@@ -27,6 +27,18 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // A leading underscore means "destructured to discard it" -- the usual
+      // way to pull one field out of an object and ignore the rest. Without
+      // this, the convention is a lint error rather than a signal.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+        },
+      ],
     },
   },
 );

@@ -230,3 +230,123 @@ DO $$ BEGIN
 END $$;
 
 DROP FUNCTION seed_t(int, int);
+
+-- ============================================================================
+-- Brief P1-3b §7 — dev-only login credentials for the three seeded
+-- profiles, so DevProfileSwitcher.tsx (a dev-only, import.meta.env.DEV
+-- -gated component — never ships in a production build) can sign in
+-- locally. Every board_window/capacity_probe/... RPC has EXECUTE revoked
+-- from anon (migration 0009 §6), so signed-out the app can read nothing;
+-- these three accounts are what makes RLS-gated data visible while
+-- developing.
+--
+-- *** LOCAL DEVELOPMENT ONLY. NEVER RUN THIS AGAINST A HOSTED/PRODUCTION
+-- SUPABASE PROJECT. *** It sets a single, publicly-known password
+-- ('devpassword', in this file, in plain text) on three accounts.
+--
+-- ASSUMPTION (brief §7 vs. the auth.users rows already inserted above by
+-- brief P1-2 §6): the brief names specific emails (admin@example.test /
+-- ana@example.test / marco@example.test), but the existing rows use
+-- *.northwind.example addresses under fixed ids
+-- 00000000-...-a1/a2/a3. Rather than INSERTing three new, still-
+-- uncredentialed, duplicate users under the brief's emails — which would
+-- leave the existing FK-linked user_profiles/profile_grants rows pointing
+-- at accounts that still can't sign in — this UPDATEs the existing three
+-- rows by their fixed id: the email becomes the brief's literal value and
+-- the password/confirmation fields are set in the same statement. This is
+-- an append (three UPDATE statements after the original INSERT block
+-- above), not a rewrite of that block, and an UPDATE keyed by primary key
+-- is idempotent by construction, so re-running the seed stays safe.
+--
+-- Column values mirror how GoTrue writes a row for a local, already-
+-- confirmed user (aud/role 'authenticated', instance_id all-zero,
+-- email_confirmed_at set) so supabase-js's signInWithPassword treats these
+-- exactly like normal accounts.
+-- ============================================================================
+-- CORRECTION (2026-08-22): the first version of this block set only the
+-- fields we cared about and left confirmation_token, recovery_token,
+-- email_change_token_new and email_change NULL -- those four are the only
+-- token columns in auth.users with no database default. GoTrue scans them
+-- into non-nullable Go strings, so loading any of these users failed with
+-- the generic "Database error querying schema" and sign-in never got as far
+-- as checking the password. Every such column is set to '' below. The
+-- partial unique indexes on those columns exclude values matching
+-- '^[0-9 ]*$', and '' matches, so three rows sharing '' is fine.
+UPDATE auth.users AS u SET
+  email                       = v.email,
+  encrypted_password          = crypt('devpassword', gen_salt('bf')),
+  email_confirmed_at          = now(),
+  aud                         = 'authenticated',
+  role                        = 'authenticated',
+  instance_id                 = '00000000-0000-0000-0000-000000000000',
+  -- the four with no default (the actual bug)
+  confirmation_token          = '',
+  recovery_token              = '',
+  email_change_token_new      = '',
+  email_change                = '',
+  -- these do default to '' on INSERT, but are set explicitly so the row is
+  -- correct even if a future default changes
+  email_change_token_current  = '',
+  phone_change                = '',
+  phone_change_token          = '',
+  reauthentication_token      = '',
+  email_change_confirm_status = 0,
+  raw_app_meta_data           = '{"provider":"email","providers":["email"]}'::jsonb,
+  raw_user_meta_data          = '{}'::jsonb,
+  is_super_admin              = false,
+  created_at                  = COALESCE(u.created_at, now()),
+  updated_at                  = now()
+FROM (VALUES
+  ('00000000-0000-0000-0000-0000000000a1'::uuid, 'admin@example.test'),
+  ('00000000-0000-0000-0000-0000000000a2'::uuid, 'ana@example.test'),
+  ('00000000-0000-0000-0000-0000000000a3'::uuid, 'marco@example.test')
+) AS v(id, email)
+WHERE u.id = v.id;
+
+-- GoTrue also expects an identities row per email-password account; without
+-- it the user exists but has no linked credential provider.
+INSERT INTO auth.identities
+  (provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+SELECT
+  u.id::text,
+  u.id,
+  jsonb_build_object(
+    'sub', u.id::text,
+    'email', u.email,
+    'email_verified', true,
+    'phone_verified', false
+  ),
+  'email',
+  now(), now(), now()
+FROM auth.users u
+WHERE u.id IN ('00000000-0000-0000-0000-0000000000a1',
+               '00000000-0000-0000-0000-0000000000a2',
+               '00000000-0000-0000-0000-0000000000a3')
+ON CONFLICT (provider_id, provider) DO NOTHING;
+
+DO $$ BEGIN
+  IF (SELECT count(*) FROM auth.users
+        WHERE id IN ('00000000-0000-0000-0000-0000000000a1',
+                      '00000000-0000-0000-0000-0000000000a2',
+                      '00000000-0000-0000-0000-0000000000a3')
+          AND encrypted_password IS NOT NULL
+          -- these four being NULL is what made GoTrue fail; assert loudly
+          AND confirmation_token IS NOT NULL
+          AND recovery_token IS NOT NULL
+          AND email_change_token_new IS NOT NULL
+          AND email_change IS NOT NULL) <> 3
+  THEN
+    RAISE EXCEPTION 'seed assertion failed: dev login credentials were not set on all three seeded users';
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF (SELECT count(*) FROM auth.identities
+        WHERE user_id IN ('00000000-0000-0000-0000-0000000000a1',
+                          '00000000-0000-0000-0000-0000000000a2',
+                          '00000000-0000-0000-0000-0000000000a3')
+          AND provider = 'email') <> 3
+  THEN
+    RAISE EXCEPTION 'seed assertion failed: auth.identities rows missing for the three dev users';
+  END IF;
+END $$;

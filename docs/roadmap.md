@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-22 (P1-1 scaffold now BUILDS and fully passes acceptance — npm unblocked on Pratik's machine; P1-2 + P1-3a database built, validated and mutation-tested) · **Current phase:** 1 — Core product
+**Last updated:** 2026-08-22 (P1-3b DONE — typed API client, dev sign-in and data-proof panel all working against local Supabase; 68 tests pass, full acceptance green. Next: P1-4 board UI) · **Current phase:** 1 — Core product
 
 ---
 
@@ -30,10 +30,10 @@
 
 - [x] Tech stack DECIDED (Aug 21): Supabase (Postgres+Auth+Realtime+RLS API) · React+TypeScript · static hosting (Vercel/Cloudflare Pages) · escape hatch to self-hosted documented in design plan §5
 - [x] **Repo scaffold + CI** — Vite/React-TS + Supabase client + CI. Authored by agent Aug 21 (unvalidated, no npm in container); `npm install` + full acceptance run completed on Pratik's machine Aug 22: typecheck, lint, format:check, unit tests, build, and Playwright e2e all green, `npm audit` reports 0 vulnerabilities.
-- [x] Database migrations from design plan §3/§14/§15/§16/§17 (incl. capacity trigger, shift tables, RLS policies) + seed scripts — **built and validated** (Sonnet, Aug 21) against a scratch PostgreSQL 16 instance; all 31 `docs/agent-briefs/p1-2-db-migrations-brief.md` §7 acceptance items pass via `scripts/verify-db.sh`. Real Supabase/Docker confirmation (the `auth.users` FK the scratch harness only shims) still outstanding.
+- [x] Database migrations from design plan §3/§14/§15/§16/§17 (incl. capacity trigger, shift tables, RLS policies) + seed scripts — **built and validated** (Sonnet, Aug 21) against a scratch PostgreSQL 16 instance; all 31 `docs/agent-briefs/p1-2-db-migrations-brief.md` §7 acceptance items pass via `scripts/verify-db.sh`. **Confirmed against real Supabase (Aug 22)**: all 9 migrations + seed applied cleanly via `supabase start` on WSL2/Docker, so the `auth.users` FK is real, not shimmed. `database.types.ts` generated from the live DB — all 17 tables and all 8 RPCs typed.
 - [ ] Org onboarding settings pages (same pattern as ⚙ Shifts): hierarchy level editor + node tree editor + CSV import (operators, products, tree)
 - [ ] Auth, profiles, subtree grants (admin / supervisor / viewer), RLS wiring
-- [x] API layer, **database half** — `board_window` / `capacity_probe` / `check_eligibility` reads, `create_run` / `create_assignment` / `move_run` / `apply_split_coverage` / `delete_run` writes, machine-readable error contract (SQLSTATE + parsed `DETAIL` JSON) — **built, validated and mutation-tested** (Sonnet, Aug 22) via migration 0009 + `scripts/verify-db.sh`; all 28 `docs/agent-briefs/p1-3a-db-api-surface-brief.md` §8 acceptance items pass. **TypeScript half is brief P1-3b** (typed wrappers, `SchedulerError` union, TanStack Query hooks) — blocked until `npm install` works, same as P1-1.
+- [x] API layer, **database half** — `board_window` / `capacity_probe` / `check_eligibility` reads, `create_run` / `create_assignment` / `move_run` / `apply_split_coverage` / `delete_run` writes, machine-readable error contract (SQLSTATE + parsed `DETAIL` JSON) — **built, validated and mutation-tested** (Sonnet, Aug 22) via migration 0009 + `scripts/verify-db.sh`; all 28 `docs/agent-briefs/p1-3a-db-api-surface-brief.md` §8 acceptance items pass. **TypeScript half (P1-3b) also DONE Aug 22**: typed wrappers, `SchedulerError` union + parser, serde boundary, React Query hooks with optimistic rollback, dev sign-in, data-proof panel. Verified end to end in the browser.
 - [ ] Board UI: virtualized timeline grid (continuous dates), hierarchy rail, zoom-adaptive snap, shift/break rendering layer
 - [ ] Board interactions: hybrid create popover, move/resize both kinds, cross-cell run moves, split-coverage flow
 - [ ] Left operator panel: roster, skills, assigned indicators, search
@@ -74,10 +74,30 @@
 
 ## Resuming work in a new session
 
-1. Start the session in this project folder (`production_scheduler`) — project memory carries the decisions and workflow.
-2. Tell Claude: **"Continue the production scheduler. Read project memory, docs/roadmap.md, and docs/design-plan.md, then pick up at the next unchecked item."**
-3. What does NOT carry over between sessions: the in-session Sonnet agent (spawn a fresh one; every brief already tells it which files to study first) and the scratch Postgres instance (rebuilt from the design plan's SQL in minutes when needed).
-4. Fable = design/briefs/verification; Sonnet = execution from `docs/agent-briefs/`. Every completed step updates this file.
+**Before you start, get the local stack up** (order matters, and note which window each runs in):
+
+1. Launch **Docker Desktop**. Wait for the whale icon to read "Running".
+2. In the **Ubuntu / WSL** window:
+   `cd /mnt/c/Users/prati/OneDrive/Documents/GitHub/production_scheduler && supabase start`
+   (Only `supabase` commands run here. Studio: http://127.0.0.1:54323)
+3. In **PowerShell**, from the same folder: `npm run dev` → http://localhost:5173
+   (Only `npm` commands run here — `node_modules` holds win32-arm64 binaries that won't execute under Linux.)
+
+**Then open the Claude session in this project folder** and paste:
+
+> Continue the production scheduler. Read project memory, `docs/roadmap.md`, and `docs/design-plan.md` (especially §17–§17.4), then pick up at the next unchecked item. The local Supabase stack is already running.
+
+That is all it needs. Project memory carries every decision, the workflow, the environment constraints, and the exact resume point; this file carries state; the design plan carries the reasoning.
+
+**What does NOT carry over:** the in-session Sonnet agent (spawn a fresh one — every brief already names the files it must study first) and the cloud container's scratch Postgres (rebuilt by `scripts/verify-db.sh` in a couple of minutes).
+
+**Known friction to expect, so it doesn't read as breakage:**
+
+- Build agents cannot run npm (the cloud container's registry access is blocked by policy). Frontend briefs are authored by the agent and validated by Pratik: run the acceptance commands, tee the output to `checks.txt` in this folder, and Claude reads it directly rather than asking for a paste.
+- Agents cannot delete files. They sometimes leave strays behind — including `.git/index.lock`, which blocks every git command until removed from PowerShell (`Remove-Item .git\index.lock`).
+- Files an agent delivers land read-only; `chmod u+w` before editing one in place.
+
+**Division of labour:** the design session (a high-reasoning model) does brainstorming, briefs, and verification only. Sonnet agents execute from judgment-free briefs in `docs/agent-briefs/`. Every completed step updates this file.
 
 ## Artifact index
 
@@ -93,6 +113,7 @@
 | Schema reference | `docs/schema.md` | v1 (P1-2, Aug 21) |
 | DB migrations, seed, SQL tests | `supabase/migrations/`, `supabase/seed.sql`, `supabase/tests/` | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22) |
 | Database API contract | `docs/api.md` | v1 (P1-3a, Aug 22) — DB half only; HTTP-status mapping unverified (no Docker/PostgREST here) |
+| TypeScript API client guide | `docs/api-client.md` | v1 (P1-3b, Aug 22) — code delivered; no npm in delivery container, acceptance pending user run |
 
 ## Phase 1 brief queue
 
@@ -103,7 +124,7 @@ Briefs are written by the design session (Opus) and executed by fresh Sonnet age
 | P1-1 | `p1-1-repo-scaffold-brief.md` | Vite/React-TS app shell, Supabase client, CSS tokens ported from the mockup, ESLint/Prettier/Vitest/Playwright, GitHub Actions CI, `docs/conventions.md` | **built + validated** — all §6 acceptance items pass on Node 24 / Windows (Aug 22) after four config fixes: `engines` relaxed to `>=20`, `.nvmrc` → 24, vitest 2→4 (killed a duplicate-Vite type clash and all 5 audit findings), `tsconfig.node.json` emits declarations (TS6310), `typecheck` script dropped a redundant `--noEmit`, `.prettierignore` added for `docs/` |
 | P1-2 | `p1-2-db-migrations-brief.md` | 8 migrations (core → capacity trigger → shifts → profiles → audit → RLS), `seed.sql` mirroring the mockup, SQL test suite + `scripts/verify-db.sh`, `docs/schema.md` | **built + validated** (Sonnet, Aug 21) — scratch PostgreSQL 16, all 31 §7 acceptance items pass; real Supabase/Docker confirmation of the `auth.users` FK still outstanding |
 | P1-3a | `p1-3a-db-api-surface-brief.md` | Migration 0009: `board_window` / `capacity_probe` / `check_eligibility` reads, `create_run` / `create_assignment` / `move_run` / `apply_split_coverage` / `delete_run` writes, machine-readable error contract, `docs/api.md`, SQL tests + required mutation pass | **built + validated + mutation-tested** (Sonnet, Aug 22) — scratch PostgreSQL 16, all 28 §8 acceptance items pass via `scripts/verify-db.sh`; all 4 §9 mutations confirmed to break their named test and restored; PostgREST HTTP-status mapping unverified (no Docker) |
-| P1-3b | *not yet written* | TypeScript half of the API layer: typed RPC wrappers, `SchedulerError` union, generated `database.types.ts`, TanStack Query hooks with optimistic update + rollback | **UNBLOCKED** (npm works as of Aug 22) — ready to brief |
-| P1-4 | *not yet written* | Board UI: virtualized grid, hierarchy rail, shift/break layer — ports the mockup engine to React. Fold in `manualChunks` code-splitting; the empty shell is already 548 kB / 161 kB gzipped | **UNBLOCKED** — ready to brief after P1-3b |
+| P1-3b | `p1-3b-ts-api-layer-brief.md` | Typed RPC wrappers, `SchedulerError` union + parser, serde boundary, React Query hooks with optimistic update + rollback, dev profile sign-in, data-proof panel | **built + validated** (Sonnet + Pratik, Aug 22) — typecheck/lint/format/build clean, 68 unit tests pass, verified in-browser against local Supabase: Admin sees 7 cells, Ana 5, Marco 2. Four fixes after delivery, all traceable to gaps in the brief (see design plan §17.4) |
+| P1-4 | *not yet written* | Board UI: virtualized timeline grid, hierarchy rail, shift/break rendering layer, then interactions (hybrid create popover, move/resize, cross-cell run moves, split-coverage flow). Fold in `manualChunks` code-splitting — the shell is already 560 kB / 165 kB gzipped | **NEXT** — everything it depends on is built and proven |
 
 Both briefs build in the cloud container and deliver to this repo via a tarball through `_delivery/` (gitignored); neither agent commits or pushes — review and commit yourself.

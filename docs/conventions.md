@@ -5,8 +5,14 @@ the rules.
 
 - **Feature-first.** Everything owned by one screen lives under `src/features/<feature>/`. A
   feature may import from `src/lib`, `src/components`, `src/hooks`, `src/types`, and
-  `src/styles` — **never from another feature**. Shared code moves *up* into `components/` or
-  `lib/`, never sideways.
+  `src/styles` — **never from another feature**. Shared code moves *up* into `components/` or `lib/`, never sideways.
+
+  **One named exception: `src/features/auth/`.** Any feature may import session and identity
+  from it. The rule exists to stop *domain* features coupling to each other — the board
+  reaching into admin's internals, and vice versa. Who is signed in is not a domain concern;
+  it is app-level infrastructure that every screen needs, and duplicating it per feature would
+  be worse than the coupling. This is an exception by name, not a precedent: adding a second
+  one requires a decision recorded in `design-plan.md`, not a judgement call at the import site.
 - `src/lib` = non-React modules (clients, pure helpers, generated types). `src/components` =
   cross-feature presentational React. `src/hooks` = cross-feature hooks.
 - One CSS Module per component, colocated, named `<Component>.module.css`. Only `tokens.css` and

@@ -574,3 +574,16 @@ The scaffold was authored without a package registry, so nothing in it had ever 
 **Requirement withdrawn.** The P1-1 brief demanded exact pinned versions with no `^` ranges. That was over-strict: `package-lock.json` pins every resolution, and CI uses `npm ci`, which installs strictly from the lockfile and ignores the ranges. Caret ranges plus a committed lockfile is the conventional, reproducible setup.
 
 **Known follow-up.** The empty shell already bundles to 548 kB (161 kB gzipped) — React, Router, TanStack Query, supabase-js. Not a problem yet; `manualChunks` code-splitting belongs in the board-UI brief, where the heaviest code lands, rather than as config churn now.
+
+### 17.4 What the P1-3b build taught us (Aug 22, 2026)
+
+The TypeScript API layer landed and works end to end — browser → typed client → RPC → RLS → Postgres, with the permission model visibly correct (Admin 7 cells, Ana 5, Marco 2). Four corrections were needed after delivery. **Every one traces to something the brief left unstated rather than to the code**, which is the pattern worth carrying forward.
+
+1. **Hand-written `auth.users` rows break GoTrue.** Four token columns — `confirmation_token`, `recovery_token`, `email_change_token_new`, `email_change` — are the only ones with no database default, so a partial INSERT leaves them NULL. GoTrue scans them into non-nullable Go strings and every user load fails with the opaque "Database error querying schema"; sign-in never reaches the password check. Seeded auth users must set all token columns to `''` and carry a matching `auth.identities` row. The seed now asserts both.
+2. **The client cache must be dropped when the signed-in identity changes.** Every cached query was fetched *as* a particular user and RLS scoped it to them, so it is not merely stale for anyone else — it is wrong. Query keys deliberately do not carry the user id: that would give each identity its own entry while leaving the previous user's rows resident in memory.
+3. **`queryClient.clear()` is the wrong API for that.** It empties the cache but leaves mounted observers pending with nothing to re-run them, so the screen sticks on "Loading…" until a manual refresh. `resetQueries()` drops the data *and* refetches the active queries.
+4. **Two config rules the code assumed and the config did not provide**: ESLint's `^_` convention for deliberately-unused destructured values, and Prettier ignoring `supabase/.temp/` (CLI runtime state, regenerated on every `supabase start`).
+
+**Also settled: `src/features/auth/` is a named exception to the no-cross-feature-imports rule** (`docs/conventions.md`). The rule exists to stop *domain* features coupling to each other; who is signed in is app-level infrastructure every screen needs. An exception by name, not a precedent.
+
+**The lesson for P1-4.** Both real bugs here were *transitions*, not steady states: what happens when identity changes, what happens to a query mid-swap. The board has far more of them — what happens to a drag in progress when a refetch lands, to a selection when the window scrolls, to an optimistic block when someone else moves its run. The P1-4 brief must specify transitions as carefully as it specifies rendering.

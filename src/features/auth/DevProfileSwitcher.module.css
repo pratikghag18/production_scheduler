@@ -1,0 +1,50 @@
+/* Ported from docs/mockups/model-hybrid.html's .vas / .scope-note rules
+   (brief P1-3b §7: "Style from tokens; keep it small."). */
+.vas {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.label {
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.select {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--axis);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.scopeNote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.signOut {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--axis);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.signOut:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.error {
+  font-size: 11.5px;
+  color: var(--signal-conflict);
+}

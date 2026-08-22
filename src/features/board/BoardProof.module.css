@@ -1,0 +1,28 @@
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.table th {
+  color: var(--ink-2);
+  font-weight: 650;
+}
