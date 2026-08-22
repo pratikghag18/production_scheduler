@@ -1,0 +1,44 @@
+/*
+ * Global design tokens.
+ *
+ * The :root block below (through --lane-h) is ported verbatim — names and
+ * values — from docs/mockups/model-hybrid.html's :root custom properties.
+ * Everything after that comment is new, per brief P1-1 §4.
+ */
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --page: #f9f9f7;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.1);
+  --warn: #fab219;
+  --crit: #d03b3b;
+  --rail-w: 232px;
+  --band-h: 26px;
+  --lane-h: 28px;
+
+  /* Product colors (brief P1-1 §4) */
+  --product-1: #2a78d6; /* Widget X */
+  --product-2: #eb6834; /* Widget Y */
+  --product-3: #1baf7a; /* Gadget Z */
+  --product-4: #eda100; /* Rework   */
+
+  /* Semantic signal tokens, values taken from the mockup (brief P1-1 §4) */
+  --signal-warn: #fab219; /* == --warn, amber: understaffed / override */
+  --signal-conflict: #d03b3b; /* == --crit, red: conflict */
+  /* Not specified by the brief or present in the mockup (which has no health
+     UI) — added so HealthPill's required green "connected" state can be
+     styled from a token instead of a hardcoded color. Assumption, see report. */
+  --signal-ok: #1baf7a;
+  /* Neutral hatch fill used for breaks on the board (mockup .shift-break rule) */
+  --break-hatch: repeating-linear-gradient(
+    45deg,
+    rgba(137, 135, 129, 0.18) 0 4px,
+    transparent 4px 8px
+  );
+  --break-hatch-bg: rgba(137, 135, 129, 0.07);
+}

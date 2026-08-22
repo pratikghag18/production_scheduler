@@ -1,0 +1,30 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dot.checking {
+  background: var(--muted);
+}
+
+.dot.connected {
+  background: var(--signal-ok);
+}
+
+.dot.unreachable {
+  background: var(--signal-conflict);
+}

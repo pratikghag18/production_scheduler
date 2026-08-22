@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scheduler Mockup — Model B · Runs + Staffing</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --page: #f9f9f7;
+    --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+    --warn: #fab219; --crit: #d03b3b;
+    --rail-w: 232px; --band-h: 26px; --lane-h: 28px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink); background: var(--page);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 10px 16px;
+    background: var(--surface); border-bottom: 1px solid var(--grid); flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+  .model-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: .4px; padding: 3px 8px;
+    border-radius: 999px; background: #184f95; color: #fff;
+  }
+  .date { color: var(--ink-2); }
+  .legend { display: flex; gap: 12px; margin-left: auto; align-items: center; }
+  .legend .key { display: flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; }
+  .legend .key.status .swatch { border-radius: 50%; }
+  .zoom { display: flex; border: 1px solid var(--axis); border-radius: 7px; overflow: hidden; }
+  .zoom button { border: 0; background: var(--surface); padding: 5px 11px; cursor: pointer; font: inherit; font-size: 12px; color: var(--ink-2); }
+  .zoom button + button { border-left: 1px solid var(--grid); }
+  .zoom button.on { background: var(--ink); color: #fff; }
+  .snap-note { font-size: 11.5px; color: var(--muted); }
+
+  #board { flex: 1; overflow: auto; position: relative; background: var(--surface); }
+  #canvas { position: relative; width: max-content; min-width: 100%; }
+  .hdr-row { display: flex; position: sticky; top: 0; z-index: 30; }
+  .hdr-corner {
+    position: sticky; left: 0; z-index: 31; width: var(--rail-w); flex: none;
+    background: var(--surface); border-bottom: 1px solid var(--axis); border-right: 1px solid var(--axis);
+    display: flex; align-items: flex-end; padding: 6px 10px; color: var(--muted); font-size: 11px;
+  }
+  .hdr-track { position: relative; height: 34px; flex: none; background: var(--surface); border-bottom: 1px solid var(--axis); }
+  .hour-tick { position: absolute; bottom: 4px; transform: translateX(3px); font-size: 11px; color: var(--muted); }
+
+  .grp-row { display: flex; position: sticky; z-index: 20; }
+  .grp-cell {
+    position: sticky; left: 0; z-index: 21; width: var(--rail-w); flex: none; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+    background: var(--page); border-bottom: 1px solid var(--grid); border-right: 1px solid var(--axis);
+    font-weight: 650; user-select: none;
+  }
+  .grp-cell .lvl { font-weight: 400; font-size: 10.5px; color: var(--muted); margin-left: auto; }
+  .grp-cell .caret { color: var(--muted); font-size: 10px; width: 10px; }
+  .grp-cell.line { padding-left: 24px; font-weight: 600; }
+  .grp-fill { flex: 1; background: var(--page); border-bottom: 1px solid var(--grid); }
+
+  .cell-row { display: flex; }
+  .cell-label {
+    position: sticky; left: 0; z-index: 10; width: var(--rail-w); flex: none;
+    padding: 8px 10px 8px 38px; background: var(--surface);
+    border-bottom: 1px solid var(--grid); border-right: 1px solid var(--axis);
+    display: flex; align-items: flex-start; gap: 6px;
+  }
+  .cell-label .nm { font-weight: 550; }
+  .req-badge { font-size: 10px; font-weight: 700; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 4px; padding: 0 4px; margin-top: 1px; }
+  .track {
+    position: relative; flex: none; border-bottom: 1px solid var(--grid);
+    background-image: repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px var(--hour-px));
+    cursor: crosshair; touch-action: none;
+  }
+  .track.ineligible { background-color: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
+  .track.ineligible::after {
+    content: "not certified"; position: sticky; left: calc(var(--rail-w) + 8px);
+    color: var(--warn); font-size: 10px; font-weight: 700;
+  }
+  .track.drop-hint { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+  /* ---------- run band ---------- */
+  .band {
+    position: absolute; top: 4px; height: var(--band-h); border-radius: 6px;
+    background: color-mix(in srgb, var(--pc) 22%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--pc) 55%, var(--surface));
+    border-left: 4px solid var(--pc);
+    display: flex; align-items: center; gap: 7px; padding: 0 7px 0 6px;
+    cursor: grab; user-select: none; overflow: hidden; white-space: nowrap; touch-action: none;
+    font-size: 12px;
+  }
+  .band .pn { font-weight: 650; }
+  .band .tm { color: var(--ink-2); font-size: 11px; }
+  .band .hc {
+    margin-left: auto; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--axis); color: var(--ink-2);
+  }
+  .band.under { border-style: dashed; border-left-style: solid; }
+  .band.under .hc { background: color-mix(in srgb, var(--warn) 25%, var(--surface)); border-color: var(--warn); color: #6b4c00; }
+  .band.dragging { opacity: .85; z-index: 50; cursor: grabbing; box-shadow: 0 3px 10px rgba(11,11,11,.25); }
+  .band.flash { animation: flash .5s 2; }
+  .band .h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+  .band .h.l { left: 0; } .band .h.r { right: 0; }
+  .band.drop-ok { outline: 2px solid var(--ink); outline-offset: 1px; }
+  @keyframes flash { 50% { background: color-mix(in srgb, var(--crit) 30%, var(--surface)); border-color: var(--crit); } }
+
+  /* ---------- staffing chip ---------- */
+  .achip {
+    position: absolute; height: 22px; border-radius: 5px;
+    background: var(--surface);
+    border: 1px solid var(--ring); border-left: 3px solid var(--pc);
+    box-shadow: 0 1px 2px rgba(11,11,11,.07);
+    display: flex; align-items: center; gap: 5px; padding: 0 6px 0 4px;
+    cursor: grab; user-select: none; overflow: hidden; white-space: nowrap; touch-action: none;
+    font-size: 11.5px;
+  }
+  .achip .avatar {
+    flex: none; width: 15px; height: 15px; border-radius: 50%; background: var(--ink-2); color: #fff;
+    font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .achip .who { font-weight: 600; }
+  .achip .tm { color: var(--ink-2); font-size: 10.5px; }
+  .achip.override { outline: 2px dashed var(--warn); outline-offset: 1px; }
+  .achip.dragging { opacity: .85; z-index: 50; cursor: grabbing; box-shadow: 0 3px 10px rgba(11,11,11,.25); }
+  .achip.flash { animation: flash .5s 2; }
+  .achip .h { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+  .achip .h.l { left: 0; } .achip .h.r { right: 0; }
+
+  .ghost {
+    position: absolute; border-radius: 6px; background: color-mix(in srgb, var(--ink) 8%, transparent);
+    border: 1.5px dashed var(--ink-2); pointer-events: none; z-index: 40;
+    display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink-2);
+  }
+
+  #tray {
+    background: var(--surface); border-top: 1px solid var(--grid);
+    padding: 8px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  #tray .lbl { font-size: 11px; color: var(--muted); font-weight: 650; letter-spacing: .3px; margin-right: 4px; }
+  .chip {
+    display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px;
+    border: 1px solid var(--axis); border-radius: 999px; background: var(--surface);
+    cursor: grab; user-select: none; touch-action: none;
+  }
+  .chip .avatar {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--ink-2); color: #fff;
+    font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .chip .sk { font-size: 9.5px; font-weight: 700; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 4px; padding: 0 3px; }
+  .chip.drag-src { opacity: .4; }
+  .chip-ghost { position: fixed; z-index: 100; pointer-events: none; box-shadow: 0 3px 10px rgba(11,11,11,.25); }
+
+  #pop {
+    position: fixed; z-index: 90; background: var(--surface); border: 1px solid var(--axis);
+    border-radius: 9px; box-shadow: 0 6px 24px rgba(11,11,11,.18); padding: 12px; width: 240px;
+  }
+  #pop h3 { margin: 0 0 8px; font-size: 12.5px; }
+  #pop label { display: block; font-size: 11px; color: var(--ink-2); margin: 7px 0 2px; }
+  #pop select, #pop input { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--axis); border-radius: 6px; background: var(--surface); }
+  #pop .time { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+  #pop .row { display: flex; gap: 8px; margin-top: 11px; }
+  #pop button { flex: 1; font: inherit; font-size: 12.5px; padding: 5px 0; border-radius: 7px; cursor: pointer; border: 1px solid var(--axis); background: var(--surface); }
+  #pop button.pri { background: var(--ink); color: #fff; border-color: var(--ink); }
+  #pop button.del { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--surface)); flex: 0 0 32%; }
+
+  #toasts { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 95; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .toast {
+    background: var(--ink); color: #fff; font-size: 12.5px; padding: 8px 14px; border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(11,11,11,.3); display: flex; gap: 7px; align-items: center;
+  }
+  .toast.warn { background: #6b4c00; } .toast.crit { background: var(--crit); }
+
+  #tips {
+    position: fixed; right: 14px; bottom: 58px; z-index: 80; width: 260px;
+    background: var(--surface); border: 1px solid var(--axis); border-radius: 10px;
+    box-shadow: 0 4px 18px rgba(11,11,11,.14); font-size: 12px;
+  }
+  #tips .hd { display: flex; align-items: center; padding: 8px 12px; font-weight: 650; cursor: pointer; user-select: none; }
+  #tips .hd span { margin-left: auto; color: var(--muted); }
+  #tips ul { margin: 0; padding: 0 12px 10px 26px; color: var(--ink-2); }
+  #tips li { margin: 5px 0; }
+  #tips.closed ul { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Production Scheduler</h1>
+  <span class="model-badge">MODEL B · RUNS + STAFFING</span>
+  <span class="date">Tue, Aug 18 · Site A</span>
+  <div class="legend" id="legend"></div>
+  <div class="zoom" id="zoom"></div>
+  <span class="snap-note" id="snapNote"></span>
+</header>
+
+<div id="board"><div id="canvas"></div></div>
+
+<div id="tray"><span class="lbl">OPERATORS — drag onto a run band</span></div>
+
+<div id="tips"><div class="hd">What to try <span>—</span></div>
+  <ul>
+    <li>Drag across empty row space to create a <b>product run</b> (product + headcount).</li>
+    <li>Drag an operator from the tray <b>onto a run band</b> to staff it.</li>
+    <li>Amber badge = understaffed run (staffed / planned).</li>
+    <li><b>The changeover test:</b> click Cell 1's morning band, switch product. One edit.</li>
+    <li>Drag a band — its whole crew moves with it. Resize it — staffing clamps.</li>
+    <li>Try staffing <b>Elena</b> onto Cell 6's run → she's busy → conflict.</li>
+    <li>Drag <b>Noah</b> onto a CNC run → certification warning (override recorded).</li>
+    <li>Hold <b>Alt</b> while dragging to ignore snapping.</li>
+  </ul>
+</div>
+
+<div id="pop" hidden></div>
+<div id="toasts"></div>
+
+<script>
+/* ============ data ============ */
+const DAY_S = 6 * 60, DAY_E = 22 * 60;
+const ZOOMS = [
+  { name: "Compact", pxh: 64,  snap: 60 },
+  { name: "Standard", pxh: 104, snap: 30 },
+  { name: "Fine", pxh: 168, snap: 15 },
+];
+let zoom = 1;
+
+const PRODUCTS = [
+  { id: "wx", name: "Widget X", color: "#2a78d6" },
+  { id: "wy", name: "Widget Y", color: "#eb6834" },
+  { id: "gz", name: "Gadget Z", color: "#1baf7a" },
+  { id: "rw", name: "Rework",   color: "#eda100" },
+];
+const OPERATORS = [
+  { id: "maria", name: "Maria",  skills: ["CNC"] },
+  { id: "raj",   name: "Raj",    skills: ["CNC"] },
+  { id: "aisha", name: "Aisha",  skills: ["CNC"] },
+  { id: "elena", name: "Elena",  skills: [] },
+  { id: "tom",   name: "Tom",    skills: [] },
+  { id: "ben",   name: "Ben",    skills: [] },
+  { id: "lily",  name: "Lily",   skills: [] },
+  { id: "sam",   name: "Sam",    skills: [] },
+  { id: "noah",  name: "Noah",   skills: [] },
+];
+const TREE = [
+  { id: "assembly", name: "Assembly", cls: "dept", lvl: "Department", children: [
+    { id: "line1", name: "Line 1", cls: "line", lvl: "Line", cells: [
+      { id: "c1", name: "Cell 1", req: [] },
+      { id: "c2", name: "Cell 2", req: [] },
+      { id: "c3", name: "Cell 3", req: [] } ] },
+    { id: "line2", name: "Line 2", cls: "line", lvl: "Line", cells: [
+      { id: "c4", name: "Cell 4", req: [] },
+      { id: "c5", name: "Cell 5", req: [] } ] } ] },
+  { id: "machining", name: "Machining", cls: "dept", lvl: "Department", children: [
+    { id: "cncline", name: "CNC Line", cls: "line", lvl: "Line", cells: [
+      { id: "c6", name: "Cell 6", req: ["CNC"] },
+      { id: "c7", name: "Cell 7", req: ["CNC"] } ] } ] },
+];
+const CELLS = {};
+TREE.forEach(d => d.children.forEach(l => l.cells.forEach(c => CELLS[c.id] = c)));
+
+let seq = 0;
+const R = (cell, prod, s, e, planned) => ({ id: "r" + (++seq), cell, prod, s, e, planned });
+const A = (runId, op, s, e, override = false) => ({ id: "a" + (++seq), runId, op, s, e, override });
+
+let runs = [
+  R("c1", "wx", 360, 840, 3),
+  R("c1", "wy", 870, 1320, 1),
+  R("c2", "wx", 360, 840, 1),
+  R("c3", "gz", 480, 960, 2),
+  R("c4", "wy", 360, 720, 1),
+  R("c6", "gz", 360, 840, 1),
+  R("c7", "rw", 600, 1080, 2),
+];
+const rid = i => runs[i].id;
+let assignments = [
+  A(rid(0), "elena", 360, 840), A(rid(0), "tom", 360, 840),
+  A(rid(1), "elena", 870, 1320),
+  A(rid(2), "ben", 360, 840),
+  A(rid(3), "lily", 480, 960), A(rid(3), "sam", 480, 960),
+  A(rid(4), "aisha", 360, 720),
+  A(rid(5), "maria", 360, 840),
+  A(rid(6), "raj", 600, 1080),
+];
+
+/* ============ helpers ============ */
+const $ = s => document.querySelector(s);
+const pxh = () => ZOOMS[zoom].pxh;
+const snapMin = () => ZOOMS[zoom].snap;
+const minToX = m => (m - DAY_S) / 60 * pxh();
+const xToMin = x => DAY_S + x / pxh() * 60;
+const clampT = m => Math.max(DAY_S, Math.min(DAY_E, m));
+const doSnap = (m, alt) => { const s = alt ? 1 : snapMin(); return Math.round(m / s) * s; };
+const fmt = m => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+const prod = id => PRODUCTS.find(p => p.id === id);
+const oper = id => OPERATORS.find(o => o.id === id);
+const run = id => runs.find(r => r.id === id);
+const initials = n => n.slice(0, 2).toUpperCase();
+const eligible = (opId, cellId) => CELLS[cellId].req.every(q => oper(opId).skills.includes(q));
+const conflictOf = (opId, s, e, excl) =>
+  assignments.find(a => a.id !== excl && a.op === opId && a.s < e && s < a.e);
+const runStaff = runId => assignments.filter(a => a.runId === runId);
+const runOverlap = (cellId, s, e, excl) =>
+  runs.find(r => r.id !== excl && r.cell === cellId && r.s < e && s < r.e);
+
+function toast(msg, kind = "") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind; t.textContent = msg;
+  $("#toasts").appendChild(t); setTimeout(() => t.remove(), 4200);
+}
+
+/* ============ render ============ */
+function render() {
+  const canvas = $("#canvas");
+  canvas.innerHTML = "";
+  const trackW = minToX(DAY_E);
+  document.documentElement.style.setProperty("--hour-px", pxh() + "px");
+
+  const hr = document.createElement("div"); hr.className = "hdr-row";
+  hr.innerHTML = `<div class="hdr-corner">Work cells · time →</div>`;
+  const ht = document.createElement("div"); ht.className = "hdr-track"; ht.style.width = trackW + "px";
+  for (let h = DAY_S / 60; h < DAY_E / 60; h++) {
+    const tick = document.createElement("span"); tick.className = "hour-tick";
+    tick.style.left = minToX(h * 60) + "px"; tick.textContent = fmt(h * 60);
+    ht.appendChild(tick);
+  }
+  hr.appendChild(ht); canvas.appendChild(hr);
+
+  const collapsed = render.collapsed || (render.collapsed = new Set());
+  for (const dept of TREE) {
+    canvas.appendChild(groupRow(dept, trackW, collapsed));
+    if (collapsed.has(dept.id)) continue;
+    for (const line of dept.children) {
+      canvas.appendChild(groupRow(line, trackW, collapsed));
+      if (collapsed.has(line.id)) continue;
+      for (const cell of line.cells) canvas.appendChild(cellRow(cell, trackW));
+    }
+  }
+  renderTray(); renderLegend(); renderZoom();
+}
+
+function groupRow(g, trackW, collapsed) {
+  const r = document.createElement("div"); r.className = "grp-row";
+  const c = document.createElement("div"); c.className = "grp-cell " + g.cls;
+  c.innerHTML = `<span class="caret">${collapsed.has(g.id) ? "▸" : "▾"}</span><span>${g.name}</span><span class="lvl">${g.lvl}</span>`;
+  c.onclick = () => { collapsed.has(g.id) ? collapsed.delete(g.id) : collapsed.add(g.id); render(); };
+  const f = document.createElement("div"); f.className = "grp-fill"; f.style.width = trackW + "px";
+  r.append(c, f); return r;
+}
+
+function cellRow(cell, trackW) {
+  const r = document.createElement("div"); r.className = "cell-row";
+  const lbl = document.createElement("div"); lbl.className = "cell-label";
+  lbl.innerHTML = `<span class="nm">${cell.name}</span>` +
+    cell.req.map(q => `<span class="req-badge">${q}</span>`).join("");
+  const tr = document.createElement("div"); tr.className = "track";
+  tr.dataset.cell = cell.id; tr.style.width = trackW + "px";
+
+  const cellRuns = runs.filter(x => x.cell === cell.id);
+  const staff = assignments
+    .filter(a => cellRuns.some(x => x.id === a.runId))
+    .sort((x, y) => x.s - y.s || x.e - y.e);
+  const lanes = [];
+  for (const a of staff) {
+    let lane = lanes.findIndex(end => end <= a.s);
+    if (lane === -1) { lane = lanes.length; lanes.push(0); }
+    lanes[lane] = a.e; a._lane = lane;
+  }
+  const h = 36 + Math.max(1, lanes.length) * 28 + 4;
+  tr.style.height = h + "px"; lbl.style.minHeight = h + "px";
+
+  for (const x of cellRuns) tr.appendChild(bandEl(x));
+  for (const a of staff) tr.appendChild(chipEl(a));
+  tr.addEventListener("pointerdown", e => { if (e.target === tr) startCreateRun(e, tr); });
+  r.append(lbl, tr); return r;
+}
+
+function bandEl(x) {
+  const p = prod(x.prod);
+  const staffed = runStaff(x.id).length;
+  const under = staffed < x.planned;
+  const el = document.createElement("div");
+  el.className = "band" + (under ? " under" : "");
+  el.dataset.run = x.id;
+  el.style.setProperty("--pc", p.color);
+  el.style.left = minToX(x.s) + "px";
+  el.style.width = (minToX(x.e) - minToX(x.s)) + "px";
+  el.title = `${p.name} · ${fmt(x.s)}–${fmt(x.e)} · staffed ${staffed}/${x.planned}${under ? " · UNDERSTAFFED" : ""}`;
+  el.innerHTML = `<span class="h l"></span><span class="pn">${p.name}</span>` +
+    `<span class="tm">${fmt(x.s)}–${fmt(x.e)}</span>` +
+    `<span class="hc">${under ? "⚠ " : ""}${staffed}/${x.planned}</span><span class="h r"></span>`;
+  el.addEventListener("pointerdown", e => startBandDrag(e, el, x));
+  return el;
+}
+
+function chipEl(a) {
+  const x = run(a.runId), p = prod(x.prod), o = oper(a.op);
+  const el = document.createElement("div");
+  el.className = "achip" + (a.override ? " override" : "");
+  el.dataset.id = a.id;
+  el.style.setProperty("--pc", p.color);
+  el.style.left = minToX(a.s) + "px";
+  el.style.width = Math.max(46, minToX(a.e) - minToX(a.s)) + "px";
+  el.style.top = (36 + a._lane * 28) + "px";
+  el.title = `${o.name} · ${p.name} · ${fmt(a.s)}–${fmt(a.e)}${a.override ? " · certification override" : ""}`;
+  el.innerHTML = `<span class="h l"></span><span class="avatar">${initials(o.name)}</span>` +
+    `<span class="who">${o.name}</span><span class="tm">${fmt(a.s)}–${fmt(a.e)}</span><span class="h r"></span>`;
+  el.addEventListener("pointerdown", e => startChipDrag(e, el, a));
+  return el;
+}
+
+function renderLegend() {
+  $("#legend").innerHTML = PRODUCTS.map(p =>
+    `<span class="key"><span class="swatch" style="background:${p.color}"></span>${p.name}</span>`).join("") +
+    `<span class="key status"><span class="swatch" style="background:var(--warn)"></span>understaffed</span>`;
+}
+function renderZoom() {
+  const z = $("#zoom");
+  z.innerHTML = ZOOMS.map((zz, i) => `<button class="${i === zoom ? "on" : ""}" data-i="${i}">${zz.name}</button>`).join("");
+  z.querySelectorAll("button").forEach(b => b.onclick = () => { zoom = +b.dataset.i; render(); });
+  $("#snapNote").textContent = `snap: ${snapMin()} min · hold Alt to drag free`;
+}
+function renderTray() {
+  const tray = $("#tray");
+  tray.querySelectorAll(".chip").forEach(c => c.remove());
+  for (const o of OPERATORS) {
+    const c = document.createElement("div"); c.className = "chip"; c.dataset.op = o.id;
+    c.innerHTML = `<span class="avatar">${initials(o.name)}</span><span>${o.name}</span>` +
+      o.skills.map(s => `<span class="sk">${s}</span>`).join("");
+    c.addEventListener("pointerdown", e => startTrayDrag(e, c, o));
+    tray.appendChild(c);
+  }
+}
+
+function markEligibility(opId) {
+  document.querySelectorAll(".track").forEach(t => {
+    if (opId && !eligible(opId, t.dataset.cell)) t.classList.add("ineligible");
+    else t.classList.remove("ineligible");
+  });
+}
+function clearHints() {
+  document.querySelectorAll(".drop-hint").forEach(t => t.classList.remove("drop-hint"));
+  document.querySelectorAll(".band.drop-ok").forEach(b => b.classList.remove("drop-ok"));
+}
+
+/* ============ create run ============ */
+function startCreateRun(e, tr) {
+  closePop();
+  const rect = tr.getBoundingClientRect();
+  const startM = doSnap(clampT(xToMin(e.clientX - rect.left)), e.altKey);
+  const ghost = document.createElement("div"); ghost.className = "ghost";
+  ghost.style.top = "4px"; ghost.style.height = "26px";
+  tr.appendChild(ghost);
+  let a = startM, b = startM;
+  const move = ev => {
+    b = doSnap(clampT(xToMin(ev.clientX - tr.getBoundingClientRect().left)), ev.altKey);
+    const s = Math.min(a, b), en = Math.max(a, b);
+    ghost.style.left = minToX(s) + "px";
+    ghost.style.width = Math.max(2, minToX(en) - minToX(s)) + "px";
+    ghost.textContent = en > s ? `${fmt(s)}–${fmt(en)}` : "";
+  };
+  const up = ev => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    const s = Math.min(a, b), en = Math.max(a, b);
+    if (en - s < 5) { ghost.remove(); return; }
+    const clash = runOverlap(tr.dataset.cell, s, en, null);
+    if (clash) {
+      ghost.remove();
+      toast(`${CELLS[tr.dataset.cell].name} already runs ${prod(clash.prod).name} ${fmt(clash.s)}–${fmt(clash.e)}`, "crit");
+      return;
+    }
+    openRunCreatePop(ev.clientX, ev.clientY, tr.dataset.cell, s, en, ghost);
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", up);
+}
+
+/* ============ move / resize run band (crew comes along) ============ */
+function startBandDrag(e, el, x) {
+  e.stopPropagation(); closePop();
+  const mode = e.target.classList.contains("h") ? (e.target.classList.contains("l") ? "l" : "r") : "move";
+  const origin = { x: e.clientX, s: x.s, e: x.e };
+  let moved = false;
+  el.setPointerCapture(e.pointerId);
+  el.classList.add("dragging");
+
+  const move = ev => {
+    const dm = (ev.clientX - origin.x) / pxh() * 60;
+    if (Math.abs(ev.clientX - origin.x) > 3) moved = true;
+    if (mode === "move") {
+      const dur = origin.e - origin.s;
+      let ns = doSnap(origin.s + dm, ev.altKey);
+      ns = Math.max(DAY_S, Math.min(DAY_E - dur, ns));
+      x.s = ns; x.e = ns + dur;
+    } else if (mode === "l") {
+      x.s = Math.min(x.e - snapMin(), Math.max(DAY_S, doSnap(origin.s + dm, ev.altKey)));
+    } else {
+      x.e = Math.max(x.s + snapMin(), Math.min(DAY_E, doSnap(origin.e + dm, ev.altKey)));
+    }
+    el.style.left = minToX(x.s) + "px";
+    el.style.width = (minToX(x.e) - minToX(x.s)) + "px";
+    el.querySelector(".tm").textContent = `${fmt(x.s)}–${fmt(x.e)}`;
+  };
+  const up = ev => {
+    el.releasePointerCapture(e.pointerId);
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.classList.remove("dragging");
+    if (!moved) { x.s = origin.s; x.e = origin.e; openRunPop(ev.clientX, ev.clientY, x); return; }
+
+    const clashRun = runOverlap(x.cell, x.s, x.e, x.id);
+    if (clashRun) {
+      toast(`${CELLS[x.cell].name} already runs ${prod(clashRun.prod).name} ${fmt(clashRun.s)}–${fmt(clashRun.e)} — reverted`, "crit");
+      x.s = origin.s; x.e = origin.e; el.classList.add("flash"); setTimeout(render, 650); return;
+    }
+    if (mode === "move") {
+      // crew moves with the run
+      const delta = x.s - origin.s;
+      const staff = runStaff(x.id);
+      for (const a of staff) {
+        const clash = conflictOf(a.op, a.s + delta, a.e + delta, a.id);
+        if (clash && clash.runId !== x.id) {
+          toast(`${oper(a.op).name} would clash with ${CELLS[run(clash.runId).cell].name} ${fmt(clash.s)}–${fmt(clash.e)} — reverted`, "crit");
+          x.s = origin.s; x.e = origin.e; el.classList.add("flash"); setTimeout(render, 650); return;
+        }
+      }
+      staff.forEach(a => { a.s += delta; a.e += delta; });
+    } else {
+      // resize clamps the crew
+      const dropped = [];
+      for (const a of runStaff(x.id)) {
+        a.s = Math.max(a.s, x.s); a.e = Math.min(a.e, x.e);
+        if (a.e <= a.s) dropped.push(a.id);
+      }
+      if (dropped.length) {
+        assignments = assignments.filter(a => !dropped.includes(a.id));
+        toast(`${dropped.length} assignment(s) fell outside the run and were removed`, "warn");
+      }
+    }
+    render();
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", up);
+}
+
+/* ============ move / resize staffing chip ============ */
+function startChipDrag(e, el, a) {
+  e.stopPropagation(); closePop();
+  const mode = e.target.classList.contains("h") ? (e.target.classList.contains("l") ? "l" : "r") : "move";
+  const origin = { x: e.clientX, s: a.s, e: a.e, runId: a.runId };
+  const homeRun = run(a.runId);
+  let moved = false, targetBand = null;
+  el.setPointerCapture(e.pointerId);
+  el.classList.add("dragging");
+  if (mode === "move") markEligibility(a.op);
+
+  const move = ev => {
+    const dm = (ev.clientX - origin.x) / pxh() * 60;
+    if (Math.abs(ev.clientX - origin.x) > 3) moved = true;
+    if (mode === "move") {
+      const dur = origin.e - origin.s;
+      let ns = doSnap(origin.s + dm, ev.altKey);
+      ns = Math.max(DAY_S, Math.min(DAY_E - dur, ns));
+      a.s = ns; a.e = ns + dur;
+      el.style.pointerEvents = "none";
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      el.style.pointerEvents = "";
+      clearHints();
+      const band = under && under.closest ? under.closest(".band") : null;
+      if (band && band.dataset.run !== a.runId) { band.classList.add("drop-ok"); targetBand = band; }
+      else targetBand = null;
+    } else if (mode === "l") {
+      a.s = Math.min(a.e - snapMin(), Math.max(homeRun.s, doSnap(origin.s + dm, ev.altKey)));
+    } else {
+      a.e = Math.max(a.s + snapMin(), Math.min(homeRun.e, doSnap(origin.e + dm, ev.altKey)));
+    }
+    el.style.left = minToX(a.s) + "px";
+    el.style.width = Math.max(46, minToX(a.e) - minToX(a.s)) + "px";
+    el.querySelector(".tm").textContent = `${fmt(a.s)}–${fmt(a.e)}`;
+  };
+  const up = ev => {
+    el.releasePointerCapture(e.pointerId);
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.classList.remove("dragging");
+    markEligibility(null); clearHints();
+    const revert = () => { a.s = origin.s; a.e = origin.e; a.runId = origin.runId; };
+
+    if (!moved) { revert(); openChipPop(ev.clientX, ev.clientY, a); return; }
+
+    let dest = homeRun;
+    if (mode === "move" && targetBand) dest = run(targetBand.dataset.run);
+    // clamp into destination run
+    const dur = Math.min(a.e - a.s, dest.e - dest.s);
+    a.s = Math.max(dest.s, Math.min(a.s, dest.e - dur)); a.e = a.s + dur;
+    const clash = conflictOf(a.op, a.s, a.e, a.id);
+    if (clash) {
+      toast(`${oper(a.op).name} is already on ${CELLS[run(clash.runId).cell].name} ${fmt(clash.s)}–${fmt(clash.e)} — reverted`, "crit");
+      el.classList.add("flash"); revert(); setTimeout(render, 650); return;
+    }
+    a.runId = dest.id;
+    if (dest !== homeRun && !eligible(a.op, dest.cell)) {
+      a.override = true;
+      toast(`${oper(a.op).name} is not certified for ${CELLS[dest.cell].name} — override recorded`, "warn");
+    } else if (dest !== homeRun) a.override = false;
+    render();
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", up);
+}
+
+/* ============ tray chip → staff a run ============ */
+function startTrayDrag(e, chipNode, o) {
+  closePop();
+  chipNode.classList.add("drag-src");
+  const ghost = chipNode.cloneNode(true);
+  ghost.classList.add("chip-ghost"); ghost.classList.remove("drag-src");
+  document.body.appendChild(ghost);
+  markEligibility(o.id);
+  const place = ev => { ghost.style.left = (ev.clientX + 8) + "px"; ghost.style.top = (ev.clientY - 14) + "px"; };
+  place(e);
+  let hoverBand = null;
+  const move = ev => {
+    place(ev);
+    const under = document.elementFromPoint(ev.clientX, ev.clientY);
+    clearHints();
+    const band = under && under.closest ? under.closest(".band") : null;
+    const track = under && under.closest ? under.closest(".track") : null;
+    if (band) { band.classList.add("drop-ok"); hoverBand = band; }
+    else { hoverBand = null; if (track) track.classList.add("drop-hint"); }
+  };
+  const up = ev => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    ghost.remove(); chipNode.classList.remove("drag-src");
+    const droppedOnTrack = !hoverBand && document.querySelector(".track.drop-hint");
+    clearHints(); markEligibility(null);
+    if (!hoverBand) {
+      if (droppedOnTrack) toast("Drop onto a product run — or drag across empty space to create a run first");
+      return;
+    }
+    const x = run(hoverBand.dataset.run);
+    if (runStaff(x.id).some(a => a.op === o.id)) { toast(`${o.name} is already staffed on this run`); return; }
+    const clash = conflictOf(o.id, x.s, x.e, null);
+    if (clash) {
+      toast(`${o.name} is already on ${CELLS[run(clash.runId).cell].name} ${fmt(clash.s)}–${fmt(clash.e)}`, "crit");
+      return;
+    }
+    const ov = !eligible(o.id, x.cell);
+    assignments.push(A(x.id, o.id, x.s, x.e, ov));
+    if (ov) toast(`${o.name} is not certified for ${CELLS[x.cell].name} — override recorded`, "warn");
+    render();
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", up);
+}
+
+/* ============ popovers ============ */
+function closePop() { $("#pop").hidden = true; const g = document.querySelector(".ghost"); if (g) g.remove(); }
+function placePop(x, y) {
+  const pop = $("#pop"); pop.hidden = false;
+  const w = 252, hMax = 320;
+  pop.style.left = Math.min(x, innerWidth - w - 10) + "px";
+  pop.style.top = Math.min(y + 8, innerHeight - hMax) + "px";
+}
+
+function openRunCreatePop(x, y, cellId, s, e, ghost) {
+  const pop = $("#pop");
+  const prodOpts = PRODUCTS.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+  pop.innerHTML = `
+    <h3>New run — ${CELLS[cellId].name}</h3>
+    <label>Product</label><select id="po-prod">${prodOpts}</select>
+    <label>Planned headcount</label><input id="po-hc" type="number" min="1" max="9" value="2">
+    <div class="time">${fmt(s)} – ${fmt(e)}</div>
+    <div class="row"><button id="po-cancel">Cancel</button><button class="pri" id="po-ok">Create run</button></div>`;
+  placePop(x, y);
+  $("#po-cancel").onclick = closePop;
+  $("#po-ok").onclick = () => {
+    runs.push(R(cellId, $("#po-prod").value, s, e, Math.max(1, +$("#po-hc").value || 1)));
+    closePop(); render();
+    toast("Run created — drag operators onto the band to staff it");
+  };
+}
+
+function openRunPop(x, y, r0) {
+  const pop = $("#pop");
+  const staffed = runStaff(r0.id).length;
+  const prodOpts = PRODUCTS.map(p => `<option value="${p.id}" ${p.id === r0.prod ? "selected" : ""}>${p.name}</option>`).join("");
+  pop.innerHTML = `
+    <h3>Run — ${CELLS[r0.cell].name}</h3>
+    <label>Product (one edit = whole crew changes over)</label><select id="po-prod">${prodOpts}</select>
+    <label>Planned headcount</label><input id="po-hc" type="number" min="1" max="9" value="${r0.planned}">
+    <div class="time">${fmt(r0.s)} – ${fmt(r0.e)} · staffed ${staffed}/${r0.planned}</div>
+    <div class="row"><button class="del" id="po-del">Delete</button><button id="po-cancel">Close</button><button class="pri" id="po-ok">Save</button></div>`;
+  placePop(x, y);
+  $("#po-cancel").onclick = closePop;
+  $("#po-del").onclick = () => {
+    assignments = assignments.filter(a => a.runId !== r0.id);
+    runs = runs.filter(z => z.id !== r0.id);
+    closePop(); render();
+  };
+  $("#po-ok").onclick = () => {
+    r0.prod = $("#po-prod").value;
+    r0.planned = Math.max(1, +$("#po-hc").value || 1);
+    closePop(); render();
+  };
+}
+
+function openChipPop(x, y, a) {
+  const pop = $("#pop");
+  const x0 = run(a.runId);
+  pop.innerHTML = `
+    <h3>${oper(a.op).name} — ${CELLS[x0.cell].name}</h3>
+    <div class="time">${prod(x0.prod).name} · ${fmt(a.s)} – ${fmt(a.e)}${a.override ? " · ⚠ certification override" : ""}</div>
+    <div class="row"><button class="del" id="po-del">Remove</button><button id="po-cancel">Close</button></div>`;
+  placePop(x, y);
+  $("#po-cancel").onclick = closePop;
+  $("#po-del").onclick = () => { assignments = assignments.filter(z => z.id !== a.id); closePop(); render(); };
+}
+
+document.addEventListener("pointerdown", e => {
+  if (!$("#pop").hidden && !e.target.closest("#pop")) closePop();
+}, true);
+
+$("#tips .hd").onclick = () => $("#tips").classList.toggle("closed");
+
+render();
+</script>
+</body>
+</html>

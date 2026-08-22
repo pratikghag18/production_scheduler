@@ -1,0 +1,1687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scheduler Mockup — Hybrid · Runs + Direct Assignments</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --page: #f9f9f7;
+    --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+    --warn: #fab219; --crit: #d03b3b;
+    --rail-w: 232px; --band-h: 26px; --lane-h: 28px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink); background: var(--page);
+    display: flex; flex-direction: row; overflow: hidden;
+  }
+  .col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .lbl { font-size: 11px; color: var(--muted); font-weight: 650; letter-spacing: .3px; }
+
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 10px 16px;
+    background: var(--surface); border-bottom: 1px solid var(--grid); flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+  .model-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: .4px; padding: 3px 8px;
+    border-radius: 999px; background: #4a3aa7; color: #fff;
+  }
+  .date { color: var(--ink-2); }
+  .legend { display: flex; gap: 12px; margin-left: auto; align-items: center; }
+  .legend .key { display: flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; }
+  .legend .key.status .swatch { border-radius: 50%; }
+  .legend .swatch.break-swatch {
+    background-image: repeating-linear-gradient(45deg, rgba(137,135,129,.45) 0 2px, transparent 2px 4px);
+    background-color: rgba(137,135,129,.15); border: 1px solid var(--axis);
+  }
+  .shifts-btn { border: 1px solid var(--axis); background: var(--surface); border-radius: 7px; padding: 5px 11px; cursor: pointer; font: inherit; font-size: 12px; color: var(--ink-2); }
+  .shifts-btn:hover { background: var(--page); }
+  .zoom { display: flex; border: 1px solid var(--axis); border-radius: 7px; overflow: hidden; }
+  .zoom button { border: 0; background: var(--surface); padding: 5px 11px; cursor: pointer; font: inherit; font-size: 12px; color: var(--ink-2); }
+  .zoom button + button { border-left: 1px solid var(--grid); }
+  .zoom button.on { background: var(--ink); color: #fff; }
+  .snap-note { font-size: 11.5px; color: var(--muted); }
+
+  .daynav { display: flex; border: 1px solid var(--axis); border-radius: 7px; overflow: hidden; }
+  .daynav button { border: 0; background: var(--surface); padding: 5px 10px; cursor: pointer; font: inherit; font-size: 12px; color: var(--ink-2); }
+  .daynav button + button { border-left: 1px solid var(--grid); }
+  .vas { display: flex; align-items: center; gap: 6px; }
+  .vas label { font-size: 11.5px; color: var(--ink-2); }
+  .vas select { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid var(--axis); border-radius: 6px; background: var(--surface); }
+  .scope-note { font-size: 11.5px; color: var(--muted); }
+
+  #board { flex: 1; overflow: auto; position: relative; background: var(--surface); }
+  #canvas { position: relative; width: max-content; min-width: 100%; }
+  .hdr-row { display: flex; position: sticky; top: 0; z-index: 30; }
+  .hdr-corner {
+    position: sticky; left: 0; z-index: 31; width: var(--rail-w); flex: none;
+    background: var(--surface); border-bottom: 1px solid var(--axis); border-right: 1px solid var(--axis);
+    display: flex; align-items: flex-end; padding: 6px 10px; color: var(--muted); font-size: 11px;
+  }
+  .hdr-track { position: relative; height: 54px; flex: none; background: var(--surface); border-bottom: 1px solid var(--axis); }
+  .day-strip { position: absolute; top: 0; left: 0; height: 20px; display: flex; }
+  .day-box {
+    height: 20px; flex: none; box-sizing: border-box; display: flex; align-items: center; padding-left: 8px;
+    font-weight: 650; font-size: 11.5px; color: var(--ink-2);
+    border-right: 1px solid var(--axis); border-bottom: 1px solid var(--grid);
+  }
+  .hour-tick { position: absolute; bottom: 4px; transform: translateX(3px); font-size: 11px; color: var(--muted); }
+  .daybound { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--axis); pointer-events: none; }
+
+  .grp-row { display: flex; position: sticky; z-index: 20; }
+  .grp-cell {
+    position: sticky; left: 0; z-index: 21; width: var(--rail-w); flex: none; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+    background: var(--page); border-bottom: 1px solid var(--grid); border-right: 1px solid var(--axis);
+    font-weight: 650; user-select: none;
+  }
+  .grp-cell .lvl { font-weight: 400; font-size: 10.5px; color: var(--muted); margin-left: auto; }
+  .grp-cell .caret { color: var(--muted); font-size: 10px; width: 10px; }
+  .grp-cell.line { padding-left: 24px; font-weight: 600; }
+  .grp-fill { position: relative; flex: 1; background: var(--page); border-bottom: 1px solid var(--grid); }
+
+  .cell-row { display: flex; }
+  .cell-label {
+    position: sticky; left: 0; z-index: 10; width: var(--rail-w); flex: none;
+    padding: 8px 10px 8px 38px; background: var(--surface);
+    border-bottom: 1px solid var(--grid); border-right: 1px solid var(--axis);
+    display: flex; align-items: flex-start; gap: 6px;
+  }
+  .cell-label .nm { font-weight: 550; }
+  .req-badge { font-size: 10px; font-weight: 700; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 4px; padding: 0 4px; margin-top: 1px; }
+  .track {
+    position: relative; flex: none; border-bottom: 1px solid var(--grid);
+    background-image: repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px var(--hour-px));
+    cursor: crosshair; touch-action: none;
+  }
+  .track.ineligible { background-color: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
+  .track.ineligible::after {
+    content: "not certified"; position: sticky; left: calc(var(--rail-w) + 8px);
+    color: var(--warn); font-size: 10px; font-weight: 700;
+  }
+  .track.drop-hint { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+  /* ---------- shift/break rendering layer (below assignments) ---------- */
+  .off-shift { position: absolute; top: 0; bottom: 0; background: var(--page); pointer-events: none; z-index: 0; }
+  .shift-break {
+    position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 1;
+    background-image: repeating-linear-gradient(45deg, rgba(137,135,129,.18) 0 4px, transparent 4px 8px);
+    background-color: rgba(137,135,129,.07);
+  }
+  .shiftbound { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px dashed var(--axis); pointer-events: none; z-index: 1; }
+  .shift-lbl { position: absolute; top: 2px; font-size: 10px; font-weight: 650; color: var(--muted); pointer-events: none; white-space: nowrap; z-index: 1; }
+
+  /* ---------- run band ---------- */
+  .band {
+    position: absolute; top: 4px; height: var(--band-h); border-radius: 6px;
+    background: color-mix(in srgb, var(--pc) 22%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--pc) 55%, var(--surface));
+    border-left: 4px solid var(--pc);
+    display: flex; align-items: center; gap: 7px; padding: 0 7px 0 6px;
+    cursor: grab; user-select: none; overflow: hidden; white-space: nowrap; touch-action: none;
+    font-size: 12px;
+  }
+  .band .pn { font-weight: 650; }
+  .band .tm { color: var(--ink-2); font-size: 11px; }
+  .band .hc {
+    margin-left: auto; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--axis); color: var(--ink-2);
+  }
+  .band.under { border-style: dashed; border-left-style: solid; }
+  .band.under .hc { background: color-mix(in srgb, var(--warn) 25%, var(--surface)); border-color: var(--warn); color: #6b4c00; }
+  .band.dragging { opacity: .85; z-index: 50; cursor: grabbing; box-shadow: 0 3px 10px rgba(11,11,11,.25); }
+  .band.flash { animation: flash .5s 2; }
+  .band .h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+  .band .h.l { left: 0; } .band .h.r { right: 0; }
+  .band.drop-ok { outline: 2px solid var(--ink); outline-offset: 1px; }
+  @keyframes flash { 50% { background: color-mix(in srgb, var(--crit) 30%, var(--surface)); border-color: var(--crit); } }
+
+  /* ---------- staffing chip (run-attached) ---------- */
+  .achip {
+    position: absolute; height: 22px; border-radius: 5px;
+    background: var(--surface);
+    border: 1px solid var(--ring); border-left: 3px solid var(--pc);
+    box-shadow: 0 1px 2px rgba(11,11,11,.07);
+    display: flex; align-items: center; gap: 5px; padding: 0 6px 0 4px;
+    cursor: grab; user-select: none; overflow: hidden; white-space: nowrap; touch-action: none;
+    font-size: 11.5px;
+  }
+  .achip .avatar {
+    flex: none; width: 15px; height: 15px; border-radius: 50%; background: var(--ink-2); color: #fff;
+    font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .achip .who { font-weight: 600; }
+  .achip .tm { color: var(--ink-2); font-size: 10.5px; }
+  .achip.override { outline: 2px dashed var(--warn); outline-offset: 1px; }
+  .achip.dragging { opacity: .85; z-index: 50; cursor: grabbing; box-shadow: 0 3px 10px rgba(11,11,11,.25); }
+  .achip.flash { animation: flash .5s 2; }
+  .achip .h { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+  .achip .h.l { left: 0; } .achip .h.r { right: 0; }
+
+  /* ---------- direct assignment block (model-a style, chip height) ---------- */
+  .dblk {
+    position: absolute; height: 22px; border-radius: 5px;
+    background: color-mix(in srgb, var(--pc) 16%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--pc) 45%, var(--surface));
+    border-left: 4px solid var(--pc);
+    display: flex; align-items: center; gap: 5px; padding: 0 6px 0 4px;
+    cursor: grab; user-select: none; overflow: hidden; white-space: nowrap; touch-action: none;
+    font-size: 11.5px;
+  }
+  .dblk:hover { box-shadow: 0 1px 4px rgba(11,11,11,.18); }
+  .dblk.dragging { opacity: .85; z-index: 50; cursor: grabbing; box-shadow: 0 3px 10px rgba(11,11,11,.25); }
+  .dblk.override { outline: 2px dashed var(--warn); outline-offset: 1px; }
+  .dblk.flash { animation: flash .5s 2; }
+  .dblk .avatar {
+    flex: none; width: 15px; height: 15px; border-radius: 50%; background: var(--ink-2); color: #fff;
+    font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .dblk .who { font-weight: 600; }
+  .dblk .what { color: var(--ink-2); font-size: 10.5px; }
+  .dblk .h { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+  .dblk .h.l { left: 0; } .dblk .h.r { right: 0; }
+
+  .ghost {
+    position: absolute; border-radius: 6px; background: color-mix(in srgb, var(--ink) 8%, transparent);
+    border: 1.5px dashed var(--ink-2); pointer-events: none; z-index: 40;
+    display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink-2);
+  }
+
+  /* ---------- left operator panel ---------- */
+  #panel {
+    width: 190px; flex: none; height: 100%; overflow-y: auto; overflow-x: hidden;
+    background: var(--surface); border-right: 1px solid var(--grid);
+    display: flex; flex-direction: column; transition: width .15s ease;
+  }
+  #panel.collapsed { width: 28px; }
+  .panel-hd {
+    display: flex; align-items: center; gap: 6px; padding: 10px 10px 8px;
+    position: sticky; top: 0; background: var(--surface); z-index: 2;
+  }
+  #panel.collapsed .panel-hd { justify-content: center; padding: 10px 2px 8px; }
+  #panel.collapsed .panel-hd .lbl { display: none; }
+  #panel-toggle {
+    margin-left: auto; border: 1px solid var(--axis); background: var(--surface); border-radius: 5px;
+    width: 20px; height: 20px; flex: none; cursor: pointer; font-size: 11px; color: var(--ink-2); line-height: 1;
+  }
+  #panel.collapsed #panel-toggle { margin-left: 0; }
+  #panel-list { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 10px; }
+  .chip {
+    display: flex; align-items: center; gap: 6px; padding: 5px 6px;
+    border-radius: 7px; cursor: grab; user-select: none; touch-action: none; position: relative;
+  }
+  .chip:hover { background: var(--page); }
+  .chip .avatar {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--ink-2); color: #fff;
+    font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .chip .nm { font-weight: 600; font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .sk { font-size: 9px; font-weight: 700; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 4px; padding: 0 3px; flex: none; }
+  .chip .pill {
+    font-size: 10px; font-weight: 700; color: var(--ink-2); background: var(--page);
+    border: 1px solid var(--axis); border-radius: 999px; padding: 1px 6px; flex: none;
+  }
+  .chip.full { opacity: .55; }
+  #panel.collapsed .chip { justify-content: center; padding: 5px 2px; }
+  #panel.collapsed .chip .nm, #panel.collapsed .chip .sk, #panel.collapsed .chip .pill { display: none; }
+  .chip.drag-src { opacity: .4; }
+  .chip-ghost { position: fixed; z-index: 100; pointer-events: none; box-shadow: 0 3px 10px rgba(11,11,11,.25); }
+
+  #pop {
+    position: fixed; z-index: 90; background: var(--surface); border: 1px solid var(--axis);
+    border-radius: 9px; box-shadow: 0 6px 24px rgba(11,11,11,.18); padding: 12px; width: 260px;
+  }
+  #pop h3 { margin: 0 0 8px; font-size: 12.5px; }
+  #pop label { display: block; font-size: 11px; color: var(--ink-2); margin: 7px 0 2px; }
+  #pop select, #pop input { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--axis); border-radius: 6px; background: var(--surface); }
+  #pop .time { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+  #pop .row { display: flex; gap: 8px; margin-top: 11px; }
+  #pop button { flex: 1; font: inherit; font-size: 12.5px; padding: 5px 0; border-radius: 7px; cursor: pointer; border: 1px solid var(--axis); background: var(--surface); }
+  #pop button.pri { background: var(--ink); color: #fff; border-color: var(--ink); }
+  #pop button.del { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--surface)); flex: 0 0 32%; }
+  #pop .seg { display: flex; border: 1px solid var(--axis); border-radius: 7px; overflow: hidden; margin: 4px 0 2px; }
+  #pop .seg button { flex: 1; border: 0; background: var(--surface); padding: 5px 4px; cursor: pointer; font: inherit; font-size: 11px; color: var(--ink-2); }
+  #pop .seg button + button { border-left: 1px solid var(--grid); }
+  #pop .seg button.on { background: var(--ink); color: #fff; }
+  #pop .row2 { display: flex; gap: 6px; margin-top: 2px; }
+  #pop .row2 input { width: auto; flex: 1; }
+  #pop button:disabled { opacity: .45; cursor: not-allowed; }
+  .shift-chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 0 8px; }
+  .shift-chip-btn { font: inherit; font-size: 10.5px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--axis); background: var(--page); color: var(--ink-2); cursor: pointer; }
+  .shift-chip-btn:hover { background: var(--surface); border-color: var(--ink-2); }
+  .split-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--grid); }
+  .split-row.inc { background: color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 6px; padding: 5px 6px; margin: 2px -6px; border-bottom: none; }
+  .split-lbl { flex: 1; font-size: 11.5px; color: var(--ink-2); }
+  .split-row input { width: 60px; flex: none; }
+  .split-foot { font-size: 12.5px; font-weight: 700; margin-top: 8px; color: var(--ink); }
+  .split-foot.over { color: var(--crit); }
+
+  #toasts { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 95; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .toast {
+    background: var(--ink); color: #fff; font-size: 12.5px; padding: 8px 14px; border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(11,11,11,.3); display: flex; gap: 7px; align-items: center;
+  }
+  .toast.warn { background: #6b4c00; } .toast.crit { background: var(--crit); }
+
+  #tips {
+    position: fixed; right: 14px; bottom: 58px; z-index: 80; width: 270px;
+    max-height: min(560px, calc(100vh - 110px)); display: flex; flex-direction: column;
+    background: var(--surface); border: 1px solid var(--axis); border-radius: 10px;
+    box-shadow: 0 4px 18px rgba(11,11,11,.14); font-size: 12px;
+  }
+  #tips .hd { display: flex; align-items: center; padding: 8px 12px; font-weight: 650; cursor: pointer; user-select: none; flex: none; }
+  #tips .hd span { margin-left: auto; color: var(--muted); }
+  #tips ul { margin: 0; padding: 0 12px 10px 26px; color: var(--ink-2); overflow-y: auto; min-height: 0; }
+  #tips li { margin: 5px 0; }
+  #tips.closed ul { display: none; }
+
+  /* ---------- admin shift editor modal ---------- */
+  #shiftOverlay { position: fixed; inset: 0; background: rgba(11,11,11,.35); z-index: 110; display: flex; align-items: center; justify-content: center; }
+  #shiftOverlay[hidden] { display: none; }
+  #shiftModal {
+    width: 420px; max-height: 82vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--axis);
+    border-radius: 10px; box-shadow: 0 10px 40px rgba(11,11,11,.3); padding: 16px;
+  }
+  #shiftModal h3 { margin: 0 0 10px; font-size: 14px; }
+  #shiftModal .tmpl-row { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }
+  #shiftModal .tmpl-tabs { display: flex; border: 1px solid var(--axis); border-radius: 7px; overflow: hidden; flex: 1; min-width: 0; }
+  #shiftModal .tmpl-tabs button { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: var(--surface); padding: 6px 4px; cursor: pointer; font: inherit; font-size: 12px; color: var(--ink-2); }
+  #shiftModal .tmpl-tabs button + button { border-left: 1px solid var(--grid); }
+  #shiftModal .tmpl-tabs button.on { background: var(--ink); color: #fff; }
+  #shiftModal button.addtmpl { flex: none; font-size: 11.5px; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--axis); background: var(--page); color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+  #shiftModal .tmpl-name-row { margin-bottom: 12px; }
+  #shiftModal .tmpl-name-row .fld-lbl { display: block; font-size: 11px; color: var(--ink-2); margin-bottom: 2px; }
+  #shiftModal .tmpl-name { font-weight: 650; font-size: 13px; border: 1px solid var(--axis); background: var(--surface); padding: 4px 6px; border-radius: 6px; width: 100%; }
+  #shiftModal .shift-block { border: 1px solid var(--grid); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  #shiftModal .shift-block h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 12.5px; }
+  #shiftModal .sh-name { flex: 1; min-width: 0; font-weight: 650; border: 1px solid transparent; background: transparent; padding: 2px 4px; }
+  #shiftModal .sh-name:hover, #shiftModal .sh-name:focus { border-color: var(--axis); background: var(--surface); }
+  #shiftModal button.rm-shift { flex: none; width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--axis); background: var(--surface); cursor: pointer; color: var(--crit); font-size: 12px; padding: 0; }
+  #shiftModal .shift-row-inline { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+  #shiftModal .shift-row-inline .fld-lbl { font-size: 11px; color: var(--ink-2); }
+  #shiftModal .shift-row-inline input, #shiftModal .break-row input { font: inherit; padding: 4px 6px; border: 1px solid var(--axis); border-radius: 6px; background: var(--surface); }
+  #shiftModal .sh-start, #shiftModal .sh-end, #shiftModal .br-start, #shiftModal .br-end { width: 64px; flex: none; }
+  #shiftModal .break-row { display: flex; gap: 6px; align-items: center; margin: 4px 0 4px 12px; }
+  #shiftModal .break-row .br-name { flex: 1; min-width: 0; }
+  #shiftModal .break-row button.rm { flex: none; width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--axis); background: var(--surface); cursor: pointer; color: var(--crit); font-size: 12px; padding: 0; }
+  #shiftModal button.addbreak { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--axis); background: var(--page); color: var(--ink-2); cursor: pointer; margin: 2px 0 0 12px; }
+  #shiftModal button.addshift { font-size: 12px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--axis); background: var(--page); color: var(--ink-2); cursor: pointer; margin: 0 0 12px; }
+  #shiftModal .line-row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 12px; }
+  #shiftModal .line-row select { flex: none; width: 130px; font: inherit; padding: 4px 6px; border: 1px solid var(--axis); border-radius: 6px; background: var(--surface); }
+  #shiftModal .err { color: var(--crit); font-size: 12px; margin: 8px 0 0; min-height: 16px; }
+  #shiftModal .row { display: flex; gap: 8px; margin-top: 14px; }
+  #shiftModal .row > button { flex: 1; font: inherit; font-size: 12.5px; padding: 6px 0; border-radius: 7px; cursor: pointer; border: 1px solid var(--axis); background: var(--surface); }
+  #shiftModal button.pri { background: var(--ink); color: #fff; border-color: var(--ink); }
+  #shiftModal button.del { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--surface)); flex: 0 0 38%; }
+</style>
+</head>
+<body>
+<aside id="panel">
+  <div class="panel-hd"><span class="lbl">OPERATORS</span><button id="panel-toggle" title="Collapse panel">«</button></div>
+  <div id="panel-list"></div>
+</aside>
+<div class="col">
+<header>
+  <h1>Production Scheduler</h1>
+  <span class="model-badge">HYBRID · RUNS + DIRECT ASSIGNMENTS</span>
+  <span class="date">Mon Aug 17 – Wed Aug 19 · Site A</span>
+  <div class="daynav" id="daynav">
+    <button id="nav-prev">◀ Prev day</button>
+    <button id="nav-today">Today</button>
+    <button id="nav-next">Next day ▶</button>
+  </div>
+  <div class="vas">
+    <label for="viewingAs">Viewing as:</label>
+    <select id="viewingAs"></select>
+    <span class="scope-note" id="scopeNote"></span>
+  </div>
+  <button id="shiftsBtn" class="shifts-btn" title="Edit shift templates">⚙ Shifts</button>
+  <div class="legend" id="legend"></div>
+  <div class="zoom" id="zoom"></div>
+  <span class="snap-note" id="snapNote"></span>
+</header>
+
+<div id="board"><div id="canvas"></div></div>
+</div>
+
+<div id="tips"><div class="hd">What to try <span>—</span></div>
+  <ul>
+    <li>Scroll sideways — the board spans Mon–Wed. Use <b>◀ Today ▶</b> to jump.</li>
+    <li>Operators live in the left panel — the pill shows how many assignments they hold. Drag them onto a band or empty space.</li>
+    <li>Drag empty space → choose <b>Product run</b> or <b>Direct assignment</b> in the popover. Your profile sets the default.</li>
+    <li>Switch <b>Viewing as</b> to Ana or Marco → the board and roster scope to their department; note their different default create type.</li>
+    <li>Sam runs at <b>50%</b> on Cell 3 → the run shows effective staffing <b>1.5/2</b>, understaffed.</li>
+    <li>Aisha covers Cell 4 + Cell 5 at <b>50/50</b> — overlap is legal while total ≤ 100%.</li>
+    <li>Ben carries a <b>target of 500 units</b> on Cell 2 (⌖ suffix).</li>
+    <li>Drop <b>Elena</b> onto Cell 6's Tue run → she's at 100% → the split-coverage dialog opens. Confirm only enables when the peak fits.</li>
+    <li>Run bands now drag to other cells — crew follows, certifications recheck.</li>
+    <li>Drag <b>Noah</b> onto CNC Cell 6 → certification override. Hold <b>Alt</b> for free drag.</li>
+    <li>Resizing a targeted assignment keeps its target number as-is here — final build will ask keep-or-scale.</li>
+    <li>Hatched stripes are shift breaks (2×15 min + 1×30 min per shift); Assembly runs 3×8h, CNC runs 2×10h — dashed lines mark shift changes.</li>
+    <li>At Compact zoom, drags snap to shift boundaries. The create popover has one-click full-shift chips.</li>
+    <li>Admin profile → <b>⚙ Shifts</b> to edit shift times, breaks, and which line uses which pattern.</li>
+  </ul>
+</div>
+
+<div id="pop" hidden></div>
+<div id="toasts"></div>
+<div id="shiftOverlay" hidden><div id="shiftModal"></div></div>
+
+<script>
+/* ============ data ============ */
+const ZOOMS = [
+  { name: "Compact", pxh: 64,  snap: 60 },
+  { name: "Standard", pxh: 104, snap: 30 },
+  { name: "Fine", pxh: 168, snap: 15 },
+];
+let zoom = 1;
+const DAY_MIN = 4320; // Mon 00:00 .. Wed 24:00, absolute minutes since Monday 00:00
+const DAY_NAMES = ["Mon Aug 17", "Tue Aug 18", "Wed Aug 19"];
+
+const PRODUCTS = [
+  { id: "wx", name: "Widget X", color: "#2a78d6" },
+  { id: "wy", name: "Widget Y", color: "#eb6834" },
+  { id: "gz", name: "Gadget Z", color: "#1baf7a" },
+  { id: "rw", name: "Rework",   color: "#eda100" },
+];
+const OPERATORS = [
+  { id: "maria", name: "Maria",  skills: ["CNC"], home: "machining" },
+  { id: "raj",   name: "Raj",    skills: ["CNC"], home: "machining" },
+  { id: "aisha", name: "Aisha",  skills: ["CNC"], home: "machining" },
+  { id: "elena", name: "Elena",  skills: [], home: "assembly" },
+  { id: "tom",   name: "Tom",    skills: [], home: "assembly" },
+  { id: "ben",   name: "Ben",    skills: [], home: "assembly" },
+  { id: "lily",  name: "Lily",   skills: [], home: "assembly" },
+  { id: "sam",   name: "Sam",    skills: [], home: "assembly" },
+  { id: "noah",  name: "Noah",   skills: [], home: "assembly" },
+];
+const TREE = [
+  { id: "assembly", name: "Assembly", cls: "dept", lvl: "Department", children: [
+    { id: "line1", name: "Line 1", cls: "line", lvl: "Line", cells: [
+      { id: "c1", name: "Cell 1", req: [] },
+      { id: "c2", name: "Cell 2", req: [] },
+      { id: "c3", name: "Cell 3", req: [] } ] },
+    { id: "line2", name: "Line 2", cls: "line", lvl: "Line", cells: [
+      { id: "c4", name: "Cell 4", req: [] },
+      { id: "c5", name: "Cell 5", req: [] } ] } ] },
+  { id: "machining", name: "Machining", cls: "dept", lvl: "Department", children: [
+    { id: "cncline", name: "CNC Line", cls: "line", lvl: "Line", cells: [
+      { id: "c6", name: "Cell 6", req: ["CNC"] },
+      { id: "c7", name: "Cell 7", req: ["CNC"] } ] } ] },
+];
+const CELLS = {};
+TREE.forEach(d => d.children.forEach(l => l.cells.forEach(c => CELLS[c.id] = c)));
+const CELL_PARENT = {};
+TREE.forEach(d => d.children.forEach(l => l.cells.forEach(c => CELL_PARENT[c.id] = { line: l.id, dept: d.id })));
+
+/* ============ shifts / breaks ============ */
+const SHIFT_TEMPLATES = {
+  t38: { name: "3 × 8h", shifts: [
+    { id:"s1", name:"Shift 1", start:360,  end:840,
+      breaks:[{name:"Break 1",start:480,end:495},{name:"Lunch",start:600,end:630},{name:"Break 2",start:720,end:735}] },
+    { id:"s2", name:"Shift 2", start:840,  end:1320,
+      breaks:[{name:"Break 1",start:960,end:975},{name:"Lunch",start:1080,end:1110},{name:"Break 2",start:1200,end:1215}] },
+    { id:"s3", name:"Shift 3", start:1320, end:1800,   // 22:00–06:00, wraps midnight
+      breaks:[{name:"Break 1",start:1440,end:1455},{name:"Lunch",start:1560,end:1590},{name:"Break 2",start:1680,end:1695}] } ] },
+  t210: { name: "2 × 10h", shifts: [
+    { id:"d", name:"Days",   start:360, end:960,
+      breaks:[{name:"Break 1",start:510,end:525},{name:"Lunch",start:660,end:690},{name:"Break 2",start:810,end:825}] },
+    { id:"n", name:"Nights", start:960, end:1560,     // 16:00–02:00, wraps midnight
+      breaks:[{name:"Break 1",start:1110,end:1125},{name:"Lunch",start:1260,end:1290},{name:"Break 2",start:1410,end:1425}] } ] }
+};
+// Attachment: any tree node id → template key. Nearest ancestor wins for a cell.
+let nodeShiftTemplates = { assembly: "t38", cncline: "t210" };
+
+// resolve nearest ancestor (cell -> line -> dept) with an explicit template attachment
+function templateForCell(cellId) {
+  const p = CELL_PARENT[cellId];
+  if (!p) return null;
+  if (nodeShiftTemplates[cellId]) return nodeShiftTemplates[cellId];
+  if (nodeShiftTemplates[p.line]) return nodeShiftTemplates[p.line];
+  if (nodeShiftTemplates[p.dept]) return nodeShiftTemplates[p.dept];
+  return null;
+}
+function templateForLine(line, dept) {
+  if (nodeShiftTemplates[line.id]) return nodeShiftTemplates[line.id];
+  if (nodeShiftTemplates[dept.id]) return nodeShiftTemplates[dept.id];
+  return null;
+}
+// instantiate every shift of a template across day offsets -1..2, clipped to [0,DAY_MIN]
+// (day -1 lets a previous-day overnight shift's tail show up on Monday morning)
+function shiftInstances(tmplKey) {
+  const tmpl = SHIFT_TEMPLATES[tmplKey];
+  if (!tmpl) return [];
+  const out = [];
+  for (const sh of tmpl.shifts) {
+    for (let day = -1; day <= 2; day++) {
+      const off = day * 1440, rawS = off + sh.start, rawE = off + sh.end;
+      if (rawE <= 0 || rawS >= DAY_MIN) continue;
+      out.push({ shift: sh, s: Math.max(0, rawS), e: Math.min(DAY_MIN, rawE), rawS, rawE });
+    }
+  }
+  return out;
+}
+function breakInstances(tmplKey) {
+  const tmpl = SHIFT_TEMPLATES[tmplKey];
+  if (!tmpl) return [];
+  const out = [];
+  for (const sh of tmpl.shifts) for (const br of sh.breaks) {
+    for (let day = -1; day <= 2; day++) {
+      const off = day * 1440, rawS = off + br.start, rawE = off + br.end;
+      if (rawE <= 0 || rawS >= DAY_MIN) continue;
+      out.push({ br, shift: sh, s: Math.max(0, rawS), e: Math.min(DAY_MIN, rawE) });
+    }
+  }
+  return out;
+}
+// every shift start/end instant across all 3 days, for Compact-zoom snapping (break edges excluded)
+function shiftSnapPoints(tmplKey) {
+  const tmpl = SHIFT_TEMPLATES[tmplKey];
+  if (!tmpl) return [];
+  const out = new Set();
+  for (const sh of tmpl.shifts) for (let day = -1; day <= 2; day++) {
+    const s = day * 1440 + sh.start, e = day * 1440 + sh.end;
+    if (s >= 0 && s <= DAY_MIN) out.add(s);
+    if (e >= 0 && e <= DAY_MIN) out.add(e);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+// boundary lines: shift starts + ends, deduped, skipping ones that coincide with a day-boundary line
+function shiftBoundaries(tmplKey) {
+  const tmpl = SHIFT_TEMPLATES[tmplKey];
+  if (!tmpl) return [];
+  const out = new Set();
+  for (const sh of tmpl.shifts) for (let day = -1; day <= 2; day++) {
+    const s = day * 1440 + sh.start, e = day * 1440 + sh.end;
+    if (s >= 0 && s <= DAY_MIN && s !== 1440 && s !== 2880) out.add(s);
+    if (e >= 0 && e <= DAY_MIN && e !== 1440 && e !== 2880) out.add(e);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+// gaps not covered by any shift instance -> off-shift wash
+function offShiftGaps(tmplKey) {
+  const insts = shiftInstances(tmplKey).map(x => [x.s, x.e]).sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [s, e] of insts) {
+    if (merged.length && s <= merged[merged.length - 1][1]) merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+    else merged.push([s, e]);
+  }
+  const gaps = []; let cursor = 0;
+  for (const [s, e] of merged) { if (s > cursor) gaps.push([cursor, s]); cursor = Math.max(cursor, e); }
+  if (cursor < DAY_MIN) gaps.push([cursor, DAY_MIN]);
+  return gaps;
+}
+
+const PROFILES = [
+  { id: "admin", name: "Admin (all)",                 role: "admin",      scopeNode: null,       defaultCreate: "run" },
+  { id: "ana",   name: "Ana — Assembly supervisor",    role: "supervisor", scopeNode: "assembly",  defaultCreate: "run" },
+  { id: "marco", name: "Marco — Machining supervisor", role: "supervisor", scopeNode: "machining", defaultCreate: "direct" },
+];
+let profileId = "admin";
+
+let seq = 0;
+const T = (day, clockMin) => day * 1440 + clockMin; // day 0=Mon,1=Tue,2=Wed
+const R = (cell, prod, s, e, planned) => ({ id: "r" + (++seq), cell, prod, s, e, planned });
+function mkAssign({ runId = null, cell = null, op, prod = null, s, e, eff = 100, target = null, targetUnit = "units", override = false }) {
+  return { id: "a" + (++seq), runId, cell, op, prod, s, e, eff, target, targetUnit, override };
+}
+
+let runs = [
+  R("c1", "wx", T(1, 360), T(1, 840), 3),   // Tue 06:00-14:00
+  R("c1", "wy", T(1, 870), T(1, 1320), 1),  // Tue 14:30-22:00
+  R("c2", "wx", T(1, 360), T(1, 840), 1),   // Tue 06:00-14:00
+  R("c3", "gz", T(1, 480), T(1, 960), 2),   // Tue 08:00-16:00
+  R("c6", "gz", T(1, 360), T(1, 840), 1),   // Tue 06:00-14:00
+  R("c7", "rw", T(1, 600), T(1, 1080), 2),  // Tue 10:00-18:00
+  R("c1", "wx", T(2, 360), T(2, 840), 3),   // Wed 06:00-14:00 (unstaffed)
+  R("c6", "gz", T(0, 360), T(0, 840), 1),   // Mon 06:00-14:00
+];
+const rid = i => runs[i].id;
+let assignments = [
+  mkAssign({ runId: rid(0), op: "elena", s: T(1, 360), e: T(1, 840) }),
+  mkAssign({ runId: rid(0), op: "tom",   s: T(1, 360), e: T(1, 840) }),
+  mkAssign({ runId: rid(1), op: "elena", s: T(1, 870), e: T(1, 1320) }),
+  mkAssign({ runId: rid(2), op: "ben",   s: T(1, 360), e: T(1, 840), target: 500, targetUnit: "units" }),
+  mkAssign({ runId: rid(3), op: "lily",  s: T(1, 480), e: T(1, 960) }),
+  mkAssign({ runId: rid(3), op: "sam",   s: T(1, 480), e: T(1, 960), eff: 50 }),
+  mkAssign({ runId: rid(4), op: "maria", s: T(1, 360), e: T(1, 840) }),
+  mkAssign({ runId: rid(5), op: "raj",   s: T(1, 600), e: T(1, 1080) }),
+  mkAssign({ runId: rid(7), op: "maria", s: T(0, 360), e: T(0, 840) }),
+  // direct assignments (runId null)
+  mkAssign({ cell: "c4", op: "aisha", prod: "wy", s: T(1, 360), e: T(1, 720), eff: 50 }),
+  mkAssign({ cell: "c5", op: "aisha", prod: "rw", s: T(1, 360), e: T(1, 720), eff: 50 }),
+  mkAssign({ cell: "c5", op: "noah",  prod: "rw", s: T(1, 540), e: T(1, 660), eff: 75 }),
+];
+
+/* ============ helpers ============ */
+const $ = s => document.querySelector(s);
+const pxh = () => ZOOMS[zoom].pxh;
+const snapMin = () => ZOOMS[zoom].snap;
+const minToX = m => m / 60 * pxh();
+const xToMin = x => x / pxh() * 60;
+const clampT = m => Math.max(0, Math.min(DAY_MIN, m));
+const doSnap = (m, alt, cellId) => {
+  if (alt) return Math.round(m);
+  if (cellId && ZOOMS[zoom].name === "Compact") {
+    const tmplKey = templateForCell(cellId);
+    const pts = tmplKey ? shiftSnapPoints(tmplKey) : [];
+    if (pts.length) {
+      let best = pts[0], bestD = Math.abs(m - pts[0]);
+      for (const p of pts) { const d = Math.abs(m - p); if (d < bestD) { bestD = d; best = p; } }
+      return best;
+    }
+  }
+  const s = snapMin();
+  return Math.round(m / s) * s;
+};
+const dayIdx = m => Math.max(0, Math.min(2, Math.floor(m / 1440)));
+const fmtClock = m => { const cm = ((m % 1440) + 1440) % 1440; return String(Math.floor(cm / 60)).padStart(2, "0") + ":" + String(Math.floor(cm % 60)).padStart(2, "0"); };
+const fmtFull = m => `${DAY_NAMES[dayIdx(m)]} ${fmtClock(m)}`;
+const fmtNum = n => { let s = n.toFixed(2); s = s.replace(/0+$/, "").replace(/\.$/, ""); return s; };
+const prod = id => PRODUCTS.find(p => p.id === id);
+const oper = id => OPERATORS.find(o => o.id === id);
+const run = id => runs.find(r => r.id === id);
+const initials = n => n.slice(0, 2).toUpperCase();
+const eligible = (opId, cellId) => CELLS[cellId].req.every(q => oper(opId).skills.includes(q));
+const cellOf = a => a.runId ? run(a.runId).cell : a.cell;
+const prodOf = a => a.runId ? run(a.runId).prod : a.prod;
+const conflictOf = (opId, s, e, excl) =>
+  assignments.find(a => a.id !== excl && a.op === opId && a.s < e && s < a.e);
+const runStaff = runId => assignments.filter(a => a.runId === runId);
+const runOverlap = (cellId, s, e, excl) =>
+  runs.find(r => r.id !== excl && r.cell === cellId && r.s < e && s < r.e);
+
+// capacity model: an operator's instantaneous total efficiency must stay <= 100.
+// candidate points = s, plus the starts of the operator's other assignments overlapping [s,e).
+function peakLoad(opId, s, e, eff, exclId) {
+  const others = assignments.filter(a => a.op === opId && a.id !== exclId && a.s < e && s < a.e);
+  const points = new Set([s]);
+  others.forEach(a => { if (a.s > s && a.s < e) points.add(a.s); });
+  let peak = 0;
+  points.forEach(t => {
+    const load = eff + others.reduce((sum, a) => sum + (a.s <= t && t < a.e ? a.eff : 0), 0);
+    if (load > peak) peak = load;
+  });
+  return peak;
+}
+// fully-allocated: peak load >= 100 with no gaps across the whole Tue 06:00-22:00 window.
+function isFullyAllocated(opId) {
+  const WS = T(1, 360), WE = T(1, 1320);
+  const mine = assignments.filter(a => a.op === opId && a.s < WE && a.e > WS);
+  if (!mine.length) return false;
+  const bounds = new Set([WS, WE]);
+  mine.forEach(a => {
+    if (a.s > WS && a.s < WE) bounds.add(a.s);
+    if (a.e > WS && a.e < WE) bounds.add(a.e);
+  });
+  const sorted = [...bounds].sort((x, y) => x - y);
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const t0 = sorted[i];
+    const load = mine.reduce((sum, a) => sum + (a.s <= t0 && t0 < a.e ? a.eff : 0), 0);
+    if (load < 100) return false;
+  }
+  return true;
+}
+const currentProfile = () => PROFILES.find(p => p.id === profileId);
+const visibleTree = () => TREE.filter(d => !currentProfile().scopeNode || d.id === currentProfile().scopeNode);
+const visibleOperators = () => OPERATORS.filter(o => !currentProfile().scopeNode || o.home === currentProfile().scopeNode);
+
+function toast(msg, kind = "") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind; t.textContent = msg;
+  $("#toasts").appendChild(t); setTimeout(() => t.remove(), 4200);
+}
+
+function boundaryDivsHTML() {
+  return [1440, 2880].map(m => `<div class="daybound" style="left:${minToX(m) - 1}px"></div>`).join("");
+}
+
+// shift/break rendering layer for a cell's track: off-shift wash, hatched breaks, dashed shift-start lines
+function shiftLayerHTML(cellId) {
+  const tmplKey = templateForCell(cellId);
+  if (!tmplKey) return "";
+  let html = "";
+  offShiftGaps(tmplKey).forEach(([s, e]) => {
+    if (e <= s) return;
+    html += `<div class="off-shift" style="left:${minToX(s)}px;width:${minToX(e) - minToX(s)}px"></div>`;
+  });
+  breakInstances(tmplKey).forEach(bi => {
+    const label = `${bi.br.name} · ${fmtClock(bi.s)}–${fmtClock(bi.e)}`;
+    html += `<div class="shift-break" style="left:${minToX(bi.s)}px;width:${minToX(bi.e) - minToX(bi.s)}px" title="${label}"></div>`;
+  });
+  shiftBoundaries(tmplKey).forEach(m => {
+    html += `<div class="shiftbound" style="left:${minToX(m)}px"></div>`;
+  });
+  return html;
+}
+// line-header strip: dashed shift-start lines always; shift-name labels at Compact zoom only
+function lineShiftLayerHTML(line, dept) {
+  const tmplKey = templateForLine(line, dept);
+  if (!tmplKey) return "";
+  let html = "";
+  shiftBoundaries(tmplKey).forEach(m => {
+    html += `<div class="shiftbound" style="left:${minToX(m)}px"></div>`;
+  });
+  if (ZOOMS[zoom].name === "Compact") {
+    shiftInstances(tmplKey).forEach(inst => {
+      if (inst.rawS === inst.s) html += `<div class="shift-lbl" style="left:${minToX(inst.s) + 4}px">${inst.shift.name}</div>`;
+    });
+  }
+  return html;
+}
+
+/* ============ render ============ */
+function render() {
+  const canvas = $("#canvas");
+  canvas.innerHTML = "";
+  const trackW = minToX(DAY_MIN);
+  document.documentElement.style.setProperty("--hour-px", pxh() + "px");
+
+  const hr = document.createElement("div"); hr.className = "hdr-row";
+  hr.innerHTML = `<div class="hdr-corner">Work cells · time →</div>`;
+  const ht = document.createElement("div"); ht.className = "hdr-track"; ht.style.width = trackW + "px";
+  ht.innerHTML = buildHeaderTrack();
+  hr.appendChild(ht); canvas.appendChild(hr);
+
+  const collapsed = render.collapsed || (render.collapsed = new Set());
+  const tree = visibleTree();
+  for (const dept of tree) {
+    canvas.appendChild(groupRow(dept, trackW, collapsed));
+    if (collapsed.has(dept.id)) continue;
+    for (const line of dept.children) {
+      canvas.appendChild(groupRow(line, trackW, collapsed, dept));
+      if (collapsed.has(line.id)) continue;
+      for (const cell of line.cells) canvas.appendChild(cellRow(cell, trackW));
+    }
+  }
+  renderPanel(); renderLegend(); renderZoom();
+}
+
+function buildHeaderTrack() {
+  let dayBoxes = "";
+  for (let day = 0; day < 3; day++) {
+    const w = minToX((day + 1) * 1440) - minToX(day * 1440);
+    dayBoxes += `<div class="day-box" style="width:${w}px">${DAY_NAMES[day]}</div>`;
+  }
+  let ticks = "";
+  const compact = ZOOMS[zoom].name === "Compact";
+  for (let day = 0; day < 3; day++) {
+    for (let hr = 0; hr < 24; hr++) {
+      if (compact && hr % 2 !== 0) continue;
+      const m = day * 1440 + hr * 60;
+      ticks += `<span class="hour-tick" style="left:${minToX(m)}px">${fmtClock(m)}</span>`;
+    }
+  }
+  return `<div class="day-strip">${dayBoxes}</div>${boundaryDivsHTML()}${ticks}`;
+}
+
+function groupRow(g, trackW, collapsed, dept) {
+  const r = document.createElement("div"); r.className = "grp-row";
+  const c = document.createElement("div"); c.className = "grp-cell " + g.cls;
+  c.innerHTML = `<span class="caret">${collapsed.has(g.id) ? "▸" : "▾"}</span><span>${g.name}</span><span class="lvl">${g.lvl}</span>`;
+  c.onclick = () => { collapsed.has(g.id) ? collapsed.delete(g.id) : collapsed.add(g.id); render(); };
+  const f = document.createElement("div"); f.className = "grp-fill"; f.style.width = trackW + "px";
+  f.innerHTML = (g.cls === "line" ? lineShiftLayerHTML(g, dept) : "") + boundaryDivsHTML();
+  r.append(c, f); return r;
+}
+
+function cellRow(cell, trackW) {
+  const r = document.createElement("div"); r.className = "cell-row";
+  const lbl = document.createElement("div"); lbl.className = "cell-label";
+  lbl.innerHTML = `<span class="nm">${cell.name}</span>` +
+    cell.req.map(q => `<span class="req-badge">${q}</span>`).join("");
+  const tr = document.createElement("div"); tr.className = "track";
+  tr.dataset.cell = cell.id; tr.style.width = trackW + "px";
+  tr.innerHTML = shiftLayerHTML(cell.id) + boundaryDivsHTML();
+
+  const cellRuns = runs.filter(x => x.cell === cell.id);
+  const items = assignments.filter(a => cellOf(a) === cell.id).sort((x, y) => x.s - y.s || x.e - y.e);
+  const lanes = [];
+  for (const it of items) {
+    let lane = lanes.findIndex(end => end <= it.s);
+    if (lane === -1) { lane = lanes.length; lanes.push(0); }
+    lanes[lane] = it.e; it._lane = lane;
+  }
+  const h = 36 + Math.max(1, lanes.length) * 28 + 4;
+  tr.style.height = h + "px"; lbl.style.minHeight = h + "px";
+
+  for (const x of cellRuns) tr.appendChild(bandEl(x));
+  for (const a of items) tr.appendChild(a.runId ? chipEl(a) : dblkEl(a));
+  tr.addEventListener("pointerdown", e => { if (e.target === tr) startCreateGeneric(e, tr); });
+  r.append(lbl, tr); return r;
+}
+
+function bandEl(x) {
+  const p = prod(x.prod);
+  const staff = runStaff(x.id);
+  const effHC = staff.reduce((s, a) => s + a.eff / 100, 0);
+  const under = effHC < x.planned;
+  const el = document.createElement("div");
+  el.className = "band" + (under ? " under" : "");
+  el.dataset.run = x.id;
+  el.style.setProperty("--pc", p.color);
+  el.style.left = minToX(x.s) + "px";
+  el.style.width = (minToX(x.e) - minToX(x.s)) + "px";
+  el.title = `${p.name} · ${fmtFull(x.s)}–${fmtClock(x.e)} · staffed ${fmtNum(effHC)}/${x.planned}${under ? " · UNDERSTAFFED" : ""}`;
+  el.innerHTML = `<span class="h l"></span><span class="pn">${p.name}</span>` +
+    `<span class="tm">${fmtClock(x.s)}–${fmtClock(x.e)}</span>` +
+    `<span class="hc">${under ? "⚠ " : ""}${fmtNum(effHC)}/${x.planned}</span><span class="h r"></span>`;
+  el.addEventListener("pointerdown", e => startBandDrag(e, el, x));
+  return el;
+}
+
+function chipEl(a) {
+  const x = run(a.runId), p = prod(x.prod), o = oper(a.op);
+  const el = document.createElement("div");
+  el.className = "achip" + (a.override ? " override" : "");
+  el.dataset.id = a.id;
+  el.style.setProperty("--pc", p.color);
+  el.style.left = minToX(a.s) + "px";
+  el.style.width = Math.max(46, minToX(a.e) - minToX(a.s)) + "px";
+  el.style.top = (36 + a._lane * 28) + "px";
+  const effSfx = a.eff !== 100 ? ` · ${a.eff}%` : "";
+  const tgtSfx = a.target != null ? ` ⌖${a.target}` : "";
+  const tgtTip = a.target != null ? ` · ⌖ ${a.target} ${a.targetUnit}` : " · target: NA";
+  el.title = `${o.name} · ${p.name} · ${fmtFull(a.s)}–${fmtClock(a.e)}${effSfx}${tgtTip}${a.override ? " · certification override" : ""}`;
+  el.innerHTML = `<span class="h l"></span><span class="avatar">${initials(o.name)}</span>` +
+    `<span class="who">${o.name}${tgtSfx}</span><span class="tm">${fmtClock(a.s)}–${fmtClock(a.e)}${effSfx}</span><span class="h r"></span>`;
+  el.addEventListener("pointerdown", e => startStaffDrag(e, el, a));
+  return el;
+}
+
+function dblkEl(a) {
+  const p = prod(a.prod), o = oper(a.op);
+  const el = document.createElement("div");
+  el.className = "dblk" + (a.override ? " override" : "");
+  el.dataset.id = a.id;
+  el.style.setProperty("--pc", p.color);
+  el.style.left = minToX(a.s) + "px";
+  el.style.width = Math.max(46, minToX(a.e) - minToX(a.s)) + "px";
+  el.style.top = (36 + a._lane * 28) + "px";
+  const effSfx = a.eff !== 100 ? ` · ${a.eff}%` : "";
+  const tgtSfx = a.target != null ? ` ⌖${a.target}` : "";
+  const tgtTip = a.target != null ? ` · ⌖ ${a.target} ${a.targetUnit}` : " · target: NA";
+  el.title = `${o.name} · ${p.name} · ${fmtFull(a.s)}–${fmtClock(a.e)}${effSfx}${tgtTip}${a.override ? " · certification override" : ""}`;
+  el.innerHTML = `<span class="h l"></span><span class="avatar">${initials(o.name)}</span>` +
+    `<span class="who">${o.name}${tgtSfx}</span><span class="what">${p.name} · ${fmtClock(a.s)}–${fmtClock(a.e)}${effSfx}</span><span class="h r"></span>`;
+  el.addEventListener("pointerdown", e => startDirectDrag(e, el, a));
+  return el;
+}
+
+function renderLegend() {
+  $("#legend").innerHTML = PRODUCTS.map(p =>
+    `<span class="key"><span class="swatch" style="background:${p.color}"></span>${p.name}</span>`).join("") +
+    `<span class="key status"><span class="swatch" style="background:var(--warn)"></span>understaffed</span>` +
+    `<span class="key"><span class="swatch break-swatch"></span>break</span>`;
+}
+function renderZoom() {
+  const z = $("#zoom");
+  z.innerHTML = ZOOMS.map((zz, i) => `<button class="${i === zoom ? "on" : ""}" data-i="${i}">${zz.name}</button>`).join("");
+  z.querySelectorAll("button").forEach(b => b.onclick = () => {
+    const board = $("#board");
+    const centerMin = xToMin(board.scrollLeft);
+    zoom = +b.dataset.i;
+    render();
+    board.scrollLeft = minToX(centerMin);
+  });
+  $("#snapNote").textContent = ZOOMS[zoom].name === "Compact" ? "snap: shift · hold Alt to drag free" : `snap: ${snapMin()} min · hold Alt to drag free`;
+}
+function renderPanel() {
+  const list = $("#panel-list");
+  list.innerHTML = "";
+  for (const o of visibleOperators()) {
+    const mine = assignments.filter(a => a.op === o.id);
+    const full = isFullyAllocated(o.id);
+    const c = document.createElement("div"); c.className = "chip" + (full ? " full" : ""); c.dataset.op = o.id;
+    if (mine.length) {
+      c.title = mine.map(a => `${CELLS[cellOf(a)].name} · ${fmtFull(a.s)}–${fmtClock(a.e)} · ${a.eff}%`).join("\n");
+    }
+    c.innerHTML = `<span class="avatar">${initials(o.name)}</span><span class="nm">${o.name}</span>` +
+      o.skills.map(s => `<span class="sk">${s}</span>`).join("") +
+      (mine.length ? `<span class="pill">${mine.length}</span>` : "");
+    c.addEventListener("pointerdown", e => startPanelDrag(e, c, o));
+    list.appendChild(c);
+  }
+}
+function populateViewingAs() {
+  const sel = $("#viewingAs");
+  sel.innerHTML = PROFILES.map(p => `<option value="${p.id}" ${p.id === profileId ? "selected" : ""}>${p.name}</option>`).join("");
+  sel.onchange = () => { profileId = sel.value; updateScopeNote(); updateAdminControls(); render(); };
+}
+function updateScopeNote() {
+  const p = currentProfile();
+  const note = $("#scopeNote");
+  if (p.scopeNode) note.textContent = `scoped to ${p.scopeNode === "assembly" ? "Assembly" : "Machining"}`;
+  else note.textContent = "";
+}
+
+function markEligibility(opId) {
+  document.querySelectorAll(".track").forEach(t => {
+    if (opId && !eligible(opId, t.dataset.cell)) t.classList.add("ineligible");
+    else t.classList.remove("ineligible");
+  });
+}
+function clearHints() {
+  document.querySelectorAll(".drop-hint").forEach(t => t.classList.remove("drop-hint"));
+  document.querySelectorAll(".band.drop-ok").forEach(b => b.classList.remove("drop-ok"));
+}
+
+/* ============ create (drag-select empty row space) ============ */
+function startCreateGeneric(e, tr) {
+  closePop();
+  const rect = tr.getBoundingClientRect();
+  const startM = doSnap(clampT(xToMin(e.clientX - rect.left)), e.altKey, tr.dataset.cell);
+  const ghost = document.createElement("div"); ghost.className = "ghost";
+  ghost.style.top = "4px"; ghost.style.height = "26px";
+  tr.appendChild(ghost);
+  let a = startM, b = startM;
+  const move = ev => {
+    b = doSnap(clampT(xToMin(ev.clientX - tr.getBoundingClientRect().left)), ev.altKey, tr.dataset.cell);
+    const s = Math.min(a, b), en = Math.max(a, b);
+    ghost.style.left = minToX(s) + "px";
+    ghost.style.width = Math.max(2, minToX(en) - minToX(s)) + "px";
+    ghost.textContent = en > s ? `${fmtClock(s)}–${fmtClock(en)}` : "";
+  };
+  const up = ev => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    const s = Math.min(a, b), en = Math.max(a, b);
+    if (en - s < 5) { ghost.remove(); return; }
+    openCreatePop(ev.clientX, ev.clientY, tr.dataset.cell, s, en, ghost, {});
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", up);
+}
+
+/* ============ move / resize run band (crew comes along; move mode can cross cells) ============ */
+function startBandDrag(e, el, x) {
+  e.stopPropagation(); closePop();
+  const mode = e.target.classList.contains("h") ? (e.target.classList.contains("l") ? "l" : "r") : "move";
+  const origin = { x: e.clientX, s: x.s, e: x.e, cell: x.cell };
+  let moved = false, targetTrack = null;
+  el.setPointerCapture(e.pointerId);
+  el.classList.add("dragging");
+
+  const move = ev => {
+    const dm = (ev.clientX - origin.x) / pxh() * 60;
+    if (Math.abs(ev.clientX - origin.x) > 3) moved = true;
+    if (mode === "move") {
+      const dur = origin.e - origin.s;
+      let ns = doSnap(origin.s + dm, ev.altKey, origin.cell);
+      ns = Math.max(0, Math.min(DAY_MIN - dur, ns));
+      x.s = ns; x.e = ns + dur;
+      el.style.pointerEvents = "none";
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      el.style.pointerEvents = "";
+      clearHints();
+      const tr = under && under.closest ? under.closest(".track") : null;
+      if (tr && tr.dataset.cell !== origin.cell) { tr.classList.add("drop-hint"); targetTrack = tr; }
+      else targetTrack = null;
+    } else if (mode === "l") {
+      x.s = Math.min(x.e - snapMin(), Math.max(0, doSnap(origin.s + dm, ev.altKey, origin.cell)));
+    } else {
+      x.e = Math.max(x.s + snapMin(), Math.min(DAY_MIN, doSnap(origin.e + dm, ev.altKey, origin.cell)));
+    }
+    el.style.left = minToX(x.s) + "px";
+    el.style.width = (minToX(x.e) - minToX(x.s)) + "px";
+    el.querySelector(".tm").textContent = `${fmtClock(x.s)}–${fmtClock(x.e)}`;
+  };
+  const revert = () => { x.s = origin.s; x.e = origin.e; x.cell = origin.cell; };
+  const up = ev => {
+    el.releasePointerCapture(e.pointerId);
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.classList.remove("dragging");
+    clearHints();
+    if (!moved) { revert(); openRunPop(ev.clientX, ev.clientY, x); return; }
+
+    const newCell = (mode === "move" && targetTrack) ? targetTrack.dataset.cell : origin.cell;
+    const clashRun = runOverlap(newCell, x.s, x.e, x.id);
+    if (clashRun) {
+      toast(`${CELLS[newCell].name} already runs ${prod(clashRun.prod).name} ${fmtFull(clashRun.s)}–${fmtClock(clashRun.e)} — reverted`, "crit");
+      revert(); el.classList.add("flash"); setTimeout(render, 650); return;
+    }
+    if (mode === "move") {
+      const delta = x.s - origin.s;
+      const cellChanged = newCell !== origin.cell;
+      const staff = runStaff(x.id);
+      // run-crew moves are a multi-assignment operation: capacity hard-blocks (no split popover) here.
+      for (const a of staff) {
+        const pk = peakLoad(a.op, a.s + delta, a.e + delta, a.eff, a.id);
+        if (pk > 100) {
+          toast(`${oper(a.op).name} would exceed 100% (peak ${Math.round(pk)}%) — reverted`, "crit");
+          revert(); el.classList.add("flash"); setTimeout(render, 650); return;
+        }
+      }
+      staff.forEach(a => { a.s += delta; a.e += delta; });
+      x.cell = newCell;
+      if (cellChanged && staff.length) {
+        let flips = 0;
+        staff.forEach(a => {
+          const ok = eligible(a.op, newCell);
+          a.override = !ok;
+          if (!ok) flips++;
+        });
+        if (flips > 0) toast(`${flips} of ${staff.length} crew not certified for ${CELLS[newCell].name} — overrides recorded`, "warn");
+      }
+    } else {
+      const dropped = [];
+      for (const a of runStaff(x.id)) {
+        a.s = Math.max(a.s, x.s); a.e = Math.min(a.e, x.e);
+        if (a.e <= a.s) dropped.push(a.id);
+      }
+      if (dropped.length) {
+        assignments = assignments.filter(a => !dropped.includes(a.id));
+        toast(`${dropped.length} assignment(s) fell outside the run and were removed`, "warn");
+      }
+    }
+    render();
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", up);
+}
+
+/* ============ move / resize staffing chip (run-attached) ============ */
+function startStaffDrag(e, el, a) {
+  e.stopPropagation(); closePop();
+  const mode = e.target.classList.contains("h") ? (e.target.classList.contains("l") ? "l" : "r") : "move";
+  const origin = { x: e.clientX, s: a.s, e: a.e, runId: a.runId };
+  const homeRun = run(a.runId);
+  let moved = false, targetBand = null;
+  el.setPointerCapture(e.pointerId);
+  el.classList.add("dragging");
+  if (mode === "move") markEligibility(a.op);
+
+  const move = ev => {
+    const dm = (ev.clientX - origin.x) / pxh() * 60;
+    if (Math.abs(ev.clientX - origin.x) > 3) moved = true;
+    if (mode === "move") {
+      const dur = origin.e - origin.s;
+      let ns = doSnap(origin.s + dm, ev.altKey, homeRun.cell);
+      ns = Math.max(0, Math.min(DAY_MIN - dur, ns));
+      a.s = ns; a.e = ns + dur;
+      el.style.pointerEvents = "none";
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      el.style.pointerEvents = "";
+      clearHints();
+      const band = under && under.closest ? under.closest(".band") : null;
+      if (band && band.dataset.run !== a.runId) { band.classList.add("drop-ok"); targetBand = band; }
+      else targetBand = null;
+    } else if (mode === "l") {
+      a.s = Math.min(a.e - snapMin(), Math.max(homeRun.s, doSnap(origin.s + dm, ev.altKey, homeRun.cell)));
+    } else {
+      a.e = Math.max(a.s + snapMin(), Math.min(homeRun.e, doSnap(origin.e + dm, ev.altKey, homeRun.cell)));
+    }
+    el.style.left = minToX(a.s) + "px";
+    el.style.width = Math.max(46, minToX(a.e) - minToX(a.s)) + "px";
+    el.querySelector(".tm").textContent = `${fmtClock(a.s)}–${fmtClock(a.e)}${a.eff !== 100 ? ` · ${a.eff}%` : ""}`;
+  };
+  const up = ev => {
+    el.releasePointerCapture(e.pointerId);
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.classList.remove("dragging");
+    markEligibility(null); clearHints();
+    const revert = () => { a.s = origin.s; a.e = origin.e; a.runId = origin.runId; };
+
+    if (!moved) { revert(); openChipPop(ev.clientX, ev.clientY, a); return; }
+
+    let dest = homeRun;
+    if (mode === "move" && targetBand) dest = run(targetBand.dataset.run);
+    const dur = Math.min(a.e - a.s, dest.e - dest.s);
+    const newS = Math.max(dest.s, Math.min(a.s, dest.e - dur)), newE = newS + dur;
+    const pk = peakLoad(a.op, newS, newE, a.eff, a.id);
+    const finalize = finalEff => {
+      a.s = newS; a.e = newE; a.eff = finalEff; a.runId = dest.id;
+      if (dest !== homeRun && !eligible(a.op, dest.cell)) {
+        a.override = true;
+        toast(`${oper(a.op).name} is not certified for ${CELLS[dest.cell].name} — override recorded`, "warn");
+      } else if (dest !== homeRun) a.override = false;
+    };
+    if (pk > 100) {
+      openSplitPop(ev.clientX, ev.clientY, a.op, newS, newE, `${CELLS[dest.cell].name} · ${fmtClock(newS)}–${fmtClock(newE)}`, a.eff, finalize, revert, a.id);
+      return;
+    }
+    finalize(a.eff);
+    render();
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", up);
+}
+
+/* ============ move / resize direct assignment block ============ */
+function startDirectDrag(e, el, a) {
+  e.stopPropagation(); closePop();
+  const mode = e.target.classList.contains("h") ? (e.target.classList.contains("l") ? "l" : "r") : "move";
+  const origin = { x: e.clientX, s: a.s, e: a.e, cell: a.cell };
+  let moved = false, targetTrack = null;
+  el.setPointerCapture(e.pointerId);
+  el.classList.add("dragging");
+  if (mode === "move") markEligibility(a.op);
+
+  const move = ev => {
+    const dm = (ev.clientX - origin.x) / pxh() * 60;
+    if (Math.abs(ev.clientX - origin.x) > 3) moved = true;
+    if (mode === "move") {
+      const dur = origin.e - origin.s;
+      let ns = doSnap(origin.s + dm, ev.altKey, origin.cell);
+      ns = Math.max(0, Math.min(DAY_MIN - dur, ns));
+      a.s = ns; a.e = ns + dur;
+      el.style.pointerEvents = "none";
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      el.style.pointerEvents = "";
+      clearHints();
+      const tr = under && under.closest ? under.closest(".track") : null;
+      if (tr && tr.dataset.cell !== a.cell) { tr.classList.add("drop-hint"); targetTrack = tr; }
+      else targetTrack = null;
+    } else if (mode === "l") {
+      a.s = Math.min(a.e - snapMin(), Math.max(0, doSnap(origin.s + dm, ev.altKey, origin.cell)));
+    } else {
+      a.e = Math.max(a.s + snapMin(), Math.min(DAY_MIN, doSnap(origin.e + dm, ev.altKey, origin.cell)));
+    }
+    el.style.left = minToX(a.s) + "px";
+    el.style.width = Math.max(46, minToX(a.e) - minToX(a.s)) + "px";
+    el.querySelector(".what").textContent = `${prod(a.prod).name} · ${fmtClock(a.s)}–${fmtClock(a.e)}${a.eff !== 100 ? ` · ${a.eff}%` : ""}`;
+  };
+  const revert = () => { a.s = origin.s; a.e = origin.e; a.cell = origin.cell; };
+  const up = ev => {
+    el.releasePointerCapture(e.pointerId);
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", up);
+    el.classList.remove("dragging");
+    markEligibility(null); clearHints();
+
+    if (!moved) { revert(); openDirectPop(ev.clientX, ev.clientY, a); return; }
+
+    const newCell = targetTrack ? targetTrack.dataset.cell : a.cell;
+    const pk = peakLoad(a.op, a.s, a.e, a.eff, a.id);
+    const finalize = finalEff => {
+      a.eff = finalEff;
+      if (newCell !== a.cell) {
+        a.cell = newCell;
+        if (!eligible(a.op, newCell)) {
+          a.override = true;
+          toast(`${oper(a.op).name} is not certified for ${CELLS[newCell].name} — override recorded`, "warn");
+        } else a.override = false;
+      }
+    };
+    if (pk > 100) {
+      openSplitPop(ev.clientX, ev.clientY, a.op, a.s, a.e, `${CELLS[newCell].name} · ${fmtClock(a.s)}–${fmtClock(a.e)}`, a.eff, finalize, revert, a.id);
+      return;
+    }
+    finalize(a.eff);
+    render();
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", up);
+}
+
+/* ============ panel chip → staff a run, or create a direct assignment ============ */
+function startPanelDrag(e, chipNode, o) {
+  closePop();
+  chipNode.classList.add("drag-src");
+  const ghost = chipNode.cloneNode(true);
+  ghost.classList.add("chip-ghost"); ghost.classList.remove("drag-src");
+  document.body.appendChild(ghost);
+  markEligibility(o.id);
+  const place = ev => { ghost.style.left = (ev.clientX + 8) + "px"; ghost.style.top = (ev.clientY - 14) + "px"; };
+  place(e);
+  let hoverBand = null, hoverTrack = null;
+  const move = ev => {
+    place(ev);
+    const under = document.elementFromPoint(ev.clientX, ev.clientY);
+    clearHints();
+    const band = under && under.closest ? under.closest(".band") : null;
+    const track = under && under.closest ? under.closest(".track") : null;
+    if (band) { band.classList.add("drop-ok"); hoverBand = band; hoverTrack = null; }
+    else { hoverBand = null; hoverTrack = track; if (track) track.classList.add("drop-hint"); }
+  };
+  const up = ev => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    ghost.remove(); chipNode.classList.remove("drag-src");
+    clearHints(); markEligibility(null);
+    if (hoverBand) {
+      const x = run(hoverBand.dataset.run);
+      if (runStaff(x.id).some(a => a.op === o.id)) { toast(`${o.name} is already staffed on this run`); return; }
+      const ov = !eligible(o.id, x.cell);
+      const pk = peakLoad(o.id, x.s, x.e, 100, null);
+      const label = `${CELLS[x.cell].name} · ${fmtClock(x.s)}–${fmtClock(x.e)}`;
+      if (pk > 100) {
+        openSplitPop(ev.clientX, ev.clientY, o.id, x.s, x.e, label, 100, finalEff => {
+          assignments.push(mkAssign({ runId: x.id, op: o.id, s: x.s, e: x.e, eff: finalEff, override: ov }));
+          if (ov) toast(`${o.name} is not certified for ${CELLS[x.cell].name} — override recorded`, "warn");
+        }, null, null);
+        return;
+      }
+      assignments.push(mkAssign({ runId: x.id, op: o.id, s: x.s, e: x.e, eff: 100, override: ov }));
+      if (ov) toast(`${o.name} is not certified for ${CELLS[x.cell].name} — override recorded`, "warn");
+      render();
+      return;
+    }
+    if (hoverTrack) {
+      const rect = hoverTrack.getBoundingClientRect();
+      const s = doSnap(clampT(xToMin(ev.clientX - rect.left)), ev.altKey, hoverTrack.dataset.cell);
+      const en = Math.min(DAY_MIN, s + 240);
+      openCreatePop(ev.clientX, ev.clientY, hoverTrack.dataset.cell, s, en, null, { presetOp: o.id, mode: "direct" });
+      return;
+    }
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", up);
+}
+
+/* ============ popovers ============ */
+function closePop() { $("#pop").hidden = true; const g = document.querySelector(".ghost"); if (g) g.remove(); }
+function placePop(x, y) {
+  const pop = $("#pop"); pop.hidden = false;
+  const w = 272, hMax = 420;
+  pop.style.left = Math.min(x, innerWidth - w - 10) + "px";
+  pop.style.top = Math.min(y + 8, innerHeight - hMax) + "px";
+}
+
+function openCreatePop(x, y, cellId, s, e, ghost, opts) {
+  opts = opts || {};
+  const pop = $("#pop");
+  let mode = opts.mode || currentProfile().defaultCreate;
+  const presetOp = opts.presetOp || null;
+  const dayOff = dayIdx(s) * 1440; // full-shift chips are for the day the drag started, fixed regardless of later chip picks
+  const tmplKeyHere = templateForCell(cellId);
+  const shiftChips = tmplKeyHere ? SHIFT_TEMPLATES[tmplKeyHere].shifts.map(sh => {
+    const cs = dayOff + sh.start, ce = Math.min(DAY_MIN, dayOff + sh.end);
+    return { name: sh.name, s: cs, e: ce };
+  }) : [];
+
+  function fieldsHTML() {
+    if (mode === "run") {
+      const prodOpts = PRODUCTS.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+      return `
+        <label>Product</label><select id="po-prod">${prodOpts}</select>
+        <label>Planned headcount</label><input id="po-hc" type="number" min="1" max="9" value="2">`;
+    }
+    const opOpts = OPERATORS.map(o => {
+      const pk0 = peakLoad(o.id, s, e, 0, null);
+      const elig = eligible(o.id, cellId);
+      const note = pk0 >= 100 ? " — at 100% (will ask to split)" : (!elig ? " — not certified (override)" : "");
+      return `<option value="${o.id}" ${presetOp === o.id ? "selected" : ""}>${o.name}${o.skills.length ? " · " + o.skills.join(",") : ""}${note}</option>`;
+    }).join("");
+    const prodOpts = PRODUCTS.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+    return `
+      <label>Operator</label><select id="po-op">${opOpts}</select>
+      <label>Product</label><select id="po-prod">${prodOpts}</select>
+      <label>Efficiency %</label><input id="po-eff" type="number" min="10" max="150" step="5" value="100">
+      <label>Target (optional)</label>
+      <div class="row2"><input id="po-target" type="number" min="1" placeholder="—"><input id="po-unit" type="text" maxlength="8" value="units"></div>`;
+  }
+
+  function draw() {
+    pop.innerHTML = `
+      <h3>New — ${CELLS[cellId].name}</h3>
+      <div class="seg" id="po-seg">
+        <button data-m="run" class="${mode === "run" ? "on" : ""}">Product run</button>
+        <button data-m="direct" class="${mode === "direct" ? "on" : ""}">Direct assignment</button>
+      </div>
+      ${shiftChips.length ? `<div class="shift-chip-row">${shiftChips.map((c, i) => `<button type="button" class="shift-chip-btn" data-i="${i}">${c.name} ${fmtClock(c.s)}–${fmtClock(c.e)}</button>`).join("")}</div>` : ""}
+      <div id="po-fields">${fieldsHTML()}</div>
+      <div class="time">${fmtFull(s)} – ${fmtClock(e)}</div>
+      <div class="row"><button id="po-cancel">Cancel</button><button class="pri" id="po-ok">Create</button></div>`;
+    placePop(x, y);
+    pop.querySelectorAll("#po-seg button").forEach(b => b.onclick = () => { mode = b.dataset.m; draw(); });
+    pop.querySelectorAll(".shift-chip-btn").forEach(b => b.onclick = () => {
+      const c = shiftChips[+b.dataset.i]; s = c.s; e = c.e; draw();
+    });
+    $("#po-cancel").onclick = closePop;
+    $("#po-ok").onclick = () => {
+      if (mode === "run") {
+        const clash = runOverlap(cellId, s, e, null);
+        if (clash) { toast(`${CELLS[cellId].name} already runs ${prod(clash.prod).name} ${fmtFull(clash.s)}–${fmtClock(clash.e)}`, "crit"); return; }
+        runs.push(R(cellId, $("#po-prod").value, s, e, Math.max(1, +$("#po-hc").value || 1)));
+        closePop(); render();
+        toast("Run created — drag operators onto the band to staff it");
+      } else {
+        const opId = $("#po-op").value, prodId = $("#po-prod").value;
+        const eff = Math.max(10, Math.min(150, +$("#po-eff").value || 100));
+        const tRaw = $("#po-target").value;
+        const target = tRaw === "" ? null : Math.max(1, +tRaw);
+        const unit = ($("#po-unit").value || "units").slice(0, 8);
+        const ov = !eligible(opId, cellId);
+        const pk = peakLoad(opId, s, e, eff, null);
+        const g = document.querySelector(".ghost"); if (g) g.remove();
+        if (pk > 100) {
+          openSplitPop(x, y, opId, s, e, `${CELLS[cellId].name} · ${fmtClock(s)}–${fmtClock(e)}`, eff, finalEff => {
+            assignments.push(mkAssign({ cell: cellId, op: opId, prod: prodId, s, e, eff: finalEff, target, targetUnit: unit, override: ov }));
+            if (ov) toast(`${oper(opId).name} is not certified for ${CELLS[cellId].name} — override recorded`, "warn");
+          }, null, null);
+          return;
+        }
+        assignments.push(mkAssign({ cell: cellId, op: opId, prod: prodId, s, e, eff, target, targetUnit: unit, override: ov }));
+        if (ov) toast(`${oper(opId).name} is not certified for ${CELLS[cellId].name} — override recorded`, "warn");
+        closePop(); render();
+      }
+    };
+  }
+  draw();
+}
+
+/* ============ split-coverage popover ============ */
+function openSplitPop(x, y, opId, s, e, incomingLabel, incomingEff, commit, cancel, exclId) {
+  const pop = $("#pop");
+  const others = assignments
+    .filter(a => a.op === opId && a.id !== exclId && a.s < e && s < a.e)
+    .map(a => ({ ref: a, eff: a.eff, label: `${CELLS[cellOf(a)].name} · ${fmtClock(Math.max(a.s, s))}–${fmtClock(Math.min(a.e, e))}` }));
+  const incoming = { ref: null, eff: incomingEff, label: incomingLabel };
+  const rows = [...others, incoming];
+
+  function peak() {
+    const points = new Set([s]);
+    others.forEach(r => { if (r.ref.s > s && r.ref.s < e) points.add(r.ref.s); });
+    let pk = 0;
+    points.forEach(t => {
+      const load = rows.reduce((sum, r) => {
+        const rs = r.ref ? r.ref.s : s, re = r.ref ? r.ref.e : e;
+        return sum + (rs <= t && t < re ? r.eff : 0);
+      }, 0);
+      if (load > pk) pk = load;
+    });
+    return pk;
+  }
+
+  pop.innerHTML = `
+    <h3>Split coverage — ${oper(opId).name}</h3>
+    ${rows.map((r, i) => `
+      <div class="split-row${r === incoming ? " inc" : ""}">
+        <span class="split-lbl">${r.label}</span>
+        <input type="number" min="10" max="150" step="5" value="${r.eff}" data-i="${i}">
+      </div>`).join("")}
+    <div class="split-foot" id="split-foot">Peak load: —</div>
+    <div class="row"><button id="po-cancel">Cancel</button><button id="po-split">Split evenly</button><button class="pri" id="po-ok">Confirm</button></div>`;
+  placePop(x, y);
+
+  function recompute() {
+    rows.forEach((r, i) => {
+      const inp = pop.querySelector(`input[data-i="${i}"]`);
+      r.eff = Math.max(10, Math.min(150, +inp.value || 0));
+    });
+    const pk = peak();
+    const foot = $("#split-foot");
+    foot.textContent = `Peak load: ${Math.round(pk)}%`;
+    foot.classList.toggle("over", pk > 100);
+    $("#po-ok").disabled = pk > 100;
+    return pk;
+  }
+  pop.querySelectorAll(".split-row input").forEach(inp => inp.addEventListener("input", recompute));
+  $("#po-cancel").onclick = () => { if (cancel) cancel(); closePop(); render(); };
+  $("#po-split").onclick = () => {
+    const even = Math.floor(100 / rows.length / 5) * 5;
+    rows.forEach((r, i) => { r.eff = even; pop.querySelector(`input[data-i="${i}"]`).value = even; });
+    recompute();
+  };
+  $("#po-ok").onclick = () => {
+    if ($("#po-ok").disabled) return;
+    others.forEach(r => { r.ref.eff = r.eff; });
+    commit(incoming.eff);
+    closePop(); render();
+  };
+  recompute();
+}
+
+function openRunPop(x, y, r0) {
+  const pop = $("#pop");
+  const staff = runStaff(r0.id);
+  const effHC = staff.reduce((s, a) => s + a.eff / 100, 0);
+  const prodOpts = PRODUCTS.map(p => `<option value="${p.id}" ${p.id === r0.prod ? "selected" : ""}>${p.name}</option>`).join("");
+  pop.innerHTML = `
+    <h3>Run — ${CELLS[r0.cell].name}</h3>
+    <label>Product (one edit = whole crew changes over)</label><select id="po-prod">${prodOpts}</select>
+    <label>Planned headcount</label><input id="po-hc" type="number" min="1" max="9" value="${r0.planned}">
+    <div class="time">${fmtFull(r0.s)} – ${fmtClock(r0.e)} · staffed ${fmtNum(effHC)}/${r0.planned}</div>
+    <div class="row"><button class="del" id="po-del">Delete</button><button id="po-cancel">Close</button><button class="pri" id="po-ok">Save</button></div>`;
+  placePop(x, y);
+  $("#po-cancel").onclick = closePop;
+  $("#po-del").onclick = () => {
+    assignments = assignments.filter(a => a.runId !== r0.id);
+    runs = runs.filter(z => z.id !== r0.id);
+    closePop(); render();
+  };
+  $("#po-ok").onclick = () => {
+    r0.prod = $("#po-prod").value;
+    r0.planned = Math.max(1, +$("#po-hc").value || 1);
+    closePop(); render();
+  };
+}
+
+function openChipPop(x, y, a) {
+  const pop = $("#pop");
+  const x0 = run(a.runId);
+  pop.innerHTML = `
+    <h3>${oper(a.op).name} — ${CELLS[x0.cell].name}</h3>
+    <div class="time">${prod(x0.prod).name} · ${fmtFull(a.s)} – ${fmtClock(a.e)}${a.override ? " · ⚠ certification override" : ""}</div>
+    <label>Efficiency %</label><input id="po-eff" type="number" min="10" max="150" step="5" value="${a.eff}">
+    <label>Target (optional)</label>
+    <div class="row2"><input id="po-target" type="number" min="1" placeholder="—" value="${a.target == null ? "" : a.target}"><input id="po-unit" type="text" maxlength="8" value="${a.targetUnit || "units"}"></div>
+    <div class="row"><button class="del" id="po-del">Remove</button><button id="po-cancel">Close</button><button class="pri" id="po-ok">Save</button></div>`;
+  placePop(x, y);
+  $("#po-cancel").onclick = closePop;
+  $("#po-del").onclick = () => { assignments = assignments.filter(z => z.id !== a.id); closePop(); render(); };
+  $("#po-ok").onclick = () => {
+    a.eff = Math.max(10, Math.min(150, +$("#po-eff").value || 100));
+    const tRaw = $("#po-target").value;
+    a.target = tRaw === "" ? null : Math.max(1, +tRaw);
+    a.targetUnit = ($("#po-unit").value || "units").slice(0, 8);
+    closePop(); render();
+  };
+}
+
+function openDirectPop(x, y, a) {
+  const pop = $("#pop");
+  const prodOpts = PRODUCTS.map(p => `<option value="${p.id}" ${p.id === a.prod ? "selected" : ""}>${p.name}</option>`).join("");
+  pop.innerHTML = `
+    <h3>${oper(a.op).name} — ${CELLS[a.cell].name}</h3>
+    <label>Product</label><select id="po-prod">${prodOpts}</select>
+    <label>Efficiency %</label><input id="po-eff" type="number" min="10" max="150" step="5" value="${a.eff}">
+    <label>Target (optional)</label>
+    <div class="row2"><input id="po-target" type="number" min="1" placeholder="—" value="${a.target == null ? "" : a.target}"><input id="po-unit" type="text" maxlength="8" value="${a.targetUnit || "units"}"></div>
+    <div class="time">${fmtFull(a.s)} – ${fmtClock(a.e)}${a.override ? " · ⚠ certification override" : ""}</div>
+    <div class="row"><button class="del" id="po-del">Delete</button><button id="po-cancel">Close</button><button class="pri" id="po-ok">Save</button></div>`;
+  placePop(x, y);
+  $("#po-cancel").onclick = closePop;
+  $("#po-del").onclick = () => { assignments = assignments.filter(z => z.id !== a.id); closePop(); render(); };
+  $("#po-ok").onclick = () => {
+    a.prod = $("#po-prod").value;
+    a.eff = Math.max(10, Math.min(150, +$("#po-eff").value || 100));
+    const tRaw = $("#po-target").value;
+    a.target = tRaw === "" ? null : Math.max(1, +tRaw);
+    a.targetUnit = ($("#po-unit").value || "units").slice(0, 8);
+    closePop(); render();
+  };
+}
+
+/* ============ admin shift editor ============ */
+let editorState = null;
+let shiftEntitySeq = 0; // generates unique ids for shifts created inside the editor (new template / add shift)
+
+function parseHHMM(str) {
+  const m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(str || "");
+  if (!m) return null;
+  const h = +m[1], mnt = +m[2];
+  if (h < 0 || h > 23 || mnt < 0 || mnt > 59) return null;
+  return h * 60 + mnt;
+}
+
+function openShiftEditor() {
+  const clone = JSON.parse(JSON.stringify(SHIFT_TEMPLATES));
+  Object.values(clone).forEach(t => t.shifts.forEach(sh => {
+    sh._startClock = sh.start % 1440;
+    sh._endClock = sh.end % 1440;
+    sh.breaks.forEach(br => { br._startClock = br.start % 1440; br._endClock = br.end % 1440; });
+  }));
+  editorState = { templates: clone, nodeMap: { ...nodeShiftTemplates }, tab: "t38" };
+  $("#shiftOverlay").hidden = false;
+  drawShiftEditor();
+}
+function closeShiftEditor() { $("#shiftOverlay").hidden = true; editorState = null; }
+
+function syncCurrentTabFromDOM() {
+  const tmpl = editorState.templates[editorState.tab];
+  const nameInp = $("#shiftModal").querySelector(".tmpl-name");
+  if (nameInp) {
+    const v = nameInp.value.trim();
+    if (v) tmpl.name = v;
+  }
+  $("#shiftModal").querySelectorAll(".shift-block").forEach((block, si) => {
+    const sh = tmpl.shifts[si];
+    const nameVal = block.querySelector(".sh-name").value.trim();
+    if (nameVal) sh.name = nameVal;
+    sh._startClock = parseHHMM(block.querySelector(".sh-start").value);
+    sh._endClock = parseHHMM(block.querySelector(".sh-end").value);
+    const rows = block.querySelectorAll(".break-row");
+    sh.breaks = [...rows].map(br => ({
+      name: br.querySelector(".br-name").value.trim() || "Break",
+      _startClock: parseHHMM(br.querySelector(".br-start").value),
+      _endClock: parseHHMM(br.querySelector(".br-end").value),
+    }));
+  });
+}
+
+// turn the edited clock fields into actual (possibly >1440, overnight-wrapped) minute values
+function resolveTimes(tmpl) {
+  return tmpl.shifts.map(sh => {
+    const sc = sh._startClock, ec = sh._endClock;
+    if (sc == null || ec == null) return { ok: false, id: sh.id, name: sh.name || sh.id };
+    const start = sc, end = ec <= sc ? ec + 1440 : ec;
+    const breaks = sh.breaks.map(br => {
+      const bsc = br._startClock, bec = br._endClock;
+      if (bsc == null || bec == null) return { ok: false, name: br.name };
+      const off = bsc < start ? 1440 : 0;
+      return { ok: true, name: br.name || "Break", start: bsc + off, end: bec + off };
+    });
+    return { ok: true, id: sh.id, name: sh.name || sh.id, start, end, breaks };
+  });
+}
+
+function validateTemplate(resolved, label) {
+  for (const sh of resolved) if (!sh.ok) return `${label}: enter a valid HH:MM start/end for ${sh.name}.`;
+  for (const sh of resolved) {
+    if (sh.end <= sh.start) return `${label}: ${sh.name} — end must be after start.`;
+    if (sh.end - sh.start > 1440) return `${label}: ${sh.name} — a shift can't be longer than 24h.`;
+    for (const br of sh.breaks) if (!br.ok) return `${label}: ${sh.name} — enter a valid HH:MM for break "${br.name}".`;
+    for (const br of sh.breaks) {
+      if (br.end <= br.start) return `${label}: ${sh.name} · ${br.name} — end must be after start.`;
+      if (br.start < sh.start || br.end > sh.end) return `${label}: ${sh.name} · ${br.name} — break must fall fully inside the shift.`;
+    }
+  }
+  // compare on the wrapped scale: each shift's own start/end already accounts for its own
+  // midnight-crossing (resolveTimes gives end > 1440 for an overnight shift) — a straight
+  // interval compare on those resolved values is enough to catch same-cycle overlaps
+  // without also re-flagging back-to-back shifts that only touch at a boundary.
+  for (let i = 0; i < resolved.length; i++) {
+    for (let j = i + 1; j < resolved.length; j++) {
+      const A = resolved[i], B = resolved[j];
+      if (A.start < B.end && B.start < A.end) return `${label}: ${A.name} and ${B.name} overlap.`;
+    }
+  }
+  return null;
+}
+
+// commit every template in the working copy (added/renamed/deleted templates all reflected —
+// the working copy is the new source of truth, not just an edit to the original two keys)
+function commitShiftEdits(resolvedByKey) {
+  const strip = r => r.map(sh => ({ id: sh.id, name: sh.name, start: sh.start, end: sh.end, breaks: sh.breaks.map(b => ({ name: b.name, start: b.start, end: b.end })) }));
+  Object.keys(SHIFT_TEMPLATES).forEach(k => delete SHIFT_TEMPLATES[k]);
+  Object.keys(resolvedByKey).forEach(key => {
+    SHIFT_TEMPLATES[key] = { name: editorState.templates[key].name, shifts: strip(resolvedByKey[key]) };
+  });
+  nodeShiftTemplates = { ...editorState.nodeMap };
+  closeShiftEditor();
+  render();
+  toast("Shift templates updated");
+}
+
+// the template a line currently resolves to, within the editor's working copy (line -> dept -> first template)
+function effectiveLineTemplate(line, dept) {
+  const fallback = Object.keys(editorState.templates)[0];
+  return editorState.nodeMap[line.id] || editorState.nodeMap[dept.id] || fallback;
+}
+
+function lineRowsHTML() {
+  const rows = [];
+  const tmplKeys = Object.keys(editorState.templates);
+  TREE.forEach(dept => dept.children.forEach(line => {
+    const val = effectiveLineTemplate(line, dept);
+    rows.push(`<div class="line-row"><span>${line.name}</span><select data-line="${line.id}">
+      ${tmplKeys.map(k => `<option value="${k}" ${val === k ? "selected" : ""}>${editorState.templates[k].name}</option>`).join("")}
+    </select></div>`);
+  }));
+  return rows.join("");
+}
+
+// true if any line's effective template resolves to this key — used to block deletion
+function templateInUse(key) {
+  let used = false;
+  TREE.forEach(dept => dept.children.forEach(line => {
+    if (effectiveLineTemplate(line, dept) === key) used = true;
+  }));
+  return used;
+}
+
+function newShiftEntity(name) {
+  return {
+    id: "sh" + (++shiftEntitySeq),
+    name,
+    _startClock: 360, _endClock: 840, // 06:00-14:00
+    breaks: [
+      { name: "Break 1", _startClock: 480, _endClock: 495 }, // 08:00-08:15
+      { name: "Lunch",   _startClock: 600, _endClock: 630 }, // 10:00-10:30
+      { name: "Break 2", _startClock: 720, _endClock: 735 }, // 12:00-12:15
+    ],
+  };
+}
+
+function newTemplateKey() {
+  let i = 1;
+  while (editorState.templates["tpl" + i]) i++;
+  return "tpl" + i;
+}
+
+// dedupe against every template's current name — "New template" -> "New template 2" -> "New template 3" ...
+function dedupeTemplateName(base) {
+  const names = new Set(Object.values(editorState.templates).map(t => t.name));
+  if (!names.has(base)) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
+}
+
+function drawShiftEditor(errMsg) {
+  const modal = $("#shiftModal");
+  const tab = editorState.tab;
+  const tmpl = editorState.templates[tab];
+  const tmplKeys = Object.keys(editorState.templates);
+  modal.innerHTML = `
+    <h3>⚙ Shift templates</h3>
+    <div class="tmpl-row">
+      <div class="tmpl-tabs">
+        ${tmplKeys.map(k => `<button data-t="${k}" class="${k === tab ? "on" : ""}">${editorState.templates[k].name}</button>`).join("")}
+      </div>
+      <button type="button" class="addtmpl" id="tmpl-new">+ new template</button>
+    </div>
+    <div class="tmpl-name-row">
+      <span class="fld-lbl">Template name</span>
+      <input type="text" class="tmpl-name" value="${tmpl.name}" placeholder="Template name">
+    </div>
+    ${tmpl.shifts.map((sh, si) => `
+      <div class="shift-block" data-si="${si}">
+        <h4><input type="text" class="sh-name" value="${sh.name}"><button type="button" class="rm-shift" data-si="${si}" title="Remove shift">×</button></h4>
+        <div class="shift-row-inline">
+          <span class="fld-lbl">Start</span><input type="text" class="sh-start" value="${fmtClock(sh._startClock)}" placeholder="HH:MM">
+          <span class="fld-lbl">End</span><input type="text" class="sh-end" value="${fmtClock(sh._endClock)}" placeholder="HH:MM">
+        </div>
+        ${sh.breaks.map((br, bi) => `
+          <div class="break-row" data-bi="${bi}">
+            <input type="text" class="br-name" value="${br.name}" placeholder="Break name">
+            <input type="text" class="br-start" value="${fmtClock(br._startClock)}" placeholder="HH:MM">
+            <input type="text" class="br-end" value="${fmtClock(br._endClock)}" placeholder="HH:MM">
+            <button type="button" class="rm" data-si="${si}" data-bi="${bi}">×</button>
+          </div>`).join("")}
+        <button type="button" class="addbreak" data-si="${si}">+ add break</button>
+      </div>`).join("")}
+    <button type="button" class="addshift" id="tmpl-addshift">+ add shift</button>
+    <div class="lbl" style="margin:10px 0 4px;">Line → template</div>
+    ${lineRowsHTML()}
+    <div class="err">${errMsg || ""}</div>
+    <div class="row"><button class="del" id="se-delete">delete template</button><button id="se-cancel">Cancel</button><button class="pri" id="se-save">Save</button></div>`;
+
+  modal.querySelectorAll(".tmpl-tabs button").forEach(b => b.onclick = () => {
+    syncCurrentTabFromDOM(); editorState.tab = b.dataset.t; drawShiftEditor();
+  });
+  $("#tmpl-new").onclick = () => {
+    syncCurrentTabFromDOM();
+    const key = newTemplateKey();
+    editorState.templates[key] = { name: dedupeTemplateName("New template"), shifts: [newShiftEntity("Shift 1")] };
+    editorState.tab = key;
+    drawShiftEditor();
+  };
+  modal.querySelectorAll(".addbreak").forEach(b => b.onclick = () => {
+    syncCurrentTabFromDOM();
+    const sh = editorState.templates[editorState.tab].shifts[+b.dataset.si];
+    sh.breaks.push({ name: "Break", _startClock: sh._startClock, _endClock: (sh._startClock + 15) % 1440 });
+    drawShiftEditor();
+  });
+  modal.querySelectorAll(".break-row .rm").forEach(b => b.onclick = () => {
+    syncCurrentTabFromDOM();
+    editorState.templates[editorState.tab].shifts[+b.dataset.si].breaks.splice(+b.dataset.bi, 1);
+    drawShiftEditor();
+  });
+  $("#tmpl-addshift").onclick = () => {
+    syncCurrentTabFromDOM();
+    const shifts = editorState.templates[editorState.tab].shifts;
+    shifts.push(newShiftEntity(`Shift ${shifts.length + 1}`));
+    drawShiftEditor();
+  };
+  modal.querySelectorAll(".rm-shift").forEach(b => b.onclick = () => {
+    syncCurrentTabFromDOM();
+    const shifts = editorState.templates[editorState.tab].shifts;
+    if (shifts.length <= 1) { drawShiftEditor("A template needs at least one shift — can't remove the last one."); return; }
+    shifts.splice(+b.dataset.si, 1);
+    drawShiftEditor();
+  });
+  modal.querySelectorAll(".line-row select").forEach(sel => sel.onchange = () => {
+    editorState.nodeMap[sel.dataset.line] = sel.value;
+  });
+  $("#se-delete").onclick = () => {
+    if (tmplKeys.length <= 1) { drawShiftEditor("At least one shift template must exist — can't delete the last one."); return; }
+    if (templateInUse(tab)) { drawShiftEditor(`"${tmpl.name}" is assigned to a line — unassign it below before deleting.`); return; }
+    delete editorState.templates[tab];
+    editorState.tab = Object.keys(editorState.templates)[0];
+    drawShiftEditor();
+  };
+  $("#se-cancel").onclick = closeShiftEditor;
+  $("#se-save").onclick = () => {
+    syncCurrentTabFromDOM();
+    const resolvedByKey = {};
+    for (const key of Object.keys(editorState.templates)) {
+      const t = editorState.templates[key];
+      const resolved = resolveTimes(t);
+      const err = validateTemplate(resolved, t.name);
+      if (err) { drawShiftEditor(err); return; }
+      resolvedByKey[key] = resolved;
+    }
+    commitShiftEdits(resolvedByKey);
+  };
+}
+$("#shiftOverlay").addEventListener("pointerdown", e => { if (e.target === $("#shiftOverlay")) closeShiftEditor(); });
+$("#shiftsBtn").onclick = openShiftEditor;
+function updateAdminControls() {
+  $("#shiftsBtn").style.display = profileId === "admin" ? "" : "none";
+}
+
+document.addEventListener("pointerdown", e => {
+  if (!$("#pop").hidden && !e.target.closest("#pop")) closePop();
+}, true);
+
+$("#tips .hd").onclick = () => $("#tips").classList.toggle("closed");
+$("#panel-toggle").onclick = () => {
+  const panel = $("#panel");
+  panel.classList.toggle("collapsed");
+  $("#panel-toggle").textContent = panel.classList.contains("collapsed") ? "»" : "«";
+};
+
+populateViewingAs();
+updateScopeNote();
+updateAdminControls();
+render();
+$("#board").scrollLeft = minToX(T(1, 360)); // auto-scroll: Tue 06:00 at left edge
+
+$("#nav-prev").onclick = () => $("#board").scrollBy({ left: -24 * pxh(), behavior: "smooth" });
+$("#nav-next").onclick = () => $("#board").scrollBy({ left: 24 * pxh(), behavior: "smooth" });
+$("#nav-today").onclick = () => $("#board").scrollTo({ left: minToX(T(1, 360)), behavior: "smooth" });
+</script>
+</body>
+</html>

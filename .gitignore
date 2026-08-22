@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+
+# env
+.env
+.env.local
+.env.*.local
+
+# supabase local state
+.supabase/
+
+# delivery staging (see docs/agent-briefs)
+_delivery/

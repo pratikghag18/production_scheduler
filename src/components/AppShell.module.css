@@ -1,0 +1,48 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--grid);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.nav {
+  display: flex;
+  gap: 12px;
+}
+
+.nav a {
+  text-decoration: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  padding: 4px 2px;
+}
+
+.nav a.active {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.health {
+  margin-left: auto;
+}
+
+.main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
