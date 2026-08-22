@@ -23,23 +23,23 @@ npm run dev
 
 ## Scripts
 
-| Script | What it does |
-| --- | --- |
-| `npm run dev` | Start the Vite dev server |
-| `npm run build` | Typecheck (project references) then build for production |
-| `npm run preview` | Preview the production build locally |
-| `npm run typecheck` | `tsc -b --noEmit` across the project |
-| `npm run lint` | ESLint over the whole tree |
-| `npm run format` | Prettier, write mode |
-| `npm run format:check` | Prettier, check mode (used in CI) |
-| `npm run test` | Vitest unit tests, single run |
-| `npm run test:watch` | Vitest in watch mode |
-| `npm run e2e` | Playwright smoke tests |
-| `npm run db:start` / `db:stop` | Start/stop the local Supabase stack |
-| `npm run db:reset` | Reset the local DB and re-run migrations + seed |
-| `npm run db:diff` | Diff local schema changes into a new migration |
-| `npm run db:push` | Push local migrations to the linked remote project |
-| `npm run db:types` | Regenerate `src/lib/database.types.ts` from the local schema |
+| Script                         | What it does                                                 |
+| ------------------------------ | ------------------------------------------------------------ |
+| `npm run dev`                  | Start the Vite dev server                                    |
+| `npm run build`                | Typecheck (project references) then build for production     |
+| `npm run preview`              | Preview the production build locally                         |
+| `npm run typecheck`            | `tsc -b --noEmit` across the project                         |
+| `npm run lint`                 | ESLint over the whole tree                                   |
+| `npm run format`               | Prettier, write mode                                         |
+| `npm run format:check`         | Prettier, check mode (used in CI)                            |
+| `npm run test`                 | Vitest unit tests, single run                                |
+| `npm run test:watch`           | Vitest in watch mode                                         |
+| `npm run e2e`                  | Playwright smoke tests                                       |
+| `npm run db:start` / `db:stop` | Start/stop the local Supabase stack                          |
+| `npm run db:reset`             | Reset the local DB and re-run migrations + seed              |
+| `npm run db:diff`              | Diff local schema changes into a new migration               |
+| `npm run db:push`              | Push local migrations to the linked remote project           |
+| `npm run db:types`             | Regenerate `src/lib/database.types.ts` from the local schema |
 
 ## Folder conventions
 

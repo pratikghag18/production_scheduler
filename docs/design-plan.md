@@ -560,3 +560,17 @@ Four more errors surfaced when the API surface ran. Two are Postgres facts worth
 Also: acceptance item 15's literal scenario was impossible on the seed data (the target cell already held an overlapping run of the same product at that window), so `move_run` correctly raised `run_overlap`. Handled the same way as P1-2's impossible cap case — surfaced as a warning, with a conflict-free supplementary case proving the real capability.
 
 **Verification.** Cold re-run by the design session: exit 0, all suites green, migration 0009 confirmed applied and all ten API functions confirmed `SECURITY INVOKER` via `pg_proc.prosecdef`. Beyond the four mutations the brief prescribed, the design session ran an **unprescribed** one — rewriting `check_eligibility`'s ltree ancestor containment (`<@`) to exact node equality — and the suite caught it with `FAIL: Elena/Cell6 should be ineligible: {"eligible": true, …}`. A suite that catches a mutation nobody told it to expect is the standard worth holding to.
+
+### 17.3 Frontend build-config corrections (Aug 22, 2026)
+
+The scaffold was authored without a package registry, so nothing in it had ever been compiled. Running `npm install` and the acceptance suite on a real machine surfaced five config errors — all mine, none in the application code, which linted clean and passed its tests and e2e smoke on the first real run.
+
+1. **`engines: "20.x"` was a hard pin** that fails on Node 24. Relaxed to `>=20`, and `.nvmrc` moved to `24` so CI runs the same Node as the dev machine. Matching those two is worth more than pinning an older LTS.
+2. **vitest 2.x drags its own nested Vite 5** alongside the root Vite 6. TypeScript then sees two distinct `Plugin` types and emits a wall of `Type 'Plugin<any>' is not assignable to type 'Plugin<any>'` — nonsense until you notice the paths differ by `node_modules/vitest/node_modules/`. Upgrading to vitest 4 dedupes onto root Vite and, as a side effect, cleared **all five** `npm audit` findings including the critical: every one traced to the nested `esbuild`/`vite`, not to anything we chose.
+3. **A referenced composite project may not disable emit (TS6310).** `tsconfig.node.json` had both `composite: true` and `noEmit: true`. It now emits declarations only, into `node_modules/.tmp`.
+4. **`tsc -b --noEmit` re-triggers TS6310 even when `tsc -b` succeeds.** The flag was redundant — the root project already sets `noEmit` in its own options — so `typecheck` is now plain `tsc -b`, identical to what `build` already does.
+5. **Prettier must not touch `docs/`.** It flagged fifteen files, nearly all design docs, briefs, and the deliberately frozen mockups, and would have reflowed their tables and rewritten the mockup HTML. Added `.prettierignore`.
+
+**Requirement withdrawn.** The P1-1 brief demanded exact pinned versions with no `^` ranges. That was over-strict: `package-lock.json` pins every resolution, and CI uses `npm ci`, which installs strictly from the lockfile and ignores the ranges. Caret ranges plus a committed lockfile is the conventional, reproducible setup.
+
+**Known follow-up.** The empty shell already bundles to 548 kB (161 kB gzipped) — React, Router, TanStack Query, supabase-js. Not a problem yet; `manualChunks` code-splitting belongs in the board-UI brief, where the heaviest code lands, rather than as config churn now.

@@ -9,7 +9,12 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",
-    "noEmit": true,
+    // A composite project that another project references must be able to emit
+    // its declarations (TS6310). allowImportingTsExtensions still needs emit
+    // suppressed for JS, so emit declarations only, into a scratch dir.
+    "emitDeclarationOnly": true,
+    "outDir": "./node_modules/.tmp/node-types",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
 
     "strict": true,
     "noUnusedLocals": true,

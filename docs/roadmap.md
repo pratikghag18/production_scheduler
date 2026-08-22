@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-22 (P1-3a database API surface — built, validated and mutation-tested: migration 0009, `docs/api.md`, `60_api_test.sql`; TypeScript half is P1-3b, still blocked on `npm install`; P1-1 scaffold still unvalidated — npm registry unreachable) · **Current phase:** 1 — Core product
+**Last updated:** 2026-08-22 (P1-1 scaffold now BUILDS and fully passes acceptance — npm unblocked on Pratik's machine; P1-2 + P1-3a database built, validated and mutation-tested) · **Current phase:** 1 — Core product
 
 ---
 
@@ -29,7 +29,7 @@
 *Each unchecked item becomes one or more agent briefs in `docs/agent-briefs/` before build starts.*
 
 - [x] Tech stack DECIDED (Aug 21): Supabase (Postgres+Auth+Realtime+RLS API) · React+TypeScript · static hosting (Vercel/Cloudflare Pages) · escape hatch to self-hosted documented in design plan §5
-- [ ] Repo scaffold + CI — Vite/React-TS + Supabase client + CI **scaffolded, unvalidated** (agent-built Aug 21, 2026; npm install could not run — cloud container network egress blocked `registry.npmjs.org` and all mirrors; needs `npm install` + acceptance run before ticking complete)
+- [x] **Repo scaffold + CI** — Vite/React-TS + Supabase client + CI. Authored by agent Aug 21 (unvalidated, no npm in container); `npm install` + full acceptance run completed on Pratik's machine Aug 22: typecheck, lint, format:check, unit tests, build, and Playwright e2e all green, `npm audit` reports 0 vulnerabilities.
 - [x] Database migrations from design plan §3/§14/§15/§16/§17 (incl. capacity trigger, shift tables, RLS policies) + seed scripts — **built and validated** (Sonnet, Aug 21) against a scratch PostgreSQL 16 instance; all 31 `docs/agent-briefs/p1-2-db-migrations-brief.md` §7 acceptance items pass via `scripts/verify-db.sh`. Real Supabase/Docker confirmation (the `auth.users` FK the scratch harness only shims) still outstanding.
 - [ ] Org onboarding settings pages (same pattern as ⚙ Shifts): hierarchy level editor + node tree editor + CSV import (operators, products, tree)
 - [ ] Auth, profiles, subtree grants (admin / supervisor / viewer), RLS wiring
@@ -100,10 +100,10 @@ Briefs are written by the design session (Opus) and executed by fresh Sonnet age
 
 | # | Brief | Produces | State |
 |---|---|---|---|
-| P1-1 | `p1-1-repo-scaffold-brief.md` | Vite/React-TS app shell, Supabase client, CSS tokens ported from the mockup, ESLint/Prettier/Vitest/Playwright, GitHub Actions CI, `docs/conventions.md` | code delivered, unvalidated — npm registry unreachable in cloud container, §6 acceptance not run |
+| P1-1 | `p1-1-repo-scaffold-brief.md` | Vite/React-TS app shell, Supabase client, CSS tokens ported from the mockup, ESLint/Prettier/Vitest/Playwright, GitHub Actions CI, `docs/conventions.md` | **built + validated** — all §6 acceptance items pass on Node 24 / Windows (Aug 22) after four config fixes: `engines` relaxed to `>=20`, `.nvmrc` → 24, vitest 2→4 (killed a duplicate-Vite type clash and all 5 audit findings), `tsconfig.node.json` emits declarations (TS6310), `typecheck` script dropped a redundant `--noEmit`, `.prettierignore` added for `docs/` |
 | P1-2 | `p1-2-db-migrations-brief.md` | 8 migrations (core → capacity trigger → shifts → profiles → audit → RLS), `seed.sql` mirroring the mockup, SQL test suite + `scripts/verify-db.sh`, `docs/schema.md` | **built + validated** (Sonnet, Aug 21) — scratch PostgreSQL 16, all 31 §7 acceptance items pass; real Supabase/Docker confirmation of the `auth.users` FK still outstanding |
 | P1-3a | `p1-3a-db-api-surface-brief.md` | Migration 0009: `board_window` / `capacity_probe` / `check_eligibility` reads, `create_run` / `create_assignment` / `move_run` / `apply_split_coverage` / `delete_run` writes, machine-readable error contract, `docs/api.md`, SQL tests + required mutation pass | **built + validated + mutation-tested** (Sonnet, Aug 22) — scratch PostgreSQL 16, all 28 §8 acceptance items pass via `scripts/verify-db.sh`; all 4 §9 mutations confirmed to break their named test and restored; PostgREST HTTP-status mapping unverified (no Docker) |
-| P1-3b | *not yet written* | TypeScript half of the API layer: typed RPC wrappers, `SchedulerError` union, generated `database.types.ts`, TanStack Query hooks with optimistic update + rollback. **Blocked until `npm install` works** — its acceptance checklist would be dead on arrival otherwise | blocked on P1-1 npm |
-| P1-4 | *not yet written* | Board UI: virtualized grid, hierarchy rail, shift/break layer — ports the mockup engine to React | — |
+| P1-3b | *not yet written* | TypeScript half of the API layer: typed RPC wrappers, `SchedulerError` union, generated `database.types.ts`, TanStack Query hooks with optimistic update + rollback | **UNBLOCKED** (npm works as of Aug 22) — ready to brief |
+| P1-4 | *not yet written* | Board UI: virtualized grid, hierarchy rail, shift/break layer — ports the mockup engine to React. Fold in `manualChunks` code-splitting; the empty shell is already 548 kB / 161 kB gzipped | **UNBLOCKED** — ready to brief after P1-3b |
 
 Both briefs build in the cloud container and deliver to this repo via a tarball through `_delivery/` (gitignored); neither agent commits or pushes — review and commit yourself.

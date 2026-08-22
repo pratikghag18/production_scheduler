@@ -1,0 +1,15 @@
+# Hand-authored design docs, briefs, and the frozen mockups — Prettier would
+# reflow tables and rewrite the mockup HTML we deliberately froze.
+docs/
+
+# Generated / vendored
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+package-lock.json
+
+# Scratch
+_delivery/
+checks.txt
