@@ -1,0 +1,135 @@
+/* Ported from the mockup's `#pop` descendant rules (§5.4). `.body` stands
+   in for the mockup's `#pop` id-scope so `label`/`select`/`input` stay
+   scoped to this popover instead of leaking globally (see the component's
+   header comment and §10.1's flattening trap). */
+
+.body label {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-2);
+  margin: 7px 0 2px;
+}
+
+.body select,
+.body input {
+  width: 100%;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--axis);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.time {
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 6px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.row button {
+  flex: 1;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 0;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+}
+
+/* Specificity trap (§10.1), the SAME one already fixed for `.seg button.segOn`:
+   a bare `.pri` is (0,1,0) and LOSES to `.row button` (0,1,1) above, which
+   matches the same element. The background and border therefore stayed the
+   default surface while `color` — having no competitor — still applied, so
+   the primary button rendered white-on-white and looked blank. The mockup's
+   rule is `#pop button.pri`, whose id makes it tie-and-win on source order;
+   the module-scoped equivalent has to be the compound `.row button.pri`. */
+.row button.pri {
+  background: var(--ink);
+  color: var(--avatar-fg);
+  border-color: var(--ink);
+}
+
+.row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.seg {
+  display: flex;
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  overflow: hidden;
+  margin: 4px 0 2px;
+}
+
+.seg button {
+  flex: 1;
+  border: 0;
+  background: var(--surface);
+  padding: 5px 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.seg button + button {
+  border-left: 1px solid var(--grid);
+}
+
+/* Specificity trap (§10.1): `.segOn` alone is ONE class (0,1,0), which
+   loses the cascade to `.seg button` above (0,1,1 — one class + one
+   element) since both match the same button simultaneously. The mockup's
+   rule is the compound `#pop .seg button.on`; `.seg button.segOn` is the
+   module-scoped equivalent (0,2,1), which correctly outranks the base. */
+.seg button.segOn {
+  background: var(--ink);
+  color: var(--avatar-fg);
+}
+
+.row2 {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* The mockup gives both inputs `flex: 1`, i.e. equal halves. Faithful, but
+   wrong here: the right-hand field is the UNIT (`maxlength=8` — "units",
+   "kg", "cases") and does not need the same room as the quantity. 2:1. */
+.row2 input {
+  width: auto;
+  flex: 2;
+}
+
+.row2 input + input {
+  flex: 1;
+}
+
+.shiftChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 2px;
+}
+
+.shiftChipBtn {
+  font: inherit;
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.shiftChipBtn:hover {
+  background: var(--grid);
+}

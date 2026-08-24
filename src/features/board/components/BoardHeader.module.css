@@ -1,0 +1,88 @@
+.hdrRow {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.hdrCorner {
+  position: sticky;
+  left: 0;
+  z-index: 31;
+  flex: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--axis);
+  border-right: 1px solid var(--axis);
+  display: flex;
+  align-items: flex-end;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.hdrTrack {
+  position: relative;
+  height: 54px;
+  flex: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--axis);
+}
+
+.dayStrip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 20px;
+  display: flex;
+}
+
+.dayBox {
+  height: 20px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  overflow: hidden;
+  font-weight: 650;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  border-right: 1px solid var(--axis);
+  border-bottom: 1px solid var(--grid);
+}
+
+/* `left` is set inline to the rail width so the label parks just clear of the
+   sticky operator rail instead of sliding under it. Sticky is clipped to
+   `.dayBox`, which is what makes one day's label give way to the next at the
+   boundary rather than overlapping it. */
+.dayLabelStart {
+  position: sticky;
+  z-index: 1;
+  white-space: nowrap;
+  background: var(--surface);
+  padding-right: 8px;
+}
+
+.dayLabelEnd {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.hourTick {
+  position: absolute;
+  bottom: 4px;
+  transform: translateX(3px);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.daybound {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--axis);
+  pointer-events: none;
+}

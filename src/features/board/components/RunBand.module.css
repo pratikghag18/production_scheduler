@@ -1,0 +1,78 @@
+.band {
+  position: absolute;
+  height: var(--band-h);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pc) 22%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--pc) 55%, var(--surface));
+  border-left: 4px solid var(--pc);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px 0 6px;
+  user-select: none;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  z-index: 2;
+  cursor: grab;
+  touch-action: none;
+}
+
+.band:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.pn {
+  font-weight: 650;
+}
+
+.tm {
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.hc {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--axis);
+  color: var(--ink-2);
+}
+
+.under {
+  border-style: dashed;
+  border-left-style: solid;
+}
+
+.under .hc {
+  background: color-mix(in srgb, var(--warn) 25%, var(--surface));
+  border-color: var(--warn);
+  color: var(--understaffed-fg);
+}
+
+/* Ported from the mockup's .band.dragging — kept as the compound
+   `.band.dragging` (§10.1's trap): `.band` and `.dragging` land on the
+   SAME element (see the className construction in RunBand.tsx), and both
+   this rule and `.band` above set `z-index`/`cursor`; a flattened
+   `.dragging` alone has equal (0,1,0) specificity to `.band` alone, so
+   which one wins would depend on source order rather than being
+   guaranteed — the compound form (0,2,0) always outranks `.band` alone,
+   matching the mockup exactly. */
+.band.dragging {
+  opacity: 0.85;
+  z-index: 50;
+  cursor: grabbing;
+  box-shadow: 0 3px 10px rgba(11, 11, 11, 0.25);
+}
+
+/* Ported from the mockup's .band .h / .h.l / .h.r edge grips. */
+.h {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  cursor: ew-resize;
+}

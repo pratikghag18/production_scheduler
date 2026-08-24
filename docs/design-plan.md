@@ -587,3 +587,128 @@ The TypeScript API layer landed and works end to end — browser → typed clien
 **Also settled: `src/features/auth/` is a named exception to the no-cross-feature-imports rule** (`docs/conventions.md`). The rule exists to stop *domain* features coupling to each other; who is signed in is app-level infrastructure every screen needs. An exception by name, not a precedent.
 
 **The lesson for P1-4.** Both real bugs here were *transitions*, not steady states: what happens when identity changes, what happens to a query mid-swap. The board has far more of them — what happens to a drag in progress when a refetch lands, to a selection when the window scrolls, to an optimistic block when someone else moves its run. The P1-4 brief must specify transitions as carefully as it specifies rendering.
+
+---
+
+## 18. Addendum v1.5 — board rendering decisions locked for build (Aug 22, 2026)
+
+Written alongside brief P1-4a. §16.2 described *what* the board shows; these close the gaps between the mockup's fixed three-day fake world and a continuous, RLS-filtered, up-to-92-day real one. Full execution detail lives in `docs/agent-briefs/p1-4a-board-render-brief.md`.
+
+**P1-4 is split in two.** P1-4a is the read-only board — grid, hierarchy rail, shift/break layer, run bands, assignment chips, the left operator panel's read-only half, zoom, collapse, code-splitting. P1-4b is every interaction on top of it. The roadmap already listed rendering and interactions as separate lines; the split follows that, keeps each brief reviewable, and puts a working board on screen a cycle earlier.
+
+| # | Decision | Rationale |
+| --- | --- | --- |
+| D13 | **The board renders in UTC in v1.** `BOARD_ZONE` in `src/features/board/lib/time.ts` is the single seam; no component may call a local-time `Date` method. | D10 anchored the seed to UTC and per-site timezone is still an open question. The load-bearing consequence: in v1 every day is exactly 1440 minutes, so board geometry has no DST discontinuity. |
+| D14 | **The board window is always whole UTC days** — the date control picks dates, and `board_window` is called with midnight-to-midnight instants. | Day boundaries then sit at exact multiples of 1440 from the window origin, so the mockup's day strip ports over unchanged instead of needing per-day width math. |
+| D15 | The x coordinate is **minutes since `windowStart`**; the mockup's hardcoded `DAY_MIN = 4320` becomes a computed `windowMinutes`, and every `for (day = -1; day <= 2)` becomes `day <= dayCount`. | The `-1` is load-bearing — it is what makes the previous day's overnight shift tail appear on the first rendered morning. Verified: starting that loop at 0 loses the tail *and* invents a spurious 00:00–06:00 off-shift gap on both seeded templates. |
+| D16 | Zoom table ported verbatim (Compact 64 px/h, Standard 104, Fine 168; snap 60/30/15), default Standard. The `snap` column ships in P1-4a although only P1-4b uses it. | It is one table; splitting it across two briefs is how the two halves drift. |
+| D17 | Default window = 3 days from the UTC Monday of the current week. | Matches seed decision D10, so a freshly seeded database shows populated rows on first load. |
+| D18 | **A node is a track row iff its level is schedulable**; indentation comes from ltree path depth. Nothing anywhere hardcodes "department / line / cell". | §2's dynamic hierarchy. The mockup's three fixed tiers are a mockup artifact, not a model. |
+| D19 | **No virtualization library** — windowing is hand-rolled from prefix-sum row offsets and a binary search. | Row heights here are *computed* from lane packing, not measured, so a measuring virtualizer buys nothing; and hand-rolling puts every line of the math in a pure module that can be executed and mutation-tested in the agent container. Same precedent as `shapes.ts`'s hand-rolled guards instead of zod. |
+
+**Nearest-ancestor resolution walks ltree paths, never `parent_id` chains.** Both the shift template and the node's skill requirements resolve this way. A node's parent may sit outside the loaded window when `p_root_path` starts mid-tree; the path always works.
+
+**A malformed `timerange` degrades to one missing block, never a blank board.** `parseTstzRange` throws by contract, so the index builder catches per row, drops it, and counts it. Silent coercion would be worse and a white screen would be much worse.
+
+### 18.1 The npm block has a hole, and the brief is shaped around it
+
+`node --experimental-strip-types` runs a `.ts` file directly by erasing its annotations, and Node 22 is already in the agent container. So a module with **no runtime imports** — only `import type` — is executable there even though npm is unreachable.
+
+P1-4a is therefore split along that line rather than along a conceptual one, per [[brief-writing-rules]] rule 1: the whole load-bearing math layer (`time.ts`, `geometry.ts`, `boardIndex.ts`) is pure and dependency-free, and the brief makes running it *and* mutation-testing it mandatory with real reported output. The React half stays author-only. This is the first brief on this project where a frontend deliverable has a genuinely verifiable half.
+
+Constraints this imposes on those three files, all stated in the brief: `import type` on every import (a value import would need alias resolution strip-types does not do), and no enums, namespaces, parameter properties, or decorators (strip-types erases, it does not transform).
+
+**Verified before the brief shipped.** The design session ran the harness pattern in the container against ported copies of the mockup's shift functions and lane packer: the day −1 tail, the 3×8h zero-gap case, the 2×10h one-240-minute-gap-per-day case, and the boundary-dedup case all pass, and mutations M1 and M3 both break their named cases. One error was caught this way *in the brief itself* — the lane-packing acceptance case asserted the wrong lane number, since greedy first-fit puts the two short blocks on lane 0 and the long one on lane 1, not the other way round. Same failure mode as P1-2's impossible cap case and P1-3a's impossible `move_run` case: an acceptance case written from reasoning rather than execution.
+
+### 18.2 Transitions the board must specify (the §17.4 lesson, applied)
+
+§17.4 ended by saying the P1-4 brief must specify transitions as carefully as rendering. P1-4a §10 enumerates nine and each is a required behaviour, not a note. The four that shape the architecture:
+
+- **Scroll anchoring is by node id, not by pixel.** A refetch can change a row's height (a new assignment adds a lane), so restoring `scrollTop` in pixels silently jumps the view. The board records the first visible row's node id and its offset within the viewport and restores *that*, with an ancestor fallback for when the node is gone — which is exactly what an identity change does.
+- **Zoom preserves the instant under the viewport's horizontal centre.** The mockup preserved the left edge; centre is the correction.
+- **A background refetch must not blank the board.** With a 30s `staleTime`, rendering the spinner on `isFetching` rather than on "pending with no cached data" makes the board flash empty every half minute.
+- **Scrolling never triggers a fetch in P1-4a.** The loaded window is exactly what the toolbar asked for, and the board marks its own end rather than letting the limit read as a bug. Window-extension-on-scroll is deliberately deferred.
+
+### 18.3 Verifying the P1-4a build (Aug 22, 2026)
+
+The agent's own numbers: 19 §12 cases green under `node --experimental-strip-types`, all 6 §13 mutations confirmed to break their named case and restored, delivered `lib/` files never mutated. Then the design session verified independently, per [[verification-standard]] — a cold re-run of the agent's own harness proves only determinism, so none was performed.
+
+**An independent 23-case probe, written to cover what the brief never prescribed** — binary-search off-by-one at exact row boundaries, `visibleMinuteRange` clamping at both edges, `clipToWindow`'s half-open behaviour at 0 and at `windowMinutes`, `isFullyAllocated` exactly at the cap, a string `capacity_cap`, assignment attribution when `run.node_id` and `assignment.node_id` disagree, `droppedRanges` counting runs as well as assignments, and `depth` under a mid-tree `p_root_path`. All 23 passed cold against the delivered files.
+
+**Seven unprescribed mutations. Six were caught; one was not.** Deleting `buildBoardIndex`'s `withRanges.sort(...)` — the line that orders assignments before `packLanes` — passed the agent's entire suite *and* the first 23 probe cases in silence. Greedy first-fit is order-sensitive, but every fixture in play happened to pack identically either way. The case that exposes it is three back-to-back blocks fed out of chronological order: A(00:00–01:40), B(01:40–03:20), C(03:20–05:00) occupy **one** lane sorted and **two** unsorted, so the row silently renders a lane taller with the sort gone. That test now lives in `src/test/boardIndex.test.ts` and fails correctly when the sort is removed.
+
+The general lesson, worth more than the specific bug: **a fixture that passes both with and without the behaviour under test is not a test of that behaviour.** The brief's §12 case 5 sorted its own input before calling `packLanes`, which made it structurally incapable of seeing the integration-level sort disappear. When a brief extracts a helper *and* specifies who is responsible for its precondition, it must also require a case where the precondition is violated.
+
+Two other coverage holes, both found by the agent and both real bugs in the brief rather than in the code:
+
+- **§13's M4 named a case that cannot distinguish the mutation.** `isUnderstaffed(1, null)` returns `false` whether `null` short-circuits or is coerced to `0`, since `1 < 0` is false either way. Needs a negative effective headcount (`-1 < 0` is true) to separate them.
+- **§13's M6 likewise.** None of §12's case-11 assertions tested the overscan margin, so dropping it passed. Needs a case asserting the returned range extends past the viewport on both sides.
+
+Scope fence and conventions were checked by grep across the whole delivery, all clean: no `pointerdown`/drag/mutation-hook code, no local-time `Date` methods, no colour literals outside `tokens.css`, no `database.types` import outside `src/lib/api/`, `BoardProof` no longer imported.
+
+**One nit carried to P1-4b, not fixed here:** `BoardGrid`'s T2 zoom handler open-codes the minute↔pixel conversion inline instead of calling `pxToMinutes`/`minutesToPx`. It is arithmetically identical today, but it is exactly the duplication [[brief-writing-rules]] rule 4 exists to prevent — two implementations of one conversion that can drift. The P1-4b brief should require it routed through `geometry.ts`.
+
+**Still outstanding:** the entire `npm` acceptance run (typecheck, lint, format:check, test, build, plus the eight in-browser checks). Nothing in Part B has ever been compiled. §17.3 is the precedent for what that surfaces — five config errors in code that was otherwise correct.
+
+### 18.4 D17 revised — the board opens on today, not on Monday (Aug 24, 2026)
+
+**D17 as written anchored the default window to the Monday of the current week.** That was wrong, and it was wrong for a revealing reason: the rule was chosen to line up with the *seed's* anchor (D10, "day 0 = Monday of the current week in UTC"), which is a fixture concern. It leaked into the product. Open the board on a Friday and the useful part of the schedule sits four days off the right-hand edge — the user has to go looking for the present before they can do anything.
+
+**Revised:** the default window starts on **today** (`startOfUtcDay(now)`), keeping the 3-day span. Surfaced by Pratik at P1-4a acceptance.
+
+Two things landed with it, both gaps in the P1-4a brief rather than in the build:
+
+- **The mockup's `.daynav` cluster (◀ Prev day · Today · Next day ▶) was never mentioned in the brief**, so it was never ported. §7 said "port the toolbar" and then enumerated zoom, date range, snap note and legend — an enumeration that silently *replaced* the mockup's day navigation with a From/Days control. Restored. Lesson for P1-4b: when a brief lists what a ported component contains, that list is read as exhaustive; say "plus everything else the mockup has" or enumerate completely.
+- **Opening on the right day is not the same as opening at the right time.** The board now scrolls the current instant into view on first mount and whenever "Today" is pressed, placing `now` a quarter of the way across the visible track so there is a little context behind and most of the screen ahead. Prev/Next day deliberately do *not* re-scroll — that would fight the user who just paged somewhere to look at it.
+
+**Also fixed at acceptance, both real bugs found from screenshots:**
+
+1. **T2's zoom centring ignored the rail.** The operator rail is `position: sticky; left: 0`, so it overlays the first `RAIL_WIDTH` (232px) of the viewport and the track is visible only in the remainder. The handler used `viewport.width / 2` as the centre, biasing it by 116px — and because that bias converts to a *different* number of minutes at each zoom (≈109 min at Compact, ≈41 min at Fine), the view drifted later on every zoom-in instead of holding still. Measured from three screenshots at 10:21 → 11:08 → 11:37 (+47, +29 min) against a predicted +42, +26. Now uses `viewport.width - RAIL_WIDTH`. The max-scroll clamp had the same omission and is fixed with it.
+2. **The active zoom button never highlighted.** A CSS-specificity loss in the port: the mockup's `.zoom button.on` (0,2,1) outranks `.zoom button` (0,1,1), but the flattened CSS-Module class `.zoomOn` is only (0,1,0) and *loses*. Now `.zoom button.zoomOn`. Worth remembering generally — flattening a descendant selector into a CSS Module class silently drops specificity, and the symptom is a style that appears to do nothing.
+
+### 18.5 P1-4b — delivered, Part A verified, agent report LOST (Aug 24, 2026)
+
+The build agent completed and delivered P1-4b (create / move / resize, popovers, toasts, keyboard paths) and extracted it into the repo — every file in the brief's §9 list is present, and the pre-existing components genuinely picked up the drag wiring. **It was then killed mid-run by an org monthly spend limit, before writing its §17 report.** Nothing technical failed.
+
+**What that costs us:** no §11 harness output, no §12 mutation table, no §7 PostgREST finding, no §13 self-review, and — most valuable of all on this project — **no list of the agent's assumptions and deviations**. Every previous build surfaced real brief bugs there.
+
+**What the design session verified directly instead**, which is the more trustworthy half anyway:
+
+- **An independent probe of the delivered `interaction.ts`: 33 cases green cold** — the brief's 19 plus 14 unprescribed (exactly-15-minute create, resize clamped to 0, a block longer than the window, non-mutation of inputs, nearest-vs-first shift snapping, `minuteToDate` exactness, tie-break determinism at the grip edge).
+- **All seven prescribed mutations run. Six were caught by that probe.** M5 (use shift points whenever non-empty, ignoring `useShiftSnap`) slipped — because no probe case supplied `shiftPoints` while the flag was false. **The agent's own suite does catch it**: it added `case1c (extra, M5 coverage)` because §12's M5 row explicitly said "add that case if yours does not already cover it". The brief's warning worked, and the design session's probe was the weaker of the two on that point. Probe case U14 now closes it.
+- **Scope fence holds by grep**: no component calls `useMoveRun` or `useApplySplitCoverage`, no `p_override` is ever sent, no `supabase.*` outside `src/lib/api/`, `pointercancel` is handled, and both `getBoundingClientRect` calls are in keydown handlers rather than the pointermove path (§5.1's perf rule).
+- `DevProfileSwitcher` survived the rewrite of `BoardPage.tsx` — checked specifically, because a stale-copy rebuild silently dropped it once during P1-4a acceptance.
+
+**Not verified, and this is the whole outstanding risk:** Part B has never been compiled. No typecheck, no lint, no build, no browser. P1-4a's precedent says expect two or so cosmetic config errors; P1-1's says expect five.
+
+**Process note worth keeping.** A subagent can die for reasons that have nothing to do with the work, and its report is not recoverable. The code survives because delivery happens before reporting — that ordering is worth preserving in every brief. Where a report is lost, the design session's own probe plus a scope-fence grep recovers most of the signal; what it cannot recover is the deviations list, so a lost report should be treated as "unreviewed brief", not merely "unreported build".
+
+### 18.6 What P1-4b's first compile found (Aug 24, 2026)
+
+`npm run test` went **132 green** (was 99). Three lint/typecheck findings, and one of them mattered.
+
+**`revertLabel` was dead code — and it was T12.** TypeScript flagged `useDragGesture.ts:234` as assigned-but-never-read. The obvious fix is to delete it. That would have been wrong: `revertLabel` builds exactly the string T12 requires (*"Widget X 06:00–14:00 — reverted"*), and `useSchedulerToast` even ships a `reverted(message)` helper whose own comment says it exists so a caller can control that wording. Both halves were built; nothing connected them. **T12 was unimplemented, and the only visible symptom was an unused variable.**
+
+Wired in instead of deleted, as `failWith(err, label)`: `CapacityExceeded` / `NotEligible` / `RunOverlap` already name the operator or the cell, so they go through D37's one true path untouched; every other kind gets the block label prefixed, because a bare *"You don't have permission"* gives no clue which of a screenful of blocks just snapped back.
+
+**The general lesson, and it is not a small one: dead code is evidence.** An unused symbol in agent-delivered work is a claim that something was built and then not connected — which is exactly what a half-implemented requirement looks like from the outside. Before deleting one, check the brief for a behaviour whose name matches it. Had the agent's report survived, this would presumably have been a flagged deviation; instead the compiler surfaced it. That is a second, weaker safety net, and it only works if dead code is investigated rather than swept.
+
+The other two were genuinely trivial: an unused `Assignment` type import in `dragGesture.test.ts`, and an `eslint-disable-next-line no-alert` for a rule this config does not enable.
+
+**Noted for P1-4c, not fixed here:** the crew-outside-the-run warning (§5.3) uses `window.confirm`. It satisfies the brief, which specified the behaviour but not the mechanism — but a blocking browser dialog sits oddly beside the popover system the same brief asked for, and it cannot be styled or tested through the DOM. Replace it with a real confirm step in the popover shell when P1-4c revisits these paths.
+
+**Still outstanding:** the four popover-fired mutations (`saveRunFields`, `deleteRunWithMode`, `saveAssignmentFields`, `removeAssignment`) still call `toast.schedulerError` without a label, so T12 holds for drag reverts but not yet for popover edits. Those call sites only receive an id, not the subject, so closing it needs an id→label lookup that `BoardIndex` does not currently expose. P1-4c should add `runById`/`assignmentById` to the index — `ToastResolveCtx` already anticipates a `runById`.
+
+### 18.7 The CSS-Module specificity trap, a third time (Aug 24, 2026)
+
+P1-4a lost the zoom button's selected state to it (§18.4). The P1-4b brief called it out as §10.1 with a worked example. The agent **fixed it for `.seg button.segOn`** — and wrote a good comment explaining the cascade while doing so — then shipped the identical bug in `.pri`, three times, in all three popovers.
+
+The failure mode is nastier than the zoom one because it is *partial*. `.row button` sets `background` and `border`; `.pri` sets `background`, `border-color` and `color`. `.row button` (0,1,1) beats `.pri` (0,1,0) for the two they share — but `color` has no competitor, so it applies. The primary button therefore rendered **white text on a white background**: not "unstyled", but invisible. A rule that half-applies is much harder to see than one that does nothing.
+
+Fixed as `.row button.pri` in all three. The four remaining `#fff` literals went to `var(--avatar-fg)` at the same time (P1-4a's no-literals rule, which nobody re-checked for the new files).
+
+**The rule to carry forward, and to put in every future brief that ports mockup CSS:** the mockup is written with `#pop`-scoped descendant selectors, so *every* state class in it (`.on`, `.pri`, `.under`, `.override`, `.dragging`, `.full`) is a compound `#pop element.class` that ties-and-wins on source order. Flattening any of them to a bare `.class` in a CSS Module drops it below the base `.parent element` rule. **Porting a state class means porting its compound shape** — `.row button.pri`, never `.pri`. Naming the specific trap once was not enough; the brief should enumerate the state classes.
+
+**Also fixed:** the create popover's target row gave the unit field the same width as the quantity field. Faithful to the mockup, but wrong — the unit is `maxlength=8`. Now 2:1.
+
+**Not a bug:** an "Unexpected Application Error! Rendered more hooks than during the previous render" seen while the app sat idle. That is Vite HMR swapping a live hook module whose hook count had just changed — the design session had added one `useCallback` (`failWith`, §18.6) to `useDragGesture` while the dev server was running. React counts hooks across renders and the hot-swapped module has one more than the mounted tree. A hard refresh clears it; it cannot occur in a production build. Worth recognising on sight, because it looks exactly like a conditional-hook bug and both `BoardPage` and `useDragGesture` were checked, hook by hook, before that conclusion was reached — every hook in both is unconditional and above every early return.

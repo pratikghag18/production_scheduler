@@ -1,0 +1,76 @@
+.dblk {
+  position: absolute;
+  height: 22px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--pc) 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--pc) 45%, var(--surface));
+  border-left: 4px solid var(--pc);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px 0 4px;
+  user-select: none;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11.5px;
+  z-index: 3;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dblk:hover {
+  box-shadow: 0 1px 4px rgba(11, 11, 11, 0.18);
+}
+
+.dblk:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.avatar {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--ink-2);
+  color: var(--avatar-fg);
+  font-size: 8px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.who {
+  font-weight: 600;
+}
+
+.what {
+  color: var(--ink-2);
+  font-size: 10.5px;
+}
+
+.override {
+  outline: 2px dashed var(--warn);
+  outline-offset: 1px;
+}
+
+/* Ported from the mockup's .dblk.dragging — kept as the compound
+   `.dblk.dragging` (§10.1's trap: see RunBand.module.css's `.band.dragging`
+   for the full reasoning). `.dblk` and `.dragging` land on the same
+   element and both set `z-index`/`cursor`, so a flattened `.dragging`
+   alone would only win by source-order luck, not by specificity. */
+.dblk.dragging {
+  opacity: 0.85;
+  z-index: 50;
+  cursor: grabbing;
+  box-shadow: 0 3px 10px rgba(11, 11, 11, 0.25);
+}
+
+/* Ported from the mockup's .dblk .h / .h.l / .h.r edge grips. */
+.h {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  cursor: ew-resize;
+}

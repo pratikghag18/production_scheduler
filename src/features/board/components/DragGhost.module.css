@@ -1,0 +1,18 @@
+/* Ported verbatim from the mockup's .ghost rule. */
+
+.ghost {
+  position: absolute;
+  height: var(--band-h);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border: 1.5px dashed var(--ink-2);
+  pointer-events: none;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+}

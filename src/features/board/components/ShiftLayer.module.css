@@ -1,0 +1,28 @@
+.offShift {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--page);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.shiftBreak {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: auto;
+  z-index: 1;
+  background-image: var(--break-hatch);
+  background-color: var(--break-hatch-bg);
+}
+
+.shiftbound {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1.5px dashed var(--axis);
+  pointer-events: none;
+  z-index: 1;
+}

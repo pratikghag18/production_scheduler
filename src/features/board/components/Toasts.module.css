@@ -1,0 +1,41 @@
+/* Ported from the mockup's #toasts / .toast rules. */
+
+.toasts {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.toast {
+  background: var(--ink);
+  color: var(--avatar-fg);
+  font-size: 12.5px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(11, 11, 11, 0.3);
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  cursor: pointer;
+  max-width: 60ch;
+}
+
+/* Kept as `.toast.warn`/`.toast.crit` (§10.1's trap — see
+   RunBand.module.css's `.band.dragging` for the full reasoning): both
+   classes land on the same element (see Toasts.tsx) and both this rule
+   and `.toast` above set `background`, so a flattened `.warn`/`.crit`
+   alone would only win by source-order luck. Mirrors the mockup's own
+   `.toast.warn` / `.toast.crit`. */
+.toast.warn {
+  background: var(--understaffed-fg);
+}
+
+.toast.crit {
+  background: var(--crit);
+}

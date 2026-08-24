@@ -1,0 +1,24 @@
+.board {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  background: var(--surface);
+  min-height: 0;
+  min-width: 0;
+}
+
+.canvas {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+
+.spacer {
+  position: relative;
+}
+
+.rowAbs {
+  position: absolute;
+  left: 0;
+  right: 0;
+}

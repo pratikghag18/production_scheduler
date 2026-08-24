@@ -1,0 +1,77 @@
+/* Ported from the mockup's `#pop` descendant rules (§5.4), the same
+   ruleset as `CreatePopover.module.css`/`RunPopover.module.css` trimmed
+   to the classes this popover actually uses — duplicated rather than
+   imported cross-component so each CSS Module stays self-contained per
+   `docs/conventions.md`'s one-module-per-component rule. `.body` stands
+   in for the mockup's `#pop` id-scope so `label`/`select`/`input` stay
+   scoped to this popover instead of leaking globally (§10.1's flattening
+   trap: keep the element+class descendant shape, don't flatten it away). */
+
+.body label {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-2);
+  margin: 7px 0 2px;
+}
+
+.body select,
+.body input {
+  width: 100%;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--axis);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.time {
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 6px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.row button {
+  flex: 1;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 0;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+}
+
+/* Specificity trap (§10.1), the SAME one already fixed for `.seg button.segOn`:
+   a bare `.pri` is (0,1,0) and LOSES to `.row button` (0,1,1) above, which
+   matches the same element. The background and border therefore stayed the
+   default surface while `color` — having no competitor — still applied, so
+   the primary button rendered white-on-white and looked blank. The mockup's
+   rule is `#pop button.pri`, whose id makes it tie-and-win on source order;
+   the module-scoped equivalent has to be the compound `.row button.pri`. */
+.row button.pri {
+  background: var(--ink);
+  color: var(--avatar-fg);
+  border-color: var(--ink);
+}
+
+.row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.row2 {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.row2 input {
+  width: auto;
+  flex: 1;
+}

@@ -1,0 +1,63 @@
+.cellRow {
+  display: flex;
+  /* absolute-positioned by the wrapping .rowAbs div in BoardGrid, which
+     supplies `top`; this element just needs to fill it. */
+  width: 100%;
+}
+
+.cellLabel {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  flex: none;
+  padding: 8px 10px 8px 38px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--grid);
+  border-right: 1px solid var(--axis);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nm {
+  font-weight: 550;
+}
+
+.reqBadge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-2);
+  border: 1px solid var(--axis);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-top: 1px;
+}
+
+.track {
+  position: relative;
+  flex: none;
+  border-bottom: 1px solid var(--grid);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--grid) 0 1px,
+    transparent 1px var(--hour-px)
+  );
+  /* P1-4b: the track is now a drag-to-create surface (mockup's .track). */
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.track:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.daybound {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--axis);
+  pointer-events: none;
+}

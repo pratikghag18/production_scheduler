@@ -4,6 +4,15 @@
  * The :root block below (through --lane-h) is ported verbatim — names and
  * values — from docs/mockups/model-hybrid.html's :root custom properties.
  * Everything after that comment is new, per brief P1-1 §4.
+ *
+ * P1-4a addendum: --avatar-fg and --understaffed-fg are two colour
+ * literals the mockup used inline (never as :root custom properties, so
+ * P1-1 had nothing to port) on `.achip .avatar`/`.dblk .avatar`/`.chip
+ * .avatar` (#fff) and `.band.under .hc` (#6b4c00). Named here, at their
+ * exact frozen-mockup values, purely so P1-4a's CSS modules can satisfy
+ * "every colour is a var(--…)" (brief §14 self-review item 4) without
+ * inventing a new colour — flagged in the agent report since tokens.css is
+ * outside this brief's file list.
  */
 :root {
   color-scheme: light;
@@ -41,4 +50,8 @@
     transparent 4px 8px
   );
   --break-hatch-bg: rgba(137, 135, 129, 0.07);
+
+  /* P1-4a addendum (see file header) */
+  --avatar-fg: #fff;
+  --understaffed-fg: #6b4c00;
 }
