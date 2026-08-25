@@ -761,7 +761,7 @@ Measured against the seed board at Standard, natural content height is **740px f
 
 With `FIT_MIN 0.75` / `FIT_MAX 2.5`, **the cases that actually occur — Admin and Ana on a laptop or a 4K browser — land inside the band and fill the screen exactly, 0% dead space.**
 
-**The design (brief P1-4d).** `fitScale = clamp(0.75, availableHeight / naturalHeight, 2.5)`, where `naturalHeight` is the row total at Standard, **unscaled**. Computing from natural rather than scaled heights is what makes it a single pass instead of a feedback loop. `scaleDensity(base, factor)` multiplies every density field and **rounds to integers**, because a sub-pixel row offset blurs every border on the board. The toolbar becomes `Fit | Comfortable | Standard | Compact` with Fit default; the named densities remain as a manual override, so D46 is amended rather than deleted.
+**The design (brief P1-4d).** `fitScale = clamp(0.75, availableHeight / naturalHeight, 2.5)`, where `naturalHeight` is the row total at Standard, **unscaled**. Computing from natural rather than scaled heights is what makes it a single pass instead of a feedback loop. `scaleDensity(base, factor)` multiplies every density field and **rounds to integers**, because a sub-pixel row offset blurs every border on the board. The toolbar becomes `Fit | Comfortable | Standard | Compact` with Fit default; the named densities remain as a manual override, so D46 is amended rather than deleted. **SUPERSEDED (D75, §19.7): the three manual density buttons were removed from the toolbar on Aug 25 and Fit is now the only mode.** The mechanism survives unreferenced — do not read this paragraph as a description of the shipped UI.
 
 Under Fit, `--ui-scale` follows the fit scale (clamped to 1.75) rather than the viewport, so text grows with the rows — a row 2.5× taller with 11px text looks broken — and never scales by both inputs at once. That also sidesteps P1-4c's `@supports` path entirely on the Fit branch, since JS computes a plain number.
 
@@ -1034,3 +1034,96 @@ only one org in the seed, so **no test anywhere proves cross-org isolation of th
 `(org_id, path)` unique would not catch a missing `org_id` filter with a single tenant. That is a
 seed limitation, not a code one, and it is the strongest argument for a second seeded org before
 P1-5c's CSV import goes anywhere near an upsert.
+
+### 19.6 The fit loop was real after all — and it was the toolbar, not the header (Aug 25, 2026)
+
+Reported as "the app is flashy, moving non-stop". Rows visibly resizing forever.
+
+**What it was.** `BoardToolbar` sits above `.body` inside `.page`, so its height is subtracted from
+the board's available height — the input to `computeFitScale`, whose output becomes `--ui-scale`.
+Eighteen of the toolbar's dimensions were driven by `--ui-scale`, including paddings and input
+widths, and `.header` is `flex-wrap: wrap`. Past roughly `--ui-scale` 1.06 the controls stop fitting
+on one line and the toolbar grows **~56px in one step**.
+
+Measured in the browser, three samples deep:
+
+| state | `--ui-scale` | `--lane-h` | board `clientHeight` | `scrollHeight` |
+| --- | --- | --- | --- | --- |
+| A | 1.01548 | 28px | 871 | 871 (content-sized, no scrollbar) |
+| B | 1.09035 | 31px | 815 | 873 (constrained, scrolling) |
+
+Alternating 50/50. The arithmetic closes exactly, against §18.10's recorded 740px natural height for
+Admin: `(871 − 64)/740 = 1.0905` — state **B**'s scale; `(815 − 64)/740 = 1.0149` — state **A**'s.
+**Each state's height computes the other state's scale.** A two-cycle with no fixed point.
+
+**Why it could not settle, when §18.15's version could.** §18.15 reasoned about this loop as a
+*gradient* and concluded the danger was oscillation "between two adjacent values". A design-session
+repro in headless Chromium confirmed the gradient case is harmless — the app header moves ~5px
+across the whole scale range and the fixed point converges in three iterations at every viewport
+tested. **The wrap makes the coupling discontinuous.** A step function has no fixed point to
+converge to, so it cannot settle at all. That distinction is the whole finding: *a feedback loop
+through a continuous quantity usually damps; a feedback loop through a layout threshold — a wrap, a
+scrollbar appearing, a breakpoint — cannot.*
+
+**The fix is §18.15's own rule, applied where §18.15 did not look.** `--chrome-scale`
+(viewport-driven, ≤1.35) now drives every dimension in `BoardToolbar.module.css`, plus the app
+chrome above it (`AppShell`, `HealthPill`, `DevProfileSwitcher`) and `BoardPage`'s
+`.status`/`.error`/`.devWarning`, all of which sit outside the fitted scroll container and consume
+vertical space. `--ui-scale` now reaches only fitted content (bands, chips, blocks, rows) and
+portals (popovers, toasts, drag ghost), which is what it was always for.
+
+**How this got missed, which is the part worth keeping.** §18.14's sweep asked the right question —
+"which files declare a font size?" — and wired `--ui-scale` into fourteen of them, the toolbar
+included. §18.15, the very next entry, wrote the rationale for why chrome must *not* use `--ui-scale`
+and applied it to exactly one element, the one whose text had been seen clipping. The rule and its
+violation were written on consecutive days by the same session. The comment block in `global.css`
+describing this loop was already correct and already there — nothing was ever audited against it.
+
+**The standing rule, now in the code:** anything outside the fitted scroll container that consumes
+vertical space is chrome and belongs on `--chrome-scale`. The audit question is not "which files
+declare a font size" but **"which elements' heights are subtracted from the height that drives the
+fit"** — and it must be re-run whenever an element moves into or out of `.page` above `.body`.
+
+**Unrelated, seen in the same console and worth recognising on sight:** `401 (Unauthorized)` on
+`rpc/board_window` after a `supabase db reset`. The reset recreates `auth.users`/`auth.identities`,
+so the JWT in local storage points at a user row that no longer exists. Clearing site data and
+signing in again fixes it. A latent bug sits behind it, not yet fixed: `useSession`'s
+`onAuthStateChange` guards `resetQueries()` on the identity actually changing but calls
+`setLoading(true)` unconditionally, and `BoardPage` renders a bare "Loading session…" for that state
+— so even a routine hourly token refresh blanks the whole board. §17.4's comment says the guard
+exists precisely to prevent that; it was applied to one of the two statements.
+
+### 19.7 D75/D76 — the density control is gone, and the decision record did not say so (Aug 25, 2026)
+
+Surfaced by Pratik when a debugging instruction referenced a toolbar button that does not exist.
+The instruction was wrong; chasing *why* it was wrong found a documentation gap that had been
+sitting there since the control was removed.
+
+| # | Decision | Rationale |
+| --- | --- | --- |
+| D75 | **The three manual density buttons are removed. Fit is the only mode.** `densityMode` stays in the store (default `"fit"`), `BoardPage` still branches on it, and `DENSITIES`/`scaleDensity` remain — they are what Fit is built from. Restoring the control is re-adding one button group and nothing else. | Fit already shrinks toward Compact when there are many rows and grows toward Comfortable when there are few, so the override only ever mattered for taste, and four buttons is a lot of chrome to spend on taste. |
+| D76 | **Anything outside the fitted scroll container that consumes vertical space is chrome and uses `--chrome-scale`, never `--ui-scale`.** | §19.6. Generalises §18.15's header rule to the class of elements it belongs to, rather than the one element that was noticed. |
+
+**The gap, stated plainly.** The removal was recorded in an excellent code comment in
+`BoardToolbar.tsx` — what was removed, why, that the mechanism is unreferenced *on purpose rather
+than by oversight*, and how to restore it. It was recorded **nowhere else**. §18.10 still read "the
+toolbar becomes `Fit | Comfortable | Standard | Compact` … the named densities remain as a manual
+override", and the roadmap's P1-4d row said the same. Both now carry a correction.
+
+This is the failure mode this project has hit before from the other direction: §18.6's *dead code is
+evidence*. Here the dead code is deliberate and well-explained at the call site, which is right — but
+a decision that lives only in a code comment is invisible to anyone reading the decision record,
+which is precisely what a design session reads before writing the next brief. **A code comment
+documents an implementation; it does not amend a design decision. Both have to move.**
+
+Two consequences worth carrying, beyond the correction:
+
+- **P1-5b was about to be written against a stale premise.** The admin-pages brief would have been
+  authored from §18.10's description of a toolbar that has not existed since Aug 25.
+- **Fit is now load-bearing with no user-facing fallback.** When it was one of four modes, a fit bug
+  had an escape hatch — the user could pick Standard and carry on. With the buttons gone there is
+  none, which is exactly why §19.6's oscillation was so disruptive rather than merely annoying. This
+  is not an argument for restoring the buttons; it is an argument that **the correctness bar for the
+  fit path is now higher than it was when D53 chose the default**, and that any future change to
+  `computeFitScale`, `scaleDensity`, or anything feeding `availableHeight` should be treated as
+  touching the only rendering path there is.

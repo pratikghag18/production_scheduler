@@ -23,20 +23,20 @@
 
 .status {
   padding: 16px;
-  font-size: calc(13px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--chrome-scale, 1));
   color: var(--ink-2);
 }
 
 .error {
   padding: 16px;
-  font-size: calc(13px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--chrome-scale, 1));
   color: var(--signal-conflict);
 }
 
 .devWarning {
   margin: 0;
   padding: 6px 16px;
-  font-size: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--chrome-scale, 1));
   color: var(--understaffed-fg);
   background: color-mix(in srgb, var(--warn) 18%, var(--surface));
   border-bottom: 1px solid var(--grid);

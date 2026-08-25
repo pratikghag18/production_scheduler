@@ -1,22 +1,38 @@
+/* D76 (design plan §19.7, Aug 25): every dimension in this file is driven by
+   `--chrome-scale` (viewport-only), NEVER `--ui-scale` (fit-driven).
+
+   This toolbar sits ABOVE `.body` inside `.page`, so its height is subtracted
+   from the board's available height — which is the input to `computeFitScale`,
+   which sets `--ui-scale`. Scaling the toolbar with `--ui-scale` therefore
+   closes a loop. Worse, `.header` is `flex-wrap: wrap`, so the coupling is a
+   STEP, not a gradient: past roughly --ui-scale 1.06 the controls stop fitting
+   on one line and the toolbar grows ~56px at once. Measured in the browser,
+   that produced a permanent two-cycle -- lane-h alternating 28px/31px forever,
+   each state's height computing exactly the other state's scale.
+
+   Same rule and same reason as `.hdrTrack` in BoardHeader.module.css (§18.15).
+   Anything outside the fitted scroll container that consumes vertical space is
+   chrome and belongs on `--chrome-scale`. */
+
 .header {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: calc(10px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
+  padding: calc(10px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
   background: var(--surface);
   border-bottom: 1px solid var(--grid);
   flex-wrap: wrap;
 }
 
 .title {
-  font-size: calc(15px * var(--ui-scale, 1));
+  font-size: calc(15px * var(--chrome-scale, 1));
   margin: 0;
   font-weight: 650;
 }
 
 .date {
   color: var(--ink-2);
-  font-size: calc(13px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--chrome-scale, 1));
 }
 
 .range {
@@ -26,35 +42,35 @@
 }
 
 .rangeLabel {
-  font-size: calc(11.5px * var(--ui-scale, 1));
+  font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--ink-2);
 }
 
 .rangeInput,
 .rangeInputNarrow {
   font: inherit;
-  font-size: calc(12px * var(--ui-scale, 1));
-  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--chrome-scale, 1));
+  padding: calc(4px * var(--chrome-scale, 1)) calc(8px * var(--chrome-scale, 1));
   border: 1px solid var(--axis);
   border-radius: 6px;
   background: var(--surface);
 }
 
 .rangeInputNarrow {
-  width: calc(56px * var(--ui-scale, 1));
+  width: calc(56px * var(--chrome-scale, 1));
 }
 
 .endMarker {
-  font-size: calc(10.5px * var(--ui-scale, 1));
+  font-size: calc(10.5px * var(--chrome-scale, 1));
   font-weight: 700;
   color: var(--ink-2);
   border: 1px solid var(--axis);
   border-radius: 999px;
-  padding: calc(1px * var(--ui-scale, 1)) calc(7px * var(--ui-scale, 1));
+  padding: calc(1px * var(--chrome-scale, 1)) calc(7px * var(--chrome-scale, 1));
 }
 
 .refreshing {
-  font-size: calc(11.5px * var(--ui-scale, 1));
+  font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--muted);
   font-style: italic;
 }
@@ -72,7 +88,7 @@
   align-items: center;
   gap: 5px;
   color: var(--ink-2);
-  font-size: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--chrome-scale, 1));
 }
 
 .swatch {
@@ -106,10 +122,10 @@
 .zoom button {
   border: 0;
   background: var(--surface);
-  padding: calc(5px * var(--ui-scale, 1)) calc(11px * var(--ui-scale, 1));
+  padding: calc(5px * var(--chrome-scale, 1)) calc(11px * var(--chrome-scale, 1));
   cursor: pointer;
   font: inherit;
-  font-size: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--chrome-scale, 1));
   color: var(--ink-2);
 }
 
@@ -141,10 +157,10 @@
 .density button {
   border: 0;
   background: var(--surface);
-  padding: calc(5px * var(--ui-scale, 1)) calc(11px * var(--ui-scale, 1));
+  padding: calc(5px * var(--chrome-scale, 1)) calc(11px * var(--chrome-scale, 1));
   cursor: pointer;
   font: inherit;
-  font-size: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--chrome-scale, 1));
   color: var(--ink-2);
 }
 
@@ -159,7 +175,7 @@
 
 .snapNote,
 .scrollNote {
-  font-size: calc(11.5px * var(--ui-scale, 1));
+  font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--muted);
 }
 
@@ -175,10 +191,10 @@
 .daynav button {
   border: 0;
   background: var(--surface);
-  padding: calc(5px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  padding: calc(5px * var(--chrome-scale, 1)) calc(10px * var(--chrome-scale, 1));
   cursor: pointer;
   font: inherit;
-  font-size: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--chrome-scale, 1));
   color: var(--ink-2);
 }
 
