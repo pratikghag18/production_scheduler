@@ -1,6 +1,6 @@
 # Production Scheduler — Design Plan
 
-**Status:** Draft v2.1 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c + D81/D82 · §19.15 a second org + the cross-tenant leak (D83) · §19.16 scaling is the default (D84) · §19.17 the create_node regression 0012 caused and the harness that hid it (D85) · §19.18 hierarchy templates — a shape per site (D86)** Aug 25)
+**Status:** Draft v2.1 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c + D81/D82 · §19.15 a second org + the cross-tenant leak (D83) · §19.16 scaling is the default (D84) · §19.17 the create_node regression 0012 caused and the harness that hid it (D85) · §19.18 hierarchy templates — a shape per site (D86) · §19.19 the level lookup D86 forgot to move (D87, OPEN)** Aug 25)
 **Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client + screens layers (P1-5a/b/c/d) are built and verified by independent design-session probes. **The SQL is at migration 0014; the CLIENT SIDE OF D86 is not written yet — see §19.18.**
 **Progress tracking:** current status and remaining work live in [`docs/roadmap.md`](roadmap.md) — this document holds decisions, that one holds state.
 
@@ -2026,3 +2026,55 @@ single failure was the right one: `shapes.test.ts`'s `board_window` fixture had 
 fixture was stale** — the fourth fixture-vs-code disagreement this project has had, and the second in
 this session. Fixed, and a case now asserts that a level with no `template_id` fails the parse, so
 the requirement has teeth instead of being enforced only by a fixture nobody would think to check.
+
+---
+
+### 19.19 D87 — `create_node` still looks a level up by `(org_id, position)` (Aug 25, 2026)
+
+**Open. Found by Pratik asking "how would one add one more hierarchy?", not by any test.**
+
+§19.18 moved level identity from `(org_id, position)` to `(template_id, position)`. It did not move
+the two places `create_node` (migration 0010, untouched by 0014) resolves a level:
+
+```sql
+-- root:
+select id into v_level_id from hierarchy_levels
+ where org_id = v_org_id and position = 0;
+-- child:
+select id into v_level_id from hierarchy_levels
+ where org_id = v_org_id and position = v_parent_position + 1;
+```
+
+Both predicates were UNIQUE until 0014 and are not any more. These are two different problems and
+only one of them is a scoping bug.
+
+**The child branch has a determined right answer.** A child's template is fixed by its parent, so the
+lookup should read `where template_id = <the parent's level's template> and position =
+v_parent_position + 1`. As written it can select another shape's level at that position, and the
+adjacency trigger then rejects the insert with `level_mismatch` — so it fails CLOSED. Confusing, not
+corrupting.
+
+**The root branch cannot be fixed by scoping, because the RPC cannot express the question.**
+`create_node(p_parent_id, p_name, p_sort_order)` takes no template, and for a root node there is
+nothing to derive one from. **So there is currently no way through the API to create a second site
+with a different shape** — only a direct `INSERT INTO nodes`, which RLS permits for an admin. The
+schema supports per-site shapes and the write path does not. `create_node` needs `p_template_id`,
+required when `p_parent_id is null` and the org holds more than one template; when it holds exactly
+one, defaulting to that one is not a guess but the only possible answer — the same reasoning
+`LevelEditor` already uses.
+
+**Severity, stated precisely.** With two shapes in one org, `SELECT ... INTO` picked the seeded
+template in all three trials, and forcing a sequential scan versus an index scan did not change it.
+`SELECT ... INTO` over a multi-row result takes an arbitrary row, so this is unspecified behaviour
+that will pass testing — it is **not** something measured going wrong. The provable defect is the
+missing parameter, not a race, and the writeup should not overstate it.
+
+**How it survived.** This is [[verification-standard]] rule 7, missed by the design session. When a
+constraint moves, the question is not "is this statement guarded" but "what else in this schema is
+conditioned on the same fact". `save_hierarchy_levels`, `board_window` and the adjacency trigger were
+all checked and updated; a two-minute grep for every level lookup keyed on org and position would
+have found `create_node` immediately. **`90_hierarchy_template_test.sql` never calls `create_node`
+once** — nineteen cases about hierarchy templates, none of which create a node the ordinary way.
+Rule 5 applies too: that absence was never written down as a gap.
+
+Filed as P1-5f, first in the queue, since it blocks the requirement §19.18 exists to satisfy.
