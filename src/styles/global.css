@@ -6,6 +6,16 @@
   box-sizing: border-box;
 }
 
+/* P1-4c D48: the height chain. #root -> the router outlet (AppShell's
+   `.main`, src/components/AppShell.module.css) -> BoardPage's `.page` ->
+   `.body` -> BoardGrid's scroll container must all resolve to a definite
+   height so the last link (the board's own scroll container) can fill
+   whatever room is actually available instead of stopping after its last
+   row and leaving a white void. html/body/#root already formed the first
+   link before this brief (each `height: 100%`); every other link in the
+   chain already carried `flex: 1; min-height: 0` from prior briefs — see
+   the agent report's "assumptions" section for the full audit of where
+   each is set. */
 html,
 body,
 #root {
@@ -21,8 +31,62 @@ body {
     sans-serif;
   color: var(--ink);
   background: var(--page);
+  /* P1-4c D50: the PAGE must never scroll sideways — only the board's own
+     scroll container (BoardGrid.module.css `.board`) does. Everything in
+     the height/width chain above is `overflow: hidden|auto` on purpose;
+     this is the outermost backstop. */
+  overflow-x: hidden;
 }
 
 a {
   color: inherit;
+}
+
+/* P1-4c D47: fluid UI scale, driven by viewport width alone — NOT by zoom
+   or density, which the user controls independently (D47's own warning:
+   scaling the board's time geometry too would compound with density and
+   make Comfortable-on-4K absurd). At <=1440px CSS px this clamps to
+   exactly 1, so nothing above 1440px-equivalent viewports changes size —
+   this is what keeps a normal dev/laptop window pixel-identical to before
+   this brief. Above 1440px, text/rail-width/control-padding grow smoothly
+   up to 1.35x at (and past) 2560px. */
+/* Dividing a length by a length to get a unitless number is CSS Values 4 and
+   is NOT universally supported. Verified in headless Chromium by the design
+   session: WITH this guard, 11px -> 11px @1440 and 14.85px @3840, correct at
+   both. WITHOUT it, a browser lacking the capability does NOT fall back to
+   `var(--ui-scale, 1)` — the custom property is set, just invalid at
+   computed-value time, so the whole `font-size` declaration is dropped and
+   the element jumps to the UA default (measured: 16px). The guard makes the
+   failure mode "no scaling" instead of "no styling". */
+:root {
+  --ui-scale: 1;
+}
+
+/* `--chrome-scale` is the board's HEADER/chrome scale, and it is deliberately
+   NOT `--ui-scale`.
+
+   `--ui-scale` is fit-driven (up to 1.75) and published on :root by BoardPage.
+   If the header used it, header height would depend on the fit scale, which
+   depends on the available height, which depends on the header height — a
+   feedback loop that can oscillate between two adjacent values.
+
+   `--chrome-scale` depends only on viewport width (max 1.35), so the header's
+   size is a pure function of the screen. That keeps `HEADER_HEIGHT_PX` in
+   BoardGrid a constant rather than something that must be measured, and it is
+   also the right model: the header is chrome around the fitted content, not
+   part of it. 15px x 1.35 = 20.25px, which fits the 30px strip. */
+:root {
+  --chrome-scale: 1;
+}
+
+@supports (line-height: calc(100vw / 1440px)) {
+  :root {
+    --chrome-scale: clamp(1, 0.75 + 0.25 * (100vw / 1440px), 1.35);
+  }
+}
+
+@supports (line-height: calc(100vw / 1440px)) {
+  :root {
+    --ui-scale: clamp(1, 0.75 + 0.25 * (100vw / 1440px), 1.35);
+  }
 }

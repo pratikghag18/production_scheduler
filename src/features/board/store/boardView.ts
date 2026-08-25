@@ -1,15 +1,25 @@
 /**
- * View-state-only store (brief P1-4a §9). Holds zoom, collapse, the
- * requested window, and the operator panel's open/closed state — nothing
+ * View-state-only store (brief P1-4a §9, extended by P1-4c D46 and P1-4d
+ * D53 for density). Holds zoom, density mode, collapse, the requested
+ * window, and the operator panel's open/closed state — nothing
  * server-derived. React Query owns `BoardWindow`; this store never holds a
  * copy of it.
  */
 import { create } from "zustand";
-import type { ZoomIndex } from "../lib/geometry";
+import type { ZoomIndex, DensityMode } from "../lib/geometry";
 import { startOfUtcDay, MINUTES_PER_DAY, MS_PER_MINUTE } from "../lib/time";
 
 export interface BoardViewState {
   zoomIndex: ZoomIndex;
+  /**
+   * P1-4d D53 (amends P1-4c D46): `"fit"` computes the vertical scale
+   * automatically from the measured available height (see
+   * `computeFitScale`/`scaleDensity` in `lib/geometry.ts`); `0 | 1 | 2`
+   * is a manual override that turns Fit off and renders that named
+   * density unscaled, exactly as P1-4c did before this brief. Default
+   * `"fit"`.
+   */
+  densityMode: DensityMode;
   collapsedNodeIds: Set<string>;
   windowStartDate: Date;
   windowDayCount: number;
@@ -18,6 +28,7 @@ export interface BoardViewState {
   scrollToNowNonce: number;
 
   setZoomIndex: (index: ZoomIndex) => void;
+  setDensityMode: (mode: DensityMode) => void;
   setWindowStartDate: (date: Date) => void;
   setWindowDayCount: (days: number) => void;
   setOperatorPanelOpen: (open: boolean) => void;
@@ -27,8 +38,8 @@ export interface BoardViewState {
 }
 
 /**
- * D17 (REVISED 2026-08-24): the default window starts on **today**, not on
- * the Monday of the current week.
+ * D17 (REVISED 2026-08-24): the default window starts on **today**, not
+ * on the Monday of the current week.
  *
  * The original rule made the board open on Monday whatever day it actually
  * was, so opening it on a Friday put the useful part of the schedule four
@@ -43,6 +54,7 @@ function defaultWindowStart(): Date {
 
 export const useBoardViewStore = create<BoardViewState>((set) => ({
   zoomIndex: 1, // D16: default Standard
+  densityMode: "fit", // D53: default Fit — automatic vertical scale
   collapsedNodeIds: new Set<string>(),
   windowStartDate: defaultWindowStart(),
   windowDayCount: 3, // D17
@@ -51,6 +63,7 @@ export const useBoardViewStore = create<BoardViewState>((set) => ({
   scrollToNowNonce: 1,
 
   setZoomIndex: (index) => set({ zoomIndex: index }),
+  setDensityMode: (mode) => set({ densityMode: mode }),
   setWindowStartDate: (date) => set({ windowStartDate: date }),
   setWindowDayCount: (days) => set({ windowDayCount: days }),
   setOperatorPanelOpen: (open) => set({ operatorPanelOpen: open }),

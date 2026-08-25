@@ -1,18 +1,18 @@
 /**
  * The one place the raw `BoardWindow` becomes something renderable (brief
- * P1-4a §4.3). `boardIndex.ts` is the only file in the board feature that
- * calls `parseTstzRange` or `fromEfficiency` — components downstream read
- * plain numbers.
+ * P1-4a §4.3, extended by P1-4c D45 for density). `boardIndex.ts` is the
+ * only file in the board feature that calls `parseTstzRange` or
+ * `fromEfficiency` — components downstream read plain numbers.
  *
  * Import note (see the agent report's "assumptions" section): this file
  * necessarily has two real (non-type) runtime dependencies —
  * `parseTstzRange`/`fromEfficiency` from `@/lib/api` (per `docs/api-client.md`'s
  * single-import-path rule and this brief's own §4.3) and `packLanes` /
- * `trackRowHeight` / `GROUP_ROW_HEIGHT` from the sibling `./geometry`
- * module. Both are unavoidable value imports, not type imports, and so do
- * not "vanish" under `--experimental-strip-types` the way `import type`
- * does. The harness copy of this file (never the delivered file) rewrites
- * both import specifiers to relative `.ts` paths so it can still run
+ * `trackRowHeight` from the sibling `./geometry` module. Both are
+ * unavoidable value imports, not type imports, and so do not "vanish"
+ * under `--experimental-strip-types` the way `import type` does. The
+ * harness copy of this file (never the delivered file) rewrites both
+ * import specifiers to relative `.ts` paths so it can still run
  * standalone — see the harness `run.ts` and the agent report.
  */
 import type {
@@ -27,7 +27,7 @@ import type {
   Json,
 } from "@/lib/api";
 import { parseTstzRange, fromEfficiency } from "@/lib/api";
-import { packLanes, trackRowHeight, GROUP_ROW_HEIGHT } from "./geometry";
+import { packLanes, trackRowHeight, type Density } from "./geometry";
 
 export interface BoardRow {
   node: BoardNode;
@@ -59,6 +59,13 @@ export interface BoardIndex {
   assignmentsByNode: Map<string, IndexedAssignment[]>;
   assignmentsByRun: Map<string, IndexedAssignment[]>;
   assignmentsByOperator: Map<string, IndexedAssignment[]>;
+  /** P1-4e §9 debt 1: the same rows as `runsByNode`/`assignmentsByNode`,
+   *  keyed by the row's own id instead of by node — for popover-fired
+   *  mutations that only ever receive an id (`saveRunFields`,
+   *  `deleteRunWithMode`, `saveAssignmentFields`, `removeAssignment`) to
+   *  resolve a revert label from. */
+  runById: Map<string, IndexedRun>;
+  assignmentById: Map<string, IndexedAssignment>;
   templateForNode: Map<string, ShiftTemplate | null>;
   skillsForNode: Map<string, Skill[]>;
   productById: Map<string, Product>;
@@ -66,7 +73,11 @@ export interface BoardIndex {
   skillById: Map<string, Skill>;
   nodeById: Map<string, BoardNode>;
   capacityCap: number;
+  /** P1-4e D64: `org.settings.eligibility_policy`, defensively read. */
+  eligibilityPolicy: "warn" | "block";
   droppedRanges: number;
+  /** D45: the density every row in `rows` was laid out at. */
+  density: Density;
 }
 
 /**
@@ -99,7 +110,28 @@ function readCapacityCap(settings: Json): number {
   return 1.0;
 }
 
-export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd: Date): BoardIndex {
+/** P1-4e: `eligibilityPolicy` reads `org.settings.eligibility_policy`
+ *  defensively; never throws — same pattern as `readCapacityCap` above.
+ *  D64's override UI needs this client-side to decide whether an
+ *  ineligible drop offers an override checkbox (`warn`) or is refused
+ *  outright (`block`); design-plan §6's stated default is `warn`. The
+ *  server remains the actual authority regardless of what this reads —
+ *  `check_eligibility`'s own `policy` field, returned per-call, is what
+ *  `create_assignment`/`move_run` actually enforce. */
+function readEligibilityPolicy(settings: Json): "warn" | "block" {
+  if (typeof settings === "object" && settings !== null && !Array.isArray(settings)) {
+    const v = (settings as Record<string, Json | undefined>).eligibility_policy;
+    if (v === "warn" || v === "block") return v;
+  }
+  return "warn";
+}
+
+export function buildBoardIndex(
+  data: BoardWindow,
+  windowStart: Date,
+  windowEnd: Date,
+  density: Density,
+): BoardIndex {
   const windowMinutes = (windowEnd.getTime() - windowStart.getTime()) / 60_000;
   const dayCount = windowMinutes / 1440;
 
@@ -134,6 +166,7 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
   const activeAssignments = data.assignments.filter((a) => a.status !== "cancelled");
 
   const runsByNode = new Map<string, IndexedRun[]>();
+  const runById = new Map<string, IndexedRun>();
   for (const r of activeRuns) {
     const clipped = parseRangeSafe(r.timerange);
     if (clipped === null) continue;
@@ -141,6 +174,7 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
     const list = runsByNode.get(r.nodeId) ?? [];
     list.push(ir);
     runsByNode.set(r.nodeId, list);
+    runById.set(ir.id, ir);
   }
 
   // Rule 2: an assignment belongs to the row named by `assignment.nodeId`,
@@ -155,6 +189,7 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
   const assignmentsByNode = new Map<string, IndexedAssignment[]>();
   const assignmentsByRun = new Map<string, IndexedAssignment[]>();
   const assignmentsByOperator = new Map<string, IndexedAssignment[]>();
+  const assignmentById = new Map<string, IndexedAssignment>();
   const laneCountByNode = new Map<string, number>();
 
   for (const [nodeId, list] of rawByNode) {
@@ -177,6 +212,7 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
     assignmentsByNode.set(nodeId, indexed);
 
     for (const ia of indexed) {
+      assignmentById.set(ia.id, ia);
       if (ia.runId) {
         const rl = assignmentsByRun.get(ia.runId) ?? [];
         rl.push(ia);
@@ -238,6 +274,8 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
   // Rule 1: rows, in full tree order, before collapse filtering. D18: a
   // node is a track row iff its level is schedulable; a node whose
   // level id is missing from `levels` is treated as a group row (T8).
+  // D44/D45: row heights are computed here, at exactly this one place, from
+  // the `density` argument — never from a module-level constant.
   const rootDepthSegments =
     data.nodes.length > 0 ? Math.min(...data.nodes.map((n) => n.path.split(".").length)) : 0;
   const rows: BoardRow[] = data.nodes.map((n) => {
@@ -246,9 +284,15 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
     const depth = n.path.split(".").length - rootDepthSegments;
     if (isTrack) {
       const laneCount = laneCountByNode.get(n.id) ?? 0;
-      return { node: n, depth, isTrack: true, height: trackRowHeight(laneCount), laneCount };
+      return {
+        node: n,
+        depth,
+        isTrack: true,
+        height: trackRowHeight(laneCount, density),
+        laneCount,
+      };
     }
-    return { node: n, depth, isTrack: false, height: GROUP_ROW_HEIGHT, laneCount: 0 };
+    return { node: n, depth, isTrack: false, height: density.groupRowHeight, laneCount: 0 };
   });
 
   return {
@@ -260,6 +304,8 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
     assignmentsByNode,
     assignmentsByRun,
     assignmentsByOperator,
+    runById,
+    assignmentById,
     templateForNode,
     skillsForNode,
     productById,
@@ -267,6 +313,8 @@ export function buildBoardIndex(data: BoardWindow, windowStart: Date, windowEnd:
     skillById,
     nodeById,
     capacityCap: readCapacityCap(data.org.settings),
+    eligibilityPolicy: readEligibilityPolicy(data.org.settings),
     droppedRanges,
+    density,
   };
 }

@@ -7,10 +7,17 @@
   border: 1px solid var(--axis);
   border-radius: 9px;
   box-shadow: 0 6px 24px rgba(11, 11, 11, 0.18);
-  padding: 12px;
+  padding: calc(12px * var(--ui-scale, 1));
+  /* The mockup's `#pop` carries `width: 260px`; the port dropped it. Without
+     a width a fixed-position element shrink-to-fits, and the target row's
+     flex ratios then drive the intrinsic width — which is how the unit input
+     ended up rendering past the popover's own right edge. */
+  /* Scales with the type inside it — a fixed 260px box holding 1.75x text
+     overflows exactly the way the unscaled unit field did in P1-4b. */
+  width: calc(260px * var(--ui-scale, 1));
 }
 
 .h3 {
   margin: 0 0 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-scale, 1));
 }

@@ -712,3 +712,146 @@ Fixed as `.row button.pri` in all three. The four remaining `#fff` literals went
 **Also fixed:** the create popover's target row gave the unit field the same width as the quantity field. Faithful to the mockup, but wrong — the unit is `maxlength=8`. Now 2:1.
 
 **Not a bug:** an "Unexpected Application Error! Rendered more hooks than during the previous render" seen while the app sat idle. That is Vite HMR swapping a live hook module whose hook count had just changed — the design session had added one `useCallback` (`failWith`, §18.6) to `useDragGesture` while the dev server was running. React counts hooks across renders and the hot-swapped module has one more than the mounted tree. A hard refresh clears it; it cannot occur in a production build. Worth recognising on sight, because it looks exactly like a conditional-hook bug and both `BoardPage` and `useDragGesture` were checked, hook by hook, before that conclusion was reached — every hook in both is unconditional and above every early return.
+
+### 18.8 CLOSED: PostgREST does map `PTxxx` to HTTP status (Aug 24, 2026)
+
+Open since §17.2, because nothing in the app could trigger a rejection for real until P1-4b made the board editable. Forced deliberately at acceptance — a second 100% assignment for an operator already fully loaded — and observed in DevTools:
+
+```
+POST http://127.0.0.1:54321/rest/v1/rpc/create_assignment
+Status Code: 409 capacity exceeded: operator 50000000-…-000000000001 would reach 2.000 (cap 1.0)
+Proxy-Status: PostgREST; error=PT409
+```
+
+**The mapping holds.** `api_raise`'s `PT409` SQLSTATE surfaces as a real HTTP 409, with the message intact and PostgREST naming the code in `Proxy-Status`. The client contract's decision to switch on the JSON `error` field rather than the HTTP status (§17.2 item 3, `docs/api.md` §1) turns out to be belt-and-braces rather than load-bearing — which is the right way for that bet to resolve. **No client change; the assumption is now a verified fact.** Item removed from the outstanding list.
+
+**Also seen and NOT a bug:** a sibling `create_assignment` row returning `PGRST202` — *"Searched for the function public.create_assignment without parameters"*. That is the CORS **preflight**. The app runs on `localhost:5173` and Supabase on `127.0.0.1:54321` — different origins — and the request carries `Authorization`/`apikey`/`Content-Profile`, so Chrome sends an `OPTIONS` first. An OPTIONS has no body, so PostgREST tries to resolve the overload with no arguments and cannot. Harmless, and worth recognising on sight because it looks like a malformed call. There is exactly one `create_assignment` call site and it sends all ten arguments.
+
+### 18.9 P1-4c delivered and verified — plus a bug in the brief's own CSS (Aug 24, 2026)
+
+Delivered by a fresh agent in **69k tokens against P1-4b's 336k** — the tighter, more mechanical brief did what it was meant to. Full §14 report this time, including a proper deviations list.
+
+**Design-session verification** (per [[verification-standard]] — own probe, not a re-run of the agent's):
+
+- **17 independent cases, all green cold.** Beyond the brief's seven: that a band still fits above the first lane at every density, that every density field is strictly ordered (not just `laneHeight`), that heights stay integers so row offsets never land on a sub-pixel, that a track row always exceeds a group row, and that lane packing is unaffected by density.
+- **Five unprescribed mutations, all five caught.** Drifting Standard's `laneTopOffset` by 2px, letting a band overlap lane 1 at Compact, reading group height from Standard regardless of density, dropping `rowPadBottom`, and reordering the density table. The end-to-end pixel-identity guard (`I4`) catches the first directly.
+- **Scope fence clean**: no `src/lib/api/`, no `package.json` change, no stale geometry constant outside comments, `.density button.densityOn` correctly compound.
+
+**The brief's `--ui-scale` formula was a bug — but not the one first suspected.** `clamp(1, 0.75 + 0.25 * (100vw / 1440px), 1.35)` divides a length by a length to get a unitless number. That reads as invalid CSS, and the initial diagnosis was that it would break every scaled declaration. **Executed in headless Chromium instead of reasoned about, and the diagnosis was wrong**: it works, giving 11px → 13.14px → 14.85px across 1440/2560/3840 and clamping correctly. CSS Values 4 permits it and Chromium implements it.
+
+The *real* risk was different and worse than a no-op. A browser lacking the capability does **not** fall back through `var(--ui-scale, 1)` — the custom property is set, merely invalid at computed-value time, so the whole `font-size` declaration is dropped and the element jumps to the **UA default**. Measured: an unguarded element rendered at **16px** instead of its intended 11px. Now wrapped in `@supports (line-height: calc(100vw / 1440px))` with a plain `--ui-scale: 1` default, so the failure mode is "no scaling" rather than "no styling". Both branches verified in the browser.
+
+**The lesson is the one this project keeps relearning, now pointing at the design session rather than the agent:** reasoning about a formula produced a confident and wrong answer twice over — first "this is invalid", then implicitly "the fallback will catch it". Executing it produced the truth in one step. Rule 5 of [[brief-writing-rules]] said to run acceptance cases before shipping a brief; that was done for the *arithmetic* here (all ten density cases) and not for the *CSS*, which is exactly where the bug was.
+
+**The agent's best deviation: D48's premise was wrong.** The brief asserted the height chain was broken and told it to fix `#root` → outlet → `.page` → `.body`. The agent traced it and found `.shell { height: 100% }` and `.main { flex: 1; min-height: 0; overflow: auto }` already correct, and said so rather than inventing a change. The white area below the last row is not a broken chain — it is simply the scroll container's background where there is no content, because seven cells do not fill a 4K display. Cosmetic if it is worth anything at all. **A brief that asserts a diagnosis rather than a symptom invites the agent to "fix" something that was never broken; this one didn't take the bait.**
+
+**Known gap, deliberately not closed:** chip/block height stays a hardcoded 22px with no density field, which the agent flagged rather than inventing one. At Compact (`laneHeight: 22`) a block therefore exactly fills its lane with no gap, where Standard leaves 6px and Comfortable 12px. Blocks will look flush at Compact. Add `blockHeight` to the density table when someone finds that annoying.
+
+### 18.10 D46 amended — the board fits its height automatically (Aug 25, 2026)
+
+**P1-4c's D46 was wrong, and Pratik was right to push on it.** It made density a manual setting, reasoning that a 4K screen might be a wall display or a dense planning station and the pixel count cannot distinguish them. True — and it answered the wrong question. **The variable that matters is row count, not screen size**, and row count is not a property of the display at all: an admin sees 7 cells, an Assembly supervisor 5, a line supervisor 2, on the same monitor. No fixed density fills the viewport for all three, so density buttons only move the dead space around rather than removing it.
+
+Measured against the seed board at Standard, natural content height is **740px for Admin, 544px for Ana, 254px for a two-cell line supervisor**. Required scale to fill:
+
+| viewport | Admin | Ana | line supervisor |
+| --- | --- | --- | --- |
+| laptop 900px | 0.97 | 1.32 | 2.82 → clamped |
+| 4K browser ~1320px | 1.54 | 2.09 | 4.47 → clamped |
+| TV 2160px | 2.67 → clamped | 3.63 → clamped | 7.78 → clamped |
+
+With `FIT_MIN 0.75` / `FIT_MAX 2.5`, **the cases that actually occur — Admin and Ana on a laptop or a 4K browser — land inside the band and fill the screen exactly, 0% dead space.**
+
+**The design (brief P1-4d).** `fitScale = clamp(0.75, availableHeight / naturalHeight, 2.5)`, where `naturalHeight` is the row total at Standard, **unscaled**. Computing from natural rather than scaled heights is what makes it a single pass instead of a feedback loop. `scaleDensity(base, factor)` multiplies every density field and **rounds to integers**, because a sub-pixel row offset blurs every border on the board. The toolbar becomes `Fit | Comfortable | Standard | Compact` with Fit default; the named densities remain as a manual override, so D46 is amended rather than deleted.
+
+Under Fit, `--ui-scale` follows the fit scale (clamped to 1.75) rather than the viewport, so text grows with the rows — a row 2.5× taller with 11px text looks broken — and never scales by both inputs at once. That also sidesteps P1-4c's `@supports` path entirely on the Fit branch, since JS computes a plain number.
+
+**The limit, stated rather than chased.** Two rows on a 2160px TV would need 7.8× and is clamped to 2.5×, leaving ~68% empty. That is intended: rows 600px tall are not a better board. Filling a wall display with two rows needs a genuinely different layout — bigger type, fewer columns, a summary panel — which is a separate design question. The brief tells the agent that if it finds itself raising `FIT_MAX` to chase this, it should stop and flag it instead.
+
+**All 11 acceptance cases were executed against a reference implementation before the brief shipped** ([[brief-writing-rules]] rule 5), including the one most at risk from rounding: that `bandTop + bandHeight <= laneTopOffset` still holds at 0.75×, 1.37× and 2.5× after `Math.round`. It does.
+
+### 18.11 P1-4d delivered and verified — and my mutation tables need the same treatment as my acceptance cases (Aug 25, 2026)
+
+Fit-to-height landed. Verification per [[verification-standard]] — own probe, not a re-run of the agent's.
+
+**16 independent cases, 15 green cold, one real hole found.** `computeFitScale` let **NaN propagate**: `computeFitScale([NaN], 800)` and `computeFitScale([100], NaN)` both returned NaN, which would flow into `scaleDensity`, make every row height NaN, and render a blank board. Not reachable through today's call path — `ResizeObserver` always reports finite numbers — but this single number is what all board geometry hangs off, so it now has layered `Number.isFinite` guards on `availableHeight`, on the natural total, and on the raw ratio. Verified: removing any one layer is still caught by the next.
+
+**This was my gap, not the agent's.** The brief's case 4 *said* "degenerate inputs never produce 0, NaN or Infinity" but the assertions it prescribed only covered an empty array and a zero height. The agent implemented exactly what was asserted. Prose in a brief is not a test.
+
+**Four unprescribed mutations run; two initially slipped.** Reversing the clamp was caught; dropping `rowPadBottom` from `scaleDensity` and flooring `laneTopOffset` while rounding the rest were **not**, because the probe checked invariants (band fits above lane, heights are integers, ordering survives) without ever checking that *every field* equals `Math.round(base × factor)`. One added case closes both. A partially-scaled density is exactly the kind of bug that looks fine at a glance and drifts by a pixel per field.
+
+**Two more errors in my own mutation table, both caught by the agent and both verified rather than asserted.** M3 (floor vs round) cited cases 1 and 3 — but both use integer factors (1 and 2), where `floor` and `round` are identical, so neither could ever catch it. M4 (leave `bandTop` unscaled) cited case 9's geometric invariant — but leaving `bandTop` *smaller* while `laneTopOffset` scales up keeps that invariant comfortably true. Both are actually caught by the exact-value check at fractional factors.
+
+**That is four mutation-table mis-mappings across three briefs** (P1-4b's M4 and M6, P1-4d's M3 and M4). The pattern is now clear enough to name: [[brief-writing-rules]] rule 5 says to *run* acceptance cases before shipping a brief, and that has been done faithfully for the acceptance list — but the **mutation table has been written from reasoning every time**, and reasoning about which assertion catches which mutation is exactly as unreliable as reasoning about arithmetic. Rule 5 now extends to the mutation table: apply each mutation to the reference implementation and record which case actually fails, rather than predicting it.
+
+**One agent claim that did not survive checking.** Its deviations list flagged a pre-existing bug — `BoardGrid` passing `density={index.density}` to `TrackRow`, "whose props type declares no `density` field". `TrackRow.tsx:87` declares `density: Density`. The agent misread. The deviations section has been the highest-value part of every report on this project, but it is not infallible, and a flagged deviation is a lead to check rather than a fact to act on.
+
+**Architecture the agent chose (§5 was left to it, correctly):** `fitScale` is computed inside `BoardGrid` — where the `ResizeObserver` and the collapse-filtered row list already live — and reported up via `onFitScaleChange`, leaving `BoardPage` as the sole owner of the `buildBoardIndex` call and its `density` argument. Crucially it derives `naturalHeights` from `laneCount`/`isTrack` rather than from `row.height`, since the latter already reflects whatever density the index was built with — which under Fit is a function of the previous `fitScale`. That is precisely the circularity D51 exists to prevent, and it reasoned the settle behaviour through explicitly rather than assuming it.
+
+### 18.12 Two more P1-4d corrections found at compile and on screen (Aug 25, 2026)
+
+**1. `as const` and a scaling function are mutually exclusive — the brief asked for both.** P1-4c's D43 wrote `DENSITIES` `as const`, which made `Density = (typeof DENSITIES)[number]` a union of **literal** types (`laneHeight: 34 | 28 | 22`). That was fine while the only densities were the three in the table. P1-4d's `scaleDensity` returns computed numbers, and no literal type can hold one — six `TS2322`s, one per field. The agent implemented exactly what both briefs specified; the specifications contradicted each other and only the compiler could say so. Fixed by declaring an explicit `interface Density` with `number` fields and typing the table `readonly Density[]`.
+
+Worth generalising: **`as const` on a table is a bet that nothing will ever derive a new member of that type.** P1-4c took that bet reasonably; P1-4d broke it one brief later. When a table's type is going to be produced as well as consumed, widen it at the point the producer is introduced.
+
+**2. The rows scaled; what lives in them did not.** Fit made every row taller and left the bands, chips and text at their original size, so a 2× row was mostly empty space. Three separate causes, all gaps in the briefs rather than the build:
+
+- **Chips and blocks had no density field at all** — `height: 22px` and a `15px` avatar, hardcoded in CSS. The P1-4c agent flagged this explicitly ("no density field exists for it and none was added, per the no-independent-design-decisions instruction") and the design session acknowledged it and did not close it. It became visible the moment rows could grow. Added `chipHeight` (26/22/18) and `avatarSize` (18/15/13), published as `--chip-h` / `--avatar-size` alongside the existing `--band-h` / `--lane-h`.
+- **`--ui-scale` was never applied to band, chip or block CSS.** P1-4c scaled the toolbar and header fonts and stopped there, because at the time nothing else could change size. Every `font-size` in those three modules now goes through `calc(Npx * var(--ui-scale, 1))`.
+- Standard's new fields are **22 and 15 — exactly the values the CSS hardcoded**, preserving the Fit-off regression guard.
+
+**New invariant, verified rather than assumed:** a chip must fit inside its lane (`chipHeight <= laneHeight`) and an avatar inside its chip, at every density and **after rounding** across the whole 0.75–2.5 factor range. Independent `Math.round` on two fields is exactly the kind of thing that holds at the three factors anyone would test by hand and fails at some fourth. It holds; now asserted.
+
+**Pattern worth naming across §18.9–§18.12: every one of these was found by execution, none by review.** The NaN leak, the `as const` collision, the unscaled chips — the first by a probe, the second by `tsc`, the third by looking at a screenshot. Reading the code found none of them. The corollary for a design session that cannot run the app: get the thing compiled and on screen as early as possible, and treat "it reads correctly" as worth very little.
+
+### 18.13 P1-4e delivered — the board is feature-complete (Aug 25, 2026)
+
+Cross-cell run moves, split coverage, eligibility overrides, panel drag and run re-parenting all landed, plus the three debts P1-4b left. The agent ran 29 acceptance cases and all six mutations, and filed two refinements to the mutation table (M3 also fails case 3; M4 also fails the single-participant-at-cap assertion) — both correct.
+
+**Two findings from the agent that are worth more than the code.**
+
+**1. The brief's scope fence and its headline feature were mutually exclusive.** §12 item 9 said "`src/lib/api/` untouched"; D66 (re-parent a chip between runs, or detach it to direct) requires patching `run_id`/`product_id` on an existing assignment, and no field on `AssignmentFieldEdit` could carry that. The agent extended the interface by 26 lines, guarded (`if ("runId" in edit)`), and **flagged it as a deliberate deviation** rather than either inventing an RPC or quietly duplicating a write path. Correct call, correctly surfaced. The lesson for future briefs: a scope fence written as a blanket file prohibition will eventually collide with a feature that needs one field in that file — say "no new RPC and no second write path" instead, which is the property actually being protected.
+
+**2. `apply_split_coverage` cannot express a move-and-split in one call.** §5 step 1 lists a chip *move* as a split-coverage trigger. But `p_adjustments` is `[{assignment_id, efficiency}]` — **no timerange** (verified in `docs/api.md` §3). An assignment that is simultaneously moving in time *and* needing its efficiency reduced therefore cannot go through that RPC without a second write, which §5 step 6 forbids for exactly the intermediate-state reason recorded in §17.2 item 5. The agent left the chip-move path as an ordinary field update and let the capacity trigger reject it server-side, documenting why in the code. That is the right resolution given the API, and it means **the split flow is reachable from a create or a panel drop but not from moving an existing chip.** If that turns out to matter in use, the fix is a widened `p_adjustments` accepting an optional timerange — a database change, not a client one, and out of scope here.
+
+**A real bug in `splitEvenly`, and my brief caused it.** The brief said *"the remainder goes to the FIRST participant, so three-way at 100% is 34/33/33"*. The agent implemented that literally — `out[0] += remainder` — which is correct for every example the brief gave (n=2, 3, 4 at cap 100 all have a remainder of 0 or 1) and wrong in general: an eight-way split at 100% produced `[16,12,12,12,12,12,12,12]`, a spread of 4, which is not an even split. Corrected to one unit each to the first `remainder` participants: `[13,13,13,13,12,12,12,12]`, spread 1. n=3 still gives 34/33/33, so the brief's stated example is unchanged.
+
+**How it was caught matters more than the bug.** No example-based case could find it, because every example in the brief had a remainder small enough that both implementations agree. It fell out of a **property** test — *max share − min share ≤ 1* — which is true of an even split by definition and holds for every n and every cap. The recurring lesson across §18.9–§18.13 is that acceptance cases written as examples keep failing to distinguish two implementations; the ones that catch real bugs assert a property that must hold across a range. [[brief-writing-rules]] rule 5 now covers running the mutation table; this adds: **where a function has an obvious invariant, assert the invariant rather than three worked examples.**
+
+### 18.14 The scaling audit — a custom property does not cross a portal (Aug 25, 2026)
+
+The create popover did not scale on a 4K display. The obvious reading is "P1-4c left the popovers out of scope, so add `calc()` to their CSS" — and that alone would **not have worked**, which is why it is worth recording.
+
+**`BoardPopover` is `createPortal(node, document.body)`.** A portaled node is not a DOM descendant of the board root, and `--ui-scale` was published as an inline style *on the board root*. Custom properties inherit down the DOM tree, so every `var(--ui-scale, 1)` inside a popover would have silently resolved to the `1` fallback. Verified in headless Chromium, three ways:
+
+| where `--ui-scale: 1.6` is set | portaled popover renders |
+| --- | --- |
+| board root only (what P1-4c did) | 12.5px / 260px — **no effect** |
+| `document.documentElement` | 20px / 416px — correct |
+| removed again | 12.5px / 260px — stylesheet cascade restored |
+
+Fixed by publishing the fit scale on `document.documentElement` in an effect, and removing it when Fit is off so P1-4c's viewport-driven `:root` rule takes back over instead of being permanently shadowed by an inline style. The board-root inline copy is left in place as harmless duplication.
+
+**The audit, because "which else is affected" is not answerable by inspection.** Every `*.module.css` was checked mechanically for a bare `font-size: Npx`. Fourteen files had one, and none of them had been scaled: both popovers *and* app chrome (`AppShell`, `HealthPill`, `DevProfileSwitcher`), the drag ghost, the toasts, and stray declarations in `GroupRow` and `TrackRow` that P1-4c's partial pass had missed. All now go through `calc(Npx * var(--ui-scale, 1))`; a repeat grep returns nothing.
+
+The popover's own `width: 260px` and `padding: 12px` scale too — a fixed box holding 1.75× text overflows in exactly the way P1-4b's unit field did (§18.7).
+
+**Two lessons.** First: **P1-4c's scaling pass was partial and nobody noticed for three briefs**, because the surfaces it missed were ones nothing else had reason to change. A cross-cutting concern like scale needs an exhaustive sweep with a grep, not a per-file judgement — "which files did I touch" is the wrong question, "which files declare a font size" is the right one. Second: **portals break custom-property inheritance**, and the failure is silent — the fallback value makes it look deliberate. Any future `--*` published for the board must go on `:root`, not the board root, unless it is genuinely board-local.
+
+**Also corrected here:** the day strip was 20px tall with an 11.5px label, the same weight as an hour tick, so the date read as noise rather than a heading. Now 28px with a 15px bold label, and `.hdrTrack` grew 54px → 62px. That number is **duplicated** in `BoardGrid`'s `HEADER_HEIGHT_PX`, which fit-to-height subtracts from the container height; changing one without the other under-measures the available height. Both are now changed and both carry a comment pointing at the other.
+
+### 18.15 `--chrome-scale`: the header cannot scale with fit, or fit becomes circular (Aug 25, 2026)
+
+The day label scaled but its 28px strip did not, so at high fit scales the text clipped. The obvious fix — scale the strip's height by `--ui-scale` too — introduces a **feedback loop**: header height depends on `--ui-scale`, which is the fit scale, which is derived from the available height, which is the container height *minus the header*. A fixed point that can oscillate between two adjacent values, and one that nothing in the current design would damp.
+
+The P1-4d agent anticipated this exactly, in a comment on `HEADER_HEIGHT_PX`: the constant is safe *"unless `.hdrTrack`'s height ever becomes `--ui-scale`-dependent"*, in which case it must become a measured probe. Making it a probe would work but would also make the loop real.
+
+**Resolved by splitting the two scales rather than measuring:**
+
+- **`--ui-scale`** — fit-driven, up to 1.75, published on `:root` by `BoardPage`. Used by everything *inside* the fitted content: bands, chips, blocks, popovers, toasts.
+- **`--chrome-scale`** — viewport-driven only, up to 1.35, pure CSS, never overridden. Used by the header.
+
+The header's size is then a pure function of viewport width, so `HEADER_HEIGHT_PX` stays a constant and no loop exists. It is also the better model: **the header is chrome around the fitted content, not part of it.** A board with two rows should not get a giant date bar just because its rows grew.
+
+Verified in headless Chromium at 1440 / 2560 / 3840 with `--ui-scale` deliberately pinned at 1.75: the label renders 15 / 17.9 / 20.25px, a 16 / 20 / 22px line box inside the 30px strip, fitting at every width and never following the fit scale. Strip 28px → 30px and `.hdrTrack` 62px → 64px for headroom, with `HEADER_HEIGHT_PX` moved in step.
+
+**The general shape, worth carrying:** when a derived value feeds back into its own input, the fix is usually to find the second, independent variable the thing should actually depend on — not to measure harder.

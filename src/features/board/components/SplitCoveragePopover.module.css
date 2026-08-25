@@ -1,0 +1,94 @@
+/* Ported from the mockup's `#pop` descendant rules for `openSplitPop` —
+   same local `.body` scoping convention as `CreatePopover.module.css` and
+   `RunPopover.module.css` (§10.1's flattening trap: a bare `input {}` here
+   would leak globally). */
+
+.body input {
+  width: 100%;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--axis);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+/* Mockup: `.split-row input { width: 60px; flex: none; }` — overrides the
+   100%-width base above for just the efficiency field. `.body .splitRow
+   input` (0,2,1) rather than a bare `.splitRow input` (0,1,1) so this wins
+   regardless of stylesheet source order, not by a tie the cascade happens
+   to break the right way (§10.1). */
+.body .splitRow input {
+  width: 60px;
+  flex: none;
+}
+
+.splitRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--grid);
+}
+
+/* Both classes land on the SAME element (see the component's className
+   construction) — a plain two-class compound, not the element-plus-class
+   shape §10.1 warns about, so `.splitRow.inc` (0,2,0) reliably outranks
+   `.splitRow` (0,1,0) with no ambiguity either way. Every declaration from
+   the mockup's `.split-row.inc` is ported, including `border-bottom: none`
+   — dropping just that one would leave a stray divider under the incoming
+   row that the mockup does not have. */
+.splitRow.inc {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border-radius: 6px;
+  padding: 5px 6px;
+  margin: 2px -6px;
+  border-bottom: none;
+}
+
+.splitLbl {
+  flex: 1;
+  font-size: calc(11.5px * var(--ui-scale, 1));
+  color: var(--ink-2);
+}
+
+.splitFoot {
+  font-size: calc(12.5px * var(--ui-scale, 1));
+  font-weight: 700;
+  margin-top: 8px;
+  color: var(--ink);
+}
+
+.splitFoot.over {
+  color: var(--crit);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.row button {
+  flex: 1;
+  font: inherit;
+  font-size: calc(12.5px * var(--ui-scale, 1));
+  padding: 5px 0;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+}
+
+/* Same specificity trap as every other popover's primary button (§10.1) —
+   `.row button.pri`, never a bare `.pri`, or it loses to `.row button`
+   above and renders white-on-white. */
+.row button.pri {
+  background: var(--ink);
+  color: var(--avatar-fg);
+  border-color: var(--ink);
+}
+
+.row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

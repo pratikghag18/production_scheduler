@@ -1,6 +1,6 @@
 import type { Product, ShiftTemplate } from "@/lib/api";
 import type { IndexedRun, IndexedAssignment } from "../lib/boardIndex";
-import { minutesToPx, effectiveHeadcount, isUnderstaffed, BAND_TOP } from "../lib/geometry";
+import { minutesToPx, effectiveHeadcount, isUnderstaffed, type Density } from "../lib/geometry";
 import { formatClock, formatFull, formatNumber, addMinutes } from "../lib/time";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import styles from "./RunBand.module.css";
@@ -10,6 +10,7 @@ const HANDLE_PX = 8;
 
 export function RunBand({
   run,
+  density,
   assignments,
   product,
   productColorVar,
@@ -29,6 +30,8 @@ export function RunBand({
   onKeyUp,
 }: {
   run: IndexedRun;
+  /** P1-4c D44/D49: `density.bandTop` replaces the removed `BAND_TOP` constant. */
+  density: Density;
   assignments: IndexedAssignment[];
   product: Product | undefined;
   productColorVar: string;
@@ -87,7 +90,7 @@ export function RunBand({
   return (
     <div
       className={`${styles.band} ${under ? styles.under : ""} ${dragging ? styles.dragging : ""}`}
-      style={{ left, width, top: BAND_TOP, ["--pc" as string]: productColorVar }}
+      style={{ left, width, top: density.bandTop, ["--pc" as string]: productColorVar }}
       title={title}
       tabIndex={0}
       role="button"

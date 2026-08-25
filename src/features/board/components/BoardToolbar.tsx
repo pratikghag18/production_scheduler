@@ -7,10 +7,11 @@ import styles from "./BoardToolbar.module.css";
 const MAX_WINDOW_DAYS = 92;
 
 /**
- * Zoom buttons, date-range control, snap note, legend (brief §7/§10). T5:
- * the loaded window is exactly what this control requests — scrolling never
- * extends it, so an end-of-window marker names that limit instead of
- * letting it read as a bug.
+ * Zoom buttons, density buttons, date-range control, snap note, legend
+ * (brief §7/§10, P1-4c §5 for density). T5: the loaded window is exactly
+ * what this control requests — scrolling never extends it, so an
+ * end-of-window marker names that limit instead of letting it read as a
+ * bug.
  */
 export function BoardToolbar({
   zoomIndex,
@@ -140,6 +141,18 @@ export function BoardToolbar({
           </button>
         ))}
       </div>
+
+      {/* DENSITY CONTROL REMOVED (Pratik, Aug 25). Fit is automatic and the
+          three manual densities earned their toolbar space back: Fit already
+          shrinks toward Compact when there are many rows and grows toward
+          Comfortable when there are few, so the override only mattered for
+          taste, and four buttons is a lot of chrome for taste.
+
+          The MECHANISM is intact and unreferenced by the UI on purpose, not
+          by oversight: `densityMode` still exists in the store (default
+          "fit"), `BoardPage` still branches on it, and `DENSITIES` /
+          `scaleDensity` are what Fit itself is built from. Restoring the
+          control is re-adding this button group and nothing else. */}
       <span className={styles.snapNote}>
         {/* No drag in P1-4a, so this names the future snap behaviour rather than an active one. */}
         snap:{" "}

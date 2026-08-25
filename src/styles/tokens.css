@@ -13,6 +13,15 @@
  * "every colour is a var(--…)" (brief §14 self-review item 4) without
  * inventing a new colour — flagged in the agent report since tokens.css is
  * outside this brief's file list.
+ *
+ * P1-4c addendum (brief D47/D49): `--rail-w` now scales with `--ui-scale`
+ * (global.css) instead of being a flat 232px — at the default viewport
+ * (<=1440px) `--ui-scale` is exactly 1, so this is 232px unchanged, same
+ * as before this brief. `--band-h`/`--lane-h` keep their Standard-density
+ * VALUES here as the pre-mount/no-JS fallback (so the very first paint
+ * already matches Standard density exactly), but the live values come from
+ * `BoardPage.tsx`'s inline `style` prop, set from the active density
+ * object (D49) — never from CSS alone once React has mounted.
  */
 :root {
   color-scheme: light;
@@ -26,7 +35,7 @@
   --ring: rgba(11, 11, 11, 0.1);
   --warn: #fab219;
   --crit: #d03b3b;
-  --rail-w: 232px;
+  --rail-w: calc(232px * var(--ui-scale, 1));
   --band-h: 26px;
   --lane-h: 28px;
 

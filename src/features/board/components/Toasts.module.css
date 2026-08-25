@@ -15,7 +15,7 @@
 .toast {
   background: var(--ink);
   color: var(--avatar-fg);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ui-scale, 1));
   padding: 8px 14px;
   border-radius: 8px;
   box-shadow: 0 4px 14px rgba(11, 11, 11, 0.3);

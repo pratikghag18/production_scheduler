@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Product, BoardOperator, ShiftTemplate, Skill } from "@/lib/api";
 import type { BoardRow, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
-import { ZOOMS, minutesToPx, intersects } from "../lib/geometry";
+import { ZOOMS, minutesToPx, intersects, type Density } from "../lib/geometry";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import { ShiftLayer } from "./ShiftLayer";
 import { RunBand } from "./RunBand";
@@ -54,9 +54,18 @@ export interface TrackRowDragApi {
  * D34: a block renders from `dragApi.activeDrag.candidate` only while ITS
  * own id matches the active drag — every other block on this and every
  * other row renders from the index as before.
+ *
+ * P1-4c: `density` (from `BoardIndex.density`, D45) is threaded straight
+ * through to every child that positions a band/chip/block/ghost by an
+ * absolute `top` — `row.height` itself already comes pre-computed from
+ * `boardIndex.ts` (D44/D45), so this component's own layout math is
+ * unchanged; only the children that used to import the now-removed
+ * `BAND_TOP`/`LANE_TOP_OFFSET`/`LANE_HEIGHT` constants now read the same
+ * fields off this `density` object instead.
  */
 export function TrackRow({
   row,
+  density,
   template,
   skills,
   runs,
@@ -75,6 +84,7 @@ export function TrackRow({
   dragApi,
 }: {
   row: BoardRow;
+  density: Density;
   template: ShiftTemplate | null;
   skills: Skill[];
   runs: IndexedRun[];
@@ -129,6 +139,21 @@ export function TrackRow({
     return s.kind === "assignment" && s.assignment.id === assignmentId ? activeDrag : null;
   }
 
+  // D58/D59/D65: this row is a live cross-cell-run-drag or panel-drag
+  // target. Independent of `rowHasActiveDrag` above (that gate is keyed to
+  // the drag's OWN origin row; a drop target is, by definition, a
+  // DIFFERENT row — a panel drag additionally has no meaningful "origin
+  // row" at all, since it starts in the operator panel, not on the board).
+  const isDropHintTarget = activeDrag !== null && activeDrag.dropTargetNodeId === nodeId;
+  const isDropRefused = isDropHintTarget && activeDrag!.dropRefused;
+  // D65: "hint from skillsForNode + operator.skillIds" — plain set
+  // arithmetic, never a `check_eligibility` round trip per hovered row.
+  const draggedPanelOperator =
+    activeDrag !== null && activeDrag.subject.kind === "panel" ? activeDrag.subject.operator : null;
+  const isIneligibleForDrag =
+    draggedPanelOperator !== null &&
+    skills.some((s) => !draggedPanelOperator.skillIds.includes(s.id));
+
   return (
     <div className={styles.cellRow} style={{ height: row.height }}>
       <div
@@ -143,7 +168,14 @@ export function TrackRow({
         ))}
       </div>
       <div
-        className={styles.track}
+        className={[
+          styles.track,
+          isDropHintTarget ? styles.dropHint : "",
+          isDropHintTarget && isDropRefused ? styles.refused : "",
+          isIneligibleForDrag ? styles.ineligible : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         style={{ width: trackWidth, height: row.height, ["--hour-px" as string]: `${pxPerHour}px` }}
         // Focusable but deliberately no `role="button"`: the track CONTAINS
         // other focusable, `role="button"` blocks (run bands, chips), and
@@ -199,6 +231,7 @@ export function TrackRow({
           <RunBand
             key={r.id}
             run={r}
+            density={density}
             assignments={assignmentsByRun.get(r.id) ?? []}
             product={productById.get(r.productId)}
             productColorVar={productColorVar(r.productId)}
@@ -223,6 +256,7 @@ export function TrackRow({
             <AssignmentChip
               key={a.id}
               assignment={a}
+              density={density}
               operator={operatorById.get(a.operatorId)}
               product={productById.get(a.productId ?? runById.get(a.runId ?? "")?.productId ?? "")}
               productColorVar={productColorVar(
@@ -247,6 +281,7 @@ export function TrackRow({
             <DirectBlock
               key={a.id}
               assignment={a}
+              density={density}
               operator={operatorById.get(a.operatorId)}
               product={a.productId ? productById.get(a.productId) : undefined}
               productColorVar={productColorVar(a.productId)}
@@ -269,6 +304,7 @@ export function TrackRow({
         {createDragHere && (
           <DragGhost
             candidate={activeDrag!.candidate}
+            density={density}
             windowStart={windowStart}
             pxPerHour={pxPerHour}
           />

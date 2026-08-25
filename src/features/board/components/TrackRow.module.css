@@ -10,6 +10,16 @@
   left: 0;
   z-index: 10;
   flex: none;
+  /* P1-4c: deliberately NOT scaled by --ui-scale (unlike most other
+     control padding, brief §5) — this padding sits inside a row whose
+     HEIGHT comes from density alone (`row.height`, fixed, not min-height,
+     on the sibling `.track`). Scaling it up at a large --ui-scale could
+     push wrapped label content taller than the row's own fixed height,
+     visibly overflowing past the track's bottom edge. `.nm`/`.reqBadge`
+     font-size still scale below — the small resulting height increase (a
+     few px) fits inside the generous slack every track row already has
+     (minimum row height at Compact/1 lane is still 31px). See the agent
+     report's self-review item 4. */
   padding: 8px 10px 8px 38px;
   background: var(--surface);
   border-bottom: 1px solid var(--grid);
@@ -22,10 +32,11 @@
 
 .nm {
   font-weight: 550;
+  font-size: calc(13px * var(--ui-scale, 1));
 }
 
 .reqBadge {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 700;
   color: var(--ink-2);
   border: 1px solid var(--axis);
@@ -51,6 +62,43 @@
 .track:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: -2px;
+}
+
+/* P1-4e D59: cross-cell drag hint, ported verbatim from the mockup's
+   `.track.drop-hint` (`markEligibility`/pointermove handlers add/remove
+   this class on the hovered row while a run or panel-operator drag is in
+   flight over a DIFFERENT cell than its origin). */
+.track.dropHint {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* Not in the mockup — the mockup's `.drop-hint` never distinguishes a
+   refused target from an accepted one (it simply never sends on drop,
+   §D59, with the outline unchanged). D59 also says the target should be
+   "marked refused", so this compounds `.dropHint` with a second class
+   using the project's existing --crit/--signal-conflict token (already
+   used for run overlap elsewhere) rather than reusing the neutral --ink
+   outline for a state that means "will not commit". */
+.track.dropHint.refused {
+  outline-color: var(--crit);
+  background-color: color-mix(in srgb, var(--crit) 7%, var(--surface));
+}
+
+/* Ported verbatim from the mockup's `.track.ineligible` /
+   `.track.ineligible::after` (D65: hint ineligible rows while dragging an
+   operator off the panel, from `skillsForNode` + `operator.skillIds`). */
+.track.ineligible {
+  background-color: color-mix(in srgb, var(--warn) 7%, var(--surface));
+}
+
+.track.ineligible::after {
+  content: "not certified";
+  position: sticky;
+  left: calc(var(--rail-w, 0px) + 8px);
+  color: var(--warn);
+  font-size: calc(10px * var(--ui-scale, 1));
+  font-weight: 700;
 }
 
 .daybound {

@@ -19,8 +19,20 @@
  * ORIGIN clientX, not from a re-measured rect.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ShiftTemplate } from "@/lib/api";
-import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
+import type {
+  ShiftTemplate,
+  BoardOperator,
+  CreateAssignmentInput,
+  AssignmentFieldEdit,
+  CapacityProbe,
+} from "@/lib/api";
+import {
+  describeSchedulerError,
+  isSchedulerError,
+  toSchedulerError,
+  probeCapacity,
+  fromEfficiency,
+} from "@/lib/api";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geometry";
 import { formatClock, addMinutes } from "../lib/time";
@@ -34,10 +46,17 @@ import {
   resizeRange,
   findRunOverlap,
   classifyCrewAgainstRun,
+  assignmentFitsRun,
+  splitEvenly,
+  splitFits,
   type DragMode,
 } from "../lib/interaction";
-import { useCreateRun, useUpdateRunFields, useDeleteRun } from "./useRunMutations";
-import { useCreateAssignment, useUpdateAssignmentFields } from "./useAssignmentMutations";
+import { useCreateRun, useUpdateRunFields, useDeleteRun, useMoveRun } from "./useRunMutations";
+import {
+  useCreateAssignment,
+  useUpdateAssignmentFields,
+  useApplySplitCoverage,
+} from "./useAssignmentMutations";
 import { useSchedulerToast, type ToastResolveCtx } from "./useSchedulerToast";
 
 export type { DragMode };
@@ -47,7 +66,10 @@ type Range = { startMin: number; endMin: number };
 export type DragSubject =
   | { kind: "run"; run: IndexedRun }
   | { kind: "assignment"; assignment: IndexedAssignment; homeRun: IndexedRun | null }
-  | { kind: "new" };
+  | { kind: "new" }
+  /** D65/§7 "panel-drag origin": a fresh operator picked up from
+   *  `OperatorPanel`, not yet attached to anything on the board. */
+  | { kind: "panel"; operator: BoardOperator };
 
 /** Public shape a renderer reads to decide whether IT is the row/block
  *  currently mid-drag (D34) — a superset of brief §5.1's `ActiveDrag`. */
@@ -59,12 +81,38 @@ export interface ActiveDrag {
   candidate: Range | null;
   moved: boolean;
   pointerId: number;
+  /** D58/D59/D65: the node id of the track row currently under the pointer
+   *  during a cross-cell run drag or a panel drag, when that row is not the
+   *  drag's own origin row — `null` otherwise (including while hovering a
+   *  group row, D59: "group rows are never drop targets"). Renderers add
+   *  `.dropHint` to that row's track. */
+  dropTargetNodeId: string | null;
+  /** D59: true once the currently-hovered target row is known to already
+   *  hold an overlapping active run — the drop will be refused. Only ever
+   *  set for a run drag; always `false` for a panel drag (no overlap
+   *  concept there). */
+  dropRefused: boolean;
+  /** T24: the live pointer position in VIEWPORT coordinates, updated on
+   *  every panel-drag pointermove — the ghost renders from this, never
+   *  from `originClientX/Y`, so it tracks the pointer through a scroll. */
+  pointerClientX: number;
+  pointerClientY: number;
 }
 
 export interface ShiftChip {
   name: string;
   startMin: number;
   endMin: number;
+}
+
+/** D62: one participant row in the split-coverage popover — either an
+ *  EXISTING overlapping assignment (`assignmentId` set, dialled down) or
+ *  the INCOMING one being created (`assignmentId` null). `efficiencyPercent`
+ *  is the popover's own live-edited state, seeded from the probe. */
+export interface SplitParticipant {
+  assignmentId: string | null;
+  label: string;
+  efficiencyPercent: number;
 }
 
 export type PopoverState =
@@ -74,6 +122,9 @@ export type PopoverState =
       range: Range;
       anchor: { x: number; y: number };
       shiftChips: ShiftChip[];
+      /** D65: set only when this popover was opened by a panel drop — the
+       *  dropped operator, pre-selected, in forced "direct" mode. */
+      presetOperatorId?: string;
     }
   | {
       kind: "run";
@@ -88,6 +139,34 @@ export type PopoverState =
       assignment: IndexedAssignment;
       homeRun: IndexedRun | null;
       anchor: { x: number; y: number };
+    }
+  | {
+      /** D61/D62: the split-coverage popover, opened PROACTIVELY from a
+       *  `capacity_probe` before anything is sent (never from a rejection —
+       *  D61). `cap`/`capPercent` are the same number in two units because
+       *  `splitFits` (Part A) works in UI percent while the live peak
+       *  readout's arithmetic is easiest to reason about in percent too. */
+      kind: "split";
+      operatorId: string;
+      operatorName: string;
+      capPercent: number;
+      participants: SplitParticipant[];
+      /** The full input `apply_split_coverage`'s new-assignment argument is
+       *  built from on confirm — everything about the incoming assignment
+       *  EXCEPT its efficiency, which lives in `participants` (the last
+       *  entry, by construction — see `openSplitPopover` below) so the
+       *  popover's own edits are the single source of truth for it. */
+      incoming: Omit<CreateAssignmentInput, "efficiencyPercent">;
+      anchor: { x: number; y: number };
+    }
+  | {
+      /** §9 debt 2: the crew-outside-the-run-window warning, moved out of
+       *  `window.confirm` (which cannot be styled or tested through the
+       *  DOM) into the popover shell. */
+      kind: "confirm";
+      message: string;
+      anchor: { x: number; y: number };
+      onConfirm: () => void;
     };
 
 interface SnapConfig {
@@ -127,19 +206,23 @@ interface InternalDragState extends ActiveDrag {
   createCurrentMin: number;
 }
 
-/** The window each mode's candidate is clamped to: a run-attached
- *  assignment stays within its OWN run's bounds for both move and resize
- *  (ASSUMPTION — see the agent report: the mockup only clamps a chip's
- *  RESIZE to its home run's bounds, letting a MOVE slide anywhere in the
- *  window and re-parent on drop. P1-4c's scope fence disables re-parenting
- *  here, and leaving a mid-drag MOVE unclamped would let a chip visually
- *  leave its band with no cross-run drop to land it anywhere sensible, so
- *  both gestures are clamped identically here). A direct assignment and a
- *  run both use the whole loaded window. Module-level and pure (no closed-
- *  over component state) so the `useCallback`s that call it need not list
- *  it as a dependency. */
+/** The window each mode's candidate is clamped to.
+ *
+ *  P1-4e REVISES this from P1-4b: a run-attached chip's RESIZE still stays
+ *  within its own run's bounds (unchanged — resizing across a run boundary
+ *  never made sense and D66 says nothing about resize), but a chip's MOVE
+ *  is no longer clamped to `homeRun` — it now slides freely across the
+ *  whole loaded window, exactly like a direct assignment, so it can
+ *  physically reach a different run's band or empty track to re-parent or
+ *  detach on drop (D66). P1-4b's own comment on this function explained
+ *  that its "clamp a MOVE to homeRun too" choice was a deliberate
+ *  stand-in for exactly this future capability ("P1-4c's scope fence
+ *  disables re-parenting here... so both gestures are clamped identically
+ *  here" — this brief is what lifts that fence). Module-level and pure (no
+ *  closed-over component state) so the `useCallback`s that call it need
+ *  not list it as a dependency. */
 function boundsFor(d: InternalDragState): Range {
-  if (d.subject.kind === "assignment" && d.homeRun) {
+  if (d.subject.kind === "assignment" && d.homeRun && d.mode !== "move") {
     return { startMin: d.homeRun.startMin, endMin: d.homeRun.endMin };
   }
   return { startMin: 0, endMin: d.windowMinutes };
@@ -151,6 +234,10 @@ export interface UseDragGestureArgs {
   to: Date;
   index: BoardIndex;
   defaultCreateMode: "run" | "direct";
+  /** D65: the active zoom, needed only for a panel drop's snap (no track
+   *  descriptor exists yet at that point the way every other gesture's
+   *  begin-call already carries one from the row it started on). */
+  zoomIndex: ZoomIndex;
   /** T13: the signed-in identity. A change cancels any in-flight drag with
    *  no mutation sent — the node the drag targeted may not even be visible
    *  to the new identity. */
@@ -185,31 +272,28 @@ export interface TrackCreateDescriptor {
 }
 
 function toastCtx(index: BoardIndex): ToastResolveCtx {
-  const runById = new Map<
-    string,
-    { productId: string; nodeId: string; startMin: number; endMin: number }
-  >();
-  for (const runs of index.runsByNode.values()) {
-    for (const r of runs) runById.set(r.id, r);
-  }
+  // P1-4e: `index.runById` (§9 debt 1) now carries exactly this shape —
+  // the ad-hoc rebuild this function used to do is no longer needed.
   return {
     operatorById: index.operatorById,
     nodeById: index.nodeById,
     productById: index.productById,
-    runById,
+    runById: index.runById,
     formatRange: (s, e) =>
       `${formatClock(addMinutes(index.windowStart, s))}–${formatClock(addMinutes(index.windowStart, e))}`,
   };
 }
 
 export function useDragGesture(args: UseDragGestureArgs) {
-  const { rootPath, from, to, index } = args;
+  const { rootPath, from, to, index, zoomIndex } = args;
 
   const createRun = useCreateRun(rootPath, from, to);
   const updateRunFields = useUpdateRunFields(rootPath, from, to);
   const deleteRun = useDeleteRun(rootPath, from, to);
+  const moveRun = useMoveRun(rootPath, from, to); // D57 — first caller (brief §1 item 3)
   const createAssignment = useCreateAssignment(rootPath, from, to);
   const updateAssignmentFields = useUpdateAssignmentFields(rootPath, from, to);
+  const applySplitCoverage = useApplySplitCoverage(rootPath, from, to); // D61/D62 — first caller
   const toast = useSchedulerToast();
 
   const [activeDrag, setActiveDrag] = useState<InternalDragState | null>(null);
@@ -220,14 +304,38 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const dragRef = useRef<InternalDragState | null>(null);
   dragRef.current = activeDrag;
 
+  // D58: the drop-target row resolver. `BoardGrid` is the one place that
+  // owns the scroll container, the row offsets, and the collapse-filtered
+  // row list, so it registers a resolver HERE via `setDropRowResolver`
+  // (returned below) instead of this hook reaching up into DOM geometry
+  // itself. A ref, not state — every pointermove reads it without causing
+  // this hook (or its consumers) to re-render when it is re-registered.
+  const dropRowResolverRef = useRef<
+    | ((
+        clientX: number,
+        clientY: number,
+      ) => { nodeId: string; isTrack: boolean; minute: number } | null)
+    | null
+  >(null);
+  const setDropRowResolver = useCallback((fn: typeof dropRowResolverRef.current) => {
+    dropRowResolverRef.current = fn;
+  }, []);
+
   const ctx = toastCtx(index);
 
   // --- T13: identity change cancels any in-flight drag, no mutation. -----
+  // T25: a SPLIT popover open when identity changes is closed too, with
+  // nothing sent — the assignments it references may not be visible to the
+  // new identity (`DevProfileSwitcher` resets the query cache). Scoped to
+  // "split" only, per T25's own literal text; the other popover kinds
+  // (create/run/assignment) are unchanged from P1-4b's existing behaviour
+  // on this transition — see the agent report's assumptions section.
   const lastUserIdRef = useRef(args.sessionUserId);
   useEffect(() => {
     if (lastUserIdRef.current !== args.sessionUserId) {
       lastUserIdRef.current = args.sessionUserId;
       if (dragRef.current) setActiveDrag(null);
+      setPopover((p) => (p?.kind === "split" ? null : p));
     }
   }, [args.sessionUserId]);
 
@@ -304,6 +412,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
       homeRun,
       createAnchorMin: 0,
       createCurrentMin: 0,
+      dropTargetNodeId: null,
+      dropRefused: false,
+      pointerClientX: e.clientX,
+      pointerClientY: e.clientY,
     };
     setActiveDrag(next);
   }, []);
@@ -367,13 +479,39 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const updateBlockDrag = useCallback(
     (e: React.PointerEvent) => {
       const d = dragRef.current;
-      if (!d || d.subject.kind === "new") return;
+      if (!d || d.subject.kind === "new" || d.subject.kind === "panel") return;
       const movedPx = Math.hypot(e.clientX - d.originClientX, e.clientY - d.originClientY);
       const moved = d.moved || movedPx >= DRAG_THRESHOLD_PX;
       const candidate = computeBlockCandidate(d, e.clientX, e.altKey);
-      setActiveDrag({ ...d, candidate, moved, altKey: e.altKey });
+
+      // D58/D59: cross-cell target resolution — a RUN move only (D57's own
+      // scope; an assignment chip's re-parenting, D66, is same-row/
+      // horizontal-only and needs no vertical row resolution). T22: this
+      // re-resolves against the CURRENT resolver/index on every move, never
+      // a value cached from pointerdown.
+      let dropTargetNodeId: string | null = null;
+      let dropRefused = false;
+      if (d.subject.kind === "run" && d.mode === "move" && dropRowResolverRef.current) {
+        const hit = dropRowResolverRef.current(e.clientX, e.clientY);
+        if (hit && hit.isTrack && hit.nodeId !== d.nodeId) {
+          dropTargetNodeId = hit.nodeId;
+          const targetRuns = index.runsByNode.get(hit.nodeId) ?? [];
+          dropRefused = findRunOverlap(candidate, targetRuns, null) !== null;
+        }
+      }
+
+      setActiveDrag({
+        ...d,
+        candidate,
+        moved,
+        altKey: e.altKey,
+        dropTargetNodeId,
+        dropRefused,
+        pointerClientX: e.clientX,
+        pointerClientY: e.clientY,
+      });
     },
-    [computeBlockCandidate],
+    [computeBlockCandidate, index],
   );
 
   const openEditPopoverFor = useCallback((d: InternalDragState, x: number, y: number) => {
@@ -396,8 +534,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
     }
   }, []);
 
+  /** §9 debt 2: the crew-outside-the-run-window warning as an in-app
+   *  confirm step (`PopoverState.kind === "confirm"`), replacing
+   *  `window.confirm` — a blocking browser dialog that "cannot be styled
+   *  or tested through the DOM as it stands" (brief §9 item 2). */
+  const askConfirm = useCallback(
+    (message: string, anchor: { x: number; y: number }, onConfirm: () => void) => {
+      setPopover({ kind: "confirm", message, anchor, onConfirm });
+    },
+    [],
+  );
+
   const commitBlockDrag = useCallback(
-    (d: InternalDragState) => {
+    (d: InternalDragState, anchor: { x: number; y: number }) => {
       const candidate = d.candidate!;
       if (d.subject.kind === "run") {
         const run = d.subject.run;
@@ -407,15 +556,85 @@ export function useDragGesture(args: UseDragGestureArgs) {
         // server actually has now, not what it had at pointerdown.
         const currentRunsOnNode = index.runsByNode.get(d.nodeId) ?? [];
         const currentCrew = index.assignmentsByRun.get(run.id) ?? [];
-        // Brief §5.3: moving a STAFFED run is refused in P1-4b (crew moves
-        // are a later brief's multi-row-transaction problem); resizing a
-        // staffed run is allowed and only warns (classifyCrewAgainstRun).
-        if (d.mode === "move" && currentCrew.length > 0) {
-          toast.info(
-            "Moving a staffed run is coming in the next build — detach or move the crew first.",
+
+        if (d.mode === "move") {
+          // D57: the refusal message is DELETED, not reworded — a staffed
+          // run now moves, crew and all, in one `move_run` call. That
+          // atomicity requirement applies just as much to a SAME-cell time
+          // move of a staffed run (the crew still needs shifting by the
+          // same delta) as to a cross-cell one, so `needsMoveRun` covers
+          // both: crossing a cell boundary (`dropTargetNodeId` set) OR
+          // carrying crew (regardless of whether the cell changes).
+          const targetNodeId = d.dropTargetNodeId;
+          // T22: the hovered target row vanished mid-drag (a refetch/
+          // collapse) — cancel silently rather than moving to a node that
+          // no longer exists in the loaded index.
+          if (targetNodeId !== null && !index.nodeById.has(targetNodeId)) return;
+
+          const needsMoveRun = targetNodeId !== null || currentCrew.length > 0;
+          const destinationNodeId = targetNodeId ?? d.nodeId;
+          const destinationRuns =
+            targetNodeId !== null ? (index.runsByNode.get(targetNodeId) ?? []) : currentRunsOnNode;
+
+          // D59: refuse a drop onto a row that already holds an
+          // overlapping active run — checked here against the CURRENT
+          // index (T10), not the drag-time `dropRefused` hint alone.
+          const overlap = findRunOverlap(candidate, destinationRuns, run.id);
+          if (overlap) {
+            const p = index.productById.get(overlap.productId);
+            toast.reverted(
+              `${index.nodeById.get(destinationNodeId)?.name ?? destinationNodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
+            );
+            return;
+          }
+
+          if (needsMoveRun) {
+            moveRun.mutate(
+              {
+                runId: run.id,
+                nodeId: destinationNodeId,
+                start: minuteDate(index.windowStart, candidate.startMin),
+                end: minuteDate(index.windowStart, candidate.endMin),
+              },
+              {
+                // T23: `eligibilityWarnings` is informational — the move
+                // has already SUCCEEDED (D60). Never treated as a failure.
+                onSuccess: (result) => {
+                  if (result.eligibilityWarnings.length > 0) {
+                    const names = result.eligibilityWarnings
+                      .map((w) => index.operatorById.get(w.operatorId)?.displayName ?? w.operatorId)
+                      .join(", ");
+                    const destName =
+                      index.nodeById.get(destinationNodeId)?.name ?? destinationNodeId;
+                    toast.info(
+                      `${result.eligibilityWarnings.length} of the crew (${names}) not certified for ${destName} — override recorded.`,
+                    );
+                  }
+                },
+                onError: (err) => failWith(err, revertLabel(d.subject)),
+              },
+            );
+            return;
+          }
+
+          // Unstaffed, same cell: a plain time-only field edit — no RPC
+          // needed (docs/api.md §4).
+          updateRunFields.mutate(
+            {
+              runId: run.id,
+              edit: {
+                timerange: {
+                  start: minuteDate(index.windowStart, candidate.startMin),
+                  end: minuteDate(index.windowStart, candidate.endMin),
+                },
+              },
+            },
+            { onError: (err) => failWith(err, revertLabel(d.subject)) },
           );
           return;
         }
+
+        // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
         const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
         if (overlap) {
           const p = index.productById.get(overlap.productId);
@@ -424,49 +643,110 @@ export function useDragGesture(args: UseDragGestureArgs) {
           );
           return;
         }
-        if (d.mode !== "move" && currentCrew.length > 0) {
+        const commitResize = () => {
+          updateRunFields.mutate(
+            {
+              runId: run.id,
+              edit: {
+                timerange: {
+                  start: minuteDate(index.windowStart, candidate.startMin),
+                  end: minuteDate(index.windowStart, candidate.endMin),
+                },
+              },
+            },
+            { onError: (err) => failWith(err, revertLabel(d.subject)) },
+          );
+        };
+        if (currentCrew.length > 0) {
           const { clipped, stranded } = classifyCrewAgainstRun(candidate, currentCrew);
           const affected = clipped.length + stranded.length;
           if (affected > 0) {
-            const ok = window.confirm(
+            askConfirm(
               `${affected} crew assignment${affected === 1 ? "" : "s"} fall outside the new run window. Continue?`,
+              anchor,
+              commitResize,
             );
-            if (!ok) return;
+            return;
           }
         }
-        updateRunFields.mutate(
-          {
-            runId: run.id,
-            edit: {
-              timerange: {
-                start: minuteDate(index.windowStart, candidate.startMin),
-                end: minuteDate(index.windowStart, candidate.endMin),
-              },
-            },
-          },
-          {
-            onError: (err) => failWith(err, revertLabel(d.subject)),
-          },
-        );
+        commitResize();
       } else if (d.subject.kind === "assignment") {
         const a = d.subject.assignment;
+        const nodeId = d.nodeId; // D66 is same-row only — a chip never crosses cells.
+        const homeRun = d.homeRun;
+
+        // D66: does the candidate still fit its current run? A different
+        // run on the SAME node? No run at all (detach, or stay direct)?
+        // Picking the target by CONTAINMENT (assignmentFitsRun) is what
+        // makes D66's "dropping onto a run whose time range does not
+        // contain the assignment is refused before sending" hold BY
+        // CONSTRUCTION here — we only ever select a run that already
+        // contains the candidate, so there is no separate rejection branch
+        // to write (see the agent report's assumptions section for the
+        // fuller reasoning, including the direct-assignment-onto-a-run
+        // direction this generalizes to, which the mockup's `startDirectDrag`
+        // does not attempt but which reuses the identical mechanism).
+        const stillFitsHome = homeRun !== null && assignmentFitsRun(candidate, homeRun);
+        const runsHere = index.runsByNode.get(nodeId) ?? [];
+        const otherFit = stillFitsHome
+          ? null
+          : (runsHere.find(
+              (r) => (homeRun === null || r.id !== homeRun.id) && assignmentFitsRun(candidate, r),
+            ) ?? null);
+
+        const edit: AssignmentFieldEdit = {
+          timerange: {
+            start: minuteDate(index.windowStart, candidate.startMin),
+            end: minuteDate(index.windowStart, candidate.endMin),
+          },
+        };
+        if (!stillFitsHome) {
+          if (otherFit) {
+            edit.runId = otherFit.id;
+            edit.productId = null;
+          } else if (homeRun !== null) {
+            // Detach: mirrors `delete_run`'s own detach-mode UPDATE
+            // (docs/api.md §3) — `run_id = NULL, product_id = <run's
+            // product>`, both in the same patch.
+            edit.runId = null;
+            edit.productId = homeRun.productId;
+          }
+          // else: was already direct and still fits no run — no
+          // runId/productId change, just the time move.
+        }
+
+        // P1-4e considered, and rejected, running a `capacity_probe` +
+        // split-coverage popover ahead of an EXISTING chip's own time
+        // move (brief §5 step 1 lists "chip move" as a split-coverage
+        // trigger). `apply_split_coverage`'s `p_adjustments` shape
+        // (docs/api.md §3) only ever carries `{assignment_id, efficiency}`
+        // — no `timerange` — so an existing assignment that is both
+        // MOVING and needing its efficiency dialled down cannot be
+        // expressed as that call's `p_new_assignment` (reserved for a
+        // brand-new INSERT) either. Making this case go through the split
+        // flow would need a second write after `apply_split_coverage`,
+        // which hazard #4 forbids ("never several calls"). Left as the
+        // ordinary `updateAssignmentFields` PATCH below; the
+        // `assignments_capacity` trigger still guards it exactly as
+        // before P1-4e, and a rejection surfaces through the existing
+        // `CapacityExceeded` toast path (`failWith`), unchanged.
         updateAssignmentFields.mutate(
-          {
-            assignmentId: a.id,
-            edit: {
-              timerange: {
-                start: minuteDate(index.windowStart, candidate.startMin),
-                end: minuteDate(index.windowStart, candidate.endMin),
-              },
-            },
-          },
-          {
-            onError: (err) => failWith(err, revertLabel(d.subject)),
-          },
+          { assignmentId: a.id, edit },
+          { onError: (err) => failWith(err, revertLabel(d.subject)) },
         );
       }
     },
-    [index, ctx, toast, updateRunFields, updateAssignmentFields, failWith, revertLabel],
+    [
+      index,
+      ctx,
+      toast,
+      moveRun,
+      updateRunFields,
+      updateAssignmentFields,
+      failWith,
+      revertLabel,
+      askConfirm,
+    ],
   );
 
   const endBlockDrag = useCallback(
@@ -474,14 +754,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const d = dragRef.current;
       if (!d) return;
       (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+      const anchor = { x: e.clientX, y: e.clientY };
       // T11: clear activeDrag BEFORE calling .mutate() — the optimistic
       // patch must never be read back in as a new drag origin.
       setActiveDrag(null);
       if (!d.moved) {
-        openEditPopoverFor(d, e.clientX, e.clientY);
+        openEditPopoverFor(d, anchor.x, anchor.y);
         return;
       }
-      commitBlockDrag(d);
+      commitBlockDrag(d, anchor);
     },
     [openEditPopoverFor, commitBlockDrag],
   );
@@ -549,6 +830,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
         homeRun: null,
         createAnchorMin: anchorMin,
         createCurrentMin: anchorMin,
+        dropTargetNodeId: null,
+        dropRefused: false,
+        pointerClientX: e.clientX,
+        pointerClientY: e.clientY,
       };
       setActiveDrag(next);
     },
@@ -672,6 +957,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
                 ctxDescriptor.subject.kind === "assignment" ? ctxDescriptor.subject.homeRun : null,
               createAnchorMin: 0,
               createCurrentMin: 0,
+              dropTargetNodeId: null,
+              dropRefused: false,
+              pointerClientX: 0,
+              pointerClientY: 0,
             };
       const original = base.original!;
       const cur = base.candidate ?? original;
@@ -692,7 +981,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const d = dragRef.current;
       if (!d || d.pointerId !== -1) return;
       setActiveDrag(null);
-      commitBlockDrag(d);
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      commitBlockDrag(d, { x: rect.left, y: rect.bottom });
     },
     [commitBlockDrag],
   );
@@ -719,10 +1009,156 @@ export function useDragGesture(args: UseDragGestureArgs) {
   );
 
   // --------------------------------------------------------------------
+  // D65/§7 — panel drag origin. `OperatorPanel` wires these three from
+  // pointerdown/move/up on each roster chip, the same D33 pointer-capture
+  // pattern as every other drag in this file (one state machine, D29 — no
+  // second controller). D65's own words: "On drop, open the create popover
+  // pre-filled with that operator and the dropped time range, in DIRECT
+  // mode, then follow D61/D64" — so there is no separate "auto-staff the
+  // hovered run band" branch here (the mockup's `startPanelDrag` has one;
+  // this brief's own decision text does not ask for it — see the agent
+  // report's assumptions section). Row-level hover detection still exists,
+  // for the `.dropHint` highlight and the D65-required `.ineligible` hint
+  // (computed per-row in `TrackRow` from `skillsForNode` + the dragged
+  // operator's own `skillIds`, never a `check_eligibility` round trip per
+  // hovered row — D65's explicit instruction).
+  // --------------------------------------------------------------------
+
+  const beginPanelDrag = useCallback(
+    (operator: BoardOperator, e: React.PointerEvent) => {
+      setPopover(null);
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      const next: InternalDragState = {
+        mode: "create",
+        nodeId: "",
+        subject: { kind: "panel", operator },
+        original: null,
+        candidate: null,
+        moved: false,
+        pointerId: e.pointerId,
+        pxPerHour: 0,
+        windowMinutes: index.windowMinutes,
+        snap: { useShiftSnap: false, snapMinutes: 15, shiftPoints: [] },
+        originClientX: e.clientX,
+        originClientY: e.clientY,
+        altKey: e.altKey,
+        runsOnNode: [],
+        crew: [],
+        homeRun: null,
+        createAnchorMin: 0,
+        createCurrentMin: 0,
+        dropTargetNodeId: null,
+        dropRefused: false,
+        pointerClientX: e.clientX,
+        pointerClientY: e.clientY,
+      };
+      setActiveDrag(next);
+    },
+    [index],
+  );
+
+  const updatePanelDrag = useCallback((e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d || d.subject.kind !== "panel") return;
+    let dropTargetNodeId: string | null = null;
+    if (dropRowResolverRef.current) {
+      const hit = dropRowResolverRef.current(e.clientX, e.clientY);
+      if (hit && hit.isTrack) dropTargetNodeId = hit.nodeId;
+    }
+    setActiveDrag({
+      ...d,
+      dropTargetNodeId,
+      moved: true,
+      pointerClientX: e.clientX, // T24: the ghost tracks THIS, every move.
+      pointerClientY: e.clientY,
+    });
+  }, []);
+
+  const endPanelDrag = useCallback(
+    (e: React.PointerEvent) => {
+      const d = dragRef.current;
+      if (!d || d.subject.kind !== "panel") return;
+      try {
+        (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+      } catch {
+        // pointer capture may already be gone (pointercancel) — fine.
+      }
+      setActiveDrag(null);
+      // T24: resolved fresh, from THIS event — never a row/minute cached
+      // from an earlier pointermove — so it reflects the container's
+      // scroll position at the instant of drop.
+      const hit = dropRowResolverRef.current
+        ? dropRowResolverRef.current(e.clientX, e.clientY)
+        : null;
+      // D59-style: not a valid track row (off the board, or a group row)
+      // — cancel silently, mirroring T22's "target no longer exists".
+      if (!hit || !hit.isTrack || !index.nodeById.has(hit.nodeId)) return;
+
+      const template = index.templateForNode.get(hit.nodeId) ?? null;
+      const windowMinutes = index.windowMinutes;
+      const snap = snapConfigFor(zoomIndex, template, index.dayCount);
+      const rawStart = Math.max(0, Math.min(windowMinutes, hit.minute));
+      const startMin = Math.max(
+        0,
+        Math.min(
+          windowMinutes,
+          snapMinute(rawStart, {
+            altKey: e.altKey,
+            useShiftSnap: snap.useShiftSnap,
+            snapMinutes: snap.snapMinutes,
+            shiftPoints: snap.shiftPoints,
+          }),
+        ),
+      );
+      // Mockup's panel-drop default duration (240 min), clamped to the
+      // window — the same fallback `defaultShiftRange` already uses for a
+      // keyboard create with no explicit drag distance.
+      const endMin = Math.min(windowMinutes, startMin + 240);
+      if (endMin - startMin < MIN_DURATION_MINUTES) return; // D31
+
+      const chips = shiftChipsFor(template, startMin, windowMinutes);
+      setPopover({
+        kind: "create",
+        nodeId: hit.nodeId,
+        range: { startMin, endMin },
+        anchor: { x: e.clientX, y: e.clientY },
+        shiftChips: chips,
+        presetOperatorId: d.subject.operator.id,
+      });
+    },
+    [index, zoomIndex],
+  );
+
+  // --------------------------------------------------------------------
   // Popover commit/cancel actions, used by the popover components.
   // --------------------------------------------------------------------
 
   const closePopover = useCallback(() => setPopover(null), []);
+
+  // §9 debt 1: `saveRunFields`/`deleteRunWithMode`/`saveAssignmentFields`/
+  // `removeAssignment` only ever receive an id — these two resolve a
+  // revert label from it via `index.runById`/`index.assignmentById` (the
+  // same maps `boardIndex.ts` now builds per that debt), so their onError
+  // handlers can go through `failWith` (D37's one true path, T12) instead
+  // of a bare `toast.schedulerError` with no clue which block reverted.
+  const runLabelById = useCallback(
+    (runId: string): string => {
+      const run = index.runById.get(runId);
+      if (!run) return "Run";
+      const p = index.productById.get(run.productId);
+      return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`;
+    },
+    [index, ctx],
+  );
+  const assignmentLabelById = useCallback(
+    (assignmentId: string): string => {
+      const a = index.assignmentById.get(assignmentId);
+      if (!a) return "Assignment";
+      const op = index.operatorById.get(a.operatorId);
+      return `${op?.displayName ?? "Assignment"} ${ctx.formatRange?.(a.startMin, a.endMin) ?? ""}`;
+    },
+    [index, ctx],
+  );
 
   const submitCreateRun = useCallback(
     (nodeId: string, range: Range, productId: string, plannedHeadcount: number | undefined) => {
@@ -755,6 +1191,46 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [index, ctx, toast, createRun],
   );
 
+  /**
+   * D61/D64: opens PROACTIVELY from a `capacity_probe`, never from a
+   * rejection. `incoming` is the FULL `CreateAssignmentInput` minus its own
+   * efficiency (that lives in `participants`, D62) so `confirmSplit` below
+   * can build `apply_split_coverage`'s `p_new_assignment` straight off it.
+   */
+  const openSplitPopover = useCallback(
+    (probe: CapacityProbe, incoming: CreateAssignmentInput, anchor: { x: number; y: number }) => {
+      const operator = index.operatorById.get(incoming.operatorId);
+      const participants: SplitParticipant[] = probe.overlapping.map((o) => ({
+        assignmentId: o.assignmentId,
+        label: `${o.nodeName} · ${fromEfficiency(o.efficiency)}%`,
+        efficiencyPercent: fromEfficiency(o.efficiency),
+      }));
+      participants.push({
+        assignmentId: null,
+        label: `${index.nodeById.get(incoming.nodeId)?.name ?? incoming.nodeId} · incoming`,
+        efficiencyPercent: incoming.efficiencyPercent ?? 100,
+      });
+      setPopover({
+        kind: "split",
+        operatorId: incoming.operatorId,
+        operatorName: operator?.displayName ?? incoming.operatorId,
+        capPercent: Math.round(probe.cap * 100),
+        participants,
+        incoming,
+        anchor,
+      });
+    },
+    [index],
+  );
+
+  /**
+   * D61: called by BOTH the create popover's direct-assignment submit AND
+   * a panel drop's create popover (D65 routes every panel drop through the
+   * create popover in direct mode, so there is exactly one code path here,
+   * not two). Probes `capacity_probe` first; `fits` proceeds with the
+   * ordinary create, `!fits` opens the split popover pre-populated —
+   * never the other way around (D61 forbids opening it FROM a rejection).
+   */
   const submitCreateDirect = useCallback(
     (
       nodeId: string,
@@ -764,58 +1240,161 @@ export function useDragGesture(args: UseDragGestureArgs) {
       efficiencyPercent: number,
       targetQty: number | undefined,
       targetUnit: string | undefined,
+      eligibilityOverride: boolean,
+      overrideReason: string | undefined,
+      anchor: { x: number; y: number },
     ) => {
-      createAssignment.mutate(
-        {
-          nodeId,
-          operatorId,
-          target: { kind: "direct", productId },
-          start: minuteDate(index.windowStart, range.startMin),
-          end: minuteDate(index.windowStart, range.endMin),
-          efficiencyPercent,
-          targetQty,
-          targetUnit,
-        },
-        {
+      const start = minuteDate(index.windowStart, range.startMin);
+      const end = minuteDate(index.windowStart, range.endMin);
+      const input: CreateAssignmentInput = {
+        nodeId,
+        operatorId,
+        target: { kind: "direct", productId },
+        start,
+        end,
+        efficiencyPercent,
+        targetQty,
+        targetUnit,
+        eligibilityOverride,
+        overrideReason,
+      };
+      const sendCreate = () => {
+        createAssignment.mutate(input, {
           onError: (err) => {
             const se = isSchedulerError(err) ? err : toSchedulerError(err);
             // §7: CapacityExceeded on create is not auto-retried, and the
             // brief explicitly wants this path exercised for real (§7).
+            // With D61's proactive probe this is now the RACE fallback
+            // (the probe said "fits", the write disagreed) rather than
+            // the common path.
+            toast.schedulerError(se, ctx);
+          },
+        });
+        setPopover(null);
+      };
+      probeCapacity({ operatorId, start, end, efficiencyPercent })
+        .then((probe) => {
+          if (probe.fits) {
+            sendCreate();
+          } else {
+            openSplitPopover(probe, input, anchor);
+          }
+        })
+        .catch(() => {
+          // The probe is a convenience, never a gate (docs/api.md §2: it
+          // "raises nothing"; a thrown error here is a network blip, not a
+          // capacity answer). Fall back to the authoritative write — its
+          // own CapacityExceeded handling is still the backstop.
+          sendCreate();
+        });
+    },
+    [index, ctx, toast, createAssignment, openSplitPopover],
+  );
+
+  /** D62's "Split evenly" / live edits / confirm / cancel. */
+  const updateSplitParticipant = useCallback((index_: number, efficiencyPercent: number) => {
+    setPopover((p) => {
+      if (!p || p.kind !== "split") return p;
+      const participants = p.participants.map((row, i) =>
+        i === index_ ? { ...row, efficiencyPercent } : row,
+      );
+      return { ...p, participants };
+    });
+  }, []);
+
+  const splitEvenlyAction = useCallback(() => {
+    setPopover((p) => {
+      if (!p || p.kind !== "split") return p;
+      const shares = splitEvenly(p.participants.length, p.capPercent);
+      const participants = p.participants.map((row, i) => ({
+        ...row,
+        efficiencyPercent: shares[i] ?? row.efficiencyPercent,
+      }));
+      return { ...p, participants };
+    });
+  }, []);
+
+  const confirmSplit = useCallback(() => {
+    setPopover((p) => {
+      if (!p || p.kind !== "split") return p;
+      const percents = p.participants.map((row) => row.efficiencyPercent);
+      if (!splitFits(percents, p.capPercent)) return p; // Confirm stays disabled while over cap (D62)
+
+      const adjustments = p.participants
+        .filter(
+          (row): row is SplitParticipant & { assignmentId: string } => row.assignmentId !== null,
+        )
+        .map((row) => ({
+          assignmentId: row.assignmentId,
+          efficiencyPercent: row.efficiencyPercent,
+        }));
+      const incomingParticipant = p.participants.find((row) => row.assignmentId === null);
+
+      // D63: NOT peak load — this is exactly the arithmetic `splitFits`
+      // above already validated (the sum of what the user edited). The
+      // authoritative peak re-check happens server-side inside
+      // `apply_split_coverage` itself (`operator_peak_load()`), and T21
+      // covers what happens when THAT disagrees with this client-side sum.
+      applySplitCoverage.mutate(
+        {
+          adjustments,
+          newAssignment: {
+            ...p.incoming,
+            efficiencyPercent: incomingParticipant?.efficiencyPercent ?? 100,
+          },
+        },
+        {
+          onError: (err) => {
+            // T21: the probe was stale by the time the user confirmed.
+            // `apply_split_coverage` is authoritative; a `CapacityExceeded`
+            // here is normal, not exceptional — shown IN the popover
+            // (re-open it with the user's edits intact) rather than
+            // closing it and toasting, because re-editing is the natural
+            // next step.
+            const se = isSchedulerError(err) ? err : toSchedulerError(err);
+            if (se.kind === "CapacityExceeded") {
+              toast.info(
+                `${p.operatorName} would still exceed capacity (peak ${Math.round(se.peak * 100)}%, cap ${Math.round(se.cap * 100)}%) — adjust and try again.`,
+              );
+              setPopover(p); // keep it open with the user's edits
+              return;
+            }
             toast.schedulerError(se, ctx);
           },
         },
       );
-      setPopover(null);
-    },
-    [index, ctx, toast, createAssignment],
-  );
+      return null; // optimistic close; re-opened above on a CapacityExceeded race
+    });
+  }, [applySplitCoverage, toast, ctx]);
+
+  const cancelSplit = useCallback(() => setPopover(null), []); // D62: Cancel reverts, sends nothing.
+
+  const confirmYes = useCallback(() => {
+    setPopover((p) => {
+      if (!p || p.kind !== "confirm") return p;
+      p.onConfirm();
+      return null;
+    });
+  }, []);
+  const confirmNo = useCallback(() => setPopover(null), []);
 
   const saveRunFields = useCallback(
     (runId: string, notes: string | null, plannedHeadcount: number | null) => {
       updateRunFields.mutate(
         { runId, edit: { notes, plannedHeadcount } },
-        {
-          onError: (err) =>
-            toast.schedulerError(isSchedulerError(err) ? err : toSchedulerError(err), ctx),
-        },
+        { onError: (err) => failWith(err, runLabelById(runId)) },
       );
       setPopover(null);
     },
-    [updateRunFields, toast, ctx],
+    [updateRunFields, failWith, runLabelById],
   );
 
   const deleteRunWithMode = useCallback(
     (runId: string, mode: "cascade" | "detach") => {
-      deleteRun.mutate(
-        { runId, mode },
-        {
-          onError: (err) =>
-            toast.schedulerError(isSchedulerError(err) ? err : toSchedulerError(err), ctx),
-        },
-      );
+      deleteRun.mutate({ runId, mode }, { onError: (err) => failWith(err, runLabelById(runId)) });
       setPopover(null);
     },
-    [deleteRun, toast, ctx],
+    [deleteRun, failWith, runLabelById],
   );
 
   const saveAssignmentFields = useCallback(
@@ -828,14 +1407,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
     ) => {
       updateAssignmentFields.mutate(
         { assignmentId, edit: { efficiencyPercent, targetQty, targetUnit, status } },
-        {
-          onError: (err) =>
-            toast.schedulerError(isSchedulerError(err) ? err : toSchedulerError(err), ctx),
-        },
+        { onError: (err) => failWith(err, assignmentLabelById(assignmentId)) },
       );
       setPopover(null);
     },
-    [updateAssignmentFields, toast, ctx],
+    [updateAssignmentFields, failWith, assignmentLabelById],
   );
 
   /** §5.4/§5.3: there is no delete_assignment RPC and no `useDeleteAssignment`
@@ -848,20 +1424,18 @@ export function useDragGesture(args: UseDragGestureArgs) {
     (assignmentId: string) => {
       updateAssignmentFields.mutate(
         { assignmentId, edit: { status: "cancelled" } },
-        {
-          onError: (err) =>
-            toast.schedulerError(isSchedulerError(err) ? err : toSchedulerError(err), ctx),
-        },
+        { onError: (err) => failWith(err, assignmentLabelById(assignmentId)) },
       );
       setPopover(null);
     },
-    [updateAssignmentFields, toast, ctx],
+    [updateAssignmentFields, failWith, assignmentLabelById],
   );
 
   return {
     activeDrag: activeDrag as ActiveDrag | null,
     popover,
     closePopover,
+    setDropRowResolver,
     beginBlockDrag,
     updateBlockDrag,
     endBlockDrag,
@@ -869,6 +1443,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
     beginTrackCreateDrag,
     updateTrackCreateDrag,
     endTrackCreateDrag,
+    beginPanelDrag,
+    updatePanelDrag,
+    endPanelDrag,
     handleBlockKeyDown,
     handleBlockKeyUp,
     handleTrackKeyDown,
@@ -878,6 +1455,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
     deleteRunWithMode,
     saveAssignmentFields,
     removeAssignment,
+    updateSplitParticipant,
+    splitEvenlyAction,
+    confirmSplit,
+    cancelSplit,
+    confirmYes,
+    confirmNo,
   };
 }
 

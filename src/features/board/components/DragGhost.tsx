@@ -1,4 +1,4 @@
-import { minutesToPx, BAND_TOP } from "../lib/geometry";
+import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, addMinutes } from "../lib/time";
 import styles from "./DragGhost.module.css";
 
@@ -10,10 +10,13 @@ import styles from "./DragGhost.module.css";
  */
 export function DragGhost({
   candidate,
+  density,
   windowStart,
   pxPerHour,
 }: {
   candidate: { startMin: number; endMin: number } | null;
+  /** P1-4c D44/D49: `density.bandTop` replaces the removed `BAND_TOP` constant. */
+  density: Density;
   windowStart: Date;
   pxPerHour: number;
 }) {
@@ -23,7 +26,7 @@ export function DragGhost({
   const hasRange = candidate.endMin > candidate.startMin;
 
   return (
-    <div className={styles.ghost} style={{ left, width, top: BAND_TOP }}>
+    <div className={styles.ghost} style={{ left, width, top: density.bandTop }}>
       {hasRange
         ? `${formatClock(addMinutes(windowStart, candidate.startMin))}–${formatClock(addMinutes(windowStart, candidate.endMin))}`
         : ""}

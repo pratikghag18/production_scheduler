@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoardWindow } from "@/lib/api";
 import { buildBoardIndex } from "@/features/board/lib/boardIndex";
+import { DENSITIES } from "@/features/board/lib/geometry";
 
 /**
  * §12 cases 14-19, ported to Vitest. Fixture mirrors supabase/seed.sql's
@@ -8,6 +9,12 @@ import { buildBoardIndex } from "@/features/board/lib/boardIndex";
  * in this container (no npm) — the /tmp/harness copy of this exact
  * boardIndex.ts + an equivalent fixture was executed (see the agent
  * report).
+ *
+ * P1-4c addendum: `buildBoardIndex` now takes a `density` 4th argument —
+ * every call below passes `DENSITIES[1]` (Standard), which reproduces the
+ * pre-P1-4c hardcoded row-geometry constants exactly (brief §3/§8 case 1),
+ * so every existing expected number here is unchanged from before this
+ * brief.
  */
 
 const t38 = {
@@ -313,29 +320,30 @@ function makeFixture(): BoardWindow {
 
 const windowStart = new Date("2026-08-17T00:00:00Z");
 const windowEnd = new Date("2026-08-20T00:00:00Z"); // 3 days
+const STANDARD = DENSITIES[1];
 
 describe("boardIndex.ts", () => {
   it("nearest-ancestor template resolution (case 14)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd);
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
     expect(idx.templateForNode.get("n-cell1")?.id).toBe("t38");
     expect(idx.templateForNode.get("n-cell6")?.id).toBe("t210"); // line overrides department
     expect(idx.templateForNode.get("n-otherx")).toBeNull();
   });
 
   it("skillsForNode unions ancestor + own requirement, deduped (case 15)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd);
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
     const names = (idx.skillsForNode.get("n-cell6") ?? []).map((s) => s.name).sort();
     expect(names).toEqual(["CNC", "Forklift"]);
   });
 
   it("a run-attached assignment lands under its OWN nodeId, not its run's (case 16)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd);
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
     expect((idx.assignmentsByNode.get("n-cell6") ?? []).some((a) => a.id === "a1")).toBe(true);
     expect((idx.assignmentsByNode.get("n-cell1") ?? []).some((a) => a.id === "a1")).toBe(false);
   });
 
   it("cancelled rows are excluded from every map (case 17)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd);
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
     const anyCancelledRun = [...idx.runsByNode.values()].flat().some((r) => r.id === "r-cancelled");
     const anyCancelledAssignment = [...idx.assignmentsByNode.values()]
       .flat()
@@ -345,23 +353,23 @@ describe("boardIndex.ts", () => {
   });
 
   it("a malformed timerange drops that row, counts it, and does not throw (case 18)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd);
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
     expect(idx.droppedRanges).toBe(1);
     expect((idx.assignmentsByNode.get("n-otherx") ?? []).some((a) => a.id === "a-ok")).toBe(true);
   });
 
   it("capacityCap reads org.settings, falls back to 1.0 (case 19)", () => {
     const fixture = makeFixture();
-    expect(buildBoardIndex(fixture, windowStart, windowEnd).capacityCap).toBe(1.2);
+    expect(buildBoardIndex(fixture, windowStart, windowEnd, STANDARD).capacityCap).toBe(1.2);
 
     const empty = { ...fixture, org: { ...fixture.org, settings: {} } };
-    expect(buildBoardIndex(empty, windowStart, windowEnd).capacityCap).toBe(1.0);
+    expect(buildBoardIndex(empty, windowStart, windowEnd, STANDARD).capacityCap).toBe(1.0);
 
     const nullSettings = { ...fixture, org: { ...fixture.org, settings: null } };
-    expect(buildBoardIndex(nullSettings, windowStart, windowEnd).capacityCap).toBe(1.0);
+    expect(buildBoardIndex(nullSettings, windowStart, windowEnd, STANDARD).capacityCap).toBe(1.0);
 
     const badCap = { ...fixture, org: { ...fixture.org, settings: { capacity_cap: "lots" } } };
-    expect(buildBoardIndex(badCap, windowStart, windowEnd).capacityCap).toBe(1.0);
+    expect(buildBoardIndex(badCap, windowStart, windowEnd, STANDARD).capacityCap).toBe(1.0);
   });
 
   /**
@@ -403,7 +411,7 @@ describe("boardIndex.ts", () => {
       mk("j-b", "2026-08-17 01:40:00+00", "2026-08-17 03:20:00+00"),
     ] as unknown as BoardWindow["assignments"];
 
-    const ix = buildBoardIndex(data, windowStart, windowEnd);
+    const ix = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
     const row = ix.rows.find((r) => r.node.id === "n-otherx")!;
     expect(row.laneCount).toBe(1);
     expect(row.height).toBe(36 + 1 * 28 + 4);
@@ -413,8 +421,15 @@ describe("boardIndex.ts", () => {
   });
 
   it("a node whose level id is missing from levels is a group row, no throw (T8)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd);
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
     const row = idx.rows.find((r) => r.node.id === "n-unknownlevel");
     expect(row?.isTrack).toBe(false);
+  });
+
+  it("P1-4c: BoardIndex.density round-trips the density it was given", () => {
+    for (const d of DENSITIES) {
+      const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, d);
+      expect(idx.density).toBe(d);
+    }
   });
 });

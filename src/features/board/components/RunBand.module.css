@@ -12,7 +12,7 @@
   user-select: none;
   overflow: hidden;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   z-index: 2;
   cursor: grab;
   touch-action: none;
@@ -29,12 +29,12 @@
 
 .tm {
   color: var(--ink-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .hc {
   margin-left: auto;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 700;
   padding: 1px 7px;
   border-radius: 999px;

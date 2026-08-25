@@ -1,8 +1,9 @@
 /**
- * Pure geometry and layout (brief P1-4a §4.2). No React, no CSS, no DOM
- * API. The one import is a type-only import from `@/lib/api` — it is
- * erased entirely under `node --experimental-strip-types` (brief §4/§12),
- * so this module still executes standalone.
+ * Pure geometry and layout (brief P1-4a §4.2, extended by P1-4c §4 for
+ * density). No React, no CSS, no DOM API. The one import is a type-only
+ * import from `@/lib/api` — it is erased entirely under `node
+ * --experimental-strip-types` (brief §4/§12), so this module still
+ * executes standalone.
  *
  * `MINUTES_PER_DAY` is intentionally duplicated from `./time.ts` rather
  * than imported — importing a *value* from a sibling module would be a
@@ -25,6 +26,147 @@ export const ZOOMS = [
 ] as const;
 
 export type ZoomIndex = 0 | 1 | 2;
+
+// ---------------------------------------------------------------------------
+// P1-4c D43 — density table. Zoom is the *horizontal* scale (px per hour);
+// density is the *vertical* one. They are independent and both are
+// user-chosen (D46) — density is never derived from viewport size.
+//
+// Standard (index 1) reproduces today's pre-P1-4c constants EXACTLY:
+// GROUP_ROW_HEIGHT was 30, BAND_TOP was 4, LANE_TOP_OFFSET was 36,
+// LANE_HEIGHT was 28 — so at Standard density nothing moves by a pixel
+// (brief §3, the acceptance-item-1 regression guard, and §8 case 1).
+// ---------------------------------------------------------------------------
+
+/**
+ * Widened deliberately. P1-4c's D43 wrote this table `as const`, which made
+ * `Density` a union of LITERAL types (`laneHeight: 34 | 28 | 22`) — fine while
+ * the only densities were the three in the table, but P1-4d's `scaleDensity`
+ * returns computed numbers, which no literal type can hold. `as const` and a
+ * scaling function are mutually exclusive; the interface is what reconciles
+ * them. (Design-session fix at P1-4d acceptance — the brief specified both and
+ * they cannot both be true.)
+ */
+export interface Density {
+  name: string;
+  laneHeight: number;
+  laneTopOffset: number;
+  groupRowHeight: number;
+  bandTop: number;
+  bandHeight: number;
+  rowPadBottom: number;
+  /** Height of an assignment chip / direct block inside a lane. */
+  chipHeight: number;
+  /** Height (and width) of the round operator avatar inside a chip. */
+  avatarSize: number;
+}
+
+export const DENSITIES: readonly Density[] = [
+  {
+    name: "Comfortable",
+    laneHeight: 34,
+    laneTopOffset: 42,
+    groupRowHeight: 36,
+    bandTop: 5,
+    bandHeight: 30,
+    rowPadBottom: 6,
+    chipHeight: 26,
+    avatarSize: 18,
+  },
+  {
+    name: "Standard",
+    laneHeight: 28,
+    laneTopOffset: 36,
+    groupRowHeight: 30,
+    bandTop: 4,
+    bandHeight: 26,
+    rowPadBottom: 4,
+    chipHeight: 22,
+    avatarSize: 15,
+  },
+  {
+    name: "Compact",
+    laneHeight: 22,
+    laneTopOffset: 28,
+    groupRowHeight: 24,
+    bandTop: 3,
+    bandHeight: 22,
+    rowPadBottom: 3,
+    chipHeight: 18,
+    avatarSize: 13,
+  },
+];
+
+export type DensityIndex = 0 | 1 | 2;
+
+// ---------------------------------------------------------------------------
+// P1-4d D53 — density mode: automatic Fit, or a manual override that turns
+// Fit off and renders one of the three named densities unscaled.
+// ---------------------------------------------------------------------------
+
+export type DensityMode = "fit" | DensityIndex;
+
+// ---------------------------------------------------------------------------
+// P1-4d D51/D52 — automatic vertical fit. `computeFitScale` derives one
+// scale factor from NATURAL (Standard, unscaled) row heights and the
+// measured available height, in a single pass. It must never be called
+// with heights that were themselves already produced by a previous
+// `scaleDensity` call — that turns a single computation into a feedback
+// loop that oscillates instead of converging (brief §3 item 3 / mutation
+// M5). `scaleDensity` then produces a new `Density` with every numeric
+// field multiplied by that factor and rounded to an integer pixel value.
+// ---------------------------------------------------------------------------
+
+/** D51: below this, a two-row board 600px tall is a worse board, not a better one. */
+export const FIT_MIN = 0.75;
+/** D51: above this, one tiny row stretched to fill a TV is a worse board too. */
+export const FIT_MAX = 2.5;
+
+/**
+ * D51. `naturalHeights` are row heights at Standard, unscaled. Returns 1
+ * when there is nothing to measure (no rows, or availableHeight <= 0) — a
+ * board that has not been measured yet must render at its natural size,
+ * never at a degenerate scale.
+ */
+export function computeFitScale(naturalHeights: number[], availableHeight: number): number {
+  // NaN/Infinity guard, added by the design session's verification pass.
+  // `Math.max(FIT_MIN, NaN)` is NaN and `<= 0` is false for NaN, so without
+  // this an unmeasured or garbage input propagates a NaN scale into
+  // `scaleDensity`, every row height becomes NaN, and the board renders
+  // blank. Not reachable through today's call path (ResizeObserver always
+  // reports finite numbers) — but this single number is what all board
+  // geometry hangs off, so it is cheap insurance rather than a live fix.
+  if (!Number.isFinite(availableHeight) || availableHeight <= 0) return 1;
+  if (naturalHeights.length === 0) return 1;
+  const naturalTotal = naturalHeights.reduce((sum, h) => sum + h, 0);
+  if (!Number.isFinite(naturalTotal) || naturalTotal <= 0) return 1;
+  const raw = availableHeight / naturalTotal;
+  if (!Number.isFinite(raw)) return 1;
+  return Math.min(FIT_MAX, Math.max(FIT_MIN, raw));
+}
+
+/**
+ * D52. Every numeric field of `base`, multiplied by `factor` and rounded to
+ * an integer — row offsets are pixel positions, and a sub-pixel one blurs
+ * every border on the board. `name` is preserved. Does not mutate `base`.
+ * `scaleDensity(d, 1)` returns values equal to `d` for every field (every
+ * field of every `DENSITIES` entry is already an integer, and rounding an
+ * integer times 1 leaves it unchanged) — the Fit-off regression guard
+ * (brief §6 case 1).
+ */
+export function scaleDensity(base: Density, factor: number): Density {
+  return {
+    name: base.name,
+    laneHeight: Math.round(base.laneHeight * factor),
+    laneTopOffset: Math.round(base.laneTopOffset * factor),
+    groupRowHeight: Math.round(base.groupRowHeight * factor),
+    bandTop: Math.round(base.bandTop * factor),
+    bandHeight: Math.round(base.bandHeight * factor),
+    rowPadBottom: Math.round(base.rowPadBottom * factor),
+    chipHeight: Math.round(base.chipHeight * factor),
+    avatarSize: Math.round(base.avatarSize * factor),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Pixel <-> minute conversion.
@@ -59,15 +201,15 @@ export function packLanes<T extends { startMin: number; endMin: number }>(
   return { laneOf, laneCount: laneEnds.length };
 }
 
-/** Mockup: `h = 36 + max(1, lanes) * 28 + 4`. */
-export function trackRowHeight(laneCount: number): number {
-  return 36 + Math.max(1, laneCount) * 28 + 4;
+/**
+ * D44: `trackRowHeight` is density-aware. Mockup/pre-P1-4c formula at
+ * Standard: `h = 36 + max(1, lanes) * 28 + 4` — that is exactly
+ * `density.laneTopOffset + max(1, laneCount) * density.laneHeight +
+ * density.rowPadBottom` evaluated at `DENSITIES[1]`.
+ */
+export function trackRowHeight(laneCount: number, density: Density): number {
+  return density.laneTopOffset + Math.max(1, laneCount) * density.laneHeight + density.rowPadBottom;
 }
-
-export const GROUP_ROW_HEIGHT = 30;
-export const BAND_TOP = 4;
-export const LANE_TOP_OFFSET = 36;
-export const LANE_HEIGHT = 28;
 
 // ---------------------------------------------------------------------------
 // Virtualization primitives (NEW, D19 — hand-rolled, no measuring virtualizer).

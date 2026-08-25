@@ -299,6 +299,30 @@ export interface AssignmentFieldEdit {
   status?: string;
   /** A resize that does not change node (docs/api.md §4). */
   timerange?: { start: Date; end: Date };
+  /**
+   * P1-4e D66: "re-parenting an assignment between runs ... is
+   * `useUpdateAssignmentFields` on `runId`/`productId` — there is no RPC
+   * for this and none is needed." Neither field existed on this interface
+   * before P1-4e — flagged as a deviation from that brief's own §2 scope
+   * fence ("do not touch src/lib/api/") in the agent report, since D66 is
+   * unreachable without it: there is no other call site anywhere in the
+   * codebase that may call `supabase.from(...).update(...)` directly (see
+   * this file's own header comment and docs/api-client.md's single-import
+   * rule). The caller is responsible for exactly one of the two being
+   * non-null in the FINAL patched row — same `num_nonnulls(run_id,
+   * product_id) = 1` invariant `resolveAssignmentTarget` enforces for
+   * `createAssignment`/`applySplitCoverage` above, just not funnelled
+   * through that helper here since a re-parent only ever sets one of the
+   * two per call (attach: `runId` set, `productId` left undefined =
+   * unchanged from a prior direct assignment's own stored value, which the
+   * caller must have already nulled in an earlier state — in practice this
+   * feature always passes BOTH together, one as a real id and the other
+   * explicitly `null`, exactly mirroring `delete_run`'s own detach-mode
+   * `UPDATE` in docs/api.md §3, which sets `run_id = NULL, product_id =
+   * <run's product>` in the very same statement).
+   */
+  runId?: string | null;
+  productId?: string | null;
 }
 
 export async function updateAssignmentFields(
@@ -311,6 +335,8 @@ export async function updateAssignmentFields(
   if ("targetUnit" in edit) patch.target_unit = edit.targetUnit ?? null;
   if (edit.status !== undefined) patch.status = edit.status;
   if (edit.timerange) patch.timerange = toTstzRange(edit.timerange.start, edit.timerange.end);
+  if ("runId" in edit) patch.run_id = edit.runId ?? null;
+  if ("productId" in edit) patch.product_id = edit.productId ?? null;
 
   const { data, error } = await supabase
     .from("assignments")

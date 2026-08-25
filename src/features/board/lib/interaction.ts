@@ -185,3 +185,127 @@ export function classifyCrewAgainstRun<T extends { id: string; startMin: number;
 export function minuteToDate(windowStart: Date, minute: number): Date {
   return new Date(windowStart.getTime() + minute * 60_000);
 }
+
+// ---------------------------------------------------------------------------
+// P1-4e additions (brief §4).
+// ---------------------------------------------------------------------------
+
+/**
+ * D58. `rowTops` is the prefix-sum offsets array (`buildRowOffsets(heights).
+ * offsets` from `./geometry`); `rowHeights` the matching heights — same
+ * length, `rowTops[i] + rowHeights[i] === rowTops[i + 1]` for every `i`
+ * (rows are contiguous, no gaps). Binary search for the row whose half-open
+ * span `[rowTops[i], rowTops[i] + rowHeights[i])` contains `y`: find the
+ * LARGEST index whose top is `<= y` (there can be at most one, since the
+ * spans are contiguous and non-overlapping), then confirm `y` is still
+ * inside that row's own span rather than past the board's total height.
+ * Returns `null` when `y` is above the first row's top or at/past the last
+ * row's bottom edge. Runs on every pointermove over a virtualized grid
+ * (D58's own words) — O(log n), no DOM measurement, no `elementFromPoint`.
+ */
+export function resolveDropRow(rowTops: number[], rowHeights: number[], y: number): number | null {
+  const n = rowTops.length;
+  if (n === 0) return null;
+  let lo = 0;
+  let hi = n - 1;
+  let candidate = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (rowTops[mid] <= y) {
+      candidate = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (candidate === -1) return null;
+  if (y < rowTops[candidate] + rowHeights[candidate]) return candidate;
+  return null;
+}
+
+/**
+ * D62's "Split evenly": given a cap (as a UI percent, e.g. `100`) and N
+ * participants (the existing overlapping assignments plus the incoming
+ * one), propose an integer UI percent for each so the total is EXACTLY
+ * `Math.round(capPercent)` — never a value that merely rounds close to it.
+ * `Math.floor(total / n)` for every participant, with the remainder (which
+ * is always `< n`, so at most `n - 1` extra percentage points) added to the
+ * FIRST participant: three-way at 100% is `[34, 33, 33]`, never
+ * `[33, 33, 33]` (which would under-fill the cap) or `[33, 33, 34]` (a
+ * different, equally arbitrary participant getting the remainder — the
+ * brief pins it to the first for a deterministic UI). `participantCount
+ * <= 0` returns `[]` (nothing to split among).
+ */
+export function splitEvenly(participantCount: number, capPercent: number): number[] {
+  if (participantCount <= 0) return [];
+  const total = Math.round(capPercent);
+  const base = Math.floor(total / participantCount);
+  const remainder = total - base * participantCount;
+  // ONE unit to each of the first `remainder` participants — not the whole
+  // remainder to participant 0. The brief said "the remainder goes to the
+  // FIRST participant", which is true for its own examples (n=2,3,4 at cap
+  // 100 all have a remainder of 0 or 1) and wrong in general: dumping it on
+  // one participant gives [16,12,12,12,12,12,12,12] for an 8-way split at
+  // 100%, a spread of 4, which is not an even split. Distributing gives
+  // [13,13,13,13,12,12,12,12] — spread 1, which is the most even integer
+  // split that still sums to the cap. Found by a design-session property
+  // test (max - min <= 1) that no example-based case could catch.
+  return Array.from({ length: participantCount }, (_, i) => base + (i < remainder ? 1 : 0));
+}
+
+/**
+ * D62's live readout: does this proposed set of percents fit under the cap?
+ * Pure arithmetic over what the user is editing — NOT a peak-load
+ * computation (D63): `percents` is the flat list the split popover shows
+ * (each participant's own single-window share), not an instant-wise peak
+ * over time. The popover's own window is a single overlapping range by
+ * construction (`capacity_probe`'s `overlapping[]` plus the incoming
+ * assignment all cover the SAME probed window), so a plain sum is the
+ * correct check here — `operator_peak_load()` is what re-validates the
+ * real, possibly-wider picture server-side on confirm.
+ */
+export function splitFits(percents: number[], capPercent: number): boolean {
+  const sum = percents.reduce((s, p) => s + p, 0);
+  return sum <= capPercent;
+}
+
+/**
+ * D57. The crew ranges after a run moves by `deltaMin`, for the drag
+ * preview only — the actual move is one `move_run` call, which (per
+ * `docs/api.md` §3's `move_run`) shifts every attached assignment's own
+ * timerange by the SAME delta as the run's new start and does NOT clamp an
+ * assignment that extended beyond the run's old bounds. This preview
+ * function instead clamps each crew member's shifted range into
+ * `[0, windowMinutes]` without squashing it (the P1-4b clamp-vs-squash
+ * rule this brief re-verifies at case 7/M5): a range pushed past an edge
+ * stops there at full length, exactly like `moveWithinTrack`. Does not
+ * mutate `crew`.
+ */
+export function planCrewShift<T extends { id: string; startMin: number; endMin: number }>(
+  crew: T[],
+  deltaMin: number,
+  windowMinutes: number,
+): { id: string; startMin: number; endMin: number }[] {
+  return crew.map((c) => {
+    const duration = c.endMin - c.startMin;
+    let newStart = c.startMin + deltaMin;
+    newStart = Math.max(0, Math.min(newStart, windowMinutes - duration));
+    return { id: c.id, startMin: newStart, endMin: newStart + duration };
+  });
+}
+
+/**
+ * D66. May this assignment live on this run? Plain containment:
+ * `a.startMin >= run.startMin && a.endMin <= run.endMin`. Do NOT add a
+ * third `a.startMin < run.endMin` clause — with any positive-duration
+ * assignment it is implied by the other two, and the design session
+ * verified it is unreachable (`MIN_DURATION_MINUTES` is 15, so a
+ * zero-length assignment cannot exist). A redundant guard reads as a case
+ * someone thought about, which is worse than not writing it.
+ */
+export function assignmentFitsRun(
+  assignment: { startMin: number; endMin: number },
+  run: { startMin: number; endMin: number },
+): boolean {
+  return assignment.startMin >= run.startMin && assignment.endMin <= run.endMin;
+}

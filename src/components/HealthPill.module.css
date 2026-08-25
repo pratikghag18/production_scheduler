@@ -6,7 +6,7 @@
   border-radius: 999px;
   border: 1px solid var(--axis);
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--ink-2);
 }
 

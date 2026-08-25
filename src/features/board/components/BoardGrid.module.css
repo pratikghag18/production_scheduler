@@ -5,6 +5,11 @@
   background: var(--surface);
   min-height: 0;
   min-width: 0;
+  /* P1-4c D50: explicit, rather than relying on the `auto` default, so a
+     future rule elsewhere can never accidentally disable panning/pinch on
+     this scroll container the way `.track` deliberately disables it
+     (TrackRow.module.css) to run its own pointer-based drag gestures. */
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .canvas {
@@ -21,4 +26,19 @@
   position: absolute;
   left: 0;
   right: 0;
+}
+
+/* P1-4c D47: zero-height, invisible measurement probe. Its `width` is set
+   to `var(--rail-w)` in CSS (a typed property, so it resolves to real px
+   through the used-value chain) — `BoardGrid.tsx` reads that resolved
+   width via `getComputedStyle` in its existing ResizeObserver callback.
+   Never shows, never affects the scrollable content size. */
+.railProbe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--rail-w);
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
 }

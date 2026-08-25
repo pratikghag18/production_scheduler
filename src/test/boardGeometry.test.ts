@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ShiftTemplate } from "@/lib/api";
 import {
   ZOOMS,
+  DENSITIES,
   minutesToPx,
   pxToMinutes,
   packLanes,
@@ -26,6 +27,11 @@ import {
  * See the agent report's "assumptions" section for the full explanation.
  * Authored, not run in this container (no npm) — the /tmp/harness copy of
  * this exact code was executed and mutation-tested (see the agent report).
+ *
+ * P1-4c addendum: `trackRowHeight` now takes a `Density` — every call below
+ * passes `DENSITIES[1]` (Standard), which reproduces the pre-P1-4c
+ * hardcoded constants exactly (brief §3/§8 case 1), so these assertions'
+ * expected numbers are unchanged from before this brief.
  */
 
 const t38: ShiftTemplate = {
@@ -67,7 +73,22 @@ describe("geometry.ts", () => {
   });
 
   it("trackRowHeight(0) === trackRowHeight(1) (max(1, lanes) floor) (case 6)", () => {
-    expect(trackRowHeight(0)).toBe(trackRowHeight(1));
+    expect(trackRowHeight(0, DENSITIES[1])).toBe(trackRowHeight(1, DENSITIES[1]));
+  });
+
+  it("P1-4c: trackRowHeight(1, Standard) reproduces the pre-brief constant exactly", () => {
+    expect(trackRowHeight(1, DENSITIES[1])).toBe(68); // 36 + 1*28 + 4
+  });
+
+  it("P1-4c: Comfortable > Standard > Compact for the same lane count", () => {
+    for (const lanes of [1, 2, 5]) {
+      expect(trackRowHeight(lanes, DENSITIES[0])).toBeGreaterThan(
+        trackRowHeight(lanes, DENSITIES[1]),
+      );
+      expect(trackRowHeight(lanes, DENSITIES[1])).toBeGreaterThan(
+        trackRowHeight(lanes, DENSITIES[2]),
+      );
+    }
   });
 
   it("shiftInstances produces a day -1 tail (case 7)", () => {

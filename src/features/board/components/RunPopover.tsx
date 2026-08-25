@@ -80,10 +80,12 @@ export function RunPopover({
 
         <div className={styles.time}>{timeLabel}</div>
 
+        {/* P1-4e D57: this used to say "moving this run is disabled until
+            they're detached" — that refusal is deleted, not reworded, now
+            that a staffed run moves (crew and all) in one `move_run` call. */}
         {crew.length > 0 && (
           <div className={styles.time}>
-            {crew.length} crew assigned — moving this run is disabled until they're detached or
-            moved individually; resizing is still allowed.
+            {crew.length} crew assigned — dragging this run moves them all with it.
           </div>
         )}
 

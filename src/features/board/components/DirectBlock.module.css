@@ -1,6 +1,6 @@
 .dblk {
   position: absolute;
-  height: 22px;
+  height: var(--chip-h, 22px);
   border-radius: 5px;
   background: color-mix(in srgb, var(--pc) 16%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--pc) 45%, var(--surface));
@@ -12,7 +12,7 @@
   user-select: none;
   overflow: hidden;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--ui-scale, 1));
   z-index: 3;
   cursor: grab;
   touch-action: none;
@@ -29,12 +29,12 @@
 
 .avatar {
   flex: none;
-  width: 15px;
-  height: 15px;
+  width: var(--avatar-size, 15px);
+  height: var(--avatar-size, 15px);
   border-radius: 50%;
   background: var(--ink-2);
   color: var(--avatar-fg);
-  font-size: 8px;
+  font-size: calc(8px * var(--ui-scale, 1));
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -47,7 +47,7 @@
 
 .what {
   color: var(--ink-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale, 1));
 }
 
 .override {

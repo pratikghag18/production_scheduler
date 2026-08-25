@@ -1,5 +1,5 @@
 .panel {
-  width: 190px;
+  width: calc(190px * var(--ui-scale, 1));
   flex: none;
   height: 100%;
   overflow-y: auto;
@@ -13,14 +13,15 @@
 
 .panel.collapsed,
 .collapsed {
-  width: 28px;
+  width: calc(28px * var(--ui-scale, 1));
 }
 
 .panelHd {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 10px 8px;
+  padding: calc(10px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1))
+    calc(8px * var(--ui-scale, 1));
   position: sticky;
   top: 0;
   background: var(--surface);
@@ -29,7 +30,8 @@
 
 .collapsed .panelHd {
   justify-content: center;
-  padding: 10px 2px 8px;
+  padding: calc(10px * var(--ui-scale, 1)) calc(2px * var(--ui-scale, 1))
+    calc(8px * var(--ui-scale, 1));
 }
 
 .collapsed .lbl {
@@ -37,7 +39,7 @@
 }
 
 .lbl {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--muted);
   font-weight: 650;
   letter-spacing: 0.3px;
@@ -48,11 +50,11 @@
   border: 1px solid var(--axis);
   background: var(--surface);
   border-radius: 5px;
-  width: 20px;
-  height: 20px;
+  width: calc(20px * var(--ui-scale, 1));
+  height: calc(20px * var(--ui-scale, 1));
   flex: none;
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--ink-2);
   line-height: 1;
 }
@@ -65,14 +67,14 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 0 8px 10px;
+  padding: 0 calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
 
 .chip {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 6px;
+  padding: calc(5px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
   border-radius: 7px;
   user-select: none;
   position: relative;
@@ -83,12 +85,12 @@
 }
 
 .avatar {
-  width: 20px;
-  height: 20px;
+  width: calc(20px * var(--ui-scale, 1));
+  height: calc(20px * var(--ui-scale, 1));
   border-radius: 50%;
   background: var(--ink-2);
   color: var(--avatar-fg);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--ui-scale, 1));
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -98,7 +100,7 @@
 
 .nm {
   font-weight: 600;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -107,7 +109,7 @@
 }
 
 .sk {
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
   font-weight: 700;
   color: var(--ink-2);
   border: 1px solid var(--axis);
@@ -117,7 +119,7 @@
 }
 
 .pill {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 700;
   color: var(--ink-2);
   background: var(--page);
@@ -131,9 +133,29 @@
   opacity: 0.55;
 }
 
+/* P1-4e D65: ported from the mockup's `.chip.drag-src` — the source chip
+   dims while its own panel drag is in flight (the ghost, rendered by
+   `BoardPage`, shows the moving copy instead). */
+.chip.dragSrc {
+  opacity: 0.4;
+}
+
+/* Ported from the mockup's `.chip-ghost` (fixed, follows the pointer,
+   never intercepts pointer events itself so drop-target detection under it
+   keeps working). Rendered by `BoardPage`, not this file, but the class
+   lives here since it is a `.chip` variant, not a new visual language. */
+.chipGhost {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 3px 10px rgba(11, 11, 11, 0.25);
+  background: var(--surface);
+  border: 1px solid var(--axis);
+}
+
 .collapsed .chip {
   justify-content: center;
-  padding: 5px 2px;
+  padding: calc(5px * var(--ui-scale, 1)) calc(2px * var(--ui-scale, 1));
 }
 
 .collapsed .nm,

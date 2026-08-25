@@ -6,6 +6,7 @@ import type { Run } from "@/lib/api";
 import { useDragGesture, type UseDragGestureArgs } from "@/features/board/hooks/useDragGesture";
 import { useToastStore } from "@/features/board/hooks/useSchedulerToast";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "@/features/board/lib/boardIndex";
+import { DENSITIES } from "@/features/board/lib/geometry";
 
 /**
  * Authored, not run in this container (no npm — see the agent report).
@@ -33,6 +34,11 @@ vi.mock("@/lib/api", async (importOriginal) => {
     deleteRun: vi.fn(),
     createAssignment: vi.fn(),
     updateAssignmentFields: vi.fn(),
+    // P1-4e: the staffed-run path now goes through `move_run`, and the
+    // split flow through `capacity_probe` + `apply_split_coverage`.
+    moveRun: vi.fn(),
+    probeCapacity: vi.fn(),
+    applySplitCoverage: vi.fn(),
   };
 });
 
@@ -104,6 +110,16 @@ function buildIndex(crew: IndexedAssignment[]): BoardIndex {
     nodeById: new Map(),
     capacityCap: 1,
     droppedRanges: 0,
+    // P1-4c D45: `BoardIndex` gained a `density`. Standard (index 1) is
+    // defined to reproduce the pre-P1-4c constants exactly, so these
+    // drag-gesture fixtures keep the geometry they were written against.
+    density: DENSITIES[1],
+    // P1-4e: `BoardIndex` gained id-keyed lookups (for T12's block labels)
+    // and the org's eligibility policy. Built from the same rows the
+    // node-keyed maps above hold, so the fixture stays self-consistent.
+    runById: new Map([["run-1", runFixture]]),
+    assignmentById: new Map(crew.map((a) => [a.id, a] as const)),
+    eligibilityPolicy: "warn",
   };
 }
 
@@ -125,6 +141,8 @@ function baseArgs(index: BoardIndex, sessionUserId: string | null = "user-1"): U
     to: new Date(WINDOW_START.getTime() + WINDOW_MINUTES * 60_000),
     index,
     defaultCreateMode: "run",
+    // P1-4e: snapping needs the zoom to know its step. 1 = Standard (30 min).
+    zoomIndex: 1,
     sessionUserId,
   };
 }
@@ -202,15 +220,20 @@ describe("useDragGesture", () => {
     expect(vi.mocked(api.updateRunFields).mock.calls[0][0]).toBe("run-1");
   });
 
-  it("§5.3: moving a STAFFED run is refused — no mutation is sent, an info toast is pushed", async () => {
+  it("P1-4e D57: moving a STAFFED run goes through move_run once — the crew follows atomically", async () => {
     const api = await import("@/lib/api");
+    vi.mocked(api.moveRun).mockResolvedValue({
+      run: {} as Run,
+      assignments: [],
+      eligibilityWarnings: [],
+    } as never);
     const crew = [crewFixture()];
     const index = buildIndex(crew); // T10: commitBlockDrag reads this fresh map, not the descriptor
     const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
 
     act(() => {
       // The descriptor's own `crew` can be stale/empty — T10 says only the
-      // fresh `index` at commit time governs the refusal.
+      // fresh `index` at commit time governs which path is taken.
       result.current.beginBlockDrag(runDescriptor([runFixture], []), fakePointerEvent(500, 300));
     });
     act(() => {
@@ -221,10 +244,15 @@ describe("useDragGesture", () => {
     });
 
     expect(result.current.activeDrag).toBe(null);
-    expect(api.updateRunFields).not.toHaveBeenCalled();
+    // D57: ONE move_run, never N per-crew writes. This test previously
+    // asserted P1-4b's refusal ("Moving a staffed run is coming in the next
+    // build"); P1-4e deleted that behaviour deliberately, so the assertion
+    // is inverted rather than removed — the refusal must NOT come back.
+    await waitFor(() => expect(api.moveRun).toHaveBeenCalledTimes(1));
+    expect(api.updateAssignmentFields).not.toHaveBeenCalled();
     expect(
       useToastStore.getState().toasts.some((t) => t.message.includes("Moving a staffed run")),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("T13: a session identity change cancels an in-flight drag with no mutation sent", async () => {

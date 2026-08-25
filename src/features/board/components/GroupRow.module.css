@@ -14,24 +14,29 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* P1-4c: not scaled by --ui-scale — same row-height-overflow reasoning
+     as TrackRow.module.css's `.cellLabel` (self-review item 4). Group rows
+     are shorter (24-36px depending on density) so the risk is tighter
+     still. */
   padding: 5px 10px;
   background: var(--page);
   border-bottom: 1px solid var(--grid);
   border-right: 1px solid var(--axis);
   font-weight: 650;
+  font-size: calc(13px * var(--ui-scale, 1));
   user-select: none;
 }
 
 .lvl {
   font-weight: 400;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--ui-scale, 1));
   color: var(--muted);
   margin-left: auto;
 }
 
 .caret {
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   width: 10px;
 }
 
@@ -54,7 +59,7 @@
 .shiftLbl {
   position: absolute;
   top: 2px;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 650;
   color: var(--muted);
   pointer-events: none;

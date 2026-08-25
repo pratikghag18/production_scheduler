@@ -91,11 +91,18 @@ export function buildSchedulerErrorToast(
 ): { message: string; kind: ToastKind } {
   switch (err.kind) {
     case "CapacityExceeded": {
+      // P1-4e D61: the split popover now opens PROACTIVELY from a
+      // `capacity_probe` before the write is even sent, so this path is
+      // the race-only fallback — the probe said "fits" and the write
+      // still failed. "Split coverage is coming in the next build" was
+      // true in P1-4b/P1-4c/P1-4d; it is this build, so that sentence is
+      // deleted rather than reworded (D57's own instruction for the
+      // analogous run-move refusal message applies here too).
       const name = resolveOperatorName(ctx, err.operatorId);
       const peakPct = Math.round(err.peak * 100);
       const capPct = Math.round(err.cap * 100);
       return {
-        message: `${name} would reach ${peakPct}% (cap ${capPct}%) — reverted. Split coverage is coming in the next build.`,
+        message: `${name} would reach ${peakPct}% (cap ${capPct}%) — reverted. Someone else changed their load — try the split again.`,
         kind: "crit",
       };
     }

@@ -1,6 +1,6 @@
 import type { Product, BoardOperator, ShiftTemplate } from "@/lib/api";
 import type { IndexedAssignment, IndexedRun } from "../lib/boardIndex";
-import { minutesToPx, LANE_TOP_OFFSET, LANE_HEIGHT } from "../lib/geometry";
+import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import styles from "./AssignmentChip.module.css";
@@ -19,6 +19,7 @@ const HANDLE_PX = 7;
  */
 export function AssignmentChip({
   assignment,
+  density,
   operator,
   product,
   productColorVar,
@@ -38,6 +39,9 @@ export function AssignmentChip({
   onKeyUp,
 }: {
   assignment: IndexedAssignment;
+  /** P1-4c D44/D49: `density.laneTopOffset`/`density.laneHeight` replace
+   *  the removed `LANE_TOP_OFFSET`/`LANE_HEIGHT` constants. */
+  density: Density;
   operator: BoardOperator | undefined;
   product: Product | undefined;
   productColorVar: string;
@@ -100,7 +104,7 @@ export function AssignmentChip({
       style={{
         left,
         width,
-        top: LANE_TOP_OFFSET + assignment.lane * LANE_HEIGHT,
+        top: density.laneTopOffset + assignment.lane * density.laneHeight,
         ["--pc" as string]: productColorVar,
       }}
       title={title}
