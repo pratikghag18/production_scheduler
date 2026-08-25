@@ -232,10 +232,16 @@ and refetch. If that turns out to feel slow in P1-5c, it becomes a decision then
 
 ---
 
-## 8. Acceptance — 74 assertions, all of which pass against a reference implementation
+## 8. Acceptance — the group table below is AUTHORITATIVE (it sums to 76 assertions)
+
+> **Count correction, 2026-08-25 (design session).** This section shipped headlined "74 assertions";
+> the group table sums to **76**. The table is right and the headline was stale — T10b, D15 and D16
+> were added after the total was written. **Implement and report against the group table, not against
+> any total.** Report your own count; if it is not 76, say which group differs and why — a mismatch is
+> a finding about this brief, not a defect in your work.
 
 **Your suite must be table-driven.** A case is a row in a table the harness loops over, not a
-copy-pasted block. The reference suite is ~200 lines for 74 assertions; the previous brief's SQL
+copy-pasted block. The reference suite is ~200 lines for ~75 assertions; the previous brief's SQL
 suite was 1,453 lines for 43 cases, and that difference is real tokens.
 
 **Every assertion must be evaluated inside a try/catch** — see §10's trap. A harness helper of this
@@ -315,7 +321,7 @@ these caught nothing on the first pass here, which is why T10/T11/D16 exist.
 
 ## 11. Report
 
-1. Part A: your harness output, all 74 assertions with PASS/FAIL
+1. Part A: your harness output, every assertion in the §8 group table with PASS/FAIL, plus your total
 2. The 12 mutations: which case actually failed for each, and **flag any that broke nothing or
    crashed**
 3. `wc -l` and `md5sum` for every file you wrote

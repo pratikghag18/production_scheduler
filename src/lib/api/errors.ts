@@ -17,6 +17,13 @@
  * supabase/tests/60_api_test.sql actually asserts on. A `status` field is
  * consulted only as a defensive secondary signal for the 401 case (see
  * below), never as the primary discriminant.
+ *
+ * Brief P1-5b §7.1 added six codes for the hierarchy-admin RPCs
+ * (migration 20260825000010_hierarchy_admin.sql, design-plan §19 D74):
+ * `path_collision`, `node_cycle`, `level_mismatch`, `level_in_use`,
+ * `node_in_use`, `schedulable_level_locked`. Each `DETAIL` shape below was
+ * read from that migration's own `jsonb_build_object(...)` calls, not
+ * guessed — see the per-variant comments for the exact raise site.
  */
 
 /** A skill reference as it appears inside an error payload. */
@@ -30,14 +37,20 @@ export interface ExpiringSkillRef extends SkillRef {
   expiresAt: string;
 }
 
-/** The closed set of machine error codes P1-3a can raise (docs/api.md §1). */
+/** The closed set of machine error codes P1-3a/P1-5b can raise (docs/api.md §1). */
 export type SchedulerErrorCode =
   | "capacity_exceeded"
   | "not_eligible"
   | "run_overlap"
   | "run_node_mismatch"
   | "not_permitted"
-  | "invalid_argument";
+  | "invalid_argument"
+  | "path_collision"
+  | "node_cycle"
+  | "level_mismatch"
+  | "level_in_use"
+  | "node_in_use"
+  | "schedulable_level_locked";
 
 export type SchedulerError =
   | {
@@ -77,6 +90,71 @@ export type SchedulerError =
       reason: string;
     }
   /**
+   * `create_node`/`rename_node`/`move_node` (migration 0010): another node
+   * already occupies the path the write would produce.
+   * `jsonb_build_object('path', v_prospective_path::text, 'existing_node_id', v_existing_node_id)`.
+   */
+  | {
+      kind: "PathCollision";
+      path: string;
+      existingNodeId: string;
+    }
+  /**
+   * The `nodes_before_cycle` trigger, or `move_node`'s own self-parent/
+   * descendant pre-checks (migration 0010 §5.2/§6.4) — same payload shape
+   * either way: `jsonb_build_object('node_id', <id>)`.
+   */
+  | {
+      kind: "NodeCycle";
+      nodeId: string;
+    }
+  /**
+   * The `nodes_before_level` trigger, `create_node` (no level exists one
+   * position below the parent), or `move_node`'s own level-adjacency
+   * pre-checks — DELIBERATELY inconsistent payload shape across call sites
+   * (migration 0010's own comment on move_node's check 6, and design-plan
+   * §19.3 item 1 / brief §6.4's N17): the trigger's `DETAIL` always carries
+   * `node_id`; `move_node`'s two pre-checks (`p_new_parent_id is null`
+   * and the level-adjacency check) carry only `reason`, with no
+   * `node_id` at all — that absence is what lets a caller tell "the RPC's
+   * own pre-check fired" apart from "the trigger fired underneath it".
+   * Both fields are therefore optional here, and at least one is present
+   * on every real payload.
+   */
+  | {
+      kind: "LevelMismatch";
+      nodeId?: string;
+      reason?: string;
+    }
+  /**
+   * `save_hierarchy_levels`: a level being removed from the array still
+   * has nodes on it. `jsonb_build_object('level_ids', to_jsonb(v_removed_ids))`.
+   */
+  | {
+      kind: "LevelInUse";
+      levelIds: string[];
+    }
+  /**
+   * `delete_node` in `'delete'` mode: the node has children, runs, or
+   * assignments. `jsonb_build_object('children', ..., 'runs', ..., 'assignments', ...)`.
+   */
+  | {
+      kind: "NodeInUse";
+      children: number;
+      runs: number;
+      assignments: number;
+    }
+  /**
+   * `save_hierarchy_levels`: the schedulable level is changing while it
+   * still has runs or direct assignments (D72).
+   * `jsonb_build_object('blocking_rows', v_blocking_count, 'level_id', v_old_schedulable_level_id)`.
+   */
+  | {
+      kind: "SchedulableLevelLocked";
+      blockingRows: number;
+      levelId: string;
+    }
+  /**
    * The bare `23P01` exclusion-constraint violation on `runs`
    * (docs/api.md §1: "you lost the race"). Not routed through `api_raise`
    * — a trigger cannot intercept an exclusion-constraint violation before
@@ -96,6 +174,12 @@ const SCHEDULER_ERROR_KINDS: ReadonlySet<SchedulerError["kind"]> = new Set([
   "RunNodeMismatch",
   "NotPermitted",
   "InvalidArgument",
+  "PathCollision",
+  "NodeCycle",
+  "LevelMismatch",
+  "LevelInUse",
+  "NodeInUse",
+  "SchedulableLevelLocked",
   "RaceLost",
   "Unauthenticated",
   "Unknown",
@@ -117,6 +201,10 @@ function hasNumberProp<K extends string>(
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((item) => typeof item === "string");
 }
 
 function isSkillRefArray(v: unknown): v is SkillRef[] {
@@ -233,6 +321,62 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
     case "invalid_argument": {
       if (hasStringProp(detail, "field") && hasStringProp(detail, "reason")) {
         return { kind: "InvalidArgument", field: detail.field, reason: detail.reason };
+      }
+      return undefined;
+    }
+    case "path_collision": {
+      if (hasStringProp(detail, "path") && hasStringProp(detail, "existing_node_id")) {
+        return {
+          kind: "PathCollision",
+          path: detail.path,
+          existingNodeId: detail.existing_node_id,
+        };
+      }
+      return undefined;
+    }
+    case "node_cycle": {
+      if (hasStringProp(detail, "node_id")) {
+        return { kind: "NodeCycle", nodeId: detail.node_id };
+      }
+      return undefined;
+    }
+    case "level_mismatch": {
+      // Deliberately lenient (see the SchedulerError variant's own
+      // comment): the trigger's payload carries `node_id`, `move_node`'s
+      // own two pre-checks carry only `reason`. Accept either, or both.
+      const nodeId = hasStringProp(detail, "node_id") ? detail.node_id : undefined;
+      const reason = hasStringProp(detail, "reason") ? detail.reason : undefined;
+      if (nodeId === undefined && reason === undefined) return undefined;
+      return { kind: "LevelMismatch", nodeId, reason };
+    }
+    case "level_in_use": {
+      if ("level_ids" in detail && isStringArray(detail.level_ids)) {
+        return { kind: "LevelInUse", levelIds: detail.level_ids };
+      }
+      return undefined;
+    }
+    case "node_in_use": {
+      if (
+        hasNumberProp(detail, "children") &&
+        hasNumberProp(detail, "runs") &&
+        hasNumberProp(detail, "assignments")
+      ) {
+        return {
+          kind: "NodeInUse",
+          children: detail.children,
+          runs: detail.runs,
+          assignments: detail.assignments,
+        };
+      }
+      return undefined;
+    }
+    case "schedulable_level_locked": {
+      if (hasNumberProp(detail, "blocking_rows") && hasStringProp(detail, "level_id")) {
+        return {
+          kind: "SchedulableLevelLocked",
+          blockingRows: detail.blocking_rows,
+          levelId: detail.level_id,
+        };
       }
       return undefined;
     }
@@ -381,6 +525,18 @@ export function describeSchedulerError(e: SchedulerError): string {
       return "You do not have edit rights on this cell.";
     case "InvalidArgument":
       return `Invalid ${e.field}: ${e.reason}.`;
+    case "PathCollision":
+      return "A node with that name already exists here.";
+    case "NodeCycle":
+      return "You can't move a node onto itself or one of its own descendants.";
+    case "LevelMismatch":
+      return "That move would skip a hierarchy level.";
+    case "LevelInUse":
+      return "That level still has nodes on it and can't be removed.";
+    case "NodeInUse":
+      return "This node has children, runs, or assignments and can't be deleted.";
+    case "SchedulableLevelLocked":
+      return "The schedulable level can't be changed while it still has scheduled work.";
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";
     case "Unauthenticated":

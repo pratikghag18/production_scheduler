@@ -157,13 +157,60 @@ what you get.
 
 The full `SchedulerError` kind list: `CapacityExceeded`, `NotEligible`,
 `RunOverlap`, `RunNodeMismatch`, `NotPermitted`, `InvalidArgument`,
-`RaceLost`, `Unauthenticated`, `Unknown`. See `src/lib/api/errors.ts` for
-every kind's exact fields.
+`PathCollision`, `NodeCycle`, `LevelMismatch`, `LevelInUse`, `NodeInUse`,
+`SchedulableLevelLocked`, `RaceLost`, `Unauthenticated`, `Unknown`. See
+`src/lib/api/errors.ts` for every kind's exact fields. The six hierarchy
+kinds are new in P1-5b — see "Hierarchy admin" below.
 
 `useBoardWindow`'s retry policy never retries a typed `SchedulerError` — a
 capacity rejection or a permission error is an answer, not a flake. Only an
 `Unknown`-shaped (network-ish) failure gets React Query's normal single
 retry.
+
+## Hierarchy admin (P1-5b)
+
+Five typed wrappers over migration `20260825000010_hierarchy_admin.sql`,
+`src/lib/api/hierarchy.ts`: `saveHierarchyLevels`, `createNode`,
+`renameNode`, `moveNode`, `deleteNode`. Same contract as every other
+wrapper in this folder — camelCase in and out, a `SchedulerError` thrown
+on failure, never a raw PostgREST error.
+
+```ts
+import {
+  useSaveHierarchyLevels,
+  useCreateNode,
+  useRenameNode,
+  useMoveNode,
+  useDeleteNode,
+} from "@/features/admin/hooks/useHierarchyMutations";
+```
+
+`saveHierarchyLevels` takes the WHOLE level array — the array's order
+*is* each level's final position; there is no separate position field to
+set or a way to express a gap. `deleteNode`'s `mode` is a real union type,
+`"deactivate" | "delete"`, not `string` — omit it to get the RPC's own
+`DEFAULT 'deactivate'`.
+
+**No optimistic updates on any of the five** (unlike the board mutations
+above): a node move rewrites the paths of an entire subtree server-side,
+and reproducing that cascade client-side would duplicate a rule the
+database already owns. Every hook here just calls its wrapper and
+invalidates the `hierarchyKeys.all` query-key prefix (exported from
+`useHierarchyMutations.ts`) on success — refetch is the only update path.
+**Building the admin tree screens, including the read query that key is
+meant to invalidate, is P1-5c's job, not this layer's** — see that file's
+own header comment for the exact assumption this leaves for that brief to
+either confirm or correct.
+
+The client-side preview logic these RPCs are checked against —
+`slugify`, tree assembly from a flat node list, legal-drop-target
+computation, level-draft validation — lives in
+`src/features/admin/lib/hierarchy.ts`, a dependency-free pure module (no
+`supabase.rpc`, no `database.types.ts`). It exists only so the UI can
+grey out an illegal drop target or show inline validation before a round
+trip; **the RPC's own answer always wins**, and a few of its server-side
+rules (`level_in_use`, `schedulable_level_locked`) have no client-side
+counterpart at all, because they need a row count the client can't see.
 
 ## Auth (dev only)
 

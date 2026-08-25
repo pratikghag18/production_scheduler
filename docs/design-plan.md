@@ -1,7 +1,7 @@
 # Production Scheduler — Design Plan
 
-**Status:** Draft v1.4 · August 21, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21)
-**Phase:** 1 — Core product. DB schema (P1-2) and API surface (P1-3a) built and verified; app scaffold (P1-1) authored but unvalidated.
+**Status:** Draft v1.7 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 Aug 25**)
+**Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client layers (P1-5a/b) are built; P1-5a/5b verified by an independent design-session probe.
 **Progress tracking:** current status and remaining work live in [`docs/roadmap.md`](roadmap.md) — this document holds decisions, that one holds state.
 
 ---
@@ -1295,3 +1295,137 @@ used for both `style.width` and the edge clamp; an acceptance case asserting the
 equals `272 × chromeScale` at more than one scale; and a case asserting the popover stays inside the
 viewport when anchored near the right edge at maximum scale. **Assert against the rendered app, not
 against a CSS-only fixture.**
+
+### 19.12 P1-5b built and verified — and the suite that proved it did not survive the container (Aug 25, 2026)
+
+The build agent delivered all five files at **243k tokens**, against P1-5a's 329k. The three cost
+controls held: `device_bash` heredocs (no tarball, no `SendUserFile`, no base64 fallback), a
+table-driven suite, and mutations executed before the brief shipped. Its report flagged three real
+brief errors, all confirmed here. **But the most important finding is one nobody flagged.**
+
+#### D78 — a brief that specifies a suite must also ship the suite as a repo file
+
+The brief's §8 demanded 76 assertions and §10 specified the harness; its **§3 file table listed no
+test file**, and neither did §13's final step. The agent did exactly as told: it built a table-driven
+suite, ran it, mutation-tested it, reported the results — **in a scratch container that no longer
+exists**. Nothing landed in `src/test/`. Every other pure module in this repo (`boardGeometry`,
+`boardIndex`, `interaction`, `serde`, `shapes`, `errors`, `dragGesture`) has a vitest file; the
+hierarchy layer had none, so `npm test` and CI would have gone on reporting green while guarding
+nothing.
+
+This is [[brief-writing-rules]] rule 1 in a shape it had not taken before. Rule 1 splits a brief by
+*what the container can validate*, and that split is right — but it silently conflates **"executable
+by the agent, once"** with **"guarded permanently."** P1-5b's Part A was the most thoroughly
+validated frontend work on this project *and* the only frontend module with no regression test.
+
+**D78: every brief that requires a suite must name the suite's repo path in its file table, in the
+project's own test framework — not merely require that a suite be run.** The in-container harness is
+the agent's proof; the committed test file is the project's. They are different artifacts and a brief
+must ask for both.
+
+The design session wrote the replacement: **`src/test/hierarchy.test.ts`, 488 lines, 101 assertions**,
+carrying the brief's §6 corpus and §8 groups plus everything the independent probe found. All 12 of
+the brief's mutations and 5 unprescribed ones were applied against it — **17 of 17 caught.**
+
+#### The independent probe: one defect, three parity divergences, three instrument errors
+
+A 54-assertion probe covering what the brief never prescribed — malformed arguments, Unicode case
+mapping, structural edges, and the §5 subset invariant — was run cold against the delivered file.
+
+**The defect (fixed).** `validateLevelDraft` **threw** on a null name, a missing `name` key, a null
+array element, and a numeric name. The server returns a typed `blank_name` for the first three
+(`trim(coalesce(e->>'name',''))=''`) and accepts the fourth. A validator the admin form will call on
+every keystroke must never throw — this is [[verification-standard]] rule 4 (probe *malformed*
+arguments, not merely wrong ones) landing for the second brief running, and it is the same shape as
+P1-5a's `delete_node(id, NULL)`. Two `?.` and one `String(… ?? "")` close it; reverting the fix
+produces four named failures.
+
+**Divergence 1 — the whitespace one, and it is the server's bug.** Postgres `trim()` with no explicit
+character set strips **spaces only**, so `trim(E'  \t ')` is `E'\t'` and the server **accepts** a
+tab- or newline-only level name. JS `.trim()` strips all whitespace, so the client rejects it. That
+is the client rejecting what the server accepts — precisely the direction §5 forbids. The right fix
+is to tighten the **server** (`btrim` over a whitespace set) rather than weaken the client, and it is
+**owed before P1-5d**, which pipes CSV — the most likely source of a pasted tab — straight into this.
+A test pins the current client behaviour so the divergence cannot be closed by accident.
+
+**Divergence 2 — `is_schedulable: 1`.** `('{"is_schedulable":1}'::jsonb->>'is_schedulable')::boolean`
+is **true** in Postgres, so the server counts a numeric 1 as schedulable while the client's
+`=== true` does not. Only reachable from untyped JSON; recorded, not fixed.
+
+**Divergence 3 — an unknown TARGET level.** §4 step 1 covers an unknown *dragged* level
+(`invalid_argument`) but never says what an unknown *target* level does; it falls through step 6 as
+`level_mismatch`. Either answer breaks the subset invariant if the caller passes a partial array, so
+**P1-5c must always pass the complete level list** — a constraint, not a code change.
+
+**Three instrument errors, caught by the instrument being tested.** Continuing §19.11's run:
+(1) the probe asserted `slugify(slugify("###")) === "n_"`; the real SQL returns `"n"` — the empty-name
+sentinel is **not a fixed point**, which matters for P1-5d if it ever re-slugifies stored values.
+(2) A `canDropOn` fixture used hand-written paths (`p1.a1.c1`) whose slugs did not match the node
+names, so **M10 — the collision check forgetting to exclude the dragged node — was invisible**: with
+the path and the name disagreeing, nothing ever holds the prospective path. Making the fixture
+slug-consistent, as the database actually derives it, caught it immediately. This is
+[[verification-standard]] rule 3 inverted and worth stating that way: **the brief's own advice to make
+fields disagree is right for the fields the rule chooses *between*, and wrong for the fields the rule
+*derives from each other*.** `parentId` vs `path` must disagree; `name` vs `path` must agree.
+(3) One mutation was a no-op that scored "NOT CAUGHT".
+
+**Unicode parity, confirmed rather than assumed.** Six inputs beyond the brief's corpus — the Kelvin
+sign U+212A, Turkish dotted İ, fullwidth Ａ, Roman numeral Ⅰ, and the two accented rows — were run
+through the real SQL `slugify()` on a UTF-8 PostgreSQL 16 database and against the client.
+**All six agree**, including the two where JS's full Unicode case mapping and Postgres `lower()` were
+most likely to diverge. Those rows are now in the committed suite as observations.
+
+#### Confirmed brief errors from the agent's report
+
+- **§5's "four of eight" is wrong.** §4 names five reason codes; the server now has nine checks
+  (P1-5a's round-2 malformed-uuid guard made it nine). Corrected in the module's comment.
+- **§7.3's query key presupposes a read hook that does not exist.** The agent introduced
+  `hierarchyKeys.all = ["hierarchy"]` and documented it. **P1-5c must confirm or override it
+  deliberately.**
+- **`create_node`'s `level_mismatch` DETAIL puts the PARENT's id under the key `node_id`**, because
+  the node being created has no id yet. Any UI reading that field must not assume it identifies the
+  subject of the error.
+
+#### Acceptance: three runs, seven errors, zero defects in the delivered logic
+
+Part B had never been compiled by anything. The first `npm` run produced **7 `tsc` errors, all in
+`src/lib/api/hierarchy.ts`, and none of them a bug in what the agent wrote.**
+
+**Run 1 — the generated types were three days stale.** `src/lib/database.types.ts` was generated
+Aug 22, before migration 0010, so none of the five hierarchy RPCs appear in its `Functions` union:
+five `TS2345`s on the RPC names, and two more where `data` falls back to `unknown` because the
+`.rpc()` overload cannot resolve. **A migration and its regenerated types are ONE change, not two** —
+P1-5a landed 0010 and did not regenerate. Recorded in [[decision-record-drift]] rule 2: a generated
+file is a decision record, and it is the one that drifts without anybody noticing, because the
+roadmap's artifact index went on claiming "all 8 RPCs typed" and nothing in the container can compile.
+
+**Run 2 — a nullability the generator structurally cannot express.** Two errors survived:
+`p_parent_id` and `p_new_parent_id` are typed `string`, never `string | null`, because **Postgres
+function parameters carry no nullability declaration**, so `supabase gen types` emits every required
+argument as non-null. But 0010 branches on `p_parent_id is null` (create a root node) and
+`p_new_parent_id is null` (move to the root) — both first-class paths. **Regenerating will never
+widen this.** The codebase had already solved the identical problem: `mutations.ts` casts
+`create_assignment`'s `p_run_id`/`p_product_id` pair at the single call site with a comment, exactly
+as the P1-3b brief §2 prescribed. Same fix applied, same shape, one shared note.
+
+**Run 3 — green.** typecheck, lint and build clean; **236 unit tests pass** (135 before this brief).
+P1-5b added 1.5 kB raw to the app chunk.
+
+**D79 — the §11 question was the wrong question.** Both misses have one root cause: the agent
+**reasoned about generated artifacts instead of reading them.** It verified every RPC argument *name*
+against migration 0010 line by line — careful, correct work — then answered §11 item 4 ("what would
+you expect `tsc` to complain about") with "clean", and wrote doc comments asserting the generated
+signature was `p_parent_id: string | null`. Both predictions were wrong, and it had never opened
+`database.types.ts`. A correct method aimed at the wrong artifact.
+
+**So future briefs replace that question with: "which generated or third-party artifacts does your
+code depend on, and what does each one actually say — quote the line."** The first phrasing invites
+reasoning and got two confident wrong answers; the second forces reading. This is rule 5's
+"execution, not reasoning" applied to the *inputs* of the work rather than its output.
+
+#### Not verified
+
+Part B (five wrappers, six error codes, hooks) was never compiled — no npm in the container. The
+agent's own flag is worth carrying: `useMutation<TData, SchedulerError, TVars>` puts a typed error in
+the second generic, which nothing else in this codebase does. **Cross-org isolation remains untested
+by anything** — the seed still has one org.

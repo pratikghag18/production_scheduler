@@ -877,6 +877,10 @@ export type Database = {
         };
         Returns: Json;
       };
+      create_node: {
+        Args: { p_name: string; p_parent_id: string; p_sort_order?: number };
+        Returns: Json;
+      };
       create_run: {
         Args: {
           p_node_id: string;
@@ -887,7 +891,19 @@ export type Database = {
         };
         Returns: Json;
       };
+      delete_node: {
+        Args: { p_mode?: string; p_node_id: string };
+        Returns: Json;
+      };
       delete_run: { Args: { p_mode?: string; p_run_id: string }; Returns: Json };
+      move_node: {
+        Args: {
+          p_new_parent_id: string;
+          p_node_id: string;
+          p_sort_order?: number;
+        };
+        Returns: Json;
+      };
       move_run: {
         Args: { p_node_id: string; p_run_id: string; p_timerange: unknown };
         Returns: Json;
@@ -901,7 +917,12 @@ export type Database = {
         };
         Returns: number;
       };
+      rename_node: {
+        Args: { p_name: string; p_node_id: string };
+        Returns: Json;
+      };
       resolve_shift_template: { Args: { p_node_id: string }; Returns: string };
+      save_hierarchy_levels: { Args: { p_levels: Json }; Returns: Json };
       slugify: { Args: { input: string }; Returns: string };
       text2ltree: { Args: { "": string }; Returns: unknown };
     };
