@@ -976,3 +976,61 @@ Onboarding splits into three briefs along the line [[brief-writing-rules]] rule 
 **A scope fence written as a blanket file prohibition is banned from here on** — §18.13's lesson.
 P1-5a's fence names the properties being protected (no new write path outside the RPCs, no client
 reimplementation of the tree rules), not a list of untouchable files.
+
+### 19.5 P1-5a delivered and verified — the probe found three real defects, and two of them were mine (Aug 25, 2026)
+
+Built by a fresh agent in **329k tokens** across two rounds. All six §3 files delivered, `md5sum`-matched
+both sides, `src/` untouched, migrations 0001–0009 untouched, no `SECURITY DEFINER` anywhere, both
+triggers correctly named, `proacl` clean on all five functions.
+
+**Design-session verification, per [[verification-standard]] — my own probe, never a re-run of theirs.**
+The 36-case harness written *before the agent existed* passed cold against its migration. All 12
+prescribed mutations broke exactly the cases §10 names. Then the part that mattered:
+
+**Six unprescribed mutations. Not one was caught — by either suite.** Four were genuine coverage
+gaps (`create_node` never asserted it trims the name; `delete_node`'s `profile_grants` cleanup is
+unreachable from the seed fixtures, because every seeded grant sits on a node with children; a
+direct `INSERT` with `parent_id = id`; a direct `INSERT` of a non-root-level node with a NULL
+parent). Two were **correctly** uncaught and are worth recording as such: scoping `create_node`'s
+collision check to siblings is equivalent to scoping it org-wide, because a path collision can only
+occur between siblings; and `move_node`'s "only a position-0 node may have no parent" check is the
+M11 shape again — the trigger catches it identically, so it buys error-payload quality, not safety.
+
+**Then I probed every RPC with NULL arguments, and found three defects no suite caught.**
+
+| # | Defect | Severity |
+| --- | --- | --- |
+| D1 | **`delete_node(id, NULL)` silently HARD-DELETED the node.** `p_mode NOT IN (...)` is NULL — not true — when `p_mode` is NULL, so the guard never fired; `p_mode = 'deactivate'` is also NULL, so control fell through to the *delete* branch. Measured on a childless, work-free node: `{"mode": "delete", "deleted": 1}`, row gone | **A malformed argument performing the destructive action when the documented default is the safe one.** |
+| D2 | `create_node(parent, name, NULL)` raised a raw `23502` | outside the §7 closed set — the client's parser cannot read it |
+| D3 | `save_hierarchy_levels` raised a raw `22P02` on an unparseable `id` | same |
+
+**D1 and D3 were bugs in my brief and in my own reference implementation, not deviations by the
+agent.** The reference had the identical NULL-blind `NOT IN`, and my 36 cases never passed a NULL
+argument to anything. The agent implemented the specification faithfully; the specification was
+wrong. Round two fixed all three, added seven cases (D1–D3, U1/U4/U5/U7), and I confirmed each new
+case has teeth by reverting the fix it guards and watching it fail.
+
+**The lesson, and it is a sharper version of one this project keeps relearning.** §18.11 said prose
+in a brief is not a test. This adds: **an acceptance suite that only ever passes well-formed
+arguments tests the happy path of the error handling, not the error handling.** Every one of the 36
+cases exercised a *wrong* input — a name that collides, a move that cycles, a level that is in use —
+and not one exercised a *malformed* one. Those are different axes, and the second was completely
+absent. Worth a standing item: for any function reachable from a client, probe every argument with
+NULL before the brief ships.
+
+**One agent claim that did not survive checking, and one that did.** Its deviation list said case
+N15 does not fail under M7 because "N15 exercises the root branch" — I could not reproduce that
+against my reference, where N15 re-parents a level-3 cell to a level-2 line, squarely the non-root
+branch. On being asked, the agent found the real cause and it was better than either reading: **its
+own N15 used Plant 1**, the one node with a legal NULL parent, so the case never tested the
+non-root move its name promised. Rewritten. Its other claim — that mutating a trigger which fires
+during seed loading breaks the *seed*, a louder signal than a failing case, and one my live-patch
+mutation runner never sees — is correct, and is the better methodology for trigger mutations.
+
+**Explicitly NOT verified by me:** the seven remaining prescribed mutations (M1, M3, M4, M7, M10,
+M11, M12) were re-run by the agent against round two but not by me; I re-ran only the five that
+touch the three functions round two changed (M2, M5, M6, M8, M9), all correct. And there is still
+only one org in the seed, so **no test anywhere proves cross-org isolation of these five RPCs** —
+`(org_id, path)` unique would not catch a missing `org_id` filter with a single tenant. That is a
+seed limitation, not a code one, and it is the strongest argument for a second seeded org before
+P1-5c's CSV import goes anywhere near an upsert.

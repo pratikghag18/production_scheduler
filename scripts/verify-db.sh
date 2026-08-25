@@ -115,6 +115,15 @@ if [ ! -f "$TESTS_DIR/60_api_test.sql" ]; then
   note_fail "60_api_test.sql not found in $TESTS_DIR (brief P1-3a §8 requires it to run after 50_audit_test.sql)"
   exit 1
 fi
+# EXTENDED BY BRIEF P1-5a §3: 70_hierarchy_test.sql (P1-5a's own test file)
+# must run after 60_api_test.sql. Filename-sorted glob order already places
+# it there on its own ("60_..." < "70_..." lexically), so the loop below is
+# unchanged; this guard just makes the requirement explicit, same idiom as
+# the 60_api_test.sql guard immediately above.
+if [ ! -f "$TESTS_DIR/70_hierarchy_test.sql" ]; then
+  note_fail "70_hierarchy_test.sql not found in $TESTS_DIR (brief P1-5a §3 requires it to run after 60_api_test.sql)"
+  exit 1
+fi
 for f in $(ls "$TESTS_DIR"/[1-9]*.sql | sort); do
   echo "--- $(basename "$f") ---"
   if psql_su -f "$f"; then

@@ -49,8 +49,14 @@ one helper (`api_raise`) so this shape cannot drift:
 | `not_eligible` | `PT409` | operator lacks a required skill (or it expires inside the window) under `block` policy, or under `warn` policy without an explicit override | `operator_id`, `node_id`, `missing_skills[]`, `expiring_skills[]`, `policy` |
 | `run_overlap` | `PT409` | a run would overlap another active run on the same node | `node_id`, `timerange`, `conflicting_run_id` |
 | `run_node_mismatch` | `PT409` | an assignment's `node_id` ≠ its run's `node_id` | `assignment_node_id`, `run_node_id`, `run_id` |
-| `not_permitted` | `PT403` | the caller lacks an edit grant on a node the operation touches | `node_id` |
+| `not_permitted` | `PT403` | the caller lacks an edit grant on a node the operation touches, **or** (brief P1-5a) is not an org admin calling one of the five hierarchy-admin RPCs | `node_id` (edit-grant case) or none (admin-check case) |
 | `invalid_argument` | `PT400` | malformed input to an RPC (bad jsonb shape, null where required, `timerange` empty) | `field`, `reason` |
+| `path_collision` *(brief P1-5a)* | `PT409` | `create_node`/`rename_node`/`move_node` would produce an `nodes.path` another node in the org already holds | `path`, `existing_node_id` |
+| `node_cycle` *(brief P1-5a)* | `PT409` | a node would become its own ancestor — from `move_node`'s own pre-check, or from the `nodes_before_cycle` trigger on a direct `UPDATE` | `node_id` |
+| `level_mismatch` *(brief P1-5a)* | `PT409` | a node's level is not exactly one position below its parent's (or, for a root node, not position 0) — from `create_node`/`move_node`'s own pre-check, or from the `nodes_before_level` trigger on a direct `INSERT`/`UPDATE` | `node_id` **only when raised by the trigger** — an RPC's own pre-check omits it deliberately, so the key's presence tells the two apart (see `docs/agent-briefs/p1-5a-hierarchy-db-brief.md` §6.4, case N17) |
+| `level_in_use` *(brief P1-5a)* | `PT409` | `save_hierarchy_levels` would remove a hierarchy level that still has nodes | `level_ids` |
+| `node_in_use` *(brief P1-5a)* | `PT409` | `delete_node(p_mode := 'delete')` on a node that still has children, runs, or assignments | `children`, `runs`, `assignments` |
+| `schedulable_level_locked` *(brief P1-5a)* | `PT409` | `save_hierarchy_levels` would move the schedulable flag off a level that still has runs **or** direct assignments on it | `blocking_rows`, `level_id` |
 
 **The `23P01` exception:** the `runs_no_overlap_on_node` exclusion
 constraint (a database-level invariant, migration `0003`) raises a bare
@@ -324,6 +330,143 @@ Any other `p_mode` → `invalid_argument`.
 
 **Raises:** `invalid_argument` (bad mode, run not found), `not_permitted`.
 
+### 3.5 Hierarchy admin (brief P1-5a)
+
+Five more RPCs, added by migration `0010`. Same shape as everything above —
+`LANGUAGE plpgsql`, `SECURITY INVOKER`, `SET search_path = public, pg_temp`,
+every raise through `api_raise`. All five open with an `app_is_admin()`
+check the brief's own §6.2-6.5 text does not spell out explicitly, but which
+mirrors `hierarchy_levels`/`nodes`' own RLS write policies (migration
+`0008`: `nodes_insert`/`update`/`delete` are *all* admin-only) — see `docs/
+agent-briefs/p1-5a-hierarchy-db-brief.md`'s agent report §5 for the reasoning.
+Without it, a non-admin caller would either get a silent all-`NULL` `jsonb`
+result (an `UPDATE ... RETURNING` that RLS filtered to zero rows) or a raw
+RLS-violation error outside this contract — exactly the failure mode the
+rest of this document exists to prevent.
+
+#### `save_hierarchy_levels(p_levels jsonb) RETURNS jsonb`
+
+Saves the org's hierarchy level list **whole**, as an ordered JSON array —
+the array index *is* the position, so a payload cannot express a gap:
+
+```json
+[{"id": "uuid or null", "name": "Site", "is_schedulable": false}, "..."]
+```
+
+`id: null` means a new level; an existing level absent from the array is
+removed. Exactly one entry must have `is_schedulable: true`. Capped at 64
+entries. Writes in three passes internally (clear `is_schedulable`, offset
+every position by +1000, then set final values) because neither
+`hierarchy_levels`' `(org_id, position)` unique constraint nor its
+one-schedulable partial index can be deferred — a direct `UPDATE` that
+tries to reorder or move the schedulable flag in one statement hits a raw
+`23505` (see `docs/design-plan.md` §19.1, findings F1/F2).
+
+```json
+[{"id": "...", "position": 0, "name": "Site", "is_schedulable": false}, "... ordered by position"]
+```
+
+**Raises:** `not_permitted`, `invalid_argument` (not an array; empty; over
+64 entries; not exactly one schedulable; a blank name; **a non-null `id`
+that does not parse as a uuid** — found in design-session verification,
+Aug 25: an unparseable `id` such as `"nope"` previously reached the
+function's own `::uuid` cast unguarded and raised a raw `22P02` outside
+this document's closed set), `level_in_use` (a removed level still has
+nodes), `schedulable_level_locked` (the schedulable level is changing and
+the *current* one still has runs, or — with zero runs — direct assignments;
+see D72 in `docs/design-plan.md` §19.2).
+
+#### `create_node(p_parent_id uuid, p_name text, p_sort_order int DEFAULT 0) RETURNS jsonb`
+
+`p_parent_id = NULL` creates a root node at the org's position-0 level.
+Otherwise the new node's level is whatever sits at *parent position + 1*;
+`path` is never supplied by the caller — trigger-derived, same as every
+other node write (D6). Pre-checks the prospective path for a collision
+before inserting, so two siblings that slugify alike (`"Cell 1"` /
+`"Cell-1"`) get a typed `path_collision` instead of the raw `23505` that
+`nodes_org_path_unique` (D67) would otherwise surface. `p_name` is trimmed
+before both the collision check and the insert, so the stored row never
+carries leading/trailing whitespace even though the SQL-level `DEFAULT 0`
+signature suggests otherwise. `p_sort_order` is coalesced to `0`
+internally — found in design-session verification, Aug 25: the function
+signature's own `DEFAULT 0` only applies when the argument is *omitted*,
+not when a caller passes `NULL` explicitly, and an uncoalesced `NULL`
+previously reached the `INSERT` and raised a raw `23502` (not-null
+violation) instead of succeeding cleanly.
+
+```json
+{"id": "...", "name": "Cell 9", "path": "plant_1.assembly.line_1.cell_9",
+ "parent_id": "...", "level_id": "...", "sort_order": 3, "active": true}
+```
+
+**Raises:** `not_permitted`, `invalid_argument` (blank name; unknown
+parent), `level_mismatch` (no level exists one position below the parent),
+`path_collision`.
+
+#### `rename_node(p_node_id uuid, p_name text) RETURNS jsonb`
+
+Descendant paths cascade via the existing `nodes_after_path` trigger
+(migration `0001`) — not reimplemented here. The path-collision check
+excludes the node's own current row, so renaming a node to its own name (or
+to a different name that happens to slugify the same) is a no-op, not a
+false-positive collision.
+
+```json
+{"id": "...", "name": "Line One", "path": "plant_1.assembly.line_one"}
+```
+
+**Raises:** `not_permitted`, `invalid_argument` (blank name; unknown node),
+`path_collision`.
+
+#### `move_node(p_node_id uuid, p_new_parent_id uuid, p_sort_order int DEFAULT NULL) RETURNS jsonb`
+
+Re-parents only — **never changes `level_id`** (D71). The new parent must
+be exactly one level above the node's *existing* level. Checks a self/
+descendant cycle **before** level adjacency (deliberately — every move
+beneath one's own descendant also skips a level, so checking level first
+would misreport a genuine cycle as `level_mismatch`; see `docs/design-plan.
+md` §19.3 item 4). `p_new_parent_id = NULL` is legal only when the node is
+already at level position 0.
+
+```json
+{"id": "...", "name": "Cell 1", "path": "plant_1.assembly.line_2.cell_1",
+ "parent_id": "...", "sort_order": 0}
+```
+
+**Raises:** `not_permitted`, `invalid_argument` (unknown node or parent),
+`node_cycle`, `level_mismatch` (this RPC's own pre-check's `DETAIL`
+deliberately omits `node_id` — see the error table in §1), `path_collision`.
+
+#### `delete_node(p_node_id uuid, p_mode text DEFAULT 'deactivate') RETURNS jsonb`
+
+Two modes, mirroring `delete_run`'s (D73):
+
+- `'deactivate'` — sets `active = false` on the node **and its whole
+  subtree** (`path <@` the node's path, which is reflexive, so the node
+  itself is included).
+- `'delete'` — refuses with `node_in_use` while the node has children,
+  runs, or assignments; otherwise deletes its `profile_grants`,
+  `node_shift_templates` and `node_skill_requirements` rows, then the node.
+
+`p_mode` is validated as `p_mode IS NULL OR p_mode NOT IN (...)` — found in
+design-session verification, Aug 25: `p_mode NOT IN ('deactivate','delete')`
+alone evaluates to `NULL`, not `true`, when `p_mode IS NULL`, so a `NULL`
+mode silently fell through every guard to the **`'delete'` branch** — the
+more destructive of the two documented modes — instead of the safer
+`'deactivate'` default the signature implies. A malformed argument must
+never select the more dangerous of two explicit behaviours; this was a bug
+in the original spec, not a deviation from it.
+
+```json
+{"mode": "deactivate", "deactivated": 4}
+```
+```json
+{"mode": "delete", "deleted": 1}
+```
+
+**Raises:** `not_permitted`, `invalid_argument` (bad mode; unknown node),
+`node_in_use`.
+
 ## 4. RPC vs. plain PostgREST table writes
 
 Simple field edits — a run's `notes` or `planned_headcount`; an
@@ -393,3 +536,42 @@ Recorded here, not silently fixed — see the full agent report for detail:
    `move_run` correctly raises `run_overlap`. `supabase/tests/60_api_test.sql`
    demonstrates this collision explicitly, then demonstrates the actual
    move-run-and-crew capability on a conflict-free target window.
+5. **(Brief P1-5a) The four node-mutating RPCs' own admin check is not in
+   the brief's literal text.** §6.2-6.5 give `save_hierarchy_levels` an
+   explicit "caller is not an admin -> `not_permitted`" step but say nothing
+   of the kind for `create_node`/`rename_node`/`move_node`/`delete_node`.
+   All four still open with it, because `nodes`' own RLS write policies
+   (migration `0008`) are admin-only with no supervisor path at all — a
+   non-admin caller without this pre-check would get either a silent
+   all-`NULL` result (RLS filtered the `RETURNING` to zero rows) or a raw
+   RLS-violation error outside the `api_raise` contract.
+6. **(Brief P1-5a) `scripts/verify-db.sh` had been broken since Aug 22.**
+   P1-3b's dev-login seed block needed ~20 more `auth.users` columns and an
+   `auth.identities` table than `supabase/tests/00_harness.sql` declared;
+   nothing caught it because P1-4a-P1-4e were frontend-only briefs. Fixed in
+   the harness, never the seed — see that file's own header comment and the
+   agent report for the full before/after.
+7. **(Brief P1-5a, found in design-session verification, Aug 25) Three real
+   defects, none prescribed by the brief and none caught by either this
+   build's own 36-case suite or the design session's independent one at the
+   time.** All three came from mutations the brief never listed and from
+   probing every RPC with `NULL` arguments:
+   - `delete_node(id, NULL)` **silently hard-deleted** a node instead of
+     rejecting the call. `p_mode NOT IN (...)` evaluates to `NULL`, not
+     `true`, when `p_mode IS NULL`, so the guard did not fire and control
+     fell through to the `'delete'` branch — the more destructive of the
+     two documented modes, chosen by a malformed argument instead of
+     refused. This is a bug in the brief's own §6.5 text and its reference
+     implementation, not a deviation from either.
+   - `create_node(parent, name, NULL)` raised a raw `23502` (not-null
+     violation) instead of succeeding with `sort_order: 0` — the function
+     signature's `DEFAULT 0` only applies when the argument is *omitted*,
+     not when a caller passes `NULL` explicitly. `move_node` already
+     guarded the equivalent case correctly; `create_node` did not.
+   - `save_hierarchy_levels` raised a raw `22P02` (invalid uuid syntax) on
+     a payload with a malformed `id`. Not in the brief's original 8-step
+     validation list; added as a 9th check.
+
+   All three now raise (or, for the `create_node` case, succeed) through
+   the documented `invalid_argument` contract; see the affected RPCs' own
+   sections above and `supabase/tests/70_hierarchy_test.sql` cases D1/D2/D3.
