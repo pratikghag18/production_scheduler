@@ -1,7 +1,7 @@
 # Production Scheduler — Design Plan
 
-**Status:** Draft v2.1 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c + D81/D82 · §19.15 a second org + the cross-tenant leak (D83) · §19.16 scaling is the default (D84) · §19.17 the create_node regression 0012 caused and the harness that hid it (D85) · §19.18 hierarchy templates — a shape per site (D86) · §19.19 the level lookup D86 forgot to move (D87, OPEN)** Aug 25)
-**Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client + screens layers (P1-5a/b/c/d) are built and verified by independent design-session probes. **The SQL is at migration 0014; the CLIENT SIDE OF D86 is not written yet — see §19.18.**
+**Status:** Draft v2.1 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c + D81/D82 · §19.15 a second org + the cross-tenant leak (D83) · §19.16 scaling is the default (D84) · §19.17 the create_node regression 0012 caused and the harness that hid it (D85) · §19.18 hierarchy templates — a shape per site (D86) · §19.19 the level lookup D86 forgot to move (D87) + its two corrections · §19.20 P1-5f written, both its mutation tables executed · §19.21 D88 per-site timezone — site-local, wall-clock, Phase 2** Aug 25)
+**Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client + screens layers (P1-5a/b/c/d) are built and verified by independent design-session probes. **The SQL is at migration 0014 and the client side of D86 shipped as P1-5e. D87 is OPEN and blocks D86's whole point; its brief (P1-5f) is written and not yet built — see §19.19/§19.20.**
 **Progress tracking:** current status and remaining work live in [`docs/roadmap.md`](roadmap.md) — this document holds decisions, that one holds state.
 
 ---
@@ -2078,3 +2078,142 @@ once** — nineteen cases about hierarchy templates, none of which create a node
 Rule 5 applies too: that absence was never written down as a gap.
 
 Filed as P1-5f, first in the queue, since it blocks the requirement §19.18 exists to satisfy.
+
+#### Two corrections to the paragraphs above, both measured while writing P1-5f (Aug 25)
+
+**1. The live `create_node` is in migration 0011, not 0010.** The sentence "migration 0010,
+untouched by 0014" is true about 0014 and misleading about everything else: **0011
+re-created `create_node`** to route its name handling through `app_trim_ws` (the D80
+whitespace-parity fix). 0010's copy is superseded, and extracting the body from it — which
+is exactly what a careful agent following verification-standard rule 12 would do — would
+silently revert D80. The P1-5f brief names 0011 explicitly and carries the md5 of the
+73-line extraction so the agent can check its own work. This is [[decision-record-drift]]
+in a new form: not a decision recorded only in a comment, but a decision recorded in the
+*wrong file*, where a later reader looking up "which migration defines X" gets the first
+answer rather than the last.
+
+**2. "Not something measured going wrong" was too generous, and the reason matters.**
+`SELECT ... INTO` over a multi-row result takes an arbitrary row, and the row it takes
+tracks **physical heap order**. Re-saving the *other* shape's level list — an ordinary
+supported admin action, e.g. renaming a level — rewrites its rows and **flips which template
+an unqualified root create lands in**: measured 5/5 Standard before, 5/5 Compact after. So
+"the seeded template wins every time" (n=13 now, not 3) is a property of a freshly-loaded
+database, not of the code.
+
+The precise statement, which is what any future writeup should use:
+
+- It is **not a race** and not a concurrency bug. Deterministic for a given heap state.
+- It is **not stable either**. An unrelated, legitimate admin action changes the answer.
+- **The root branch writes a wrong-but-legal row with no error.** A root node at position 0
+  of *any* template satisfies `nodes_check_level_adjacency` — parent NULL, position 0 — so
+  the trigger structurally cannot catch it. The admin gets a node in the wrong shape and no
+  indication. That is worse than §19.19's original "confusing, not corrupting".
+- **The child branch fails closed**, so the second shape cannot grow children either. The
+  net effect is that the API can build trees only in whichever shape happens to be
+  physically first.
+- **No existing row is at risk, and with one shape per org — every org today — behaviour is
+  unchanged and correct.** The provable defect is still the one §19.19 named: a correct
+  request cannot be expressed.
+
+A third measurement, recorded because it is a *non*-defect and someone will otherwise
+"fix" it: creating a root into a template with **no levels** (the ordinary state right after
+`create_hierarchy_template`) already fails inside the closed error set — the BEFORE trigger
+sees a NULL `level_id` before the NOT NULL constraint fires, so it raises `level_mismatch`,
+not a raw `23502`. 0015 adds an explicit guard for the *message*, which today reads "its
+level is not position 0" about a level that does not exist. That is a legibility fix, not a
+leak.
+
+---
+
+### 19.20 P1-5f written — and what executing its two mutation tables cost (Aug 25, 2026)
+
+`docs/agent-briefs/p1-5f-hierarchy-shape-picker-brief.md`. Migration 0015 plus the shape
+picker, as one brief, because they are the same feature from the database and from the
+screen. Both halves were **executed by the design session before the brief shipped**
+(brief-writing rule 5), and both tables were wrong on the first pass.
+
+**SQL: eleven cases (T20–T28, T30, T31), eight mutations shipped of ten designed.**
+
+- **T22 had no teeth.** Written as `authenticated`, mutation M5 — deleting the explicit
+  template lookup's `and org_id = v_org_id` — was **NOT CAUGHT by any case in the file**,
+  because `create_node` is SECURITY INVOKER and the `hierarchy_templates` SELECT policy was
+  quietly supplying the org scope. Re-running T22 under `RESET ROLE` gives it teeth. Third
+  instance of this exact masking here ([[verification-standard]] rule 10); the same reason
+  T18 and C19 exist.
+- **T21 and T26 assert BOTH shapes**, not just the second one. A one-sided assertion is
+  order-dependent: an org-scoped lookup returns one arbitrary row for both calls, so whether
+  it happens to be right depends on heap layout. Asserting both means whichever row it
+  picks, one side fails — which is what makes M1 and M2 reliably catchable.
+- **There is deliberately no T29.** The case written there first asserted the §19.19 heap
+  flip directly. Its *behaviour* half was right; its *precondition* half was a heap-order
+  assertion, and heap order depends on what free space earlier savepoint rollbacks left
+  behind. It passed standalone and failed inside a full-file run **against the unmutated
+  build** — i.e. it appeared to be broken by all ten mutations including one independently
+  proved inert. That is the signature of a broken instrument, not a caught defect. Sixteenth
+  logged instance, and the first where the design session caught its own before shipping it.
+- Two mutations were **executed, found inert, and left out** rather than listed as holes:
+  `<> 1` → `< 1` (identical to M3) and collapsing the zero-template `reason` string (no case
+  reaches the root branch with zero templates, and there is no supported way to).
+- Ten of the eleven cases fail against a 0001–0014 build — but **eight fail with
+  `function create_node(..., uuid) does not exist`**, a signature failure any signature
+  change would produce. **Exactly one case demonstrates the defect**: T20, which on the
+  unfixed build reports `caught=f` — the call *succeeds silently*. The brief says so, so
+  nobody reads ten red lines as ten proofs.
+
+**TypeScript: `shapePicker.ts`, 41 assertions, ten mutations shipped of twelve designed.**
+Three defects, all in the *suite*, none visible until the table was run:
+
+1. A mutation **CRASHED** where a named failure belonged (`S.find(...)!` returned undefined).
+2. Two sort-deleting mutations were **INERT because the fixture was already in position
+   order** — a fixture that agrees with the field being derived cannot test the derivation
+   ([[verification-standard]] rule 3). The fixture is now deliberately shuffled.
+3. A mutation anchor **matched zero lines** (wrong indentation) and would have been recorded
+   as a coverage hole; the runner reported `ANCHOR NOT UNIQUE (count=0)` distinctly, which is
+   the only reason it was caught. The D84 Z2 / D86 lesson, working.
+
+**The single most likely bug in the client half, named in the brief with its own case:**
+deriving the shape list from the distinct `templateId`s present in `levels` rather than from
+`hierarchy_templates`. It is the cheap path, it works for every seeded org, and it makes a
+**newly created shape vanish the instant it is created** — because `create_hierarchy_template`
+returns an EMPTY template on purpose. `fetchHierarchyTree` does not read
+`hierarchy_templates` today, so this is not a hypothetical.
+
+---
+
+### 19.21 D88 — per-site timezone: site-local, wall-clock, Phase 2 (Aug 25, 2026)
+
+Flagged as blocking-adjacent since D86, decided with Pratik today. The mismatch was narrow
+and specific, and worth stating because it is not what "we hardcoded UTC" sounds like:
+
+- **Runs and assignments are `tstzrange`** — absolute instants. Already zone-independent and
+  correct. Nothing to fix.
+- **Shifts are `start_min`/`end_min`, minutes from midnight, with no zone attached** (§16).
+  Wall-clock by construction.
+- **D13 renders the board in UTC**, `BOARD_ZONE` in `src/features/board/lib/time.ts` the
+  single seam.
+
+So a shift defined 06:00–14:00 draws at 06:00 **UTC** wherever the plant is; for a Texas
+plant that band sits over midnight–08:00 local. It has never bitten because D10 anchors the
+seed to UTC.
+
+**Decisions:**
+
+- **D88a — the board's axis is SITE-LOCAL.** `board_window` already takes one `p_root_path`,
+  so a board usually *is* one site. A 06:00 shift must read 06:00 to the people working it.
+- **D88b — a shift keeps its posted WALL-CLOCK start across a DST change.** On the changeover
+  day that shift is 7 or 9 hours long and the crew works it short or long. Pratik's call, and
+  it matches how plants actually post schedules.
+- **D88c — Phase 2, not v1.** Recorded now so nothing new is built assuming UTC; scheduled
+  after P1-5f/5g/5h. Nothing shipped is wrong for a single-zone customer.
+
+**Where the attribute lives was never a question** and was not asked: "site" is not a fixed
+level any more, so the timezone hangs off a **node** and resolves nearest-ancestor — the same
+mechanic `node_shift_templates` / `resolve_shift_template` already uses for shifts, and the
+same shape D86 used for hierarchy shapes. A nullable `timezone` on `nodes` with an org-level
+fallback, reusing the resolution that exists.
+
+**The load-bearing consequence, so it is not discovered late.** D13's note that "in v1 every
+day is exactly 1440 minutes, so board geometry has no DST discontinuity" **stops being true
+under D88a.** Two days a year a local day is 1380 or 1500 minutes, and the shift-band mapping
+stops being `dayStart + start_min`. That is the actual cost of D88 and it lands in
+`src/features/board/lib/time.ts` and `geometry.ts`, not in the schema.
