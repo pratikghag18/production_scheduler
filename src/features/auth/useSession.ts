@@ -55,13 +55,20 @@ export function useSession(): UseSessionResult {
      * Guarded on the id actually changing, because onAuthStateChange also
      * fires on token refresh, and clearing the board on a routine refresh
      * would blank the screen every hour for no reason.
+     *
+     * RETURNS whether the identity actually changed (design plan §19.8).
+     * It used to return void, and the caller below therefore had no way to
+     * make the SAME distinction for `setLoading` -- so the cache survived a
+     * token refresh while the whole board still flashed through the
+     * `sessionLoading` branch. The guard existed; only one of the two
+     * statements it was written for was using it.
      */
-    function clearCacheOnIdentityChange(nextSession: Session | null) {
+    function clearCacheOnIdentityChange(nextSession: Session | null): boolean {
       const nextUserId = nextSession?.user.id ?? null;
-      if (lastUserId.current !== nextUserId) {
-        lastUserId.current = nextUserId;
-        void queryClient.resetQueries();
-      }
+      if (lastUserId.current === nextUserId) return false;
+      lastUserId.current = nextUserId;
+      void queryClient.resetQueries();
+      return true;
     }
 
     async function loadProfile(nextSession: Session | null) {
@@ -100,8 +107,19 @@ export function useSession(): UseSessionResult {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (cancelled) return;
-      clearCacheOnIdentityChange(nextSession);
+      const identityChanged = clearCacheOnIdentityChange(nextSession);
+
+      // The token itself may have changed even when the user did not, so the
+      // session object is always replaced.
       setSession(nextSession);
+
+      // ...but a TOKEN_REFRESH (supabase-js fires one roughly hourly) is the
+      // same person with the same profile. Re-fetching it is a wasted round
+      // trip, and `setLoading(true)` is worse than wasted: `BoardPage` renders
+      // a bare "Loading session..." for that state, so an invisible background
+      // refresh would tear the whole board down and rebuild it. Bail out.
+      if (!identityChanged) return;
+
       setLoading(true);
       void loadProfile(nextSession).finally(() => {
         if (!cancelled) setLoading(false);

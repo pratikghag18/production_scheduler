@@ -1127,3 +1127,60 @@ Two consequences worth carrying, beyond the correction:
   fit path is now higher than it was when D53 chose the default**, and that any future change to
   `computeFitScale`, `scaleDensity`, or anything feeding `availableHeight` should be treated as
   touching the only rendering path there is.
+
+### 19.8 `useSession` blanked the board on every token refresh (Aug 25, 2026)
+
+Found while diagnosing §19.6, in the `401`s that turned out to be unrelated. `onAuthStateChange`
+called `clearCacheOnIdentityChange(nextSession)` — which correctly guards the cache reset on the user
+id actually changing, exactly as §17.4 intended — and then called `setLoading(true)`
+**unconditionally**. `BoardPage` renders a bare `Loading session…` for that state, so every auth
+event tore the whole board down and rebuilt it. supabase-js fires one roughly hourly on token refresh.
+
+The guard existed and was correct; only one of the two statements it was written for was using it.
+`clearCacheOnIdentityChange` now returns whether the identity changed, and the listener bails out
+before `setLoading` when it did not — which also drops a pointless `user_profiles` re-fetch on every
+refresh. The `getSession()` path is unchanged, since first mount must always load.
+
+**Third instance today of one shape:** a guarded statement standing next to an unguarded neighbour
+that needed the same guard. §19.5's `delete_node(id, NULL)` fell through a NULL-blind `NOT IN` into
+the destructive branch; §19.6's `--ui-scale` was kept off the board header and left on the toolbar;
+this one guards the cache and not the spinner. **When a guard is introduced, the question to ask is
+not "is this statement guarded" but "what else in this function is conditioned on the same fact".**
+
+### 19.9 Brief P1-5b written — and the mutation table found three blind fixtures and a harness bug
+
+P1-5b covers the client half of the hierarchy admin: a pure `src/features/admin/lib/hierarchy.ts`
+(Part A, executable in-container) plus the five typed RPC wrappers, six error codes and React Query
+hooks (Part B, author-only). **The admin screens move to P1-5c and CSV import to P1-5d** — a change
+from §19.4's split, made because P1-4c cost 69k against P1-4b's 336k purely on tightness.
+
+A reference implementation was written and all 74 assertions run before the brief shipped, then all
+12 mutations applied one at a time. Three findings worth keeping:
+
+**1. `slugify` is duplicated logic, so the corpus is the contract.** 33 inputs were run through the
+SQL `slugify()` on a scratch database and the expectations recorded verbatim. Two rows do the real
+work: `ÀÉÎÕÜ` → `n_` (Postgres does **not** transliterate, so the instinctive
+`.normalize("NFD")` implementation is wrong) and `Ünïcödé Zoné` → `n_c_d_zon` (the leading `n` is a
+letter from the input, not the empty-string prefix).
+
+**2. Three mutations caught nothing, all for the same reason.** Every fixture had been copied from
+the shape of the seed, where `parentId` agrees with `path` and `sortOrder` agrees with `name` — so
+building the tree from the wrong signal produced an identical tree, and dropping the `sortOrder`
+comparison changed no order. The third was a sibling-path prefix: nothing in the fixture had a path
+that was a string prefix of another's without a dot boundary, so `line_10` vs `line_1` went untested.
+This is §18.3's rule for the third time — **a fixture that passes with and without the behaviour is
+not a test of that behaviour** — and the generalisation is now sharper: *when two fields could each
+explain the same output, the fixture must make them disagree.*
+
+**3. A mutation can crash the harness, and a naive runner scores that as "not caught".** M6 changes
+the tree's shape, so an assertion indexing into it throws; the uncaught throw aborted the file, no
+`FAIL` line printed, and the runner reported NOT CAUGHT. Two defences, both now required by the
+brief: evaluate every assertion inside try/catch so a throw becomes a named failure, and make the
+runner treat *non-zero exit with zero failures* as CRASHED rather than passing. **That is the second
+harness bug in two briefs** — P1-5a's mislabelled every non-`api_raise` failure as `22P02`. The
+harness is code, and it is the code no one tests.
+
+**Cost controls written into the brief, since P1-5a cost 329k.** Delivery is `device_bash` heredocs
+only — no tarball, no `SendUserFile`, no base64 fallback (that fallback moved ~94KB of source as
+~125KB of base64, each chunk appearing twice in context, plausibly a third of the run). The suite
+must be table-driven: ~200 lines for 74 assertions here, against 1,453 lines for 43 cases in P1-5a.
