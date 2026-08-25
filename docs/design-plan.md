@@ -855,3 +855,124 @@ The header's size is then a pure function of viewport width, so `HEADER_HEIGHT_P
 Verified in headless Chromium at 1440 / 2560 / 3840 with `--ui-scale` deliberately pinned at 1.75: the label renders 15 / 17.9 / 20.25px, a 16 / 20 / 22px line box inside the 30px strip, fitting at every width and never following the fit scale. Strip 28px → 30px and `.hdrTrack` 62px → 64px for headroom, with `HEADER_HEIGHT_PX` moved in step.
 
 **The general shape, worth carrying:** when a derived value feeds back into its own input, the fix is usually to find the second, independent variable the thing should actually depend on — not to measure harder.
+
+---
+
+## 19. Addendum v1.6 — onboarding and the hierarchy admin surface (Aug 25, 2026)
+
+Written alongside brief P1-5a, the first brief since P1-3a whose whole deliverable is
+executable in the agent container. Everything below was **executed against the seeded
+scratch database**, not reasoned about — including the mutation table, which
+[[brief-writing-rules]] rule 5 was extended to cover after P1-4d.
+
+### 19.0 Before anything else: the SQL suite had been broken for three days
+
+`scripts/verify-db.sh` aborts at step 6 with `ERROR: column u.created_at does not exist`.
+P1-3b's dev sign-in work (Aug 22) appended a GoTrue block to `seed.sql` that writes ~20 real
+`auth.users` columns and an `auth.identities` row; `supabase/tests/00_harness.sql`, the
+scratch-DB auth shim, still declared only `auth.users (id uuid, email text)`.
+
+Nobody noticed because **P1-4a through P1-4e were all frontend briefs** — nothing had run the
+SQL suite since P1-3a. Fixed by extending the harness, never the seed (the same call as §17.2
+item 3: the seed legitimately targets real Supabase; the shim is the thing that drifted). With
+the harness extended, all 9 migrations + seed + 6 test files are green again.
+
+**The process lesson:** the SQL suite has no CI, so it rots silently across frontend briefs.
+Re-run `verify-db.sh` at the start of any session that touches the database, *before* trusting it.
+
+### 19.1 Six invariants the schema does not hold — all measured
+
+The admin tree editor is the first surface in the product that can create these states. Today
+nothing prevents any of them.
+
+| # | State the database accepts today | Measured consequence |
+| --- | --- | --- |
+| F1 | Levels cannot be reordered in one `UPDATE` | `unique (org_id, position)` is non-deferrable; swapping positions 1↔2 fails with a duplicate-key error |
+| F2 | Nor can the schedulable flag be moved in one `UPDATE` | `hierarchy_levels_one_schedulable` is a partial **index**, and an index can never be deferred |
+| F3 | Two root nodes may share a name | `unique (org_id, parent_id, name)` treats NULLs as distinct; both roots get `path = plant_1` |
+| F4 | Sibling names that slugify alike produce duplicate paths | "Cell 1" and "Cell-1" are distinct `name`s but both slugify to `cell_1` |
+| F4a | **That collision leaks subtree grants** | A profile granted *only* Cell 1 was measured to get `app_can_read_node` **and `app_can_edit_node` = true** on `Cell-1`, a different node, because `app_grant_paths` compares `n.path <@ gp` and the two paths are byte-identical. `Cell 2` correctly stayed invisible — a specific leak, not a broad one |
+| F5 | A node can become its own ancestor | The composite self-FK does not detect cycles. `nodes_cascade_path` then re-roots the subtree under itself, and **a recursive `parent_id` walk never terminates** (measured: alternating Cell 1 / Line 1 forever, stopped only by an explicit hop guard) |
+| F6 | Level adjacency is enforced nowhere | Re-parenting a Work Cell (position 3) directly under a Department (position 1) is accepted, skipping Line entirely |
+
+F5 has not bitten yet only because §18 requires nearest-ancestor resolution to walk ltree paths,
+never `parent_id`. **An admin tree editor walks `parent_id` by nature**, so the board's discipline
+does not protect it.
+
+Checked and *not* holes: deleting a `hierarchy_level` that still has nodes is correctly blocked by
+`nodes_level_id_fkey`, and a legal same-depth re-parent cascades descendant paths correctly.
+
+### 19.2 Decisions
+
+| # | Decision | Rationale |
+| --- | --- | --- |
+| D67 | **`(org_id, path)` carries a unique index.** | Closes F3 and F4 — and therefore F4a — as a *database* invariant, so no client, import or future RPC can bypass it. Verified: the existing seed satisfies it. |
+| D68 | **A `BEFORE INSERT OR UPDATE OF parent_id` trigger rejects a parent that is the node itself or one of its descendants.** Trigger named `nodes_before_cycle` so it sorts *before* `nodes_before_path` and sees a coherent `OLD.path`. | Closes F5 structurally. Postgres fires same-timing triggers in **name order**, so the name is load-bearing, not cosmetic. |
+| D69 | **Level adjacency is enforced by a trigger with a documented escape hatch** — skipped when `current_setting('app.hierarchy_migration')` is `'on'`. | §2 put this rule in "the application" so hierarchy edits stay cheap, and migration 0001 carries an explicit *do not add it here later* note. That note was protecting the Phase-3 mid-level-insertion tool, not the invariant. A trigger plus a named escape hatch keeps the invariant on by default and still lets that tool run. This **amends** the 0001 note rather than ignoring it. |
+| D70 | **The hierarchy definition is saved whole, as an ordered array**, by `save_hierarchy_levels(p_levels jsonb)`; the array index *is* the position. | Removes "positions must be contiguous" from the validation surface entirely — a payload cannot express a gap. F1/F2 then reduce to one internal concern: write in two passes (clear `is_schedulable`, offset every position by +1000, then set final values). Capped at 64 levels so the offset can never collide. |
+| D71 | **`move_node` re-parents only; it never changes `level_id`.** The new parent must be exactly one level above the node's *existing* level. | Moving a Work Cell under a Department could otherwise silently promote it to a Line, taking its runs onto a no-longer-schedulable node. Refusing is the honest answer. |
+| D72 | **The schedulable level cannot move while scheduled work exists** (`schedulable_level_locked`), counting runs **and** direct assignments. | Moving it would orphan every run onto a non-schedulable node — rows the board can no longer render or reach. The assignments half is not redundant: after P1-4e a direct assignment can exist with no run at all. |
+| D73 | **`delete_node(p_mode)` is `'deactivate'` \| `'delete'`**, mirroring `delete_run(mode)`. Deactivate cascades to the whole subtree; delete refuses while the node has children, runs or assignments. | A deactivated parent with active children is not a state anyone means. Delete stays available for onboarding typos and is refused the moment history depends on the node. |
+| D74 | **Six new machine error codes** join the closed set: `path_collision`, `node_cycle`, `level_mismatch`, `level_in_use`, `node_in_use`, `schedulable_level_locked`. All routed through `api_raise`, all `PT409`. | §17.2 item 3's contract: clients switch on the JSON `error` field. Raw constraint violations are not part of that contract, so every RPC pre-checks and raises a named code rather than letting `23505` surface. |
+
+### 19.3 What executing the acceptance cases and the mutation table actually found
+
+36 acceptance cases, all green cold against the reference implementation. Twelve mutations,
+each applied on its own and re-run — **every mapping in the brief's table is a recorded
+observation, not a prediction.** That was worth doing four times over:
+
+**1. Two mutations were NOT CAUGHT on the first pass, and both were my gaps.**
+
+- **M9** (count runs only, ignore assignments) survived, because the only case exercising the
+  schedulable lock had runs present. New case L12 detaches every assignment and deletes the runs
+  first. This is D72's second half having no test — prose in a brief is not a test, again.
+- **M11** (drop `move_node`'s level pre-check) survived, because the trigger caught the write with
+  the *same* error code and nothing could tell the two apart. Textbook "a mutation of a redundant
+  clause cannot fail anything". Resolved by noticing the payloads differ — the trigger's `DETAIL`
+  carries `node_id`, the RPC's does not — so new case N17 asserts the *absence* of that key.
+
+**2. A bug in the reference implementation that no amount of reading would have found.** Two
+cases failed with `record "r" is not assigned yet` (SQLSTATE 55000). The cause: the blocking-work
+query was written `FROM runs r JOIN nodes n`, and `r` was also the name of the declared record
+variable for the write loop. **PL/pgSQL resolves a table alias against a declared variable of the
+same name**, and the variable was still unassigned. Filed to [[postgres-supabase-gotchas]]. The
+brief warns about it by name, because it is invisible until the exact branch runs.
+
+**3. A bug in the harness, which mislabelled a whole class of failure.** The helper that extracts
+the machine code did `v_detail::jsonb` inside a nested handler and, on failure, returned
+`SQLSTATE` — but inside that handler `SQLSTATE` is the *cast's* code (`22P02`), not the error
+under test. Every non-`api_raise` failure was therefore reported as `22P02`. Capture
+`RETURNED_SQLSTATE` in the outer handler *first*. Worth stating because the same shape will
+appear in whatever harness the agent writes.
+
+**4. One thing I inferred and then disproved.** M4 (remove `move_node`'s own cycle pre-check)
+reported `level_mismatch` instead of `node_cycle`, and the first reading was "the two pre-checks
+are in the wrong order". They are not — the cycle check already runs first, and M4 removes it, so
+the level check is simply what remains. The real finding underneath is sharper and did survive:
+**every move beneath one's own descendant necessarily also skips a level**, so `move_node`'s
+`node_cycle` is reachable only because it is checked first. The cycle pre-check is load-bearing
+for *error quality*, not for safety — the trigger is what makes it safe. Checking the source
+order took one command; writing the wrong version into this document would have cost a cycle.
+
+**5. Over-broad mutations are worth naming as such.** M7 (level trigger off by one) fails six
+cases and M3 (cycle test reversed) fails three, including cases about unrelated behaviour. The
+table names one primary case for each and records the collateral, so a future reader is not
+misled into thinking those cases are *about* the mutated line.
+
+### 19.4 Scope boundary for P1-5
+
+Onboarding splits into three briefs along the line [[brief-writing-rules]] rule 1 draws:
+
+- **P1-5a — hierarchy levels + node tree, database half.** Everything above. Fully executable
+  in-container; no author-only half at all.
+- **P1-5b — the admin pages.** Part A: a pure `lib/hierarchy.ts` (tree assembly from the flat node
+  list, legal-drop-target computation, level-editor validation mirroring the RPC's rules). Part B:
+  React, author-only.
+- **P1-5c — CSV import.** Part A: a pure parse/plan module (RFC 4180 quoting, BOM, CRLF, header
+  mapping, duplicate detection, parents-before-children ordering for the tree). Part B: the
+  import wizard, plus the upsert-by-`external_id` RPC. §7 calls CSV import "the sync pipeline with
+  a manual trigger", so this brief is what validates the whole upsert machinery.
+
+**A scope fence written as a blanket file prohibition is banned from here on** — §18.13's lesson.
+P1-5a's fence names the properties being protected (no new write path outside the RPCs, no client
+reimplementation of the tree rules), not a list of untouchable files.

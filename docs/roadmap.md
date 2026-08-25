@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-25 (**P1-4e delivered — the board is feature-complete.** Cross-cell moves, split coverage, overrides, panel drag, re-parenting, plus P1-4b's debts. Design-session probe: 21 cases, found and fixed a real `splitEvenly` bug my own brief caused. Agent surfaced two genuine brief/API contradictions (§18.13). **Browser acceptance is the outstanding step.** After that: Phase 1's remaining lines — onboarding/admin pages, auth+RLS wiring, realtime, audit log, E2E pass.) · **Current phase:** 1 — Core product
+**Last updated:** 2026-08-25 (**Board accepted; P1-4 closed.** P1-4a–e all delivered, verified and green in the browser — render, interactions, fit-to-height, split coverage, cross-cell moves. Onboarding is next: **brief P1-5a written**, its 36 acceptance cases and all 12 mutations *executed* against a reference implementation first. That run surfaced six unenforced hierarchy invariants — including a **subtree-grant leak** via duplicate ltree paths — and found `scripts/verify-db.sh` had been broken in-container since Aug 22. See design plan §19.) · **Current phase:** 1 — Core product
 
 ---
 
@@ -31,12 +31,12 @@
 - [x] Tech stack DECIDED (Aug 21): Supabase (Postgres+Auth+Realtime+RLS API) · React+TypeScript · static hosting (Vercel/Cloudflare Pages) · escape hatch to self-hosted documented in design plan §5
 - [x] **Repo scaffold + CI** — Vite/React-TS + Supabase client + CI. Authored by agent Aug 21 (unvalidated, no npm in container); `npm install` + full acceptance run completed on Pratik's machine Aug 22: typecheck, lint, format:check, unit tests, build, and Playwright e2e all green, `npm audit` reports 0 vulnerabilities.
 - [x] Database migrations from design plan §3/§14/§15/§16/§17 (incl. capacity trigger, shift tables, RLS policies) + seed scripts — **built and validated** (Sonnet, Aug 21) against a scratch PostgreSQL 16 instance; all 31 `docs/agent-briefs/p1-2-db-migrations-brief.md` §7 acceptance items pass via `scripts/verify-db.sh`. **Confirmed against real Supabase (Aug 22)**: all 9 migrations + seed applied cleanly via `supabase start` on WSL2/Docker, so the `auth.users` FK is real, not shimmed. `database.types.ts` generated from the live DB — all 17 tables and all 8 RPCs typed.
-- [ ] Org onboarding settings pages (same pattern as ⚙ Shifts): hierarchy level editor + node tree editor + CSV import (operators, products, tree)
+- [ ] Org onboarding settings pages (same pattern as ⚙ Shifts): hierarchy level editor + node tree editor + CSV import (operators, products, tree) — **split into P1-5a (database half, brief written), P1-5b (admin pages), P1-5c (CSV import)**; see design plan §19.4
 - [ ] Auth, profiles, subtree grants (admin / supervisor / viewer), RLS wiring
 - [x] API layer, **database half** — `board_window` / `capacity_probe` / `check_eligibility` reads, `create_run` / `create_assignment` / `move_run` / `apply_split_coverage` / `delete_run` writes, machine-readable error contract (SQLSTATE + parsed `DETAIL` JSON) — **built, validated and mutation-tested** (Sonnet, Aug 22) via migration 0009 + `scripts/verify-db.sh`; all 28 `docs/agent-briefs/p1-3a-db-api-surface-brief.md` §8 acceptance items pass. **TypeScript half (P1-3b) also DONE Aug 22**: typed wrappers, `SchedulerError` union + parser, serde boundary, React Query hooks with optimistic rollback, dev sign-in, data-proof panel. Verified end to end in the browser.
-- [x] Board UI: virtualized timeline grid (continuous dates), hierarchy rail, zoom-adaptive snap, shift/break rendering layer — **P1-4a code delivered, acceptance pending user run**
-- [ ] Board interactions: hybrid create popover, move/resize both kinds, cross-cell run moves, split-coverage flow
-- [ ] Left operator panel: roster, skills, assigned indicators, search — read-only half folded into P1-4a; drag-from-panel is P1-4b
+- [x] Board UI: virtualized timeline grid (continuous dates), hierarchy rail, zoom-adaptive snap, shift/break rendering layer — **P1-4a built, verified and accepted in the browser (Aug 24)**; P1-4c/P1-4d added responsive density and fit-to-height on top
+- [x] Board interactions: hybrid create popover, move/resize both kinds, cross-cell run moves, split-coverage flow — **P1-4b + P1-4e, delivered and accepted (Aug 25)**. Eligibility overrides and run re-parenting landed with them
+- [x] Left operator panel: roster, skills, assigned indicators, search — read-only half folded into P1-4a; drag-from-panel landed in P1-4e
 - [ ] Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
 - [ ] Audit log on all schedule mutations
 - [ ] E2E test pass (Playwright) + load sanity (hundreds of rows, thousands of assignments)
@@ -85,7 +85,7 @@
 
 **Then open the Claude session in this project folder** and paste:
 
-> Continue the production scheduler. Read project memory, `docs/roadmap.md`, and `docs/design-plan.md` (especially §17–§17.4), then pick up at the next unchecked item. The local Supabase stack is already running.
+> Continue the production scheduler. Read project memory, `docs/roadmap.md`, and `docs/design-plan.md` (especially §19), then pick up at the next unchecked item. The local Supabase stack is already running.
 
 That is all it needs. Project memory carries every decision, the workflow, the environment constraints, and the exact resume point; this file carries state; the design plan carries the reasoning.
 
@@ -103,7 +103,7 @@ That is all it needs. Project memory carries every decision, the workflow, the e
 
 | Artifact | Path | State |
 |---|---|---|
-| Design plan (decisions) | `docs/design-plan.md` | v1.5 (§18 board rendering, Aug 22) |
+| Design plan (decisions) | `docs/design-plan.md` | v1.6 (§19 onboarding & hierarchy admin, Aug 25) |
 | This roadmap (state) | `docs/roadmap.md` | living |
 | Mockup A / B (reference) | `docs/mockups/model-a.html`, `model-b.html` | frozen |
 | Hybrid mockup (current) | `docs/mockups/model-hybrid.html` | v2.3 — **signed off Aug 22, frozen**; P1-4a ports its render engine |
@@ -143,6 +143,8 @@ Briefs are written by the design session (Opus) and executed by fresh Sonnet age
 | P1-4c | `p1-4c-responsive-density-brief.md` | Responsive & density pass: viewport-aware scale, a Comfortable/Standard/Compact density control, the board filling available height instead of stopping mid-screen, and phone-legible basics (viewport meta, touch panning, LAN dev access). Density-aware row geometry stays pure and testable | code delivered, acceptance pending user run |
 | P1-4d | `p1-4d-fit-to-height-brief.md` | **Fit-to-height**: rows scale automatically so the board fills the available height, clamped to [0.75, 2.5]. `Fit | Comfortable | Standard | Compact`, Fit default; manual density becomes an override. Amends P1-4c's D46 | **Code delivered, acceptance pending user run.** Part A (`computeFitScale`/`scaleDensity`, pure) verified via node harness — 164 passed, 0 failed, all §6 cases and §7 mutations M1–M5 caught. Part B (wiring) is author-only, unrun — no npm in container. Written after Pratik pointed out that row count, not screen size, is the variable that matters — an admin sees 7 cells, a line supervisor 2, on the same screen, so no fixed density fills it for both |
 | P1-4e | `p1-4e-board-interactions-ii-brief.md` | Board interactions II: cross-cell run moves (`move_run`, crew follows, one RPC), split-coverage popover via `capacity_probe`, eligibility overrides, drag-from-operator-panel, re-parenting an assignment between runs. Also closes the three P1-4b debts: T12 for the four popover-fired mutations, replacing the `window.confirm` crew warning with a real popover step, and `runById`/`assignmentById` on `BoardIndex` | **Code delivered, acceptance pending user run.** Part A (`lib/interaction.ts` additions — `resolveDropRow`, `splitEvenly`, `splitFits`, `planCrewShift`, `assignmentFitsRun`) verified via node harness — §10: 29/29 assertions pass across all 10 cases. §11: all 6 prescribed mutations (M1–M6) confirmed to break their named case; M3 and M4 also broke an additional case beyond what the brief's own table named (table corrections filed in the agent report). Part B (`useDragGesture.ts` wiring + component integration) is author-only, unrun — no npm in container |
+
+| P1-5a | `p1-5a-hierarchy-db-brief.md` | Migration 0010: a `(org_id, path)` unique index, cycle and level-adjacency triggers, and `save_hierarchy_levels` / `create_node` / `rename_node` / `move_node` / `delete_node`; six new error codes; `70_hierarchy_test.sql`; the `00_harness.sql` GoTrue fix | **written, not built.** All 36 acceptance cases and all 12 mutations were EXECUTED against a design-session reference implementation before shipping — which found two mutations nothing caught (cases L12 and N17 exist because of them), a PL/pgSQL alias-shadowing bug, and a harness that mislabelled every non-`api_raise` failure as `22P02`. Closes six measured schema holes incl. a subtree-grant leak (§19.1) |
 
 Briefs build in the cloud container and deliver to this repo via a tarball through `_delivery/` (gitignored); no agent commits or pushes — review and commit yourself.
 
