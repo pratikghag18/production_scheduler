@@ -3,6 +3,7 @@ import type { HierarchyLevel } from "@/lib/api";
 import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
+import { canQueryAsUser } from "@/features/auth/session";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useRootPath } from "./hooks/useRootPath";
 import { useBoardViewStore } from "./store/boardView";
@@ -99,7 +100,10 @@ export default function BoardPage() {
     [windowStartDate, windowDayCount],
   );
 
-  const boardQuery = useBoardWindow(rootPath, from, to);
+  // Do not query as nobody: until the session resolves, an RLS-scoped read can
+  // only come back 401. One shared predicate, never re-derived inline (§19.8).
+  const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  const boardQuery = useBoardWindow(rootPath, from, to, canQuery);
 
   // T4: spinner only on "pending" with no cached data; keep rendering
   // stale data during a background refetch (isFetching), with a subtle

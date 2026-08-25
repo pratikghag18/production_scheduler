@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideSessionUpdate } from "@/features/auth/session";
+import { canQueryAsUser, decideSessionUpdate } from "@/features/auth/session";
 import type { AuthEvent } from "@/features/auth/session";
 
 /**
@@ -80,5 +80,55 @@ describe("session.ts: decideSessionUpdate", () => {
         expect(decision.setLoading).toBe(decision.reloadProfile);
       }
     }
+  });
+});
+
+/**
+ * D91 — `canQueryAsUser`, the gate that stops an RLS-scoped read firing as
+ * nobody. Every read in this app is scoped to the caller, so a query sent
+ * before the session resolves is a request the server MUST refuse: on every
+ * page load the hierarchy reads and `board_window` went out unauthenticated,
+ * came back 401, and re-ran once auth landed.
+ *
+ * Two terms, one implementation — because §19.8's cache-reset and loading
+ * flags drifted apart precisely by being open-coded at more than one caller,
+ * and this condition now has two (BoardPage, AdminPage).
+ */
+describe("session.ts: canQueryAsUser", () => {
+  it("Q1: resolved AND signed in -> may query", () => {
+    expect(canQueryAsUser("user-1", false)).toBe(true);
+  });
+
+  it("Q2: still loading -> must NOT query, even with a user id", () => {
+    // The dangerous case: an id is present before `loading` clears on the
+    // very first pass, and querying then is exactly the 401.
+    expect(canQueryAsUser("user-1", true)).toBe(false);
+  });
+
+  it("Q3: resolved but signed out -> must not query", () => {
+    expect(canQueryAsUser(null, false)).toBe(false);
+  });
+
+  it("Q4: loading and signed out -> must not query", () => {
+    expect(canQueryAsUser(null, true)).toBe(false);
+  });
+
+  it("Q5: BOTH terms are load-bearing — exactly one input combination is true", () => {
+    // A guard that ignored either argument would let a second combination
+    // through, and a `return true` would let all four.
+    const combos: Array<[string | null, boolean]> = [
+      ["user-1", false],
+      ["user-1", true],
+      [null, false],
+      [null, true],
+    ];
+    expect(combos.filter(([id, loading]) => canQueryAsUser(id, loading)).length).toBe(1);
+  });
+
+  it("Q6: an empty-string id is still an identity, not a signed-out state", () => {
+    // Guarding on truthiness rather than `!== null` would silently treat "" as
+    // signed out. The session layer's contract is `string | null`, and only
+    // `null` means nobody.
+    expect(canQueryAsUser("", false)).toBe(true);
   });
 });

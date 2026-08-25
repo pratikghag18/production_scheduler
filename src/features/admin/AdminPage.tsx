@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 // database.types.ts (docs/conventions.md). The brief's file table authorised no
 // file for it, which is why it landed here; the boundary is the rule.
 import { fetchHierarchyTree } from "@/lib/api";
+import { useSession } from "@/features/auth/useSession";
+import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "./hooks/useHierarchyMutations";
 import { buildShapeSummaries, resolveSelectedShape } from "./lib/shapePicker";
 import { LevelEditor } from "./components/LevelEditor";
@@ -47,16 +49,22 @@ const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }
  * prefix, so this query is covered without either file knowing the
  * other's exact shape.
  */
-function useHierarchyTree() {
+function useHierarchyTree(enabled: boolean) {
   return useQuery({
     queryKey: [...hierarchyKeys.all, "tree"],
     queryFn: fetchHierarchyTree,
+    // See useBoardWindow: REQUIRED, not defaulted. `fetchHierarchyTree` reads
+    // `hierarchy_templates`, `hierarchy_levels` and `nodes`, all RLS-scoped to
+    // the caller, so before the session resolves this can only be a 401.
+    enabled,
   });
 }
 
 export default function AdminPage() {
   const [section, setSection] = useState<SectionId>("hierarchy");
-  const { data, isLoading, isError } = useHierarchyTree();
+  const { session, loading: sessionLoading } = useSession();
+  const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  const { data, isLoading, isError } = useHierarchyTree(canQuery);
 
   // D87 (brief P1-5f §7.6): this component owns the shape SELECTION; every
   // other fact about a shape (its levels, whether it has nodes) is derived
@@ -91,7 +99,14 @@ export default function AdminPage() {
         {section === "hierarchy" && (
           <>
             <h1 className={styles.h1}>Hierarchy</h1>
-            {isLoading && <p className={styles.status}>Loading…</p>}
+            {/* `!canQuery || isLoading` — NOT `isLoading` alone. With
+                `enabled: false` React Query v5 reports `isPending` with
+                `fetchStatus: "idle"`, so `isLoading` is FALSE while the
+                session is still resolving: gating the query without widening
+                this condition renders a blank card instead of a spinner.
+                That is §19.8's exact mistake — guarding the cache but not the
+                loading flag — and it is why `decideSessionUpdate` exists. */}
+            {(!canQuery || isLoading) && <p className={styles.status}>Loading…</p>}
             {isError && (
               <p className={styles.status} role="alert">
                 Couldn't load the hierarchy. Try refreshing the page.

@@ -17,11 +17,17 @@ export const boardKeys = {
  * any other typed failure) is an answer, not a flake; only an
  * unrecognised/network-shaped failure gets React Query's normal one retry.
  */
-export function useBoardWindow(rootPath: string, from: Date, to: Date) {
+export function useBoardWindow(rootPath: string, from: Date, to: Date, enabled: boolean) {
   return useQuery({
     queryKey: boardKeys.window(rootPath, from, to),
     queryFn: () => fetchBoardWindow(rootPath, from, to),
     staleTime: 30_000,
     retry: (count, err) => !isSchedulerError(err) && count < 1,
+    // Every read here is RLS-scoped to the caller, so firing before the
+    // session resolves is a request the server MUST refuse. `enabled` is
+    // REQUIRED, not optional with a `true` default: a default would let a new
+    // caller reintroduce the 401 silently, which is the whole failure being
+    // removed. Callers derive it from `canQueryAsUser` (features/auth/session).
+    enabled,
   });
 }

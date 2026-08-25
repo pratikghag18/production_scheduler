@@ -2605,3 +2605,63 @@ Prose was not enough — the first attempt described all four layouts in text an
 *"give me visual options, I can't imagine what you're proposing."* Fair. This project already has the
 convention (`docs/mockups/`, four files now); **a layout question wants a rendering, not a
 paragraph.**
+
+---
+
+### 19.25 D91 — do not query as nobody: the 401s on every page load (Aug 25, 2026)
+
+Seven red `401 (Unauthorized)` lines in the console on every load, spotted by Pratik in a screenshot
+taken for a different reason. Nothing was broken — the data arrived and every acceptance check
+passed — which is exactly why it had survived.
+
+**Cause, read from the code rather than inferred.** `useSession` starts `loading: true` with no
+identity and resolves asynchronously; `useQuery` fires the moment its component mounts. Neither
+`AdminPage`'s hierarchy read nor `useBoardWindow` carried an `enabled` guard, so on every load both
+went out before there was a session. **Every read in this app is RLS-scoped to the caller, so a query
+sent with no identity is not merely early — it is a request the server MUST refuse.** Auth then
+landed, the queries re-ran, and the screen was correct.
+
+The cost was small and real: a wasted round trip per query on every visit, invisible against local
+Supabase and not against a hosted one, plus a console full of red that would hide the next genuine
+failure. Twice this session an instrument that looked fine turned out not to be, so that second cost
+is not hypothetical.
+
+**Fixed with one predicate, `canQueryAsUser(userId, loading)`, in `features/auth/session.ts`** — the
+module that already exists because §19.8's cache-reset and loading flags drifted apart by being
+open-coded at more than one call site. This condition now has two callers (`BoardPage`, `AdminPage`),
+which is precisely the shape that produced that bug. It takes a user id rather than a `Session` for
+the same reason `decideSessionUpdate` does: the module stays import-free of @supabase/supabase-js.
+
+**`enabled` is a REQUIRED parameter on both query hooks, not optional with a `true` default.** A
+default would let the next caller reintroduce the 401 silently, which is the whole failure being
+removed.
+
+#### The trap inside the fix, which is §19.8 over again
+
+`enabled: false` does **not** make `isLoading` true. Verified against the installed source rather
+than from memory — `@tanstack/query-core` 5.102.0, `queryObserver.js:237`:
+
+```js
+const isLoading = isPending && isFetching;
+```
+
+With `enabled: false` the query is `pending` but `fetchStatus` is `idle`, so `isFetching` is false
+and **`isLoading` is false while the session resolves**. Gating the query without widening the
+render condition would have swapped seven console errors for a blank admin card — **guarding the
+cache but not the spinner, which is §19.8's exact mistake.** `AdminPage` now renders its spinner on
+`!canQuery || isLoading`. `BoardPage` needs no change: it already early-returns on `sessionLoading`
+and on a missing session, so its render never reaches the board query in that state — checked, not
+assumed.
+
+Six cases (Q1–Q6) and five mutations, all caught. Two are worth naming: **Q5** asserts that exactly
+one of the four input combinations returns true, so a guard that ignored either argument — or
+returned a constant — fails; and **Q6** pins that an empty-string id is an identity, not a
+signed-out state, because guarding on truthiness rather than `!== null` would silently treat `""` as
+nobody. The session layer's contract is `string | null`, and only `null` means nobody.
+
+#### Why it is filed as a decision and not a bug fix
+
+"Do not issue an RLS-scoped read before the identity is settled" is a rule the next query hook needs
+to know, and there was nowhere it was written down. It is now one exported predicate with a doc
+comment, which is the same move D89 made for control fonts: **a rule that exists only as a habit
+will be forgotten by the next component.**
