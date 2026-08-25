@@ -2353,3 +2353,255 @@ the seeded single-shape tree rather than building a second shape. Collateral is 
 cases as written, not of the requirement. See [[brief-writing-rules]] rule 14.
 
 ---
+
+---
+
+### 19.23 D89 — the hole D84 left: form controls do not inherit fonts (Aug 25, 2026)
+
+Reported by Pratik for the **third** time, as "the popup scaling is so bad, why do I have to keep
+talking about this?" He is right that it kept coming back, and the reason is worth stating plainly:
+every previous fix treated an instance.
+
+**Measured in headless Chromium** against the real repo stylesheets and the real popover markup —
+not reasoned about, because §19.11 already burned this project once by verifying a stylesheet
+instead of the app:
+
+| viewport | root font-size | `.h3` (rem-sized) | unstyled `<input>` / `<button>` |
+|---|---|---|---|
+| 1440 | 16px | 13px system-ui | **13.3333px Arial** |
+| 2560 | 19.11px | 15.53px system-ui | **13.3333px Arial** |
+| 3840 | 21.6px | 17.55px system-ui | **13.3333px Arial** |
+
+Two defects, one local and one systemic.
+
+#### The systemic one: D84 only covered what the CSS sizes
+
+`input`, `button`, `select` and `textarea` do not inherit fonts — the UA gives them their own
+absolute one. So they are immune **both** to D84's scaled root font-size and to anything inherited
+from `body`. Every stylesheet involved was fully D84-compliant; `scaleAudit` reported green; the
+defect was an **absent declaration**, which no file-content audit of the existing files could ever
+see.
+
+The same measurement found a second, wider miss: **`body { font: 13px/1.45 ... }` was absolute**, so
+D84's scaled root only ever reached text explicitly sized in `rem`. Anything that merely inherited
+was frozen at 13px on a 4K display. Now `0.8125rem` — 13/16 exactly, so byte-identical at
+`--chrome-scale: 1` and scaling above it.
+
+The fix is one rule in `global.css`:
+
+```css
+input, button, select, textarea, optgroup { font: inherit; letter-spacing: inherit; }
+```
+
+After which forgetting `font: inherit` in a component stylesheet costs a border, **never the
+typeface or the scale**. Verified: at 2560 the rename popover's title, input and both buttons now
+compute to 15.53 / 15.53 / 14.33px system-ui and move together.
+
+#### The local one, and what it says about why this recurs
+
+`NodeTreeEditor.module.css` writes `font: inherit` on all four of its popover modes.
+`ShapePicker.module.css` writes it on the two controls the card renders **inline** (`.select`,
+`.createForm input`) and forgot the two it hands to `AdminPopover` **as children** — which carried no
+class at all, so its own stylesheet could not reach them even in principle. That is the screenshot:
+a raw UA text box and two default grey buttons inside an otherwise designed surface.
+
+**A component remembers for the controls it styles and forgets for the ones it passes to a shared
+container.** Every recurrence of this complaint has had that shape. It is not a person failing to
+concentrate; it is a rule that exists only as a habit. Fixed by giving the input a class and copying
+`NodeTreeEditor`'s proven `.popActions button` values rather than inventing new ones.
+
+#### Enforcement, because D84 taught us not to ship a rule without one
+
+`scaleAudit.ts` now guards four things instead of two. The two new ones:
+
+- **`missingControlFontReset`** — the reset exists and names all four controls. It has a case proving
+  it does **not** pass on the prose documenting the rule (the third CSS matcher on this project that
+  had to be taught code from comments) and one proving a partial reset reports exactly the omitted
+  control.
+- **`missingRemSurfaces`** — walks `src/features/admin` and fails on any `*.module.css` that
+  `REM_SURFACES` does not name. **`ShapePicker.module.css` shipped in P1-5f without being added to
+  that list**, so an entire new admin surface sat outside the D84 audit while the audit reported
+  green. A hand-maintained list is untested unless something asserts it. It has a case proving the
+  completeness guard can fail.
+
+Eight assertions, all executed in-container against the real files, including the two
+prove-it-can-fail cases.
+
+#### The fix broke a test, and that is the second instance of the same mistake in two turns
+
+`R10: REM_SURFACES is exactly the four admin stylesheets` — a case that has existed since D84,
+pinning the list literally so that dropping a file from it cannot pass silently. Adding
+`ShapePicker.module.css` to `REM_SURFACES` made it five. **The guard did exactly what it exists for**,
+and the acceptance run reported `1 failed | 397 passed (398)`.
+
+The mistake was not the stale literal, it was how the change was verified: an eight-assertion harness
+was written for the two NEW audit functions and run in-container, and **the existing suite that
+guards the file being edited was never run.** That is [[verification-standard]] rule 2b — *run the
+committed file in the runner that will guard it* — which was written one turn earlier, after
+`shapePicker.test.ts` shipped as a standalone script. The same error twice in two turns, in two
+sizes.
+
+The correction is mechanical and now habitual: the whole of `scaleAudit.test.ts` was run against the
+real repo files under a vitest shim (33 cases, matching vitest's own collection count exactly), and
+then mutation-tested:
+
+| mutation | breaks |
+|---|---|
+| drop `ShapePicker.module.css` from `REM_SURFACES` | **R10** *and* `missingRemSurfaces` |
+| drop `textarea` from the control reset | `missingControlFontReset` coverage case |
+| revert `body` to an absolute `13px` | the body-sizes-in-rem case |
+
+Belt and braces on the first one is deliberate, not redundant: R10 catches the list drifting for any
+reason, and `missingRemSurfaces` catches a surface existing on disk that the list never learned
+about. The second is the one that would have caught P1-5f; the first is the one that caught me.
+
+#### One thing deliberately not fixed here
+
+The console shows seven `401 (Unauthorized)` responses on first load — the hierarchy reads and
+`board_window` firing before the dev sign-in resolves. Every check Pratik ran then worked, so this is
+noise rather than breakage, but it is the §19.8 class of problem (a query firing against an identity
+that is not established yet) and it wastes a round trip per query on every load. Filed rather than
+fixed, because it is unrelated to D89 and wants its own measurement.
+
+---
+
+### 19.24 D90 — the node tree lost its meaning when shapes went per-site (Aug 25, 2026)
+
+Raised by Pratik looking at the built admin screen: *"there should be a better way to visualize this,
+one which leaves no ambiguity."* He is right, and this is a defect we introduced rather than a
+matter of taste.
+
+**Before D86, indentation WAS the level.** One vocabulary per org meant depth 2 always said
+"Department", so an indent-only tree encoded everything. Per-site shapes made that false: `Plant 2`
+sits at the same indent as `Plant 1`, but its children are **Lines** where `Plant 1`'s are
+**Departments** — and on the Compact shape a Line is *schedulable*, so the two rows at equal indent
+are not merely different levels, one of them takes bookings and the other cannot. **The tree's only
+encoding of level is indentation, and indentation stopped being reliable the moment D86 shipped.**
+Nothing in P1-5e/5f caught it because every test asserts data, and this is a defect in what the
+screen *communicates*.
+
+Four options mocked up in `docs/mockups/hierarchy-tree-options.html`, all rendering the same
+two-shape dataset:
+
+- **A — level label on every row.** Smallest possible fix; the level name is already in scope in
+  `buildTreeRows`, so no new data. Says nothing about which *shape* a root belongs to.
+- **B — group by shape, plus level labels (recommended).** Fixes both the per-row level and the
+  per-subtree vocabulary, and makes the tree agree with the picker instead of silently disagreeing.
+  Heading only appears when the org holds more than one shape.
+- **C — Miller columns.** The level *is* the column header, so it cannot be misread, and it stays
+  scannable at hundreds of cells. Costs the whole-tree overview and makes P1-5g's drag harder, not
+  easier. A rebuild of `NodeTreeEditor`.
+- **D — flat table, one row per schedulable cell.** Unambiguous, sorts and filters, and it is the
+  natural preview format for P1-5h's CSV import. **Two shapes do not share a column set** — the
+  mockup shows the seam honestly — so it wants a separator or a table per shape, and it is a *second*
+  view, not a replacement for editing.
+
+#### Two decisions already taken
+
+- **D90a — the section is renamed "Site Structure"** (Pratik's wording, from "Site type" and
+  "Structure"). It reads correctly in the flow that actually matters: the shape dropdown when adding
+  a root becomes *"which site structure does Plant 2 use?"*, a question a plant manager can answer.
+  "Shape" was abstract, and "Hierarchy type" collides with the admin section it sits inside.
+- **D90b — the picker merges INTO the Levels card.** They were laid out as peers while being
+  parent and child: the Levels card only ever edits whichever shape is selected above it, and nothing
+  on screen said so. One card, structure selector on top, `Levels in this structure` beneath.
+
+#### Decided: option B, and why C was dropped
+
+**Option B built.** Pratik's reason for rejecting C is sharper than the one in the mockup and is
+worth keeping: the mockup argued C loses the whole-tree overview and complicates drag. The real flaw
+is **the first column**. The panes only have a well-defined header *after* a root is selected — the
+Site column itself mixes roots of every structure, and it only looks coherent because both seeded
+shapes happen to name level 0 "Site". Rename Compact's root level to "Facility" and that header has
+nothing honest to say. A visualisation whose correctness depends on two independent vocabularies
+coincidentally agreeing is the same bug as the one being fixed, one level up.
+
+#### What was built
+
+- **`groupRowsByShape(rows, levels, templates)`** in `treeView.ts`, pure and strip-types-runnable,
+  returning `ShapeGroup[]` — each with `templateId`, `templateName`, `levelPath` and rows carrying
+  `levelName`. Grouping never splits a subtree, because a node's structure is its level's template
+  and the adjacency trigger requires a node and its parent to share one (D86).
+- **Two invariants worth naming.** Row order within a group is the depth-first flatten, untouched.
+  And **a row can never disappear**: an unresolvable level lands in a trailing `templateId: null`
+  group rather than being skipped, because a node you cannot see is a node you cannot fix. Groups
+  sort by template name with a code-unit comparison, not `localeCompare` — that has already produced
+  two answers on two machines here.
+- **The heading renders only when the org holds more than one structure.** For a single-plant
+  customer it would be a label on the only thing there is.
+- `NodeTreeEditor` renders the groups and a level chip per row; `NodeTreeEditor.module.css` gains
+  `.group` / `.shapeHead` / `.shapePath` / `.levelChip`, all in `rem`.
+- **A D89-class bug fixed in passing:** the row indent was an inline `paddingLeft: row.depth * 18`.
+  An inline style is invisible to `scaleAudit`, which reads CSS files — so that indent silently did
+  not scale and nothing could have caught it. Now `${row.depth * 1.125}rem`, the same 18px at the
+  default root.
+
+**Verification:** `groupRowsByShape` has 12 cases and **8 mutations, every one caught** — group by
+level name, sort by id, drop the `levelPath` sort, re-sort rows within a group, drop unresolvable
+rows, build groups from templates so empty ones appear, take the level id instead of its name, and
+put the unresolved group first. The fixture is a two-shape org whose level names **collide**
+(`Site` at position 0 in both, `Line` in both at different positions), so a grouping keyed on name or
+position passes nothing. The whole 37-case `treeView` suite and the whole 33-case `scaleAudit` suite
+were re-run against the real repo files, not just the new cases — [[verification-standard]] rule 2b,
+which this session has now broken twice.
+
+One case was renamed after the mutation run: `G7` was called "no row is ever dropped" but runs on a
+fully-resolvable fixture, so it cannot catch dropping — measured, the drop mutation breaks G9 and not
+G7. It is now "every row lands in exactly one group, none duplicated", which is what it actually
+tests. **A case whose name promises more than its fixture can deliver is how a coverage gap hides in
+plain sight.**
+
+#### The guides were promised and not built — and building them found a real bug
+
+The mockup drew vertical connector lines and the covering note called them "cheap and worth adding
+alongside whichever option". Option B then shipped without them. Pratik: *"I don't see the vertical
+line as in the proposals."*
+
+The mockup got them free from nested `<div>`s, whose borders end where the container ends.
+`flattenTree` deliberately produces a **flat** list — that is what makes the tree keyboard-navigable,
+since up/down is index ±1 — and a flat list has no containers to hang borders on. Nesting `<ul>`s
+would buy the lines and cost the navigability, which is the wrong trade. So `TreeRow` gained the data
+instead: `guides: boolean[]`, one entry per ancestor depth, true when that ancestor still has
+siblings below, plus `isLastSibling` so a last child's rail stops at its own elbow. Rendered as
+fixed-width rails that also **provide the indent**, replacing the inline `paddingLeft` D89 flagged.
+
+**Then the render was screenshotted in headless Chromium, and it was wrong.** A vertical rule ran the
+full height of the Standard Plant block. `flattenTree` seats the depth-0 rail against every root *in
+the org*; `groupRowsByShape` then splits those roots across blocks, so `Plant 1` — not last overall,
+because `Plant 2` exists — kept drawing a rail down to a sibling that renders **in a different group,
+above it**. A line pointing at nothing.
+
+**All 45 `treeView` cases passed while that was on screen.** Both functions are correct in isolation;
+the defect lives in their COMPOSITION, and every case asserted on one function at a time. Closed by
+`reseatRootGuides`, which re-seats index 0 against the group's own roots — and only index 0, because
+every deeper rail describes siblings inside one subtree and grouping never splits a subtree. Six new
+cases (K1–K6) assert on the composed output, K1 pinning the precondition so the block cannot quietly
+stop proving anything.
+
+**This is the lesson of §19.22 and D89 arriving a third time, in its strongest form yet.** A suite
+that passes tells you each part is right. It does not tell you the screen is right, and for anything
+visual **the only instrument that reads the actual output is a rendered picture.** Chromium is
+available in-container — `--headless --screenshot`, then look at it. That is now the last step for
+any visual change here, and it is what should have happened before the first version was handed over.
+
+#### Vocabulary note, so the next reader is not surprised
+
+The UI now says **"Site Structure"**; the code and the database still say *shape* and
+*hierarchy_templates*. That split is deliberate — renaming the DB is not worth a migration, and
+churning every comment adds diff noise — but it is exactly the kind of thing that reads as a mistake
+later. Likewise **`ShapePicker.tsx` keeps its filename**: renaming it needs a delete this session
+cannot perform, and a stray dead module is worse than a stale filename.
+
+#### Not changed, deliberately
+
+The mockup showed `schedulable` as a chip on the level row rather than a radio. **The radio stayed.**
+A chip is a marker; the radio is the *control* that changes which level is schedulable, and the
+mockup version had no way to perform that action. Flagged at the time and not confirmed, so changing
+an interaction on the strength of a picture would have been a guess.
+
+#### Worth noting about how this was found
+
+Prose was not enough — the first attempt described all four layouts in text and the answer came back
+*"give me visual options, I can't imagine what you're proposing."* Fair. This project already has the
+convention (`docs/mockups/`, four files now); **a layout question wants a rendering, not a
+paragraph.**

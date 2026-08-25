@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { describeSchedulerError } from "@/lib/api";
 import {
   useCreateHierarchyTemplate,
@@ -34,10 +34,25 @@ export function ShapePicker({
   summaries,
   selectedId,
   onSelect,
+  children,
 }: {
   summaries: readonly ShapeSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /**
+   * D90b (design plan §19.24): the level editor renders INSIDE this card.
+   *
+   * The two were laid out as peer cards while being parent and child — the
+   * level list only ever edits whichever structure is selected here, and
+   * nothing on screen said so. Passing it as a child makes the coupling
+   * structural instead of something an admin has to infer by clicking.
+   *
+   * NOTE the file is still `ShapePicker.tsx` while the section now reads
+   * "Site Structure": renaming a file needs a delete this session cannot
+   * perform, and a stray dead module is worse than a stale filename. Recorded
+   * here rather than left as a surprise.
+   */
+  children?: ReactNode;
 }) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -96,14 +111,14 @@ export function ShapePicker({
 
   return (
     <section className={styles.card}>
-      <h2 className={styles.h2}>Shape</h2>
+      <h2 className={styles.h2}>Site Structure</h2>
 
-      {summaries.length === 0 && <p className={styles.emptyLine}>No hierarchy shapes yet.</p>}
+      {summaries.length === 0 && <p className={styles.emptyLine}>No site structures yet.</p>}
 
       {summaries.length > 2 ? (
         <select
           className={styles.select}
-          aria-label="Hierarchy shape"
+          aria-label="Site structure"
           value={selectedId ?? ""}
           onChange={(e) => onSelect(e.target.value)}
         >
@@ -115,7 +130,7 @@ export function ShapePicker({
         </select>
       ) : (
         summaries.length > 0 && (
-          <div className={styles.radioGroup} role="radiogroup" aria-label="Hierarchy shape">
+          <div className={styles.radioGroup} role="radiogroup" aria-label="Site structure">
             {summaries.map((s) => (
               <label key={s.id} className={styles.radioRow}>
                 <input
@@ -145,14 +160,14 @@ export function ShapePicker({
             type="button"
             className={styles.smallBtn}
             disabled={selected.hasNodes || deleteMutation.isPending}
-            title={selected.hasNodes ? "This shape still has nodes on it." : undefined}
+            title={selected.hasNodes ? "This structure still has nodes on it." : undefined}
             onClick={handleDelete}
           >
             Delete
           </button>
         )}
         <button type="button" className={styles.smallBtn} onClick={() => setCreating((v) => !v)}>
-          + new shape
+          + new structure
         </button>
       </div>
 
@@ -162,7 +177,7 @@ export function ShapePicker({
             autoFocus
             type="text"
             value={newName}
-            placeholder="Shape name"
+            placeholder="Structure name"
             onChange={(e) => setNewName(e.target.value)}
           />
           <button type="submit" disabled={!createValidation.ok || createMutation.isPending}>
@@ -175,7 +190,7 @@ export function ShapePicker({
             <p className={styles.errorLine} role="alert">
               {createValidation.reason === "blank_name"
                 ? "Name can't be blank."
-                : "A shape with this name already exists."}
+                : "A structure with this name already exists."}
             </p>
           )}
           {createMutation.isError && (
@@ -202,6 +217,7 @@ export function ShapePicker({
             <input
               autoFocus
               type="text"
+              className={styles.popInput}
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
             />
@@ -217,7 +233,7 @@ export function ShapePicker({
               <p className={styles.errorLine} role="alert">
                 {renameValidation.reason === "blank_name"
                   ? "Name can't be blank."
-                  : "A shape with this name already exists."}
+                  : "A structure with this name already exists."}
               </p>
             )}
             {renameMutation.isError && (
@@ -228,6 +244,7 @@ export function ShapePicker({
           </form>
         </AdminPopover>
       )}
+      {children !== undefined && <div className={styles.embedded}>{children}</div>}
     </section>
   );
 }

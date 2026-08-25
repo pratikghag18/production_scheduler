@@ -85,8 +85,11 @@ export function LevelEditor({
   }
 
   return (
-    <section className={styles.card}>
-      <h2 className={styles.h2}>Levels</h2>
+    // D90b: no card chrome of its own — this renders inside the Site Structure
+    // card (see ShapePicker's `children`), so a second border here would draw a
+    // box inside a box and re-suggest the very independence the merge removes.
+    <div className={styles.embedded}>
+      <div className={styles.sectionLabel}>Levels in this structure</div>
       <ol className={styles.list}>
         {draft.map((level, index) => {
           const isInvalid = invalidIndices.has(index);
@@ -189,6 +192,6 @@ export function LevelEditor({
           {saveMutation.isPending ? "Saving…" : "Save"}
         </button>
       </div>
-    </section>
+    </div>
   );
 }

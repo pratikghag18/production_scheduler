@@ -24,8 +24,14 @@ body,
 
 body {
   margin: 0;
+  /* D89: 0.8125rem == 13px at the default 16px root, so this is IDENTICAL at
+     `--chrome-scale: 1` (every viewport <= 1440px) and scales above it. An
+     absolute 13px here silently overrode D84's scaled root for everything that
+     merely INHERITS a size -- only explicitly rem-sized text was ever scaling.
+     Measured in headless Chromium: body stayed 13px at 1440, 2560 AND 3840 CSS
+     px while a rem-sized sibling went 13 -> 15.53 -> 17.55px. */
   font:
-    13px/1.45 system-ui,
+    0.8125rem/1.45 system-ui,
     -apple-system,
     "Segoe UI",
     sans-serif;
@@ -125,4 +131,40 @@ a {
   :root {
     --ui-scale: clamp(1, 0.75 + 0.25 * (100vw / 1440px), 1.35);
   }
+}
+
+/* ---------------------------------------------------------------------------
+   D89 — FORM CONTROLS DO NOT INHERIT FONTS, AND THAT IS THE HOLE D84 LEFT.
+
+   D84 made scaling the default for everything the CSS *sizes*. It said nothing
+   about the things the CSS does not size, and `input` / `button` / `select` /
+   `textarea` are the biggest such category: the UA gives them their own
+   absolute font, so they are immune both to the scaled root font-size AND to
+   anything inherited from `body`.
+
+   MEASURED in headless Chromium against the pre-fix stylesheet, an unstyled
+   `<input>` and `<button>` inside an otherwise-correct rem-sized popover:
+
+       viewport   root      .h3 (rem)          input / button
+       1440       16px      13px system-ui     13.3333px Arial
+       2560       19.11px   15.53px system-ui  13.3333px Arial
+       3840       21.6px    17.55px system-ui  13.3333px Arial
+
+   The mismatch is present at EVERY size (wrong typeface) and widens with the
+   display (no scaling). `scaleAudit` could never catch it: every stylesheet
+   involved is fully compliant — the defect is in what they do not say.
+
+   This is the third time this class of bug has been reported. Making it a
+   default rather than a per-component discipline is the only thing that ends
+   it: after this rule, forgetting to write `font: inherit` in a component
+   stylesheet costs you a border, never the typeface or the scale.
+   `scaleAudit.assertControlFontReset` fails if this block is deleted.
+   --------------------------------------------------------------------------- */
+input,
+button,
+select,
+textarea,
+optgroup {
+  font: inherit;
+  letter-spacing: inherit;
 }

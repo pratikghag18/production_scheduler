@@ -90,7 +90,82 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/LevelEditor.module.css",
   "src/features/admin/components/NodeTreeEditor.module.css",
   "src/features/admin/components/AdminPopover.module.css",
+  "src/features/admin/components/ShapePicker.module.css",
 ];
+
+/**
+ * D89 — THE LIST ABOVE IS ITSELF UNTESTED UNLESS SOMETHING ASSERTS IT.
+ *
+ * `ShapePicker.module.css` shipped in P1-5f and was not added here, so a whole
+ * new admin surface sat outside the D84 audit while the audit reported green.
+ * That is the same failure shape as brief-writing rule 5's "a list that drives
+ * a test is itself untested": the guard cannot fail for a file it never reads.
+ *
+ * This walks the admin feature directory and reports any `*.module.css` that
+ * REM_SURFACES does not name, so adding a surface without auditing it is a
+ * test failure rather than something noticed on a 4K monitor three briefs
+ * later.
+ */
+export const REM_SURFACE_DIR = "src/features/admin";
+
+export function missingRemSurfaces(
+  root: string,
+  dir: string = REM_SURFACE_DIR,
+  known: readonly string[] = REM_SURFACES,
+): string[] {
+  const base = root.endsWith("/") ? root.slice(0, -1) : root;
+  const found: string[] = [];
+  const walk = (rel: string): void => {
+    for (const entry of fs.readdirSync(`${base}/${rel}`, { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.name.endsWith(".module.css")) found.push(child);
+    }
+  };
+  walk(dir);
+  const knownSet = new Set(known);
+  return found.filter((f) => !knownSet.has(f)).sort();
+}
+
+/**
+ * D89 — the control-font reset in `global.css`.
+ *
+ * `input` / `button` / `select` / `textarea` do NOT inherit fonts. The UA gives
+ * them an absolute one, so they are immune to D84's scaled root font-size AND
+ * to anything inherited from `body`. Measured in headless Chromium before the
+ * fix: an unstyled control computed to 13.3333px Arial at 1440, 2560 and 3840
+ * CSS px, beside a rem-sized sibling that went 13 -> 15.53 -> 17.55px system-ui.
+ *
+ * Every stylesheet involved was fully D84-compliant. `unscaledPxLengths` cannot
+ * see this class of defect at all, because the defect is an ABSENT declaration.
+ * This asserts the presence of the one rule that makes it impossible.
+ *
+ * Returns the control selectors that are NOT covered by a `font: inherit`
+ * block; empty means the reset is intact.
+ */
+export const RESET_CONTROLS: readonly string[] = [
+  "input",
+  "button",
+  "select",
+  "textarea",
+];
+
+export function missingControlFontReset(globalCss: string): string[] {
+  const withoutComments = globalCss.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Find every rule whose body declares `font: inherit`, and collect the
+  // element selectors in its prelude. Comment-stripped first for the same
+  // reason every other matcher here is: global.css explains this rule in prose
+  // that names all four controls, and a matcher that reads comments would pass
+  // on the documentation alone.
+  const covered = new Set<string>();
+  for (const m of withoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const prelude = m[1];
+    const body = m[2];
+    if (!/\bfont\s*:\s*inherit\b/.test(body)) continue;
+    for (const sel of prelude.split(",")) covered.add(sel.trim().toLowerCase());
+  }
+  return RESET_CONTROLS.filter((c) => !covered.has(c));
+}
 
 /**
  * Pixel lengths that are legitimately NOT scaled:

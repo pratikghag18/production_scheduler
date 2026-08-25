@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Node tree — visualisation options</title>
+<style>
+:root{
+  --surface:#fcfcfb; --page:#f9f9f7; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --sel:#2a78d6; --sel-bg:#eaf2fc; --warn:#eda100;
+  font-size:100%;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--page)}
+.wrap{max-width:1180px;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.3rem;margin:0 0 .35rem}
+.sub{color:var(--ink-2);margin:0 0 1.75rem;max-width:70ch}
+.card{border:1px solid var(--axis);border-radius:.625rem;background:var(--surface);padding:.875rem 1rem;margin-bottom:1rem}
+h2{font-size:.875rem;margin:0 0 .625rem}
+.opt{border:1px solid var(--axis);border-radius:.75rem;background:var(--surface);margin:0 0 1.5rem;overflow:hidden}
+.opt > header{padding:.75rem 1rem;border-bottom:1px solid var(--grid);background:var(--page);display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap}
+.tag{font-size:.6875rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#fff;background:var(--ink-2);border-radius:.3rem;padding:.15rem .4rem}
+.tag.rec{background:var(--sel)}
+.opt h3{font-size:.9375rem;margin:0}
+.opt .body{padding:1rem}
+.note{display:grid;grid-template-columns:auto 1fr;gap:.35rem .6rem;font-size:.8125rem;color:var(--ink-2);margin:.9rem 0 0;padding-top:.75rem;border-top:1px dashed var(--grid)}
+.note b{color:var(--ink);font-weight:600;white-space:nowrap}
+.demo{border:1px solid var(--grid);border-radius:.5rem;background:var(--surface);padding:.75rem .875rem;max-width:34rem}
+/* ---- tree ---- */
+.row{display:flex;align-items:center;gap:.4rem;padding:.2rem .3rem;border-radius:.3rem}
+.row:hover{background:var(--page)}
+.tw{width:.85rem;color:var(--muted);font-size:.7rem;flex:none;text-align:center}
+.nm{flex:1}
+.lvl{font-size:.6875rem;color:var(--muted);background:var(--page);border:1px solid var(--grid);border-radius:.3rem;padding:.05rem .35rem;white-space:nowrap}
+.guide{border-left:1px solid var(--grid);margin-left:.42rem;padding-left:.55rem}
+.shapehead{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin:.9rem 0 .35rem;padding-top:.6rem;border-top:1px solid var(--grid)}
+.shapehead:first-child{margin-top:0;padding-top:0;border-top:0}
+.shapehead b{font-size:.8125rem}
+.path{font-size:.6875rem;color:var(--muted)}
+/* ---- miller ---- */
+.mill{display:flex;gap:0;border:1px solid var(--grid);border-radius:.5rem;overflow:hidden;background:var(--surface)}
+.col{flex:1;min-width:0;border-right:1px solid var(--grid)}
+.col:last-child{border-right:0}
+.col h4{margin:0;font-size:.6875rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:.45rem .6rem;background:var(--page);border-bottom:1px solid var(--grid)}
+.col ul{list-style:none;margin:0;padding:.25rem}
+.col li{padding:.25rem .4rem;border-radius:.3rem;display:flex;justify-content:space-between;gap:.4rem;align-items:center}
+.col li .chev{color:var(--muted);font-size:.7rem}
+.col li.on{background:var(--sel-bg);color:var(--sel);font-weight:600}
+/* ---- table ---- */
+table{border-collapse:collapse;width:100%;font-size:.8125rem}
+th{text-align:left;font-size:.6875rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:.4rem .55rem;border-bottom:1px solid var(--axis);white-space:nowrap}
+td{padding:.3rem .55rem;border-bottom:1px solid var(--grid)}
+td.dim{color:var(--muted)}
+td.blank{color:var(--grid)}
+.tbl-sep td{background:var(--page);font-size:.6875rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.warnbox{border:1px solid var(--warn);background:#fff8e6;border-radius:.5rem;padding:.6rem .75rem;font-size:.8125rem;color:#6b4c00;margin:.9rem 0 0}
+.side{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:880px){.side{grid-template-columns:1fr}}
+code{background:var(--page);border:1px solid var(--grid);border-radius:.25rem;padding:.05rem .3rem;font-size:.9em}
+</style></head><body><div class="wrap">
+
+<h1>Node tree — four ways to remove the ambiguity</h1>
+<p class="sub">Same data in every panel: <b>Plant 1</b> on the four-level Standard Plant shape, <b>Plant 2</b> on the two-level Compact Plant shape. That mix is the case worth designing for — it is the one the current tree cannot express.</p>
+
+<div class="card">
+  <h2>What is actually ambiguous today</h2>
+  <div class="demo" style="max-width:26rem">
+    <div class="row"><span class="tw">▾</span><span class="nm">Plant 1</span></div>
+    <div class="guide">
+      <div class="row"><span class="tw">▾</span><span class="nm">Assembly</span></div>
+      <div class="guide"><div class="row"><span class="tw">▾</span><span class="nm">Line 1</span></div></div>
+    </div>
+    <div class="row"><span class="tw">▾</span><span class="nm">Plant 2</span></div>
+    <div class="guide">
+      <div class="row"><span class="tw"></span><span class="nm">Packing Line</span></div>
+    </div>
+  </div>
+  <div class="warnbox"><b>Assembly and Packing Line sit at the same indent and are not the same kind of thing.</b> Assembly is a <b>Department</b>; Packing Line is a <b>Line</b>, and a schedulable one — work gets booked on it. Before per-site shapes, depth&nbsp;2 always meant Department. It no longer does, and indentation is the only thing the tree encodes.</div>
+</div>
+
+<!-- A -->
+<section class="opt">
+  <header><span class="tag">Option A</span><h3>Level label on every row</h3></header>
+  <div class="body">
+    <div class="demo">
+      <div class="row"><span class="tw">▾</span><span class="nm">Plant 1</span><span class="lvl">Site</span></div>
+      <div class="guide">
+        <div class="row"><span class="tw">▾</span><span class="nm">Assembly</span><span class="lvl">Department</span></div>
+        <div class="guide">
+          <div class="row"><span class="tw">▾</span><span class="nm">Line 1</span><span class="lvl">Line</span></div>
+          <div class="guide">
+            <div class="row"><span class="tw"></span><span class="nm">Cell 1</span><span class="lvl">Work Cell</span></div>
+            <div class="row"><span class="tw"></span><span class="nm">Cell 2</span><span class="lvl">Work Cell</span></div>
+          </div>
+          <div class="row"><span class="tw">▸</span><span class="nm">Line 2</span><span class="lvl">Line</span></div>
+        </div>
+        <div class="row"><span class="tw">▸</span><span class="nm">Machining</span><span class="lvl">Department</span></div>
+      </div>
+      <div class="row"><span class="tw">▾</span><span class="nm">Plant 2</span><span class="lvl">Site</span></div>
+      <div class="guide">
+        <div class="row"><span class="tw"></span><span class="nm">Packing Line</span><span class="lvl">Line</span></div>
+      </div>
+    </div>
+    <div class="note">
+      <b>Fixes</b><span>Every row states its own level. Ambiguity gone regardless of how many shapes are on screen.</span>
+      <b>Costs</b><span>A repeated word on ~30 rows. Says nothing about <i>which shape</i> a root belongs to — you infer it from the level names.</span>
+      <b>Effort</b><span>Smallest on this page. The level name is already in scope in <code>buildTreeRows</code>; no new data, no new query.</span>
+    </div>
+  </div>
+</section>
+
+<!-- B -->
+<section class="opt">
+  <header><span class="tag rec">Option B — recommended</span><h3>Group by shape, plus level labels</h3></header>
+  <div class="body">
+    <div class="demo">
+      <div class="shapehead"><b>Standard Plant</b><span class="path">Site › Department › Line › Work Cell</span></div>
+      <div class="row"><span class="tw">▾</span><span class="nm">Plant 1</span><span class="lvl">Site</span></div>
+      <div class="guide">
+        <div class="row"><span class="tw">▾</span><span class="nm">Assembly</span><span class="lvl">Department</span></div>
+        <div class="guide">
+          <div class="row"><span class="tw">▾</span><span class="nm">Line 1</span><span class="lvl">Line</span></div>
+          <div class="guide">
+            <div class="row"><span class="tw"></span><span class="nm">Cell 1</span><span class="lvl">Work Cell</span></div>
+            <div class="row"><span class="tw"></span><span class="nm">Cell 2</span><span class="lvl">Work Cell</span></div>
+          </div>
+          <div class="row"><span class="tw">▸</span><span class="nm">Line 2</span><span class="lvl">Line</span></div>
+        </div>
+        <div class="row"><span class="tw">▸</span><span class="nm">Machining</span><span class="lvl">Department</span></div>
+      </div>
+      <div class="shapehead"><b>Compact Plant</b><span class="path">Site › Line</span></div>
+      <div class="row"><span class="tw">▾</span><span class="nm">Plant 2</span><span class="lvl">Site</span></div>
+      <div class="guide">
+        <div class="row"><span class="tw"></span><span class="nm">Packing Line</span><span class="lvl">Line</span></div>
+      </div>
+    </div>
+    <div class="note">
+      <b>Fixes</b><span>Both kinds of ambiguity — the level of each row, and which vocabulary a whole subtree is speaking. The heading also makes the tree agree with the Site Structure picker instead of silently disagreeing.</span>
+      <b>Costs</b><span>With one shape the heading is dead weight, so it only appears when there is more than one.</span>
+      <b>Effort</b><span>Small. A group-by over the existing rows plus Option A.</span>
+    </div>
+  </div>
+</section>
+
+<!-- C -->
+<section class="opt">
+  <header><span class="tag">Option C</span><h3>Miller columns — one pane per level</h3></header>
+  <div class="body">
+    <div class="mill">
+      <div class="col"><h4>Site</h4><ul>
+        <li class="on">Plant 1 <span class="chev">›</span></li><li>Plant 2 <span class="chev">›</span></li></ul></div>
+      <div class="col"><h4>Department</h4><ul>
+        <li class="on">Assembly <span class="chev">›</span></li><li>Machining <span class="chev">›</span></li></ul></div>
+      <div class="col"><h4>Line</h4><ul>
+        <li class="on">Line 1 <span class="chev">›</span></li><li>Line 2 <span class="chev">›</span></li></ul></div>
+      <div class="col"><h4>Work Cell</h4><ul>
+        <li>Cell 1</li><li>Cell 2</li><li>Cell 3</li></ul></div>
+    </div>
+    <p style="font-size:.8125rem;color:var(--ink-2);margin:.75rem 0 0">Selecting <b>Plant 2</b> instead would redraw the panes as just <b>Site › Line</b> — the columns follow that root's own shape, so a shape mismatch is impossible to render.</p>
+    <div class="note">
+      <b>Fixes</b><span>Level is the column header, so it cannot be misread. Stays scannable at hundreds of cells, where one long indented list stops working.</span>
+      <b>Costs</b><span>You lose the whole-tree overview — no seeing Cell 1 and Cell 7 at once. Wants horizontal room. Drag-to-reparent (P1-5g) gets harder, not easier.</span>
+      <b>Effort</b><span>Largest. A rebuild of <code>NodeTreeEditor</code>, not a tweak.</span>
+    </div>
+  </div>
+</section>
+
+<!-- D -->
+<section class="opt">
+  <header><span class="tag">Option D</span><h3>Flat table — one row per schedulable cell</h3></header>
+  <div class="body">
+    <table>
+      <thead><tr><th>Site</th><th>Department</th><th>Line</th><th>Work Cell</th></tr></thead>
+      <tbody>
+        <tr><td>Plant 1</td><td>Assembly</td><td>Line 1</td><td>Cell 1</td></tr>
+        <tr><td class="blank">〃</td><td class="blank">〃</td><td class="blank">〃</td><td>Cell 2</td></tr>
+        <tr><td class="blank">〃</td><td class="blank">〃</td><td class="blank">〃</td><td>Cell 3</td></tr>
+        <tr><td class="blank">〃</td><td class="blank">〃</td><td>Line 2</td><td>Cell 4</td></tr>
+        <tr><td class="blank">〃</td><td class="blank">〃</td><td class="blank">〃</td><td>Cell 5</td></tr>
+        <tr><td class="blank">〃</td><td>Machining</td><td>CNC Line</td><td>Cell 6</td></tr>
+        <tr><td class="blank">〃</td><td class="blank">〃</td><td class="blank">〃</td><td>Cell 7</td></tr>
+        <tr class="tbl-sep"><td colspan="4">Compact Plant — Site › Line</td></tr>
+        <tr><td>Plant 2</td><td class="dim">—</td><td>Packing Line</td><td class="dim">—</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <b>Fixes</b><span>Nothing to infer at all, and it sorts and filters. Familiar from a spreadsheet, and it is the natural preview format for CSV import when that lands.</span>
+      <b>Costs</b><span><b>Two shapes do not share a column set</b> — see the seam above, where Plant 2 has no Department and its schedulable level is Line, not Work Cell. Either a separator per shape or one table per shape; neither is tidy. Editing structure here is worse than in a tree.</span>
+      <b>Effort</b><span>Medium, and it is a <i>second</i> view rather than a replacement.</span>
+    </div>
+  </div>
+</section>
+
+<div class="card">
+  <h2>And the two decisions you already made</h2>
+  <div class="side">
+    <div>
+      <p style="font-size:.8125rem;color:var(--ink-2);margin:0 0 .5rem"><b>Renamed to “Site Structure”, picker merged into one card.</b></p>
+      <div class="demo" style="max-width:none">
+        <h2 style="margin-bottom:.5rem">Site Structure</h2>
+        <select style="width:100%;font:inherit;padding:.3rem .45rem;border:1px solid var(--axis);border-radius:.375rem;background:var(--page);margin-bottom:.6rem">
+          <option>Standard Plant — Site › Department › Line › Work Cell</option>
+        </select>
+        <div style="display:flex;gap:.4rem;margin-bottom:.75rem">
+          <button style="font:inherit;font-size:.75rem;padding:.3rem .6rem;border:1px solid var(--axis);border-radius:.375rem;background:var(--surface)">Rename</button>
+          <button style="font:inherit;font-size:.75rem;padding:.3rem .6rem;border:1px solid var(--axis);border-radius:.375rem;background:var(--surface);color:var(--muted)">Delete</button>
+          <button style="font:inherit;font-size:.75rem;padding:.3rem .6rem;border:1px solid var(--axis);border-radius:.375rem;background:var(--surface)">+ new</button>
+        </div>
+        <div style="border-top:1px solid var(--grid);padding-top:.6rem">
+          <div style="font-size:.6875rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:.4rem">Levels in this structure</div>
+          <div class="row"><span class="tw">↕</span><span class="nm">Site</span></div>
+          <div class="row"><span class="tw">↕</span><span class="nm">Department</span></div>
+          <div class="row"><span class="tw">↕</span><span class="nm">Line</span></div>
+          <div class="row"><span class="tw">↕</span><span class="nm">Work Cell</span><span class="lvl">schedulable</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:.8125rem;color:var(--ink-2)">
+      <p style="margin-top:0">One card instead of two peers, so the coupling is structural rather than something to infer: the level list visibly belongs to the structure named above it.</p>
+      <p><b>“Site Structure”</b> also reads correctly in the flow that matters — the shape dropdown when you add a root node becomes <i>“which site structure does Plant 2 use?”</i>, which is a question a plant manager can answer.</p>
+      <p style="margin-bottom:0">Note the level rows now carry the <code>schedulable</code> marker as a chip rather than a radio buried at the end of the row — same idiom as the level labels in the tree, so the two cards speak the same visual language.</p>
+    </div>
+  </div>
+</div>
+
+</div></body></html>

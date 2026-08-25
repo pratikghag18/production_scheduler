@@ -105,26 +105,29 @@ export default function AdminPage() {
               // wrapper class, since `AdminPage.module.css` is not in this
               // brief's file table — flagged in the delivery report.
               <div className={styles.hierarchyGrid}>
+                {/* D90b (design plan §19.24): ONE card. The level editor is a
+                    child of the Site Structure card because it only ever edits
+                    the structure selected there — they were peers while being
+                    parent and child, and nothing on screen said so. */}
                 <div style={{ gridColumn: 1, gridRow: 1 }}>
                   <ShapePicker
                     summaries={summaries}
                     selectedId={resolvedShapeId}
                     onSelect={setSelectedShapeId}
-                  />
+                  >
+                    {/* key={resolvedShapeId}: remounts the editor on every
+                        structure switch (§7.4) so a previous structure's draft
+                        rows can never be left on screen and saved into the newly
+                        selected template -- simpler and harder to get wrong
+                        than an effect that has to stay in sync by hand. */}
+                    <LevelEditor
+                      key={resolvedShapeId}
+                      levels={data.levels}
+                      templateId={resolvedShapeId}
+                    />
+                  </ShapePicker>
                 </div>
-                <div style={{ gridColumn: 1, gridRow: 2 }}>
-                  {/* key={resolvedShapeId}: remounts the editor on every
-                      shape switch (§7.4) so a previous shape's draft rows
-                      can never be left on screen and saved into the newly
-                      selected template -- simpler and harder to get wrong
-                      than an effect that has to stay in sync by hand. */}
-                  <LevelEditor
-                    key={resolvedShapeId}
-                    levels={data.levels}
-                    templateId={resolvedShapeId}
-                  />
-                </div>
-                <div style={{ gridColumn: 2, gridRow: "1 / span 2" }}>
+                <div style={{ gridColumn: 2, gridRow: 1 }}>
                   {/* `levels` here is the COMPLETE array, never filtered by
                       shape (§7.6/§6.3 debt 2 carried forward) -- `canDropOn`
                       and `legalParentsFor` need every level to answer

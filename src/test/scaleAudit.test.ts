@@ -10,6 +10,9 @@ import {
   REM_SURFACES,
   unscaledPxLengths,
   auditRemSurfaces,
+  missingRemSurfaces,
+  missingControlFontReset,
+  RESET_CONTROLS,
 } from "./scaleAudit";
 
 /**
@@ -169,14 +172,91 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
 
   // The LIST is part of the guard: drop a file and it silently stops being
   // guarded while every other case still passes.
-  it("R10: REM_SURFACES is exactly the four admin stylesheets", () => {
+  //
+  // D89: ShapePicker.module.css was added here after it shipped in P1-5f
+  // WITHOUT being listed — this case is what caught the omission, which is
+  // exactly what it exists for. Adding a sixth admin surface means updating
+  // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
+  // directory, so it catches a surface that exists on disk and is not listed,
+  // while this case catches the list drifting for any other reason.
+  it("R10: REM_SURFACES is exactly the five admin stylesheets", () => {
     expect([...REM_SURFACES].sort()).toEqual(
       [
         "src/features/admin/AdminPage.module.css",
         "src/features/admin/components/AdminPopover.module.css",
         "src/features/admin/components/LevelEditor.module.css",
         "src/features/admin/components/NodeTreeEditor.module.css",
+        "src/features/admin/components/ShapePicker.module.css",
       ].sort(),
     );
+  });
+});
+
+/**
+ * D89 — the two holes D84's enforcement left, both found the hard way.
+ *
+ * (1) Form controls do not inherit fonts, so a fully D84-compliant stylesheet
+ *     still renders 13.3333px Arial controls that never scale. Measured in
+ *     headless Chromium at 1440 / 2560 / 3840 CSS px before the fix.
+ * (2) `REM_SURFACES` is a hand-maintained list, and `ShapePicker.module.css`
+ *     shipped without being added to it — so a whole new admin surface sat
+ *     outside the audit while the audit reported green.
+ */
+describe("D89: the control-font reset in global.css", () => {
+  const root = process.cwd();
+  const globalCss = readFileSync(`${root}/src/styles/global.css`, "utf8");
+
+  it("covers every control that does not inherit a font by default", () => {
+    expect(missingControlFontReset(globalCss)).toEqual([]);
+  });
+
+  it("names all four controls — a reset that forgets one is the bug itself", () => {
+    expect([...RESET_CONTROLS].sort()).toEqual(["button", "input", "select", "textarea"]);
+  });
+
+  it("does not pass on the PROSE that documents the rule", () => {
+    // global.css explains this rule in a comment naming all four controls. A
+    // matcher that reads comments would pass on the documentation alone —
+    // which is exactly the mistake `countUiScaleUses` was written to avoid.
+    const commentOnly = `/* input, button, select, textarea { font: inherit; } */\nbody { margin: 0; }`;
+    expect(missingControlFontReset(commentOnly).sort()).toEqual([
+      "button",
+      "input",
+      "select",
+      "textarea",
+    ]);
+  });
+
+  it("reports exactly the control a partial reset leaves out", () => {
+    const partial = `input, button, select { font: inherit; }`;
+    expect(missingControlFontReset(partial)).toEqual(["textarea"]);
+  });
+
+  it("body sizes in rem, so inherited text scales with the root", () => {
+    // An absolute `font: 13px` on body overrides D84's scaled root for
+    // everything that merely inherits — measured: body stayed 13px at 3840
+    // CSS px while a rem-sized sibling reached 17.55px.
+    const bodyRule = globalCss.slice(globalCss.indexOf("body {"));
+    const decl = bodyRule.slice(0, bodyRule.indexOf("}"));
+    expect(decl).toMatch(/font:\s*[\s\S]*?\d*\.?\d+rem\//);
+  });
+});
+
+describe("D89: REM_SURFACES names every admin stylesheet on disk", () => {
+  const root = process.cwd();
+
+  it("has no unaudited *.module.css under src/features/admin", () => {
+    expect(missingRemSurfaces(root)).toEqual([]);
+  });
+
+  it("would report a surface that exists but is not listed", () => {
+    // The guard must be able to FAIL — a list-completeness check that always
+    // returns [] is the same silent pass it was written to prevent.
+    const short = REM_SURFACES.filter(
+      (f) => f !== "src/features/admin/components/ShapePicker.module.css",
+    );
+    expect(missingRemSurfaces(root, undefined, short)).toEqual([
+      "src/features/admin/components/ShapePicker.module.css",
+    ]);
   });
 });

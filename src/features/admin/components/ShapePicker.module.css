@@ -106,3 +106,45 @@
   gap: 0.5rem;
   margin-top: 0.625rem;
 }
+
+/* The rename popover's own controls. This card styled the controls it renders
+   INLINE (`.select`, `.createForm input`) and forgot the ones it hands to
+   `AdminPopover` as children — which is why the rename popover shipped with a
+   raw UA text box and two default grey buttons inside an otherwise designed
+   surface. `NodeTreeEditor.module.css` styles all four of its popover modes;
+   this file styled none of its one. Values copied from that file's
+   `.popActions button` rather than invented, so the two popovers match.
+
+   The bare `<input>` had no class at all, so this stylesheet could not reach
+   it even in principle — hence `styles.popInput` in the TSX. */
+.popInput {
+  width: 100%;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  padding: 0.3125rem 0.4375rem;
+  font-size: 0.8125rem;
+}
+
+.popActions button {
+  font-size: 0.75rem;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.popActions button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* D90b — the level editor renders inside this card, below a divider, so the
+   level list visibly belongs to the structure named above it rather than
+   sitting beside it as an unrelated peer. */
+.embedded {
+  margin-top: 0.875rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--grid);
+}

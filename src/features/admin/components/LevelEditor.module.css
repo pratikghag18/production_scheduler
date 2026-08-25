@@ -159,3 +159,17 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* D90b — rendered inside the Site Structure card, so no border, no background
+   and no padding of its own; the divider above it belongs to the host card. */
+.embedded {
+  display: block;
+}
+
+.sectionLabel {
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}

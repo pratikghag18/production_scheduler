@@ -58,12 +58,112 @@
   flex-direction: column;
 }
 
+/* D90 (design plan §19.24, option B) — one block per site structure, with the
+   structure's level path in its heading. Rendered only when the org holds more
+   than one structure; see the comment in NodeTreeEditor.tsx for why depth alone
+   stopped being a reliable signal after D86. Sized in `rem` (D84). */
+.group + .group {
+  margin-top: 0.75rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--grid);
+}
+
+.shapeHead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+  padding: 0 0.25rem;
+}
+
+.shapeName {
+  font-size: 0.8125rem;
+}
+
+.shapePath {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+/* The level a row sits at, stated rather than inferred from indentation. */
+.levelChip {
+  flex: none;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  background: var(--page);
+  border: 1px solid var(--grid);
+  border-radius: 0.3125rem;
+  padding: 0.0625rem 0.375rem;
+  white-space: nowrap;
+}
+
 .row {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.25rem 0.25rem;
+  /* Named, because the tree guides below must bleed through exactly this much
+     vertical padding to join up row-to-row. A literal in both places drifts. */
+  --row-pad-y: 0.25rem;
+  padding: var(--row-pad-y) 0.25rem;
   border-radius: 0.375rem;
+}
+
+/* ---------------------------------------------------------------------------
+   D90 — tree guides on a FLAT row list.
+
+   `flattenTree` produces a flat list on purpose: that is what makes the tree
+   keyboard-navigable, since up/down is index ±1. A flat list has no containers
+   whose borders could draw the guides for free, so each row renders its own
+   ancestry as fixed-width rails, driven by `row.guides` (see treeView.ts).
+
+   The rails also PROVIDE the indent. It used to be an inline
+   `paddingLeft: row.depth * 18` — raw px in a `style` prop, which `scaleAudit`
+   cannot see because it reads CSS files, so it silently did not scale (D89).
+   --------------------------------------------------------------------------- */
+.guides {
+  display: flex;
+  flex: none;
+  align-self: stretch;
+}
+
+.guideOn,
+.guideOff,
+.elbow,
+.elbowLast {
+  position: relative;
+  flex: none;
+  width: 1.125rem;
+}
+
+/* The vertical line bleeds through the row's padding, top and bottom, so
+   consecutive rows form one continuous rule instead of a dashed one. */
+.guideOn::before,
+.elbow::before,
+.elbowLast::before {
+  content: "";
+  position: absolute;
+  left: 0.5rem;
+  top: calc(-1 * var(--row-pad-y));
+  bottom: calc(-1 * var(--row-pad-y));
+  border-left: 1px solid var(--grid);
+}
+
+/* A last child's line stops at its own elbow rather than running on into
+   empty space — which is the whole reason `guides` carries the ancestry
+   trail instead of just a depth count. */
+.elbowLast::before {
+  bottom: 50%;
+}
+
+.elbow::after,
+.elbowLast::after {
+  content: "";
+  position: absolute;
+  left: 0.5rem;
+  top: 50%;
+  width: 0.4375rem;
+  border-top: 1px solid var(--grid);
 }
 
 .row:hover {

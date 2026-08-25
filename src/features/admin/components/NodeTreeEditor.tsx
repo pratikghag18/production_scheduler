@@ -6,7 +6,7 @@ import {
   useMoveNode,
   useRenameNode,
 } from "../hooks/useHierarchyMutations";
-import { buildTreeRows, legalParentsFor } from "../lib/treeView";
+import { buildTreeRows, groupRowsByShape, legalParentsFor } from "../lib/treeView";
 import type { ShapeSummary } from "../lib/shapePicker";
 import { AdminPopover } from "./AdminPopover";
 import styles from "./NodeTreeEditor.module.css";
@@ -68,6 +68,12 @@ export function NodeTreeEditor({
   const deleteMutation = useDeleteNode();
 
   const rows = buildTreeRows(nodes, levels, collapsedIds);
+  // `shapeSummaries` is structurally a `HierarchyTemplateRef[]` (id + name),
+  // so the picker's own model is reused rather than threading a second list
+  // down. One source for "what structures exist", shared by the picker and
+  // the tree, which is the disagreement D90 exists to remove.
+  const groups = groupRowsByShape(rows, levels, shapeSummaries);
+  const showShapeHeadings = groups.length > 1;
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
   function toggleCollapsed(nodeId: string) {
@@ -137,12 +143,12 @@ export function NodeTreeEditor({
           />
           {requiresShapeChoice && (
             <select
-              aria-label="Hierarchy shape for the new root"
+              aria-label="Site structure for the new root node"
               value={addRootTemplateId ?? ""}
               onChange={(e) => setAddRootTemplateId(e.target.value === "" ? null : e.target.value)}
             >
               <option value="" disabled>
-                Choose a shape…
+                Choose a structure…
               </option>
               {shapeSummaries.map((s) => (
                 // A shape with no levels yet has no position-0 level for a
@@ -173,37 +179,95 @@ export function NodeTreeEditor({
         </p>
       )}
 
-      <ul className={styles.tree}>
-        {rows.map((row) => (
-          <li key={row.node.id} className={styles.row} style={{ paddingLeft: row.depth * 18 }}>
-            {row.hasChildren ? (
-              <button
-                type="button"
-                className={styles.disclosure}
-                aria-label={row.collapsed ? `Expand ${row.node.name}` : `Collapse ${row.node.name}`}
-                onClick={() => toggleCollapsed(row.node.id)}
-              >
-                {row.collapsed ? "▸" : "▾"}
-              </button>
-            ) : (
-              <span className={styles.disclosureSpacer} />
-            )}
+      {/*
+        D90 (design plan §19.24, option B). Grouped by SITE STRUCTURE, and every
+        row states its own level.
 
-            <span className={row.node.active ? styles.name : styles.nameInactive}>
-              {row.node.name}
-            </span>
+        Before D86 this was unnecessary — one vocabulary per org meant
+        indentation depth WAS the level. Per-site shapes made that false: a root
+        on a two-level structure sits at the same indent as one on a four-level
+        structure, and its children are Lines where the other's are Departments.
+        On the two-level shape a Line is SCHEDULABLE, so two rows at equal
+        indent can differ in whether work can be booked on them at all.
 
-            <button
-              type="button"
-              className={styles.menuBtn}
-              aria-label={`Actions for ${row.node.name}`}
-              onClick={(e) => openMenu(row.node.id, e)}
-            >
-              ⋮
-            </button>
-          </li>
-        ))}
-      </ul>
+        The heading appears only when the org holds more than one structure: for
+        the single-plant case it would be a label on the only thing there is.
+      */}
+      {groups.map((group) => (
+        <div key={group.templateId ?? "__unresolved__"} className={styles.group}>
+          {showShapeHeadings && (
+            <div className={styles.shapeHead}>
+              <b className={styles.shapeName}>{group.templateName ?? "Unknown structure"}</b>
+              {group.levelPath.length > 0 && (
+                <span className={styles.shapePath}>{group.levelPath.join(" › ")}</span>
+              )}
+            </div>
+          )}
+          <ul className={styles.tree}>
+            {group.rows.map((row) => (
+              <li key={row.node.id} className={styles.row}>
+                {/*
+                  Tree guides, drawn from `row.guides` (D90). One fixed-width
+                  rail per ancestor depth: it carries a vertical line when that
+                  ancestor still has siblings below, and nothing when it does
+                  not — which is what makes a last child's line stop instead of
+                  running on into empty space.
+
+                  These rails ALSO provide the indent, replacing an inline
+                  `paddingLeft: row.depth * 18`. That was raw px in a `style`
+                  prop, invisible to `scaleAudit` (which reads CSS files), so it
+                  silently did not scale and nothing could have caught it — the
+                  D89 blind spot, one component over.
+                */}
+                {row.depth > 0 && (
+                  // One flex container for the whole rail block, with NO gap
+                  // inside it, so each level is exactly one rail wide. The
+                  // row's own `gap` would otherwise widen every indent step
+                  // and make the arithmetic depend on a spacing token.
+                  <span className={styles.guides} aria-hidden="true">
+                    {row.guides.map((continues, i) => (
+                      <span key={i} className={continues ? styles.guideOn : styles.guideOff} />
+                    ))}
+                    <span className={row.isLastSibling ? styles.elbowLast : styles.elbow} />
+                  </span>
+                )}
+
+                {row.hasChildren ? (
+                  <button
+                    type="button"
+                    className={styles.disclosure}
+                    aria-label={
+                      row.collapsed ? `Expand ${row.node.name}` : `Collapse ${row.node.name}`
+                    }
+                    onClick={() => toggleCollapsed(row.node.id)}
+                  >
+                    {row.collapsed ? "▸" : "▾"}
+                  </button>
+                ) : (
+                  <span className={styles.disclosureSpacer} />
+                )}
+
+                <span className={row.node.active ? styles.name : styles.nameInactive}>
+                  {row.node.name}
+                </span>
+
+                {row.levelName !== null && (
+                  <span className={styles.levelChip}>{row.levelName}</span>
+                )}
+
+                <button
+                  type="button"
+                  className={styles.menuBtn}
+                  aria-label={`Actions for ${row.node.name}`}
+                  onClick={(e) => openMenu(row.node.id, e)}
+                >
+                  ⋮
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
 
       {popover && (
         <NodePopoverContent

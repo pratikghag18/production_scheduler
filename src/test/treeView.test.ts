@@ -4,6 +4,7 @@ import type { LevelRow, NodeRow } from "@/features/admin/lib/hierarchy";
 import {
   buildTreeRows,
   flattenTree,
+  groupRowsByShape,
   legalParentsFor,
   ROOT_LABEL,
 } from "@/features/admin/lib/treeView";
@@ -364,5 +365,278 @@ describe("legalParentsFor — labels must be unambiguous", () => {
       "plant_1.machining.line_1",
       "plant_1.welding.line_1",
     ]);
+  });
+});
+
+/**
+ * D90 — `groupRowsByShape` (design plan §19.24, option B).
+ *
+ * The fixture is a TWO-SHAPE org, because a one-shape org cannot distinguish
+ * "grouped by structure" from "not grouped at all". Shape B's levels
+ * deliberately COLLIDE with shape A's by name (`Site` at position 0 in both)
+ * and its position-1 level is called `Line` — the same name A uses at position
+ * 2 — so a grouping accidentally keyed on level name or on position passes
+ * nothing. This is the ambiguity the feature exists to remove, encoded as a
+ * fixture (verification standard rule 3).
+ */
+const TPL_B = "tpl-b";
+
+const TWO_SHAPE_LEVELS: LevelRow[] = [
+  // Deliberately not in position order, and interleaved across templates:
+  // `levelPath` derives an order, so a pre-sorted fixture could not test it.
+  { id: "L2", templateId: TPL, position: 2, name: "Line", isSchedulable: true },
+  { id: "B1", templateId: TPL_B, position: 1, name: "Line", isSchedulable: true },
+  { id: "L0", templateId: TPL, position: 0, name: "Site", isSchedulable: false },
+  { id: "L3", templateId: TPL, position: 3, name: "Work Cell", isSchedulable: false },
+  { id: "B0", templateId: TPL_B, position: 0, name: "Site", isSchedulable: false },
+  { id: "L1", templateId: TPL, position: 1, name: "Department", isSchedulable: false },
+];
+
+const TWO_SHAPE_NODES: NodeRow[] = [
+  ...NODES,
+  // A child under Line 2 — the LAST of its siblings — so the guide trail has a
+  // case where an ancestor's rail must switch OFF. Without a node here, every
+  // deep row hangs off a non-last parent and a mutation that never stops a
+  // rail would be invisible.
+  node("n_cell4", "Cell 4", "plant_1.assembly.line_2.cell_4", "n_line2", "L3", 0),
+  node("n_plant2", "Plant 2", "plant_2", null, "B0", 1),
+  node("n_packing", "Packing Line", "plant_2.packing_line", "n_plant2", "B1", 0),
+];
+
+const TEMPLATES = [
+  // Reversed on purpose: the function sorts, so a pre-sorted input would not
+  // test the sort.
+  { id: TPL_B, name: "Compact Plant" },
+  { id: TPL, name: "Standard Plant" },
+];
+
+const TWO_SHAPE_ROWS = buildTreeRows(TWO_SHAPE_NODES, TWO_SHAPE_LEVELS, NONE_COLLAPSED);
+
+describe("D90: groupRowsByShape", () => {
+  const groups = groupRowsByShape(TWO_SHAPE_ROWS, TWO_SHAPE_LEVELS, TEMPLATES);
+
+  it("G0: the fixture is well-formed — two shapes, colliding level names", () => {
+    const levelIds = new Set(TWO_SHAPE_LEVELS.map((l) => l.id));
+    expect(TWO_SHAPE_NODES.every((n) => levelIds.has(n.levelId))).toBe(true);
+    expect(new Set(TWO_SHAPE_LEVELS.map((l) => l.templateId)).size).toBe(2);
+    // `Site` at position 0 in BOTH, and `Line` in both at different positions.
+    expect(TWO_SHAPE_LEVELS.filter((l) => l.name === "Site").length).toBe(2);
+    expect(TWO_SHAPE_LEVELS.filter((l) => l.name === "Line").length).toBe(2);
+  });
+
+  it("G1: one group per structure that actually has nodes", () => {
+    expect(groups.map((g) => g.templateId)).toEqual([TPL_B, TPL]);
+  });
+
+  it("G2: groups are ordered by template NAME, not by input order or id", () => {
+    // Input order is [Compact, Standard] by id but [tpl-b, tpl-a] — so a
+    // function that preserved input order, or sorted by id, would differ.
+    expect(groups.map((g) => g.templateName)).toEqual(["Compact Plant", "Standard Plant"]);
+  });
+
+  it("G3: levelPath is in ascending position order, from an unsorted source", () => {
+    expect(groups[1].levelPath).toEqual(["Site", "Department", "Line", "Work Cell"]);
+    expect(groups[0].levelPath).toEqual(["Site", "Line"]);
+  });
+
+  it("G4: every row carries its own level NAME", () => {
+    const standard = groups[1].rows;
+    expect(standard.map((r) => r.levelName)).toEqual([
+      "Site",
+      "Department",
+      "Line",
+      "Work Cell",
+      "Work Cell",
+      "Line",
+      "Work Cell",
+    ]);
+  });
+
+  it("G5: the ambiguity the feature exists to remove — equal depth, different level", () => {
+    const assembly = groups[1].rows.find((r) => r.node.id === "n_assembly");
+    const packing = groups[0].rows.find((r) => r.node.id === "n_packing");
+    expect(assembly?.depth).toBe(packing?.depth);
+    expect(assembly?.levelName).toBe("Department");
+    expect(packing?.levelName).toBe("Line");
+  });
+
+  it("G6: row order WITHIN a group is the depth-first flatten, untouched", () => {
+    expect(groups[1].rows.map((r) => r.node.id)).toEqual([
+      "n_plant",
+      "n_assembly",
+      "n_line1",
+      "n_cell1",
+      "n_cell2",
+      "n_line2",
+      "n_cell4",
+    ]);
+  });
+
+  // NAMED PRECISELY: this covers "every row lands in exactly one group" on a
+  // fully-resolvable fixture. It canNOT catch rows being dropped for being
+  // UNRESOLVABLE, because nothing here is — measured: the drop-the-unresolved
+  // mutation breaks G9 and not this. A case whose name promises more than its
+  // fixture can deliver is how a coverage gap hides in plain sight.
+  it("G7: every row lands in exactly one group, none duplicated", () => {
+    const grouped = groups.flatMap((g) => g.rows.map((r) => r.node.id));
+    expect(grouped.sort()).toEqual(TWO_SHAPE_ROWS.map((r) => r.node.id).sort());
+    expect(new Set(grouped).size).toBe(grouped.length);
+  });
+
+  it("G8: a structure with no nodes yields NO group — an empty heading is noise", () => {
+    const withEmpty = [...TEMPLATES, { id: "tpl-empty", name: "Aardvark Plant" }];
+    const g = groupRowsByShape(TWO_SHAPE_ROWS, TWO_SHAPE_LEVELS, withEmpty);
+    // Sorts first by name, so it would be groups[0] if it were included at all.
+    expect(g.map((x) => x.templateId)).toEqual([TPL_B, TPL]);
+  });
+
+  it("G9: an unresolvable level puts the row in a trailing null group, never nowhere", () => {
+    const partial = TWO_SHAPE_LEVELS.filter((l) => l.templateId !== TPL_B);
+    const g = groupRowsByShape(TWO_SHAPE_ROWS, partial, TEMPLATES);
+    const last = g[g.length - 1];
+    expect(last.templateId).toBe(null);
+    expect(last.rows.map((r) => r.node.id)).toEqual(["n_plant2", "n_packing"]);
+    expect(last.rows.every((r) => r.levelName === null)).toBe(true);
+    // and still nothing lost
+    expect(g.flatMap((x) => x.rows).length).toBe(TWO_SHAPE_ROWS.length);
+  });
+
+  it("G10: a template id with no matching template row keeps the group, name null", () => {
+    const g = groupRowsByShape(TWO_SHAPE_ROWS, TWO_SHAPE_LEVELS, [{ id: TPL, name: "Standard Plant" }]);
+    const orphan = g.find((x) => x.templateId === TPL_B);
+    expect(orphan?.templateName).toBe(null);
+    expect(orphan?.rows.length).toBe(2);
+  });
+
+  it("G11: empty input yields no groups", () => {
+    expect(groupRowsByShape([], TWO_SHAPE_LEVELS, TEMPLATES)).toEqual([]);
+  });
+});
+
+/**
+ * D90 — the ancestry trail that lets a FLAT row list draw tree guides.
+ *
+ * Run on the TWO-SHAPE fixture because it has two roots: with a single root,
+ * `guides[0]` is `false` for every row in the tree and a mutation that hard-codes
+ * `false` would be invisible.
+ */
+describe("D90: flattenTree guides + isLastSibling", () => {
+  const rows = TWO_SHAPE_ROWS;
+  const byId = new Map(rows.map((r) => [r.node.id, r]));
+
+  it("H1: guides length always equals depth", () => {
+    expect(rows.every((r) => r.guides.length === r.depth)).toBe(true);
+  });
+
+  it("H2: roots have no guides at all", () => {
+    expect(byId.get("n_plant")?.guides).toEqual([]);
+    expect(byId.get("n_plant2")?.guides).toEqual([]);
+  });
+
+  it("H3: isLastSibling marks the last of each sibling set", () => {
+    // Plant 1 is followed by Plant 2; Line 1 is followed by Line 2.
+    expect(byId.get("n_plant")?.isLastSibling).toBe(false);
+    expect(byId.get("n_plant2")?.isLastSibling).toBe(true);
+    expect(byId.get("n_line1")?.isLastSibling).toBe(false);
+    expect(byId.get("n_line2")?.isLastSibling).toBe(true);
+  });
+
+  it("H4: a child of a NON-last root keeps that root's line running", () => {
+    // Assembly sits under Plant 1, which is followed by Plant 2 — so the rail
+    // at depth 0 must continue past Assembly.
+    expect(byId.get("n_assembly")?.guides).toEqual([true]);
+  });
+
+  it("H5: a child of the LAST root has no line at depth 0", () => {
+    expect(byId.get("n_packing")?.guides).toEqual([false]);
+  });
+
+  it("H6: a grandchild's trail continues where a later sibling exists", () => {
+    // Cell 1 -> Line 1 -> Assembly -> Plant 1.
+    // depth 0: Plant 1 has Plant 2 after it        -> true
+    // depth 1: Assembly is Plant 1's only child    -> false
+    // depth 2: Line 1 is followed by Line 2        -> true
+    expect(byId.get("n_cell1")?.guides).toEqual([true, false, true]);
+  });
+
+  it("H7: and STOPS under the last sibling", () => {
+    // Cell 4 hangs off Line 2, which is last -> depth 2 rail is off.
+    expect(byId.get("n_cell4")?.guides).toEqual([true, false, false]);
+  });
+
+  it("H8: collapsing a node removes its descendants, trail included", () => {
+    const collapsed = buildTreeRows(TWO_SHAPE_NODES, TWO_SHAPE_LEVELS, new Set(["n_line1"]));
+    expect(collapsed.some((r) => r.node.id === "n_cell1")).toBe(false);
+    // and Line 1 itself still reports the same trail as when expanded
+    expect(collapsed.find((r) => r.node.id === "n_line1")?.guides).toEqual([true, false]);
+  });
+});
+
+/**
+ * D90 — the composition bug that 45 passing unit cases missed and a SCREENSHOT
+ * caught. `flattenTree` seats the depth-0 rail against every root in the org;
+ * `groupRowsByShape` then splits those roots across blocks. A root that is not
+ * last overall can be last within its block, and its descendants kept drawing a
+ * rail down to a sibling rendered in a different group — a line pointing at
+ * nothing.
+ *
+ * Both functions were correct in isolation. That is why these cases assert on
+ * the COMPOSED output and not on either one alone.
+ */
+describe("D90: root guides are re-seated per group", () => {
+  const groups = groupRowsByShape(TWO_SHAPE_ROWS, TWO_SHAPE_LEVELS, TEMPLATES);
+  const standard = groups.find((g) => g.templateId === TPL)!;
+  const compact = groups.find((g) => g.templateId === TPL_B)!;
+
+  it("K1: ungrouped, Plant 1 is NOT last — this is the precondition", () => {
+    // If this ever stops being true the rest of the block proves nothing,
+    // because there would be no re-seating left to do.
+    const raw = TWO_SHAPE_ROWS.find((r) => r.node.id === "n_plant");
+    expect(raw?.isLastSibling).toBe(false);
+    expect(TWO_SHAPE_ROWS.find((r) => r.node.id === "n_assembly")?.guides).toEqual([true]);
+  });
+
+  it("K2: inside its own group Plant 1 IS last, so its rail stops", () => {
+    expect(standard.rows.find((r) => r.node.id === "n_plant")?.isLastSibling).toBe(true);
+    expect(standard.rows.find((r) => r.node.id === "n_assembly")?.guides).toEqual([false]);
+  });
+
+  it("K3: every descendant in that group loses the depth-0 rail, at any depth", () => {
+    expect(standard.rows.filter((r) => r.depth > 0).every((r) => r.guides[0] === false)).toBe(true);
+  });
+
+  it("K4: deeper rails are untouched — only index 0 is re-seated", () => {
+    // Cell 1 still knows Line 1 is followed by Line 2.
+    expect(standard.rows.find((r) => r.node.id === "n_cell1")?.guides).toEqual([
+      false,
+      false,
+      true,
+    ]);
+    expect(standard.rows.find((r) => r.node.id === "n_cell4")?.guides).toEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("K5: the other group's single root is last too", () => {
+    expect(compact.rows.find((r) => r.node.id === "n_plant2")?.isLastSibling).toBe(true);
+    expect(compact.rows.find((r) => r.node.id === "n_packing")?.guides).toEqual([false]);
+  });
+
+  it("K6: with TWO roots in one group, the earlier one keeps its rail", () => {
+    const extra = [
+      ...TWO_SHAPE_NODES,
+      node("n_plant3", "Plant 3", "plant_3", null, "L0", 2),
+    ];
+    const g = groupRowsByShape(
+      buildTreeRows(extra, TWO_SHAPE_LEVELS, NONE_COLLAPSED),
+      TWO_SHAPE_LEVELS,
+      TEMPLATES,
+    ).find((x) => x.templateId === TPL)!;
+    // Plant 1 now has a same-group sibling below it, so its subtree's rail runs.
+    expect(g.rows.find((r) => r.node.id === "n_plant")?.isLastSibling).toBe(false);
+    expect(g.rows.find((r) => r.node.id === "n_assembly")?.guides).toEqual([true]);
+    expect(g.rows.find((r) => r.node.id === "n_plant3")?.isLastSibling).toBe(true);
   });
 });
