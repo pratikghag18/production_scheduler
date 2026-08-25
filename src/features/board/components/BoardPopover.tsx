@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { resolvePopoverPlacement } from "../lib/placement";
+import { resolvePopoverPlacement } from "@/lib/placement";
 import styles from "./BoardPopover.module.css";
 
 const FOCUSABLE_SELECTOR =

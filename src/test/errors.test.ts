@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isSchedulerError, toSchedulerError } from "@/lib/api";
+import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
+import type { SchedulerError } from "@/lib/api";
 import * as fixtures from "./fixtures/postgrest-errors";
 
 describe("toSchedulerError", () => {
@@ -156,5 +157,47 @@ describe("isSchedulerError", () => {
     expect(isSchedulerError(null)).toBe(false);
     expect(isSchedulerError(undefined)).toBe(false);
     expect(isSchedulerError({ kind: "NotARealKind" })).toBe(false);
+  });
+});
+
+/**
+ * Design-session verification, P1-5d review.
+ *
+ * The six hierarchy codes (D74) are a CLOSED SET and every one is reachable by
+ * ordinary use of the admin screens, so every one needs its own sentence.
+ * Nothing guarded that: `describeSchedulerError` covered all six, but no test
+ * would have noticed a missing or duplicated branch.
+ *
+ * P1-5d's brief compounded this by specifying a SECOND message map in the
+ * admin feature, justified on the false premise that `src/lib/api/` holds only
+ * the error contract and not its presentation. It holds both, and always did.
+ * The duplicate was deleted; this is what should have been written instead.
+ */
+describe("describeSchedulerError — the six hierarchy codes (D74)", () => {
+  const HIERARCHY_ERRORS: SchedulerError[] = [
+    { kind: "PathCollision" } as SchedulerError,
+    { kind: "NodeCycle" } as SchedulerError,
+    { kind: "LevelMismatch" } as SchedulerError,
+    { kind: "LevelInUse" } as SchedulerError,
+    { kind: "NodeInUse" } as SchedulerError,
+    { kind: "SchedulableLevelLocked" } as SchedulerError,
+  ];
+
+  it("every one produces a non-trivial sentence", () => {
+    for (const e of HIERARCHY_ERRORS) {
+      const msg = describeSchedulerError(e);
+      expect(msg.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("none leaks its raw discriminant to the user", () => {
+    for (const e of HIERARCHY_ERRORS) {
+      expect(describeSchedulerError(e)).not.toContain(e.kind);
+    }
+  });
+
+  it("all six messages are DISTINCT — a copy-paste branch is a real risk here", () => {
+    const msgs = HIERARCHY_ERRORS.map(describeSchedulerError);
+    expect(new Set(msgs).size).toBe(HIERARCHY_ERRORS.length);
   });
 });

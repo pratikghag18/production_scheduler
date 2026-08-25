@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  resolvePopoverPlacement,
-  DEFAULT_MARGIN,
-  DEFAULT_GAP,
-} from "@/features/board/lib/placement";
-import type { PlacementInput } from "@/features/board/lib/placement";
+import { resolvePopoverPlacement, DEFAULT_MARGIN, DEFAULT_GAP } from "@/lib/placement";
+import type { PlacementInput } from "@/lib/placement";
 
 /**
  * Brief P1-5c §8 group P (16 assertions) for `resolvePopoverPlacement`

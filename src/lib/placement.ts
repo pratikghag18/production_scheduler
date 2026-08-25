@@ -1,4 +1,23 @@
 /**
+ * MOVED HERE from `src/features/board/lib/` by the design session (P1-5d review).
+ *
+ * This is pure geometry with no board-specific knowledge, and as of P1-5d it has
+ * TWO consumers in different features: `BoardPopover` and `AdminPopover`.
+ * `docs/conventions.md` forbids cross-feature imports (`src/features/auth/` is
+ * the only named exception), so leaving it under `board/` forced the admin
+ * feature to either breach that rule or duplicate the module — and duplicating
+ * is worse: this function carries a non-obvious NaN-anchor fix (design plan
+ * §19.14) that a copy would silently never receive.
+ *
+ * The P1-5d brief's own scope fence said "no changes to src/features/board/",
+ * which blocked the clean answer; the build agent correctly flagged the
+ * collision rather than resolving it silently. The fence was the error.
+ *
+ * Shared, dependency-free logic belongs in `src/lib/`. `src/lib/api/` remains
+ * the only place allowed to touch supabase, snake_case or database.types.ts —
+ * that rule is unchanged and this file touches none of them.
+ */
+/**
  * Pure popover placement (design plan §19.11, brief P1-5c §4.1).
  *
  * One rule, in this order:

@@ -3,7 +3,14 @@
 // than added to the app tsconfig, because this is a browser app.
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { CHROME_FILES, countUiScaleUses, auditChromeFiles } from "./scaleAudit";
+import {
+  CHROME_FILES,
+  countUiScaleUses,
+  auditChromeFiles,
+  REM_SURFACES,
+  unscaledPxLengths,
+  auditRemSurfaces,
+} from "./scaleAudit";
 
 /**
  * Brief P1-5c §8 group A (10 assertions) for the `--ui-scale` file audit
@@ -88,5 +95,88 @@ describe("scaleAudit.ts: auditChromeFiles against the real repo", () => {
       "src/features/board/components/BoardToolbar.module.css",
       "src/features/board/BoardPage.module.css",
     ]);
+  });
+});
+
+/**
+ * D84 — scaling is the DEFAULT, and this is what enforces it.
+ *
+ * The admin screens shipped with 129 raw pixel values and zero uses of
+ * `--chrome-scale`, so on a 4K display the board scaled to 1.35x and the admin
+ * page stayed at 1x. Nothing checked, so nothing stopped it. The root font-size
+ * now scales and these surfaces size in `rem`; these cases make forgetting that
+ * a test failure instead of something noticed on a monitor three briefs later.
+ *
+ * All seven mutations of the audit were executed and each is caught by a named
+ * case below. One of them, Z2, initially reported NOT CAUGHT for a reason worth
+ * recording: `countUiScaleUses` and `unscaledPxLengths` contain the IDENTICAL
+ * comment-stripping line, so a single-occurrence replace mutated the wrong
+ * function entirely. A mutation must be anchored on something unique to the
+ * function under test.
+ */
+describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
+  it("R1: every rem surface is clean", () => {
+    const offenders = auditRemSurfaces(repoRoot).filter((r) => r.offenders.length > 0);
+    expect(offenders).toEqual([]);
+  });
+
+  // NOT VACUOUS: an audit that never matches anything reports success just as
+  // loudly as one with nothing to find.
+  it("R2: the matcher fires on a px-based declaration", () => {
+    expect(unscaledPxLengths(".a {\n  padding: 12px 8px;\n}").length).toBeGreaterThan(0);
+  });
+
+  it("R3: a hairline border is exempt", () => {
+    expect(unscaledPxLengths(".a { border: 1px solid red; }")).toEqual([]);
+  });
+
+  it("R4: a NON-hairline border width is flagged", () => {
+    expect(unscaledPxLengths(".a { border: 4px solid red; }").length).toBe(1);
+  });
+
+  it("R5: box-shadow offsets are exempt", () => {
+    expect(unscaledPxLengths(".a { box-shadow: 0 10px 40px #000; }")).toEqual([]);
+  });
+
+  // A breakpoint is about the DEVICE. In `rem` it would resolve against the
+  // scaled root and move with the scale — a real bug in the first conversion.
+  it("R6: a @media prelude is exempt", () => {
+    expect(unscaledPxLengths("@media (max-width: 900px) {\n  .a { color: red; }\n}")).toEqual([]);
+  });
+
+  it("R7: a comment mentioning 16px is not flagged", () => {
+    expect(unscaledPxLengths("/* 1rem = 16px at the default */\n.a { color: red; }")).toEqual([]);
+  });
+
+  it("R8: 0px is exempt", () => {
+    expect(unscaledPxLengths(".a { margin: 0px; }")).toEqual([]);
+  });
+
+  it("R12: border-radius is NOT exempt — a radius is a real dimension", () => {
+    expect(unscaledPxLengths(".a { border-radius: 20px; }").length).toBe(1);
+  });
+
+  it("R13: 3px border flagged, 2px border exempt", () => {
+    expect(unscaledPxLengths(".a { border: 3px solid red; }").length).toBe(1);
+    expect(unscaledPxLengths(".a { border: 2px solid red; }")).toEqual([]);
+  });
+
+  // The hairline exemption is border-only. Without this, widening it to every
+  // property goes unnoticed.
+  it("R14: a 2px non-border dimension is flagged", () => {
+    expect(unscaledPxLengths(".a { gap: 2px; }").length).toBe(1);
+  });
+
+  // The LIST is part of the guard: drop a file and it silently stops being
+  // guarded while every other case still passes.
+  it("R10: REM_SURFACES is exactly the four admin stylesheets", () => {
+    expect([...REM_SURFACES].sort()).toEqual(
+      [
+        "src/features/admin/AdminPage.module.css",
+        "src/features/admin/components/AdminPopover.module.css",
+        "src/features/admin/components/LevelEditor.module.css",
+        "src/features/admin/components/NodeTreeEditor.module.css",
+      ].sort(),
+    );
   });
 });

@@ -36,11 +36,16 @@ VALUES ('10000000-0000-0000-0000-000000000001', 'Northwind Manufacturing');
 -- The mockup starts at Department; design-plan §1's default vocabulary is
 -- Site -> Department -> Line -> Work Cell, so the Site root is added here.
 -- ----------------------------------------------------------------------------
-INSERT INTO hierarchy_levels (id, org_id, position, name, is_schedulable) VALUES
-  ('20000000-0000-0000-0000-000000000000', '10000000-0000-0000-0000-000000000001', 0, 'Site', false),
-  ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 1, 'Department', false),
-  ('20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 2, 'Line', false),
-  ('20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 3, 'Work Cell', true);
+-- D85: levels belong to a TEMPLATE, not directly to the org. One org may hold
+-- several shapes; this is Northwind's only one, so its name is generic.
+INSERT INTO hierarchy_templates (id, org_id, name) VALUES
+  ('21000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Standard Plant');
+
+INSERT INTO hierarchy_levels (id, org_id, template_id, position, name, is_schedulable) VALUES
+  ('20000000-0000-0000-0000-000000000000', '10000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001', 0, 'Site', false),
+  ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001', 1, 'Department', false),
+  ('20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001', 2, 'Line', false),
+  ('20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001', 3, 'Work Cell', true);
 
 -- ----------------------------------------------------------------------------
 -- Nodes. Inserted parent-first so the path trigger (D6) resolves each row's
@@ -258,12 +263,17 @@ END $$;
 INSERT INTO orgs (id, name)
 VALUES ('10000000-0000-0000-0000-000000000002', 'Contoso Fabrication');
 
--- Same four level NAMES and positions as org 1 (unique is (org_id, position)).
-INSERT INTO hierarchy_levels (id, org_id, position, name, is_schedulable) VALUES
-  ('2000000b-0000-0000-0000-000000000000', '10000000-0000-0000-0000-000000000002', 0, 'Site',      false),
-  ('2000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 1, 'Department',false),
-  ('2000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', 2, 'Line',      false),
-  ('2000000b-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', 3, 'Work Cell', true);
+-- Same four level NAMES and positions as org 1. Uniqueness is now
+-- (template_id, position), and the two orgs hold different templates, so the
+-- collision the fixture depends on survives D85 unchanged.
+INSERT INTO hierarchy_templates (id, org_id, name) VALUES
+  ('2100000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'Standard Plant');
+
+INSERT INTO hierarchy_levels (id, org_id, template_id, position, name, is_schedulable) VALUES
+  ('2000000b-0000-0000-0000-000000000000', '10000000-0000-0000-0000-000000000002', '2100000b-0000-0000-0000-000000000001', 0, 'Site',      false),
+  ('2000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '2100000b-0000-0000-0000-000000000001', 1, 'Department',false),
+  ('2000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', '2100000b-0000-0000-0000-000000000001', 2, 'Line',      false),
+  ('2000000b-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', '2100000b-0000-0000-0000-000000000001', 3, 'Work Cell', true);
 
 -- Parent-first, so the path trigger resolves each row from its parent.
 INSERT INTO nodes (id, org_id, level_id, parent_id, name) VALUES

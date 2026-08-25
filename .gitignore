@@ -14,3 +14,10 @@ test-results
 
 # delivery staging (see docs/agent-briefs)
 _delivery/
+
+# build caches and local run output — regenerated every run, never reviewable
+# checks.txt is the Windows acceptance log (UTF-16, changes on every run);
+# tsconfig.tsbuildinfo is TypeScript's incremental cache. Both were tracked
+# until Aug 25 and both guarantee spurious diffs and merge conflicts.
+tsconfig.tsbuildinfo
+checks.txt

@@ -72,9 +72,10 @@ export interface HierarchyLevelDraftInput {
 
 function parseHierarchyLevel(v: Json): HierarchyLevel | null {
   if (!isJsonObject(v)) return null;
-  const { id, position, name, is_schedulable } = v;
-  if (!isStr(id) || !isNum(position) || !isStr(name) || !isBool(is_schedulable)) return null;
-  return { id, position, name, isSchedulable: is_schedulable };
+  const { id, template_id, position, name, is_schedulable } = v;
+  if (!isStr(id) || !isStr(template_id) || !isNum(position) || !isStr(name) || !isBool(is_schedulable))
+    return null;
+  return { id, templateId: template_id, position, name, isSchedulable: is_schedulable };
 }
 
 function parseHierarchyLevelArray(json: Json): HierarchyLevel[] | null {
@@ -89,13 +90,18 @@ function parseHierarchyLevelArray(json: Json): HierarchyLevel[] | null {
 }
 
 /**
- * `save_hierarchy_levels(p_levels jsonb)`. Generated signature:
- * `{ p_levels: Json } -> Json`. The array's order defines each level's
- * final `position` (D70) — this function does not accept or send one.
- * Returns the org's full, saved level list, ordered by position.
+ * `save_hierarchy_levels(p_levels jsonb, p_template_id uuid)`. The array's
+ * order defines each level's final `position` (D70) — this function does not
+ * accept or send one. Returns that TEMPLATE's full, saved level list.
+ *
+ * D86 / migration 0014: `templateId` is REQUIRED and has no default, on
+ * purpose. The one-argument RPC was dropped rather than overloaded, and the
+ * server refuses to guess which shape an admin meant — so neither does this.
+ * Returns only the named template's levels, never the org's.
  */
 export async function saveHierarchyLevels(
   levels: HierarchyLevelDraftInput[],
+  templateId: string,
 ): Promise<HierarchyLevel[]> {
   const p_levels = levels.map((l) => ({
     id: l.id,
@@ -103,13 +109,16 @@ export async function saveHierarchyLevels(
     is_schedulable: l.isSchedulable,
   })) as unknown as Json;
 
-  const { data, error } = await supabase.rpc("save_hierarchy_levels", { p_levels });
+  const { data, error } = await supabase.rpc("save_hierarchy_levels", {
+    p_levels,
+    p_template_id: templateId,
+  });
   if (error) throw toSchedulerError(error);
   const parsed = parseHierarchyLevelArray(data);
   if (parsed === null) {
     throw shapeMismatch(
       "save_hierarchy_levels",
-      "expected a JSON array of {id,position,name,is_schedulable} (see shapes.ts HierarchyLevel)",
+      "expected a JSON array of {id,template_id,position,name,is_schedulable} (see shapes.ts HierarchyLevel)",
     );
   }
   return parsed;
@@ -305,4 +314,67 @@ export async function deleteNode(nodeId: string, mode?: DeleteNodeMode): Promise
     );
   }
   return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
+/**
+ * The whole org's levels and nodes, for the hierarchy admin screens.
+ *
+ * `board_window` is the codebase's other hierarchy-shaped read and is the
+ * wrong shape here: it is scoped to one root path and one time window, while
+ * a tree EDITOR needs every node regardless of schedule activity.
+ *
+ * Lives here rather than in the admin feature because `src/lib/api/` is the
+ * only place allowed to touch `supabase`, snake_case, or `database.types.ts`
+ * (docs/conventions.md). P1-5d's file table authorised no file for this and
+ * the build agent therefore, reasonably, put it in `AdminPage.tsx`; the
+ * boundary is the rule, and the file table was the error.
+ *
+ * No manual `org_id` filter: RLS scopes both tables to the caller's org, and
+ * as of migration 0012 that scoping is tenant-correct (design plan §19.15).
+ * Adding a redundant filter here would be a second implementation of a rule
+ * the database already owns.
+ */
+export async function fetchHierarchyTree(): Promise<{
+  levels: HierarchyLevel[];
+  nodes: BoardNode[];
+}> {
+  const [levelsRes, nodesRes] = await Promise.all([
+    supabase
+      .from("hierarchy_levels")
+      .select("id, template_id, position, name, is_schedulable")
+      .order("position"),
+    supabase
+      .from("nodes")
+      .select("id, parent_id, level_id, name, path, sort_order, active")
+      .order("sort_order"),
+  ]);
+  if (levelsRes.error) throw toSchedulerError(levelsRes.error);
+  if (nodesRes.error) throw toSchedulerError(nodesRes.error);
+
+  const levels: HierarchyLevel[] = (levelsRes.data ?? []).map((r) => ({
+    id: r.id,
+    templateId: r.template_id,
+    position: r.position,
+    name: r.name,
+    isSchedulable: r.is_schedulable,
+  }));
+  const nodes: BoardNode[] = (nodesRes.data ?? []).map((r) => ({
+    id: r.id,
+    parentId: r.parent_id,
+    levelId: r.level_id,
+    name: r.name,
+    // `nodes.path` is a Postgres `ltree`, which has no JS mapping, so
+    // `supabase gen types` emits it as `unknown` — the same class of gap as
+    // the nullable-argument one above: the generated type cannot express
+    // this and regenerating will never change it. It is a string over the
+    // wire. Cast at the single boundary, with this comment.
+    path: r.path as string,
+    sortOrder: r.sort_order,
+    active: r.active,
+  }));
+  return { levels, nodes };
 }

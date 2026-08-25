@@ -15,6 +15,12 @@
 
 export interface LevelRow {
   id: string;
+  /**
+   * D86: a level belongs to a hierarchy TEMPLATE, not to the org. One org may
+   * hold several shapes, so `position` is unique only within a template and
+   * two levels in the same org can both sit at position 1.
+   */
+  templateId: string;
   position: number;
   name: string;
   isSchedulable: boolean;
@@ -225,6 +231,20 @@ export function canDropOn(
   // 6. node's level position must be exactly one below target's.
   const targetLevel = levelsById.get(target.levelId);
   if (!targetLevel || draggedLevel.position !== targetLevel.position + 1) {
+    return { ok: false, reason: "level_mismatch" };
+  }
+
+  // 6b. D86: and both levels must belong to the SAME template. Position
+  // arithmetic alone is not enough once an org holds more than one shape --
+  // a Line at position 2 of shape A and a Department at position 1 of shape
+  // B satisfy `2 === 1 + 1` and have nothing to do with each other.
+  //
+  // ORDER IS THE CONTRACT, as everywhere else in this function: the server's
+  // `nodes_check_level_adjacency` (migration 0014) tests POSITION first and
+  // TEMPLATE second, and raises `level_mismatch` for both. Reordering these
+  // two would make this preview disagree with the server about WHICH rule a
+  // drop broke, which is the one thing this mirror exists to get right.
+  if (draggedLevel.templateId !== targetLevel.templateId) {
     return { ok: false, reason: "level_mismatch" };
   }
 

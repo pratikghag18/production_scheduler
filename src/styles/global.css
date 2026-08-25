@@ -79,6 +79,42 @@ a {
   --chrome-scale: 1;
 }
 
+/* ---------------------------------------------------------------------------
+   D84 — SCALING IS THE DEFAULT, NOT A DISCIPLINE (design session, Aug 25 2026).
+
+   Every scaled dimension in this app is written by hand as
+   `calc(12px * var(--chrome-scale))`. That works, and it is something a person
+   has to REMEMBER on every new stylesheet. P1-5d proved it does not survive
+   contact: the admin screens shipped with 129 raw pixel values and zero uses of
+   `--chrome-scale`, so on a 4K display the board scaled to 1.35x and the whole
+   admin page stayed at 1x. The one admin file that DID scale was the popover —
+   the only one whose brief happened to mention the mechanism.
+
+   So the root font-size scales instead, and new surfaces size in `rem`. Scaling
+   becomes the behaviour of the UNIT: a stylesheet is scalable with nothing to
+   remember, and forgetting is no longer possible rather than merely caught.
+
+   `100%`, not `16px`, so a user who has raised their browser's default font
+   size keeps that preference and gets the viewport scaling on top of it.
+
+   THE GUARD ABOVE IS WHAT MAKES THIS SAFE. `--chrome-scale: 1` is declared
+   unconditionally, and only then overridden inside `@supports`. Without it, a
+   browser that cannot divide a length by a length leaves the custom property
+   set but invalid at computed-value time, the whole `font-size` declaration is
+   dropped, and the element falls back to the UA default — which for THIS
+   declaration would mean every `rem` in the app shifting at once. The failure
+   mode is "no scaling", never "no styling".
+
+   Verified before writing this: the only `rem`/`em` in the entire codebase was
+   one `0.04em` letter-spacing (relative to its own element, not the root), so
+   nothing existing moves. The board keeps its `calc(px * var(--chrome-scale))`
+   idiom — its geometry is computed in real pixels by JS (`HEADER_HEIGHT_PX`,
+   lane heights, minute-to-pixel), so px there is deliberate, not an oversight.
+   --------------------------------------------------------------------------- */
+:root {
+  font-size: calc(100% * var(--chrome-scale));
+}
+
 @supports (line-height: calc(100vw / 1440px)) {
   :root {
     --chrome-scale: clamp(1, 0.75 + 0.25 * (100vw / 1440px), 1.35);

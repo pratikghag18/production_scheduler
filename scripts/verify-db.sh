@@ -182,13 +182,56 @@ if [ ! -f "$TESTS_DIR/70_hierarchy_test.sql" ]; then
   note_fail "70_hierarchy_test.sql not found in $TESTS_DIR (brief P1-5a §3 requires it to run after 60_api_test.sql)"
   exit 1
 fi
+# ------------------------------------------------------------------------------
+# A NON-ZERO EXIT CODE IS NOT THE ONLY WAY A TEST FILE FAILS (design session,
+# Aug 25 2026 -- design plan §19.17 / D85).
+#
+# 70_hierarchy_test.sql and 80_cross_org_test.sql report per-case results with
+# `RAISE NOTICE 'PASS x'` / `RAISE NOTICE 'FAIL x'`, and wrap each case in
+# `EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'FAIL ...'`. A NOTICE is not an
+# error: psql exits 0 no matter how many cases failed. This loop used to test
+# only the exit code, so for as long as that idiom has existed the harness has
+# been able to print
+#
+#     PASS: 70_hierarchy_test.sql
+#
+# for a run in which EIGHT cases printed FAIL -- which is exactly what it did,
+# hiding the `create_node` regression that migration 0013 fixes.
+#
+# The output is now scanned for `NOTICE:  FAIL` as well. A file that emits ZERO
+# `NOTICE:  PASS` lines is not treated as suspicious: 10-60 use a different
+# idiom (raise an exception on failure) and legitimately emit neither.
+# ------------------------------------------------------------------------------
+# EXTENDED BY D86: 90_hierarchy_template_test.sql must run after
+# 80_cross_org_test.sql. Filename-sorted glob order already places it there;
+# this guard makes the requirement explicit and fails loudly if the file goes
+# missing, instead of silently running one fewer test -- the same idiom as the
+# 60_ and 70_ guards above.
+if [ ! -f "$TESTS_DIR/90_hierarchy_template_test.sql" ]; then
+  note_fail "90_hierarchy_template_test.sql not found in $TESTS_DIR (D86 requires it to run after 80_cross_org_test.sql)"
+  exit 1
+fi
 for f in $(ls "$TESTS_DIR"/[1-9]*.sql | sort); do
   echo "--- $(basename "$f") ---"
-  if psql_su -f "$f"; then
-    note_pass "$(basename "$f")"
+  out_file=$(mktemp)
+  if psql_su -f "$f" > "$out_file" 2>&1; then
+    exit_ok=1
   else
-    note_fail "$(basename "$f")"
+    exit_ok=0
   fi
+  cat "$out_file"
+  n_fail=$(grep -c "NOTICE:  FAIL" "$out_file" || true)
+  n_pass=$(grep -c "NOTICE:  PASS" "$out_file" || true)
+  if [ "$exit_ok" -ne 1 ]; then
+    note_fail "$(basename "$f") (psql exited non-zero)"
+  elif [ "$n_fail" -ne 0 ]; then
+    note_fail "$(basename "$f") ($n_fail case(s) reported FAIL via RAISE NOTICE; $n_pass reported PASS)"
+  elif [ "$n_pass" -ne 0 ]; then
+    note_pass "$(basename "$f") ($n_pass cases)"
+  else
+    note_pass "$(basename "$f")"
+  fi
+  rm -f "$out_file"
 done
 
 # ------------------------------------------------------------------------------
@@ -226,7 +269,7 @@ fi
 # ------------------------------------------------------------------------------
 step "8b. Acceptance item 31: \\d+ every table, appended to docs/schema.md"
 # ------------------------------------------------------------------------------
-TABLES="orgs hierarchy_levels nodes operators products skills operator_skills node_skill_requirements runs assignments shift_templates shifts shift_breaks node_shift_templates user_profiles profile_grants audit_log"
+TABLES="orgs hierarchy_templates hierarchy_levels nodes operators products skills operator_skills node_skill_requirements runs assignments shift_templates shifts shift_breaks node_shift_templates user_profiles profile_grants audit_log"
 
 mkdir -p "$(dirname "$SCHEMA_MD")"
 cat > "$SCHEMA_MD" <<'MD'
@@ -240,7 +283,8 @@ cat > "$SCHEMA_MD" <<'MD'
 | Table | Purpose |
 |---|---|
 | `orgs` | One row per tenant. Carries `settings` (capacity cap, eligibility policy, week start, snap default). |
-| `hierarchy_levels` | The org's ordered hierarchy definition (Site/Department/Line/Work Cell, or whatever the org names them). Exactly one level per org may be `is_schedulable`. |
+| `hierarchy_templates` | A named hierarchy SHAPE within an org (D86). One org may hold several, so different sites can be organised differently. |
+| `hierarchy_levels` | One template's ordered level list (Site/Department/Line/Work Cell, or whatever the site names them). Exactly one level per TEMPLATE may be `is_schedulable` — not one per org. |
 | `nodes` | Every unit at every level, self-referencing tree. `path` (ltree) is trigger-maintained from `parent_id`/`name` — never supplied by callers. |
 | `operators` | The roster. `home_node_id` is a default site/department for roster filtering. |
 | `products` | The catalog. No color column — color is a UI-only sku-to-token mapping. |

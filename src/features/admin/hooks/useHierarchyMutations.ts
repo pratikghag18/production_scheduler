@@ -63,11 +63,21 @@ function invalidateHierarchy(queryClient: ReturnType<typeof useQueryClient>) {
  * `save_hierarchy_levels`. Raises: not_permitted, invalid_argument,
  * level_in_use, schedulable_level_locked.
  */
+/**
+ * D86: the variables are now a PAIR. `save_hierarchy_levels` edits one
+ * hierarchy template's level list, and an org may hold several shapes, so the
+ * caller must say which — there is no "the org's levels" any more.
+ */
+export interface SaveHierarchyLevelsVars {
+  levels: HierarchyLevelDraftInput[];
+  templateId: string;
+}
+
 export function useSaveHierarchyLevels() {
   const queryClient = useQueryClient();
 
-  return useMutation<HierarchyLevel[], SchedulerError, HierarchyLevelDraftInput[]>({
-    mutationFn: (levels) => saveHierarchyLevels(levels),
+  return useMutation<HierarchyLevel[], SchedulerError, SaveHierarchyLevelsVars>({
+    mutationFn: ({ levels, templateId }) => saveHierarchyLevels(levels, templateId),
     onSuccess: () => {
       void invalidateHierarchy(queryClient);
     },

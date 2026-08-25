@@ -128,8 +128,23 @@ describe("prospectivePath", () => {
 // fixtures
 // ---------------------------------------------------------------------------
 
-const L = (id: string, position: number, isSchedulable = false): LevelRow => ({
+/**
+ * D86: every level belongs to a template. `templateId` defaults to a single
+ * shape so all the pre-D86 cases below keep testing exactly what they tested
+ * before — an org with one hierarchy shape, which is still the common case.
+ * The cross-template cases pass a second one explicitly.
+ */
+export const TEMPLATE_A = "tpl-a";
+export const TEMPLATE_B = "tpl-b";
+
+const L = (
+  id: string,
+  position: number,
+  isSchedulable = false,
+  templateId: string = TEMPLATE_A,
+): LevelRow => ({
   id,
+  templateId,
   position,
   name: id,
   isSchedulable,
@@ -549,5 +564,64 @@ describe("validateLevelDraft", () => {
         { id, name: "b", isSchedulable: false },
       ]),
     ).toEqual({ ok: true });
+  });
+});
+
+/**
+ * D86 (migration 0014) — a node may only sit under a parent from the SAME
+ * hierarchy template.
+ *
+ * Once an org holds two shapes, level POSITION stops being enough to identify
+ * a legal parent: a Line at position 2 of shape A and a Department at position
+ * 1 of shape B satisfy `2 === 1 + 1` and have nothing to do with each other.
+ * D2 is the case that matters, and its fixture is built so the ARITHMETIC
+ * PASSES — otherwise it would be a duplicate of the level-mismatch cases above
+ * and would go on passing with the template check deleted.
+ *
+ * Mutation-verified: replacing the template comparison with `false` breaks D2
+ * and ONLY D2.
+ *
+ * Check order mirrors the server (`nodes_check_level_adjacency`): POSITION
+ * first, TEMPLATE second. Both report `level_mismatch`, so D3 cannot tell them
+ * apart by reason code — it exists to prove the cross-template path does not
+ * accidentally start reporting something else.
+ */
+describe("canDropOn — hierarchy templates (D86)", () => {
+  const TL = [
+    L("a0", 0, false, TEMPLATE_A),
+    L("a1", 1, false, TEMPLATE_A),
+    L("a2", 2, true, TEMPLATE_A),
+    L("b0", 0, false, TEMPLATE_B),
+    L("b1", 1, false, TEMPLATE_B),
+    L("b2", 2, true, TEMPLATE_B),
+  ];
+  const TN = [
+    N("pa", "plant_a", "a0", null, 0, "Plant A"),
+    N("da", "plant_a.dept", "a1", "pa", 0, "Dept"),
+    N("la", "plant_a.dept.line_1", "a2", "da", 0, "Line 1"),
+    N("pb", "plant_b", "b0", null, 0, "Plant B"),
+    N("zb", "plant_b.zone", "b1", "pb", 0, "Zone"),
+    N("bb", "plant_b.zone.bay_1", "b2", "zb", 0, "Bay 1"),
+  ];
+
+  it("D1: a same-template move is still legal", () => {
+    expect(canDropOn("la", "da", TN, TL)).toEqual({ ok: true, noop: true });
+  });
+
+  it("D2: a cross-template parent is refused even when the positions line up", () => {
+    // Line(shape A, position 2) onto Zone(shape B, position 1): 2 === 1 + 1.
+    expect(canDropOn("la", "zb", TN, TL)).toEqual({ ok: false, reason: "level_mismatch" });
+  });
+
+  it("D3: cross-template AND wrong position is still level_mismatch", () => {
+    expect(canDropOn("la", "pb", TN, TL)).toEqual({ ok: false, reason: "level_mismatch" });
+  });
+
+  it("D4: a root move is position-only and untouched by templates", () => {
+    expect(canDropOn("pa", null, TN, TL)).toEqual({ ok: true, noop: true });
+  });
+
+  it("D5: the second shape works internally, exactly like the first", () => {
+    expect(canDropOn("bb", "zb", TN, TL)).toEqual({ ok: true, noop: true });
   });
 });

@@ -78,6 +78,8 @@ function parseOrg(v: Json | undefined): Org | null {
 
 export interface HierarchyLevel {
   id: string;
+  /** D86: which hierarchy shape this level belongs to (migration 0014). */
+  templateId: string;
   position: number;
   name: string;
   isSchedulable: boolean;
@@ -85,9 +87,10 @@ export interface HierarchyLevel {
 
 function parseLevel(v: Json): HierarchyLevel | null {
   if (!isJsonObject(v)) return null;
-  const { id, position, name, is_schedulable } = v;
-  if (!isStr(id) || !isNum(position) || !isStr(name) || !isBool(is_schedulable)) return null;
-  return { id, position, name, isSchedulable: is_schedulable };
+  const { id, template_id, position, name, is_schedulable } = v;
+  if (!isStr(id) || !isStr(template_id) || !isNum(position) || !isStr(name) || !isBool(is_schedulable))
+    return null;
+  return { id, templateId: template_id, position, name, isSchedulable: is_schedulable };
 }
 
 /** Named `BoardNode` (not `Node`) to avoid colliding with the DOM `Node` type. */

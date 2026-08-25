@@ -79,19 +79,54 @@ BEGIN
   END IF;
 END $$;
 
-\echo 'Case 3: a second schedulable level in the same org is rejected'
+\echo 'Case 3: a second schedulable level in the same TEMPLATE is rejected'
+-- D86 moved this constraint from (org_id) to (template_id). The org-level
+-- version of this case is now WRONG, not merely differently phrased: an org
+-- with two site shapes must be able to schedule at Work Cell in one and at
+-- Line in the other. Case 3b is the half that proves the constraint actually
+-- moved rather than being dropped -- without it, deleting the partial index
+-- entirely would still leave Case 3... failing, which is why 3 alone is not
+-- enough and 3b alone is not enough either.
 DO $$
 DECLARE v_caught boolean := false;
 BEGIN
   BEGIN
-    INSERT INTO hierarchy_levels (org_id, position, name, is_schedulable)
-    VALUES ('10000000-0000-0000-0000-000000000001', 9, 'Extra Schedulable', true);
+    INSERT INTO hierarchy_levels (org_id, template_id, position, name, is_schedulable)
+    VALUES ('10000000-0000-0000-0000-000000000001',
+            '21000000-0000-0000-0000-000000000001', 9, 'Extra Schedulable', true);
   EXCEPTION WHEN unique_violation THEN
     v_caught := true;
   END;
   IF NOT v_caught THEN
-    RAISE EXCEPTION 'FAIL: a second schedulable level was not rejected';
+    RAISE EXCEPTION 'FAIL: a second schedulable level in the same template was not rejected';
   END IF;
+END $$;
+
+\echo 'Case 3b: a second schedulable level in a DIFFERENT template is ACCEPTED'
+DO $$
+DECLARE v_tpl uuid;
+BEGIN
+  INSERT INTO hierarchy_templates (org_id, name)
+  VALUES ('10000000-0000-0000-0000-000000000001', 'Case 3b Shape')
+  RETURNING id INTO v_tpl;
+
+  -- Same org, already holding a schedulable level in 'Standard Plant'.
+  INSERT INTO hierarchy_levels (org_id, template_id, position, name, is_schedulable)
+  VALUES ('10000000-0000-0000-0000-000000000001', v_tpl, 0, 'Site', false),
+         ('10000000-0000-0000-0000-000000000001', v_tpl, 1, 'Line', true);
+
+  IF (SELECT count(*) FROM hierarchy_levels
+      WHERE org_id = '10000000-0000-0000-0000-000000000001' AND is_schedulable) <> 2 THEN
+    RAISE EXCEPTION 'FAIL: expected 2 schedulable levels in this org, one per template';
+  END IF;
+
+  -- Positions repeat across templates too -- that is the point.
+  IF (SELECT count(*) FROM hierarchy_levels
+      WHERE org_id = '10000000-0000-0000-0000-000000000001' AND position = 0) <> 2 THEN
+    RAISE EXCEPTION 'FAIL: expected position 0 to exist twice in this org';
+  END IF;
+EXCEPTION WHEN unique_violation THEN
+  RAISE EXCEPTION 'FAIL: a second shape in the same org was rejected (D86 regression)';
 END $$;
 
 \echo 'Case 4a: assignment with both run_id and product_id is rejected'
@@ -154,14 +189,16 @@ END $$;
 DO $$
 DECLARE
   v_org_b uuid := gen_random_uuid();
+  v_tpl_b uuid := gen_random_uuid();
   v_level_b uuid := gen_random_uuid();
   v_node_b uuid := gen_random_uuid();
   v_operator_b uuid := gen_random_uuid();
   v_caught boolean := false;
 BEGIN
   INSERT INTO orgs (id, name) VALUES (v_org_b, 'Throwaway Org B');
-  INSERT INTO hierarchy_levels (id, org_id, position, name, is_schedulable)
-    VALUES (v_level_b, v_org_b, 0, 'Cell', true);
+  INSERT INTO hierarchy_templates (id, org_id, name) VALUES (v_tpl_b, v_org_b, 'B Shape');
+  INSERT INTO hierarchy_levels (id, org_id, template_id, position, name, is_schedulable)
+    VALUES (v_level_b, v_org_b, v_tpl_b, 0, 'Cell', true);
   INSERT INTO nodes (id, org_id, level_id, parent_id, name)
     VALUES (v_node_b, v_org_b, v_level_b, NULL, 'B Cell 1');
   INSERT INTO operators (id, org_id, display_name)

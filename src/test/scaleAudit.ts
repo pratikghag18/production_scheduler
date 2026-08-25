@@ -72,3 +72,74 @@ export function auditChromeFiles(
     return { file, uses: countUiScaleUses(css) };
   });
 }
+
+/**
+ * D84 — the rem surfaces.
+ *
+ * These stylesheets size in `rem` and scale through the root font-size
+ * (`global.css`). A raw pixel dimension in one of them does not scale, and that
+ * is exactly how the admin screens shipped at 1x on a 4K display while the
+ * board scaled to 1.35x: nothing checked, so nothing stopped it.
+ *
+ * This is the enforcement half of D84. The scaled root font-size makes scaling
+ * the DEFAULT; this makes forgetting it a test failure rather than something
+ * noticed on someone's monitor three briefs later.
+ */
+export const REM_SURFACES: readonly string[] = [
+  "src/features/admin/AdminPage.module.css",
+  "src/features/admin/components/LevelEditor.module.css",
+  "src/features/admin/components/NodeTreeEditor.module.css",
+  "src/features/admin/components/AdminPopover.module.css",
+];
+
+/**
+ * Pixel lengths that are legitimately NOT scaled:
+ *   - hairlines on a border/outline (a 1px rule at 1.35x renders blurry)
+ *   - `box-shadow` offsets and blur (decorative; scaling them is noise)
+ *   - anything inside a `@media` prelude — a breakpoint is about the DEVICE,
+ *     and in `rem` it would resolve against the scaled root and move with the
+ *     scale. This was a real bug in the first conversion pass.
+ *   - `0px`
+ *
+ * Comments are stripped first, for the same reason `countUiScaleUses` strips
+ * them: these files explain themselves in prose that mentions `16px` and
+ * `1.35px`, and a matcher that reads comments flags the very file documenting
+ * the rule. That mistake has now been made twice on this project.
+ */
+export function unscaledPxLengths(css: string): string[] {
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const out: string[] = [];
+  // Split on `;` and braces as well as newlines, so the matcher does not depend
+  // on Prettier's formatting at all. A line-oriented version reports ZERO
+  // offenders the moment a selector and a declaration share a line — and zero
+  // offenders reads exactly like a pass. A guard must not be able to fail
+  // silently, so it is split down to individual declarations.
+  for (const rawLine of withoutComments.split(/[\n;{}]/)) {
+    const line = rawLine.trim();
+    if (line.startsWith("@media")) continue;
+    const prop = line.split(":")[0].trim().toLowerCase();
+    if (prop === "box-shadow") continue;
+    // Exempt by VALUE, not by property family. An earlier version exempted
+    // anything matching /^(border|outline)/, which also swallowed
+    // `border-radius: 20px` — a radius is a real dimension and must scale.
+    // Only a genuine hairline WIDTH (<=2px) on a border/outline is exempt.
+    const isHairlineContext = /^(border|outline)/.test(prop) && !prop.includes("radius");
+    for (const m of line.matchAll(/\b(\d+(?:\.\d+)?)px\b/g)) {
+      const v = parseFloat(m[1]);
+      if (v === 0) continue;
+      if (isHairlineContext && v <= 2) continue;
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+export function auditRemSurfaces(
+  root: string,
+  files: readonly string[] = REM_SURFACES,
+): Array<{ file: string; offenders: string[] }> {
+  return files.map((f) => ({
+    file: f,
+    offenders: unscaledPxLengths(fs.readFileSync(`${root}/${f}`, "utf8")),
+  }));
+}

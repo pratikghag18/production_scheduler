@@ -1,7 +1,7 @@
 # Production Scheduler — Design Plan
 
-**Status:** Draft v2.0 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c + D81/D82 · §19.15 a second org, and the cross-tenant leak it found — D83** Aug 25)
-**Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client layers (P1-5a/b) are built; P1-5a/5b verified by an independent design-session probe.
+**Status:** Draft v2.1 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c + D81/D82 · §19.15 a second org + the cross-tenant leak (D83) · §19.16 scaling is the default (D84) · §19.17 the create_node regression 0012 caused and the harness that hid it (D85) · §19.18 hierarchy templates — a shape per site (D86)** Aug 25)
+**Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client + screens layers (P1-5a/b/c/d) are built and verified by independent design-session probes. **The SQL is at migration 0014; the CLIENT SIDE OF D86 is not written yet — see §19.18.**
 **Progress tracking:** current status and remaining work live in [`docs/roadmap.md`](roadmap.md) — this document holds decisions, that one holds state.
 
 ---
@@ -1755,3 +1755,274 @@ security bug on the first run. **An untested invariant in a multi-tenant product
 coverage, it is an unexamined claim about safety** — and the cost of leaving it untested rises with
 every RPC written on top of it. Two migrations, five RPCs and a whole board UI were built over this
 one.
+
+### 19.16 D84 — scaling is the default, not a discipline (Aug 25, 2026)
+
+Reported: the admin page does not scale on a 4K display. Measured: **129 raw pixel values across
+three of the four admin stylesheets, and zero uses of `--chrome-scale`.** On a 4K screen the board
+scaled to 1.35× and the entire admin surface stayed at 1×.
+
+**The one admin file that DID scale was the popover** — the only one whose brief happened to mention
+the mechanism (P1-5d §7.4, which told the agent to carry `BoardPopover`'s fix across). Nothing in the
+brief said the surface itself must scale, so nothing did. The build followed its instructions exactly.
+
+#### The rule was the problem, not the build
+
+Every scaled dimension in this app is written by hand as `calc(12px * var(--chrome-scale))`. That
+works and it is **something a person has to remember on every new stylesheet.** `BoardToolbar` has 24
+of them; `AppShell` has 2; admin had 0. A convention that must be recalled per property will be
+forgotten, and the only question is which surface forgets first.
+
+So the unit changes instead:
+
+```css
+:root { font-size: calc(100% * var(--chrome-scale)); }
+```
+
+and new surfaces size in `rem`. **Scaling becomes the behaviour of the unit** — a stylesheet is
+scalable with nothing to remember, and forgetting stops being possible rather than merely being
+caught later.
+
+`100%` rather than `16px`, so a user who has raised their browser's default font size keeps that
+preference *and* gets viewport scaling on top of it.
+
+**The guard from D47 is what makes this safe.** `--chrome-scale: 1` is declared unconditionally on
+`:root` and only then overridden inside `@supports`. Without that, a browser that cannot divide a
+length by a length leaves the custom property set but invalid at computed-value time, the whole
+`font-size` declaration is dropped, and the element falls back to the UA default — which for *this*
+declaration would mean every `rem` in the app shifting at once. The failure mode stays "no scaling",
+never "no styling". That guard was written for a single element's `font-size`; it is now load-bearing
+for the whole document.
+
+**Verified before writing it:** the only `rem`/`em` in the entire codebase was one `0.04em`
+letter-spacing, which resolves against its own element rather than the root. Nothing existing moves.
+
+**The board keeps `calc(px * var(--chrome-scale))`, deliberately.** Its geometry is computed in real
+pixels by JS — `HEADER_HEIGHT_PX`, lane heights, minutes-to-pixels — so px there is a decision, not
+an oversight. Two idioms, with a reason for the boundary.
+
+#### The conversion found two bugs of its own
+
+**A media query in `rem` moves with the scale.** `@media (max-width: 56.25rem)` resolves against the
+root font-size, which now scales — so on a 4K display the "narrow layout" breakpoint would have fired
+at ~1215px instead of 900px. **A breakpoint is about the DEVICE; only content sizes are `rem`.**
+Reverted to px, with the reasoning in the file.
+
+**A converter that does not strip comments rewrites its own documentation.** The script turned
+`272px` inside a comment *it had just written* into `17rem`, producing "17rem is 17rem at the default
+root size". Third instance on this project of a CSS matcher that had to be taught the difference
+between code and prose.
+
+#### Enforcement — the half that makes it a default
+
+`src/test/scaleAudit.ts` already guarded "no `--ui-scale` in chrome files" (D76). It now also guards
+**"no unscaled pixel dimensions in a rem surface"**, with 12 committed cases. Exemptions are by
+VALUE, not by property family: hairline widths (≤2px) on a border or outline, `box-shadow` offsets,
+anything inside a `@media` prelude, and `0px`.
+
+Seven mutations, each caught by a named case. Two are worth keeping:
+
+- **The first version exempted anything matching `/^(border|outline)/`, which also swallowed
+  `border-radius: 20px`** — a radius is a real dimension and must scale. Exempting by property
+  family was the mistake; exempting by value is the fix.
+- **Mutation Z2 reported NOT CAUGHT because it mutated the wrong function.** `countUiScaleUses` and
+  `unscaledPxLengths` contain the *identical* comment-stripping line, so a single-occurrence replace
+  never touched the function under test. **A mutation must be anchored on something unique to the
+  function it targets** — otherwise the table records a hole that does not exist and hides one that
+  does. New, and it goes in [[verification-standard]].
+
+Also fixed en route: the matcher was line-oriented, so it depended on Prettier's one-declaration-per-
+line formatting and would have reported **zero offenders** — indistinguishable from a pass — the day
+two declarations shared a line. It now splits on newlines, semicolons and braces.
+
+#### Multiple sites, and a limit worth naming
+
+Checked directly rather than assumed: **multiple root nodes in one org render correctly.** Two Sites,
+each with their own subtree, flatten in the right order with the right depths, and `+ add root node`
+exists.
+
+**But every site in an org must have the SAME shape.** `hierarchy_levels` is unique on
+`(org_id, position)` — one ordered vocabulary per org — and `nodes_check_level_adjacency` requires
+each node's level position to be exactly its parent's + 1. So an org cannot have
+Site → Department → Line → Cell at one plant and Site → Line → Cell at another: the second plant's
+Lines would have to sit at position 1 and position 2 simultaneously.
+
+That is a consequence of D69/D70. It was never written down as a constraint, and it contradicts a
+requirement Pratik stated at the start of this project: hierarchy levels are whatever the site wants.
+**I recorded it as an open question and asked him to re-decide it, which was the wrong move and he
+said so** — a gap between the code and a requirement already given is a DEFECT, not a question. It is
+fixed in §19.18. The note stays because the shape of the mistake is worth keeping: finding an
+undocumented limit is good; turning it into a question for the person who already answered it is not.
+
+### 19.17 D85 — the regression 0012 caused, and the harness that reported it as PASS (Aug 25, 2026)
+
+`create_node` had been dead since §19.15 shipped. For every caller, admins included:
+
+```
+ERROR:  new row violates row-level security policy for table "nodes"
+CONTEXT: insert into nodes (...) values (...) returning *
+```
+
+**The fix in 0012 was right; its side effect was not.** Making `app_can_read_node` org-correct turned
+it from an expression that could answer `app_is_admin()` without touching a table into one that
+ALWAYS runs `SELECT 1 FROM nodes WHERE id = p_node AND n.org_id = ...`. `nodes_select` calls it as
+`app_can_read_node(id)` — the id of the row the policy is being applied to. For an
+`INSERT ... RETURNING`, PostgreSQL applies the SELECT policy to the NEW row, and the function is a
+separate query running under the command's own snapshot, **which by definition does not contain the
+row being inserted**. The lookup finds nothing, the policy is FALSE, the INSERT is rejected.
+
+**Only `nodes` is affected, and that is why nothing else broke.** Every other policy that delegates to
+`app_can_read_node` passes a FOREIGN key — `runs.node_id`, `assignments.node_id` — naming an
+already-committed row. `60_api_test.sql`'s whole surface stayed green.
+
+Migration 0013 puts the short-circuit back where it can be evaluated without a table read:
+
+```sql
+create policy nodes_select on nodes for select
+  using (org_id = app_current_org() and (app_is_admin() or app_can_read_node(id)));
+```
+
+`app_is_admin() or` **looks** redundant — the function ORs the same test internally — and it is the
+entire fix. Deleting it as a duplicate re-breaks `create_node` silently. Tenancy is not weakened:
+`org_id = app_current_org()` is still the first conjunct and still gates the admin branch, which is
+precisely the hole D83 closed.
+
+#### The half that matters more: the harness said PASS
+
+`70_hierarchy_test.sql` reports per case with `RAISE NOTICE 'PASS x'` / `'FAIL x'`, and wraps each
+case in `EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'FAIL ...'` — deliberately, so one failure cannot
+abort a mutation run (§9 of the P1-5a brief). **A NOTICE is not an error. psql exits 0 no matter how
+many cases failed.** `verify-db.sh` step 7 tested only the exit code.
+
+Measured the first time anyone looked: **42 PASS, 8 FAIL, and the Summary block said
+`PASS: 70_hierarchy_test.sql`.** Those eight were this regression. It shipped under a green run.
+
+Step 7 now captures each file's output and greps it for `NOTICE:  FAIL`, failing the step with the
+count. A file emitting zero PASS notices is NOT treated as suspicious — 10–60 use the
+raise-on-failure idiom and legitimately emit neither. **Mutation-proved**: with 0013 removed, the
+harness reports `FAIL: 70_hierarchy_test.sql (8 case(s) reported FAIL via RAISE NOTICE; 42 reported
+PASS)`. The instrument now catches what it hid.
+
+Twelfth logged instance of the measuring instrument being the defect — and the first where the
+instrument was reading the wrong SIGNAL rather than reading the right signal wrongly.
+
+---
+
+### 19.18 D86 — hierarchy templates: a shape per site, not one per org (Aug 25, 2026)
+
+§19.16 named the constraint. This removes it. The requirement was never in question: **hierarchy
+levels are whatever the site wants**, and an org must be able to run Site › Department › Line › Cell
+at one plant and Site › Line at another, scheduling at a different depth in each.
+
+#### Shape
+
+The idiom already in this schema is `shift_templates` / `node_shift_templates`, so this mirrors it: a
+named, org-scoped **template** owns the ordered level list.
+
+- `hierarchy_templates (id, org_id, name, unique (org_id, name), unique (org_id, id))`.
+- `hierarchy_levels` gains `template_id`; `unique (org_id, position)` becomes
+  `unique (template_id, position)`; the one-schedulable partial index moves from `(org_id)` to
+  `(template_id)`.
+- **`nodes` gets NO template column.** A node's template is its level's template, and
+  `nodes_check_level_adjacency` now requires a node's level and its parent's level to share one — so
+  a tree cannot straddle two templates, and there is no second copy of that fact to keep in sync. Two
+  identical plants SHARE a template rather than duplicating its levels; that is the point of naming
+  it.
+- `save_hierarchy_levels(p_levels, p_template_id)`. The 1-argument version is **DROPPED, not
+  overloaded**, and `p_template_id` has **no default**. Leaving the old one exposed through PostgREST
+  would let any un-updated client go on rewriting every template's positions, and "the org's only
+  template" is a guess — guessing which shape the admin meant is the failure this removes.
+- `board_window` returns only the levels of the templates present in its window, and emits
+  `template_id` per level. It was already scoped to one subtree by `p_root_path`; before D86,
+  `WHERE hl.org_id = v_org_id` was harmless because an org had one vocabulary, and with several it
+  would have interleaved two shapes into one array with two rows claiming position 1.
+- Three new RPCs: `create_hierarchy_template`, `rename_hierarchy_template`,
+  `delete_hierarchy_template`. **No new error code.** The client's closed set stays at twelve: an
+  unknown or foreign template is `invalid_argument` with `field: p_template_id`, and a template whose
+  levels still carry nodes is `level_in_use` — the same fact `save_hierarchy_levels` already reports
+  with the same `level_ids` detail key.
+- A new template is created EMPTY. Seeding it with a starter level would decide the site's shape on
+  the admin's behalf, which is the thing this whole migration exists to stop doing.
+
+**Check order is the contract.** Adjacency tests POSITION first and TEMPLATE second, and `canDropOn`
+must mirror that: a Line at position 2 of shape A dropped under a Department at position 1 of shape B
+passes the arithmetic and is caught by the template test, while the same Line dropped under a Zone at
+position 2 of shape B fails the arithmetic first.
+
+**The most consequential line in the diff** is `v_removed_ids` scoped
+`where hl.template_id = v_template_id`. Scoped by org instead — which is what the old code said —
+saving one shape deletes every other shape's levels. It is one of the twelve mutations.
+
+#### A D3 gap found while writing it
+
+`nodes.level_id` was a plain `references hierarchy_levels(id)` — **the only child FK in this schema
+that was not tenant-composite.** A node in org A could structurally reference a level in org B.
+`hierarchy_levels` had no `unique (org_id, id)` for a composite FK to point at, which is presumably
+why it was left plain; it has one now, so `foreign key (org_id, level_id)` is added. Same class of
+hole as D83, one table over.
+
+#### A trap every future migration inherits
+
+Migration 0008's grants are `GRANT ... ON ALL TABLES IN SCHEMA public` — a **one-shot** grant over the
+tables that existed then, not a standing rule. `hierarchy_templates` therefore arrived with four
+carefully-written RLS policies and **no table privilege behind them**, and every caller got
+`permission denied for table hierarchy_templates (42501)` before a policy was ever consulted. Sixteen
+cases failed that way. **Every migration that creates a table needs its own guarded GRANT block.**
+
+#### Verification
+
+`supabase/tests/90_hierarchy_template_test.sql` — **19 cases, all green; 12 mutations, 11 caught.**
+
+- **T6 is the requirement itself**: one org holding a 4-level plant and a 2-level plant, two
+  schedulable levels at two different depths, two levels at position 0.
+- **T7 is the only case guarding the template half of adjacency**, and its fixture is built so the
+  position arithmetic PASSES — otherwise it would be a duplicate of an existing level-mismatch case.
+- **T17** asserts `save_hierarchy_levels(jsonb)` is gone rather than overloaded.
+- **T18 runs as the TABLE OWNER on purpose.** Deleting `and org_id = v_org_id` from the function's own
+  template lookup was **NOT CAUGHT** by anything until T18 existed: `save_hierarchy_levels` is
+  SECURITY INVOKER, so under the `authenticated` role RLS was quietly doing the scoping. Any future
+  SECURITY DEFINER wrapper, service-role script or bulk import gets no RLS at all. Same reasoning as
+  `80_cross_org_test`'s C19.
+- **The one NOT CAUGHT, recorded rather than papered over:** scoping the `update hierarchy_levels set
+  position = ...` pass by `org_id` instead of `template_id` changes nothing observable, because the
+  wrong-template guard rejects a foreign id before that pass can run.
+
+`10_constraints_test.sql` Case 3 was **wrong, not merely differently phrased**, after this change: "a
+second schedulable level in the same org is rejected" is now the opposite of the requirement. It is
+split into Case 3 (same TEMPLATE → rejected) and Case 3b (different template → accepted). **Either
+half alone still passes if the constraint is simply dropped**, which is why a relocated constraint
+needs both.
+
+#### Two process notes from building it
+
+**A 129-line function was nearly retyped by hand to change two lines of it.** The first draft of the
+`board_window` replacement was written from memory of a partial read and silently lost six
+subqueries and the `STABLE` marker. The delivered version is extracted from migration 0009
+programmatically, has exactly two hunks applied by string replacement, and the diff was inspected;
+the migration says so in a comment, so nobody re-types it next time either.
+
+**A mutation whose anchor matches nothing must not be reported as NOT CAUGHT.** The runner's first
+pass silently scored one mutation as a hole because its anchor string had the wrong indentation.
+That is the D84 Z2 lesson again, from the other direction: the runner now asserts its anchor is
+unique and present, and reports `ANCHOR NOT UNIQUE` distinctly.
+
+#### What the client side cost, and the one thing that broke
+
+Migration 0014 changed three things the client got wrong, all fixed in the same session:
+`saveHierarchyLevels` called the dropped 1-argument RPC; `HierarchyLevel`/`LevelRow` had no
+`templateId`; and **`canDropOn` compared level POSITION only**, so with two shapes in one org it
+would have approved dropping a Line from shape A under a Department from shape B whenever the
+arithmetic lined up. It now mirrors the server's order — position, then template — and five
+committed cases guard it, of which **D2 is built so the arithmetic PASSES**. Replacing the template
+comparison with `false` breaks D2 and only D2.
+
+`LevelEditor` **fails closed** when the loaded levels span more than one template, rather than
+editing `levels[0]`'s shape: the shape picker is P1-5e's job, and silently guessing which vocabulary
+an admin is reordering is the same guess the RPC was built to reject.
+
+The acceptance run came back typecheck / lint / build clean with **347 of 348 tests passing**, and the
+single failure was the right one: `shapes.test.ts`'s `board_window` fixture had a level with no
+`template_id`, so `parseLevel` correctly rejected the whole payload. **The parser was right and the
+fixture was stale** — the fourth fixture-vs-code disagreement this project has had, and the second in
+this session. Fixed, and a case now asserts that a level with no `template_id` fails the parse, so
+the requirement has teeth instead of being enforced only by a fixture nobody would think to check.

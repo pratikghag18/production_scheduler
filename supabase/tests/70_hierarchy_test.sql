@@ -64,7 +64,7 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT array_agg(e->>'name' ORDER BY (e->>'position')::int) INTO v_names
     FROM jsonb_array_elements(v_res) e;
   IF v_names = ARRAY['Site','Line','Department','Work Cell'] THEN
@@ -89,7 +89,7 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Zone','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Cell Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Station','is_schedulable',true)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT count(*) INTO v_cell_count FROM nodes
     WHERE level_id = '20000000-0000-0000-0000-000000000003'
       AND org_id = '10000000-0000-0000-0000-000000000001';
@@ -116,7 +116,7 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true),
     jsonb_build_object('id',null,'name','Sub Cell','is_schedulable',false)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT e INTO v_new FROM jsonb_array_elements(v_res) e WHERE e->>'name' = 'Sub Cell';
   IF jsonb_array_length(v_res) = 5
      AND (v_new->>'position')::int = 4
@@ -145,7 +145,7 @@ BEGIN
       jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',true)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -185,13 +185,13 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true),
     jsonb_build_object('id',null,'name','Extra','is_schedulable',false)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   PERFORM save_hierarchy_levels(jsonb_build_array(
     jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT count(*) INTO v_count FROM hierarchy_levels WHERE org_id = '10000000-0000-0000-0000-000000000001';
   IF v_count = 4 THEN
     RAISE NOTICE 'PASS L5';
@@ -216,7 +216,7 @@ BEGIN
       jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',false)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -256,7 +256,7 @@ BEGIN
       jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',true),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -296,7 +296,7 @@ BEGIN
       jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',true),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',false)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -337,7 +337,7 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',true),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',false)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT count(*) INTO v_sched_count FROM jsonb_array_elements(v_res) e WHERE (e->>'is_schedulable')::boolean;
   SELECT (e->>'is_schedulable')::boolean INTO v_line_sched FROM jsonb_array_elements(v_res) e WHERE e->>'id' = '20000000-0000-0000-0000-000000000002';
   IF v_sched_count = 1 AND v_line_sched THEN
@@ -363,7 +363,7 @@ BEGIN
       jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -404,7 +404,7 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT array_agg(position ORDER BY position) INTO v_positions FROM hierarchy_levels WHERE org_id = '10000000-0000-0000-0000-000000000001';
   v_n := array_length(v_positions,1);
   SELECT array_agg(g) INTO v_expected FROM generate_series(0, v_n-1) g;
@@ -418,7 +418,7 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Zone','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Cell Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Station','is_schedulable',true)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT array_agg(position ORDER BY position) INTO v_positions FROM hierarchy_levels WHERE org_id = '10000000-0000-0000-0000-000000000001';
   v_n := array_length(v_positions,1);
   SELECT array_agg(g) INTO v_expected FROM generate_series(0, v_n-1) g;
@@ -433,7 +433,7 @@ BEGIN
     jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Cell Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Station','is_schedulable',true),
     jsonb_build_object('id',null,'name','Sub Station','is_schedulable',false)
-  ));
+  ), '21000000-0000-0000-0000-000000000001');
   SELECT array_agg(position ORDER BY position) INTO v_positions FROM hierarchy_levels WHERE org_id = '10000000-0000-0000-0000-000000000001';
   v_n := array_length(v_positions,1);
   SELECT array_agg(g) INTO v_expected FROM generate_series(0, v_n-1) g;
@@ -459,7 +459,7 @@ DO $$
 DECLARE v_caught boolean := false; v_detail jsonb; v_detail_raw text; v_sqlstate text;
 BEGIN
   BEGIN
-    PERFORM save_hierarchy_levels('[]'::jsonb);
+    PERFORM save_hierarchy_levels('[]'::jsonb, '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -496,7 +496,7 @@ BEGIN
   BEGIN
     PERFORM save_hierarchy_levels(jsonb_build_array(
       jsonb_build_object('id',null,'name','   ','is_schedulable',true)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -531,7 +531,7 @@ DO $$
 DECLARE v_caught boolean := false; v_detail jsonb; v_detail_raw text; v_sqlstate text;
 BEGIN
   BEGIN
-    PERFORM save_hierarchy_levels('{"a":1}'::jsonb);
+    PERFORM save_hierarchy_levels('{"a":1}'::jsonb, '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -581,7 +581,7 @@ BEGIN
       jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',true),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',false)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -1324,7 +1324,7 @@ DO $$
 DECLARE v_caught boolean := false; v_detail jsonb; v_detail_raw text; v_sqlstate text;
 BEGIN
   BEGIN
-    PERFORM save_hierarchy_levels('[{"id":"nope","name":"S","is_schedulable":true}]'::jsonb);
+    PERFORM save_hierarchy_levels('[{"id":"nope","name":"S","is_schedulable":true}]'::jsonb, '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;
@@ -1478,7 +1478,7 @@ BEGIN
       jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name',chr(9),'is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
       jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
-    ));
+    ), '21000000-0000-0000-0000-000000000001');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
     v_caught := true;

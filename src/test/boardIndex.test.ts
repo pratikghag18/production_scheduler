@@ -37,10 +37,10 @@ const t210 = {
 
 function makeFixture(): BoardWindow {
   const levels = [
-    { id: "lvl-plant", position: 0, name: "Plant", isSchedulable: false },
-    { id: "lvl-dept", position: 1, name: "Department", isSchedulable: false },
-    { id: "lvl-line", position: 2, name: "Line", isSchedulable: false },
-    { id: "lvl-cell", position: 3, name: "Cell", isSchedulable: true },
+    { id: "lvl-plant", templateId: "tpl-a", position: 0, name: "Plant", isSchedulable: false },
+    { id: "lvl-dept", templateId: "tpl-a", position: 1, name: "Department", isSchedulable: false },
+    { id: "lvl-line", templateId: "tpl-a", position: 2, name: "Line", isSchedulable: false },
+    { id: "lvl-cell", templateId: "tpl-a", position: 3, name: "Cell", isSchedulable: true },
   ];
 
   const nodes = [

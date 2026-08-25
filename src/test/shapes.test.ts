@@ -55,7 +55,10 @@ const boardWindowJson: Json = {
     name: "Northwind Manufacturing",
     settings: { capacity_cap: 1.0 },
   },
-  levels: [{ id: "l1", position: 0, name: "Site", is_schedulable: false }],
+  // D86 (migration 0014): board_window emits `template_id` on every level, and
+  // `parseLevel` requires it. A payload without one is now correctly rejected —
+  // this fixture failed for exactly that reason on the first run after 0014.
+  levels: [{ id: "l1", template_id: "tpl-a", position: 0, name: "Site", is_schedulable: false }],
   nodes: [
     {
       id: "30000000-0000-0000-0000-000000000001",
@@ -123,6 +126,23 @@ describe("parseBoardWindow", () => {
     expect(parsed?.operators[0]?.skillIds).toEqual(["40000000-0000-0000-0000-000000000001"]);
     expect(parsed?.shiftTemplates[0]?.shifts[0]?.breaks[0]?.startMin).toBe(480);
     expect(parsed?.nodeShiftMap[0]?.templateId).toBe("70000000-0000-0000-0000-000000000001");
+    expect(parsed?.levels[0]?.templateId).toBe("tpl-a");
+  });
+
+  /**
+   * D86. `template_id` on a level is not decoration: with two shapes in one
+   * org it is the only thing that says which vocabulary a level belongs to,
+   * and `canDropOn` refuses a cross-template parent on the strength of it.
+   * A payload without it must fail the parse rather than arrive with the
+   * field quietly `undefined`.
+   *
+   * This is a real regression guard, not a hypothetical: the fixture above
+   * lacked `template_id` on the first run after migration 0014 and this suite
+   * caught it — the parser was right and the fixture was stale.
+   */
+  it("rejects a level with no template_id (D86)", () => {
+    const levels = [{ id: "l1", position: 0, name: "Site", is_schedulable: false }];
+    expect(parseBoardWindow({ ...boardWindowJson, levels } as Json)).toBeNull();
   });
 
   it("rejects a payload missing a required top-level key", () => {
