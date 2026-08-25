@@ -9,38 +9,38 @@
 
 .body label {
   display: block;
-  font-size: calc(11px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--chrome-scale, 1));
   color: var(--ink-2);
-  margin: 7px 0 2px;
+  margin: calc(7px * var(--chrome-scale, 1)) 0 calc(2px * var(--chrome-scale, 1));
 }
 
 .body select,
 .body input {
   width: 100%;
   font: inherit;
-  padding: 4px 6px;
+  padding: calc(4px * var(--chrome-scale, 1)) calc(6px * var(--chrome-scale, 1));
   border: 1px solid var(--axis);
   border-radius: 6px;
   background: var(--surface);
 }
 
 .time {
-  font-size: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--chrome-scale, 1));
   color: var(--ink-2);
-  margin-top: 6px;
+  margin-top: calc(6px * var(--chrome-scale, 1));
 }
 
 .row {
   display: flex;
-  gap: 8px;
-  margin-top: 11px;
+  gap: calc(8px * var(--chrome-scale, 1));
+  margin-top: calc(11px * var(--chrome-scale, 1));
 }
 
 .row button {
   flex: 1;
   font: inherit;
-  font-size: calc(12.5px * var(--ui-scale, 1));
-  padding: 5px 0;
+  font-size: calc(12.5px * var(--chrome-scale, 1));
+  padding: calc(5px * var(--chrome-scale, 1)) 0;
   border-radius: 7px;
   cursor: pointer;
   border: 1px solid var(--axis);
@@ -67,8 +67,8 @@
 
 .row2 {
   display: flex;
-  gap: 6px;
-  margin-top: 2px;
+  gap: calc(6px * var(--chrome-scale, 1));
+  margin-top: calc(2px * var(--chrome-scale, 1));
 }
 
 .row2 input {

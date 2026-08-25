@@ -1184,3 +1184,114 @@ harness is code, and it is the code no one tests.
 only — no tarball, no `SendUserFile`, no base64 fallback (that fallback moved ~94KB of source as
 ~125KB of base64, each chunk appearing twice in context, plausibly a third of the run). The suite
 must be table-driven: ~200 lines for 74 assertions here, against 1,453 lines for 43 cases in P1-5a.
+
+### 19.10 D77 — portaled floating UI is chrome too, and the popover scaling pass was `font-size`-only (Aug 25, 2026)
+
+Raised by Pratik: "I thought the scaling for pop windows was fixed, what's wrong?" Three separate
+things were tangled together, and only one of them was a regression.
+
+**1. Nothing broke. The popovers were scaling — by about 1.09.** Under Fit, `--ui-scale` *is* the fit
+scale, and a 7-cell board on that display needs only ~1.09 to fill the height. The popover was
+faithfully scaled by a number barely above 1, which reads as unscaled.
+
+**2. D77: a portaled, fixed-position panel is chrome, and uses `--chrome-scale`.** §19.7's D76 said
+chrome uses `--chrome-scale` but scoped it to *"elements that consume vertical space"* — which a
+fixed-position popover does not, so popovers fell outside a rule that should always have covered
+them. The argument is §18.15's, unchanged: **a floating panel is chrome around the fitted content,
+not part of it.** Tying it to the fit scale produces an incoherence — two supervisors on identical
+monitors, one seeing 7 cells (fit 1.09) and one seeing 2 (fit clamped to 2.5), get wildly different
+popovers for a reason that has nothing to do with popovers. All six popovers and the toast stack now
+use `--chrome-scale`.
+
+**The drag ghost deliberately stays on `--ui-scale`** — it is a preview of a block, i.e. fitted
+content that happens to be rendered above the page. The test is not "does it float" but "is it a
+picture of something inside the fitted board".
+
+**3. The real miss: the popover scaling pass only ever touched `font-size`.** The shell's `width` and
+`padding` scaled and every font scaled, but every child popover's `padding`, `gap`, `margin`, single-
+side offsets, and `SplitCoveragePopover`'s hardcoded `width: 60px` did not. 22 scale references moved
+and **48 box dimensions** now scale that never did.
+
+This is §18.14's own lesson landing in the place §18.14 declared fixed. Its audit is quoted there:
+*"Every `*.module.css` was checked mechanically for a bare `font-size: Npx`."* It asked about
+font-size and answered exactly that. **The audit question for a scale token is not "which files
+declare a font size" but "which declarations carry a length".**
+
+Verified in headless Chromium against the real repo CSS: at `--chrome-scale` 1.0 / 1.1 / 1.2 / 1.35
+the popover is 286 / 314 / 343 / 385px wide with **no overflow at any scale** and a height:width
+ratio holding to within 4.6% across the whole range (the residual is line-height rounding, not a
+defect). Before the change the box did not scale at all.
+
+**CORRECTION (§19.11): those widths are what the STYLESHEET does, not what the app renders.** The
+repro was built from the CSS files alone; `BoardPopover.tsx` adds an inline `width`, which overrides
+it. The padding and font numbers above hold; the width ones do not.
+
+**What was NOT fixed, deliberately.** The reported symptom included "Direct assignment" wrapping to
+two lines in the segmented control. **That does not reproduce here** — measured with `Range`
+rects (see below), the label sits on one line at every scale from 1.0 to 2.5, with the button 130px
+wide at scale 1. It wraps on Windows, so the cause is font metrics, not scale. Blind-fixing an
+unreproducible symptom is §18.9's D48 trap — the brief asserted a broken height chain, the chain was
+fine, and the agent was right to refuse. Waiting on a measurement from the affected machine.
+
+**A measurement bug worth recording, because it nearly sent this the wrong way.** The first pass
+counted lines as `height / line-height`, which counts **padding** as lines — it reported a one-line
+button as "1.7 lines" and would have justified a fix to something that was never broken. The correct
+measure is `range.selectNodeContents(el); range.getClientRects().length`. **Third time today that a
+shortcut in the measurement, not in the code, produced the wrong answer** — after P1-5a's harness
+mislabelling every non-`api_raise` failure as `22P02`, and P1-5b's mutation runner scoring a crash as
+"not caught". Instruments need the same scepticism as the thing they measure.
+
+### 19.11 The popover width has never scaled — an inline style has been overriding the CSS all along (Aug 25, 2026)
+
+Surfaced only because Pratik pasted a measurement that did not match a prediction: `--chrome-scale`
+≈ 1.243 and a font of 13.67px (= 11 × 1.243, so the token *is* reaching the subtree), but a popover
+**272px** wide where `260 × 1.243 = 323px` was expected.
+
+```tsx
+// BoardPopover.tsx
+width = 272,                    // default prop
+style={{ left, top, width }}    // inline — outranks any stylesheet rule
+```
+
+**`.pop`'s `width` declaration has been dead since it was written.** The popover is a hard 272px at
+every scale.
+
+**This falsifies a claim in §18.14** — *"The popover's own `width: 260px` and `padding: 12px` scale
+too"* — which was never true. The padding does scale (nothing sets it inline); the width never has.
+The note was written in the same session as the change it describes and nobody checked it against a
+render.
+
+**And it falsifies half of §19.10's verification, which is the more useful failure.** That repro was
+built from the repo's CSS files and measured 286 / 314 / 343 / 385px across the scale range. Those
+numbers are correct *for the stylesheet*. They are not what the app renders, because the repro had no
+way to know about an inline style living in a `.tsx` file it never read. **A repro assembled from the
+CSS verifies the CSS, not the application** — it is blind to inline styles, to anything a component
+sets imperatively, and to any rule the repro's own markup fails to match. The check that would have
+caught it is the one that did: compare the repro's number against the running app's.
+
+That makes four instances in one day of the *instrument* being wrong rather than the code — P1-5a's
+harness mislabelling every non-`api_raise` failure as `22P02`, P1-5b's mutation runner scoring a
+crash as "not caught", the line-count metric that counted padding as lines, and now a CSS repro that
+measured a declaration the app overrides.
+
+**Deferred to P1-5c, deliberately.** The inline width is not gratuitous — the positioning code needs
+the number *before* layout to keep the popover on screen:
+
+```js
+Math.min(anchor.x, window.innerWidth - width - 10)
+```
+
+Simply deleting it lets CSS win the width and leaves the clamp computing against 272 while the box is
+really ~338, so the popover would overhang the right edge by ~66px at this scale. The fix needs **one
+source of truth for the scaled width, feeding both the inline style and the edge clamp**, and this
+codebase already has the pattern: `BoardGrid`'s `railProbe` (P1-4c D47) — a zero-height element sized
+to a token, whose computed width JS reads back through the used-value chain. Reading
+`getComputedStyle(root).getPropertyValue('--chrome-scale')` is *not* an option: for an unregistered
+custom property it returns the raw `clamp(...)` token stream, not a number, which is exactly what the
+diagnostic snippet showed.
+
+**P1-5c must therefore specify:** the popover's scaled width computed once via the probe pattern,
+used for both `style.width` and the edge clamp; an acceptance case asserting the rendered width
+equals `272 × chromeScale` at more than one scale; and a case asserting the popover stays inside the
+viewport when anchored near the right edge at maximum scale. **Assert against the rendered app, not
+against a CSS-only fixture.**

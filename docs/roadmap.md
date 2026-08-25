@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-25 (**P1-5a built + verified; P1-5b written.** Migration 0010 closes six measured schema holes incl. a subtree-grant leak. Also fixed today: a fit-to-height oscillation caused by the toolbar wrapping (§19.6), and `useSession` blanking the board on every hourly token refresh (§19.8). **P1-5 re-split into four**: 5a database (done), **5b client layer (brief written)**, 5c admin screens, 5d CSV import. See design plan §19.5–§19.9.) · **Current phase:** 1 — Core product
+**Last updated:** 2026-08-25 (**P1-5a built + verified; P1-5b written; three UI bugs fixed; FULL ACCEPTANCE GREEN.** `typecheck`/`lint`/`build` clean, **135 unit tests pass** (was 99), formatting applied. Migration 0010 closes six measured schema holes incl. a subtree-grant leak. Fixed today: the fit-to-height oscillation (toolbar wrap, §19.6), `useSession` blanking the board every token refresh (§19.8), and popovers/toasts moved to `--chrome-scale` with 48 box dimensions that never scaled (D77, §19.10). **Found, deferred to P1-5c:** the popover's CSS width has never applied — an inline style overrides it (§19.11). **P1-5 is four briefs**: 5a database ✓, 5b client layer (written), 5c admin screens, 5d CSV import.) · **Current phase:** 1 — Core product
 
 ---
 
@@ -115,18 +115,26 @@ That is all it needs. Project memory carries every decision, the workflow, the e
 | Database API contract | `docs/api.md` | v1 (P1-3a, Aug 22) — DB half only; HTTP-status mapping unverified (no Docker/PostgREST here); §3.5 (five hierarchy-admin RPCs) and six new error codes added (P1-5a, Aug 25) |
 | TypeScript API client guide | `docs/api-client.md` | v1 (P1-3b, Aug 22) — code delivered; no npm in delivery container, acceptance pending user run |
 
-### Build output after `manualChunks` (Aug 24, first real measurement)
+### Build output (Aug 25, after P1-4b–e + today's fixes)
 
 | chunk | raw | gzipped |
 |---|---|---|
-| app (`index`) | 40.15 kB | 14.05 kB |
-| query | 47.32 kB | 14.75 kB |
-| router | 94.32 kB | 31.81 kB |
-| react | 180.98 kB | 56.86 kB |
-| supabase | 219.90 kB | 57.42 kB |
-| **total JS** | **582.67 kB** | **174.89 kB** |
+| app (`index`) | 97.45 kB | 29.20 kB |
+| query | 50.11 kB | 15.31 kB |
+| router | 94.33 kB | 31.70 kB |
+| react | 180.98 kB | 56.52 kB |
+| supabase | 219.90 kB | 57.13 kB |
+| **total JS** | **642.78 kB** | **189.85 kB** |
+| CSS | 25.72 kB | 4.51 kB |
 
-Read this honestly: the pre-split baseline was 560 kB / 165 kB in one chunk, so **first-load bytes went slightly UP**, not down. `manualChunks` buys *caching granularity* — vendor chunks keep their hashes across deploys, so a board-code change re-downloads 40 kB instead of 560 kB — it does not defer anything, because every chunk is still imported by the entry. Actual first-load reduction needs route-level `React.lazy`, which belongs in a later brief. The genuinely good number: the whole board feature added only ~22 kB raw / ~6 kB gzipped to the app chunk.
+The app chunk went 40 kB → 97 kB and CSS 11.6 kB → 25.7 kB since the Aug 24 measurement. That is
+**P1-4b through P1-4e** — interactions, six popovers, split coverage, drag — not today's fixes, which
+were CSS-token substitutions with no new rules. Gzipped JS is 190 kB against 175 kB on Aug 24.
+
+**The honest read is unchanged from Aug 24:** `manualChunks` buys caching granularity, not deferral —
+every chunk is still imported by the entry, so this is all first-load. **Route-level `React.lazy` is
+the actual fix** and is still unwritten. The `/admin` route is about to grow substantially in P1-5c,
+which makes it the natural first candidate to split.
 
 ## Phase 1 brief queue
 
@@ -147,6 +155,8 @@ Briefs are written by the design session (Opus) and executed by fresh Sonnet age
 | P1-5a | `p1-5a-hierarchy-db-brief.md` | Migration 0010: a `(org_id, path)` unique index, cycle and level-adjacency triggers, and `save_hierarchy_levels` / `create_node` / `rename_node` / `move_node` / `delete_node`; six new error codes; `70_hierarchy_test.sql`; the `00_harness.sql` GoTrue fix | **built + validated + mutation-tested + design-session-reviewed** (Sonnet, Aug 25) — `scripts/verify-db.sh` was broken at step 6 since Aug 22 (P1-3b's dev-login seed block vs. an un-updated harness); fixed first, confirmed green, *then* migration 0010 built. All 12 §10 mutations confirmed to break their named case (M7 additionally prevents `seed.sql` from loading under a from-scratch rebuild, a stronger failure than the brief's own live-patch framing predicts). **Design-session review (Aug 25) then found three real defects no suite caught**: `delete_node(id, NULL)` silently hard-deleted (a bug in the brief's own spec: `p_mode NOT IN (...)` is `NULL`, not `true`, when `p_mode IS NULL`, so the guard didn't fire and control fell through to the destructive branch); `create_node(parent, name, NULL)` raised a raw `23502` instead of coalescing `p_sort_order` to `0`; `save_hierarchy_levels` raised a raw `22P02` on a malformed level `id` instead of `invalid_argument`. All three fixed; the review's own N15 reading also caught a test-case misinterpretation (moved a root node to test sort_order preservation, when the intent was an ordinary non-root move) — fixed to match. Now 43 acceptance cases (36 original + D1/D2/D3 regression cases for the three defects + U1/U4/U5/U7 closing coverage gaps the review's own unprescribed mutations found), all green. Closes six measured schema holes incl. a subtree-grant leak (§19.1) | **Design-session verification (§19.5) went further than the brief's own table:** an independent 36-case probe (green cold), **six UNPRESCRIBED mutations — none caught by either suite** (four real coverage gaps, two correctly redundant), and a NULL-argument sweep across all five RPCs that found **three defects neither suite caught**: `delete_node(id, NULL)` silently HARD-DELETED, `create_node` leaked a raw `23502`, `save_hierarchy_levels` a raw `22P02`. **Two of the three were bugs in the brief and in the design session's own reference implementation, not deviations by the agent.** Round 2 fixed all three and added 7 cases (43 total), each confirmed to have teeth by reverting the fix it guards. Not verified by me: 7 of the 12 prescribed mutations on round 2, and cross-org isolation (the seed has only one org).
 
 | P1-5b | `p1-5b-hierarchy-client-brief.md` | Pure `src/features/admin/lib/hierarchy.ts` (`slugify` parity with the SQL, path-based tree building, `canDropOn` mirroring `move_node`'s check order, `validateLevelDraft`) plus five typed RPC wrappers, six error codes and React Query hooks | **written, not built.** All 74 Part-A assertions and all 12 mutations EXECUTED against a reference implementation first — which found **three fixtures blind to their mutation** (parentId vs path, sortOrder vs name, `line_10` vs `line_1`) and **a harness that scored a crash as "not caught"**. Delivery switched to `device_bash` heredocs: no tarball, no `SendUserFile`, no base64 fallback |
+
+| P1-5c | *(not yet written)* | The admin screens: hierarchy level editor + node tree editor, built on P1-5b's pure lib and typed wrappers | **CARRIES A KNOWN DEFECT TO FIX (§19.11): `BoardPopover`'s inline `width` overrides its CSS, so the popover has never scaled.** Needs one source of truth for the scaled width feeding BOTH `style.width` and the `window.innerWidth - width - 10` edge clamp — use the `railProbe` pattern (D47), not `getPropertyValue('--chrome-scale')` (returns the raw `clamp()` token stream, not a number). Acceptance must assert the RENDERED width at two scales and that the popover stays on screen when anchored at the right edge |
 
 Briefs build in the cloud container and deliver to this repo via a tarball through `_delivery/` (gitignored); no agent commits or pushes — review and commit yourself.
 

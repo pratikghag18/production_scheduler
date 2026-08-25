@@ -6,7 +6,7 @@
 .body input {
   width: 100%;
   font: inherit;
-  padding: 4px 6px;
+  padding: calc(4px * var(--chrome-scale, 1)) calc(6px * var(--chrome-scale, 1));
   border: 1px solid var(--axis);
   border-radius: 6px;
   background: var(--surface);
@@ -18,15 +18,15 @@
    regardless of stylesheet source order, not by a tie the cascade happens
    to break the right way (§10.1). */
 .body .splitRow input {
-  width: 60px;
+  width: calc(60px * var(--chrome-scale, 1));
   flex: none;
 }
 
 .splitRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 0;
+  gap: calc(8px * var(--chrome-scale, 1));
+  padding: calc(5px * var(--chrome-scale, 1)) 0;
   border-bottom: 1px solid var(--grid);
 }
 
@@ -40,21 +40,21 @@
 .splitRow.inc {
   background: color-mix(in srgb, var(--ink) 5%, transparent);
   border-radius: 6px;
-  padding: 5px 6px;
+  padding: calc(5px * var(--chrome-scale, 1)) calc(6px * var(--chrome-scale, 1));
   margin: 2px -6px;
   border-bottom: none;
 }
 
 .splitLbl {
   flex: 1;
-  font-size: calc(11.5px * var(--ui-scale, 1));
+  font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--ink-2);
 }
 
 .splitFoot {
-  font-size: calc(12.5px * var(--ui-scale, 1));
+  font-size: calc(12.5px * var(--chrome-scale, 1));
   font-weight: 700;
-  margin-top: 8px;
+  margin-top: calc(8px * var(--chrome-scale, 1));
   color: var(--ink);
 }
 
@@ -64,15 +64,15 @@
 
 .row {
   display: flex;
-  gap: 8px;
-  margin-top: 11px;
+  gap: calc(8px * var(--chrome-scale, 1));
+  margin-top: calc(11px * var(--chrome-scale, 1));
 }
 
 .row button {
   flex: 1;
   font: inherit;
-  font-size: calc(12.5px * var(--ui-scale, 1));
-  padding: 5px 0;
+  font-size: calc(12.5px * var(--chrome-scale, 1));
+  padding: calc(5px * var(--chrome-scale, 1)) 0;
   border-radius: 7px;
   cursor: pointer;
   border: 1px solid var(--axis);
