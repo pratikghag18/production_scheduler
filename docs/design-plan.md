@@ -2217,3 +2217,139 @@ day is exactly 1440 minutes, so board geometry has no DST discontinuity" **stops
 under D88a.** Two days a year a local day is 1380 or 1500 minutes, and the shift-band mapping
 stops being `dayStart + start_min`. That is the actual cost of D88 and it lands in
 `src/features/board/lib/time.ts` and `geometry.ts`, not in the schema.
+
+---
+
+### 19.22 P1-5f built — and the review found two blind tests and one unguarded clause (Aug 25, 2026)
+
+Agent cost **107k**, the cheapest P1-5 build yet (P1-5d was 264k, P1-5c 370k) — delivery-by-operation
+(D82) plus a brief whose tables were measurements rather than predictions. The build is good: 15
+migrations apply, **101 SQL cases green**, 42 TS assertions green, every prescribed mutation caught.
+The design-session review found three things anyway, and two of them were tests that could not fail.
+
+#### 1. `R2`/`R3` asserted against the array under test — measured blind
+
+`shapePicker.test.ts` wrote its expectations as `got === withoutB[0]?.id` and
+`got === SUMMARIES[0]?.id`, deriving the expected value from the very array `buildShapeSummaries`
+produces. **Measured: both PASSED under mutation N1**, which deletes a whole summary from that array
+— `SUMMARIES[0]` simply became a different template and the assertion moved with it. The agent
+reported this as a *table correction* ("the brief predicted R2/R3, they don't break"), which is the
+wrong diagnosis: the brief's prediction was right and its own reference cases did break. Fixed to a
+fixed literal (`TPL_NEW`), after which N1 breaks R2 and R3 exactly as predicted, and N6 — the
+mutation those cases actually exist for — still breaks R2/R4.
+
+**This is [[verification-standard]] rule 3 in its purest form**, and worth stating as a general tell:
+*when a mutation the design session measured as caught comes back "not caught", suspect the test
+before the table.*
+
+#### 2. Three unprescribed mutations caught by nothing — one of them a real hole
+
+The review ran five mutations the brief never named. Three survived both suites:
+
+- deleting the org scope from the root branch's **template count**,
+- deleting it from the **sole-template pick**,
+- widening the root level lookup from `position = 0` to `position >= 0`.
+
+The first two are the RLS-masking of §19.18's T18 and this brief's T22, one clause further in: under
+`authenticated`, the `hierarchy_templates` SELECT policy supplies the org scope, so a SECURITY
+INVOKER function's own clause is untestable. **T32 was added, running under `RESET ROLE`** — org 1
+and org 2 hold one template each, so an unscoped count sees 2 and wrongly raises `ambiguous`. It
+catches the first.
+
+**The second could not be caught by any functional test, and the fix was to delete the clause, not
+add a case.** The root branch ran two queries — a scoped `count(*)`, then a separate scoped
+`select id into` — so there were two org scopes to keep in sync, and removing the one on the *pick*
+makes `select ... into` arbitrary across every org's templates. That is the same unordered-single-row
+hazard D87 is about, reintroduced one line over. Catching it deterministically would require
+controlling which row an unordered `SELECT ... INTO` returns, which is precisely the thing that
+cannot be controlled. Folded into one statement:
+
+```sql
+select count(*), (array_agg(id order by id))[1]
+  into v_template_count, v_resolved_template_id
+  from hierarchy_templates where org_id = v_org_id;
+```
+
+One scope instead of two, and a deterministic pick where a bare `select id into` was not. **The
+general form: when a mutation cannot be caught by a test, the answer is often to remove the thing
+that needed guarding.** [[verification-standard]] rule 7 — what else is conditioned on the same fact
+— pointed at a *second copy of the fact*, not a second guard.
+
+The third (`position >= 0`) is guarded by T21's assertion on the exact expected `level_id`, but only
+non-deterministically: whether the mutation is caught depends on which row the widened query returns.
+Recorded as a known soft spot rather than papered over.
+
+#### 3. `min(uuid)` does not exist, and reasoning said it did
+
+The first draft of the fold above used `min(id)`. PostgreSQL 16 has **no min/max aggregate for
+`uuid`** — `42883` at runtime, not at `create function` time, because plpgsql bodies are not
+resolved when defined. The harness caught it immediately (three cases red across two files). `uuid`
+*does* have a btree ordering, so `order by` inside `array_agg` works. Filed in
+[[postgres-supabase-gotchas]].
+
+Worth noting what this cost and what it did not: nothing shipped, because the change was executed
+before it was written down. This is the same rule that caught the brief's own two tables.
+
+#### 4. What the review confirmed rather than found
+
+An unprescribed probe of the new parameter (rule 4, malformed-argument sweep) came back clean on all
+seven: an explicit `NULL` `p_template_id` behaves exactly like omitting it on both branches; D2's
+`coalesce(p_sort_order, 0)` survived the function rewrite; a *level* id passed as a template id
+returns `invalid_argument`/`not found` rather than leaking; a supervisor gets `not_permitted` before
+any template lookup runs, so no existence is disclosed; org 2's admin can build a root in org 2's own
+template; and org 2's admin naming org 1's template gets `not found`, not a distinguishable error.
+
+#### 4b. The acceptance run found what neither the agent nor the review did: the suite was not in the framework
+
+`npm run test` failed. Not on an assertion — on collection:
+
+```
+FAIL  src/test/shapePicker.test.ts [ src/test/shapePicker.test.ts ]
+Error: No test suite found in file .../src/test/shapePicker.test.ts
+Test Files  1 failed | 15 passed (16)
+     Tests  349 passed (349)
+```
+
+The file was delivered as a **standalone `node --experimental-strip-types` script** with its own
+`check()` runner and `console.log` reporting. It runs, and the acceptance log even contains all 42 of
+its assertions printed as PASS — while vitest, which collects every `src/test/*.test.ts`, finds no
+`describe`/`it` and fails the run. **The suite was simultaneously passing and failing, depending on
+which runner you asked.**
+
+The tell was in the numbers and nobody read it: **349 tests before P1-5f, 349 after.** Forty-two new
+assertions contributed exactly zero to the count that CI reports.
+
+This is **[[brief-writing-rules]] rule 11 (D78) in a second form.** D78's lesson was that a suite run
+once in a scratch container and never committed leaves a module unguarded while CI reports green.
+P1-5f's brief applied that correctly — §3's file table names `src/test/shapePicker.test.ts`, §12 item
+7 requires it to exist in the repo — and the file does exist, in the right place, containing the
+right assertions. **Naming the path is necessary and not sufficient: the file must also be in the
+framework the repo's own `npm run test` actually runs.** The rule now says both.
+
+Converted to a vitest suite by keeping every `check(...)` call verbatim and changing only what
+`check` does — it registers an `it()` whose body returns `true` or a detail string, asserted with
+`expect(outcome).toBe(true)`, so a failure still names what was seen and a throw still fails BY NAME
+rather than aborting the file. Verified in-container against a 30-line vitest shim: 42 registered, 42
+passing, and mutation N1 still breaks the same eleven cases including the repaired R2/R3.
+
+The standalone harness is not a committed artifact and does not need to be: `shapePicker.ts` is still
+pure and `import type`-only, so any future agent can drive it from a throwaway strip-types runner for
+mutation work. That is the same split the repo already uses for `scaleAudit.ts` / `scaleAudit.test.ts`
+— logic in a plain `.ts`, vitest wrapper in the `.test.ts`.
+
+**Worth being precise about what this cost:** nothing shipped, and the acceptance run is exactly the
+gate that is supposed to catch a container-unverifiable defect. It did. But the design-session review
+had already run this file's 42 assertions and its whole mutation table and called it verified —
+**against the wrong runner.** Nineteenth logged instance of the instrument being the defect, and the
+first where the instrument was *the design session's own choice of how to execute a committed file*.
+
+#### 5. A brief error worth recording, because it will recur
+
+§9.1 predicted M1's collateral as T27/T28 and M2's as T27. Measured: M1 breaks T21/T25/T26, M2 breaks
+T26 alone. **The brief was wrong, and not because the mutation table was reasoned — it was executed.**
+It was executed against the design session's *own reference cases*, and the agent wrote a valid T27
+that satisfies the brief's prose ("child + `p_template_id` equal to the parent's → accepted") using
+the seeded single-shape tree rather than building a second shape. Collateral is a property of the
+cases as written, not of the requirement. See [[brief-writing-rules]] rule 14.
+
+---

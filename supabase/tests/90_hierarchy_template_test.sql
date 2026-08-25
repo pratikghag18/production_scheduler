@@ -663,4 +663,435 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_T17;
 
+-- ============================================================================
+-- create_node learns which hierarchy shape (migration 0015 / D87 / brief
+-- P1-5f §8.1): T20-T28, T30, T31.
+--
+-- Same conventions as T1-T18 above, without exception: one SAVEPOINT + DO
+-- block each, an outer EXCEPTION WHEN OTHERS turning any unexpected error
+-- into RAISE NOTICE 'FAIL ...', ROLLBACK TO SAVEPOINT at the end, assertions
+-- on the machine `error` parsed from DETAIL, never on SQLSTATE or message
+-- text.
+--
+-- "rows at position N" below counts hierarchy_levels rows, exactly like T6's
+-- own v_pos0 (a level exists once per template regardless of how many nodes
+-- sit on it) -- not nodes. Org 1 already has one seeded root ('Plant 1') on
+-- Standard Plant's position-0 level, so a NODE count at position 0 would
+-- read 3, not 2, once a root is added to each of two shapes; a LEVEL count
+-- reads 2 regardless, and is the number that answers "does this org now
+-- hold two shapes, each with a level at this position" -- the actual
+-- precondition these two cases are checking.
+-- ============================================================================
+
+\echo 'T20: root, two shapes, p_template_id omitted -> invalid_argument (ambiguous)'
+SAVEPOINT sp_T20;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_caught boolean := false; v_sqlstate text; v_detail_raw text; v_detail jsonb;
+BEGIN
+  -- Second shape for the org -- this is the defect's own reproduction
+  -- (brief §4.2): before 0015, this exact call SUCCEEDED silently, landing
+  -- in an arbitrary shape. T24 below is the one case that must still pass
+  -- unmutated with the org back down to one shape.
+  PERFORM create_hierarchy_template('Compact Plant');
+  BEGIN
+    PERFORM create_node(NULL, 'Plant 9');
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'invalid_argument'
+     AND v_detail->>'field' = 'p_template_id'
+     AND v_detail->>'reason' = 'ambiguous'
+     AND (v_detail->>'template_count')::int = 2 THEN
+    RAISE NOTICE 'PASS T20';
+  ELSE
+    RAISE NOTICE 'FAIL T20: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T20: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T20;
+
+\echo 'T21: root, two shapes, one root created in EACH, each naming its own template'
+SAVEPOINT sp_T21;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_compact_tpl  uuid;
+  v_plant_a      jsonb;
+  v_plant_b      jsonb;
+  v_compact_site uuid;
+  v_pos0_levels  int;
+BEGIN
+  v_compact_tpl := (create_hierarchy_template('Compact Plant')->>'id')::uuid;
+  PERFORM save_hierarchy_levels(jsonb_build_array(
+    jsonb_build_object('id', NULL, 'name', 'Site', 'is_schedulable', false),
+    jsonb_build_object('id', NULL, 'name', 'Line', 'is_schedulable', true)
+  ), v_compact_tpl);
+  SELECT id INTO v_compact_site FROM hierarchy_levels
+    WHERE template_id = v_compact_tpl AND position = 0;
+
+  -- BOTH roots, BOTH naming their own template. A one-sided assertion (only
+  -- v_plant_b) is order-dependent: an org-scoped lookup (M1) returns one
+  -- arbitrary row for both calls, so whether it happens to be right for the
+  -- side actually checked depends on physical heap order. Asserting both
+  -- means whichever row an org-scoped lookup picks, at least one of the two
+  -- checks fails, deterministically, on any heap state.
+  v_plant_a := create_node(NULL, 'Plant A', 0, '21000000-0000-0000-0000-000000000001');
+  v_plant_b := create_node(NULL, 'Plant B', 0, v_compact_tpl);
+
+  SELECT count(*) INTO v_pos0_levels FROM hierarchy_levels
+    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND position = 0;
+
+  IF v_plant_a->>'path' = 'plant_a'
+     AND v_plant_a->>'parent_id' IS NULL
+     AND v_plant_a->>'level_id' = '20000000-0000-0000-0000-000000000000'
+     AND v_plant_b->>'path' = 'plant_b'
+     AND v_plant_b->>'parent_id' IS NULL
+     AND v_plant_b->>'level_id' = v_compact_site::text
+     AND v_pos0_levels = 2
+  THEN
+    RAISE NOTICE 'PASS T21';
+  ELSE
+    RAISE NOTICE 'FAIL T21: plant_a=%, plant_b=%, compact_site=%, pos0_levels=%',
+      v_plant_a, v_plant_b, v_compact_site, v_pos0_levels;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T21: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T21;
+
+-- T22 runs as the TABLE OWNER (RESET ROLE) on purpose, for the same reason
+-- T18 above does. create_node is SECURITY INVOKER, so under `authenticated`
+-- the hierarchy_templates SELECT policy already hides org 2's template and
+-- this case would pass whether or not create_node's own
+-- `and org_id = v_org_id` clause exists at all. Measured: with T22 run as
+-- `authenticated`, deleting that clause (M5) was NOT CAUGHT by any case in
+-- this file; with RESET ROLE, M5 breaks T22 and only T22.
+\echo 'T22: root + org 2''s template id, with RLS bypassed (RESET ROLE) -> invalid_argument (not found)'
+SAVEPOINT sp_T22;
+RESET ROLE;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_caught boolean := false; v_sqlstate text; v_detail_raw text; v_detail jsonb;
+BEGIN
+  BEGIN
+    PERFORM create_node(NULL, 'Sneaky Plant', 0, '2100000b-0000-0000-0000-000000000001');
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'invalid_argument'
+     AND v_detail->>'field' = 'p_template_id'
+     AND v_detail->>'reason' = 'not found' THEN
+    RAISE NOTICE 'PASS T22';
+  ELSE
+    RAISE NOTICE 'FAIL T22: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T22: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T22;
+
+\echo 'T23: root + an unknown template id -> invalid_argument (not found)'
+SAVEPOINT sp_T23;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_caught boolean := false; v_sqlstate text; v_detail_raw text; v_detail jsonb;
+BEGIN
+  BEGIN
+    PERFORM create_node(NULL, 'Plant X', 0, '99999999-9999-9999-9999-999999999999');
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'invalid_argument'
+     AND v_detail->>'field' = 'p_template_id'
+     AND v_detail->>'reason' = 'not found' THEN
+    RAISE NOTICE 'PASS T23';
+  ELSE
+    RAISE NOTICE 'FAIL T23: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T23: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T23;
+
+\echo 'T24: root, org has exactly ONE template, p_template_id omitted -> succeeds (backward compatibility)'
+SAVEPOINT sp_T24;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_res jsonb;
+BEGIN
+  -- No second template created in this savepoint: org 1 holds exactly the
+  -- one seeded template, which is the case every existing caller (three
+  -- positional arguments, no p_template_id) must keep working under.
+  v_res := create_node(NULL, 'Plant 9');
+  IF v_res->>'path' = 'plant_9'
+     AND v_res->>'level_id' = '20000000-0000-0000-0000-000000000000'
+     AND v_res->>'parent_id' IS NULL
+  THEN
+    RAISE NOTICE 'PASS T24';
+  ELSE
+    RAISE NOTICE 'FAIL T24: %', v_res;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T24: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T24;
+
+\echo 'T25: root into a template with no levels yet -> level_mismatch'
+SAVEPOINT sp_T25;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_tpl uuid;
+  v_caught boolean := false; v_sqlstate text; v_detail_raw text; v_detail jsonb;
+BEGIN
+  -- create_hierarchy_template deliberately returns an EMPTY template (0014's
+  -- own comment) -- this is the ordinary path into that state, not an
+  -- exotic one.
+  v_tpl := (create_hierarchy_template('Empty Plant')->>'id')::uuid;
+  BEGIN
+    PERFORM create_node(NULL, 'Plant Z', 0, v_tpl);
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'level_mismatch'
+     AND v_detail->>'template_id' = v_tpl::text THEN
+    RAISE NOTICE 'PASS T25';
+  ELSE
+    RAISE NOTICE 'FAIL T25: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T25: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T25;
+
+\echo 'T26: a child under EACH shape''s root, neither naming a template'
+SAVEPOINT sp_T26;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_compact_tpl  uuid;
+  v_plant_a      jsonb;
+  v_plant_b      jsonb;
+  v_dept         jsonb;
+  v_line         jsonb;
+  v_compact_line uuid;
+  v_pos1_levels  int;
+BEGIN
+  v_compact_tpl := (create_hierarchy_template('Compact Plant')->>'id')::uuid;
+  PERFORM save_hierarchy_levels(jsonb_build_array(
+    jsonb_build_object('id', NULL, 'name', 'Site', 'is_schedulable', false),
+    jsonb_build_object('id', NULL, 'name', 'Line', 'is_schedulable', true)
+  ), v_compact_tpl);
+  SELECT id INTO v_compact_line FROM hierarchy_levels
+    WHERE template_id = v_compact_tpl AND position = 1;
+
+  v_plant_a := create_node(NULL, 'Plant A', 0, '21000000-0000-0000-0000-000000000001');
+  v_plant_b := create_node(NULL, 'Plant B', 0, v_compact_tpl);
+
+  -- Neither child names a template: the parent alone decides.
+  v_dept := create_node((v_plant_a->>'id')::uuid, 'Dept One');
+  v_line := create_node((v_plant_b->>'id')::uuid, 'Line One');
+
+  SELECT count(*) INTO v_pos1_levels FROM hierarchy_levels
+    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND position = 1;
+
+  IF v_dept->>'path' = 'plant_a.dept_one'
+     AND v_dept->>'level_id' = '20000000-0000-0000-0000-000000000001'
+     AND v_line->>'path' = 'plant_b.line_one'
+     AND v_line->>'level_id' = v_compact_line::text
+     AND v_pos1_levels = 2
+  THEN
+    RAISE NOTICE 'PASS T26';
+  ELSE
+    RAISE NOTICE 'FAIL T26: dept=%, line=%, compact_line=%, pos1_levels=%',
+      v_dept, v_line, v_compact_line, v_pos1_levels;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T26: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T26;
+
+\echo 'T27: child + p_template_id equal to the parent''s -> accepted'
+SAVEPOINT sp_T27;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_res jsonb;
+BEGIN
+  v_res := create_node('30000000-0000-0000-0000-000000000001', 'Bottling',
+                        0, '21000000-0000-0000-0000-000000000001');
+  IF v_res->>'path' = 'plant_1.bottling'
+     AND v_res->>'level_id' = '20000000-0000-0000-0000-000000000001'
+  THEN
+    RAISE NOTICE 'PASS T27';
+  ELSE
+    RAISE NOTICE 'FAIL T27: %', v_res;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T27: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T27;
+
+\echo 'T28: child + a CONTRADICTING p_template_id -> invalid_argument'
+SAVEPOINT sp_T28;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_compact_tpl uuid;
+  v_caught boolean := false; v_sqlstate text; v_detail_raw text; v_detail jsonb;
+BEGIN
+  v_compact_tpl := (create_hierarchy_template('Compact Plant')->>'id')::uuid;
+  BEGIN
+    -- Plant 1 belongs to Standard Plant; naming Compact Plant here is a
+    -- caller believing it can choose a child's shape, which it cannot.
+    PERFORM create_node('30000000-0000-0000-0000-000000000001', 'Straddler',
+                         0, v_compact_tpl);
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'invalid_argument'
+     AND v_detail->>'field' = 'p_template_id'
+     AND v_detail->>'parent_template_id' = '21000000-0000-0000-0000-000000000001' THEN
+    RAISE NOTICE 'PASS T28';
+  ELSE
+    RAISE NOTICE 'FAIL T28: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T28: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T28;
+
+-- ----------------------------------------------------------------------------
+-- There is deliberately no T29 (brief §8.2). The design session wrote one
+-- and deleted it: it asserted that re-saving one shape's level list makes
+-- the OTHER shape's position-0 row physically first (the §4.3 flip), and
+-- that an explicitly-named template still wins over that. The behaviour
+-- half was right; the PRECONDITION half was a heap-order assertion, and
+-- heap order depends on what free space earlier savepoint rollbacks happen
+-- to leave behind -- it passed standalone and failed inside a full-file run
+-- against the UNMUTATED build, which made it look "broken by" every
+-- mutation including one independently proved inert. That is the signature
+-- of a broken instrument, not a caught defect. The flip itself is a real,
+-- reproducible measurement (5/5 one way before a re-save, 5/5 the other way
+-- after) and belongs in design plan §19.19/§19.20, not in a committed case.
+-- ----------------------------------------------------------------------------
+
+\echo 'T30: grants on the 4-arg create_node after the drop/recreate'
+SAVEPOINT sp_T30;
+DO $$
+DECLARE
+  v_auth_has   boolean;
+  v_anon_has   boolean;
+  v_public_has boolean;
+BEGIN
+  v_auth_has   := has_function_privilege('authenticated', 'create_node(uuid,text,int,uuid)', 'EXECUTE');
+  v_anon_has   := has_function_privilege('anon', 'create_node(uuid,text,int,uuid)', 'EXECUTE');
+  v_public_has := has_function_privilege('public', 'create_node(uuid,text,int,uuid)', 'EXECUTE');
+  IF v_auth_has AND NOT v_anon_has AND NOT v_public_has THEN
+    RAISE NOTICE 'PASS T30';
+  ELSE
+    RAISE NOTICE 'FAIL T30: authenticated=%, anon=%, public=%', v_auth_has, v_anon_has, v_public_has;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T30: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T30;
+
+\echo 'T31: create_node(uuid,text,int) is GONE, not overloaded'
+SAVEPOINT sp_T31;
+DO $$
+DECLARE v_sigs text[];
+BEGIN
+  SELECT array_agg(p.oid::regprocedure::text ORDER BY p.oid::regprocedure::text)
+    INTO v_sigs
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE p.proname = 'create_node' AND n.nspname = 'public';
+  IF v_sigs = ARRAY['create_node(uuid,text,integer,uuid)']
+     AND to_regprocedure('public.create_node(uuid,text,int)') IS NULL
+     AND to_regprocedure('public.create_node(uuid,text,int,uuid)') IS NOT NULL
+  THEN
+    RAISE NOTICE 'PASS T31';
+  ELSE
+    RAISE NOTICE 'FAIL T31: sigs=%, 3arg=%, 4arg=%', v_sigs,
+      to_regprocedure('public.create_node(uuid,text,int)'),
+      to_regprocedure('public.create_node(uuid,text,int,uuid)');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T31: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T31;
+
+\echo 'T32: with RLS BYPASSED, the root branch is still org-scoped (count AND sole pick)'
+SAVEPOINT sp_T32;
+-- RESET ROLE for the same reason as T18/T22/C19. `create_node` is SECURITY
+-- INVOKER, so under `authenticated` the hierarchy_templates SELECT policy
+-- silently supplies the org scope and the function's OWN org clause in the
+-- root branch is never the thing under test. MEASURED (design session,
+-- Aug 25): deleting the org scope from the template count/pick was NOT CAUGHT
+-- by any case in this file or in 70_hierarchy_test.sql until this case
+-- existed. Org 1 and org 2 hold one template each, so an unscoped count sees
+-- 2 and wrongly raises `ambiguous`.
+RESET ROLE;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_res jsonb; v_tpl uuid; v_org uuid; v_total int;
+  v_caught boolean := false; v_detail_raw text; v_detail jsonb;
+BEGIN
+  SELECT count(*) INTO v_total FROM hierarchy_templates;
+  IF v_total < 2 THEN
+    RAISE NOTICE 'FAIL T32: fixture needs a template in each org, saw % in total', v_total;
+    RETURN;
+  END IF;
+
+  BEGIN
+    v_res := create_node(NULL, 'Scoped Plant');
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+
+  IF v_caught THEN
+    RAISE NOTICE 'FAIL T32: org 1 holds exactly one template, so an omitted p_template_id must resolve; got %', v_detail;
+    RETURN;
+  END IF;
+
+  SELECT hl.template_id, hl.org_id INTO v_tpl, v_org
+    FROM hierarchy_levels hl WHERE hl.id = (v_res->>'level_id')::uuid;
+
+  IF v_tpl = '21000000-0000-0000-0000-000000000001'
+     AND v_org = '10000000-0000-0000-0000-000000000001'
+  THEN
+    RAISE NOTICE 'PASS T32';
+  ELSE
+    RAISE NOTICE 'FAIL T32: landed in template % of org % (wanted org 1 Standard Plant)', v_tpl, v_org;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL T32: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_T32;
+
 ROLLBACK;

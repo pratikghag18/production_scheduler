@@ -1,6 +1,7 @@
 /**
  * React Query mutations over the five hierarchy-admin RPC wrappers
- * (brief P1-5b §7.3, `src/lib/api/hierarchy.ts`).
+ * (brief P1-5b §7.3, `src/lib/api/hierarchy.ts`), plus three more over the
+ * hierarchy-TEMPLATE RPC wrappers (D87 / brief P1-5f §7.2).
  *
  * AUTHOR-ONLY — not compiled or run in this container (imports React
  * Query and, transitively through `@/lib/api`, the Supabase client and
@@ -22,9 +23,12 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  createHierarchyTemplate,
   createNode,
+  deleteHierarchyTemplate,
   deleteNode,
   moveNode,
+  renameHierarchyTemplate,
   renameNode,
   saveHierarchyLevels,
   type BoardNode,
@@ -33,6 +37,7 @@ import {
   type DeleteNodeResult,
   type HierarchyLevel,
   type HierarchyLevelDraftInput,
+  type HierarchyTemplateSummary,
   type MoveNodeInput,
   type MoveNodeResult,
   type RenameNodeResult,
@@ -57,6 +62,55 @@ export const hierarchyKeys = {
 
 function invalidateHierarchy(queryClient: ReturnType<typeof useQueryClient>) {
   return queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
+}
+
+/**
+ * Hierarchy TEMPLATE CRUD (D87 / brief P1-5f §7.2) -- three hooks, same
+ * shape as the five below: no optimistic update, invalidate the
+ * `hierarchyKeys.all` prefix on success.
+ */
+
+/** `create_hierarchy_template`. Raises: not_permitted, invalid_argument. */
+export function useCreateHierarchyTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ id: string; name: string; levels: [] }, SchedulerError, string>({
+    mutationFn: (name) => createHierarchyTemplate(name),
+    onSuccess: () => {
+      void invalidateHierarchy(queryClient);
+    },
+  });
+}
+
+/** `rename_hierarchy_template`. Raises: not_permitted, invalid_argument. */
+export function useRenameHierarchyTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    HierarchyTemplateSummary,
+    SchedulerError,
+    { templateId: string; name: string }
+  >({
+    mutationFn: ({ templateId, name }) => renameHierarchyTemplate(templateId, name),
+    onSuccess: () => {
+      void invalidateHierarchy(queryClient);
+    },
+  });
+}
+
+/**
+ * `delete_hierarchy_template`. Raises: not_permitted, invalid_argument
+ * (not found), level_in_use (the shape still has nodes on it).
+ */
+export function useDeleteHierarchyTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ id: string; deleted: boolean }, SchedulerError, string>({
+    mutationFn: (templateId) => deleteHierarchyTemplate(templateId),
+    onSuccess: () => {
+      void invalidateHierarchy(queryClient);
+    },
+  });
 }
 
 /**

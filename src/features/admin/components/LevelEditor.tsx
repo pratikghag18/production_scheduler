@@ -4,6 +4,7 @@ import { useSaveHierarchyLevels } from "../hooks/useHierarchyMutations";
 import { applyLevelAction, invalidNameIndices, MAX_LEVELS } from "../lib/levelDraft";
 import type { LevelDraft } from "../lib/levelDraft";
 import { validateLevelDraft } from "../lib/hierarchy";
+import { levelsForShape } from "../lib/shapePicker";
 import styles from "./LevelEditor.module.css";
 
 /**
@@ -34,29 +35,25 @@ const PREVIEW_REASON_TEXT: Record<string, string> = {
 };
 
 /**
- * D86: which shape is this editor editing?
- *
- * `save_hierarchy_levels` takes a template id and the server refuses to guess
- * one. The SHAPE PICKER is P1-5e's job and is not built yet, so this editor
- * handles the two cases it can handle honestly and refuses the third:
- *
- *   - exactly one template in the loaded levels -> edit it
- *   - none (an org with no levels yet)          -> nothing to edit
- *   - more than one                             -> FAIL CLOSED
- *
- * Silently editing `levels[0]`'s template would be the same guess the RPC was
- * deliberately built to reject, and the failure would be invisible: the admin
- * would reorder one plant's vocabulary while looking at another's.
+ * D87 (brief P1-5f §7.4): which shape this editor edits is now the SHAPE
+ * PICKER's decision, not something this component infers. `templateId` is
+ * a required prop -- `null` means no shape is selected yet (an org with no
+ * templates at all), and Save stays disabled while it is. This replaces
+ * D86's `soleTemplateId` fail-closed guess, which is exactly the thing the
+ * shape picker exists to remove: silently editing `levels[0]`'s template
+ * was the same guess the RPC was deliberately built to reject.
  */
-function soleTemplateId(levels: readonly HierarchyLevel[]): string | null {
-  const ids = new Set(levels.map((l) => l.templateId));
-  return ids.size === 1 ? [...ids][0] : null;
-}
-
-export function LevelEditor({ levels }: { levels: HierarchyLevel[] }) {
-  const [draft, setDraft] = useState<readonly LevelDraft[]>(() => toDraft(levels));
+export function LevelEditor({
+  levels,
+  templateId,
+}: {
+  levels: HierarchyLevel[];
+  templateId: string | null;
+}) {
+  const [draft, setDraft] = useState<readonly LevelDraft[]>(() =>
+    toDraft(levelsForShape(levels, templateId)),
+  );
   const saveMutation = useSaveHierarchyLevels();
-  const templateId = soleTemplateId(levels);
 
   // hierarchy.ts's `validateLevelDraft` predates this editor's readonly
   // state convention and takes a mutable `LevelDraft[]`; it never mutates
@@ -66,7 +63,7 @@ export function LevelEditor({ levels }: { levels: HierarchyLevel[] }) {
   const invalidIndices = new Set(invalidNameIndices(draft));
 
   function handleCancel() {
-    setDraft(toDraft(levels));
+    setDraft(toDraft(levelsForShape(levels, templateId)));
     saveMutation.reset();
   }
 
@@ -174,13 +171,6 @@ export function LevelEditor({ levels }: { levels: HierarchyLevel[] }) {
           {describeSchedulerError(saveMutation.error)}
         </p>
       )}
-      {templateId === null && levels.length > 0 && (
-        <p className={styles.errorLine} role="alert">
-          This organisation has more than one hierarchy shape. Choosing which one to edit ships
-          with the shape picker — until then this editor can only show them.
-        </p>
-      )}
-
       <div className={styles.actions}>
         <button
           type="button"

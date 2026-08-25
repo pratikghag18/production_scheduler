@@ -929,7 +929,12 @@ export type Database = {
       }
       create_hierarchy_template: { Args: { p_name: string }; Returns: Json }
       create_node: {
-        Args: { p_name: string; p_parent_id: string; p_sort_order?: number }
+        Args: {
+          p_name: string
+          p_parent_id: string
+          p_sort_order?: number
+          p_template_id?: string
+        }
         Returns: Json
       }
       create_run: {

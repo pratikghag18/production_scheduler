@@ -7,6 +7,7 @@ import {
   useRenameNode,
 } from "../hooks/useHierarchyMutations";
 import { buildTreeRows, legalParentsFor } from "../lib/treeView";
+import type { ShapeSummary } from "../lib/shapePicker";
 import { AdminPopover } from "./AdminPopover";
 import styles from "./NodeTreeEditor.module.css";
 
@@ -40,14 +41,26 @@ type PopoverState =
 export function NodeTreeEditor({
   nodes,
   levels,
+  shapeSummaries,
+  selectedTemplateId,
 }: {
   nodes: BoardNode[];
   levels: HierarchyLevel[];
+  /** D87 (brief P1-5f §7.5): every shape in the org, for the add-root picker. */
+  shapeSummaries: readonly ShapeSummary[];
+  /** The shape currently selected in `ShapePicker`, used as the add-root default. */
+  selectedTemplateId: string | null;
 }) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [addRootOpen, setAddRootOpen] = useState(false);
   const [addRootName, setAddRootName] = useState("");
+  // D87: which shape a new root lands in. Only consulted when there is more
+  // than one shape to choose among (§7.5) -- with one shape, or none, this
+  // stays unused and templateId is omitted from the create_node call
+  // entirely, so the RPC's own single-template inference is what runs.
+  const [addRootTemplateId, setAddRootTemplateId] = useState<string | null>(selectedTemplateId);
+  const requiresShapeChoice = shapeSummaries.length > 1;
 
   const renameMutation = useRenameNode();
   const createMutation = useCreateNode();
@@ -82,7 +95,10 @@ export function NodeTreeEditor({
         <button
           type="button"
           className={styles.addRootBtn}
-          onClick={() => setAddRootOpen((v) => !v)}
+          onClick={() => {
+            if (!addRootOpen) setAddRootTemplateId(selectedTemplateId);
+            setAddRootOpen((v) => !v);
+          }}
         >
           + add root node
         </button>
@@ -94,8 +110,15 @@ export function NodeTreeEditor({
           onSubmit={(e) => {
             e.preventDefault();
             if (addRootName.trim() === "") return;
+            if (requiresShapeChoice && addRootTemplateId === null) return;
             createMutation.mutate(
-              { parentId: null, name: addRootName },
+              {
+                parentId: null,
+                name: addRootName,
+                // One shape (or none) in the org -> omit the key entirely,
+                // so the RPC's own single-template inference runs (§7.5).
+                templateId: requiresShapeChoice ? (addRootTemplateId ?? undefined) : undefined,
+              },
               {
                 onSuccess: () => {
                   setAddRootName("");
@@ -112,7 +135,31 @@ export function NodeTreeEditor({
             placeholder="Root node name"
             onChange={(e) => setAddRootName(e.target.value)}
           />
-          <button type="submit" disabled={createMutation.isPending}>
+          {requiresShapeChoice && (
+            <select
+              aria-label="Hierarchy shape for the new root"
+              value={addRootTemplateId ?? ""}
+              onChange={(e) => setAddRootTemplateId(e.target.value === "" ? null : e.target.value)}
+            >
+              <option value="" disabled>
+                Choose a shape…
+              </option>
+              {shapeSummaries.map((s) => (
+                // A shape with no levels yet has no position-0 level for a
+                // root to land on -- offered so the admin can see it exists,
+                // disabled so they cannot pick it and get level_mismatch
+                // back with no warning (§7.5).
+                <option key={s.id} value={s.id} disabled={s.levelCount === 0}>
+                  {s.name}
+                  {s.levelCount === 0 ? " (no levels yet)" : ""}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="submit"
+            disabled={createMutation.isPending || (requiresShapeChoice && addRootTemplateId === null)}
+          >
             Add
           </button>
           <button type="button" onClick={() => setAddRootOpen(false)}>

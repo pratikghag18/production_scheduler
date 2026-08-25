@@ -1,7 +1,12 @@
 /**
  * Five typed RPC wrappers over migration `20260825000010_hierarchy_admin.sql`
  * (brief P1-5b §7.2): `saveHierarchyLevels`, `createNode`, `renameNode`,
- * `moveNode`, `deleteNode`.
+ * `moveNode`, `deleteNode`. Plus three more over the template RPCs added by
+ * migration `20260825000014_hierarchy_templates.sql` (brief P1-5f §7.1):
+ * `createHierarchyTemplate`, `renameHierarchyTemplate`,
+ * `deleteHierarchyTemplate`. `createNode` itself gained an optional
+ * `templateId` (migration `20260825000015_create_node_template.sql`, D87) —
+ * see that function's own doc comment below.
  *
  * Same contract as every other file in this folder (board.ts, mutations.ts):
  * call `supabase.rpc`, throw `toSchedulerError(error)` on a PostgREST
@@ -54,6 +59,95 @@ function isNum(v: Json | undefined): v is number {
 
 function isBool(v: Json | undefined): v is boolean {
   return typeof v === "boolean";
+}
+
+// ---------------------------------------------------------------------------
+// Hierarchy TEMPLATE CRUD (D87 / brief P1-5f §7.1) — three thin wrappers
+// over migration 20260825000014_hierarchy_templates.sql's
+// create_/rename_/delete_hierarchy_template. Same shape as every other RPC
+// in this file: `supabase.rpc`, `toSchedulerError` on a PostgREST error, a
+// hand-rolled runtime guard, `shapeMismatch` if the guard fails, camelCase
+// out. Raises for all three: not_permitted, invalid_argument (blank/
+// duplicate name for create/rename; not found for rename/delete);
+// `delete_hierarchy_template` additionally raises `level_in_use` (§9 of
+// migration 0014) when the shape still has nodes on it.
+// ---------------------------------------------------------------------------
+
+export interface HierarchyTemplateSummary {
+  id: string;
+  name: string;
+}
+
+function parseHierarchyTemplateSummary(v: Json): HierarchyTemplateSummary | null {
+  if (!isJsonObject(v)) return null;
+  const { id, name } = v;
+  if (!isStr(id) || !isStr(name)) return null;
+  return { id, name };
+}
+
+/**
+ * `create_hierarchy_template(p_name text)`. Always returns an EMPTY
+ * template (migration 0014's own comment: seeding a starter level would
+ * decide the site's shape on the admin's behalf) — `levels` is therefore
+ * typed as the literal `[]`, not `HierarchyLevel[]`, so a caller cannot
+ * accidentally read levels off a payload that never carries any.
+ */
+export async function createHierarchyTemplate(
+  name: string,
+): Promise<{ id: string; name: string; levels: [] }> {
+  const { data, error } = await supabase.rpc("create_hierarchy_template", {
+    p_name: name,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseHierarchyTemplateSummary(data);
+  const levelsOk =
+    isJsonObject(data) && Array.isArray(data.levels) && data.levels.length === 0;
+  if (parsed === null || !levelsOk) {
+    throw shapeMismatch(
+      "create_hierarchy_template",
+      "expected { id, name, levels: [] }",
+    );
+  }
+  return { id: parsed.id, name: parsed.name, levels: [] };
+}
+
+/** `rename_hierarchy_template(p_template_id uuid, p_name text)`. */
+export async function renameHierarchyTemplate(
+  templateId: string,
+  name: string,
+): Promise<{ id: string; name: string }> {
+  const { data, error } = await supabase.rpc("rename_hierarchy_template", {
+    p_template_id: templateId,
+    p_name: name,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseHierarchyTemplateSummary(data);
+  if (parsed === null) {
+    throw shapeMismatch("rename_hierarchy_template", "expected { id, name }");
+  }
+  return parsed;
+}
+
+function parseDeleteTemplateResult(v: Json): { id: string; deleted: boolean } | null {
+  if (!isJsonObject(v)) return null;
+  const { id, deleted } = v;
+  if (!isStr(id) || !isBool(deleted)) return null;
+  return { id, deleted };
+}
+
+/** `delete_hierarchy_template(p_template_id uuid)`. */
+export async function deleteHierarchyTemplate(
+  templateId: string,
+): Promise<{ id: string; deleted: boolean }> {
+  const { data, error } = await supabase.rpc("delete_hierarchy_template", {
+    p_template_id: templateId,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseDeleteTemplateResult(data);
+  if (parsed === null) {
+    throw shapeMismatch("delete_hierarchy_template", "expected { id, deleted }");
+  }
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +230,18 @@ export interface CreateNodeInput {
   name: string;
   /** Omit to use the RPC's own `DEFAULT 0`. */
   sortOrder?: number;
+  /**
+   * D87 (migration 20260825000015): which hierarchy template a ROOT node
+   * belongs to. Required when `parentId` is `null` and the org holds more
+   * than one template (server-refused `invalid_argument` otherwise);
+   * ignored for a child, whose shape is fixed by its parent — and must not
+   * CONTRADICT the parent's own template, which the RPC also refuses.
+   * OMIT entirely (never pass `undefined` explicitly) when the caller did
+   * not choose one, exactly as `deleteNode` already does for `p_mode`, so
+   * the RPC's own `DEFAULT null` / one-template-in-the-org inference stays
+   * the single source of that default.
+   */
+  templateId?: string | null;
 }
 
 function parseBoardNode(v: Json): BoardNode | null {
@@ -177,6 +283,11 @@ export async function createNode(input: CreateNodeInput): Promise<BoardNode> {
     p_parent_id: input.parentId as unknown as string,
     p_name: input.name,
     p_sort_order: input.sortOrder,
+    // D87: same cast as p_parent_id above, and the same omit-when-absent
+    // rule as p_mode in deleteNode below — an omitted `templateId` sends no
+    // key at all (JSON.stringify drops an `undefined` property), so the
+    // RPC's own DEFAULT/inference is what runs, not a client-side guess.
+    p_template_id: input.templateId as unknown as string,
   });
   if (error) throw toSchedulerError(error);
   const parsed = parseBoardNode(data);
@@ -321,7 +432,8 @@ export async function deleteNode(nodeId: string, mode?: DeleteNodeMode): Promise
 // ---------------------------------------------------------------------------
 
 /**
- * The whole org's levels and nodes, for the hierarchy admin screens.
+ * The whole org's templates, levels and nodes, for the hierarchy admin
+ * screens.
  *
  * `board_window` is the codebase's other hierarchy-shaped read and is the
  * wrong shape here: it is scoped to one root path and one time window, while
@@ -333,16 +445,28 @@ export async function deleteNode(nodeId: string, mode?: DeleteNodeMode): Promise
  * the build agent therefore, reasonably, put it in `AdminPage.tsx`; the
  * boundary is the rule, and the file table was the error.
  *
- * No manual `org_id` filter: RLS scopes both tables to the caller's org, and
- * as of migration 0012 that scoping is tenant-correct (design plan §19.15).
- * Adding a redundant filter here would be a second implementation of a rule
- * the database already owns.
+ * No manual `org_id` filter: RLS scopes all three tables to the caller's
+ * org, and as of migration 0012 that scoping is tenant-correct (design plan
+ * §19.15). Adding a redundant filter here would be a second implementation
+ * of a rule the database already owns.
+ *
+ * D87 (brief P1-5f §7.1): the `hierarchy_templates` read is NEW and is NOT
+ * OPTIONAL — it cannot be replaced by deriving the shape list from the
+ * distinct `template_id`s already present in `levels`. A freshly-created,
+ * still-empty template (`create_hierarchy_template` returns one on purpose,
+ * migration 0014's own comment) has no rows in `levels` at all, so a
+ * derived list would make it vanish from the picker the instant it is
+ * created — see `shapePicker.ts`'s own `buildShapeSummaries` doc comment
+ * for the full reasoning; this read is what makes that function's
+ * `templates`/`levels` split possible in the first place.
  */
 export async function fetchHierarchyTree(): Promise<{
+  templates: HierarchyTemplateSummary[];
   levels: HierarchyLevel[];
   nodes: BoardNode[];
 }> {
-  const [levelsRes, nodesRes] = await Promise.all([
+  const [templatesRes, levelsRes, nodesRes] = await Promise.all([
+    supabase.from("hierarchy_templates").select("id, name").order("name"),
     supabase
       .from("hierarchy_levels")
       .select("id, template_id, position, name, is_schedulable")
@@ -352,9 +476,14 @@ export async function fetchHierarchyTree(): Promise<{
       .select("id, parent_id, level_id, name, path, sort_order, active")
       .order("sort_order"),
   ]);
+  if (templatesRes.error) throw toSchedulerError(templatesRes.error);
   if (levelsRes.error) throw toSchedulerError(levelsRes.error);
   if (nodesRes.error) throw toSchedulerError(nodesRes.error);
 
+  const templates: HierarchyTemplateSummary[] = (templatesRes.data ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+  }));
   const levels: HierarchyLevel[] = (levelsRes.data ?? []).map((r) => ({
     id: r.id,
     templateId: r.template_id,
@@ -376,5 +505,5 @@ export async function fetchHierarchyTree(): Promise<{
     sortOrder: r.sort_order,
     active: r.active,
   }));
-  return { levels, nodes };
+  return { templates, levels, nodes };
 }

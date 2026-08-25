@@ -376,10 +376,37 @@ nodes), `schedulable_level_locked` (the schedulable level is changing and
 the *current* one still has runs, or — with zero runs — direct assignments;
 see D72 in `docs/design-plan.md` §19.2).
 
-#### `create_node(p_parent_id uuid, p_name text, p_sort_order int DEFAULT 0) RETURNS jsonb`
+#### `create_node(p_parent_id uuid, p_name text, p_sort_order int DEFAULT 0, p_template_id uuid DEFAULT NULL) RETURNS jsonb`
 
-`p_parent_id = NULL` creates a root node at the org's position-0 level.
-Otherwise the new node's level is whatever sits at *parent position + 1*;
+`p_template_id` added by migration `0015` (D87, brief P1-5f): since
+migration `0014` a level's identity is `(template_id, position)`, not
+`(org_id, position)`, and an org may hold more than one hierarchy shape —
+`create_node` is the one write path 0014 left asking the old question, so
+with two shapes present it used to place a root in an ARBITRARY one with
+no error (§4 of the brief; not a race, and not a corruption risk with one
+shape per org, but a correct request could not be expressed at all).
+
+`p_parent_id = NULL` creates a ROOT node, and now resolves the shape first:
+
+- `p_template_id` omitted (`NULL`) — legal only when the org holds
+  **exactly one** hierarchy template, which is inferred and used. Every
+  existing three-argument caller keeps working unchanged.
+- `p_template_id` given — must name a template that exists **in the
+  caller's own org** (checked explicitly; not made redundant by RLS under
+  `SECURITY INVOKER` — see `supabase/tests/90_hierarchy_template_test.sql`
+  T22, which runs with RLS bypassed for exactly this reason).
+- Either way, the resolved template must already have a level at
+  position 0 — a **freshly-created, still-empty** template (`create_
+  hierarchy_template` returns one on purpose) has none yet.
+
+Otherwise (`p_parent_id` given) this is a CHILD: the new node's level is
+whatever sits at *parent position + 1*, **within the parent's own
+template** — a child's shape is fixed by its parent, so `p_template_id`
+is not a choice here. Passing one is fine ONLY when it names that same
+template; passing a template that CONTRADICTS the parent's is refused
+rather than silently accepted, so a caller can never believe it chose a
+child's shape when it did not.
+
 `path` is never supplied by the caller — trigger-derived, same as every
 other node write (D6). Pre-checks the prospective path for a collision
 before inserting, so two siblings that slugify alike (`"Cell 1"` /
@@ -400,8 +427,22 @@ violation) instead of succeeding cleanly.
 ```
 
 **Raises:** `not_permitted`, `invalid_argument` (blank name; unknown
-parent), `level_mismatch` (no level exists one position below the parent),
-`path_collision`.
+parent; and — new in migration 0015, all still `invalid_argument`,
+distinguished only by `DETAIL.reason` — a root with `p_template_id` NULL
+and the org holding zero or more than one template:
+`{field: "p_template_id", reason: "no templates" | "ambiguous",
+template_count: <n>}`; a root naming an unknown/foreign template:
+`{field: "p_template_id", reason: "not found"}`; a child naming a
+template that contradicts its parent's:
+`{field: "p_template_id", reason: "not the parent's template",
+parent_template_id: <uuid>}`), `level_mismatch` (no level exists one
+position below the parent — `{node_id: <uuid>}`; **or, new in migration
+0015**, a root resolved to a template with no levels yet at all —
+`{template_id: <uuid>}`), `path_collision`. No new error CODE — the
+closed set in `docs/api.md` §1 stays at twelve; every new failure above
+is `invalid_argument` or `level_mismatch` with a new `DETAIL` shape, the
+same convention migration 0014 already used for the three template RPCs
+below.
 
 #### `rename_node(p_node_id uuid, p_name text) RETURNS jsonb`
 
