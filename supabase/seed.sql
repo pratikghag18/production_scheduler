@@ -229,6 +229,137 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- ============================================================================
+-- SECOND ORG — Contoso Fabrication (design session, Aug 25 2026).
+--
+-- WHY THIS EXISTS. Until now the seed had exactly ONE org, which meant no test
+-- anywhere in this repo could catch a missing `org_id` filter: with a single
+-- tenant, a query that forgets to scope by org returns exactly the same rows as
+-- one that remembers. Every RLS test, every RPC test and every acceptance case
+-- passed under that blind spot. Recorded as unverified since P1-5a (§19.5).
+--
+-- WHY EVERY NAME COLLIDES WITH ORG 1. This org is deliberately NOT a distinct
+-- fixture. Its levels, nodes, product SKU, skill, shift template and employee
+-- ref all reuse org 1's actual values, so its node paths are IDENTICAL:
+-- `plant_1`, `plant_1.assembly`, `plant_1.assembly.line_1`,
+-- `plant_1.assembly.line_1.cell_1`.
+--
+-- Every uniqueness constraint in this schema is `(org_id, ...)` -- `(org_id,
+-- path)`, `(org_id, sku)`, `(org_id, name)`, `(org_id, position)` -- so all of
+-- this is legal BY DESIGN, and that is precisely the point: a leak between
+-- tenants is invisible when the two tenants look different, and unmissable
+-- when they look the same. A query that filters on `path` alone gets two rows;
+-- one that filters on `(org_id, path)` gets one.
+--
+-- `Cell Z` has no counterpart in org 1, so "org 1 must never see Cell Z" is a
+-- single unambiguous assertion.
+-- ============================================================================
+
+INSERT INTO orgs (id, name)
+VALUES ('10000000-0000-0000-0000-000000000002', 'Contoso Fabrication');
+
+-- Same four level NAMES and positions as org 1 (unique is (org_id, position)).
+INSERT INTO hierarchy_levels (id, org_id, position, name, is_schedulable) VALUES
+  ('2000000b-0000-0000-0000-000000000000', '10000000-0000-0000-0000-000000000002', 0, 'Site',      false),
+  ('2000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 1, 'Department',false),
+  ('2000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', 2, 'Line',      false),
+  ('2000000b-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', 3, 'Work Cell', true);
+
+-- Parent-first, so the path trigger resolves each row from its parent.
+INSERT INTO nodes (id, org_id, level_id, parent_id, name) VALUES
+  ('3000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '2000000b-0000-0000-0000-000000000000', NULL, 'Plant 1');
+
+INSERT INTO nodes (id, org_id, level_id, parent_id, name) VALUES
+  ('3000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', '2000000b-0000-0000-0000-000000000001', '3000000b-0000-0000-0000-000000000001', 'Assembly');
+
+INSERT INTO nodes (id, org_id, level_id, parent_id, name) VALUES
+  ('3000000b-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', '2000000b-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000002', 'Line 1');
+
+INSERT INTO nodes (id, org_id, level_id, parent_id, name) VALUES
+  ('3000000b-0000-0000-0000-000000000007', '10000000-0000-0000-0000-000000000002', '2000000b-0000-0000-0000-000000000003', '3000000b-0000-0000-0000-000000000004', 'Cell 1'),
+  ('3000000b-0000-0000-0000-000000000008', '10000000-0000-0000-0000-000000000002', '2000000b-0000-0000-0000-000000000003', '3000000b-0000-0000-0000-000000000004', 'Cell Z');
+
+-- The collision is the fixture. Assert it rather than trusting it: if a future
+-- schema change ever made paths globally unique, these inserts would fail and
+-- every cross-org test would silently lose its teeth.
+DO $$
+DECLARE v_paths int; v_orgs int;
+BEGIN
+  SELECT count(*), count(DISTINCT org_id) INTO v_paths, v_orgs
+    FROM nodes WHERE path = 'plant_1.assembly.line_1.cell_1';
+  IF v_paths <> 2 OR v_orgs <> 2 THEN
+    RAISE EXCEPTION 'seed assertion failed: expected the SAME path in 2 orgs, got % rows across % orgs', v_paths, v_orgs;
+  END IF;
+END $$;
+
+-- Same skill NAME as org 1's (unique is (org_id, name)): 'CNC' in both.
+INSERT INTO skills (id, org_id, name)
+VALUES ('4000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'CNC');
+
+-- `employee_ref` carries NO uniqueness at all, so EMP-001 exists in both orgs.
+INSERT INTO operators (id, org_id, home_node_id, display_name, employee_ref, source) VALUES
+  ('5000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000007', 'Contoso Operator A', 'EMP-001', 'manual'),
+  ('5000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000008', 'Contoso Operator B', 'EMP-002', 'manual');
+
+INSERT INTO operator_skills (operator_id, skill_id, org_id) VALUES
+  ('5000000b-0000-0000-0000-000000000001', '4000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002');
+
+-- Same SKU as org 1's Widget X (unique is (org_id, sku)) -- so 'WX' means a
+-- DIFFERENT product in each org, which is the sharpest possible product leak.
+INSERT INTO products (id, org_id, sku, name, source) VALUES
+  ('6000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'WX', 'Contoso Widget', 'manual');
+
+-- Same template NAME as org 1's (unique is (org_id, name)).
+INSERT INTO shift_templates (id, org_id, name) VALUES
+  ('7000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '3 × 8h');
+
+INSERT INTO shifts (id, org_id, template_id, name, start_min, end_min) VALUES
+  ('7000000b-0000-0000-0000-000000000011', '10000000-0000-0000-0000-000000000002', '7000000b-0000-0000-0000-000000000001', 'Day', 360, 840);
+
+INSERT INTO node_shift_templates (node_id, org_id, template_id) VALUES
+  ('3000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '7000000b-0000-0000-0000-000000000001');
+
+-- One run and one assignment, in the same anchored week as org 1's, on a node
+-- whose PATH is identical to an org-1 node that also has runs. A board query
+-- that resolves rows by path instead of (org_id, path) returns both.
+INSERT INTO runs (id, org_id, node_id, product_id, timerange, planned_headcount) VALUES
+  ('8000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000007', '6000000b-0000-0000-0000-000000000001', tstzrange(seed_t(1,360), seed_t(1,840)), 1);
+
+INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency, target_qty, target_unit) VALUES
+  ('9000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000007', '5000000b-0000-0000-0000-000000000001', '8000000b-0000-0000-0000-000000000001', NULL, tstzrange(seed_t(1,360), seed_t(1,840)), 1.000, NULL, NULL);
+
+-- Users and profiles. LOCAL-DEV ONLY, same shim as org 1's block above.
+INSERT INTO auth.users (id, email) VALUES
+  ('00000000-0000-0000-0000-0000000000b1', 'admin@contoso.example'),
+  ('00000000-0000-0000-0000-0000000000b2', 'sofia@contoso.example')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO user_profiles (id, org_id, user_id, role, default_create_mode) VALUES
+  ('a000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-0000000000b1', 'admin',      'run'),
+  ('a000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-0000000000b2', 'supervisor', 'run')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO profile_grants (profile_id, node_id, org_id, can_edit) VALUES
+  ('a000000b-0000-0000-0000-000000000001', '3000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', true),
+  ('a000000b-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', true)
+ON CONFLICT DO NOTHING;
+
+-- ----------------------------------------------------------------------------
+-- Seed assertion: org 2 is populated, and `Cell Z` is unique to it.
+-- ----------------------------------------------------------------------------
+DO $$
+DECLARE v_nodes int; v_cellz int;
+BEGIN
+  SELECT count(*) INTO v_nodes FROM nodes WHERE org_id = '10000000-0000-0000-0000-000000000002';
+  IF v_nodes <> 5 THEN
+    RAISE EXCEPTION 'seed assertion failed: org 2 has % nodes, expected 5', v_nodes;
+  END IF;
+  SELECT count(*) INTO v_cellz FROM nodes WHERE name = 'Cell Z';
+  IF v_cellz <> 1 THEN
+    RAISE EXCEPTION 'seed assertion failed: Cell Z must exist exactly once, found %', v_cellz;
+  END IF;
+END $$;
+
 DROP FUNCTION seed_t(int, int);
 
 -- ============================================================================

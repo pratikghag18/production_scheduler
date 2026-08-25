@@ -1,6 +1,6 @@
 # Production Scheduler — Design Plan
 
-**Status:** Draft v1.9 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c built + D81/D82** Aug 25)
+**Status:** Draft v2.0 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c + D81/D82 · §19.15 a second org, and the cross-tenant leak it found — D83** Aug 25)
 **Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client layers (P1-5a/b) are built; P1-5a/5b verified by an independent design-session probe.
 **Progress tracking:** current status and remaining work live in [`docs/roadmap.md`](roadmap.md) — this document holds decisions, that one holds state.
 
@@ -1637,3 +1637,121 @@ mismatch that way in `RunPopover.tsx`.** The defence worked; it also doubled the
 
 This session used exactly that technique for migration 0011 and the §19.13 edits; the brief simply
 never told the agent it was allowed to.
+
+### 19.15 A second org, and the cross-tenant leak it found in under ten minutes (Aug 25, 2026)
+
+Every verification note since P1-5a has carried the same line: *cross-org isolation is not tested by
+anything, because the seed has one org.* With a single tenant, a query that forgets `org_id` returns
+exactly the same rows as one that remembers, so **every** RLS test, RPC test and acceptance case in
+this repo passed under that blind spot.
+
+Seeding a second org found a real cross-tenant read **and write** leak almost immediately.
+
+#### The fixture is the finding
+
+Org 2 (Contoso) is deliberately **not** a distinct fixture. Its levels, nodes, product SKU, skill,
+shift template and employee ref all reuse org 1's actual values, so its node paths are *identical*:
+`plant_1`, `plant_1.assembly`, `plant_1.assembly.line_1`, `plant_1.assembly.line_1.cell_1`.
+
+Every uniqueness constraint in this schema is `(org_id, …)` — `(org_id, path)`, `(org_id, sku)`,
+`(org_id, name)`, `(org_id, position)` — so all of that is legal *by design*. And that is the point:
+**a leak between tenants is invisible when the two tenants look different, and unmissable when they
+look the same.** One node, `Cell Z`, has no counterpart in org 1, so "org 1 must never see Cell Z" is
+a single unambiguous assertion.
+
+Writing the fixture also caught four wrong assumptions of my own: I had guessed org 1's skill, SKU,
+shift-template name and employee ref, and all four were wrong (`CNC`, `WX`, `3 × 8h`, `EMP-001`). A
+fixture whose comment claims collisions it does not have is worse than no fixture, because it reads
+as covered.
+
+#### D83 — the read leak, measured
+
+`app_can_read_node` / `app_can_edit_node` are `SECURITY DEFINER`, so RLS on `nodes` does not apply
+inside them, and they tested **only ltree containment**:
+
+```sql
+SELECT app_is_admin() OR EXISTS (
+  SELECT 1 FROM nodes n, app_grant_paths(false) gp
+  WHERE n.id = p_node AND n.path <@ gp)
+```
+
+Two independent holes: `app_is_admin()` short-circuits the whole expression and is not org-scoped,
+so **any admin passed for any node in any org**; and the grant branch compared paths only, so a grant
+on `plant_1.assembly` matched the *other* tenant's subtree.
+
+Measured, not inferred:
+
+| caller | saw | of which another tenant's |
+| --- | --- | --- |
+| org-1 admin | runs 9, assignments 13 | 1 run, 1 assignment |
+| org-2 admin | runs 9 | all 8 of org 1's |
+| Ana (org-1 supervisor) | runs 6 | 1 |
+| Ana | `app_can_read_node(org-2 cell)` = **TRUE**, `app_can_edit_node` = **TRUE** | |
+| Ana | `UPDATE runs WHERE org_id = <org 2>` | **1 row affected** |
+
+A cross-tenant **write**, by a non-admin, in a multi-tenant product.
+
+**Why it survived review.** `nodes_select` carries its own `org_id = app_current_org()` predicate, so
+nodes never leaked and the hierarchy always looked right. All eight `runs` and `assignments` policies
+delegate *entirely* to these two functions and add no org predicate — so the leak lived in exactly
+the tables that carry the schedule, and nowhere it could be seen.
+
+Fixed in migration 0012 by resolving the node together with its org inside both functions. That one
+change covers all nine delegating policies; per [[brief-writing-rules]] rule 9 the org test is
+deliberately **not** duplicated into the policies, because a redundant clause is one no mutation can
+catch.
+
+#### The second bug — and the correction I nearly shipped with it
+
+`10_constraints_test.sql` then failed with `ERROR: invalid positions`. The cause is
+`nodes_cascade_path()`:
+
+```sql
+update nodes set path = new.path || subpath(path, nlevel(old.path))
+ where path <@ old.path and id <> new.id;
+```
+
+No org filter, and `<@` includes equality — so renaming org 1's `Line 1` matched org 2's node at the
+identical path. `subpath()` then errored because the offset equalled the path length.
+
+**My first write-up called this a second active leak. That was wrong, and running it is what
+corrected me.** `nodes_cascade_path()` is `SECURITY INVOKER`, so RLS *does* apply to its internal
+UPDATE, and `nodes_update`'s own org predicate blocks the cross-tenant rows. An org-1 admin renaming
+through `rename_node()` leaves org 2 untouched **with or without the fix** — the first version of
+case C19 passed under the mutation, which is how the overstatement was caught.
+
+So this half is **latent, not active**: reachable only where RLS does not apply — the table owner, a
+service role, a `SECURITY DEFINER` function, a migration, a bulk import. `10_constraints_test`
+renames as the owner, which is why it saw it at all. It is fixed now because **P1-5e's CSV upsert is
+exactly that shape**, and because the error was luck: had org 2 held a *deeper* node under the same
+path, `subpath()` would have succeeded and silently re-pathed another tenant's subtree.
+
+C19 now runs as the owner deliberately, with a comment saying why an org-1-admin version of the same
+case tests nothing.
+
+#### Verification
+
+`supabase/tests/80_cross_org_test.sql`, **20 cases, all failing before 0012**. All eight SQL files
+pass cold on UTF-8; three mutations, each caught by a named case:
+
+| # | Mutation | Caught by |
+| --- | --- | --- |
+| Y1 | `app_can_read_node` loses its org scope | C1, C2, C3, C4, C5, C7 |
+| Y2 | `app_can_edit_node` loses its org scope | **C6 alone** |
+| Y3 | `nodes_cascade_path` loses its org scope | **C19** |
+
+**Y2 is the instructive one.** It was expected to break C8/C9/C10 — the "an UPDATE of another
+tenant's runs affects zero rows" cases. It did not: Postgres requires a row to be visible under the
+SELECT policy before UPDATE or DELETE can touch it, so those three are guarded by the **read** path
+and would keep passing while the edit path was wide open. C6, which calls `app_can_edit_node`
+directly, is the only case that actually guards editing. Three cases that look like write tests are
+read tests wearing a disguise — noted in the file so nobody deletes C6 as redundant.
+
+#### What this changes about the standard
+
+[[verification-standard]] rule 5 says to record what you did *not* verify. That line has been in
+every note since P1-5a, and it was load-bearing: the moment the blind spot was closed, it produced a
+security bug on the first run. **An untested invariant in a multi-tenant product is not a gap in
+coverage, it is an unexamined claim about safety** — and the cost of leaving it untested rises with
+every RPC written on top of it. Two migrations, five RPCs and a whole board UI were built over this
+one.
