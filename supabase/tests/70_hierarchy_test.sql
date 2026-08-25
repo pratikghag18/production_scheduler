@@ -1448,6 +1448,184 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_U7;
 
+-- ============================================================================
+-- W1-W7 (design session, Aug 25, migration 0011 / design plan §19.13):
+-- whitespace parity between the SQL name rules and the client's
+-- `String.trim()`. Before 0011, bare `trim()` stripped SPACES ONLY, so
+-- W1-W3 ACCEPTED input the client rejects and W4-W5 STORED the name with its
+-- whitespace still attached.
+--
+-- W3 is the load-bearing case: it uses NBSP (U+00A0), which the obvious
+-- `btrim(x, E' \t\n\r\f\v')` fix does NOT strip. That fix passes W1, W2,
+-- W4 and W5 and fails W3 -- which is exactly why the character class is
+-- `[\s\uFEFF]` and not an ASCII set. W5 covers the U+FEFF arm that plain
+-- `\s` misses, and it is the character a CSV file opens with.
+--
+-- W6 pins the opposite edge: U+200B is NOT whitespace to JS, so it must not
+-- be stripped here either. Parity is the requirement, not aggressiveness.
+-- ============================================================================
+
+\echo 'W1: save_hierarchy_levels with a TAB-only level name -> invalid_argument (blank)'
+SAVEPOINT sp_W1;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_caught boolean := false; v_detail jsonb; v_detail_raw text; v_sqlstate text;
+BEGIN
+  BEGIN
+    PERFORM save_hierarchy_levels(jsonb_build_array(
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name',chr(9),'is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
+    ));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    v_caught := true;
+    BEGIN
+      v_detail := v_detail_raw::jsonb;
+    EXCEPTION WHEN OTHERS THEN
+      v_detail := NULL;
+    END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'invalid_argument' THEN
+    RAISE NOTICE 'PASS W1';
+  ELSE
+    RAISE NOTICE 'FAIL W1: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL W1: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_W1;
+
+\echo 'W2: create_node(Line 1, TAB) -> invalid_argument (blank)'
+SAVEPOINT sp_W2;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_caught boolean := false; v_detail jsonb; v_detail_raw text; v_sqlstate text;
+BEGIN
+  BEGIN
+    PERFORM create_node('30000000-0000-0000-0000-000000000004', chr(9));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    v_caught := true;
+    BEGIN
+      v_detail := v_detail_raw::jsonb;
+    EXCEPTION WHEN OTHERS THEN
+      v_detail := NULL;
+    END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'invalid_argument' THEN
+    RAISE NOTICE 'PASS W2';
+  ELSE
+    RAISE NOTICE 'FAIL W2: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL W2: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_W2;
+
+\echo 'W3: rename_node(Cell 1, NBSP U+00A0) -> invalid_argument (btrim over an ASCII set would MISS this)'
+SAVEPOINT sp_W3;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_caught boolean := false; v_detail jsonb; v_detail_raw text; v_sqlstate text;
+BEGIN
+  BEGIN
+    PERFORM rename_node('30000000-0000-0000-0000-000000000007', chr(160));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_detail_raw = PG_EXCEPTION_DETAIL;
+    v_caught := true;
+    BEGIN
+      v_detail := v_detail_raw::jsonb;
+    EXCEPTION WHEN OTHERS THEN
+      v_detail := NULL;
+    END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'invalid_argument' THEN
+    RAISE NOTICE 'PASS W3';
+  ELSE
+    RAISE NOTICE 'FAIL W3: caught=%, sqlstate=%, detail=%', v_caught, v_sqlstate, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL W3: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_W3;
+
+\echo 'W4: create_node(Line 1, TAB + ''Cell 9'' + LF) stores the name TRIMMED and slugs it'
+SAVEPOINT sp_W4;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_res jsonb;
+BEGIN
+  v_res := create_node('30000000-0000-0000-0000-000000000004', chr(9) || ' Cell 9 ' || chr(10));
+  IF v_res->>'name' = 'Cell 9' AND v_res->>'path' = 'plant_1.assembly.line_1.cell_9' THEN
+    RAISE NOTICE 'PASS W4';
+  ELSE
+    RAISE NOTICE 'FAIL W4: name=%, path=%', v_res->>'name', v_res->>'path';
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL W4: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_W4;
+
+\echo 'W5: rename_node(Cell 1, BOM U+FEFF + ''Cell One'') strips the BOM -- the character a CSV file starts with'
+SAVEPOINT sp_W5;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_res jsonb;
+BEGIN
+  v_res := rename_node('30000000-0000-0000-0000-000000000007', chr(65279) || 'Cell One');
+  IF v_res->>'name' = 'Cell One' AND v_res->>'path' = 'plant_1.assembly.line_1.cell_one' THEN
+    RAISE NOTICE 'PASS W5';
+  ELSE
+    RAISE NOTICE 'FAIL W5: name=%, path=%', v_res->>'name', v_res->>'path';
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL W5: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_W5;
+
+\echo 'W6: app_trim_ws does NOT strip U+200B ZWSP -- JS String.trim() does not either, and parity is the point'
+SAVEPOINT sp_W6;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_got text;
+BEGIN
+  v_got := app_trim_ws(chr(8203) || 'a' || chr(8203));
+  IF v_got = chr(8203) || 'a' || chr(8203) THEN
+    RAISE NOTICE 'PASS W6';
+  ELSE
+    RAISE NOTICE 'FAIL W6: app_trim_ws stripped U+200B; got %', v_got;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL W6: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_W6;
+
+\echo 'W7: app_trim_ws(NULL) is '''' -- matches the client''s String(d?.name ?? '''').trim()'
+SAVEPOINT sp_W7;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_got text;
+BEGIN
+  v_got := app_trim_ws(NULL);
+  IF v_got = '' THEN
+    RAISE NOTICE 'PASS W7';
+  ELSE
+    RAISE NOTICE 'FAIL W7: app_trim_ws(NULL) = %', coalesce(v_got,'<NULL>');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL W7: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_W7;
+
 RESET ROLE;
-\echo '70_hierarchy_test.sql: all 43 cases executed (see NOTICE output above for PASS/FAIL per case)'
+\echo '70_hierarchy_test.sql: all 50 cases executed (see NOTICE output above for PASS/FAIL per case)'
 ROLLBACK;

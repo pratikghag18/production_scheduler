@@ -74,12 +74,7 @@ export function AssignmentPopover({
   const timeLabel = `${formatFull(addMinutes(windowStart, assignment.startMin))} – ${formatClock(addMinutes(windowStart, assignment.endMin))}${assignment.eligibilityOverride ? " · certification override" : ""}`;
 
   return (
-    <BoardPopover
-      anchor={anchor}
-      onClose={onCancel}
-      title={`${name} — ${product?.name ?? "—"}`}
-      width={272}
-    >
+    <BoardPopover anchor={anchor} onClose={onCancel} title={`${name} — ${product?.name ?? "—"}`}>
       <div className={styles.body}>
         <label htmlFor="ap-eff">Efficiency %</label>
         <input

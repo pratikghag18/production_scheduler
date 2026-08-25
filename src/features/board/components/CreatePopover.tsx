@@ -123,7 +123,7 @@ export function CreatePopover({
     (blocked || (needsOverride && (!overrideChecked || overrideReason.trim() === "")));
 
   return (
-    <BoardPopover anchor={anchor} onClose={onCancel} title="New" width={272}>
+    <BoardPopover anchor={anchor} onClose={onCancel} title="New">
       <div className={styles.body}>
         <div className={styles.seg}>
           <button

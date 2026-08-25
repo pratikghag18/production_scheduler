@@ -8,13 +8,19 @@
   border-radius: 9px;
   box-shadow: 0 6px 24px rgba(11, 11, 11, 0.18);
   padding: calc(12px * var(--chrome-scale, 1));
-  /* The mockup's `#pop` carries `width: 260px`; the port dropped it. Without
-     a width a fixed-position element shrink-to-fits, and the target row's
-     flex ratios then drive the intrinsic width — which is how the unit input
-     ended up rendering past the popover's own right edge. */
-  /* Scales with the type inside it — a fixed 260px box holding 1.75x text
-     overflows exactly the way the unscaled unit field did in P1-4b. */
-  width: calc(260px * var(--chrome-scale, 1));
+  /* Design plan §19.11 / brief P1-5c §5: the mockup's `#pop` carried
+     `width: 260px`; this rule has been `260px` since it was ported, and has
+     NEVER taken effect, because BoardPopover.tsx set `width` inline
+     (`style={{ ..., width }}`, default 272) and an inline style always
+     outranks a stylesheet rule. 272 -- not 260 -- is therefore what has
+     actually been rendering, and what every one of the five callers passed
+     explicitly (`width={272}`). This rule is now the ONLY source of the
+     popover's width (the inline style is gone, and BoardPopover.tsx reads
+     the rendered box back with getBoundingClientRect() instead of holding a
+     second, competing number), so the base is set to the value that was
+     really shipping -- 272 -- rather than silently reverting to the 260
+     the mockup specified and nobody ever saw rendered. */
+  width: calc(272px * var(--chrome-scale, 1));
 }
 
 .h3 {

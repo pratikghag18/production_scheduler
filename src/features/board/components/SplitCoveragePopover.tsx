@@ -43,12 +43,7 @@ export function SplitCoveragePopover({
   const peakPercent = participants.reduce((sum, p) => sum + p.efficiencyPercent, 0);
 
   return (
-    <BoardPopover
-      anchor={anchor}
-      onClose={onCancel}
-      title={`Split coverage — ${operatorName}`}
-      width={272}
-    >
+    <BoardPopover anchor={anchor} onClose={onCancel} title={`Split coverage — ${operatorName}`}>
       <div className={styles.body}>
         {participants.map((p, i) => (
           <div

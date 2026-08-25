@@ -58,12 +58,7 @@ export function RunPopover({
   const timeLabel = `${formatFull(addMinutes(windowStart, run.startMin))} – ${formatClock(addMinutes(windowStart, run.endMin))} · staffed ${formatNumber(staffedHc)}/${run.plannedHeadcount ?? "—"}`;
 
   return (
-    <BoardPopover
-      anchor={anchor}
-      onClose={onCancel}
-      title={`Run — ${product?.name ?? productId}`}
-      width={272}
-    >
+    <BoardPopover anchor={anchor} onClose={onCancel} title={`Run — ${product?.name ?? productId}`}>
       <div className={styles.body}>
         <label htmlFor="rp-hc">Planned headcount</label>
         <input

@@ -21,7 +21,7 @@ export function ConfirmPopover({
   onCancel: () => void;
 }) {
   return (
-    <BoardPopover anchor={anchor} onClose={onCancel} title="Continue?" width={272}>
+    <BoardPopover anchor={anchor} onClose={onCancel} title="Continue?">
       <div className={styles.body}>
         <p className={styles.message}>{message}</p>
         <div className={styles.row}>

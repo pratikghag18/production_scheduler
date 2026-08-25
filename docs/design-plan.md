@@ -1,6 +1,6 @@
 # Production Scheduler — Design Plan
 
-**Status:** Draft v1.7 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 Aug 25**)
+**Status:** Draft v1.9 · August 25, 2026 (v1 Aug 18 · §14–15 Aug 20 · §16 shifts Aug 21 · §17 build decisions Aug 21 · §18 board rendering Aug 24 · §19 hierarchy admin Aug 25 · **§19.12 P1-5b verification + D78/D79 · §19.13 whitespace parity + D80 · §19.14 P1-5c built + D81/D82** Aug 25)
 **Phase:** 1 — Core product. DB schema (P1-2), API surface (P1-3a/b), the board UI (P1-4a–e) and the hierarchy admin database + client layers (P1-5a/b) are built; P1-5a/5b verified by an independent design-session probe.
 **Progress tracking:** current status and remaining work live in [`docs/roadmap.md`](roadmap.md) — this document holds decisions, that one holds state.
 
@@ -961,6 +961,11 @@ misled into thinking those cases are *about* the mutated line.
 
 ### 19.4 Scope boundary for P1-5
 
+> **SUPERSEDED (Aug 25) — the three-way split below is stale.** §19.9 re-split P1-5 into four
+> and §19.13 renumbered again. **Current: 5a database ✓ · 5b client layer ✓ · 5c board debts ·
+> 5d admin screens · 5e CSV import.** The Part-A/Part-B reasoning below still holds; only the
+> brief NUMBERS changed. Read §19.9 and §19.13 before quoting this section.
+
 Onboarding splits into three briefs along the line [[brief-writing-rules]] rule 1 draws:
 
 - **P1-5a — hierarchy levels + node tree, database half.** Everything above. Fully executable
@@ -1429,3 +1434,206 @@ Part B (five wrappers, six error codes, hooks) was never compiled — no npm in 
 agent's own flag is worth carrying: `useMutation<TData, SchedulerError, TVars>` puts a typed error in
 the second generic, which nothing else in this codebase does. **Cross-org isolation remains untested
 by anything** — the seed still has one org.
+
+### 19.13 The whitespace fix, and the four days the SQL suite spent on the wrong database (Aug 25, 2026)
+
+§19.12 recorded one client/server divergence: Postgres `trim()` strips spaces only, so
+`save_hierarchy_levels` accepted a tab-only level name the client rejects. Fixing it took three
+attempts, each wrong for a different reason, and turned up something considerably larger than the
+bug it started from.
+
+#### It was four sites, not one (verification-standard rule 7, third time)
+
+The client only disagreed about one call. Grepping for what *else* was conditioned on the same fact
+found **four bare `trim()` calls across three functions** — and two of them **store** the result
+rather than validate it, so tab-padded names were being persisted:
+
+| function | call | role |
+| --- | --- | --- |
+| `save_hierarchy_levels` | blank-name check | validate |
+| `save_hierarchy_levels` | `v_name` assignment | **store** |
+| `create_node` | `v_name` assignment | validate + **store** |
+| `rename_node` | `v_name` assignment | validate + **store** |
+
+`create_node(parent, E'\t')` therefore created a real node named `E'\t'`, whose slug is `n_`. Fixing
+only the site the client complained about would have left three, and the mutation that reverts
+exactly those three (X5 below) fails four cases — so this is measured, not asserted.
+
+#### Three candidate character sets, two of them measurably wrong
+
+**Attempt 1 — `btrim(x, E' \t\n\r\f\v')`.** This is what §19.12 itself recommended, and it is wrong.
+Measured against JS `String.trim()` over a 12-character probe it matches on **6 of 12**, silently
+leaving NBSP, EM SPACE, IDEOGRAPHIC SPACE, LINE SEPARATOR and OGHAM SPACE diverging. It is the shape
+of fix that looks complete and closes half the hole.
+
+**Attempt 2 — `[\s\uFEFF]`.** Matched JS on 12 of 12 when measured. Then it **failed in the actual
+test suite**, because `\s` is **collation-dependent**: under the `C` locale it does not match NBSP at
+all. A fix that passes on the machine it was written on and fails on the machine it ships to.
+
+**Attempt 3 — an explicit code-point class**, exactly ECMA-262's WhiteSpace + LineTerminator:
+
+```
+[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]
+```
+
+Naming code points makes it collation-independent. Verified character by character against Node v22
+on an 18-point probe: exact parity, including U+FEFF (the character a CSV file opens with) and
+excluding U+200B ZWSP, which JS does not strip either. **Parity is the requirement, not
+aggressiveness** — a server that strips *more* than the client is the same invariant violation
+pointing the other way.
+
+One authoritative implementation, `app_trim_ws(text)`, now backs all four sites; nothing open-codes a
+trim. Its comment says why, because the next reader's instinct will be to simplify it back to
+`trim()`.
+
+#### D80 — the scratch database was SQL_ASCII, and had been all along
+
+Attempt 2 failed for a reason worth more than the fix: `scripts/verify-db.sh` ran a bare `initdb`,
+the container sets no locale, and PostgreSQL therefore defaulted to **SQL_ASCII / C**. **Every SQL
+test this project has ever run — all of P1-2's 31 cases, P1-3a's 28, P1-5a's 43 — has run against a
+database whose encoding and collation do not match Supabase, which is UTF-8.**
+
+What that actually cost:
+
+- Non-ASCII cases were not merely untested but **unwritable**: `chr(5760)` raises *"requested
+  character too large for encoding"*. The whitespace cases could not have been expressed at all.
+- `lower()` stops doing Unicode case mapping — and `lower()` is the first thing `slugify()` does.
+  The function whose corpus the P1-5b brief calls "the contract" was being exercised by a database
+  that cannot reproduce half of it.
+- It is invisible. Every test passed. A suite reports green just as loudly on the wrong database.
+
+This is [[verification-standard]] rule 6 — the instrument is code and it is the code no one tests —
+at the largest scale it has appeared yet. §19.11's version was a CSS repro that modelled the
+stylesheet instead of the app; this one is a *whole database* configured unlike production, and it
+sat under every SQL result this project has recorded.
+
+**D80: `verify-db.sh` creates the scratch cluster and database as UTF-8 (`--encoding=UTF8
+--locale=C.utf8`), re-initialising an existing cluster that has the wrong encoding, and then
+ASSERTS the resulting encoding rather than trusting it.** The assertion is the part that matters:
+its absence is what let this run for four days.
+
+`C.utf8` is the only UTF-8 locale in the container. Before settling for it, the full `slugify`
+corpus was run on a `C.utf8` database and on an ICU `en-US` database and **every row agrees** — so
+the collation *provider* changes no answer here and the **encoding** was the whole problem. That
+also retroactively clears the six Unicode rows committed to `src/test/hierarchy.test.ts` in §19.12:
+they depend on UTF-8, not on a particular collation, so they hold on Supabase.
+
+#### Verification
+
+All 11 migrations apply cleanly and **all seven SQL test files pass cold on UTF-8**, with
+`70_hierarchy_test.sql` now at **50 cases** (43 + W1–W7). Six mutations, each applied alone and
+restored:
+
+| # | Mutation | Cases that failed |
+| --- | --- | --- |
+| X1 | `app_trim_ws` reverts to bare `trim()` | W1, W2, W3, W4, W5 |
+| X2 | the plausible `btrim(ASCII set)` fix — **attempt 1** | W3, W5 |
+| X3 | the collation-dependent `[\s\uFEFF]` class — **attempt 2** | W3 |
+| X4 | class wrongly includes U+200B ZWSP | W6 |
+| X5 | only `save_hierarchy_levels` fixed, the other two reverted | W2, W3, W4, W5 |
+| X6 | `app_trim_ws` drops the NULL coalesce | W7 |
+
+X2 and X3 are the two wrong answers this section describes, kept as mutations so that a future
+"simplification" back to either one fails a named test instead of quietly reopening the hole. W3
+(NBSP) is the load-bearing case: it is the single case that separates all three candidate
+character sets.
+
+#### The §19.4 split is stale — read §19.9 instead
+
+§19.4 still describes P1-5 as three briefs with "P1-5b — the admin pages" and "P1-5c — CSV import".
+§19.9 re-split it into four and never came back to correct §19.4. The current split is: **5a
+database ✓ · 5b client layer ✓ · 5c board debts · 5d admin screens · 5e CSV import** — the last
+three renumbered again here, because the popover defect and the two missing regression tests are
+board work that has nothing to do with the admin feature and should not ride inside it.
+[[decision-record-drift]] with the design plan drifting against *itself*.
+
+### 19.14 P1-5c built — and the delivery rule that was right for new files and wrong for edits (Aug 25, 2026)
+
+All three board debts closed: the popover's inline-width defect (§19.11), and committed regression
+tests for §19.6 and §19.8, neither of which had been guarded by anything.
+
+**The agent found a real error in the brief and it was mine.** §4.3 said `OperatorPanel.module.css`
+uses `--ui-scale` "19 times". It uses it **24 times across 19 lines** — I had run `grep -c`, which
+counts lines, not occurrences. The conclusion was unaffected (the panel is correctly excluded), but
+the number was wrong, and it was wrong in the section that tells the agent how to count.
+
+#### D81 — reasoning about a token's DEFINITION instead of its RANGE
+
+The brief left the resize-tracking mechanism to the agent, asking it to say which it chose and why.
+It chose a `ResizeObserver` on the popover alone, with this argument: `--chrome-scale` is a `clamp()`
+of `100vw`, so a viewport resize changes the box's own computed width, which *is* a resize of the
+observed element — so no `window` resize listener is needed. It quoted the real line to support it,
+which is exactly what §11 item 4 asked for.
+
+**The argument is true of the definition and false across the range this app runs in.** Evaluating
+`clamp(1, 0.75 + 0.25 * (100vw / 1440px), 1.35)`:
+
+| viewport | `--chrome-scale` | popover width |
+| --- | --- | --- |
+| 800–1440px | **1.0000 (pinned)** | **272.0px (constant)** |
+| 1600px | 1.0278 | 279.6px |
+| 1920px | 1.0833 | 294.7px |
+| 3456px+ | 1.3500 (pinned) | 367.2px |
+
+It is **flat at 1.0 for every viewport ≤ 1440px** — which is every ordinary laptop, and every
+windowed browser. Below that width, resizing changes the popover's width by exactly nothing, the
+observer never fires, and the `window.innerWidth` captured at the last render goes stale. Open a
+popover near the right edge, narrow the window, and it stays where it was and ends up off screen —
+*the precise failure this component was being fixed to prevent.*
+
+Fixed by tracking the viewport in state behind a `window` resize listener, with the same
+change-guard as the size measurement.
+
+**D81 sharpens D79.** D79 said: quote the artifact, do not predict it. That is necessary and not
+sufficient — the agent *did* quote the line. The missing step is the next one: **evaluate the
+expression across the range you actually operate in.** A `clamp()`, a media query, a breakpoint and
+a `Math.min` all have the same property — they are locally constant, and reading them tells you the
+formula while only evaluating them tells you the behaviour. Ask "at what input does this stop
+changing?"
+
+#### Two more from the independent probe
+
+**A NaN anchor propagated all the way to the DOM.** The §8 table probed wrong-but-well-formed inputs
+and never a malformed one — [[verification-standard]] rule 4 for the third brief running, after
+P1-5a's `delete_node(id, NULL)` and P1-5b's throwing `validateLevelDraft`. `NaN` survives both
+`Math.max` and `Math.min`, so `resolvePopoverPlacement` returned `{ left: NaN }`, React wrote
+`left: NaNpx`, the browser discarded it, and a `position: fixed` popover then renders at its **static**
+position instead of being clamped on screen.
+
+The tell was rule 7 again: the function sanitised **three of its five** numeric inputs — `width`,
+`height`, and both viewport dimensions — and not the anchor, `margin` or `gap`. A function that is
+carefully defensive about some of its arguments and not others is describing where its author's
+attention went, not where the risk is. Fixed; `P17`–`P24` guard it, and reverting the fix fails four
+by name.
+
+**The agent's suite is stronger than the reference I wrote.** Its group-P cases assert the whole
+`{left, top}` object with `toEqual`; my reference probe asserted single fields for several cases. So
+M3 and M4 break more cases in its build than the brief's table predicted, and it reported the
+difference rather than quietly matching the table. That is the right behaviour and the table has
+been annotated rather than the suite weakened.
+
+#### D82 — heredoc delivery is right for NEW files and wrong for EDITS
+
+**The run cost 370k against P1-5b's 243k, for a brief with half the assertions.** 239 tool calls
+against 62. The structural difference is not brief length: **P1-5b created five new files; P1-5c
+edited eight existing ones.**
+
+§2.2 mandates `cat > file <<'EOF'` heredoc delivery for everything, a rule adopted after P1-5a lost
+a third of its run to a base64 fallback. For a new file it is optimal. For an *edit* it is close to
+the worst available option: the whole file has to be read into context, transcribed with the change
+applied, and written back — so a three-line change to a 311-line component costs 311 lines of input
+and 311 of output, and risks transcription drift. The agent noticed the risk, defended against it by
+md5-verifying its transcription against the original before every edit, and **caught a real
+mismatch that way in `RunPopover.tsx`.** The defence worked; it also doubled the cost of every edit.
+
+**D82: briefs specify delivery by operation, not by file.**
+
+- **New file** → `device_bash` heredoc, as now.
+- **Edit to an existing file** → a targeted in-place `python3` read-modify-write over `device_bash`
+  (read, assert the old substring is present, replace, write), which never brings the untouched
+  parts of the file through context at all. The `assert old in s` is the integrity check that
+  replaces the md5 dance.
+- Still never a tarball, `SendUserFile`, or base64.
+
+This session used exactly that technique for migration 0011 and the §19.13 edits; the brief simply
+never told the agent it was allowed to.

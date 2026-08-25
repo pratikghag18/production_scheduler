@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { decideSessionUpdate } from "./session";
+import type { AuthEventKind } from "./session";
 
 /**
  * The caller's `user_profiles` row (brief P1-3b §7), readable under RLS by
@@ -40,7 +42,19 @@ export function useSession(): UseSessionResult {
     let cancelled = false;
 
     /**
-     * Drop every cached query when the signed-in identity changes.
+     * Design plan §19.8 / brief P1-5c §4.2/§7.4: the decision of what to do
+     * about a session update -- reset the cache, spin the loading state,
+     * reload the profile -- is now made in ONE place,
+     * `decideSessionUpdate` (src/features/auth/session.ts), a pure function
+     * this hook only calls and applies. It used to be three independent
+     * statements at two call sites, one of which (`setLoading(true)`) was
+     * written unconditionally while its neighbour (`resetQueries()`) was
+     * correctly guarded on the identity actually changing -- so the cache
+     * survived a token refresh while the whole board still flashed through
+     * the `sessionLoading` branch. Deriving all three flags from a single
+     * `identityChanged` computation, once, is what stops the two from
+     * drifting apart again: there is one answer now, not two call sites
+     * that each have to remember to ask the same question.
      *
      * Query keys deliberately do NOT carry the user id: adding one would give
      * each identity its own cache entry, but the previous user's rows would
@@ -51,24 +65,19 @@ export function useSession(): UseSessionResult {
      * observers pending with nothing to fetch them again, so the board sticks
      * on "Loading..." until a manual refresh. resetQueries returns queries to
      * their initial state and re-runs the active ones.
-     *
-     * Guarded on the id actually changing, because onAuthStateChange also
-     * fires on token refresh, and clearing the board on a routine refresh
-     * would blank the screen every hour for no reason.
-     *
-     * RETURNS whether the identity actually changed (design plan §19.8).
-     * It used to return void, and the caller below therefore had no way to
-     * make the SAME distinction for `setLoading` -- so the cache survived a
-     * token refresh while the whole board still flashed through the
-     * `sessionLoading` branch. The guard existed; only one of the two
-     * statements it was written for was using it.
      */
-    function clearCacheOnIdentityChange(nextSession: Session | null): boolean {
+    function applyStep(nextSession: Session | null, kind: AuthEventKind) {
       const nextUserId = nextSession?.user.id ?? null;
-      if (lastUserId.current === nextUserId) return false;
-      lastUserId.current = nextUserId;
-      void queryClient.resetQueries();
-      return true;
+      const step = decideSessionUpdate(lastUserId.current, { kind, nextUserId });
+      lastUserId.current = step.nextLastUserId;
+
+      if (step.decision.resetCache) void queryClient.resetQueries();
+      if (step.decision.setLoading) setLoading(true);
+      if (step.decision.reloadProfile) {
+        void loadProfile(nextSession).finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      }
     }
 
     async function loadProfile(nextSession: Session | null) {
@@ -96,34 +105,31 @@ export function useSession(): UseSessionResult {
       setProfile({ id, orgId, userId, role, defaultCreateMode });
     }
 
+    // First mount must always load: `decideSessionUpdate`'s "initial" kind
+    // always resolves `setLoading`/`reloadProfile` to true regardless of
+    // identity (even signed-out, since `loading` starts true and something
+    // must clear it) -- this path's behaviour is unchanged from before the
+    // refactor.
     supabase.auth.getSession().then(({ data }) => {
       if (cancelled) return;
-      clearCacheOnIdentityChange(data.session);
       setSession(data.session);
-      void loadProfile(data.session).finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      applyStep(data.session, "initial");
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (cancelled) return;
-      const identityChanged = clearCacheOnIdentityChange(nextSession);
 
       // The token itself may have changed even when the user did not, so the
       // session object is always replaced.
       setSession(nextSession);
 
-      // ...but a TOKEN_REFRESH (supabase-js fires one roughly hourly) is the
-      // same person with the same profile. Re-fetching it is a wasted round
-      // trip, and `setLoading(true)` is worse than wasted: `BoardPage` renders
-      // a bare "Loading session..." for that state, so an invisible background
-      // refresh would tear the whole board down and rebuild it. Bail out.
-      if (!identityChanged) return;
-
-      setLoading(true);
-      void loadProfile(nextSession).finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      // A TOKEN_REFRESH (supabase-js fires one roughly hourly) is the same
+      // person with the same profile: `decideSessionUpdate`'s "change" kind
+      // resolves all three flags to `identityChanged`, so a same-identity
+      // event resets nothing, spins no loading state, and re-fetches
+      // nothing -- `applyStep` becomes a no-op past updating `lastUserId`
+      // (to the same value) below.
+      applyStep(nextSession, "change");
     });
 
     return () => {

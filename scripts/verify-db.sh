@@ -51,11 +51,59 @@ note_pass "PostgreSQL 16 binaries located at $PGBIN"
 # ------------------------------------------------------------------------------
 step "2. initdb (as ubuntu, not root) + start (unix socket only)"
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# ENCODING IS LOAD-BEARING (design session, Aug 25 2026 — design plan §19.13).
+#
+# This script used to run a bare `initdb`. The container sets no locale, so
+# PostgreSQL defaulted to **SQL_ASCII / C** — and every SQL test this project
+# has ever run has therefore run on a database whose encoding and collation
+# do NOT match Supabase, which is UTF-8.
+#
+# What that cost: any test touching non-ASCII text was not merely untested but
+# UNWRITABLE — `chr(5760)` raises "requested character too large for encoding",
+# so the whitespace-parity cases in 70_hierarchy_test.sql (W1–W7) could not
+# even be expressed. `lower()` also stops doing Unicode case mapping, which is
+# exactly what `slugify()` depends on.
+#
+# `C.utf8` is the only UTF-8 locale present in this container. It was MEASURED
+# against an ICU `en-US` database on the full slugify corpus and every row
+# agrees, so the collation *provider* does not change any answer here; the
+# ENCODING is what mattered.
+#
+# The cluster is re-initialised if it exists with the wrong encoding, because a
+# database's encoding cannot be changed after the fact.
+# ------------------------------------------------------------------------------
+PG_WANT_ENCODING=UTF8
+PG_WANT_LOCALE=C.utf8
+
+pgdata_encoding() {
+  # Read the encoding initdb baked in, without needing the server running.
+  [ -f "$PGDATA/PG_VERSION" ] || return 1
+  grep -oP '(?<=^ENCODING = ).*' "$PGDATA/pg_control_stub" 2>/dev/null && return 0
+  # No stub file in a normal cluster; ask the server if it is up, else assume unknown.
+  if runuser -u "$PGSUPERUSER" -- "$PGBIN/pg_ctl" -D "$PGDATA" status >/dev/null 2>&1; then
+    runuser -u "$PGSUPERUSER" -- "$PGBIN/psql" -h "$PGSOCK" -U "$PGSUPERUSER" -d postgres \
+      -tAc "select pg_encoding_to_char(encoding) from pg_database where datname='template1'" 2>/dev/null
+  else
+    echo UNKNOWN
+  fi
+}
+
+if [ -f "$PGDATA/PG_VERSION" ]; then
+  existing="$(pgdata_encoding || echo UNKNOWN)"
+  if [ "$existing" != "$PG_WANT_ENCODING" ]; then
+    echo "PGDATA at $PGDATA has encoding '${existing:-UNKNOWN}', not $PG_WANT_ENCODING — re-initialising."
+    runuser -u "$PGSUPERUSER" -- "$PGBIN/pg_ctl" -D "$PGDATA" -m immediate stop >/dev/null 2>&1 || true
+    rm -rf "$PGDATA"
+  else
+    echo "PGDATA already initialised at $PGDATA with $PG_WANT_ENCODING, reusing."
+  fi
+fi
+
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
   runuser -u "$PGSUPERUSER" -- "$PGBIN/initdb" -D "$PGDATA" --auth=trust -U "$PGSUPERUSER" \
+    --encoding="$PG_WANT_ENCODING" --locale="$PG_WANT_LOCALE" \
     || { note_fail "initdb"; exit 1; }
-else
-  echo "PGDATA already initialised at $PGDATA, reusing."
 fi
 
 runuser -u "$PGSUPERUSER" -- mkdir -p "$PGSOCK"
@@ -78,9 +126,19 @@ step "3. createdb scheduler_test (dropped and recreated fresh every run)"
 # ------------------------------------------------------------------------------
 runuser -u "$PGSUPERUSER" -- "$PGBIN/dropdb" -h "$PGSOCK" --if-exists "$DB" \
   || { note_fail "dropdb"; exit 1; }
-runuser -u "$PGSUPERUSER" -- "$PGBIN/createdb" -h "$PGSOCK" "$DB" \
+runuser -u "$PGSUPERUSER" -- "$PGBIN/createdb" -h "$PGSOCK" \
+  --encoding="$PG_WANT_ENCODING" --locale="$PG_WANT_LOCALE" --template=template0 "$DB" \
   || { note_fail "createdb"; exit 1; }
-note_pass "database $DB created fresh"
+
+# Assert it, rather than trusting it — this is the check whose absence let the
+# suite run on SQL_ASCII for four days.
+db_enc="$(runuser -u "$PGSUPERUSER" -- "$PGBIN/psql" -h "$PGSOCK" -U "$PGSUPERUSER" -d "$DB" \
+  -tAc "select pg_encoding_to_char(encoding) from pg_database where datname = current_database()")"
+if [ "$db_enc" != "$PG_WANT_ENCODING" ]; then
+  note_fail "database $DB has encoding $db_enc, expected $PG_WANT_ENCODING"
+  exit 1
+fi
+note_pass "database $DB created fresh ($db_enc, locale $PG_WANT_LOCALE — matches Supabase's UTF-8)"
 
 # ------------------------------------------------------------------------------
 step "4. Apply supabase/tests/00_harness.sql (test-only auth shim)"
