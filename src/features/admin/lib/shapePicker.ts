@@ -98,6 +98,41 @@ export function buildShapeSummaries(
 }
 
 /**
+ * The shape picker's filter (0021 §2). `editableIds` is what
+ * `editable_shape_ids()` answered: the structures this person may actually
+ * edit — every structure in the company for a company admin, their own
+ * site's for a site admin.
+ *
+ * ⭐ IT FAILS **OPEN**, AND THAT IS THE OPPOSITE OF `fetchAdminAnywhere`,
+ * WHICH FAILS CLOSED. The difference is what the answer buys. `adminAccess`
+ * decides whether a screen OPENS, so an unanswered question there has to mean
+ * "no". This decides only what a list OFFERS, and the server refuses every
+ * edit on its own regardless (0020's W6/W7) — so an unanswered question here
+ * degrades to exactly the behaviour that shipped before this function
+ * existed: every structure listed, and a `not_permitted` on the ones that
+ * are not yours. Failing closed would instead hide a site admin's OWN
+ * structure from them the moment one RPC hiccups, which is a broken screen
+ * bought for no safety at all.
+ *
+ * `null`, `undefined`, and anything that is not an array all mean "no answer"
+ * — the value crosses a network boundary and `Array.isArray` is the only
+ * honest test of what came back. NEVER THROWS.
+ *
+ * The invariant in this file's header still holds and is worth restating
+ * because this function is the first one that could break it: anything the
+ * client hides, the server must also refuse. It does — the same predicate,
+ * `app_is_admin_for_template`, decides both.
+ */
+export function filterEditableShapes(
+  summaries: readonly ShapeSummary[],
+  editableIds: readonly string[] | null | undefined,
+): ShapeSummary[] {
+  if (!Array.isArray(editableIds)) return summaries.slice();
+  const allowed = new Set<string>(editableIds);
+  return summaries.filter((s) => allowed.has(s.id));
+}
+
+/**
  * Falls back, never sticks (§6.3). The case that matters is deleting the
  * shape currently being viewed: the selection must move to a surviving
  * shape, not point at nothing.

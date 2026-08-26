@@ -4794,3 +4794,202 @@ The brief forbids a `thresholdPx <= 0` short-circuit because `Math.hypot` is nev
 3. **No touch drag on the level list** — no `⠿` handle was added there, and `rowIsDragSource` is fail-closed, so a finger gets the arrows. Consistent with D95a, but a real gap if touch reordering of levels was expected.
 4. **StrictMode double-invocation**: the agent found P1-5g fires `move_node` twice per drop in development, because side effects sat inside a state updater. It moved both components to a `useRef` mirror with synchronous transitions. **A behaviour change to existing code the brief did not ask for** — judged in scope because §5.3 is about that review's findings. Worth a second look.
 5. `src/test/treeDrag.test.ts`'s header still says *"43 plain `it()` cases"* while the file has 79 — the same expired-comment class as §6.2.
+
+---
+
+## §19.50 — The no-op caret: closing open item 1 of §19.49, and the second theorem about a row's zones
+
+§19.49 left five items flagged. This closes the first. The other four are still open and still
+listed there.
+
+### The defect
+
+`rowDropZones` offered a `before`/`after` placement on every legal sibling row, including the two
+seams the dragged node is already sitting on. Concretely: dragging **Cell B** out of `[A, B, C]`,
+the `after` half of **A** and the `before` half of **C** both resolve to index 1 — where B already
+is. The user got a caret that promised a move, dropped, and nothing happened. Two dead zones per
+drag, on every drag, on both surfaces.
+
+It is not a rendering bug and it is not in the component. `place_node` splices the dragged node
+into its siblings *with itself removed*, so the resulting order is unchanged exactly when
+
+- the destination parent **is** the node's current parent, **and**
+- the destination index **equals** the node's own position in the full sibling list.
+
+That is a fact about the placement algebra, so the rule belongs in the pure layer — which is why
+the agent was correct to flag it rather than fix it (its brief forbade editing `treeDrag.ts`).
+
+### The rule as shipped
+
+`siblingIndex` is called a second time, with `excludeId = null`, to get the dragged node's own
+position in the *unfiltered* sibling list. The two indices are compared:
+
+```ts
+const currentIndex = siblingIndex(draggedId, reference.parentId, null, rows);
+const isNoop = (i: number): boolean =>
+  reference.parentId === (findNode(draggedId, nodes)?.parentId ?? null) && i === currentIndex;
+```
+
+The `excludeId` asymmetry is load-bearing and is the part most likely to be "simplified" later.
+The reference index is computed with the dragged node **excluded**, because that is the list
+`place_node` splices into. The current index is computed with it **included**, because that is
+where it visibly sits now. Passing the same flag to both makes the rule silently wrong for every
+reference row below the dragged node — and green, because the symmetric cases still pass.
+
+The zone is **dropped, not flagged**. A flagged-but-present zone would give the row a dead half
+that swallows a drop; dropping it lets the surviving placement take the whole row, which is
+already exactly how an adopt-only row behaves. No new geometry, no new state.
+
+### The second theorem
+
+§19.48 recorded: *a row can never offer all three zones* (adopt requires the reference to be a
+legal parent; sibling requires the reference's parent to be one; the level rules cannot admit
+both at once). This adds a companion:
+
+> **A placement that lands where the node already is offers nothing, and appears on exactly two
+> rows per drag** — the row directly above the dragged node (as `after`) and the row directly
+> below it (as `before`). They are the same seam approached from either side.
+
+Together the two theorems bound the case space: a reference row emits 0, 1 or 2 zones, and the
+"2" is never `{before, after, adopt}`. The test file asserts both as properties, not just as
+examples.
+
+### Verification
+
+- **Probe: 41 assertions, all passing**, written in the design session and run against the file
+  as delivered to Pratik's machine (re-staged and byte-compared to the delivered copy first, so
+  this is the module that ships, not a local variant). Five of the 41 are new and are the rule
+  itself — D35 the seam approached from above, D36 the same seam from below, D37 a real reorder
+  keeping both zones, D38/D39 the same pair among *roots*. **D38's first draft measured nothing**:
+  it used `n10`, the node with a missing level, which offers no zones at all, so the case would
+  have passed against a deleted rule. A case name is a claim; that one was re-fixtured onto two
+  real roots.
+- **5 mutations, V1-V5, all CAUGHT** — run, not remembered, with the killing cases recorded:
+
+  | # | breakage | verdict | killed by |
+  |---|---|---|---|
+  | V1 | the parent comparison is dropped, so any row at that index counts as the seam | CAUGHT | D3, D16, D17, D22, D32, D37 |
+  | V2 | the after-seam is tested with the before-seam's index | CAUGHT | D1, D9, D13, D34, D35, D36, D38, D39 |
+  | V3 | the current index EXCLUDES the dragged node (the `excludeId` asymmetry above) | CAUGHT | D13, D34, D36, D39 |
+  | V4 | the guard is inverted, so *only* the no-op seam is offered | CAUGHT | D1, D3, D8, D9, D13, D15, D21, D23-D27, D31, D32, D34-D39 |
+  | V5 | the rule is reverted for the after-seam only | CAUGHT | D1, D9, D35, D38 |
+
+  **V3 is the one worth reading.** It is killed by exactly four cases -- D13, D34, D36, D39 --
+  and every one of them puts the reference row *below* the dragged node. That is the measured
+  proof of the asymmetry claim above: make both `siblingIndex` calls agree and the rule stays
+  green for every reference row above the dragged node. Four cases stand between that mistake and
+  a silent regression, and D34 (the collapsed tree) is one of them, which is not where anyone
+  would look for it.
+
+- **Committed cases**: `src/test/treeDrag.test.ts` 79 → 83. Four added (R37–R40) and **five
+  existing cases updated**, because they asserted the old two-zone shape on rows adjacent to the
+  dragged node. Those five were pinning the defect as the contract — a green case is a claim, and
+  those claims were wrong.
+- `tsc -b --force` exit 0. In-container vitest shim over the pure modules: 137 passed, 0 failed.
+- Suite prediction moves **580 → 584 in 18 files**.
+
+### Still open from §19.49
+
+Items 2–5 are unchanged: `.eligible` still means "legal adoption parent" only and now under-hints
+peer rows; no touch drag on the level list; the StrictMode change to existing code deserves a
+second look; and `treeDrag.test.ts`'s header comment still says "43 cases".
+
+---
+
+## §19.51 — Migration 0021: the reciprocal read 0020 named, and the three pieces of code the mutation run deleted
+
+**Status: written, applied and green on a scratch PG16 in the design session — 21 migrations, `48_site_membership_test.sql` 41 cases, 262 SQL cases total, cold, from scratch, twice. 32 mutations, 30 caught. `eslint .` exit 0. `tsc` has ONE error and it is the expected one — see "what Pratik owes" at the end.**
+
+### What it is, in his frame
+
+0020 settled that *"a site admin may add people to their site and set that person's role there"* and then left the sentence unusable, in a comment that named its own successor:
+
+> `user_profiles_select` is still `own row, or company admin`, so a site admin can WRITE a grant for a person they cannot READ. … a UI cannot offer a person picker yet. That is `add_site_member`, the next RPC after this migration, and it is where the reciprocal read is designed rather than bolted on here.
+
+0021 is that read, plus the two writes whose refusal would otherwise be silent, plus the shape-picker filter §19.47 flagged and left open.
+
+### The read: a function, not a wider policy — and the reason is gotcha 21
+
+The obvious move is to widen `user_profiles_select` so a site admin can see their colleagues. It is the wrong move, and **RLS filters rows, not columns** is why. A policy cannot hand out the email and withhold `user_profiles.role` — the company-wide admin flag — because a policy has no say over columns at all. A function chooses its projection explicitly. This is the same gotcha that deleted a helper in 0020, arriving from the opposite side: there it made a guard pointless, here it makes a policy the wrong instrument.
+
+**The exposure is bounded by an ACTION, not by a standing privilege.** `site_people(p_node_id)` answers only for a node the caller already administers. Administering a place is what makes "who works here" your business. A caller who administers nothing gets `not_permitted` from all three functions, and `user_profiles_select` is untouched.
+
+**People show as their email address**, because that is all the system knows: `user_profiles` has no name column and the seed sets `raw_user_meta_data` to `{}`. Worth saying out loud rather than discovering on screen.
+
+### The writes: two, not four, and `docs/api.md` §4 decided it rather than me
+
+> An RPC exists only where the operation needs to touch more than one row atomically, needs a pre-write permission check ahead of RLS to avoid a silent zero-row result, or is a pure read aggregation.
+
+- `site_people` — pure read aggregation. RPC.
+- `set_site_member` / `remove_site_member` — **a refused UPDATE or DELETE under RLS is zero rows and no error.** Plant 2's admin clicks "remove" on Plant 1's admin, gets a green tick, the row leaves the list, the refetch puts it back and nothing explains why. RPC.
+- Everything else — a plain PostgREST write against the 0020 policies, like a run's `notes`.
+
+Adding and re-roling are **one** function because they are one row: `profile_grants` is keyed `(profile_id, node_id)`.
+
+**And the pre-check is not the duplicate-of-RLS that gotcha 17 condemns.** Delete it and the refusal still happens — as a raw `42501 new row violates row-level security policy`. The mutation is caught because *the shape of the refusal changes*, and case X16 asserts `PT403` and a typed detail rather than merely "it was refused" — which is green against the deletion.
+
+### ⭐ The self-rule, and rule 17 catching me in my own file
+
+A site admin who sets their own role on their own site to `viewer` loses the screen they are standing on and only a company admin can put it back. So the write functions refuse it.
+
+**The first draft refused any change to your own row, and its own comment described a narrower rule** — that a change to a *different* node is fine. Two sentences apart, contradicting each other, exactly §19.49's item 2 in a file I had just written. The comment was right: adding yourself as a viewer somewhere inside your own site takes nothing away, because the strongest covering grant wins (0019) and your admin grant on the site above still decides. Refusing it would refuse a harmless thing with a frightening message.
+
+Shipped rule: **only the row that currently grants you `admin` on THIS EXACT node is protected.** Cases X21 and X31 are the harmless changes that must be ALLOWED, and they are the cases the broad version fails.
+
+### ⭐ Three pieces of code the mutation run deleted
+
+Each of these was written with a plausible justification, and the run measured the justification to be false. Recorded the way 0020 recorded its deleted helper.
+
+1. **`editable_shape_ids`' own `t.org_id = app_current_org()` term (Y3, NOT CAUGHT).** The argument was rule 10's: isolation cases run as the TABLE OWNER, where RLS is off and an org term is the only scope left. Measured, `app_is_admin_for_template` is SECURITY DEFINER and carries the org scope itself, refusing org 2's structure before the outer query sees the row. **X3 changed meaning rather than being deleted** — it now tests the composition with RLS off, which is a real property.
+
+2. **`set_site_member`'s outcome check (Y27, NOT CAUGHT).** Rule 7b says read the row back rather than trust the statement, and D92 earned that rule. It does not apply here: the pre-check has already established `app_is_admin_for(p_node_id)`, and the INSERT WITH CHECK, UPDATE USING and UPDATE WITH CHECK are all that same predicate — so if any of them disagreed, RLS would **raise**, and 42501 is not something a read-back can improve.
+
+3. **`remove_site_member`'s outcome check (Y33, NOT CAUGHT).** Same reasoning from the DELETE side, and it sharpens rule 7b into something more useful than "always read it back": **rule 7b is for writes that can do nothing QUIETLY, and what makes a refused removal loud here is the PRE-check, not a post-check.** That is the whole reason the function exists instead of a PostgREST `DELETE`, and X28 measures it — the typed refusal AND the row surviving.
+
+The row read-back stays in `set_site_member`, without the raise, because the honest thing to return is what is stored rather than an echo of the argument.
+
+### ⭐ Y12: inert, KEPT, and the impossibility pinned as its own case
+
+`site_people`'s grant subquery carries `pg.org_id = v_org` and `gn.org_id = v_org`. Removing both was **NOT CAUGHT**. The terms are not pointless — 0012's lesson is that a path is unique only per `(org_id, path)`, so org 2 has its own `plant_1.assembly` and it *is* contained in `plant_1`. What masks it is a **foreign key in another migration**: `profile_grants` carries composite `(org_id, profile_id)` and `(org_id, node_id)` FKs, so the leaking row cannot be constructed.
+
+Because the masking lives somewhere else, **case X39 asserts the impossibility directly** — as the table owner, an insert pairing org 1's person with org 2's node must fail with `23503`. Relax either FK and X39 goes red and points at this decision, instead of a cross-tenant leak appearing quietly. Same device 0020 §9 used for its shadowed UPDATE clause.
+
+### ⭐ Y5b: a flaky case, caught by running it twice
+
+The first version of X38 asserted `editable_shape_ids()` comes back ascending, and mutation Y5b (the `ORDER BY` removed entirely) came back **NOT CAUGHT on one run and CAUGHT on the next, with nothing changed between them.** Two of the three fixture structures get `gen_random_uuid()` ids, so the heap order is ascending by luck a good share of the time.
+
+A fixture row with a deliberately low id was added to break the tie **and did not work** — the planner reuses free slots, so **physical order is not something a test may assume.** The row was removed again rather than left looking load-bearing.
+
+The fix was to fix the *mutation*, not the fixture: `ORDER BY t.id DESC` is caught on every run at any size, and it is the shape a careless edit actually takes. Y5b stays in the table marked NOT CAUGHT and environment-dependent so nobody re-derives this.
+
+### ⭐ Instrument failure 34: a TEMP table is not readable by `authenticated`
+
+X16's first run reported `sqlstate=42501, detail=<NULL>` and read exactly like "the pre-check is missing, RLS refused instead" — which is the defect that case exists to catch. It was `permission denied for table x_fix`: a TEMP table belongs to the session user, and the case read the fixture id *after* `SET LOCAL ROLE authenticated`. **The RLS refusal and the temp-table refusal are the same SQLSTATE with the same empty DETAIL.** Every fixture read now happens before the role change, and X1 carries the note.
+
+### The client half
+
+- **`filterEditableShapes(summaries, editableIds)`** in `shapePicker.ts`, and **it fails OPEN** — the opposite call from `adminAccess`, which fails closed. The difference is what the answer buys: `adminAccess` decides whether a screen OPENS, so an unanswered question there must mean no. This decides only what a list OFFERS, and the server refuses every edit on its own (0020's W6/W7), so an unanswered question degrades to exactly the behaviour that shipped before — every structure listed, `not_permitted` on the ones that are not yours. Failing closed would hide a site admin's OWN structure the moment one RPC hiccups.
+- `null`, `undefined` and anything that is not an array all mean "no answer". **F7 pins the specific failure the `Array.isArray` guard prevents**: `new Set("abc")` has three members, so a truthiness check would match single characters.
+- `fetchHierarchyTree` calls `editable_shape_ids()` **in the same `Promise.all`, not a second `useQuery`** — §19.47's lesson, and D91's reminder that `enabled: false` leaves `isLoading` FALSE. One read, one spinner. It is the only one of the four that does not throw on error, and the asymmetry is the point: the other three are the screen's content, this is a preview.
+- `AdminPage` filters **before** `resolveSelectedShape`, so the selection can never land on a structure the list no longer shows.
+
+### Verification
+
+- **41 cases in `48_site_membership_test.sql`**, green cold twice. 262 SQL cases in total across 21 migrations, `verify-db.sh` exit 0.
+- **32 mutations, 30 caught.** The two NOT CAUGHT are Y5b (environment-dependent, above) and Y12 (inert, kept, X39 pins the masking). Three further mutations have no entry because **the code they broke was deleted** — Y3, Y27, Y33.
+- **No `UPGRADE_CHECKS` row and no `upgrade_0021_*.sql`, deliberately**: 0021 adds no column, table, policy or trigger and transforms no existing data. Stated in the migration header so the absence is a decision rather than an omission.
+- Client: `eslint .` exit 0. `src/test/shapePicker.test.ts` 34 → 45 cases (F1–F11). **Suite prediction 584 → 595, still 18 files.**
+- **`tsc -b --force` exits 2 with exactly one error**, `TS2345` on `supabase.rpc("editable_shape_ids")` — `database.types.ts` does not know the function yet. It goes away with `npm run db:types` and nothing else in the tree is affected. (**Instrument 35**: `tsc … | head` reports *head's* exit code, not tsc's — it printed the error and reported `exit=0`. Redirect to a file, echo `$?`, then read.)
+- **In-container vitest shim over the pure modules, run against the files as delivered: 190 passed, 0 failed** (`treeDrag` 83, `levelDraft` 54, `shapePicker` 53). The shim implements only the matchers these files use, grepped not guessed — `shapePicker.test.ts` uses `.toBe` and nothing else.
+
+### What is NOT verified, stated as work (rule 5)
+
+1. **The wire shape of `editable_shape_ids()` through PostgREST has not been exercised.** The function returns `jsonb`, and the client reads `editableRes.data` as an array of strings — the same shape `board_window` establishes for a jsonb-returning RPC. There is no PostgREST in this container, so this is reasoning from precedent, not a measurement. **The first thing to check when the screen is wired up**; `filterEditableShapes` fails open on anything that is not an array, so the failure mode is "no filtering", not a crash.
+2. **`site_people`, `set_site_member` and `remove_site_member` have no client caller at all yet**, so their jsonb shapes are unexercised outside SQL. That is stage 10's work.
+3. **Nothing here has been seen on screen.** The shape picker's filter changes what a real admin sees and has not been rendered (rule 2c). It should be, with a site-admin session, before it is called done.
+
+### What Pratik owes, in order
+
+1. `npm run db:reset && npm run db:types` — applies 0021 and regenerates the types, which is what clears the single `tsc` error.
+2. `npm run test` → **595 in 18 files**.
+3. One commit for everything since `055300c`.

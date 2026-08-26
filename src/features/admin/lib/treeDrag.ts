@@ -283,13 +283,13 @@ export interface DropZone {
 function siblingIndex(
   referenceId: string,
   parentId: string | null,
-  draggedId: string,
+  excludeId: string | null,
   rows: readonly { node: NodeRow }[],
 ): number {
   let i = 0;
   for (const r of rows) {
     if (r.node.parentId !== parentId) continue;
-    if (r.node.id === draggedId) continue;
+    if (excludeId !== null && r.node.id === excludeId) continue;
     if (r.node.id === referenceId) return i;
     i += 1;
   }
@@ -350,28 +350,51 @@ export function rowDropZones(
 
   if (siblingLegal) {
     const idx = siblingIndex(referenceId, reference.parentId, draggedId, rows);
+
+    // ⭐ A PLACEMENT THAT LANDS WHERE THE NODE ALREADY IS OFFERS NOTHING, and
+    // without this every drag drew one caret that promised a move and then did
+    // nothing. `place_node` splices the dragged node into its siblings with
+    // itself removed, so the result is unchanged exactly when the destination
+    // parent is the node's CURRENT parent and the index equals the node's own
+    // position in the full sibling list.
+    //
+    // It shows up twice, symmetrically: `after` on the row directly ABOVE the
+    // dragged node, and `before` on the row directly BELOW it. Both are the
+    // same seam — the one the node is already sitting on.
+    //
+    // The zone is DROPPED rather than flagged, so a row never has a dead half.
+    // Where only one placement survives it takes the whole row, which is
+    // already how an adopt-only row behaves.
+    const currentIndex = siblingIndex(draggedId, reference.parentId, null, rows);
+    const isNoop = (i: number): boolean =>
+      reference.parentId === (findNode(draggedId, nodes)?.parentId ?? null) && i === currentIndex;
+
     const draggedName = nodeName(draggedId, nodes, "This node");
     const referenceName = nodeName(referenceId, nodes, "that node");
-    out.push({
-      kind: "before",
-      parentId: reference.parentId,
-      index: idx,
-      verdict: {
-        kind: "ok",
-        reason: null,
-        message: `Place ${draggedName} above ${referenceName}.`,
-      },
-    });
-    out.push({
-      kind: "after",
-      parentId: reference.parentId,
-      index: idx + 1,
-      verdict: {
-        kind: "ok",
-        reason: null,
-        message: `Place ${draggedName} below ${referenceName}.`,
-      },
-    });
+    if (!isNoop(idx)) {
+      out.push({
+        kind: "before",
+        parentId: reference.parentId,
+        index: idx,
+        verdict: {
+          kind: "ok",
+          reason: null,
+          message: `Place ${draggedName} above ${referenceName}.`,
+        },
+      });
+    }
+    if (!isNoop(idx + 1)) {
+      out.push({
+        kind: "after",
+        parentId: reference.parentId,
+        index: idx + 1,
+        verdict: {
+          kind: "ok",
+          reason: null,
+          message: `Place ${draggedName} below ${referenceName}.`,
+        },
+      });
+    }
   }
 
   // --- the adopt zone, unchanged from P1-5g ------------------------------

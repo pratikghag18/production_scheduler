@@ -540,8 +540,14 @@ export async function fetchHierarchyTree(): Promise<{
   templates: HierarchyTemplateSummary[];
   levels: HierarchyLevel[];
   nodes: BoardNode[];
+  /**
+   * Which structures this person may EDIT (0021 §2), or `null` when the
+   * server did not answer. `null` is a real value here, not an error state —
+   * see `filterEditableShapes`, which fails OPEN on it.
+   */
+  editableShapeIds: string[] | null;
 }> {
-  const [templatesRes, levelsRes, nodesRes] = await Promise.all([
+  const [templatesRes, levelsRes, nodesRes, editableRes] = await Promise.all([
     supabase.from("hierarchy_templates").select("id, name").order("name"),
     supabase
       .from("hierarchy_levels")
@@ -551,6 +557,11 @@ export async function fetchHierarchyTree(): Promise<{
       .from("nodes")
       .select("id, parent_id, level_id, name, path, sort_order, active")
       .order("sort_order"),
+    // ⭐ IN THE SAME `Promise.all`, DELIBERATELY, AND NOT A SECOND `useQuery`.
+    // §19.47 settled this one level up: a second unresolved window is a second
+    // thing to fold into the loading state, and D91 is the standing reminder
+    // that `enabled: false` leaves `isLoading` FALSE. One read, one spinner.
+    supabase.rpc("editable_shape_ids"),
   ]);
   if (templatesRes.error) throw toSchedulerError(templatesRes.error);
   if (levelsRes.error) throw toSchedulerError(levelsRes.error);
@@ -581,5 +592,18 @@ export async function fetchHierarchyTree(): Promise<{
     sortOrder: r.sort_order,
     active: r.active,
   }));
-  return { templates, levels, nodes };
+  // ⚠️ THIS ONE DOES NOT THROW, and the asymmetry with the three reads above
+  // is the point. The three are the screen's content; without them there is
+  // nothing to render and an error is the honest answer. This is a PREVIEW —
+  // it decides which structures to offer, and the server refuses the rest on
+  // its own either way — so an error here degrades the picker rather than the
+  // page. `filterEditableShapes` fails open on `null` and says why.
+  const editableShapeIds: string[] | null =
+    editableRes.error || !Array.isArray(editableRes.data)
+      ? null
+      : (editableRes.data as unknown[]).filter(
+          (v): v is string => typeof v === "string",
+        );
+
+  return { templates, levels, nodes, editableShapeIds };
 }

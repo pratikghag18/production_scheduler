@@ -508,6 +508,139 @@ in the original spec, not a deviation from it.
 **Raises:** `not_permitted`, `invalid_argument` (bad mode; unknown node),
 `node_in_use`.
 
+### 3.6 Site membership (migration `0021`)
+
+Three functions, and the split between them is `§4`'s rule applied literally:
+one pure read aggregation, and two writes whose refusal would otherwise be
+**silent**. Adding somebody, re-roling them and removing them are the only
+operations, because `profile_grants` is keyed `(profile_id, node_id)` — "add"
+and "change role" are the same row.
+
+`p_node_id` is any node the caller administers. For a site admin that is their
+site's root; for a department admin it is their department. All three refuse
+with `not_permitted` unless `app_is_admin_for(p_node_id)`.
+
+#### `editable_shape_ids() RETURNS jsonb`
+
+`SECURITY INVOKER`. The ids of the structures the caller may edit — every
+structure in the org for a company admin, their own site's for a site admin.
+Returns a jsonb **array**, `[]` and never `null`.
+
+It restricts nothing. `hierarchy_templates_select` stays org-wide on purpose
+(`0020` §5: a structure's name and level list are not secrets; the nodes inside
+a site are, and `nodes_select` governs those). This answers a question the
+client cannot compute, so the shape picker can stop offering structures whose
+first edit would come back `not_permitted`. The client mirror
+(`filterEditableShapes`) **fails open** on a missing answer — see its own
+comment for why that is the opposite call from `adminAccess` and still right.
+
+```json
+["21000000-0000-0000-0000-000000000001"]
+```
+
+**Raises:** nothing. A caller who administers nothing gets `[]`.
+
+#### `site_people(p_node_id uuid) RETURNS jsonb`
+
+`SECURITY DEFINER`, because `auth.users` is not readable by `authenticated`
+and the sign-in email is the only human-readable thing this system knows about
+a person — `user_profiles` has no name column.
+
+One entry per person **in the company**, each carrying the grants they hold
+inside `p_node_id`'s subtree (`path <@`, so a department admin inside the plant
+shows up when you ask about the plant). The server does not split them into
+"members" and "candidates"; the client does, from `grants` and `companyAdmin`.
+
+⚠️ `companyAdmin` matters: a company admin reaches every site with no grant at
+all, so without it a screen lists them under "no access" beside a button that
+would do nothing for them.
+
+The list is **unbounded** — no `LIMIT`, no search parameter. A silent cap would
+make a missing person look like a person who does not exist. When it needs
+paging it gets an argument and a documented bound.
+
+```json
+{
+  "nodeId": "30000000-0000-0000-0000-000000000001",
+  "nodeName": "Plant 1",
+  "people": [
+    {
+      "profileId": "d0000000-0000-0000-0000-000000000004",
+      "email": "sam@example.test",
+      "orgRole": "viewer",
+      "companyAdmin": false,
+      "grants": [
+        {"nodeId": "30000000-0000-0000-0000-000000000001",
+         "nodeName": "Plant 1", "role": "supervisor"}
+      ]
+    }
+  ]
+}
+```
+
+**Raises:** `invalid_argument` (unknown node — checked *before* permission, so a
+typo does not read as a permissions problem), `not_permitted`.
+
+#### `set_site_member(p_node_id uuid, p_profile_id uuid, p_role text) RETURNS jsonb`
+
+`SECURITY INVOKER`; the `0020` policies are the real gate. Adds the person or
+changes the role they already hold there. `p_role` is `admin` | `supervisor` |
+`viewer`.
+
+Check order, and each step is a different sentence to the user: node exists →
+caller administers it → **person exists** → role is legal → the caller is not
+taking away their own admin access here → write.
+
+⚠️ The person-existence check runs **after** the permission check, which
+inverts `0020` §8's "existence first" ordering on purpose. "Does an account for
+this address exist in the company" is not a question an outsider gets to ask.
+
+⚠️ **You cannot take away your own `admin` role on this exact node** —
+`not_permitted`, `reason: "self"`. A company admin is exempt. The rule is
+narrow by design: adding yourself as a *viewer* somewhere inside your own site
+is allowed, because the strongest covering grant wins and it takes nothing
+away.
+
+```json
+{"nodeId": "30000000-…-0001", "profileId": "d0000000-…-0006", "role": "supervisor"}
+```
+
+**Raises:** `invalid_argument` (unknown node — carries `node_id`; unknown
+person — carries `profile_id`; unknown or null role — carries `field: "role"`),
+`not_permitted`.
+
+#### `remove_site_member(p_node_id uuid, p_profile_id uuid) RETURNS jsonb`
+
+`SECURITY INVOKER`. Removes the grant sitting on this exact node.
+
+**This is the one that most needs to exist.** A `DELETE` under RLS removes the
+rows the `USING` clause admits and reports success for the rest, so wired
+straight to PostgREST a refused removal is a silent no-op: the row leaves the
+list, the refetch puts it back, and nothing explains why. The pre-check is what
+makes it loud. There is no post-write outcome check — one was written and
+deleted, because with the pre-check in place it is unreachable (mutation Y33,
+NOT CAUGHT).
+
+Removing access that is not there is `invalid_argument`, not a shrug: two
+admins with the same screen open should not both be told they succeeded.
+
+```json
+{"nodeId": "30000000-…-0001", "profileId": "d0000000-…-0004", "removedRole": "supervisor"}
+```
+
+**Raises:** `invalid_argument` (unknown node; nothing here to remove),
+`not_permitted` (not yours; your own admin access).
+
+#### What `0021` deliberately does not add
+
+`user_profiles` is untouched. A site admin still cannot create or delete a
+company membership and cannot write `user_profiles.role`, the company-wide
+admin flag. There is no invitation flow — `site_people` can only offer people
+who already have a `user_profiles` row, because a grant's foreign key requires
+one, and inviting a new person is a GoTrue operation that does not exist for
+company admins either. There is no "last admin" rule and no audit row for
+access changes; both are named in the migration as tasks.
+
 ## 4. RPC vs. plain PostgREST table writes
 
 Simple field edits — a run's `notes` or `planned_headcount`; an

@@ -8,7 +8,11 @@ import { fetchHierarchyTree } from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "./hooks/useHierarchyMutations";
-import { buildShapeSummaries, resolveSelectedShape } from "./lib/shapePicker";
+import {
+  buildShapeSummaries,
+  filterEditableShapes,
+  resolveSelectedShape,
+} from "./lib/shapePicker";
 import { LevelEditor } from "./components/LevelEditor";
 import { NodeTreeEditor } from "./components/NodeTreeEditor";
 import { ShapePicker } from "./components/ShapePicker";
@@ -73,7 +77,15 @@ export default function AdminPage() {
   // keeps the selection from pointing at a shape that no longer exists
   // (e.g. right after deleting the one currently selected).
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
-  const summaries = data ? buildShapeSummaries(data.templates, data.levels, data.nodes) : [];
+  // 0021 §2: the picker offers the structures this person may actually edit.
+  // A company admin sees every one; a site admin sees their own site's. The
+  // filter runs BEFORE `resolveSelectedShape`, so the selection can never
+  // land on a structure the list no longer shows — the same reason that
+  // function exists at all (D87).
+  const allSummaries = data
+    ? buildShapeSummaries(data.templates, data.levels, data.nodes)
+    : [];
+  const summaries = filterEditableShapes(allSummaries, data?.editableShapeIds ?? null);
   const resolvedShapeId = resolveSelectedShape(summaries, selectedShapeId);
 
   return (

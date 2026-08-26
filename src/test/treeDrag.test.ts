@@ -1,8 +1,12 @@
 /**
- * Acceptance for `src/features/admin/lib/treeDrag.ts` (brief P1-5g §8).
+ * Acceptance for `src/features/admin/lib/treeDrag.ts`.
+ * P1-5g §8 (adoption), P1-5l §19.48 (before/after zones), §19.50 (no-op seams).
  *
- * 43 plain `it()` cases — no `it.each`, no dynamic registration — so the
+ * 83 plain `it()` cases — no `it.each`, no dynamic registration — so the
  * count vitest reports is exactly the number of `it(` lines below.
+ *
+ * KEEP THIS NUMBER HONEST. `grep -c '^\s*it(' ` on this file must equal it;
+ * a stale count here is how §6.2's expired comment happened.
  */
 import { describe, expect, it } from "vitest";
 import type { LevelRow, NodeRow } from "../features/admin/lib/hierarchy.ts";
@@ -377,8 +381,11 @@ describe("treeDrag.ts: rowDropZones", () => {
   // `canDropOn(n7, n2)` returns `noop`, and the whole point is that `noop` is
   // LEGAL here — it is returned exactly when the dragged node already has
   // that parent, which is the definition of a pure reorder.
-  it("R1: a peer row offers before/after — the reorder D94 was about", () => {
-    expect(shape("n7", "n1")).toBe("before@0,after@1");
+  // Only `before` survives here, and that is the no-op rule below at work:
+  // Line 2 already sits directly after Line 1, so "place below Line 1" is the
+  // seam it is on. R37–R40 are that rule's own cases.
+  it("R1: a peer row offers a placement — the reorder D94 was about", () => {
+    expect(shape("n7", "n1")).toBe("before@0");
   });
 
   it("R2: a peer row offers no adoption — a Line cannot hold a Line", () => {
@@ -423,7 +430,7 @@ describe("treeDrag.ts: rowDropZones", () => {
   });
 
   it("R10: a root's index counts the other roots in display order", () => {
-    expect(shape("n11", "n10")).toBe("before@2,after@3");
+    expect(shape("n11", "n10")).toBe("before@2");
   });
 
   it("R11: a non-root over a root offers nothing — it cannot become a root", () => {
@@ -441,8 +448,10 @@ describe("treeDrag.ts: rowDropZones", () => {
   // Assembly(0) and Packing(1) are the only Departments; dropping Assembly
   // AFTER Packing is index 1, not 2, because `place_node` splices into the
   // sibling list with the moved node already removed.
+  // Assembly already sits directly before Packing, so "place above Packing" is
+  // the seam it is on and only `after` survives.
   it("R14: the index excludes the dragged node", () => {
-    expect(shape("n2", "n8")).toBe("before@0,after@1");
+    expect(shape("n2", "n8")).toBe("after@1");
   });
 
   // ⭐ R15/R16 — proved by exhaustion over every pair, not argued.
@@ -477,7 +486,7 @@ describe("treeDrag.ts: rowDropZones", () => {
   });
 
   it("R21: the after message says BELOW", () => {
-    expect(msg("n7", "n1", 1)).toBe("Place Line 2 below Line 1.");
+    expect(msg("n7", "n3", 1)).toBe("Place Line 2 below Line 1.");
   });
 
   it("R22: adoption keeps describeDrop's own sentence", () => {
@@ -489,7 +498,7 @@ describe("treeDrag.ts: rowDropZones", () => {
   it("R23: a collapsed tree yields the same indices", () => {
     const collapsed = buildTreeRows(NODES, LEVELS, new Set(["n2", "n8"]));
     const z = rowDropZones("n2", "n8", collapsed, NODES, LEVELS, TEMPLATES);
-    expect(z.map((x) => `${x.kind}@${x.index}`).join(",")).toBe("before@0,after@1");
+    expect(z.map((x) => `${x.kind}@${x.index}`).join(",")).toBe("after@1");
   });
 });
 
@@ -554,5 +563,43 @@ describe("treeDrag.ts: resolveDropZone", () => {
 
   it("R36: an infinite row height falls back to the first zone", () => {
     expect(resolveDropZone(two, 10, Infinity)?.kind).toBe("before");
+  });
+});
+
+describe("treeDrag.ts: a placement that changes nothing is not offered", () => {
+  const zones2 = (d: string, r: string) => rowDropZones(d, r, ROWS, NODES, LEVELS, TEMPLATES);
+  const shape2 = (d: string, r: string): string =>
+    zones2(d, r)
+      .map((z) => `${z.kind}@${z.index ?? "-"}`)
+      .join(",");
+
+  /* ⭐ Without this rule every drag drew one caret that promised a move and
+   * then did nothing. `place_node` splices the dragged node into its siblings
+   * with itself removed, so the result is unchanged exactly when the
+   * destination parent is the node's CURRENT parent and the index equals the
+   * node's own position in the full sibling list.
+   *
+   * It appears twice, symmetrically — as `after` on the row directly ABOVE the
+   * node, and as `before` on the row directly BELOW it. Both name the one seam
+   * the node is already sitting on. */
+
+  it("R37: the seam a node already sits on is not offered, from above", () => {
+    // Line 2 sits directly after Line 1 under Assembly.
+    expect(shape2("n7", "n1")).toBe("before@0");
+  });
+
+  it("R38: the same seam approached from below", () => {
+    expect(shape2("n1", "n7")).toBe("after@1");
+  });
+
+  it("R39: a genuine reorder keeps both zones", () => {
+    // Line 2 over Packing's Line 1 — a different parent entirely, so neither
+    // seam is the one it is on.
+    expect(shape2("n7", "n3")).toBe("before@0,after@1");
+  });
+
+  it("R40: roots get the same treatment", () => {
+    // Plant 1 is the first root, so "above Plant 2" is where it already is.
+    expect(shape2("n5", "n9")).toBe("after@1");
   });
 });

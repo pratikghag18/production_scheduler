@@ -1,0 +1,162 @@
+[
+ [
+  "Y1  the person lookup loses its org scope (a person from another company 'exists')",
+  "     WHERE up.id = p_profile_id AND up.org_id = app_current_org()",
+  "     WHERE up.id = p_profile_id"
+ ],
+ [
+  "Y2  every structure in the org is reported editable",
+  "   WHERE app_is_admin_for_template(t.id);",
+  "   WHERE true;"
+ ],
+ [
+  "Y4  no shapes comes back as NULL instead of []",
+  "SELECT coalesce(jsonb_agg(t.id ORDER BY t.id), '[]'::jsonb)",
+  "SELECT jsonb_agg(t.id)"
+ ],
+ [
+  "Y5  the shape ids come back in DESCENDING order",
+  "jsonb_agg(t.id ORDER BY t.id)",
+  "jsonb_agg(t.id ORDER BY t.id DESC)"
+ ],
+ [
+  "Y5b the ordering is removed entirely (environment-dependent -- see X38)",
+  "jsonb_agg(t.id ORDER BY t.id)",
+  "jsonb_agg(t.id)"
+ ],
+ [
+  "Y6  site_people stops checking the node exists",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  v_org := app_current_org();\n  SELECT n.path, n.name INTO v_path, v_name",
+  "  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  v_org := app_current_org();\n  SELECT n.path, n.name INTO v_path, v_name"
+ ],
+ [
+  "Y7  site_people stops checking the caller administers the place",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  v_org := app_current_org();\n  SELECT n.path, n.name INTO v_path, v_name",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  v_org := app_current_org();\n  SELECT n.path, n.name INTO v_path, v_name"
+ ],
+ [
+  "Y8  site_people checks permission BEFORE existence",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  v_org := app_current_org();\n  SELECT n.path, n.name INTO v_path, v_name",
+  "  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  v_org := app_current_org();\n  SELECT n.path, n.name INTO v_path, v_name"
+ ],
+ [
+  "Y9  every grant in the company is reported, not just those inside this place",
+  "                    AND gn.path <@ v_path",
+  "                    AND true"
+ ],
+ [
+  "Y10 only a grant sitting on THIS EXACT node is reported",
+  "                    AND gn.path <@ v_path",
+  "                    AND gn.id = p_node_id"
+ ],
+ [
+  "Y11 the people list loses its org scope",
+  "        LEFT JOIN auth.users u ON u.id = up.user_id\n       WHERE up.org_id = v_org",
+  "        LEFT JOIN auth.users u ON u.id = up.user_id"
+ ],
+ [
+  "Y12 the grant subquery loses its org scope",
+  "                    AND pg.org_id     = v_org\n                    AND gn.org_id     = v_org",
+  ""
+ ],
+ [
+  "Y13 nobody is reported as a company admin",
+  "               'companyAdmin', (up.role = 'admin'),",
+  "               'companyAdmin', false,"
+ ],
+ [
+  "Y14 the email is not returned",
+  "               'email',        u.email,",
+  "               'email',        NULL,"
+ ],
+ [
+  "Y15 a person with no grants here gets NULL instead of []",
+  "               ), '[]'::jsonb)\n             ) AS p",
+  "               ))\n             ) AS p"
+ ],
+ [
+  "Y16 the people list comes back in whatever order the heap gives",
+  "jsonb_agg(p ORDER BY p->>'email' COLLATE \"C\", p->>'profileId')",
+  "jsonb_agg(p)"
+ ],
+ [
+  "Y17 set_site_member stops checking the node exists",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  IF NOT app_profile_exists_in_org(p_profile_id) THEN",
+  "  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  IF NOT app_profile_exists_in_org(p_profile_id) THEN"
+ ],
+ [
+  "Y18 the pre-check goes, and RLS refuses instead -- as a raw 42501",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  IF NOT app_profile_exists_in_org(p_profile_id) THEN",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  IF NOT app_profile_exists_in_org(p_profile_id) THEN"
+ ],
+ [
+  "Y19 the person lookup goes, and the foreign key refuses instead",
+  "  IF NOT app_profile_exists_in_org(p_profile_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such person',\n                      jsonb_build_object('profile_id', p_profile_id, 'reason', 'not found'));\n  END IF;\n",
+  ""
+ ],
+ [
+  "Y20 a NULL role slips past the role check onto the NOT NULL column",
+  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'supervisor', 'viewer') THEN",
+  "  IF p_role NOT IN ('admin', 'supervisor', 'viewer') THEN"
+ ],
+ [
+  "Y21 the role check goes entirely, and the CHECK constraint refuses instead",
+  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'supervisor', 'viewer') THEN\n    PERFORM api_raise('invalid_argument', 'unknown role',\n                      jsonb_build_object('field', 'role', 'value', p_role));\n  END IF;\n",
+  ""
+ ],
+ [
+  "Y22 the self-rule goes -- a site admin can demote themselves out of their own site",
+  "  IF p_profile_id = app_current_profile_id()\n     AND p_role <> 'admin'\n     AND NOT app_is_admin()\n     AND EXISTS (SELECT 1 FROM profile_grants pg\n                  WHERE pg.profile_id = p_profile_id\n                    AND pg.node_id    = p_node_id\n                    AND pg.role       = 'admin') THEN",
+  "  IF FALSE THEN"
+ ],
+ [
+  "Y23 the self-rule goes BROAD -- any change to your own row is refused",
+  "     AND NOT app_is_admin()\n     AND EXISTS (SELECT 1 FROM profile_grants pg\n                  WHERE pg.profile_id = p_profile_id\n                    AND pg.node_id    = p_node_id\n                    AND pg.role       = 'admin') THEN",
+  "     AND NOT app_is_admin() THEN"
+ ],
+ [
+  "Y24 the self-rule fires on a company admin too",
+  "     AND p_role <> 'admin'\n     AND NOT app_is_admin()",
+  "     AND p_role <> 'admin'"
+ ],
+ [
+  "Y25 the self-rule fires when you re-assert your own admin role",
+  "     AND p_role <> 'admin'\n     AND NOT app_is_admin()",
+  "     AND NOT app_is_admin()"
+ ],
+ [
+  "Y26 re-roling an existing member does nothing",
+  "  ON CONFLICT (profile_id, node_id) DO UPDATE SET role = EXCLUDED.role;",
+  "  ON CONFLICT (profile_id, node_id) DO NOTHING;"
+ ],
+ [
+  "Y28 remove_site_member stops checking the caller administers the place",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  IF NOT app_is_admin_for(p_node_id) THEN\n    PERFORM api_raise('not_permitted', 'you do not administer this place',\n                      jsonb_build_object('node_id', p_node_id));\n  END IF;\n\n  SELECT pg.role INTO v_before",
+  "  IF NOT app_node_exists_in_org(p_node_id) THEN\n    PERFORM api_raise('invalid_argument', 'no such node',\n                      jsonb_build_object('node_id', p_node_id, 'reason', 'not found'));\n  END IF;\n\n  SELECT pg.role INTO v_before"
+ ],
+ [
+  "Y29 removing access that is not there succeeds quietly",
+  "  IF v_before IS NULL THEN\n    PERFORM api_raise('invalid_argument', 'that person has no access here to remove',\n                      jsonb_build_object('node_id', p_node_id, 'profile_id', p_profile_id,\n                                         'reason', 'not found'));\n  END IF;\n",
+  ""
+ ],
+ [
+  "Y30 the self-rule goes from the DELETE side",
+  "  IF p_profile_id = app_current_profile_id()\n     AND NOT app_is_admin()\n     AND v_before = 'admin' THEN",
+  "  IF FALSE THEN"
+ ],
+ [
+  "Y31 the DELETE self-rule goes broad -- you may not drop any grant of your own",
+  "  IF p_profile_id = app_current_profile_id()\n     AND NOT app_is_admin()\n     AND v_before = 'admin' THEN",
+  "  IF p_profile_id = app_current_profile_id()\n     AND NOT app_is_admin() THEN"
+ ],
+ [
+  "Y32 the DELETE forgets which node it was asked about",
+  "  DELETE FROM profile_grants\n   WHERE profile_id = p_profile_id AND node_id = p_node_id;",
+  "  DELETE FROM profile_grants\n   WHERE profile_id = p_profile_id;"
+ ],
+ [
+  "Y34 the PUBLIC revoke on site_people is forgotten",
+  "revoke execute on function site_people(uuid) from public;",
+  ""
+ ]
+]

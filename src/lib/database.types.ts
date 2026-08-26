@@ -912,6 +912,10 @@ export type Database = {
       }
       app_is_admin_on_path: { Args: { p_path: unknown }; Returns: boolean }
       app_node_exists_in_org: { Args: { p_node_id: string }; Returns: boolean }
+      app_profile_exists_in_org: {
+        Args: { p_profile_id: string }
+        Returns: boolean
+      }
       app_relevel_subtree: {
         Args: { p_delta: number; p_new_parent_id: string; p_node_id: string }
         Returns: Json
@@ -987,6 +991,7 @@ export type Database = {
         Args: { p_new_parent_id: string; p_node_id: string }
         Returns: Json
       }
+      editable_shape_ids: { Args: never; Returns: Json }
       move_node: {
         Args: {
           p_new_parent_id: string
@@ -1013,6 +1018,10 @@ export type Database = {
         Returns: Json
       }
       promote_node: { Args: { p_node_id: string }; Returns: Json }
+      remove_site_member: {
+        Args: { p_node_id: string; p_profile_id: string }
+        Returns: Json
+      }
       rename_hierarchy_template: {
         Args: { p_name: string; p_template_id: string }
         Returns: Json
@@ -1026,6 +1035,11 @@ export type Database = {
         Args: { p_levels: Json; p_template_id: string }
         Returns: Json
       }
+      set_site_member: {
+        Args: { p_node_id: string; p_profile_id: string; p_role: string }
+        Returns: Json
+      }
+      site_people: { Args: { p_node_id: string }; Returns: Json }
       slugify: { Args: { input: string }; Returns: string }
       text2ltree: { Args: { "": string }; Returns: unknown }
     }

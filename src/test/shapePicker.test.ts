@@ -43,6 +43,7 @@
 import { expect, it } from "vitest";
 import {
   buildShapeSummaries,
+  filterEditableShapes,
   levelsForShape,
   resolveSelectedShape,
   validateShapeName,
@@ -412,4 +413,97 @@ check("V7: the shape's own name under its own currentId -> ok", () => {
 check("V8: 'shape a' vs 'Shape A' -> not a duplicate (case-sensitive)", () => {
   const r = validateShapeName("shape a", SUMMARIES, null);
   return r.ok === true || `got ${JSON.stringify(r)}`;
+});
+
+
+// ---------------------------------------------------------------------------
+// F — filterEditableShapes (0021 §2). The shape picker's filter.
+//
+// The rough edge it closes: the admin screen listed EVERY structure in the
+// company, because `hierarchy_templates_select` is org-wide on purpose. A site
+// admin saw five plants' structures, picked the wrong one, edited a level name
+// and got a correct `not_permitted` for something the screen had offered them.
+//
+// ⭐ IT FAILS OPEN, WHICH IS THE OPPOSITE OF `adminAccess`, and F4-F7 are what
+// make that a decision rather than an accident. `adminAccess` decides whether a
+// screen OPENS; this decides only what a list OFFERS, and the server refuses
+// every edit on its own regardless. Failing closed would hide a site admin's
+// OWN structure the moment one RPC hiccups.
+// ---------------------------------------------------------------------------
+
+check("F1: only the named shapes survive", () => {
+  const out = filterEditableShapes(SUMMARIES, [TPL_B]);
+  return (out.length === 1 && out[0].id === TPL_B) || `got ${JSON.stringify(out.map((x) => x.id))}`;
+});
+
+check("F2: an id that matches no shape is ignored, not invented", () => {
+  const out = filterEditableShapes(SUMMARIES, [TPL_A, "44444444-4444-4444-4444-444444444444"]);
+  return (out.length === 1 && out[0].id === TPL_A) || `got ${JSON.stringify(out.map((x) => x.id))}`;
+});
+
+check("F3: an EMPTY list hides everything -- [] is an answer, not a missing one", () => {
+  // The case that separates [] from null. `editable_shape_ids()` returns
+  // `'[]'::jsonb` and never NULL precisely so this distinction survives the
+  // wire, and 48's X4 asserts that on the server side.
+  const out = filterEditableShapes(SUMMARIES, []);
+  return out.length === 0 || `got ${JSON.stringify(out.map((x) => x.id))}`;
+});
+
+check("F4: null means the server did not answer -- everything is offered", () => {
+  const out = filterEditableShapes(SUMMARIES, null);
+  return out.length === SUMMARIES.length || `got ${out.length} of ${SUMMARIES.length}`;
+});
+
+check("F5: undefined is the same answer as null", () => {
+  const out = filterEditableShapes(SUMMARIES, undefined);
+  return out.length === SUMMARIES.length || `got ${out.length} of ${SUMMARIES.length}`;
+});
+
+check("F6: a non-array from the wire fails OPEN and does not throw", () => {
+  // `Array.isArray` is the only honest test of what came back over a network
+  // boundary -- a truthiness check passes a string straight into `new Set`,
+  // which would then match single CHARACTERS.
+  const bads = ["not-an-array", { length: 2 }, 42, true];
+  for (const bad of bads) {
+    const out = filterEditableShapes(SUMMARIES, bad as unknown as readonly string[]);
+    if (out.length !== SUMMARIES.length) return `${JSON.stringify(bad)} -> ${out.length}`;
+  }
+  return true;
+});
+
+check("F7: a string is NOT treated as a list of its characters", () => {
+  // The specific failure F6's guard prevents, pinned on its own: `new
+  // Set("abc")` has three members and `.has` would answer for single letters.
+  const out = filterEditableShapes(SUMMARIES, TPL_A as unknown as readonly string[]);
+  return out.length === SUMMARIES.length || `got ${out.length}`;
+});
+
+check("F8: the surviving shapes keep buildShapeSummaries' order", () => {
+  const out = filterEditableShapes(SUMMARIES, SUMMARIES.map((x) => x.id));
+  const before = SUMMARIES.map((x) => x.id).join(",");
+  const after = out.map((x) => x.id).join(",");
+  return before === after || `${before} -> ${after}`;
+});
+
+check("F9: neither input is mutated", () => {
+  const ids = [TPL_A];
+  const beforeSummaries = SUMMARIES.map((x) => x.id).join(",");
+  filterEditableShapes(SUMMARIES, ids);
+  return (
+    (ids.length === 1 && ids[0] === TPL_A &&
+      SUMMARIES.map((x) => x.id).join(",") === beforeSummaries) ||
+    "an input was mutated"
+  );
+});
+
+check("F10: a duplicate id does not duplicate the shape", () => {
+  const out = filterEditableShapes(SUMMARIES, [TPL_A, TPL_A, TPL_A]);
+  return out.length === 1 || `got ${out.length}`;
+});
+
+check("F11: ids match EXACTLY -- an uppercased uuid is a different id", () => {
+  // D86's lesson in its client form: a fixture whose level ids differed in
+  // CASE from the level table made a whole group of cases unfalsifiable.
+  const out = filterEditableShapes(SUMMARIES, [TPL_A.toUpperCase()]);
+  return out.length === 0 || `got ${JSON.stringify(out.map((x) => x.id))}`;
 });
