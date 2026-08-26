@@ -106,7 +106,49 @@ export function canQueryAsUser(userId: string | null, loading: boolean): boolean
  */
 export type AdminAccess = "pending" | "granted" | "denied";
 
-export function adminAccess(role: string | null | undefined, loading: boolean): AdminAccess {
+/**
+ * ⭐ WIDENED BY MIGRATION 0020 (design plan §19.46). D97's original form asked
+ * only `role === "admin"` -- the ORG-WIDE flag -- and that was correct while
+ * org-wide admin was the only kind there was. It stopped being correct the
+ * moment a role became a property of a (person, PLACE) pair: a site admin
+ * carries the org-wide role `viewer` and an `admin` GRANT on their site, so
+ * the old gate denied every one of them and 0020's whole surface was
+ * unreachable through the product.
+ *
+ * `adminAnywhere` is `app_is_admin_anywhere()`, fetched with the profile so
+ * it shares one loading state -- see `useSession`. Deliberately NOT a second
+ * `useQuery`: a separate query would introduce a second unresolved window to
+ * fold into `pending`, and D91 is the standing reminder that `enabled: false`
+ * leaves `isLoading` FALSE, so that fold is easy to get silently wrong.
+ *
+ * THE ROLE TERM IS KEPT EVEN THOUGH THE SERVER PREDICATE SUBSUMES IT.
+ * `app_is_admin_anywhere()` already returns true for a company admin, so this
+ * function could be one line. It is two because the wrapper fails CLOSED on a
+ * PostgREST error, and a company admin who cannot reach that RPC should still
+ * see their own admin screen -- their answer is in a profile they already
+ * have. The redundancy is the fallback, not an oversight.
+ *
+ * `adminAnywhere === true`, NOT a truthiness test, and the distinction is
+ * load-bearing: the value crosses a network boundary, so "truthy" would admit
+ * a `1` or a non-empty string that a shape change could start returning.
+ * Case A9 is the only thing that catches that.
+ *
+ * STILL FAILS CLOSED ON A ROLE IT DOES NOT RECOGNISE, and still THREE STATES
+ * rather than a boolean, for D97's original reasons: `loading` starts true
+ * with no profile, and both boolean answers are wrong in that window -- one
+ * bounces a real admin who navigated straight to `/admin`, the other shows
+ * the screen to whoever turns out not to be one.
+ *
+ * ONE implementation, TWO call sites -- the nav link and the route -- because
+ * a nav link that disagrees with its own route is how a user ends up staring
+ * at a link that refuses them.
+ */
+export function adminAccess(
+  role: string | null | undefined,
+  adminAnywhere: boolean | null | undefined,
+  loading: boolean,
+): AdminAccess {
   if (loading) return "pending";
-  return role === "admin" ? "granted" : "denied";
+  if (role === "admin") return "granted";
+  return adminAnywhere === true ? "granted" : "denied";
 }

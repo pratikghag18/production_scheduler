@@ -134,12 +134,19 @@ describe("session.ts: canQueryAsUser", () => {
 });
 
 /* ===========================================================================
- * Group A — `adminAccess`, D97's single gate (design plan §19.38).
+ * Group A — `adminAccess`, D97's single gate, WIDENED BY MIGRATION 0020
+ * (design plan §19.38, then §19.46).
  *
  * Two call sites depend on this agreeing with itself: the nav link in
  * `AppShell` and the route guard in `RequireAdmin`. The database remains the
- * authority — every admin RPC opens with `app_is_admin()` — so nothing here
- * protects data. It decides what gets RENDERED.
+ * authority — every admin RPC re-asks the real question about the specific
+ * node or structure — so nothing here protects data. It decides what gets
+ * RENDERED.
+ *
+ * ⭐ A1–A11 GAINED A THIRD ARGUMENT AND KEPT THEIR MEANING. Each passes
+ * `adminAnywhere = false`, which is the value that leaves the ROLE term as
+ * the only thing that can decide — so every one of them still measures
+ * exactly what it was written to measure. A12–A17 are the new behaviour.
  * ======================================================================== */
 
 describe("session.ts: adminAccess", () => {
@@ -149,34 +156,34 @@ describe("session.ts: adminAccess", () => {
   // session that merely happens to carry the right role already. Loading is
   // asked FIRST, and A2 is the case that pins the order.
   it("A1: an unresolved session with no profile yet is pending", () => {
-    expect(adminAccess(null, true)).toBe("pending");
+    expect(adminAccess(null, false, true)).toBe("pending");
   });
 
   it("A2: still pending while loading EVEN IF the role is already admin", () => {
-    expect(adminAccess("admin", true)).toBe("pending");
+    expect(adminAccess("admin", false, true)).toBe("pending");
   });
 
   it("A3: a resolved admin is granted", () => {
-    expect(adminAccess("admin", false)).toBe("granted");
+    expect(adminAccess("admin", false, false)).toBe("granted");
   });
 
   it("A4: a resolved supervisor is denied", () => {
-    expect(adminAccess("supervisor", false)).toBe("denied");
+    expect(adminAccess("supervisor", false, false)).toBe("denied");
   });
 
   it("A5: a resolved viewer is denied", () => {
-    expect(adminAccess("viewer", false)).toBe("denied");
+    expect(adminAccess("viewer", false, false)).toBe("denied");
   });
 
   it("A6: a resolved session with no profile at all is denied", () => {
-    expect(adminAccess(null, false)).toBe("denied");
+    expect(adminAccess(null, false, false)).toBe("denied");
   });
 
   // `profile?.role` is `undefined` when there is no profile object, and `null`
   // when there is one with a null role. Both callers pass the optional-chained
   // form, so undefined is the shape that actually arrives.
   it("A7: an undefined role is denied", () => {
-    expect(adminAccess(undefined, false)).toBe("denied");
+    expect(adminAccess(undefined, false, false)).toBe("denied");
   });
 
   // ⭐ A8 is the load-bearing one for the three-tier model (§19.38). When
@@ -184,25 +191,75 @@ describe("session.ts: adminAccess", () => {
   // role with "admin" in the name is probably fine -- it has no idea how to
   // scope the screen. `adminAccess` is the one place to widen deliberately.
   it("A8: a role this build has never heard of is denied, not assumed", () => {
-    expect(adminAccess("site_admin", false)).toBe("denied");
-    expect(adminAccess("system_admin", false)).toBe("denied");
-    expect(adminAccess("superuser", false)).toBe("denied");
+    expect(adminAccess("site_admin", false, false)).toBe("denied");
+    expect(adminAccess("system_admin", false, false)).toBe("denied");
+    expect(adminAccess("superuser", false, false)).toBe("denied");
   });
 
   // A9/A10: the comparison is exact. `user_profiles.role` is a CHECK-constrained
   // column, so a value differing by case or whitespace means something has gone
   // wrong upstream -- normalising it here would paper over that silently.
   it("A9: the match is case-sensitive", () => {
-    expect(adminAccess("Admin", false)).toBe("denied");
-    expect(adminAccess("ADMIN", false)).toBe("denied");
+    expect(adminAccess("Admin", false, false)).toBe("denied");
+    expect(adminAccess("ADMIN", false, false)).toBe("denied");
   });
 
   it("A10: the match does not trim", () => {
-    expect(adminAccess(" admin", false)).toBe("denied");
-    expect(adminAccess("admin ", false)).toBe("denied");
+    expect(adminAccess(" admin", false, false)).toBe("denied");
+    expect(adminAccess("admin ", false, false)).toBe("denied");
   });
 
   it("A11: the empty string is denied, not treated as absent", () => {
-    expect(adminAccess("", false)).toBe("denied");
+    expect(adminAccess("", false, false)).toBe("denied");
+  });
+
+  /* -------------------------------------------------------------------------
+   * A12–A17 — migration 0020. A site admin carries the ORG-WIDE role `viewer`
+   * and an `admin` GRANT on their site, so the D97 gate denied every one of
+   * them and 0020's entire surface was unreachable through the product. A8
+   * above says a role this build does not recognise is refused; these say the
+   * answer now arrives as a separate fact instead, from the server.
+   * ---------------------------------------------------------------------- */
+
+  // A12 is the case the whole widening exists for.
+  it("A12: a site admin -- org-wide viewer, admin somewhere -- is granted", () => {
+    expect(adminAccess("viewer", true, false)).toBe("granted");
+  });
+
+  it("A13: a supervisor who is also an admin somewhere is granted", () => {
+    expect(adminAccess("supervisor", true, false)).toBe("granted");
+  });
+
+  // The other half of A12, and without it a gate that granted EVERYONE would
+  // pass every case above that was written before this argument existed.
+  it("A14: a viewer who is an admin nowhere is still denied", () => {
+    expect(adminAccess("viewer", false, false)).toBe("denied");
+  });
+
+  // Loading still wins over BOTH terms. A2 pins the order against the role;
+  // this pins it against the new one.
+  it("A15: still pending while loading EVEN IF admin somewhere", () => {
+    expect(adminAccess("viewer", true, true)).toBe("pending");
+  });
+
+  // A16 -- THE FALLBACK IS DELIBERATE. `fetchAdminAnywhere` fails CLOSED, so a
+  // company admin whose RPC call errored arrives here with null/undefined.
+  // Their answer is in a profile they already hold, and this is the case that
+  // says the role term is a fallback rather than dead weight the server
+  // predicate subsumes.
+  it("A16: a company admin is granted even when the probe could not answer", () => {
+    expect(adminAccess("admin", null, false)).toBe("granted");
+    expect(adminAccess("admin", undefined, false)).toBe("granted");
+  });
+
+  // A17 -- the comparison is `=== true`, not truthiness, and this is the ONLY
+  // case that can tell the two apart. The value crosses a network boundary, so
+  // a shape change could start returning a 1 or a non-empty string; truthy
+  // would let either through. Measured in the design container: rewriting the
+  // term as `Boolean(adminAnywhere)` passes A12-A16 and fails only here.
+  it("A17: a truthy non-boolean from the server does not grant", () => {
+    expect(adminAccess("viewer", 1 as unknown as boolean, false)).toBe("denied");
+    expect(adminAccess("viewer", "yes" as unknown as boolean, false)).toBe("denied");
+    expect(adminAccess("viewer", {} as unknown as boolean, false)).toBe("denied");
   });
 });

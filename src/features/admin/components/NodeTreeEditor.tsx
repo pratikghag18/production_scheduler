@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { DRAG_THRESHOLD_PX } from "@/lib/interaction";
 import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/lib/api";
 import {
   useCreateNode,
   useDeleteNode,
   useMoveNode,
+  usePlaceNode,
   useRenameNode,
 } from "../hooks/useHierarchyMutations";
 import { buildTreeRows, groupRowsByShape, legalParentsFor } from "../lib/treeView";
@@ -13,8 +15,12 @@ import {
   dropRailIndex,
   eligibleTargetIds,
   groupDropState,
+  resolveDropZone,
+  rowDropZones,
   type DropVerdict,
+  type DropZone,
 } from "../lib/treeDrag";
+import { offsetInRow, passedThreshold, rowIsDragSource } from "../lib/dragPointer";
 import { AdminPopover } from "./AdminPopover";
 import styles from "./NodeTreeEditor.module.css";
 
@@ -72,6 +78,7 @@ export function NodeTreeEditor({
   const renameMutation = useRenameNode();
   const createMutation = useCreateNode();
   const moveMutation = useMoveNode();
+  const placeMutation = usePlaceNode();
   const deleteMutation = useDeleteNode();
 
   // ---------------------------------------------------------------------------
@@ -85,72 +92,223 @@ export function NodeTreeEditor({
   // is extracted in this brief (§11) -- LevelEditor is two other pieces of
   // work away, and a hook built for a caller that far off is speculative.
   // ---------------------------------------------------------------------------
-  type DragState = {
-    draggedId: string;
-    pointerId: number;
+  // The flattened rows, hoisted above the drag block because `rowDropZones`
+  // needs them: sibling ORDER comes from the rows the admin is actually looking
+  // at, never from re-sorting `nodes`, so the index handed to `place_node`
+  // means the same thing they just saw.
+  const rows = buildTreeRows(nodes, levels, collapsedIds);
+
+  type DragLive = {
     /** computed ONCE at drag start -- legalParentsFor is O(n) in canDropOn calls */
     eligible: ReadonlySet<string>;
     hoverId: string | null;
-    verdict: DropVerdict | null;
+    /** Which zone of the hovered row the pointer is in; null when it refuses. */
+    zone: DropZone | null;
+    /**
+     * Set ONLY when the hovered row offers no zone at all. `rowDropZones`
+     * returning `[]` is a SILENT refusal -- there is no sentence inside an empty
+     * array -- so the explanation still comes from `describeDrop`, exactly as it
+     * did in P1-5g. Used for the MESSAGE only; the drop decision is the zone's.
+     * The brief does not mention this; without it a Work Cell dragged over a
+     * Site row goes from "A Work Cell can only sit under a Line." to nothing at
+     * all, which is a regression the reorder work has no reason to cause.
+     */
+    refusal: DropVerdict | null;
     pointer: { x: number; y: number };
+  };
+
+  type DragState = {
+    draggedId: string;
+    pointerId: number;
+    /** Where the pointer went DOWN. A drag has not started at this point. */
+    origin: { x: number; y: number };
+    source: "row" | "handle";
+    /** null until `passedThreshold` says this is a drag and not a click. */
+    live: DragLive | null;
   };
 
   const [drag, setDrag] = useState<DragState | null>(null);
 
-  function handleDragPointerDown(nodeId: string, e: React.PointerEvent<HTMLButtonElement>) {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({
+  // ⭐ A REF BESIDE THE STATE, and it is not a micro-optimisation.
+  //
+  // Every transition below reads the CURRENT drag synchronously and writes both
+  // halves at once. The alternative -- doing the work inside a `setDrag(prev =>
+  // ...)` updater, which is what P1-5g did -- puts `document.elementFromPoint`
+  // and `mutation.mutate()` inside a function React is allowed to call twice.
+  // `main.tsx` renders under `<StrictMode>`, which DOES call updaters twice in
+  // development, so P1-5g's drop fired its `move_node` twice on every dev drop.
+  // A ref makes each transition a plain, once-only event handler.
+  const dragRef = useRef<DragState | null>(null);
+
+  function commitDrag(next: DragState | null) {
+    dragRef.current = next;
+    setDrag(next);
+  }
+
+  /**
+   * ⭐ THE COST D95a NAMES, AND IT IS DELIBERATE (brief §5.1).
+   *
+   * P1-5g could say "a pointerdown on the handle is unambiguously a drag start,
+   * and no threshold logic exists to get wrong". Dragging from the WHOLE ROW
+   * makes that sentence false: every click on a row is a zero-length drag
+   * unless something gates it. `passedThreshold` is that gate, and the
+   * threshold is the PRICE of the affordance, not an optimisation.
+   *
+   * So `onPointerDown` records only an ORIGIN. `onPointerMove` is what starts
+   * the drag, the first time the pointer has travelled `DRAG_THRESHOLD_PX`
+   * (D32, now `src/lib/interaction.ts` so admin and board share the one number).
+   */
+  function beginPointer(
+    nodeId: string,
+    e: React.PointerEvent,
+    rowEl: HTMLElement,
+    source: "row" | "handle",
+  ) {
+    // Capture on the ROW, even when the gesture started on the handle, so
+    // `currentTarget` in every later handler IS the capturing element and
+    // `releasePointerCapture` below always has the right one.
+    rowEl.setPointerCapture(e.pointerId);
+    commitDrag({
       draggedId: nodeId,
       pointerId: e.pointerId,
-      eligible: eligibleTargetIds(nodeId, nodes, levels),
-      hoverId: null,
-      verdict: null,
-      pointer: { x: e.clientX, y: e.clientY },
+      origin: { x: e.clientX, y: e.clientY },
+      source,
+      live: null,
     });
   }
 
-  function handleDragPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
-    setDrag((prev) => {
-      if (!prev) return prev;
-      // `elementFromPoint`, not `e.target` -- `setPointerCapture` routes
-      // every subsequent event to the handle, so `e.target` is always the
-      // handle and a naive implementation reports one unchanging hover row.
-      const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-node-id]");
-      const hoverId = hit ? hit.getAttribute("data-node-id") : null;
-      if (hoverId === prev.hoverId) {
-        return { ...prev, pointer: { x: e.clientX, y: e.clientY } };
+  function handleRowPointerDown(nodeId: string, e: React.PointerEvent<HTMLLIElement>) {
+    // GUARD THE CONTROLS. The disclosure triangle, the `⋮` menu and the drag
+    // handle all live inside the row and must keep working as buttons; the
+    // handle has its own `onPointerDown` below, and this is what stops the row
+    // from also claiming the same pointerdown.
+    if (e.target instanceof Element && e.target.closest("button") !== null) return;
+    // D95a: mouse and pen drag from anywhere on the row; touch keeps the handle,
+    // because `touch-action: none` on the whole row would leave nowhere on the
+    // tree for a finger to scroll from.
+    if (!rowIsDragSource(e.pointerType)) return;
+    beginPointer(nodeId, e, e.currentTarget, "row");
+  }
+
+  function handleHandlePointerDown(nodeId: string, e: React.PointerEvent<HTMLButtonElement>) {
+    // The handle keeps its own start (§5.1) -- it is the TOUCH path, and it is
+    // the only one on a touch device. `preventDefault` here and not on the row:
+    // the handle is a button whose default action we never want, while a plain
+    // click on a row must still behave like a click.
+    e.preventDefault();
+    const rowEl = e.currentTarget.closest("[data-node-id]");
+    if (!(rowEl instanceof HTMLElement)) return;
+    beginPointer(nodeId, e, rowEl, "handle");
+  }
+
+  function handleRowPointerMove(e: React.PointerEvent<HTMLLIElement>) {
+    const prev = dragRef.current;
+    if (!prev || prev.pointerId !== e.pointerId) return;
+
+    // Not a drag yet, and not far enough to become one: leave the origin alone.
+    if (
+      prev.live === null &&
+      !passedThreshold(prev.origin, e.clientX, e.clientY, DRAG_THRESHOLD_PX)
+    ) {
+      return;
+    }
+
+    const eligible = prev.live?.eligible ?? eligibleTargetIds(prev.draggedId, nodes, levels);
+
+    // `elementFromPoint`, NOT `e.target` -- `setPointerCapture` routes every
+    // subsequent event to the capturing row, so `e.target` is always that one
+    // row and a naive version reports a single unchanging hover target.
+    const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-node-id]") ?? null;
+    const hoverId = hit === null ? null : hit.getAttribute("data-node-id");
+
+    let zone: DropZone | null = null;
+    let refusal: DropVerdict | null = null;
+    if (hit !== null && hoverId !== null) {
+      const zones = rowDropZones(prev.draggedId, hoverId, rows, nodes, levels, shapeSummaries);
+      // `rect.height`, never a hard-coded row height: the row scales with
+      // `--chrome-scale` (D84) and a literal would silently stop matching at 4K.
+      const rect = hit.getBoundingClientRect();
+      zone = resolveDropZone(zones, offsetInRow(e.clientY, rect.top), rect.height);
+      if (zones.length === 0) {
+        refusal = describeDrop(prev.draggedId, hoverId, nodes, levels, shapeSummaries);
       }
-      const verdict = hoverId ? describeDrop(prev.draggedId, hoverId, nodes, levels, shapeSummaries) : null;
-      return { ...prev, pointer: { x: e.clientX, y: e.clientY }, hoverId, verdict };
+    }
+
+    commitDrag({
+      ...prev,
+      live: { eligible, hoverId, zone, refusal, pointer: { x: e.clientX, y: e.clientY } },
     });
   }
 
-  function handleDragPointerUp() {
-    setDrag((prev) => {
-      // A `noop` verdict commits nothing -- dropping a node on the parent it
-      // already has is not an error and not a write.
-      if (prev && prev.verdict?.kind === "ok" && prev.hoverId) {
-        moveMutation.mutate({ nodeId: prev.draggedId, newParentId: prev.hoverId });
+  function releaseCapture(e: React.PointerEvent<HTMLLIElement>) {
+    // ⭐ P1-5g NEVER CALLED THIS. Its independent review found
+    // `DragState.pointerId` was written and never read, and dead state is the
+    // fingerprint of a dropped requirement. Released on BOTH up and cancel.
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }
+
+  function handleRowPointerUp(e: React.PointerEvent<HTMLLIElement>) {
+    releaseCapture(e);
+    const prev = dragRef.current;
+    if (!prev || prev.pointerId !== e.pointerId) return;
+    commitDrag(null);
+
+    const live = prev.live;
+    // No `live` at all means the pointer never crossed the threshold: this was
+    // a click, and a click commits nothing.
+    if (live === null || live.hoverId === null) return;
+
+    const zone = live.zone;
+    if (zone === null) return;
+
+    if (zone.kind === "adopt") {
+      // Unchanged from P1-5g: adoption still requires `ok`, because there
+      // `noop` really does mean "already a child of this row".
+      if (zone.verdict.kind === "ok" && zone.parentId !== null) {
+        moveMutation.mutate({ nodeId: prev.draggedId, newParentId: zone.parentId });
       }
-      return null;
-    });
+      return;
+    }
+
+    // `before` / `after` -- a PLACEMENT, which is `place_node`, not `move_node`.
+    // The index is `rowDropZones`' own, counted among the destination parent's
+    // children with the dragged node removed, which is the list `place_node`
+    // splices into.
+    if (zone.index !== null) {
+      placeMutation.mutate({
+        nodeId: prev.draggedId,
+        newParentId: zone.parentId,
+        index: zone.index,
+      });
+    }
   }
 
-  function handleDragPointerCancel() {
-    setDrag(null);
+  function handleRowPointerCancel(e: React.PointerEvent<HTMLLIElement>) {
+    releaseCapture(e);
+    if (dragRef.current !== null) commitDrag(null);
   }
+
+  // ⭐ KEYED ON `dragActive`, NOT ON `drag`. The same review found P1-5g's
+  // Escape listener keyed on `[drag]` -- a new object on every single
+  // `pointermove` -- so the listener was torn down and re-added on every frame
+  // of every drag. A boolean changes twice per drag, which is the real number
+  // of times this listener needs to exist.
+  const dragActive = drag !== null;
 
   useEffect(() => {
-    if (!drag) return;
+    if (!dragActive) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setDrag(null);
+      if (e.key === "Escape") {
+        dragRef.current = null;
+        setDrag(null);
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [drag]);
+  }, [dragActive]);
 
-  const rows = buildTreeRows(nodes, levels, collapsedIds);
   // `shapeSummaries` is structurally a `HierarchyTemplateRef[]` (id + name),
   // so the picker's own model is reused rather than threading a second list
   // down. One source for "what structures exist", shared by the picker and
@@ -159,33 +317,65 @@ export function NodeTreeEditor({
   const showShapeHeadings = groups.length > 1;
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
+  // ⭐ EVERYTHING BELOW READS `drag.live`, NEVER `drag`. A `drag` with a null
+  // `live` is a pointer that went down and has not travelled 4px yet -- which
+  // is what a CLICK looks like -- and it must paint nothing at all.
+  const live = drag?.live ?? null;
+
   // Drag chip presentation (§7.1). `flip` reads `window.innerWidth`, which is
   // only ever consulted while a drag is live, so it is safe outside an effect.
   const draggedName = drag ? (byId.get(drag.draggedId)?.name ?? "This node") : "";
-  const verdictBlocked = drag?.verdict?.kind === "blocked";
-  const flip = drag ? drag.pointer.x > window.innerWidth * 0.72 : false;
+  // The sentence the chip and the live region both say: the chosen zone's own
+  // wording when there is a zone, and `describeDrop`'s refusal when the row
+  // offered none.
+  const dragVerdict: DropVerdict | null = live?.zone?.verdict ?? live?.refusal ?? null;
+  const verdictBlocked = dragVerdict?.kind === "blocked";
+  const flip = live ? live.pointer.x > window.innerWidth * 0.72 : false;
 
-  // Row classes (§7.1 table). Conditions accumulate rather than exclude: an
-  // eligible row that is also the hovered, legal drop target carries BOTH
-  // `.eligible` and `.dropOk` -- the stylesheet relies on `.dropOk` coming
-  // after `.eligible` in source order to suppress the dashed hint on the
-  // chosen target.
+  // Row classes (§7.1 table, extended by §5 of this brief). Conditions
+  // accumulate rather than exclude: an eligible row that is also the hovered,
+  // legal drop target carries BOTH `.eligible` and `.dropOk` -- the stylesheet
+  // relies on `.dropOk` coming after `.eligible` in source order to suppress
+  // the dashed hint on the chosen target.
+  //
+  // ⭐ THE TICK AND THE CARET ARE MUTUALLY EXCLUSIVE HERE BECAUSE THEY ARE
+  // MUTUALLY EXCLUSIVE IN `rowDropZones`: a row offers `before`+`after` or it
+  // offers `adopt`, never both (the theorem above `resolveDropZone`). Nothing
+  // in this function has to arbitrate between them.
   function rowClassName(nodeId: string): string {
-    if (!drag) return styles.row;
+    if (!live) return styles.row;
     const classes = [styles.row];
-    if (nodeId === drag.draggedId) classes.push(styles.rowDragging);
-    if (drag.eligible.has(nodeId)) classes.push(styles.eligible);
-    if (drag.hoverId === nodeId) {
-      if (drag.verdict?.kind === "ok") classes.push(styles.dropOk, styles.dropTick);
-      else if (drag.verdict?.kind === "blocked") classes.push(styles.dropBlocked);
-      // "noop" gets no row treatment at all (§7.1) -- not styled here.
+    if (nodeId === drag?.draggedId) classes.push(styles.rowDragging);
+    if (live.eligible.has(nodeId)) classes.push(styles.eligible);
+    if (live.hoverId === nodeId) {
+      const zone = live.zone;
+      if (zone === null) {
+        // The row offered no zone. Only a genuine refusal gets a treatment;
+        // "noop" still gets none at all (§7.1), unchanged from P1-5g.
+        if (live.refusal?.kind === "blocked") classes.push(styles.dropBlocked);
+      } else if (zone.kind === "adopt") {
+        classes.push(styles.dropOk, styles.dropTick);
+      } else if (zone.kind === "before") {
+        classes.push(styles.caretBefore);
+      } else {
+        classes.push(styles.caretAfter);
+      }
     }
     return classes.join(" ");
   }
 
   function rowStyle(row: { node: { id: string }; depth: number }): React.CSSProperties | undefined {
-    if (!drag || drag.hoverId !== row.node.id || drag.verdict?.kind !== "ok") return undefined;
-    return { "--drop-rails": dropRailIndex(row.depth) } as React.CSSProperties;
+    if (!live || live.hoverId !== row.node.id) return undefined;
+    const zone = live.zone;
+    if (zone === null) return undefined;
+    // The adopt tick sits at a CHILD's elbow -- one rail in from this row.
+    if (zone.kind === "adopt") {
+      return { "--drop-rails": dropRailIndex(row.depth) } as React.CSSProperties;
+    }
+    // The caret sits at the DRAGGED node's depth, and for a sibling placement
+    // that is this reference row's own depth. `row.depth`, not `row.depth + 1`:
+    // a caret one rail too far in reads as a placement inside this row.
+    return { "--caret-rails": row.depth } as React.CSSProperties;
   }
 
   function toggleCollapsed(nodeId: string) {
@@ -207,7 +397,7 @@ export function NodeTreeEditor({
   }
 
   return (
-    <section className={drag ? `${styles.card} ${styles.dragging}` : styles.card}>
+    <section className={live ? `${styles.card} ${styles.dragging}` : styles.card}>
       <div className={styles.header}>
         <h2 className={styles.h2}>Nodes</h2>
         <button
@@ -307,7 +497,9 @@ export function NodeTreeEditor({
       */}
       {groups.map((group) => {
         const isForeignGroup =
-          drag !== null && groupDropState(drag.draggedId, group.templateId, nodes, levels) === "foreign";
+          drag !== null &&
+          live !== null &&
+          groupDropState(drag.draggedId, group.templateId, nodes, levels) === "foreign";
         return (
         <div
           key={group.templateId ?? "__unresolved__"}
@@ -326,7 +518,16 @@ export function NodeTreeEditor({
           )}
           <ul className={styles.tree}>
             {group.rows.map((row) => (
-              <li key={row.node.id} data-node-id={row.node.id} className={rowClassName(row.node.id)} style={rowStyle(row)}>
+              <li
+                key={row.node.id}
+                data-node-id={row.node.id}
+                className={rowClassName(row.node.id)}
+                style={rowStyle(row)}
+                onPointerDown={(e) => handleRowPointerDown(row.node.id, e)}
+                onPointerMove={handleRowPointerMove}
+                onPointerUp={handleRowPointerUp}
+                onPointerCancel={handleRowPointerCancel}
+              >
                 {/*
                   Tree guides, drawn from `row.guides` (D90). One fixed-width
                   rail per ancestor depth: it carries a vertical line when that
@@ -376,14 +577,19 @@ export function NodeTreeEditor({
                   <span className={styles.levelChip}>{row.levelName}</span>
                 )}
 
+                {/*
+                  The handle keeps its own `onPointerDown` and NOTHING ELSE. It
+                  captures on the ROW, so every later pointer event targets the
+                  row and is handled exactly once by the row's own handlers --
+                  putting move/up/cancel here as well would run them twice for a
+                  handle-started drag, since those events bubble from the handle
+                  up through the row.
+                */}
                 <button
                   type="button"
                   className={styles.dragHandle}
                   aria-label={`Drag ${row.node.name}`}
-                  onPointerDown={(e) => handleDragPointerDown(row.node.id, e)}
-                  onPointerMove={handleDragPointerMove}
-                  onPointerUp={handleDragPointerUp}
-                  onPointerCancel={handleDragPointerCancel}
+                  onPointerDown={(e) => handleHandlePointerDown(row.node.id, e)}
                 >
                   ⠿
                 </button>
@@ -403,18 +609,18 @@ export function NodeTreeEditor({
         );
       })}
 
-      {drag && (
+      {live && (
         <div
           className={`${styles.dragChip}${verdictBlocked ? " " + styles.dragChipBlocked : ""}${flip ? " " + styles.dragChipFlip : ""}`}
-          style={{ left: drag.pointer.x, top: drag.pointer.y }}
+          style={{ left: live.pointer.x, top: live.pointer.y }}
           aria-hidden="true"
         >
           <span className={styles.dragChipName}>{draggedName}</span>
-          {drag.verdict && <span className={styles.dragChipMsg}>{drag.verdict.message}</span>}
+          {dragVerdict && <span className={styles.dragChipMsg}>{dragVerdict.message}</span>}
         </div>
       )}
       <p className={styles.srOnly} aria-live="polite">
-        {drag?.verdict?.message ?? ""}
+        {dragVerdict?.message ?? ""}
       </p>
 
       {popover && (

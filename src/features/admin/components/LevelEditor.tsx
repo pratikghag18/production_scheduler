@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { DRAG_THRESHOLD_PX } from "@/lib/interaction";
 import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/lib/api";
 import { useSaveHierarchyLevels } from "../hooks/useHierarchyMutations";
 import {
@@ -10,6 +11,7 @@ import {
 import type { LevelDraft, LevelOrderProblem } from "../lib/levelDraft";
 import { validateLevelDraft } from "../lib/hierarchy";
 import { levelsForShape } from "../lib/shapePicker";
+import { offsetInRow, passedThreshold, rowIsDragSource } from "../lib/dragPointer";
 import styles from "./LevelEditor.module.css";
 
 /**
@@ -104,6 +106,176 @@ export function LevelEditor({
   // (migration 0016 + its older check 7). NOT a rule about which rows may move.
   const orderProblems = findLevelOrderProblems(draft, levels, nodes, templateId);
 
+  // ---------------------------------------------------------------------------
+  // P1-5i — DRAG TO REORDER, over a flat list (brief P1-5l §5.4).
+  //
+  // The SAME pointer block as the node tree, which is the whole reason D95b put
+  // `dragPointer.ts` in `lib/` and the reason these two surfaces ship in one
+  // build: written apart, this gets written twice and then reconciled.
+  //
+  // ⭐ AND THEN EVERYTHING THE TREE NEEDS ON TOP OF IT IS ABSENT HERE. No
+  // `canDropOn`, no zones, no verdicts, no refusals: a level list has no
+  // illegal target, because every ordering of a level vocabulary is a
+  // structurally legal ordering. What makes a given order UNSAVEABLE is
+  // `findLevelOrderProblems` (D92) and P1-5j's Save gate, which run on the
+  // draft afterwards and are unchanged by this. A drag that produces a bad
+  // order is allowed to happen and is refused at Save, with a sentence -- which
+  // is the same trade the arrows already make.
+  //
+  // A drop dispatches ONE `{ kind: "moveTo" }` action. Not a chain of adjacent
+  // swaps: `moveTo` splices out and then splices in, so `to` is read against
+  // the list WITH THE DRAGGED ROW REMOVED, and that off-by-one is exactly what
+  // a caller composing swaps gets wrong.
+  // ---------------------------------------------------------------------------
+  type LevelDragState = {
+    from: number;
+    pointerId: number;
+    origin: { x: number; y: number };
+    /** null until `passedThreshold`: before that this is still a click. */
+    live: {
+      /** The row under the pointer. */
+      overIndex: number;
+      /** Top half of that row, i.e. the caret is above it rather than below. */
+      above: boolean;
+      /** The `to` for `moveTo` -- see `landingIndex`. */
+      landAt: number;
+    } | null;
+  };
+
+  const [levelDrag, setLevelDrag] = useState<LevelDragState | null>(null);
+  // Same reason as the node tree's: every transition reads the current drag
+  // synchronously, so no DOM read and no dispatch ever happens inside a state
+  // updater React is free to call twice under `<StrictMode>`.
+  const levelDragRef = useRef<LevelDragState | null>(null);
+
+  function commitLevelDrag(next: LevelDragState | null) {
+    levelDragRef.current = next;
+    setLevelDrag(next);
+  }
+
+  /**
+   * ⭐ THE OFF-BY-ONE, WRITTEN DOWN ONCE.
+   *
+   * `caretAt` is the SEAM the caret sits on, counted against the list as it is
+   * drawn: seam `i` is the gap above row `i`, so the top half of row `i` is
+   * seam `i` and the bottom half is seam `i + 1`. That is the same half-split
+   * `resolveDropZone` applies to a tree row, with the same convention that the
+   * midpoint belongs to the lower zone (`t < 0.5` is "above").
+   *
+   * `moveTo`'s `to`, though, is read against the list WITH THE DRAGGED ROW
+   * ALREADY REMOVED. Every seam BELOW the dragged row therefore shifts down by
+   * one; every seam above it does not. Hence the single `from < caretAt`
+   * subtraction, and hence dropping a row back onto its own two seams resolves
+   * to `to === from`, which `applyLevelAction` returns unchanged.
+   *
+   * `resolveDropZone` itself is deliberately NOT called here: it consumes
+   * `DropZone[]`, and a `DropZone` carries a `parentId` and a `DropVerdict` --
+   * a parent and a legality this list does not have and §5.4 explicitly says it
+   * must not invent. What is shared is the RULE, not the call. See the report.
+   */
+  function landingIndex(from: number, caretAt: number): number {
+    return from < caretAt ? caretAt - 1 : caretAt;
+  }
+
+  function handleLevelPointerDown(index: number, e: React.PointerEvent<HTMLLIElement>) {
+    // Guard the controls. Unlike the tree, a level row holds a TEXT INPUT and a
+    // radio as well as buttons: a pointerdown inside the name field must start
+    // a text selection, not a drag.
+    if (e.target instanceof Element && e.target.closest("button, input, label") !== null) return;
+    // D95a, and there is no `⠿` handle on this surface: a finger gets the ↑/↓
+    // arrows, which stay precisely because they are the non-pointer path.
+    if (!rowIsDragSource(e.pointerType)) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    commitLevelDrag({
+      from: index,
+      pointerId: e.pointerId,
+      origin: { x: e.clientX, y: e.clientY },
+      live: null,
+    });
+  }
+
+  function handleLevelPointerMove(e: React.PointerEvent<HTMLLIElement>) {
+    const prev = levelDragRef.current;
+    if (!prev || prev.pointerId !== e.pointerId) return;
+    if (
+      prev.live === null &&
+      !passedThreshold(prev.origin, e.clientX, e.clientY, DRAG_THRESHOLD_PX)
+    ) {
+      return;
+    }
+
+    // `elementFromPoint`, not `e.target`: the row has pointer capture, so
+    // `e.target` is that one row for the rest of the gesture.
+    const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-level-index]");
+    if (!(hit instanceof HTMLElement)) {
+      commitLevelDrag({ ...prev, live: null });
+      return;
+    }
+    const overIndex = Number(hit.getAttribute("data-level-index"));
+    if (!Number.isInteger(overIndex)) {
+      commitLevelDrag({ ...prev, live: null });
+      return;
+    }
+
+    const rect = hit.getBoundingClientRect();
+    // `rect.height`, never a hard-coded row height -- the row scales with
+    // `--chrome-scale` (D84) and a literal would stop matching at 4K.
+    const t = rect.height > 0 ? offsetInRow(e.clientY, rect.top) / rect.height : 0;
+    const above = !Number.isFinite(t) || t < 0.5;
+    const caretAt = above ? overIndex : overIndex + 1;
+    commitLevelDrag({
+      ...prev,
+      live: { overIndex, above, landAt: landingIndex(prev.from, caretAt) },
+    });
+  }
+
+  function releaseLevelCapture(e: React.PointerEvent<HTMLLIElement>) {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }
+
+  function handleLevelPointerUp(e: React.PointerEvent<HTMLLIElement>) {
+    releaseLevelCapture(e);
+    const prev = levelDragRef.current;
+    if (!prev || prev.pointerId !== e.pointerId) return;
+    commitLevelDrag(null);
+    if (prev.live === null) return; // never crossed the threshold: a click
+    const to = prev.live.landAt;
+    setDraft((d) => applyLevelAction(d, { kind: "moveTo", from: prev.from, to }));
+  }
+
+  function handleLevelPointerCancel(e: React.PointerEvent<HTMLLIElement>) {
+    releaseLevelCapture(e);
+    if (levelDragRef.current !== null) commitLevelDrag(null);
+  }
+
+  const levelDragActive = levelDrag !== null;
+
+  useEffect(() => {
+    if (!levelDragActive) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        levelDragRef.current = null;
+        setLevelDrag(null);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [levelDragActive]);
+
+  const levelLive = levelDrag?.live ?? null;
+
+  function levelRowClassName(index: number): string {
+    if (!levelLive || !levelDrag) return styles.row;
+    const classes = [styles.row];
+    if (index === levelDrag.from) classes.push(styles.rowDragging);
+    if (levelLive.overIndex === index) {
+      classes.push(levelLive.above ? styles.caretBefore : styles.caretAfter);
+    }
+    return classes.join(" ");
+  }
+
   function handleCancel() {
     setDraft(toDraft(levelsForShape(levels, templateId)));
     saveMutation.reset();
@@ -130,13 +302,21 @@ export function LevelEditor({
     // D90b: no card chrome of its own — this renders inside the Site Structure
     // card (see ShapePicker's `children`), so a second border here would draw a
     // box inside a box and re-suggest the very independence the merge removes.
-    <div className={styles.embedded}>
+    <div className={levelLive ? `${styles.embedded} ${styles.dragging}` : styles.embedded}>
       <div className={styles.sectionLabel}>Levels in this structure</div>
       <ol className={styles.list}>
         {draft.map((level, index) => {
           const isInvalid = invalidIndices.has(index);
           return (
-            <li key={level.id ?? `new-${index}`} className={styles.row}>
+            <li
+              key={level.id ?? `new-${index}`}
+              data-level-index={index}
+              className={levelRowClassName(index)}
+              onPointerDown={(e) => handleLevelPointerDown(index, e)}
+              onPointerMove={handleLevelPointerMove}
+              onPointerUp={handleLevelPointerUp}
+              onPointerCancel={handleLevelPointerCancel}
+            >
               <div className={styles.moveCol}>
                 <button
                   type="button"

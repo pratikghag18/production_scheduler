@@ -228,3 +228,213 @@ export function groupDropState(
 export function dropRailIndex(targetDepth: number): number {
   return targetDepth + 1;
 }
+
+/* ===========================================================================
+ * P1-5l — DROP ZONES: reorder as well as re-parent (design plan §19.34, D94).
+ *
+ * ⭐ WHY THIS EXISTS. The first gesture Pratik tried was the one P1-5g
+ * excluded: *"I tried moving cell 3 between cell 1 and cell 2, but it turned
+ * red."* Cells 1/2/3 are siblings, so that is a REORDER — and P1-5g only ever
+ * offered re-parenting, so the pointer landed on a Work Cell row and
+ * `canDropOn` correctly refused a re-parent he never attempted. The drag did
+ * what the brief said; the brief was wrong.
+ *
+ * A row now offers up to THREE zones instead of one:
+ *
+ *     ┌──────────────── before ── place above this row, same parent
+ *     │──────────────── adopt  ── become a child of this row  (P1-5g)
+ *     └──────────────── after  ── place below this row, same parent
+ *
+ * ⭐ AND THE `noop` VERDICT IS WHAT MAKES A REORDER LEGAL, NOT ILLEGAL.
+ * `canDropOn(dragged, referenceRow.parentId)` returns `noop` precisely when
+ * the dragged node ALREADY has that parent — which is the definition of a
+ * pure reorder. Treating `noop` as a refusal is the single mistake this whole
+ * section exists to avoid, and it is the mistake the old code made by
+ * omission. Adopt is the opposite: there, `noop` means "already a child of
+ * this row", which really does nothing, so adopt keeps requiring `ok`.
+ * ======================================================================== */
+
+export type DropZoneKind = "before" | "adopt" | "after";
+
+export interface DropZone {
+  kind: DropZoneKind;
+  /** The parent the dragged node ends up under if this zone is used. */
+  parentId: string | null;
+  /**
+   * For `before`/`after`: the index to pass to `place_node`, counted among
+   * the destination parent's children WITH THE DRAGGED NODE REMOVED — which
+   * is exactly the list `place_node` splices into (it excludes `p_node_id`
+   * before renumbering). `null` for `adopt`, which calls `move_node`.
+   */
+  index: number | null;
+  verdict: DropVerdict;
+}
+
+/**
+ * Sibling order comes from the ALREADY-FLATTENED rows, not from re-sorting
+ * `nodes`. The index handed to the server has to mean the same thing the
+ * admin just saw, and `flattenTree`'s output IS what they saw — re-deriving
+ * the order here would be a second implementation of `compareSiblings` free
+ * to drift from the one that painted the screen.
+ *
+ * Collapsing hides DESCENDANTS, never siblings, so a visible row's siblings
+ * are all present in `rows` even when parts of the tree are collapsed.
+ */
+function siblingIndex(
+  referenceId: string,
+  parentId: string | null,
+  draggedId: string,
+  rows: readonly { node: NodeRow }[],
+): number {
+  let i = 0;
+  for (const r of rows) {
+    if (r.node.parentId !== parentId) continue;
+    if (r.node.id === draggedId) continue;
+    if (r.node.id === referenceId) return i;
+    i += 1;
+  }
+  return i;
+}
+
+/**
+ * Every zone this row legitimately offers, in top-to-bottom order.
+ *
+ * An EMPTY array means the row refuses the drag outright — which is a real
+ * and common state (a Work Cell dragged over a Site row offers neither a
+ * sibling slot nor an adoption) and is why the caller must handle zero.
+ */
+export function rowDropZones(
+  draggedId: string,
+  referenceId: string,
+  rows: readonly { node: NodeRow }[],
+  nodes: readonly NodeRow[],
+  levels: readonly LevelRow[],
+  templates: readonly HierarchyTemplateRef[],
+): DropZone[] {
+  // A row cannot host a drop of itself: "above me" and "below me" are not
+  // positions when the thing being placed IS me, and adopting yourself is
+  // `node_cycle`. Handled here rather than left to canDropOn so that the row
+  // reports NOTHING rather than a refusal message about itself.
+  if (referenceId === draggedId) return [];
+
+  const reference = findNode(referenceId, nodes);
+  if (!reference) return [];
+
+  const out: DropZone[] = [];
+
+  // --- the sibling zones, which stand or fall together -------------------
+  // Both ask ONE question -- "may the dragged node be a child of the
+  // reference row's parent" -- so they are never individually legal.
+  //
+  // `canDropOn` directly, NOT `describeDrop`: the reference row may be a
+  // ROOT, whose parent is `null`, and that is a legitimate destination --
+  // reordering plants is a real (company-admin) operation and `place_node`
+  // handles it. `describeDrop` takes a `string`, so routing a root through it
+  // would mean inventing a sentinel id and asking about a node that does not
+  // exist. `canDropOn` already takes `string | null` and already refuses a
+  // null parent for anything not at level position 0.
+  //
+  // None of describeDrop's sentences are used here anyway: they are all about
+  // adoption ("Move X into Y") and would be an actively wrong description of
+  // a reorder.
+  const sibling = canDropOn(
+    draggedId,
+    reference.parentId,
+    nodes as NodeRow[],
+    levels as LevelRow[],
+  );
+  // ⭐ `noop` COUNTS AS LEGAL. It is returned exactly when the dragged node
+  // already has this parent -- which is the definition of a pure reorder, and
+  // the case D94 was about.
+  const siblingLegal = sibling.ok;
+
+  if (siblingLegal) {
+    const idx = siblingIndex(referenceId, reference.parentId, draggedId, rows);
+    const draggedName = nodeName(draggedId, nodes, "This node");
+    const referenceName = nodeName(referenceId, nodes, "that node");
+    out.push({
+      kind: "before",
+      parentId: reference.parentId,
+      index: idx,
+      verdict: {
+        kind: "ok",
+        reason: null,
+        message: `Place ${draggedName} above ${referenceName}.`,
+      },
+    });
+    out.push({
+      kind: "after",
+      parentId: reference.parentId,
+      index: idx + 1,
+      verdict: {
+        kind: "ok",
+        reason: null,
+        message: `Place ${draggedName} below ${referenceName}.`,
+      },
+    });
+  }
+
+  // --- the adopt zone, unchanged from P1-5g ------------------------------
+  const adopt = describeDrop(draggedId, referenceId, nodes, levels, templates);
+  if (adopt.kind === "ok") {
+    out.push({ kind: "adopt", parentId: referenceId, index: null, verdict: adopt });
+  }
+
+  // NO SORT. `before`/`after` are pushed together and `adopt` after them, so
+  // an ordering pass would only matter if a row could offer a sibling slot
+  // AND an adoption at once -- which the theorem below `resolveDropZone`
+  // rules out. A sort here was written, mutation-tested, and deleted: no case
+  // could distinguish removing it from keeping it, and gotcha 17 says the
+  // honest answer to an unfalsifiable line is to remove it.
+  return out;
+}
+
+/**
+ * ⭐ A ROW CAN NEVER OFFER ALL THREE ZONES, AND THAT IS A THEOREM, NOT AN
+ * ACCIDENT OF THE FIXTURE.
+ *
+ * Adoption needs the dragged node to sit ONE RUNG BELOW the reference row.
+ * A sibling slot needs it to sit one rung below the reference row's PARENT —
+ * that is, on the SAME rung as the reference row. Every node in this schema
+ * sits exactly one rung below its parent (the adjacency trigger enforces it),
+ * so those two demands are contradictory: a row is either a peer of the
+ * dragged node or a possible home for it, never both.
+ *
+ * So the band arithmetic this section was expected to need — a 25/50/25 or
+ * 30/40/30 split, and an argument about how many pixels the sibling slots
+ * deserve — does not exist. **The question answered itself.** There are only
+ * ever two zones or one, and two zones split the row in half.
+ *
+ * Case P7 proves it by exhaustion over every (dragged, reference) pair in the
+ * fixture rather than by repeating the argument above, because an argument is
+ * not a measurement and a schema change could falsify this one silently.
+ *
+ * `offsetY` is measured from the row's top edge and is deliberately NOT
+ * clamped — see the note in the body. A pointer a fraction of a pixel outside
+ * the row, which happens constantly at the seam between two rows, still
+ * resolves to the nearer half.
+ *
+ * The midpoint belongs to the LOWER zone (`t < 0.5` is "before"), matching
+ * the convention that a boundary belongs to the band it opens.
+ */
+export function resolveDropZone(
+  zones: readonly DropZone[],
+  offsetY: number,
+  rowHeight: number,
+): DropZone | null {
+  if (zones.length === 0) return null;
+  if (zones.length === 1) return zones[0];
+
+  // A zero, negative or non-finite height would make every boundary 0 and
+  // hand back the last zone for any offset; the first is the safer answer and
+  // is what a clamped offset of 0 would give anyway.
+  if (!(rowHeight > 0)) return zones[0];
+  if (!Number.isFinite(offsetY)) return zones[0];
+
+  // NOT CLAMPED, for the same reason. Against a single 0.5 boundary a
+  // negative offset is already below it and an over-long one already above
+  // it, so clamping changes no answer -- proved by mutation, not argued. It
+  // would only earn its keep with three or more bands.
+  const t = offsetY / rowHeight;
+  return t < 0.5 ? zones[0] : zones[1];
+}

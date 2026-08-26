@@ -4613,3 +4613,184 @@ D97 gated the escape hatch on `pg_has_role(current_user, <owner of public.nodes>
 ### What has to happen on Pratik's machine
 
 `npm run db:reset && npm run db:types`. **0020 changes `database.types.ts`**: `hierarchy_templates` gains `site_node_id`, and four new functions appear (`app_is_admin_for_template`, `app_node_exists_in_org`, `app_is_admin_on_grant_node`, plus 0019's set). Nothing in `src/` reads any of them yet, so no client code moves — **the app suite should stay at 502 tests in 17 files.** A different number means a test file did not load.
+
+---
+
+## §19.47 — The admin-page gate: 0020 was unreachable through the product
+
+**Status: built, typechecked, linted, delivered. Awaiting one `npm run test`.**
+
+### The gap, and it is the "what does a user try first" question again
+
+0020 gave a site admin the run of their own plant and `adminAccess()` still asked one thing: `role === "admin"`. That is `user_profiles.role`, the ORG-WIDE flag — and a site admin is an org-wide **`viewer`** carrying an `admin` GRANT. **Every door 0020 opened was behind a gate that denied all of them.** Nothing in the product changed when 0020 landed.
+
+D97 wrote the gate's own expiry date into itself: *"`user_profiles.role` already allows admin | supervisor | viewer, and the three-tier model will add more. A client that has not been taught a new role must not decide it is probably fine — this function is the single place to widen when that lands."* This is that widening.
+
+### No migration. The server half has existed since 0019
+
+`app_is_admin_anywhere()` — `app_is_admin() OR exists(a grant with role 'admin')` — is exactly "should I see the admin section at all", is granted to `authenticated`, revoked from `anon`, and 0019's case **S14** pins that it never authorises a write.
+
+### Where the answer is fetched, and why not a second query
+
+`SessionProfile` gains `adminAnywhere`, fetched **inside `loadProfile`**, so ONE `loading` covers the profile and the probe together. A separate `useQuery` would add a second unresolved window for `adminAccess` to fold into `pending` — and **D91 is the standing reminder that `enabled: false` leaves `isLoading` FALSE**, which is precisely the fold that is easy to get silently wrong. The read is sequential rather than concurrent because the early return above it means a caller with no profile never fires it at all.
+
+`fetchAdminAnywhere` (`src/lib/api/access.ts`) **fails CLOSED**: a PostgREST error resolves to `false`, not a throw. The only consumers are a nav link and a route guard, and the honest fallback for "could not ask" is "do not show it".
+
+### The shape of the predicate
+
+```ts
+export function adminAccess(
+  role: string | null | undefined,
+  adminAnywhere: boolean | null | undefined,
+  loading: boolean,
+): AdminAccess {
+  if (loading) return "pending";
+  if (role === "admin") return "granted";
+  return adminAnywhere === true ? "granted" : "denied";
+}
+```
+
+**The role term is kept even though the server predicate subsumes it.** `app_is_admin_anywhere()` already answers true for a company admin, so this could be one line — it is two because the wrapper fails closed, and a company admin who cannot reach that RPC should still see their own admin screen from a profile they already hold. **Case A16 is what makes that a decision rather than dead weight.**
+
+**`adminAnywhere === true`, not truthiness.** The value crosses a network boundary, so "truthy" would admit a `1` or a non-empty string a shape change started returning. **A17 is the only case that can tell the two apart** — measured: rewriting the term as `Boolean(adminAnywhere)` passes A12–A16 and fails A17 alone.
+
+### Verification
+
+Design-session probe under `--experimental-strip-types`: **19 assertions, 8 mutations, all 8 caught.**
+
+| # | Mutation | Caught by |
+|---|---|---|
+| N1 | `loading` no longer dominates | G1–G4 |
+| N2 | the site-admin term is dropped | G8, G9 |
+| N3 | the company-admin term is dropped | G5–G7 |
+| N4 | loose equality on the RPC result | **the malformed sweep only** |
+| N5 | truthiness on the role instead of equality | G10, G11, G14 |
+| N6 | `pending` collapses to `granted` | G1–G4 |
+| N7 | `pending` collapses to `denied` | G1–G4 |
+| N8 | the whole gate opens | G10–G12 |
+
+**N4 is why A17 exists.** It fell to a 64-pair malformed sweep and to nothing else, so the committed suite would not have caught it — a sweep in a scratch harness is not a regression test. Rule 4's "record a clean sweep as a pass" has a corollary: **when the sweep is the ONLY thing that catches a mutation, the sweep has found a missing committed case.**
+
+`node node_modules/typescript/lib/tsc.js -b --force` exit 0 and `node node_modules/eslint/bin/eslint.js .` exit 0, both on Pratik's machine. **Instrument-checked**: a deliberate 2-argument call was injected into `RequireAdmin.tsx`, `TS2554: Expected 3 arguments, but got 2` fired at the expected line, and the restore re-ran clean.
+
+### A1–A11 gained an argument and kept their meaning
+
+Each existing case now passes `adminAnywhere = false` — the value that leaves the ROLE term as the only thing that can decide — so all eleven still measure exactly what they were written to measure. `src/test/session.test.ts` goes **26 → 32 `it()`**, and the app suite **502 → 508 in 17 files**.
+
+### 📌 Rough edge, named rather than left to be discovered
+
+With the gate open, a site admin opening `/admin` sees the shape picker listing **every structure in the org**, because `hierarchy_templates_select` is deliberately org-wide (0020 §5, so a company admin can pick a shape to copy). Choosing another site's and saving gets a correct `not_permitted`, but that is a refusal where a filter belongs. **It goes with `add_site_member`, which is the next piece of screen work for a site admin, and it should be looked at on screen rather than reasoned about** ([[verification-standard]] rule 2c).
+
+---
+
+## §19.48 — P1-5l/P1-5i part A: the pure layer, and the three-band row that cannot exist
+
+**Status: pure logic written, probed and mutation-tested in-container. NOT yet delivered to the repo — the React half is still to come, and these functions ship with it.**
+
+### ⭐ D94's design is wrong in one specific way, and running it is what showed that
+
+§19.34 specified the gesture as **three bands per row**: *"top/bottom row bands = place before/after as a sibling, middle = today's adopt"*, and left "the exact band fractions" as the thing to settle before a brief. The fractions do not need settling, because **a row can never offer all three zones at once.**
+
+Adoption requires the dragged node to sit **one rung below the reference row**. A sibling slot requires it to sit one rung below the reference row's **parent** — that is, on the **same rung as the reference row**. Every node here sits exactly one rung below its parent, enforced by `nodes_check_level_adjacency`. The two demands are contradictory: a row is either a **peer** of the dragged node or a possible **home** for it, never both.
+
+So every row is one of three things, and there is no fourth:
+
+| the row is… | zones | the row is split |
+|---|---|---|
+| a peer of the dragged node | `before`, `after` | in half |
+| a possible parent | `adopt` | not at all — the whole row |
+| neither | none | it refuses |
+
+**Case P7 proves this by exhaustion** over all 121 (dragged, reference) pairs in the fixture rather than by repeating the argument, because an argument is not a measurement and a future schema change could falsify it silently.
+
+**It deleted two pieces of code I had already written.** The three-way band split (30/40/30), and the `offsetY` clamp — against a single 0.5 boundary a negative offset is already below it and an over-long one already above it, so clamping changes no answer. Both were mutation-tested, both came back `NOT CAUGHT`, and both were removed (gotcha 17). A `sort` over the returned zones went the same way. **Three unfalsifiable lines, one theorem.**
+
+### ⭐ And `noop` is what makes a reorder LEGAL — the D94 bug in one line
+
+`canDropOn(dragged, referenceRow.parentId)` returns `noop` **exactly when the dragged node already has that parent**, which is the definition of a pure reorder. `rowDropZones` therefore accepts `sibling.ok` outright — `noop` included. Adopt is the opposite: there, `noop` means "already a child of this row", which really does nothing, so adopt still requires `ok` and not `noop`. Mutation **P1** restores the old reading and is caught by six cases.
+
+### Two things the fixture taught that reading would not have
+
+1. **Roots are siblings of each other**, and `describeDrop` cannot express that at all — it takes a `string`, and a root's parent is `null`. `rowDropZones` calls `canDropOn` directly, which already takes `string | null` and already refuses a null parent for anything off level position 0. Reordering plants is a real (company-admin) operation; `place_node(node, NULL, i)` handles it. Cases D8/D9, mutation P8.
+2. **A name collision at the destination blocks a sibling slot**, and my first cross-parent case tripped straight into one — both Lines in the fixture are called "Line 1", so `plant_1.packing.line_1` already existed and the case measured a `path_collision` while claiming to measure a level rule. Rule 3b, on a case I had just written. Re-fixtured, and the collision kept as its own case (D7b).
+
+### The index handed to `place_node`
+
+Counted among the destination parent's children **with the dragged node removed**, which is exactly the list `place_node` splices into. Taken from the **already-flattened rows**, not from re-sorting `nodes`: the index has to mean the same thing the admin just saw, and re-deriving the order here would be a second `compareSiblings` free to drift from the one that painted the screen. Collapsing hides descendants, never siblings, so a visible row's siblings are all present even in a collapsed tree (case D34).
+
+### P1-5i: one new level action, and the off-by-one it exists to prevent
+
+`{ kind: "moveTo", from, to }` in `levelDraft.ts`. **Splice out, then splice in** — removing the row first shifts later indices down by one, so `to` is read against the shortened array, which is what a caret means. Insert-then-remove makes a downward drag land one short; that is mutation **Q1**, and it is the classic bug in every list-reorder implementation. One action rather than a chain of adjacent swaps is the point: **case L12 asserts the new action equals the swap chain it replaces**, rather than against a second hand-written expectation.
+
+The level list needs **no server work at all** — the array index IS the stored position (D70), there is no illegal target, and P1-5j's Save gate already refuses an order that would strand nodes.
+
+### Verification
+
+| | assertions | mutations | caught |
+|---|---|---|---|
+| `treeDrag.ts` (`rowDropZones`, `resolveDropZone`) | 36 | 16 | **16** |
+| `levelDraft.ts` (`moveTo`) | 23 | 7 | **7** |
+
+**Two instrument failures on the way, both mine.** A probe that indexed `zones(...)[0]` on a possibly-empty array **threw**, scoring a cleanly-caught mutation as `CRASHED` (instrument #17, again) — the helper now returns `"(no such zone)"` instead. And mutation **Q6** (`draft.slice()` for `cloneRows()`) came back `NOT CAUGHT` because a reposition mutates no row; rather than record an escape, **case L16 asserts the rows are copies**, which is the convention every other arm of that reducer already follows and the thing that would silently break the day someone adds a field edit to this arm.
+
+### Rendered before writing any of this into a brief
+
+`docs/mockups/p1-5l-drop-zones.png`, built against the real `NodeTreeEditor.module.css` + `tokens.css` + `global.css`. **Two rounds, and the first was wrong twice:**
+
+- the caret was drawn at `-var(--row-pad-y) - 1px`, which is **inside the row above** — it read as that row's underline rather than as a seam between two rows;
+- and the "place below" panel put the caret directly above the **dragged** row, which is where the node already was, so the picture showed a no-op. Rule 2c: a screenshot of the wrong state is as blind as no screenshot. Re-staged with three sibling Lines so the destination is somewhere the node is not.
+
+The caret starts at the indent the dragged node will occupy and carries a knob there, so a caret at depth 3 cannot be read as one at depth 2.
+
+**📌 And an expired decision record found in passing.** `NodeTreeEditor.module.css`'s `.dropTick` comment says the affordance is *"deliberately NOT a horizontal line BETWEEN two rows… P1-5g does not ship reordering, so a caret would promise an outcome the drop does not deliver."* That reasoning was correct and is now spent — P1-5l ships exactly that outcome. **The comment must be rewritten in the same change, or it becomes the third instance of [[decision-record-drift]] rule 6 in this project.**
+
+### What is left
+
+The React half: the ~4px pointer threshold, the whole-row drag source with `pointerType` branching (D95a), the caret element, and lifting the shared pointer block so `LevelEditor` and `NodeTreeEditor` do not each get a copy (D95b, and the reason these two ship as ONE build). That is an agent brief, and the verified fixture and CSS above splice into it verbatim.
+
+---
+
+## §19.49 — P1-5l/P1-5i part B built, and D99: a shipped affordance that was rendering into the wrong row
+
+**Status: built by a Sonnet agent from `docs/agent-briefs/p1-5l-drag-to-reorder-brief.md`, reviewed independently, `tsc` and `eslint` exit 0 on Pratik's machine. NEEDS `npm run test` — predicted 580 in 18 files.**
+
+### ⭐ D99 — the adopt tick has been rendering 4px into the NEXT row since P1-5g
+
+Found by the build agent reading the geometry, then MEASURED in headless Chromium against this stylesheet:
+
+```
+.tree is a gapless flex column   ->  Line1.bottom == Line2.top == 604.89
+.dropTick::after  bottom: -4px   ->  the tick's top edge is 4px INTO Line 2
+```
+
+**Why it happened, and it is a reference-frame error rather than a typo.** The `-1 * var(--row-pad-y)` idiom is *correct* where it came from: `.guideOn::before` hangs off `.guideOn`, a flex child stretched to the row's **content** box, so it must bleed by a padding to reach the row's outer edge. `.dropTick::after` hangs off `.row` itself, and an absolutely-positioned child is laid out against its ancestor's **padding box** — which for a border-less `.row` already starts at that outer edge. Copying the idiom across changed the reference frame silently.
+
+**Why nobody saw it, and this is the reusable half.** P1-5g's render, P1-5g's review render, and my own P1-5l render all put the adopt target on the **last row**, where there is no next row to intrude on. Rule 2c already says *"choose demo states that can actually show the state you claim"* — this is that rule one level up: **the state that exposes a spacing bug is the one with a NEIGHBOUR**, and three consecutive renders picked a fixture that could not fail.
+
+**And the first fix was also wrong, which the render caught immediately.** `bottom: 0` puts the tick exactly on the row's bottom edge — where `.dropOk` already paints a 2px inset ring in the same `--signal-ok`. **The tick vanished.** Same colour, same pixels, green suite either way; the D89 family, a defect made of absent contrast. Shipped value is `bottom: 0.125rem`, just inside the ring, rendered and looked at.
+
+### The brief was wrong in four ways, all found by the agent
+
+1. **§6's "verbatim" CSS would have turned `scaleAudit` red.** Seven raw pixel lengths (`7px` knob, `1px`/`3px`/`4px` offsets) in a file that is in `REM_SURFACES`. Only a border/outline ≤2px is exempt. The agent re-expressed the knob as `--caret-knob: 0.4375rem` and the offsets as `calc()` over it — which is the *point* of D84: a 7px dot that stays 7px at 4K is precisely what the audit exists to catch. **I pasted CSS I had rendered but never audited.**
+2. **§6.1's code contradicted §6.1's own comment, and the comment was right (rule 17, again).** The comment says `-var(--row-pad-y)` *is* the seam and condemns adding `- 1px`; the pasted code then had `- 1px`. Both were wrong anyway for the reason in D99 above — against `.row` the seam is `0`. Measured: `Assembly.bottom == Line1.top == 122.30`, caret `top: 0px`.
+3. **§6.3 does not survive contact with `LevelEditor.module.css`.** "The same two rules" assumes the tree's gapless column; `.list` there is a flex column with `gap: 0.375rem`, so the seam is a **band**, not an edge. The agent named the gap and centred the rule in it.
+4. **§2.5's "no change to `place_node`" was true of the database and misleading about the client.** There was **no `placeNode` wrapper and no `usePlaceNode` hook anywhere in `src/`** — `place_node` appears only in migrations, `database.types.ts`, the SQL tests and this plan. A before/after drop has nothing to call. The agent added both, modelled on `moveNode`/`useMoveNode`, with a guard for the RPC's **array** return. Three files outside §3's table, each reported as a breach. **Rule 10 again: plan by property, not by file count.**
+
+### ⭐ And it found a hole in the brief's own case list
+
+The brief forbids a `thresholdPx <= 0` short-circuit because `Math.hypot` is never negative — I had proved that inert. The agent proved it inert far more thoroughly (**0 behavioural differences over 371,293 input tuples**) and then found the case I had missed: **written as the FIRST line, before the finite guards, the same branch is NOT inert** — it returns `true` for a non-finite origin whenever the threshold is ≤ 0, so an unmeasurable pointer starts a drag. No case combines a non-finite coordinate with a non-positive threshold. It did not add a 20th case (the brief pins the file at 19 and the branch is forbidden anyway) and flagged it instead. **That is the right call and the escape is recorded here rather than closed.**
+
+### Verification
+
+- Agent's own table: **7 mutations, all caught.** Collateral differed from my prediction in two rows (its T7 fixture also kills U1 and U2) — measured, not chased, exactly as rule 14 asks.
+- **Independent review probe against the DELIVERED module** (not the agent's copy): **16 unprescribed assertions, all passing**, including subpixel thresholds, `-Infinity` at both ends, a NaN threshold, pointer-type casing and padding, and a **243-combination malformed sweep with zero throws**.
+- `tsc -b --force` exit 0 and `eslint .` exit 0, re-run by the design session, not taken from the report.
+- Counts re-derived independently: 18 test files, `dragPointer.test.ts` 19, `interaction.test.ts` 30, `treeDrag.test.ts` 79, `levelDraft.test.ts` 54, `session.test.ts` 32. **580 predicted.** The agent also caught that my brief said "17 files" while adding an eighteenth.
+
+### Open, flagged by the agent, for the design session to decide
+
+1. **A no-op caret is still drawn** — `rowDropZones` emits `after` on the row above the dragged node, whose index equals where it already is. Suppressing it needs a rule in the pure layer, which the agent was told not to edit.
+2. **`.eligible` still means "legal adoption parent" only.** With reorder shipping, peer rows are destinations too and get no dashed hint.
+3. **No touch drag on the level list** — no `⠿` handle was added there, and `rowIsDragSource` is fail-closed, so a finger gets the arrows. Consistent with D95a, but a real gap if touch reordering of levels was expected.
+4. **StrictMode double-invocation**: the agent found P1-5g fires `move_node` twice per drop in development, because side effects sat inside a state updater. It moved both components to a `useRef` mirror with synchronous transitions. **A behaviour change to existing code the brief did not ask for** — judged in scope because §5.3 is about that review's findings. Worth a second look.
+5. `src/test/treeDrag.test.ts`'s header still says *"43 plain `it()` cases"* while the file has 79 — the same expired-comment class as §6.2.

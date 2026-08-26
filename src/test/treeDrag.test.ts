@@ -14,6 +14,8 @@ import {
   dropRailIndex,
   eligibleTargetIds,
   groupDropState,
+  resolveDropZone,
+  rowDropZones,
 } from "../features/admin/lib/treeDrag.ts";
 
 const TPL_S = "tpl1"; // "Standard Plant" — Site > Department > Line > Work Cell
@@ -337,5 +339,220 @@ describe("treeDrag", () => {
 
   it("N6: dropRailIndex(-1) === 0, recorded, not clamped", () => {
     expect(dropRailIndex(-1)).toBe(0);
+  });
+});
+
+/* ===========================================================================
+ * Group R — `rowDropZones` / `resolveDropZone` (P1-5l, design plan §19.48).
+ *
+ * ⭐ WHY THIS GROUP EXISTS. The first gesture Pratik tried was the one P1-5g
+ * excluded: *"I tried moving cell 3 between cell 1 and cell 2, but it turned
+ * red."* Those are siblings, so it is a REORDER, and P1-5g only ever offered
+ * re-parenting. The drag did what the brief said; the brief was wrong (D94).
+ *
+ * ⭐ AND THE HEADLINE FINDING, WHICH IS R15/R16: A ROW CAN NEVER OFFER ALL
+ * THREE ZONES. Adoption wants the dragged node one rung BELOW the reference
+ * row; a sibling slot wants it on the SAME rung. Both cannot hold, so §19.34's
+ * planned three-band row does not exist and its band fractions never needed
+ * settling. R15 proves it by exhaustion rather than repeating the argument.
+ * ======================================================================== */
+
+const zones = (d: string, r: string) => rowDropZones(d, r, ROWS, NODES, LEVELS, TEMPLATES);
+/** Compact, order-preserving shape of a row's zones: `kind@index`. */
+const shape = (d: string, r: string): string =>
+  zones(d, r)
+    .map((z) => `${z.kind}@${z.index ?? "-"}`)
+    .join(",");
+/**
+ * Never INDEXES into a possibly-empty array. A probe that throws scores
+ * CRASHED where a named failure belongs, and the first run of these cases did
+ * exactly that — a cleanly-caught mutation looked like a broken one for a
+ * minute (verification rule 6, instrument #17).
+ */
+const msg = (d: string, r: string, i: number): string =>
+  zones(d, r)[i]?.verdict.message ?? "(no such zone)";
+
+describe("treeDrag.ts: rowDropZones", () => {
+  // ⭐ R1 IS THE GESTURE. Line 2 dropped on its own sibling Line 1.
+  // `canDropOn(n7, n2)` returns `noop`, and the whole point is that `noop` is
+  // LEGAL here — it is returned exactly when the dragged node already has
+  // that parent, which is the definition of a pure reorder.
+  it("R1: a peer row offers before/after — the reorder D94 was about", () => {
+    expect(shape("n7", "n1")).toBe("before@0,after@1");
+  });
+
+  it("R2: a peer row offers no adoption — a Line cannot hold a Line", () => {
+    expect(zones("n7", "n1").some((z) => z.kind === "adopt")).toBe(false);
+  });
+
+  // Line 2 (under Assembly) onto Packing's Line 1: a legal sibling slot under
+  // Packing, and not adoptable. The first draft of this case dragged Line 1
+  // instead and got NOTHING — `plant_1.packing.line_1` already exists, so it
+  // measured a path_collision while claiming to measure a level rule (rule 3b).
+  it("R3: a peer row under a DIFFERENT parent still offers before/after", () => {
+    expect(shape("n7", "n3")).toBe("before@0,after@1");
+  });
+
+  it("R4: a row that can be a parent offers adoption alone", () => {
+    expect(shape("n6", "n7")).toBe("adopt@-");
+  });
+
+  // Sibling slot would be a Cell under a Department (mismatch); adoption is a
+  // noop, because the Cell is already there. Adopt keeps requiring `ok`.
+  it("R5: a node's own parent row offers nothing", () => {
+    expect(shape("n6", "n1")).toBe("");
+  });
+
+  it("R6: a row never hosts a drop of itself", () => {
+    expect(shape("n1", "n1")).toBe("");
+  });
+
+  it("R7: two rungs apart offers neither zone", () => {
+    expect(shape("n6", "n2")).toBe("");
+  });
+
+  it("R8: a name collision at the destination blocks the sibling slot", () => {
+    expect(shape("n1", "n3")).toBe("");
+  });
+
+  // ⭐ R9 — ROOTS ARE SIBLINGS OF EACH OTHER, and their parent is `null`,
+  // which `describeDrop` cannot express at all (it takes a `string`).
+  // `rowDropZones` calls `canDropOn` directly for exactly this reason.
+  it("R9: roots are peers of each other", () => {
+    expect(shape("n11", "n5")).toBe("before@0,after@1");
+  });
+
+  it("R10: a root's index counts the other roots in display order", () => {
+    expect(shape("n11", "n10")).toBe("before@2,after@3");
+  });
+
+  it("R11: a non-root over a root offers nothing — it cannot become a root", () => {
+    expect(shape("n1", "n9")).toBe("");
+  });
+
+  it("R12: a row in another site structure offers nothing", () => {
+    expect(shape("n1", "n4")).toBe("");
+  });
+
+  it("R13: a node dragged onto its own descendant offers nothing", () => {
+    expect(shape("n2", "n1")).toBe("");
+  });
+
+  // Assembly(0) and Packing(1) are the only Departments; dropping Assembly
+  // AFTER Packing is index 1, not 2, because `place_node` splices into the
+  // sibling list with the moved node already removed.
+  it("R14: the index excludes the dragged node", () => {
+    expect(shape("n2", "n8")).toBe("before@0,after@1");
+  });
+
+  // ⭐ R15/R16 — proved by exhaustion over every pair, not argued.
+  it("R15: no pair anywhere offers three zones", () => {
+    let threes = 0;
+    for (const d of NODES) for (const r of NODES) if (zones(d.id, r.id).length >= 3) threes += 1;
+    expect(threes).toBe(0);
+  });
+
+  it("R16: the widest row offers exactly two", () => {
+    let widest = 0;
+    for (const d of NODES) for (const r of NODES) {
+      widest = Math.max(widest, zones(d.id, r.id).length);
+    }
+    expect(widest).toBe(2);
+  });
+
+  it("R17: an unknown dragged id offers nothing", () => {
+    expect(shape("nope", "n1")).toBe("");
+  });
+
+  it("R18: an unknown reference id offers nothing", () => {
+    expect(shape("n1", "nope")).toBe("");
+  });
+
+  it("R19: a node whose level is missing offers nothing", () => {
+    expect(shape("n10", "n5")).toBe("");
+  });
+
+  it("R20: the before message says ABOVE, not 'into'", () => {
+    expect(msg("n7", "n1", 0)).toBe("Place Line 2 above Line 1.");
+  });
+
+  it("R21: the after message says BELOW", () => {
+    expect(msg("n7", "n1", 1)).toBe("Place Line 2 below Line 1.");
+  });
+
+  it("R22: adoption keeps describeDrop's own sentence", () => {
+    expect(msg("n6", "n7", 0)).toBe("Move Cell 1 into Line 2.");
+  });
+
+  // Collapsing hides DESCENDANTS, never siblings, so a visible row's peers
+  // are all still in the flattened list the index is counted from.
+  it("R23: a collapsed tree yields the same indices", () => {
+    const collapsed = buildTreeRows(NODES, LEVELS, new Set(["n2", "n8"]));
+    const z = rowDropZones("n2", "n8", collapsed, NODES, LEVELS, TEMPLATES);
+    expect(z.map((x) => `${x.kind}@${x.index}`).join(",")).toBe("before@0,after@1");
+  });
+});
+
+describe("treeDrag.ts: resolveDropZone", () => {
+  const two = rowDropZones("n7", "n3", ROWS, NODES, LEVELS, TEMPLATES);
+  const one = rowDropZones("n6", "n7", ROWS, NODES, LEVELS, TEMPLATES);
+
+  it("R24: two zones, the top half is 'before'", () => {
+    expect(resolveDropZone(two, 10, 32)?.kind).toBe("before");
+  });
+
+  it("R25: two zones, the bottom half is 'after'", () => {
+    expect(resolveDropZone(two, 20, 32)?.kind).toBe("after");
+  });
+
+  // A boundary belongs to the band it opens.
+  it("R26: the midpoint belongs to the lower band", () => {
+    expect(resolveDropZone(two, 16, 32)?.kind).toBe("after");
+  });
+
+  it("R27: one zone takes the whole row, at the top", () => {
+    expect(resolveDropZone(one, 0, 32)?.kind).toBe("adopt");
+  });
+
+  it("R28: one zone takes the whole row, at the bottom", () => {
+    expect(resolveDropZone(one, 31, 32)?.kind).toBe("adopt");
+  });
+
+  it("R29: no zones resolves to null", () => {
+    expect(resolveDropZone([], 10, 32)).toBeNull();
+  });
+
+  // ⭐ R30/R31 — the offset is deliberately NOT clamped. Against a single 0.5
+  // boundary a negative offset is already below it and an over-long one
+  // already above it, so a clamp changes no answer — measured, not argued: the
+  // clamp was written, came back NOT CAUGHT by every case, and was removed.
+  it("R30: an offset above the row still resolves to the top band", () => {
+    expect(resolveDropZone(two, -50, 32)?.kind).toBe("before");
+  });
+
+  it("R31: an offset below the row still resolves to the bottom band", () => {
+    expect(resolveDropZone(two, 999, 32)?.kind).toBe("after");
+  });
+
+  // A zero or negative height would make every boundary 0 and hand back the
+  // last zone for any offset. The first is what a clamped offset of 0 gives.
+  it("R32: a zero row height falls back to the first zone", () => {
+    expect(resolveDropZone(two, 10, 0)?.kind).toBe("before");
+  });
+
+  it("R33: a negative row height falls back to the first zone", () => {
+    expect(resolveDropZone(two, 10, -32)?.kind).toBe("before");
+  });
+
+  it("R34: a NaN offset falls back to the first zone", () => {
+    expect(resolveDropZone(two, NaN, 32)?.kind).toBe("before");
+  });
+
+  it("R35: a NaN row height falls back to the first zone", () => {
+    expect(resolveDropZone(two, 10, NaN)?.kind).toBe("before");
+  });
+
+  it("R36: an infinite row height falls back to the first zone", () => {
+    expect(resolveDropZone(two, 10, Infinity)?.kind).toBe("before");
   });
 });

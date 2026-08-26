@@ -4,7 +4,19 @@
  * `geometry.ts` (brief P1-4a §4.2), so this module is executable standalone
  * under `node --experimental-strip-types` for the §11/§12 harness.
  *
- * This file ends up with zero non-type imports: every function needed here
+ * P1-5l §4.1: this file no longer ends up with zero non-type imports. It
+ * carries ONE re-export -- `DRAG_THRESHOLD_PX`, which moved to
+ * `src/lib/interaction.ts` the moment the admin tree needed the same number
+ * and `conventions.md` forbade admin importing from board. That is an
+ * `export ... from`, so it costs this module a resolvable specifier under
+ * `node --experimental-strip-types` (the `@/` alias is a bundler alias, not a
+ * node one) and the §11/§12 standalone harness would now need the same alias
+ * mapping the test runner already has. Recorded here rather than left to be
+ * discovered, because the paragraph below asserted the opposite and an
+ * expired comment is this project's recurring defect. Everything else in the
+ * paragraph still holds:
+ *
+ * This file ends up with zero OTHER non-type imports: every function needed here
  * is self-contained arithmetic over `{ startMin, endMin }` shapes, so
  * there is nothing to pull in from `./geometry` or `@/lib/api` (the brief
  * permits both, it does not require either). See the agent report's
@@ -14,7 +26,16 @@
  */
 
 export const MIN_DURATION_MINUTES = 15; // D31
-export const DRAG_THRESHOLD_PX = 4; // D32
+
+/**
+ * D32, and it now lives in `src/lib/interaction.ts` (brief P1-5l §4.1) because
+ * the admin node tree and level list need the same number and a feature may not
+ * import from another feature. RE-EXPORTED here rather than duplicated, so
+ * every existing `from "../lib/interaction"` import (only
+ * `hooks/useDragGesture.ts`, twice) keeps working untouched and there is still
+ * exactly one `4` in the repo.
+ */
+export { DRAG_THRESHOLD_PX } from "@/lib/interaction";
 
 export type DragMode = "create" | "move" | "resize-start" | "resize-end";
 export type EdgeHit = "start" | "end" | "body";

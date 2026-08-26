@@ -384,6 +384,82 @@ export async function moveNode(input: MoveNodeInput): Promise<MoveNodeResult> {
 }
 
 // ---------------------------------------------------------------------------
+// placeNode — `place_node(p_node_id uuid, p_new_parent_id uuid, p_index int)`
+// (D94, migration 0017, re-issued by 0020 §8). ONE RPC, not two: it calls
+// `move_node` first — so it raises everything `move_node` raises, with the same
+// codes and no new ones — and then densely renumbers the DESTINATION parent's
+// children 0..n-1. It carries no permission check of its own, deliberately
+// (0020 §8, gotcha 17): `move_node` runs first and checks both ends of the move.
+//
+// Returns the destination parent's children AFTER the renumber, in the new
+// order — a JSON ARRAY, which is the one payload shape in this file that is not
+// an object, so it gets its own guard rather than reusing `isJsonObject`.
+//
+// Raises: not_permitted, invalid_argument, node_cycle, level_mismatch,
+// path_collision. No new error codes (brief P1-5l §2.6).
+// ---------------------------------------------------------------------------
+
+export interface PlaceNodeInput {
+  nodeId: string;
+  /** `null` places among the ROOTS — legal only for a position-0 node, and
+   * only for a company admin. Reordering plants is a real operation. */
+  newParentId: string | null;
+  /**
+   * Counted among the destination parent's children WITH THE DRAGGED NODE
+   * REMOVED, which is exactly the list `place_node` splices into. The RPC
+   * clamps to `[0, n]` and treats NULL as 0, so an out-of-range index is not an
+   * error — "before everything" and "after everything" are unambiguous.
+   */
+  index: number;
+}
+
+/** One sibling as `place_node` reports it back. Same five fields
+ * `move_node` returns, because they are the same row. */
+export interface PlacedSibling {
+  id: string;
+  name: string;
+  path: string;
+  parentId: string | null;
+  sortOrder: number;
+}
+
+function parsePlaceNodeResult(v: Json): PlacedSibling[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: PlacedSibling[] = [];
+  for (const entry of v) {
+    if (!isJsonObject(entry)) return null;
+    const { id, name, path, parent_id, sort_order } = entry;
+    if (!isStr(id) || !isStr(name) || !isStr(path) || !isStrOrNull(parent_id) || !isNum(sort_order)) {
+      return null;
+    }
+    out.push({ id, name, path, parentId: parent_id, sortOrder: sort_order });
+  }
+  return out;
+}
+
+/** Generated signature: `{ p_index: number; p_new_parent_id: string;
+ * p_node_id: string } -> Json`. `p_new_parent_id` is nullable in SQL and the
+ * generator does not say so — the same generated-nullability gap `createNode`
+ * and `moveNode` document above; the note there is the single explanation for
+ * all three call sites. */
+export async function placeNode(input: PlaceNodeInput): Promise<PlacedSibling[]> {
+  const { data, error } = await supabase.rpc("place_node", {
+    p_node_id: input.nodeId,
+    p_new_parent_id: input.newParentId as unknown as string,
+    p_index: input.index,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parsePlaceNodeResult(data);
+  if (parsed === null) {
+    throw shapeMismatch(
+      "place_node",
+      "expected [{ id, name, path, parent_id, sort_order }, ...]",
+    );
+  }
+  return parsed;
+}
+
+// ---------------------------------------------------------------------------
 // deleteNode — `delete_node(p_node_id uuid, p_mode text default
 // 'deactivate')`. Raises: not_permitted, invalid_argument (unrecognised or
 // NULL mode — D1's fix), node_in_use.

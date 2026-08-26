@@ -21,6 +21,21 @@ export type LevelAction =
   | { kind: "rename"; index: number; name: string }
   | { kind: "moveUp"; index: number }
   | { kind: "moveDown"; index: number }
+  /**
+   * P1-5i (design plan §19.35, §19.48) — a drag from one position to another,
+   * as ONE action rather than a chain of adjacent swaps.
+   *
+   * `to` is the index the row should END UP AT in the resulting array, which
+   * is what a caret between two rows means — and is NOT the same as "the row
+   * it was dropped above" once the dragged row has been lifted out. The
+   * reducer arm below carries the reason.
+   *
+   * The level list is the EASY half of this build: the array index IS the
+   * stored position (D70), there is no illegal target, and P1-5j's Save gate
+   * already refuses an order that would strand nodes. So a level drag is a
+   * pure draft edit — no server call, no `canDropOn`.
+   */
+  | { kind: "moveTo"; from: number; to: number }
   | { kind: "add" }
   | { kind: "remove"; index: number }
   | { kind: "setSchedulable"; index: number };
@@ -63,6 +78,27 @@ export function applyLevelAction(
       const next = cloneRows(draft);
       const i = action.index;
       [next[i], next[i + 1]] = [next[i + 1], next[i]];
+      return next;
+    }
+
+    case "moveTo": {
+      // Both ends must be real positions. `to` may be at most
+      // `draft.length - 1`: `moveTo` REPOSITIONS an existing row, so the array
+      // never grows and "past the end" is not a destination.
+      if (!inRange(draft, action.from) || !inRange(draft, action.to)) return draft;
+      if (action.from === action.to) return draft;
+
+      // ⭐ SPLICE OUT, THEN SPLICE IN — and the order is the whole subtlety.
+      // Removing the row first shifts every later index down by one, so `to`
+      // is interpreted against the SHORTENED array, which is exactly what a
+      // caret means: "the row ends up here", counted without itself. Doing it
+      // the other way round makes a downward drag land one short — the
+      // classic off-by-one in every list-reorder implementation, and the
+      // reason this is one action rather than a chain of adjacent swaps the
+      // caller has to compose correctly. Case L12 pins the equivalence.
+      const next = cloneRows(draft);
+      const [row] = next.splice(action.from, 1);
+      next.splice(action.to, 0, row);
       return next;
     }
 

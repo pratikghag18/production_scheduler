@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { fetchAdminAnywhere } from "@/lib/api";
 import { decideSessionUpdate } from "./session";
 import type { AuthEventKind } from "./session";
 
@@ -20,6 +21,18 @@ export interface SessionProfile {
   userId: string;
   role: string;
   defaultCreateMode: string;
+  /**
+   * `app_is_admin_anywhere()` (migration 0019), carried on the profile rather
+   * than fetched separately so that ONE `loading` covers both. A second
+   * `useQuery` would add a second unresolved window for `adminAccess` to fold
+   * into `pending`, and D91 is the standing reminder that `enabled: false`
+   * leaves `isLoading` FALSE -- that fold is easy to get silently wrong.
+   *
+   * ⚠️ VISIBILITY ONLY. It decides whether the admin screen is worth showing.
+   * It authorises nothing; every write re-asks the real question about the
+   * specific node or structure. See `src/lib/api/access.ts`.
+   */
+  adminAnywhere: boolean;
 }
 
 export interface UseSessionResult {
@@ -95,6 +108,14 @@ export function useSession(): UseSessionResult {
         setProfile(null);
         return;
       }
+      // Sequential, not concurrent, and on purpose: the RPC is only ever
+      // consulted for someone who HAS a profile, and the early return above
+      // means a failed profile read never fires it at all. One round trip is
+      // the cost of the admin nav link resolving in the same tick as the rest
+      // of the session, which is what keeps `adminAccess` a two-state
+      // question instead of a three-state one.
+      const adminAnywhere = await fetchAdminAnywhere();
+      if (cancelled) return;
       const {
         id,
         org_id: orgId,
@@ -102,7 +123,7 @@ export function useSession(): UseSessionResult {
         role,
         default_create_mode: defaultCreateMode,
       } = data;
-      setProfile({ id, orgId, userId, role, defaultCreateMode });
+      setProfile({ id, orgId, userId, role, defaultCreateMode, adminAnywhere });
     }
 
     // First mount must always load: `decideSessionUpdate`'s "initial" kind

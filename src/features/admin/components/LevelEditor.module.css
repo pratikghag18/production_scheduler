@@ -21,7 +21,11 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  /* NAMED, because P1-5l's insertion caret has to sit in the middle of this
+     exact gap and a literal in both places drifts. Same reason `.row` in
+     NodeTreeEditor names `--row-pad-y`. Inherited by the rows below. */
+  --level-row-gap: 0.375rem;
+  gap: var(--level-row-gap);
 }
 
 .row {
@@ -191,4 +195,82 @@
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   P1-5i — DRAG TO REORDER THE LEVEL LIST (brief P1-5l §5.4/§6.3).
+
+   The same two caret rules as `NodeTreeEditor.module.css`, minus
+   `--caret-rails`: a flat list has no indent, so the caret spans the row's full
+   width and there is no depth for a knob to disambiguate. The knob is kept
+   anyway, flush at the left edge, so the two surfaces read as one affordance.
+
+   ⚠️ AND THE SEAM IS NOT IN THE SAME PLACE AS THE TREE'S. `.tree` in the node
+   editor is a GAPLESS column, so row i's bottom edge is row i+1's top edge and
+   the caret sits at `top: 0` / `bottom: 0`. This list has `gap:
+   var(--level-row-gap)` between rows, so the seam is a BAND, not an edge, and
+   the caret is centred in it — half a gap outside the row, less half the rule.
+   Reusing the tree's `0` here would draw the caret against one row's edge
+   rather than between two rows, which is the same class of mistake the brief's
+   own §6.1 comment describes.
+
+   Every length is `rem` apart from the 2px rule itself (a hairline, exempt in
+   `scaleAudit`'s `unscaledPxLengths` and matching `.dropTick::after`).
+   --------------------------------------------------------------------------- */
+.caretBefore,
+.caretAfter {
+  position: relative;
+  --caret-knob: 0.4375rem;
+  --caret-half-rule: 0.0625rem;
+}
+
+.caretBefore::before,
+.caretAfter::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid var(--signal-ok);
+  z-index: 1;
+}
+
+.caretBefore::before {
+  top: calc(-0.5 * var(--level-row-gap) - var(--caret-half-rule));
+}
+
+.caretAfter::before {
+  bottom: calc(-0.5 * var(--level-row-gap) - var(--caret-half-rule));
+}
+
+.caretBefore::after,
+.caretAfter::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: var(--caret-knob);
+  height: var(--caret-knob);
+  border-radius: 50%;
+  background: var(--signal-ok);
+  z-index: 2;
+}
+
+.caretBefore::after {
+  top: calc(-0.5 * var(--level-row-gap) - var(--caret-knob) / 2);
+}
+
+.caretAfter::after {
+  bottom: calc(-0.5 * var(--level-row-gap) - var(--caret-knob) / 2);
+}
+
+/* The row being dragged, shown as lifted out of the list. Matches
+   `.rowDragging` in the node tree. */
+.rowDragging {
+  opacity: 0.45;
+}
+
+/* While a drag is live, nothing in the list should select text. */
+.dragging,
+.dragging * {
+  user-select: none;
 }

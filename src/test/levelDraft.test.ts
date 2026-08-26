@@ -491,3 +491,119 @@ describe("levelDraft.ts: findLevelOrderProblems", () => {
     ]);
   });
 });
+
+/* ===========================================================================
+ * Group M — `moveTo` (P1-5i, design plan §19.48).
+ *
+ * The level list is the EASY half of the drag build: the array index IS the
+ * stored position (D70), there is no illegal target, and P1-5j's Save gate
+ * already refuses an order that would strand nodes. So this is a pure draft
+ * edit with no server call.
+ *
+ * ⭐ THE ONE SUBTLETY IS THE OFF-BY-ONE. `to` is where the row ENDS UP, read
+ * against the array with the row already lifted out — which is what a caret
+ * between two rows means. Insert-then-remove makes a downward drag land one
+ * short; M1 and M11 are what catch it.
+ * ======================================================================== */
+
+describe("levelDraft.ts: moveTo", () => {
+  const M = (...names: string[]): LevelDraft[] =>
+    names.map((n, i) => ({ id: `m${i}`, name: n, isSchedulable: n === "Cell" }));
+  const BASE = M("Site", "Dept", "Line", "Cell");
+  const names = (d: readonly LevelDraft[]): string => d.map((r) => r.name).join(",");
+  const moveTo = (from: number, to: number): string =>
+    names(applyLevelAction(BASE, { kind: "moveTo", from, to }));
+
+  it("M1: a downward drag lands AT the target index, not one short", () => {
+    expect(moveTo(0, 2)).toBe("Dept,Line,Site,Cell");
+  });
+
+  it("M2: a downward drag of one is a single swap", () => {
+    expect(moveTo(0, 1)).toBe("Dept,Site,Line,Cell");
+  });
+
+  it("M3: an upward drag of two", () => {
+    expect(moveTo(3, 1)).toBe("Site,Cell,Dept,Line");
+  });
+
+  it("M4: an upward drag of one is a single swap", () => {
+    expect(moveTo(1, 0)).toBe("Dept,Site,Line,Cell");
+  });
+
+  it("M5: first to last", () => {
+    expect(moveTo(0, 3)).toBe("Dept,Line,Cell,Site");
+  });
+
+  it("M6: last to first", () => {
+    expect(moveTo(3, 0)).toBe("Cell,Site,Dept,Line");
+  });
+
+  it("M7: a move to the same index changes nothing", () => {
+    expect(moveTo(2, 2)).toBe("Site,Dept,Line,Cell");
+  });
+
+  // Identity returns the SAME REFERENCE, so React does not re-render and Save
+  // does not light up for a gesture that changed nothing.
+  it("M8: a move to the same index returns the original array", () => {
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: 2, to: 2 })).toBe(BASE);
+  });
+
+  it("M9: every out-of-range index is a no-op", () => {
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: -1, to: 2 })).toBe(BASE);
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: 2, to: -1 })).toBe(BASE);
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: 4, to: 0 })).toBe(BASE);
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: 0, to: 4 })).toBe(BASE);
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: 1.5, to: 0 })).toBe(BASE);
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: 0, to: 1.5 })).toBe(BASE);
+  });
+
+  it("M10: NaN at either end is a no-op", () => {
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: NaN, to: 0 })).toBe(BASE);
+    expect(applyLevelAction(BASE, { kind: "moveTo", from: 0, to: NaN })).toBe(BASE);
+  });
+
+  // ⭐ M11/M12 — asserted against the ADJACENT SWAPS this action replaces,
+  // not against a second hand-written expectation. "Same result, one step" is
+  // the claim; comparing to a hand-written string would only re-assert M1.
+  it("M11: one downward moveTo equals the swap chain it replaces", () => {
+    let viaSwaps: readonly LevelDraft[] = BASE;
+    for (let i = 0; i < 2; i += 1) {
+      viaSwaps = applyLevelAction(viaSwaps, { kind: "moveDown", index: i });
+    }
+    expect(names(viaSwaps)).toBe(moveTo(0, 2));
+  });
+
+  it("M12: one upward moveTo equals the swap chain it replaces", () => {
+    let viaSwaps: readonly LevelDraft[] = BASE;
+    for (let i = 3; i > 1; i -= 1) {
+      viaSwaps = applyLevelAction(viaSwaps, { kind: "moveUp", index: i });
+    }
+    expect(names(viaSwaps)).toBe(moveTo(3, 1));
+  });
+
+  it("M13: the schedulable flag travels with its row, not with the position", () => {
+    const moved = applyLevelAction(BASE, { kind: "moveTo", from: 3, to: 0 });
+    expect(moved.map((r) => r.isSchedulable)).toEqual([true, false, false, false]);
+  });
+
+  // ⭐ M14/M15 exist because a mutation proved nothing else could tell. A
+  // reposition mutates no row, so `draft.slice()` gives an identical-looking
+  // answer while aliasing the caller's row objects — and the day someone adds
+  // a field edit to this arm it would start writing through into their state.
+  // Every other arm of this reducer clones; these pin that this one does too.
+  it("M14: the moved row is a copy, not the caller's object", () => {
+    const moved = applyLevelAction(BASE, { kind: "moveTo", from: 3, to: 0 });
+    expect(moved[0]).not.toBe(BASE[3]);
+  });
+
+  it("M15: rows that did not move are copies too", () => {
+    const moved = applyLevelAction(BASE, { kind: "moveTo", from: 3, to: 0 });
+    expect(moved[1]).not.toBe(BASE[0]);
+  });
+
+  it("M16: the caller's array is left untouched", () => {
+    const before = names(BASE);
+    applyLevelAction(BASE, { kind: "moveTo", from: 0, to: 3 });
+    expect(names(BASE)).toBe(before);
+  });
+});

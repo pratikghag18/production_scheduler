@@ -24,7 +24,7 @@ import { useSession } from "./useSession";
  */
 export function RequireAdmin({ children }: { children: ReactNode }) {
   const { profile, loading } = useSession();
-  const access = adminAccess(profile?.role, loading);
+  const access = adminAccess(profile?.role, profile?.adminAnywhere, loading);
 
   if (access === "pending") return <p>Loading…</p>;
 

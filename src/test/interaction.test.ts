@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { DRAG_THRESHOLD_PX as SHARED_DRAG_THRESHOLD_PX } from "@/lib/interaction";
 import {
+  DRAG_THRESHOLD_PX as BOARD_DRAG_THRESHOLD_PX,
   MIN_DURATION_MINUTES,
   hitTestBlock,
   snapMinute,
@@ -217,5 +219,20 @@ describe("interaction.ts — overlap and crew classification", () => {
     const { clipped, stranded } = classifyCrewAgainstRun({ startMin: 150, endMin: 250 }, crew);
     expect(clipped).toEqual([]);
     expect(stranded.map((c) => c.id)).toEqual(["a2"]);
+  });
+});
+
+/**
+ * P1-5l §4.1. `DRAG_THRESHOLD_PX` (D32) moved to `src/lib/interaction.ts` when
+ * the admin tree needed the same number and `conventions.md` forbade admin
+ * importing from board; the board's own file re-exports it so no board import
+ * changed. One line, and it is the whole guard against the failure the move
+ * exists to prevent: someone replacing the re-export with a second literal that
+ * agrees today and drifts later.
+ */
+describe("interaction.ts — the shared drag threshold (P1-5l §4.1)", () => {
+  it("case20: board and lib see the same DRAG_THRESHOLD_PX, and it is still 4", () => {
+    expect(BOARD_DRAG_THRESHOLD_PX).toBe(SHARED_DRAG_THRESHOLD_PX);
+    expect(SHARED_DRAG_THRESHOLD_PX).toBe(4);
   });
 });

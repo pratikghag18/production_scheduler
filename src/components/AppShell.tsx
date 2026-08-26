@@ -14,7 +14,7 @@ export function AppShell() {
   // it stays hidden, so the failure mode is a link appearing a moment late
   // for an admin, never one shown briefly to everyone else.
   const { profile, loading } = useSession();
-  const canSeeAdmin = adminAccess(profile?.role, loading) === "granted";
+  const canSeeAdmin = adminAccess(profile?.role, profile?.adminAnywhere, loading) === "granted";
 
   return (
     <div className={styles.shell}>

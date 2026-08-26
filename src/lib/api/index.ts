@@ -11,6 +11,7 @@ export * from "./serde";
 export * from "./board";
 export * from "./mutations";
 export * from "./hierarchy";
+export * from "./access";
 
 // Re-exported so callers that need the raw `Json` type (e.g. shapes.test.ts
 // building RPC-payload fixtures) never have to import database.types.ts

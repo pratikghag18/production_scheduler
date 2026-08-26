@@ -396,14 +396,24 @@
    target already has instead of floating at an invented indent. That alignment
    is what `dropRailIndex` computes from D90's `guides` ancestry.
 
-   It is deliberately NOT a horizontal line BETWEEN two rows. `move_node` CAN
-   reorder — it takes `p_sort_order int default null` and writes
-   `sort_order = coalesce(p_sort_order, sort_order)` (migration 0010) — but
-   P1-5g does not ship reordering, so a caret would promise an outcome the drop
-   does not deliver. A dropped node keeps its existing `sort_order` and lands
-   wherever `compareSiblings` puts it among its new siblings, which is not
-   necessarily last; an adopt mark on the PARENT is true regardless of where it
-   lands, and a caret between two rows would not be. */
+   P1-5l §6.2 — THIS COMMENT USED TO SAY THE OPPOSITE, AND THE REASONING IT
+   GAVE WAS CORRECT AND IS NOW SPENT. It said the tick was deliberately NOT a
+   horizontal line between two rows, because P1-5g shipped no reordering and a
+   caret would promise an outcome the drop did not deliver. P1-5l ships the
+   reordering (D94, `place_node`), so a caret now delivers exactly what it
+   promises and `.caretBefore`/`.caretAfter` below draw it.
+
+   The two marks say different things and are MUTUALLY EXCLUSIVE:
+
+     - the TICK marks ADOPTION — the dragged node becomes a child of this row;
+     - the CARET marks PLACEMENT — it lands beside this row, under the same
+       parent, at the seam the caret sits on.
+
+   They can never appear on the same row at the same time, and that is a
+   theorem rather than a styling convention: adoption needs the dragged node one
+   rung BELOW this row, a sibling slot needs it on the SAME rung, and no node
+   can be both. `rowDropZones` returns `before`+`after` or `adopt`, never all
+   three, so nothing in the component has to arbitrate. */
 /* `position: relative` is LOAD-BEARING and was missing in the first version:
    `.row` is not positioned, so the tick was laid out against the initial
    containing block and rendered off the card entirely. The suite was green and
@@ -412,11 +422,33 @@
   position: relative;
 }
 
+/* ⭐ D99 — `bottom: 0`, NOT `-1 * var(--row-pad-y)`, and the difference was a
+   SHIPPED DEFECT nobody had seen. MEASURED in headless Chromium against this
+   stylesheet: `.tree` is a gapless flex column, so a row's bottom edge and the
+   next row's top edge are the same coordinate (604.89 in the probe). `.row`
+   has padding but NO border, so an absolutely-positioned child is laid out
+   against a padding box that already starts at that edge — bleeding by another
+   `--row-pad-y` put the tick 4px INTO THE NEXT ROW, detached from the row it
+   describes.
+
+   The `-1 * var(--row-pad-y)` idiom is correct where it came from:
+   `.guideOn::before` hangs off `.guideOn`, a flex child stretched to the row's
+   CONTENT box, which must bleed by a padding to reach the row's outer edge.
+   Copying it onto a child of `.row` changed the reference frame and nobody
+   noticed, because every render P1-5g and its review ever made happened to put
+   the adopt target on the LAST row, where there is no next row to intrude on.
+   Found by the P1-5l build agent reading the geometry, then measured. */
 .dropTick::after {
   content: "";
   position: absolute;
   left: calc(0.25rem + var(--drop-rails) * 1.125rem + 0.5rem);
-  bottom: calc(-1 * var(--row-pad-y));
+  /* Just INSIDE `.dropOk`'s 2px inset ring, not on it. `bottom: 0` was the
+     first fix and it made the tick VANISH — the ring already paints the row's
+     outer 2px `--signal-ok`, so a 2px rule at the same coordinate is the same
+     colour on the same pixels. That is the D89 family: an affordance that is
+     not on screen, with a green suite either way. Rendered both ways before
+     choosing this one. */
+  bottom: 0.125rem;
   width: 0.875rem;
   border-top: 2px solid var(--signal-ok);
 }
@@ -528,3 +560,91 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------------------
+   P1-5l — THE INSERTION CARET.
+
+   Sits EXACTLY on the boundary between two rows. `.tree` is a gapless flex
+   column of `li.row`s, so row i's bottom edge IS row i+1's top edge, and an
+   absolutely-positioned pseudo-element on the row is laid out against the
+   ROW'S OWN PADDING BOX — which for a border-less `.row` starts at that same
+   outer edge. So the seam is `top: 0` / `bottom: 0` here, and NOTHING else.
+
+   ⚠️ IT IS NOT `-1 * var(--row-pad-y)`, WHICH IS WHAT THE BRIEF PASTED, and the
+   difference is the exact defect the brief's own comment describes. That
+   expression is the GUIDE-RAIL idiom (`.guideOn::before` above): those
+   pseudo-elements hang off `.guideOn`, which is a flex child stretched to the
+   row's CONTENT box, so `-var(--row-pad-y)` is how far they must bleed to reach
+   the row's outer edge. Reusing the number against a different containing block
+   moves the caret a full `--row-pad-y` ABOVE the seam — into the row above,
+   where it reads as that row's underline. That is the failure the brief says
+   the first version had; the brief's code still had it. See the agent report.
+
+   The caret starts at the indent the dragged node will occupy and carries a
+   knob there, so a caret at depth 3 cannot be read as one at depth 2.
+   `--caret-rails` is set inline per row exactly as `--drop-rails` is for the
+   adopt tick, and is a UNITLESS COUNT — all the rem arithmetic stays here,
+   where `scaleAudit` can read it (D89).
+
+   Every length is `rem` apart from the 2px rule itself, which is a hairline and
+   matches `.dropTick::after`. The brief's version sized the knob `7px` square
+   with `1px`/`3px`/`4px` offsets; those are eight raw pixel lengths in a
+   REM_SURFACE file and `scaleAudit`'s `unscaledPxLengths` fails every one of
+   them, so the knob is `0.4375rem` (7px at the default root) and scales.
+   --------------------------------------------------------------------------- */
+.caretBefore,
+.caretAfter {
+  position: relative;
+  /* The knob's diameter, named so the centring arithmetic below reads as
+     centring rather than as three unrelated magic numbers. */
+  --caret-knob: 0.4375rem;
+  /* Half the 2px rule — where the line's own centre sits, measured from the
+     seam the line is drawn against. */
+  --caret-half-rule: 0.0625rem;
+}
+
+.caretBefore::before,
+.caretAfter::before {
+  content: "";
+  position: absolute;
+  left: calc(0.25rem + var(--caret-rails) * 1.125rem + 0.5rem);
+  right: 0.25rem;
+  height: 0;
+  border-top: 2px solid var(--signal-ok);
+  z-index: 1;
+}
+
+.caretBefore::before {
+  top: 0;
+}
+
+.caretAfter::before {
+  bottom: 0;
+}
+
+/* The knob, centred on the line's left end so the caret's depth is legible
+   even where the line runs alongside a guide rail. */
+.caretBefore::after,
+.caretAfter::after {
+  content: "";
+  position: absolute;
+  left: calc(0.25rem + var(--caret-rails) * 1.125rem + 0.5rem - var(--caret-knob) / 2);
+  width: var(--caret-knob);
+  height: var(--caret-knob);
+  border-radius: 50%;
+  background: var(--signal-ok);
+  z-index: 2;
+}
+
+.caretBefore::after {
+  top: calc(var(--caret-half-rule) - var(--caret-knob) / 2);
+}
+
+.caretAfter::after {
+  bottom: calc(var(--caret-half-rule) - var(--caret-knob) / 2);
+}
+
+/* A caret must out-draw the row's own hover background and the dashed
+   `.eligible` hint, both of which paint on the row itself. Nothing here sets a
+   background, so the row treatment underneath is untouched — the caret is
+   additive, exactly as `.dropTick` is. */

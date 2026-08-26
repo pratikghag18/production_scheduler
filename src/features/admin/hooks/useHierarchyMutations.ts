@@ -28,6 +28,7 @@ import {
   deleteHierarchyTemplate,
   deleteNode,
   moveNode,
+  placeNode,
   renameHierarchyTemplate,
   renameNode,
   saveHierarchyLevels,
@@ -40,6 +41,8 @@ import {
   type HierarchyTemplateSummary,
   type MoveNodeInput,
   type MoveNodeResult,
+  type PlaceNodeInput,
+  type PlacedSibling,
   type RenameNodeResult,
   type SchedulerError,
 } from "@/lib/api";
@@ -176,6 +179,29 @@ export function useMoveNode() {
 
   return useMutation<MoveNodeResult, SchedulerError, MoveNodeInput>({
     mutationFn: (input) => moveNode(input),
+    onSuccess: () => {
+      void invalidateHierarchy(queryClient);
+    },
+  });
+}
+
+/**
+ * `place_node` (D94 / brief P1-5l). The reorder half of the drag: it
+ * re-parents through `move_node` — so it raises exactly what `useMoveNode`
+ * raises, no new codes — and then densely renumbers the destination parent's
+ * children.
+ *
+ * Same no-optimistic-update rule as every hook here (file header): a placement
+ * rewrites the `sort_order` of every sibling at the destination, and the RPC's
+ * own return value is that new order. Reproducing it client-side would be the
+ * duplicated logic the header forbids, so this just invalidates and lets the
+ * refetch redraw.
+ */
+export function usePlaceNode() {
+  const queryClient = useQueryClient();
+
+  return useMutation<PlacedSibling[], SchedulerError, PlaceNodeInput>({
+    mutationFn: (input) => placeNode(input),
     onSuccess: () => {
       void invalidateHierarchy(queryClient);
     },
