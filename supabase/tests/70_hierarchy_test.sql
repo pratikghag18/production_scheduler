@@ -52,28 +52,39 @@ BEGIN;
 -- Levels: L1-L12
 -- ============================================================================
 
-\echo 'L1: reorder — swap Department and Line'
+\echo 'L1: reorder that strands nodes (swap Department and Line) -> level_in_use'
 SAVEPOINT sp_L1;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+-- D92 (migration 0016). THIS CASE USED TO ASSERT THE DEFECT.
+-- It swapped Department and Line on the SEEDED, POPULATED org and asserted the
+-- save succeeded -- which it did, taking the org from 0 adjacency violations to
+-- 12 with no error, after which create_node silently produced children on the
+-- wrong level. The suite was not merely blind to the bug: it pinned it as the
+-- contract. A green case is not evidence a behaviour is correct, only that it
+-- is intended, and intent is what this line changes.
+-- The "a reorder can succeed" coverage L1 used to provide moves to L1b, which
+-- runs it on a structure where it is legal.
 DO $$
-DECLARE v_res jsonb; v_names text[];
+DECLARE v_caught boolean := false; v_detail jsonb; v_detail_raw text; v_order text;
 BEGIN
-  v_res := save_hierarchy_levels(jsonb_build_array(
-    jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
-    jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
-    jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
-    jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
-  ), '21000000-0000-0000-0000-000000000001');
-  SELECT array_agg(e->>'name' ORDER BY (e->>'position')::int) INTO v_names
-    FROM jsonb_array_elements(v_res) e;
-  IF v_names = ARRAY['Site','Line','Department','Work Cell'] THEN
+  BEGIN
+    PERFORM save_hierarchy_levels(jsonb_build_array(
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
+    ), '21000000-0000-0000-0000-000000000001');
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'level_in_use' THEN
     RAISE NOTICE 'PASS L1';
   ELSE
-    RAISE NOTICE 'FAIL L1: expected [Site,Line,Department,Work Cell], got %', v_names;
+    RAISE NOTICE 'FAIL L1: caught=%, detail=%', v_caught, v_detail;
   END IF;
-EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'FAIL L1: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_L1;
 
@@ -398,11 +409,15 @@ DO $$
 DECLARE
   v_positions int[]; v_expected int[]; v_sched_count int; v_n int; v_violations int := 0;
 BEGIN
-  -- Save 1: reorder.
+  -- Save 1: rename in place. This WAS a reorder (Department and Line swapped),
+  -- which migration 0016 now refuses on a populated structure -- see L1. The
+  -- property this case exists to check is that positions stay 0..n-1 with no
+  -- gaps and exactly one schedulable after EVERY save, which does not depend on
+  -- the save being a reorder; L1b covers a legal reorder.
   PERFORM save_hierarchy_levels(jsonb_build_array(
     jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
-    jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
     jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
   ), '21000000-0000-0000-0000-000000000001');
   SELECT array_agg(position ORDER BY position) INTO v_positions FROM hierarchy_levels WHERE org_id = '10000000-0000-0000-0000-000000000001';
@@ -607,6 +622,249 @@ EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'FAIL L12: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_L12;
+
+-- ============================================================================
+-- D92 / migration 0016 — the reorder guard: L1b, L13-L17
+--
+-- `save_hierarchy_levels` always refused to REMOVE a level with nodes (L4) and
+-- to move the schedulable flag off a level with work (L7/L12). It never guarded
+-- REORDERING, and `nodes_before_level` cannot: that trigger is
+-- `before insert or update of parent_id, level_id ON NODES`, and the three
+-- write passes touch only `hierarchy_levels`.
+--
+-- The guard is phrased as an OUTCOME -- "does every node still line up
+-- afterwards" -- not as "an in-use level may not move". L15 is why: the obvious
+-- phrasing makes an already-scrambled database unrepairable, because the repair
+-- is itself a move of an in-use level.
+-- ============================================================================
+
+\echo 'L1b: reorder a structure that has NO nodes -> succeeds'
+SAVEPOINT sp_L1b;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_tpl uuid; v_names text[];
+BEGIN
+  v_tpl := (create_hierarchy_template('Reorderable')->>'id')::uuid;
+  PERFORM save_hierarchy_levels(jsonb_build_array(
+    jsonb_build_object('id',null,'name','Alpha','is_schedulable',false),
+    jsonb_build_object('id',null,'name','Beta','is_schedulable',true)
+  ), v_tpl);
+  -- Now swap them. No node sits on either, so nothing can be stranded.
+  PERFORM save_hierarchy_levels(
+    (SELECT jsonb_agg(jsonb_build_object('id',hl.id,'name',hl.name,'is_schedulable',hl.is_schedulable)
+              ORDER BY hl.position DESC)
+       FROM hierarchy_levels hl WHERE hl.template_id = v_tpl), v_tpl);
+  SELECT array_agg(hl.name ORDER BY hl.position) INTO v_names
+    FROM hierarchy_levels hl WHERE hl.template_id = v_tpl;
+  IF v_names = ARRAY['Beta','Alpha'] THEN
+    RAISE NOTICE 'PASS L1b';
+  ELSE
+    RAISE NOTICE 'FAIL L1b: expected [Beta,Alpha], got %', v_names;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL L1b: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_L1b;
+
+\echo 'L13: reorder strands a ROOT only (one root, no children) -> level_in_use'
+SAVEPOINT sp_L13;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_tpl uuid; v_caught boolean := false; v_detail jsonb; v_detail_raw text;
+BEGIN
+  -- THE CASE A PARENT-JOIN GUARD MISSES ENTIRELY. With one root and no
+  -- children there is no parent/child pair at all, so a check written only as
+  -- "child position = parent position + 1" scores ZERO violations while the
+  -- root sits off position 0. Measured before the second half of the guard was
+  -- written: the swap below was ALLOWED. Both halves of `nodes_before_level`'s
+  -- rule have to be mirrored, not just the one an obvious fixture reaches.
+  v_tpl := (create_hierarchy_template('Solo')->>'id')::uuid;
+  PERFORM save_hierarchy_levels(jsonb_build_array(
+    jsonb_build_object('id',null,'name','Alpha','is_schedulable',false),
+    jsonb_build_object('id',null,'name','Beta','is_schedulable',true)
+  ), v_tpl);
+  PERFORM create_node(NULL, 'Only Node', 0, v_tpl);
+  BEGIN
+    PERFORM save_hierarchy_levels(
+      (SELECT jsonb_agg(jsonb_build_object('id',hl.id,'name',hl.name,'is_schedulable',hl.is_schedulable)
+                ORDER BY hl.position DESC)
+         FROM hierarchy_levels hl WHERE hl.template_id = v_tpl), v_tpl);
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'level_in_use'
+     AND v_detail->>'reason' = 'reorder strands a root node' THEN
+    RAISE NOTICE 'PASS L13';
+  ELSE
+    RAISE NOTICE 'FAIL L13: caught=%, detail=%', v_caught, v_detail;
+  END IF;
+END $$;
+ROLLBACK TO SAVEPOINT sp_L13;
+
+\echo 'L14: a REFUSED reorder leaves the stored order untouched'
+SAVEPOINT sp_L14;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE v_order text;
+BEGIN
+  -- The guard runs AFTER the three write passes, so this asserts the raise
+  -- actually rolls them back rather than leaving a half-applied order behind.
+  BEGIN
+    PERFORM save_hierarchy_levels(jsonb_build_array(
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
+      jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
+    ), '21000000-0000-0000-0000-000000000001');
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  SELECT string_agg(hl.name, ' > ' ORDER BY hl.position) INTO v_order
+    FROM hierarchy_levels hl WHERE hl.template_id = '21000000-0000-0000-0000-000000000001';
+  IF v_order = 'Site > Department > Line > Work Cell' THEN
+    RAISE NOTICE 'PASS L14';
+  ELSE
+    RAISE NOTICE 'FAIL L14: order is now %', v_order;
+  END IF;
+END $$;
+ROLLBACK TO SAVEPOINT sp_L14;
+
+\echo 'L15: a structure ALREADY scrambled can still be repaired -> succeeds'
+SAVEPOINT sp_L15;
+DO $$
+DECLARE v_before int; v_after int;
+BEGIN
+  -- Simulates a database saved before 0016 existed. THE WHOLE REASON the guard
+  -- asks about the OUTCOME rather than forbidding a used level from moving: the
+  -- repair is itself a move of two in-use levels, so the obvious phrasing would
+  -- lock the admin out of fixing their own data. Scrambled here with a direct
+  -- UPDATE as the table owner, because the RPC would (correctly) refuse.
+  UPDATE hierarchy_levels SET position = position + 100
+    WHERE template_id = '21000000-0000-0000-0000-000000000001';
+  UPDATE hierarchy_levels SET position =
+      CASE position - 100 WHEN 1 THEN 2 WHEN 2 THEN 1 ELSE position - 100 END
+    WHERE template_id = '21000000-0000-0000-0000-000000000001';
+  SELECT count(*) INTO v_before FROM nodes n
+    JOIN nodes pn ON pn.id = n.parent_id
+    JOIN hierarchy_levels cl ON cl.id = n.level_id
+    JOIN hierarchy_levels pl ON pl.id = pn.level_id
+   WHERE cl.template_id = '21000000-0000-0000-0000-000000000001'
+     AND cl.position IS DISTINCT FROM pl.position + 1;
+
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  PERFORM save_hierarchy_levels(jsonb_build_array(
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Work Cell','is_schedulable',true)
+  ), '21000000-0000-0000-0000-000000000001');
+  RESET ROLE;
+
+  SELECT count(*) INTO v_after FROM nodes n
+    JOIN nodes pn ON pn.id = n.parent_id
+    JOIN hierarchy_levels cl ON cl.id = n.level_id
+    JOIN hierarchy_levels pl ON pl.id = pn.level_id
+   WHERE cl.template_id = '21000000-0000-0000-0000-000000000001'
+     AND cl.position IS DISTINCT FROM pl.position + 1;
+
+  IF v_before > 0 AND v_after = 0 THEN
+    RAISE NOTICE 'PASS L15 (repaired % violations)', v_before;
+  ELSE
+    RAISE NOTICE 'FAIL L15: before=%, after=%', v_before, v_after;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL L15: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_L15;
+
+\echo 'L16: a SECOND template in the SAME org being broken does not block this one'
+SAVEPOINT sp_L16;
+DO $$
+DECLARE v_other uuid; v_ok boolean := false;
+BEGIN
+  -- The guard is scoped to the template being saved. Scoped by ORG instead, one
+  -- scrambled site would make every save to EVERY OTHER site in the same org
+  -- fail, with a message about nodes the admin cannot see from that screen.
+  --
+  -- THE FIXTURE IS THE TEST, and the first version of it was blind: it broke a
+  -- template belonging to the OTHER ORG, where org-scoping and template-scoping
+  -- give the same answer, so the mutation that swaps one for the other was NOT
+  -- CAUGHT. Telling them apart needs two templates in the SAME org -- one
+  -- broken, the other being saved.
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  v_other := (create_hierarchy_template('Second Site')->>'id')::uuid;
+  PERFORM save_hierarchy_levels(jsonb_build_array(
+    jsonb_build_object('id',null,'name','Alpha','is_schedulable',false),
+    jsonb_build_object('id',null,'name','Beta','is_schedulable',true)
+  ), v_other);
+  PERFORM create_node(NULL, 'Second Root', 0, v_other);
+  -- A CHILD, not just a root. Without it the second template's only breakage is
+  -- a stranded ROOT, which the parent-join clause never looks at -- so the
+  -- mutation that re-scopes THAT clause from template to org stayed NOT CAUGHT.
+  -- The fixture has to be able to break the specific clause under test.
+  PERFORM create_node(
+    (SELECT n.id FROM nodes n JOIN hierarchy_levels l ON l.id = n.level_id
+      WHERE l.template_id = v_other AND n.parent_id IS NULL LIMIT 1),
+    'Second Child', 0);
+  RESET ROLE;
+
+  -- Scramble ONLY the second template, as the table owner (the RPC would refuse).
+  UPDATE hierarchy_levels SET position = position + 100 WHERE template_id = v_other;
+  UPDATE hierarchy_levels SET position =
+      CASE position - 100 WHEN 0 THEN 1 WHEN 1 THEN 0 ELSE position - 100 END
+    WHERE template_id = v_other;
+
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  PERFORM save_hierarchy_levels(jsonb_build_array(
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000000','name','Site','is_schedulable',false),
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000001','name','Department','is_schedulable',false),
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000002','name','Line','is_schedulable',false),
+    jsonb_build_object('id','20000000-0000-0000-0000-000000000003','name','Cell','is_schedulable',true)
+  ), '21000000-0000-0000-0000-000000000001');
+  RESET ROLE;
+  v_ok := true;
+  IF v_ok THEN RAISE NOTICE 'PASS L16'; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL L16: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_L16;
+
+\echo 'L17: every RPC migration 0014 created is revoked from anon'
+SAVEPOINT sp_L17;
+DO $$
+DECLARE v_leaky int;
+BEGIN
+  -- Migration 0016 replaces save_hierarchy_levels in place rather than dropping
+  -- it. A DROP would take the grants with it and the function would come back
+  -- with the PUBLIC default -- the trap 90_'s T30 exists for. Asserted, not
+  -- assumed, because the difference is invisible in the migration's diff.
+  -- D93. Written for save_hierarchy_levels alone, it FAILED -- anon had
+  -- EXECUTE. Widening it to all four of 0014's functions showed the same for
+  -- every one, and only those: of thirteen public RPCs, the nine from other
+  -- migrations are all correctly revoked. A guard that checks one member of a
+  -- set a migration created will not tell you the migration forgot the set.
+  SELECT count(*) INTO v_leaky FROM (VALUES
+    ('save_hierarchy_levels(jsonb,uuid)'),
+    ('create_hierarchy_template(text)'),
+    ('rename_hierarchy_template(uuid,text)'),
+    ('delete_hierarchy_template(uuid)')
+  ) AS f(sig)
+  WHERE has_function_privilege('anon', f.sig, 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', f.sig, 'EXECUTE');
+  IF v_leaky = 0 THEN
+    RAISE NOTICE 'PASS L17';
+  ELSE
+    RAISE NOTICE 'FAIL L17: % of 4 functions have wrong grants', v_leaky;
+  END IF;
+END $$;
+ROLLBACK TO SAVEPOINT sp_L17;
 
 -- ============================================================================
 -- Nodes: N1-N17
