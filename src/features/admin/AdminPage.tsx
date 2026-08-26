@@ -16,6 +16,7 @@ import {
 import { LevelEditor } from "./components/LevelEditor";
 import { NodeTreeEditor } from "./components/NodeTreeEditor";
 import { ShapePicker } from "./components/ShapePicker";
+import { SiteAccessPanel } from "./components/SiteAccessPanel";
 import styles from "./AdminPage.module.css";
 
 /**
@@ -34,10 +35,11 @@ import styles from "./AdminPage.module.css";
  * itself has no use for `nodes`.
  */
 
-type SectionId = "hierarchy" | "shifts" | "operators" | "products" | "import";
+type SectionId = "hierarchy" | "access" | "shifts" | "operators" | "products" | "import";
 
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }> = [
   { id: "hierarchy", label: "Hierarchy", enabled: true },
+  { id: "access", label: "Access", enabled: true },
   { id: "shifts", label: "Shifts", enabled: false },
   { id: "operators", label: "Operators", enabled: false },
   { id: "products", label: "Products", enabled: false },
@@ -66,9 +68,14 @@ function useHierarchyTree(enabled: boolean) {
 
 export default function AdminPage() {
   const [section, setSection] = useState<SectionId>("hierarchy");
-  const { session, loading: sessionLoading } = useSession();
+  const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
   const { data, isLoading, isError } = useHierarchyTree(canQuery);
+  // Shared by the Hierarchy section's own "Loading..." branch below and by
+  // `SiteAccessPanel`'s `treeLoading` prop (brief P1-6a §6/§9): one boolean,
+  // not two call sites independently re-deriving the same D91-shaped
+  // condition (`!canQuery || isLoading`) and risking them drifting apart.
+  const hierarchyLoading = !canQuery || isLoading;
 
   // D87 (brief P1-5f §7.6): this component owns the shape SELECTION; every
   // other fact about a shape (its levels, whether it has nodes) is derived
@@ -87,6 +94,13 @@ export default function AdminPage() {
     : [];
   const summaries = filterEditableShapes(allSummaries, data?.editableShapeIds ?? null);
   const resolvedShapeId = resolveSelectedShape(summaries, selectedShapeId);
+
+  // Brief P1-6a §6: written out rather than
+  // `data?.siteNodeIds[resolvedShapeId] ?? null`, because `resolvedShapeId`
+  // is `string | null` and `data` is `undefined` until the query resolves --
+  // indexing a `Record<string, ...>` with `string | null` does not compile.
+  const siteNodeId =
+    data && resolvedShapeId !== null ? (data.siteNodeIds[resolvedShapeId] ?? null) : null;
 
   return (
     <div className={styles.page}>
@@ -174,6 +188,18 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+          </>
+        )}
+
+        {section === "access" && (
+          <>
+            <h1 className={styles.h1}>Access</h1>
+            <SiteAccessPanel
+              siteNodeId={siteNodeId}
+              treeLoading={hierarchyLoading}
+              viewerProfileId={profile?.id ?? null}
+              viewerIsCompanyAdmin={profile?.role === "admin"}
+            />
           </>
         )}
       </div>

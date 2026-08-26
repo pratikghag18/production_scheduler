@@ -179,7 +179,14 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the five admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the six admin stylesheets", () => {
+    // Brief P1-6a §7: updated per this describe block's own comment above --
+    // "Adding a sixth admin surface means updating this literal AND nothing
+    // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
+    // Not in the P1-6a brief's own file table (which named only
+    // `src/test/scaleAudit.ts`), but leaving this hardcoded five-file list
+    // unchanged would fail this case the moment the required sixth entry
+    // landed -- see the delivery report's deviations section.
     expect([...REM_SURFACES].sort()).toEqual(
       [
         "src/features/admin/AdminPage.module.css",
@@ -187,6 +194,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         "src/features/admin/components/LevelEditor.module.css",
         "src/features/admin/components/NodeTreeEditor.module.css",
         "src/features/admin/components/ShapePicker.module.css",
+        "src/features/admin/components/SiteAccessPanel.module.css",
       ].sort(),
     );
   });

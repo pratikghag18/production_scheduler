@@ -4993,3 +4993,72 @@ X16's first run reported `sqlstate=42501, detail=<NULL>` and read exactly like "
 1. `npm run db:reset && npm run db:types` — applies 0021 and regenerates the types, which is what clears the single `tsc` error.
 2. `npm run test` → **595 in 18 files**.
 3. One commit for everything since `055300c`.
+
+---
+
+## §19.52 — P1-6a "Who can get in": the first screen in this app that shows a person
+
+**Status: built. Pure layer written and mutation-tested by the design session; the panel, its stylesheet and the hooks built by a Sonnet agent from `docs/agent-briefs/p1-6a-site-access-panel-brief.md` and reviewed independently. `tsc -b --force` exit 0 and `eslint .` exit 0, both re-run by the design session rather than taken from the agent's report. NEEDS `npm run test` — predicted 652 in 19 files.**
+
+### What it is
+
+0021 made "a site admin may add people to their site" true and reachable from a client. It had no screen, and neither did anything else: **measured, the app had no UI anywhere that showed a person's name or address** — the only `display_name` in the product is `operators`, a scheduling resource. This is the first.
+
+The panel scopes to the site that owns the currently selected structure. `fetchHierarchyTree` gained a `siteNodeIds` map for that — **a separate map rather than a field on `HierarchyTemplateSummary`, because that type is shared with `create_hierarchy_template` and `rename_hierarchy_template`, whose payloads carry no `site_node_id`.** Adding a required field there would make two parsers reject every response they have ever received; an optional one would make "absent" and "unowned" the same value.
+
+### The split, again, and it held
+
+Same shape as §19.48/§19.49: **the design session writes and breaks the rules; an agent builds the screen from a brief.** The pure layer is `src/features/admin/lib/siteAccess.ts` — `buildAccessRows`, `partitionAccess`, `allowedRoles`, `canRemoveAccess`, `removalNote`, `describeAccess`, `matchesQuery`, `accessPanelState` — and the brief forbids editing it.
+
+The rule the whole panel turns on: **`AccessRow` splits `directRole` (the grant on THIS node, the only one this screen can edit) from `inheritedGrants` (further down the subtree, real access, not editable here).** Collapsing the two is the most likely bug in the module, and **case A5 is the only one that catches it** — the person holding a grant on this node *and* one below. A3 and A4 are both green against a collapse.
+
+### ⭐ Instrument 36: twenty-eight mutations "NOT CAUGHT" at once
+
+The first run of the mutation table reported **every one of 28 as NOT CAUGHT**, against a suite that was green. The runner decided the verdict by parsing failure names with `line.startswith("FAIL ")` — and the shim prints `  FAIL <name>` with two leading spaces, so the list was always empty.
+
+This is rule 6's standing signal in its loudest possible form: *when several mutations go NOT CAUGHT at once, suspect the instrument before the table.* Twenty-eight at once is not a result. The fix is also the general one: **the verdict is the COUNT the runner reports, not the list it managed to parse** — names are for the table, the number is for the decision.
+
+### The two escapes that survived a working runner
+
+- **B9 — the `nodeId === null ? undefined : …` guard, deleted.** It was written so that a payload with no node makes every grant inherited and none direct. That behaviour is real and A16 still pins it; the guard was not what produced it. `parseGrant` only admits a grant whose `nodeId` is a string, so `find` against `null` cannot match either way. Gotcha 17: a second copy of a check that always holds cannot be mutation-tested.
+- **B27 — `asString` coercing instead of dropping, NOT CAUGHT because no fixture had a non-string address.** Every address in the fixture was a real string or already `null`, so the coercion had nothing to bite. **Case A49 added**: a numeric address must become `null`, never the text "12345" beside a person's row. An address the screen invented is worse than a blank one.
+
+### ⭐ C4 rewritten: a case whose name claimed more than it guarded
+
+C4 was named *"no place beats a FALSE loading flag — the D91 trap"*. The mutation that swaps those branches (B29) is caught by **C5**, not by C4: with a disabled query `peopleLoading` is false, so both branch orders answer `"no-place"` and C4 cannot tell them apart. It was rule 3b sitting in a case I had just written.
+
+Rewritten to guard what it can: **a null place is never `"ready"`, whatever the loading flags say** — swept over both — which is the mutation that actually ships the D91 bug (B33, added). An unasked query resolving to `"ready"` renders an empty list of colleagues as though the company had nobody in it.
+
+### ⭐ Rule 0 earning its place again
+
+`node --experimental-strip-types` was green on `A30`'s third clause, `s !== v`. `tsc` rejected it: **TS2367, a comparison between two string literal types that provably cannot overlap.** The compiler proved an assertion inert before any run did. Removed, with the reason in the case.
+
+### The brief was wrong, and the agent found it
+
+**§7 said adding the new stylesheet to `REM_SURFACES` was "one line, and the suite fails without it". It is two.** `src/test/scaleAudit.test.ts`'s case **R10** hardcodes the exact list of admin stylesheets, so the mandated entry turns R10 red the moment it lands. That file was in neither §2's forbidden table nor §3's file list. The agent found it, fixed it the way that file's own comment prescribes (*"Adding a sixth admin surface means updating this literal AND nothing else"*), and reported it. **That is the fourth brief in a row with a real error in it, and the fourth time the agent found it.**
+
+Verified independently that this changed no case count: `scaleAudit.test.ts` has 28 static `it(` plus one `it.each` over `CHROME_FILES`, which is a hardcoded five-file list containing nothing under `src/features/admin`. 28 + 5 = 33, unchanged.
+
+### ⭐ Two findings from LOOKING at it, which no suite could have produced
+
+Rendered in headless Chromium from the **real** module — the row data is computed by importing `siteAccess.ts` and running it, not by re-implementing it — with the real stylesheet, real tokens and real `global.css` inlined.
+
+1. **The company-admin row printed the same sentence twice.** `describeAccess` said *"Company admin — reaches every plant"* and `removalNote` said *"Company admins reach every plant; there's no access here to take away."* — side by side, two columns apart. The note's only job is to explain the ABSENT button; the reason is already on the row. Shortened to *"Nothing to take away here."*, and **A37 now asserts the note is not equal to `describeAccess`'s output**, so the duplication cannot come back.
+2. **People with no address on file vanish from every search with nothing said.** That is `matchesQuery`'s correct behaviour and A43 pins it — an address is the only thing that can be typed for. But on screen it is the same failure `skipped` is reported to avoid one line up. The panel now counts them and says so.
+
+Neither is visible to a passing suite. Both took one screenshot.
+
+### Verification
+
+- **`siteAccess.test.ts`: 57 cases, green.** In-container shim over the real modules: **247 passed, 0 failed** (`treeDrag` 83, `levelDraft` 54, `shapePicker` 53, `siteAccess` 57).
+- **32 mutations, all 32 caught** — after the instrument fix, and after the two escapes above were closed by deleting one guard and adding one case.
+- `tsc -b --force` exit 0, `eslint .` exit 0, both re-run by the design session. The agent's own instrument-check produced `TS2741` at the expected call site.
+- Scale audit re-run by the design session against the real files: 6 `REM_SURFACES` entries, **zero** unscaled pixel lengths, **zero** admin stylesheets on disk missing from the list, control font reset present. (My first probe passed the repo root to `missingControlFontReset`, which takes the file CONTENTS, and got a false positive naming all four controls — instrument caution, corrected before reading anything into it.)
+- Changed files re-derived from mtimes rather than from the report: exactly the eleven expected, nothing else.
+- **Suite prediction 595 → 652, and 18 files → 19.**
+
+### Open, flagged, not closed
+
+1. **A department admin gets `"no-place"`.** A structure is owned by a ROOT (0020 §1), so somebody who administers a department administers no structure and this panel has nothing to be about. Correct today, named in 0021 §7, and it needs a real answer eventually — most likely `site_people` being reachable for any node the caller administers, which the RPC already supports.
+2. **The role control renders the raw enum text** (`admin` / `supervisor` / `viewer`, lower case). Fine, but it is the only place in the product showing a database value unformatted.
+3. **Nothing here has been seen against a real Supabase.** The wire shapes of all four RPCs are still reasoning from precedent — `site_people`'s payload most of all, since `buildAccessRows` is written against the shape the SQL tests assert rather than against a response anyone has received.

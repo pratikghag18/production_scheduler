@@ -91,6 +91,7 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/NodeTreeEditor.module.css",
   "src/features/admin/components/AdminPopover.module.css",
   "src/features/admin/components/ShapePicker.module.css",
+  "src/features/admin/components/SiteAccessPanel.module.css",
 ];
 
 /**

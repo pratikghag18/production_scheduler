@@ -546,9 +546,23 @@ export async function fetchHierarchyTree(): Promise<{
    * see `filterEditableShapes`, which fails OPEN on it.
    */
   editableShapeIds: string[] | null;
+  /**
+   * Which SITE each structure belongs to — `hierarchy_templates.site_node_id`,
+   * added by migration 0020 §1 — keyed by template id, `null` for a structure
+   * no site has claimed.
+   *
+   * ⚠️ A SEPARATE MAP RATHER THAN A FIELD ON `HierarchyTemplateSummary`, and
+   * the reason is that the summary type is SHARED with
+   * `create_hierarchy_template` and `rename_hierarchy_template`, whose
+   * payloads carry no `site_node_id` at all. Adding a required field there
+   * would make two parsers reject every response they have ever received;
+   * adding an optional one would make "absent" and "unowned" the same value.
+   * The map keeps both honest and leaves `buildShapeSummaries` untouched.
+   */
+  siteNodeIds: Record<string, string | null>;
 }> {
   const [templatesRes, levelsRes, nodesRes, editableRes] = await Promise.all([
-    supabase.from("hierarchy_templates").select("id, name").order("name"),
+    supabase.from("hierarchy_templates").select("id, name, site_node_id").order("name"),
     supabase
       .from("hierarchy_levels")
       .select("id, template_id, position, name, is_schedulable")
@@ -605,5 +619,10 @@ export async function fetchHierarchyTree(): Promise<{
           (v): v is string => typeof v === "string",
         );
 
-  return { templates, levels, nodes, editableShapeIds };
+  const siteNodeIds: Record<string, string | null> = {};
+  for (const r of templatesRes.data ?? []) {
+    siteNodeIds[r.id] = r.site_node_id ?? null;
+  }
+
+  return { templates, levels, nodes, editableShapeIds, siteNodeIds };
 }
