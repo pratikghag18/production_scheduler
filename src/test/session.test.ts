@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canQueryAsUser, decideSessionUpdate } from "@/features/auth/session";
+import { adminAccess, canQueryAsUser, decideSessionUpdate } from "@/features/auth/session";
 import type { AuthEvent } from "@/features/auth/session";
 
 /**
@@ -130,5 +130,79 @@ describe("session.ts: canQueryAsUser", () => {
     // signed out. The session layer's contract is `string | null`, and only
     // `null` means nobody.
     expect(canQueryAsUser("", false)).toBe(true);
+  });
+});
+
+/* ===========================================================================
+ * Group A — `adminAccess`, D97's single gate (design plan §19.38).
+ *
+ * Two call sites depend on this agreeing with itself: the nav link in
+ * `AppShell` and the route guard in `RequireAdmin`. The database remains the
+ * authority — every admin RPC opens with `app_is_admin()` — so nothing here
+ * protects data. It decides what gets RENDERED.
+ * ======================================================================== */
+
+describe("session.ts: adminAccess", () => {
+  // A1/A2 are the pair that matters. A predicate written as
+  // `role === "admin" ? "granted" : loading ? "pending" : "denied"` passes A1
+  // and FAILS A2 -- it would show the admin screen to a still-unresolved
+  // session that merely happens to carry the right role already. Loading is
+  // asked FIRST, and A2 is the case that pins the order.
+  it("A1: an unresolved session with no profile yet is pending", () => {
+    expect(adminAccess(null, true)).toBe("pending");
+  });
+
+  it("A2: still pending while loading EVEN IF the role is already admin", () => {
+    expect(adminAccess("admin", true)).toBe("pending");
+  });
+
+  it("A3: a resolved admin is granted", () => {
+    expect(adminAccess("admin", false)).toBe("granted");
+  });
+
+  it("A4: a resolved supervisor is denied", () => {
+    expect(adminAccess("supervisor", false)).toBe("denied");
+  });
+
+  it("A5: a resolved viewer is denied", () => {
+    expect(adminAccess("viewer", false)).toBe("denied");
+  });
+
+  it("A6: a resolved session with no profile at all is denied", () => {
+    expect(adminAccess(null, false)).toBe("denied");
+  });
+
+  // `profile?.role` is `undefined` when there is no profile object, and `null`
+  // when there is one with a null role. Both callers pass the optional-chained
+  // form, so undefined is the shape that actually arrives.
+  it("A7: an undefined role is denied", () => {
+    expect(adminAccess(undefined, false)).toBe("denied");
+  });
+
+  // ⭐ A8 is the load-bearing one for the three-tier model (§19.38). When
+  // `site_admin` lands, an OLD client must refuse it rather than guess that a
+  // role with "admin" in the name is probably fine -- it has no idea how to
+  // scope the screen. `adminAccess` is the one place to widen deliberately.
+  it("A8: a role this build has never heard of is denied, not assumed", () => {
+    expect(adminAccess("site_admin", false)).toBe("denied");
+    expect(adminAccess("system_admin", false)).toBe("denied");
+    expect(adminAccess("superuser", false)).toBe("denied");
+  });
+
+  // A9/A10: the comparison is exact. `user_profiles.role` is a CHECK-constrained
+  // column, so a value differing by case or whitespace means something has gone
+  // wrong upstream -- normalising it here would paper over that silently.
+  it("A9: the match is case-sensitive", () => {
+    expect(adminAccess("Admin", false)).toBe("denied");
+    expect(adminAccess("ADMIN", false)).toBe("denied");
+  });
+
+  it("A10: the match does not trim", () => {
+    expect(adminAccess(" admin", false)).toBe("denied");
+    expect(adminAccess("admin ", false)).toBe("denied");
+  });
+
+  it("A11: the empty string is denied, not treated as absent", () => {
+    expect(adminAccess("", false)).toBe("denied");
   });
 });

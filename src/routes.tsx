@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, Link } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { RequireAdmin } from "@/features/auth/RequireAdmin";
 import BoardPage from "@/features/board/BoardPage";
 
 /**
@@ -30,10 +31,15 @@ export const router = createBrowserRouter([
       { path: "/", element: <BoardPage /> },
       {
         path: "/admin",
+        // D97 (§19.38): the guard wraps the Suspense boundary, not the other
+        // way round, so a non-admin never triggers the lazy chunk fetch at
+        // all -- the refusal costs no download.
         element: (
-          <Suspense fallback={<p>Loading…</p>}>
-            <AdminPage />
-          </Suspense>
+          <RequireAdmin>
+            <Suspense fallback={<p>Loading…</p>}>
+              <AdminPage />
+            </Suspense>
+          </RequireAdmin>
         ),
       },
       { path: "*", element: <NotFoundPage /> },

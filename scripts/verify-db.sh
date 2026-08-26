@@ -156,6 +156,92 @@ done
 note_pass "all $(ls "$MIGRATIONS_DIR"/*.sql | wc -l | tr -d ' ') migrations applied cleanly"
 
 # ------------------------------------------------------------------------------
+step "5b/5c. Upgrade paths: migrations that TRANSFORM EXISTING DATA"
+# ------------------------------------------------------------------------------
+# WHY THESE STEPS EXIST AT ALL. Every numbered test in supabase/tests runs
+# against a database where all migrations have ALREADY been applied to an empty
+# schema, so any migration whose job is to transform existing data runs against
+# ZERO ROWS and is, in effect, untested. Two have now been caught by this:
+#
+#   0019  a backfill that read can_edit=true as 'admin' would have handed every
+#         existing subtree grantee the hierarchy, on the morning of the upgrade,
+#         with a fully green suite.
+#   0020  its backfill IS a no-op here, by construction -- and the first run of
+#         it left every template unowned, silently, while the suite was green.
+#
+# Each check below builds its own database, applies migrations STOPPING AT the
+# one under test, plants a fixture in the old shape, applies that one migration,
+# and asserts. Stopping (rather than skipping) matters: a skip would apply every
+# LATER migration against a schema missing the column the upgrade is about.
+#
+# THIS IS THE PATTERN FOR ANY FUTURE DATA-TRANSFORMING MIGRATION: add a row to
+# UPGRADE_CHECKS and a file that takes the migration path as :mig.
+#
+# Format: <stop-at migration basename>|<test file basename>|<expected PASS count>
+UPGRADE_CHECKS="
+20260826000019_scoped_roles.sql|upgrade_0019_backfill.sql|5
+20260826000020_site_ownership.sql|upgrade_0020_site_ownership.sql|5
+"
+
+run_upgrade_check() {
+  local stop_at="$1" test_file="$2" want_pass="$3"
+  local db="scheduler_upgrade_${stop_at%%_*}"
+  local mig="$MIGRATIONS_DIR/$stop_at"
+  local tf="$TESTS_DIR/$test_file"
+
+  if [ ! -f "$mig" ] || [ ! -f "$tf" ]; then
+    note_fail "upgrade check: $mig or $tf missing"; return
+  fi
+
+  runuser -u "$PGSUPERUSER" -- "$PGBIN/dropdb" -h "$PGSOCK" --if-exists "$db" >/dev/null 2>&1
+  runuser -u "$PGSUPERUSER" -- "$PGBIN/createdb" -h "$PGSOCK" \
+    --encoding="$PG_WANT_ENCODING" --locale="$PG_WANT_LOCALE" --template=template0 "$db"
+
+  local ok=1
+  "$PGBIN/psql" -h "$PGSOCK" -U "$PGSUPERUSER" -d "$db" -v ON_ERROR_STOP=1 -q \
+    -f "$HARNESS_FILE" >/dev/null 2>&1 || ok=0
+  for f in $(ls "$MIGRATIONS_DIR"/*.sql | sort); do
+    [ "$(basename "$f")" = "$stop_at" ] && break
+    "$PGBIN/psql" -h "$PGSOCK" -U "$PGSUPERUSER" -d "$db" -v ON_ERROR_STOP=1 -q \
+      -f "$f" >/dev/null 2>&1 || { ok=0; echo "upgrade check: failed applying $(basename "$f")"; break; }
+  done
+
+  if [ "$ok" -ne 1 ]; then
+    note_fail "upgrade check $test_file: could not build a database stopping at $stop_at"
+  else
+    local out; out=$(mktemp)
+    # ON_ERROR_STOP off: these files report per-case with RAISE NOTICE, the same
+    # idiom as 70/80, and are SCANNED for NOTICE: FAIL rather than trusted to
+    # exit non-zero. An expected PASS count is asserted too, so a file that dies
+    # halfway cannot look like a pass.
+    ( cd "$REPO_ROOT" && "$PGBIN/psql" -h "$PGSOCK" -U "$PGSUPERUSER" -d "$db" \
+        -v "mig=$mig" -f "$tf" ) > "$out" 2>&1
+    cat "$out"
+    local n_fail n_pass
+    n_fail=$(grep -c "NOTICE:  FAIL" "$out" || true)
+    n_pass=$(grep -c "NOTICE:  PASS" "$out" || true)
+    if [ "$n_fail" -ne 0 ] || [ "$n_pass" -ne "$want_pass" ]; then
+      note_fail "$test_file ($n_pass passed, $n_fail failed; expected $want_pass passed, 0 failed)"
+    else
+      note_pass "$test_file ($n_pass cases, real upgrade stopping at $stop_at)"
+    fi
+    rm -f "$out"
+  fi
+  runuser -u "$PGSUPERUSER" -- "$PGBIN/dropdb" -h "$PGSOCK" --if-exists "$db" >/dev/null 2>&1
+}
+
+# HERE-STRING, NOT A PIPE. `echo ... | while` runs the loop in a SUBSHELL, so
+# every note_fail inside it would set FAILED=1 in a process that then exits --
+# the script would print the failure and still exit 0. That is the third
+# distinct way this harness has managed to report a pass over a failure (see
+# [[verify-db-harness-drift]]); a here-string keeps the loop in this shell.
+while IFS='|' read -r stop_at test_file want_pass; do
+  [ -z "$stop_at" ] && continue
+  echo "--- $test_file ---"
+  run_upgrade_check "$stop_at" "$test_file" "$want_pass"
+done <<< "$UPGRADE_CHECKS"
+
+# ------------------------------------------------------------------------------
 step "6. Apply supabase/seed.sql"
 # ------------------------------------------------------------------------------
 psql_su -f "$SEED_FILE" || { note_fail "seed.sql"; exit 1; }

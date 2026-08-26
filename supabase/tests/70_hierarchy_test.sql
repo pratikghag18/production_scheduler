@@ -672,7 +672,7 @@ SAVEPOINT sp_L13;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
 DO $$
-DECLARE v_tpl uuid; v_caught boolean := false; v_detail jsonb; v_detail_raw text;
+DECLARE v_tpl uuid; v_own uuid; v_caught boolean := false; v_detail jsonb; v_detail_raw text;
 BEGIN
   -- THE CASE A PARENT-JOIN GUARD MISSES ENTIRELY. With one root and no
   -- children there is no parent/child pair at all, so a check written only as
@@ -685,12 +685,21 @@ BEGIN
     jsonb_build_object('id',null,'name','Alpha','is_schedulable',false),
     jsonb_build_object('id',null,'name','Beta','is_schedulable',true)
   ), v_tpl);
-  PERFORM create_node(NULL, 'Only Node', 0, v_tpl);
+  -- 0020 §10: a root create COPIES the shape it is given, so the node lands in
+  -- a NEW structure and `v_tpl` is left empty. Reordering `v_tpl` would strand
+  -- nothing and this case would pass for the wrong reason -- a fixture that can
+  -- no longer deliver what its name claims (rule 3b). The reorder must target
+  -- the structure the site actually owns, which create_node now returns.
+  v_own := (create_node(NULL, 'Only Node', 0, v_tpl)->>'template_id')::uuid;
+  IF v_own IS NULL OR v_own = v_tpl THEN
+    RAISE NOTICE 'FAIL L13: fixture -- root did not receive its own copy (own=%, source=%)', v_own, v_tpl;
+    RETURN;
+  END IF;
   BEGIN
     PERFORM save_hierarchy_levels(
       (SELECT jsonb_agg(jsonb_build_object('id',hl.id,'name',hl.name,'is_schedulable',hl.is_schedulable)
                 ORDER BY hl.position DESC)
-         FROM hierarchy_levels hl WHERE hl.template_id = v_tpl), v_tpl);
+         FROM hierarchy_levels hl WHERE hl.template_id = v_own), v_own);
   EXCEPTION WHEN OTHERS THEN
     v_caught := true;
     GET STACKED DIAGNOSTICS v_detail_raw = PG_EXCEPTION_DETAIL;
@@ -785,7 +794,7 @@ ROLLBACK TO SAVEPOINT sp_L15;
 \echo 'L16: a SECOND template in the SAME org being broken does not block this one'
 SAVEPOINT sp_L16;
 DO $$
-DECLARE v_other uuid; v_ok boolean := false;
+DECLARE v_other uuid; v_owned uuid; v_root uuid; v_ok boolean := false;
 BEGIN
   -- The guard is scoped to the template being saved. Scoped by ORG instead, one
   -- scrambled site would make every save to EVERY OTHER site in the same org
@@ -803,22 +812,33 @@ BEGIN
     jsonb_build_object('id',null,'name','Alpha','is_schedulable',false),
     jsonb_build_object('id',null,'name','Beta','is_schedulable',true)
   ), v_other);
-  PERFORM create_node(NULL, 'Second Root', 0, v_other);
+  -- 0020 §10: the root lands in a COPY of `v_other`, and THE COPY is what
+  -- holds the nodes. Everything below must therefore point at `v_owned`, not
+  -- at `v_other` -- scrambling an empty structure strands nothing, and the two
+  -- mutations this case exists to catch (guard scoped by ORG instead of by
+  -- TEMPLATE) would go quietly uncaught for the third time.
+  v_root := (create_node(NULL, 'Second Root', 0, v_other)->>'id')::uuid;
+  SELECT hl.template_id INTO v_owned
+    FROM nodes n JOIN hierarchy_levels hl ON hl.id = n.level_id WHERE n.id = v_root;
   -- A CHILD, not just a root. Without it the second template's only breakage is
   -- a stranded ROOT, which the parent-join clause never looks at -- so the
   -- mutation that re-scopes THAT clause from template to org stayed NOT CAUGHT.
   -- The fixture has to be able to break the specific clause under test.
-  PERFORM create_node(
-    (SELECT n.id FROM nodes n JOIN hierarchy_levels l ON l.id = n.level_id
-      WHERE l.template_id = v_other AND n.parent_id IS NULL LIMIT 1),
-    'Second Child', 0);
+  PERFORM create_node(v_root, 'Second Child', 0);
   RESET ROLE;
 
-  -- Scramble ONLY the second template, as the table owner (the RPC would refuse).
-  UPDATE hierarchy_levels SET position = position + 100 WHERE template_id = v_other;
+  IF v_owned IS NULL OR v_owned = v_other THEN
+    RAISE NOTICE 'FAIL L16: fixture -- second root did not receive its own copy';
+    RETURN;
+  END IF;
+
+  -- Scramble ONLY the second site's structure, as the table owner (the RPC
+  -- would refuse). It is in the SAME ORG as the template saved below, which is
+  -- the property that tells org-scoping and template-scoping apart.
+  UPDATE hierarchy_levels SET position = position + 100 WHERE template_id = v_owned;
   UPDATE hierarchy_levels SET position =
       CASE position - 100 WHEN 0 THEN 1 WHEN 1 THEN 0 ELSE position - 100 END
-    WHERE template_id = v_other;
+    WHERE template_id = v_owned;
 
   SET LOCAL ROLE authenticated;
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
@@ -1408,10 +1428,47 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_N13;
 
-\echo 'N14: with app.hierarchy_migration=on, a level-skipping UPDATE succeeds; path becomes plant_1.assembly.cell_1'
+-- ============================================================================
+-- N14 / N14b — the escape hatch, REWRITTEN for D97 (migration 0017).
+--
+-- N14 used to assert that a plain `authenticated` caller could set
+-- app.hierarchy_migration and skip the level check. That was true, it was
+-- never reachable through PostgREST, and Pratik asked for it closed -- so the
+-- case now asserts the REFUSAL. N14b rescues the coverage N14 was legitimately
+-- providing (the hatch works, and the path cascade still runs underneath it),
+-- moved to the caller the hatch is now reserved for: the table's OWNER. Same
+-- shape as L1/L1b when D92 landed.
+-- ============================================================================
+\echo 'N14: app.hierarchy_migration=on as `authenticated` is REFUSED -> not_permitted'
 SAVEPOINT sp_N14;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
+DO $$
+DECLARE
+  v_caught boolean := false; v_detail_raw text; v_detail jsonb;
+BEGIN
+  PERFORM set_config('app.hierarchy_migration', 'on', true);
+  BEGIN
+    UPDATE nodes SET parent_id = '30000000-0000-0000-0000-000000000002'
+      WHERE id = '30000000-0000-0000-0000-000000000007';
+  EXCEPTION WHEN OTHERS THEN
+    v_caught := true;
+    GET STACKED DIAGNOSTICS v_detail_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_detail_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  IF v_caught AND v_detail->>'error' = 'not_permitted' THEN
+    RAISE NOTICE 'PASS N14';
+  ELSE
+    RAISE NOTICE 'FAIL N14: caught=%, detail=%', v_caught, v_detail;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL N14: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_N14;
+
+\echo 'N14b: the OWNER may still use the hatch, and the path cascade still runs'
+SAVEPOINT sp_N14b;
+RESET ROLE;
 DO $$
 DECLARE v_path ltree;
 BEGIN
@@ -1420,14 +1477,14 @@ BEGIN
     WHERE id = '30000000-0000-0000-0000-000000000007';
   SELECT path INTO v_path FROM nodes WHERE id = '30000000-0000-0000-0000-000000000007';
   IF v_path = 'plant_1.assembly.cell_1'::ltree THEN
-    RAISE NOTICE 'PASS N14';
+    RAISE NOTICE 'PASS N14b';
   ELSE
-    RAISE NOTICE 'FAIL N14: path is %, expected plant_1.assembly.cell_1', v_path;
+    RAISE NOTICE 'FAIL N14b: path is %, expected plant_1.assembly.cell_1', v_path;
   END IF;
 EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'FAIL N14: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+  RAISE NOTICE 'FAIL N14b: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;
-ROLLBACK TO SAVEPOINT sp_N14;
+ROLLBACK TO SAVEPOINT sp_N14b;
 
 \echo 'N15: set a node''s sort_order to 7, then move_node(..., NULL) [p_sort_order omitted] -> sort_order still 7'
 -- CORRECTED (design-session review, Aug 25): this case's point is that the
@@ -1630,8 +1687,8 @@ DECLARE v_new jsonb; v_id uuid; v_res jsonb; v_grant_count int; v_node_exists bo
 BEGIN
   v_new := create_node('30000000-0000-0000-0000-000000000004', 'U4 Probe Leaf', 0);
   v_id := (v_new->>'id')::uuid;
-  INSERT INTO profile_grants (profile_id, node_id, org_id, can_edit)
-    VALUES ('a0000000-0000-0000-0000-000000000001', v_id, '10000000-0000-0000-0000-000000000001', true);
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role)
+    VALUES ('a0000000-0000-0000-0000-000000000001', v_id, '10000000-0000-0000-0000-000000000001', 'supervisor');
   v_res := delete_node(v_id, 'delete');
   SELECT count(*) INTO v_grant_count FROM profile_grants WHERE node_id = v_id;
   SELECT EXISTS(SELECT 1 FROM nodes WHERE id = v_id) INTO v_node_exists;

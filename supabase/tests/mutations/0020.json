@@ -1,0 +1,177 @@
+[
+ [
+  "Z1  backfill claims a SHARED template for one of its roots",
+  "    having count(*) = 1",
+  "    having count(*) >= 1"
+ ],
+ [
+  "Z2  site_node_id uniqueness dropped (a site owns two structures)",
+  "create unique index hierarchy_templates_site_node_id_key\n  on hierarchy_templates (site_node_id) where site_node_id is not null;",
+  "create index hierarchy_templates_site_node_id_key\n  on hierarchy_templates (site_node_id) where site_node_id is not null;"
+ ],
+ [
+  "Z3  a non-root may own a structure (root check removed)",
+  "  if v_parent_id is not null then\n    perform api_raise('invalid_argument',\n      'a structure can only be owned by a top-level site, not by a node inside one',\n      jsonb_build_object('field', 'site_node_id', 'reason', 'not a root node'));\n  end if;",
+  "  if false then\n    perform api_raise('invalid_argument',\n      'a structure can only be owned by a top-level site, not by a node inside one',\n      jsonb_build_object('field', 'site_node_id', 'reason', 'not a root node'));\n  end if;"
+ ],
+ [
+  "Z4  app_is_admin_for_template drops its org predicate",
+  "    WHERE t.id = p_template_id\n      AND t.org_id = app_current_org()",
+  "    WHERE t.id = p_template_id"
+ ],
+ [
+  "Z5  an UNOWNED structure becomes editable by any site admin",
+  "           OR (t.site_node_id IS NOT NULL AND app_is_admin_for(t.site_node_id)))",
+  "           OR app_is_admin_anywhere())"
+ ],
+ [
+  "Z6  save_hierarchy_levels reverts to company-admin-only",
+  "  if not app_is_admin_for_template(p_template_id) then\n    perform api_raise('not_permitted',\n      'admin rights are required on the site that owns this structure',\n      jsonb_build_object('template_id', p_template_id));\n  end if;\n\n  -- 2. must be a JSON array.",
+  "  if not app_is_admin() then\n    perform api_raise('not_permitted',\n      'admin rights are required on the site that owns this structure',\n      jsonb_build_object('template_id', p_template_id));\n  end if;\n\n  -- 2. must be a JSON array."
+ ],
+ [
+  "Z7  hierarchy_levels_update loses its WITH CHECK scope",
+  "create policy hierarchy_levels_update on hierarchy_levels for update\n  using (org_id = app_current_org() and app_is_admin_for_template(template_id))\n  with check (org_id = app_current_org() and app_is_admin_for_template(template_id));",
+  "create policy hierarchy_levels_update on hierarchy_levels for update\n  using (org_id = app_current_org() and app_is_admin_for_template(template_id))\n  with check (org_id = app_current_org());"
+ ],
+ [
+  "Z8  hierarchy_templates_insert lets a site admin create unowned structures",
+  "create policy hierarchy_templates_insert on hierarchy_templates for insert\n  with check (\n    org_id = app_current_org()\n    and (app_is_admin()\n         or (site_node_id is not null and app_is_admin_for(site_node_id)))\n  );",
+  "create policy hierarchy_templates_insert on hierarchy_templates for insert\n  with check (\n    org_id = app_current_org()\n    and (app_is_admin() or app_is_admin_anywhere())\n  );"
+ ],
+ [
+  "Z9  the REVOKE FROM PUBLIC on the new predicate is removed",
+  "revoke execute on function app_is_admin_for_template(uuid) from public;",
+  "-- revoke removed;"
+ ],
+ [
+  "Z10 the GRANT to authenticated is removed (revoke kept)",
+  "    execute 'grant execute on function app_is_admin_for_template(uuid) to authenticated';",
+  "    -- grant removed;"
+ ],
+ [
+  "Z11 create_node: the CHILD permission check is removed",
+  "    if not app_is_admin_for(p_parent_id) then\n      perform api_raise('not_permitted', 'admin rights are required on the parent node',\n        jsonb_build_object('node_id', p_parent_id));\n    end if;",
+  "    if false then\n      perform api_raise('not_permitted', 'admin rights are required on the parent node',\n        jsonb_build_object('node_id', p_parent_id));\n    end if;"
+ ],
+ [
+  "Z12 create_node: a ROOT create stops being company-admin-only",
+  "  if p_parent_id is null and not app_is_admin() then",
+  "  if false then"
+ ],
+ [
+  "Z13 rename_node: the node permission check is removed",
+  "  if not app_is_admin_for(p_node_id) then\n    perform api_raise('not_permitted', 'admin rights are required on this node',\n      jsonb_build_object('node_id', p_node_id));\n  end if;\n\n  if v_node.parent_id is null then\n    v_prospective_path := slugify(v_name)::ltree;",
+  "  if false then\n    perform api_raise('not_permitted', 'admin rights are required on this node',\n      jsonb_build_object('node_id', p_node_id));\n  end if;\n\n  if v_node.parent_id is null then\n    v_prospective_path := slugify(v_name)::ltree;"
+ ],
+ [
+  "Z14 move_node: the DESTINATION check is removed (the 19.44 wrong-code fix)",
+  "    if not app_is_admin_for(p_new_parent_id) then\n      perform api_raise('not_permitted', 'admin rights are required on the destination',\n        jsonb_build_object('node_id', p_new_parent_id));\n    end if;\n\n    -- 5. cycle:",
+  "    if false then\n      perform api_raise('not_permitted', 'admin rights are required on the destination',\n        jsonb_build_object('node_id', p_new_parent_id));\n    end if;\n\n    -- 5. cycle:"
+ ],
+ [
+  "Z15 move_node: the SOURCE check is removed",
+  "  elsif not app_is_admin_for(p_node_id) then\n    perform api_raise('not_permitted', 'admin rights are required on the node being moved',\n      jsonb_build_object('node_id', p_node_id));\n  end if;\n\n  select position into v_own_position",
+  "  elsif false then\n    perform api_raise('not_permitted', 'admin rights are required on the node being moved',\n      jsonb_build_object('node_id', p_node_id));\n  end if;\n\n  select position into v_own_position"
+ ],
+ [
+  "Z16 move_node: detaching a node into a site stops being company-admin-only",
+  "    if not app_is_admin() then\n      perform api_raise('not_permitted', 'company-admin rights are required to detach a node into a site',",
+  "    if false then\n      perform api_raise('not_permitted', 'company-admin rights are required to detach a node into a site',"
+ ],
+ [
+  "Z17 move_node: moving a SITE stops being company-admin-only",
+  "    if not app_is_admin() then\n      perform api_raise('not_permitted', 'company-admin rights are required to move a site',",
+  "    if false then\n      perform api_raise('not_permitted', 'company-admin rights are required to move a site',"
+ ],
+ [
+  "Z18 delete_node: removing a SITE stops being company-admin-only",
+  "    if not app_is_admin() then\n      perform api_raise('not_permitted', 'company-admin rights are required to remove a site',",
+  "    if false then\n      perform api_raise('not_permitted', 'company-admin rights are required to remove a site',"
+ ],
+ [
+  "Z19 delete_node: the node permission check is removed",
+  "  elsif not app_is_admin_for(p_node_id) then\n    perform api_raise('not_permitted', 'admin rights are required on this node',\n      jsonb_build_object('node_id', p_node_id));\n  end if;\n\n  if p_mode = 'deactivate' then",
+  "  elsif false then\n    perform api_raise('not_permitted', 'admin rights are required on this node',\n      jsonb_build_object('node_id', p_node_id));\n  end if;\n\n  if p_mode = 'deactivate' then"
+ ],
+ [
+  "Z20 app_relevel_subtree: the DESTINATION check is removed (source-only guard)",
+  "    if not app_is_admin_for(p_new_parent_id) then\n      perform api_raise('not_permitted', 'admin rights are required on the destination',\n        jsonb_build_object('node_id', p_new_parent_id));\n    end if;\n  end if;",
+  "    if false then\n      perform api_raise('not_permitted', 'admin rights are required on the destination',\n        jsonb_build_object('node_id', p_new_parent_id));\n    end if;\n  end if;"
+ ],
+ [
+  "Z21 app_relevel_subtree: the whole guard reverts to company-admin-only",
+  "  if p_new_parent_id is null then\n    if not app_is_admin() then\n      perform api_raise('not_permitted', 'company-admin rights are required to promote a node into a site',",
+  "  if not app_is_admin() then\n    perform api_raise('not_permitted', 'company-admin rights are required', jsonb_build_object());\n  end if;\n  if p_new_parent_id is null then\n    if false then\n      perform api_raise('not_permitted', 'company-admin rights are required to promote a node into a site',"
+ ],
+ [
+  "Z22 app_node_exists_in_org drops its org scope (a cross-tenant id starts saying not_permitted)",
+  "    SELECT 1 FROM nodes n WHERE n.id = p_node_id AND n.org_id = app_current_org()",
+  "    SELECT 1 FROM nodes n WHERE n.id = p_node_id"
+ ],
+ [
+  "Z23 app_node_exists_in_org is bypassed entirely (a hidden node says 'not found' again)",
+  "      if app_node_exists_in_org(p_parent_id) then\n        perform api_raise('not_permitted', 'admin rights are required on the parent node',\n          jsonb_build_object('node_id', p_parent_id));\n      end if;",
+  "      if false then\n        perform api_raise('not_permitted', 'admin rights are required on the parent node',\n          jsonb_build_object('node_id', p_parent_id));\n      end if;"
+ ],
+ [
+  "Z24 the `parent_id is null` condition is dropped from nodes_update's new term",
+  "    and (app_is_admin()\n         or app_is_admin_on_path(path)\n         or (parent_id is null and app_is_admin_on_grant_node(id)))\n  );",
+  "    and (app_is_admin()\n         or app_is_admin_on_path(path)\n         or app_is_admin_on_grant_node(id))\n  );"
+ ],
+ [
+  "Z25 the new term is dropped from nodes_select",
+  "         or exists (select 1 from app_grant_paths(false) gp where nodes.path <@ gp)\n         or (parent_id is null and app_is_admin_on_grant_node(id)))",
+  "         or exists (select 1 from app_grant_paths(false) gp where nodes.path <@ gp))"
+ ],
+ [
+  "Z26 nodes_cascade_path goes back to SECURITY INVOKER",
+  "create or replace function nodes_cascade_path() returns trigger\nlanguage plpgsql security definer set search_path = public, pg_temp as $$",
+  "create or replace function nodes_cascade_path() returns trigger\nlanguage plpgsql as $$"
+ ],
+ [
+  "Z27 profile_grants_insert reverts to company-admin-only",
+  "create policy profile_grants_insert on profile_grants for insert\n  with check (\n    org_id = app_current_org() and (app_is_admin() or app_is_admin_for(node_id))\n  );",
+  "create policy profile_grants_insert on profile_grants for insert\n  with check (\n    org_id = app_current_org() and app_is_admin()\n  );"
+ ],
+ [
+  "Z28 profile_grants_insert loses the NODE scope (any site admin grants anywhere)",
+  "    org_id = app_current_org() and (app_is_admin() or app_is_admin_for(node_id))\n  );",
+  "    org_id = app_current_org() and (app_is_admin() or app_is_admin_anywhere())\n  );"
+ ],
+ [
+  "Z29 profile_grants_update loses its USING scope",
+  "create policy profile_grants_update on profile_grants for update\n  using (org_id = app_current_org() and (app_is_admin() or app_is_admin_for(node_id)))",
+  "create policy profile_grants_update on profile_grants for update\n  using (org_id = app_current_org())"
+ ],
+ [
+  "Z30 the copied structure is never claimed by its site",
+  "  if v_copied_template_id is not null then\n    update hierarchy_templates set site_node_id = v_node.id\n      where id = v_copied_template_id;\n  end if;",
+  "  if false then\n    update hierarchy_templates set site_node_id = v_node.id\n      where id = v_copied_template_id;\n  end if;"
+ ],
+ [
+  "Z31 the copy loses the schedulable flag",
+  "      select v_org_id, v_copied_template_id, hl.position, hl.name, hl.is_schedulable",
+  "      select v_org_id, v_copied_template_id, hl.position, hl.name, false"
+ ],
+ [
+  "Z32 the root is put on the SOURCE structure instead of on its copy",
+  "    select id into v_level_id from hierarchy_levels\n      where template_id = v_copied_template_id and position = 0;",
+  "    select id into v_level_id from hierarchy_levels\n      where template_id = v_resolved_template_id and position = 0;"
+ ],
+ [
+  "Z33 the copy's name-collision loop is removed (a taken name raises a raw 23505)",
+  "    v_copy_name := v_name;\n    v_copy_suffix := 1;\n    while v_copy_suffix < 64\n      and exists (select 1 from hierarchy_templates\n                   where org_id = v_org_id and name = v_copy_name) loop\n      v_copy_suffix := v_copy_suffix + 1;\n      v_copy_name := v_name || ' (' || v_copy_suffix || ')';\n    end loop;",
+  "    v_copy_name := v_name;"
+ ],
+ [
+  "Z34 node_skill_requirements_insert reverts to company-admin-only",
+  "create policy node_skill_requirements_insert on node_skill_requirements for insert\n  with check (org_id = app_current_org() and app_is_admin_for(node_id));",
+  "create policy node_skill_requirements_insert on node_skill_requirements for insert\n  with check (org_id = app_current_org() and app_is_admin());"
+ ],
+ [
+  "Z35 node_shift_templates_insert loses its node scope",
+  "create policy node_shift_templates_insert on node_shift_templates for insert\n  with check (org_id = app_current_org() and app_is_admin_for(node_id));",
+  "create policy node_shift_templates_insert on node_shift_templates for insert\n  with check (org_id = app_current_org() and app_is_admin_anywhere());"
+ ]
+]

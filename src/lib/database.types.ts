@@ -218,16 +218,19 @@ export type Database = {
           id: string
           name: string
           org_id: string
+          site_node_id: string | null
         }
         Insert: {
           id?: string
           name: string
           org_id: string
+          site_node_id?: string | null
         }
         Update: {
           id?: string
           name?: string
           org_id?: string
+          site_node_id?: string | null
         }
         Relationships: [
           {
@@ -236,6 +239,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "orgs"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hierarchy_templates_org_id_site_node_id_fkey"
+            columns: ["org_id", "site_node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
           },
         ]
       }
@@ -573,27 +583,27 @@ export type Database = {
       }
       profile_grants: {
         Row: {
-          can_edit: boolean
           created_at: string
           node_id: string
           org_id: string
           profile_id: string
+          role: string
           updated_at: string
         }
         Insert: {
-          can_edit?: boolean
           created_at?: string
           node_id: string
           org_id: string
           profile_id: string
+          role?: string
           updated_at?: string
         }
         Update: {
-          can_edit?: boolean
           created_at?: string
           node_id?: string
           org_id?: string
           profile_id?: string
+          role?: string
           updated_at?: string
         }
         Relationships: [
@@ -888,7 +898,24 @@ export type Database = {
       app_current_org: { Args: never; Returns: string }
       app_current_profile_id: { Args: never; Returns: string }
       app_grant_paths: { Args: { require_edit: boolean }; Returns: unknown[] }
+      app_grant_paths_for: { Args: { p_roles: string[] }; Returns: unknown[] }
       app_is_admin: { Args: never; Returns: boolean }
+      app_is_admin_anywhere: { Args: never; Returns: boolean }
+      app_is_admin_for: { Args: { p_node: string }; Returns: boolean }
+      app_is_admin_for_template: {
+        Args: { p_template_id: string }
+        Returns: boolean
+      }
+      app_is_admin_on_grant_node: {
+        Args: { p_node_id: string }
+        Returns: boolean
+      }
+      app_is_admin_on_path: { Args: { p_path: unknown }; Returns: boolean }
+      app_node_exists_in_org: { Args: { p_node_id: string }; Returns: boolean }
+      app_relevel_subtree: {
+        Args: { p_delta: number; p_new_parent_id: string; p_node_id: string }
+        Returns: Json
+      }
       app_trim_ws: { Args: { input: string }; Returns: string }
       apply_split_coverage: {
         Args: { p_adjustments: Json; p_new_assignment: Json }
@@ -956,6 +983,10 @@ export type Database = {
         Returns: Json
       }
       delete_run: { Args: { p_mode?: string; p_run_id: string }; Returns: Json }
+      demote_node: {
+        Args: { p_new_parent_id: string; p_node_id: string }
+        Returns: Json
+      }
       move_node: {
         Args: {
           p_new_parent_id: string
@@ -977,6 +1008,11 @@ export type Database = {
         }
         Returns: number
       }
+      place_node: {
+        Args: { p_index: number; p_new_parent_id: string; p_node_id: string }
+        Returns: Json
+      }
+      promote_node: { Args: { p_node_id: string }; Returns: Json }
       rename_hierarchy_template: {
         Args: { p_name: string; p_template_id: string }
         Returns: Json

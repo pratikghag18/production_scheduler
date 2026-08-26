@@ -8,7 +8,8 @@
 | Table | Purpose |
 |---|---|
 | `orgs` | One row per tenant. Carries `settings` (capacity cap, eligibility policy, week start, snap default). |
-| `hierarchy_levels` | The org's ordered hierarchy definition (Site/Department/Line/Work Cell, or whatever the org names them). Exactly one level per org may be `is_schedulable`. |
+| `hierarchy_templates` | A named hierarchy SHAPE within an org (D86). One org may hold several, so different sites can be organised differently. |
+| `hierarchy_levels` | One template's ordered level list (Site/Department/Line/Work Cell, or whatever the site names them). Exactly one level per TEMPLATE may be `is_schedulable` — not one per org. |
 | `nodes` | Every unit at every level, self-referencing tree. `path` (ltree) is trigger-maintained from `parent_id`/`name` — never supplied by callers. |
 | `operators` | The roster. `home_node_id` is a default site/department for roster filtering. |
 | `products` | The catalog. No color column — color is a UI-only sku-to-token mapping. |
@@ -63,6 +64,7 @@ Referenced by:
     TABLE "assignments" CONSTRAINT "assignments_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     TABLE "audit_log" CONSTRAINT "audit_log_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     TABLE "hierarchy_levels" CONSTRAINT "hierarchy_levels_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
+    TABLE "hierarchy_templates" CONSTRAINT "hierarchy_templates_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     TABLE "node_shift_templates" CONSTRAINT "node_shift_templates_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     TABLE "node_skill_requirements" CONSTRAINT "node_skill_requirements_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     TABLE "nodes" CONSTRAINT "nodes_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
@@ -91,6 +93,41 @@ Access method: heap
 ```
 
 ```
+\d+ hierarchy_templates
+                                                                                                                                                                Table "public.hierarchy_templates"
+    Column    | Type | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                       Description                                                                                                                        
+--------------+------+-----------+----------+-------------------+----------+-------------+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ id           | uuid |           | not null | gen_random_uuid() | plain    |             |              | 
+ org_id       | uuid |           | not null |                   | plain    |             |              | 
+ name         | text |           | not null |                   | extended |             |              | 
+ site_node_id | uuid |           |          |                   | plain    |             |              | The ROOT node whose site this structure belongs to (0020). NULL = unowned, company-admin-only, which is what a template is between being created and its root being built. A site admin may edit the structure of the site they administer and no other.
+Indexes:
+    "hierarchy_templates_pkey" PRIMARY KEY, btree (id)
+    "hierarchy_templates_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
+    "hierarchy_templates_org_id_name_key" UNIQUE CONSTRAINT, btree (org_id, name)
+    "hierarchy_templates_site_node_id_key" UNIQUE, btree (site_node_id) WHERE site_node_id IS NOT NULL
+Foreign-key constraints:
+    "hierarchy_templates_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
+    "hierarchy_templates_org_id_site_node_id_fkey" FOREIGN KEY (org_id, site_node_id) REFERENCES nodes(org_id, id)
+Referenced by:
+    TABLE "hierarchy_levels" CONSTRAINT "hierarchy_levels_org_template_fkey" FOREIGN KEY (org_id, template_id) REFERENCES hierarchy_templates(org_id, id)
+Policies:
+    POLICY "hierarchy_templates_delete" FOR DELETE
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+    POLICY "hierarchy_templates_insert" FOR INSERT
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+    POLICY "hierarchy_templates_select" FOR SELECT
+      USING ((org_id = app_current_org()))
+    POLICY "hierarchy_templates_update" FOR UPDATE
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+Triggers:
+    hierarchy_templates_check_site BEFORE INSERT OR UPDATE OF site_node_id, org_id ON hierarchy_templates FOR EACH ROW EXECUTE FUNCTION hierarchy_templates_check_site()
+Access method: heap
+
+```
+
+```
 \d+ hierarchy_levels
                                               Table "public.hierarchy_levels"
      Column     |  Type   | Collation | Nullable |      Default      | Storage  | Compression | Stats target | Description 
@@ -100,24 +137,28 @@ Access method: heap
  position       | integer |           | not null |                   | plain    |             |              | 
  name           | text    |           | not null |                   | extended |             |              | 
  is_schedulable | boolean |           | not null | false             | plain    |             |              | 
+ template_id    | uuid    |           | not null |                   | plain    |             |              | 
 Indexes:
     "hierarchy_levels_pkey" PRIMARY KEY, btree (id)
-    "hierarchy_levels_one_schedulable" UNIQUE, btree (org_id) WHERE is_schedulable
-    "hierarchy_levels_org_id_position_key" UNIQUE CONSTRAINT, btree (org_id, "position")
+    "hierarchy_levels_one_schedulable" UNIQUE, btree (template_id) WHERE is_schedulable
+    "hierarchy_levels_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
+    "hierarchy_levels_template_id_position_key" UNIQUE CONSTRAINT, btree (template_id, "position")
 Foreign-key constraints:
     "hierarchy_levels_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
+    "hierarchy_levels_org_template_fkey" FOREIGN KEY (org_id, template_id) REFERENCES hierarchy_templates(org_id, id)
 Referenced by:
     TABLE "nodes" CONSTRAINT "nodes_level_id_fkey" FOREIGN KEY (level_id) REFERENCES hierarchy_levels(id)
+    TABLE "nodes" CONSTRAINT "nodes_org_level_fkey" FOREIGN KEY (org_id, level_id) REFERENCES hierarchy_levels(org_id, id)
 Policies:
     POLICY "hierarchy_levels_delete" FOR DELETE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND app_is_admin_for_template(template_id)))
     POLICY "hierarchy_levels_insert" FOR INSERT
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_template(template_id)))
     POLICY "hierarchy_levels_select" FOR SELECT
       USING ((org_id = app_current_org()))
     POLICY "hierarchy_levels_update" FOR UPDATE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND app_is_admin_for_template(template_id)))
+      WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_template(template_id)))
 Access method: heap
 
 ```
@@ -142,13 +183,16 @@ Indexes:
     "nodes_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
     "nodes_org_id_parent_id_name_key" UNIQUE CONSTRAINT, btree (org_id, parent_id, name)
     "nodes_org_parent_idx" btree (org_id, parent_id)
+    "nodes_org_path_unique" UNIQUE, btree (org_id, path)
     "nodes_path_idx" gist (path)
 Foreign-key constraints:
     "nodes_level_id_fkey" FOREIGN KEY (level_id) REFERENCES hierarchy_levels(id)
     "nodes_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "nodes_org_id_parent_id_fkey" FOREIGN KEY (org_id, parent_id) REFERENCES nodes(org_id, id)
+    "nodes_org_level_fkey" FOREIGN KEY (org_id, level_id) REFERENCES hierarchy_levels(org_id, id)
 Referenced by:
     TABLE "assignments" CONSTRAINT "assignments_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
+    TABLE "hierarchy_templates" CONSTRAINT "hierarchy_templates_org_id_site_node_id_fkey" FOREIGN KEY (org_id, site_node_id) REFERENCES nodes(org_id, id)
     TABLE "node_shift_templates" CONSTRAINT "node_shift_templates_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
     TABLE "node_skill_requirements" CONSTRAINT "node_skill_requirements_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
     TABLE "nodes" CONSTRAINT "nodes_org_id_parent_id_fkey" FOREIGN KEY (org_id, parent_id) REFERENCES nodes(org_id, id)
@@ -158,16 +202,20 @@ Referenced by:
     TABLE "runs" CONSTRAINT "runs_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
 Policies:
     POLICY "nodes_delete" FOR DELETE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_on_path(path))))
     POLICY "nodes_insert" FOR INSERT
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_on_path(path))))
     POLICY "nodes_select" FOR SELECT
-      USING (((org_id = app_current_org()) AND app_can_read_node(id)))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR (EXISTS ( SELECT 1
+   FROM app_grant_paths(false) gp(gp)
+  WHERE (nodes.path <@ gp.gp))) OR ((parent_id IS NULL) AND app_is_admin_on_grant_node(id)))))
     POLICY "nodes_update" FOR UPDATE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_on_path(path))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_on_path(path) OR ((parent_id IS NULL) AND app_is_admin_on_grant_node(id)))))
 Triggers:
     nodes_after_path AFTER UPDATE OF name, parent_id ON nodes FOR EACH ROW WHEN (old.path IS DISTINCT FROM new.path) EXECUTE FUNCTION nodes_cascade_path()
+    nodes_before_cycle BEFORE INSERT OR UPDATE OF parent_id ON nodes FOR EACH ROW EXECUTE FUNCTION nodes_check_cycle()
+    nodes_before_level BEFORE INSERT OR UPDATE OF parent_id, level_id ON nodes FOR EACH ROW EXECUTE FUNCTION nodes_check_level_adjacency()
     nodes_before_path BEFORE INSERT OR UPDATE OF name, parent_id ON nodes FOR EACH ROW EXECUTE FUNCTION nodes_set_path()
     nodes_set_updated_at BEFORE UPDATE ON nodes FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
@@ -343,14 +391,14 @@ Foreign-key constraints:
     "node_skill_requirements_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id)
 Policies:
     POLICY "node_skill_requirements_delete" FOR DELETE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_skill_requirements_insert" FOR INSERT
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_skill_requirements_select" FOR SELECT
       USING ((org_id = app_current_org()))
     POLICY "node_skill_requirements_update" FOR UPDATE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
+      WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
 Triggers:
     node_skill_requirements_set_updated_at BEFORE UPDATE ON node_skill_requirements FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
@@ -584,14 +632,14 @@ Foreign-key constraints:
     "node_shift_templates_org_id_template_id_fkey" FOREIGN KEY (org_id, template_id) REFERENCES shift_templates(org_id, id)
 Policies:
     POLICY "node_shift_templates_delete" FOR DELETE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_shift_templates_insert" FOR INSERT
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_shift_templates_select" FOR SELECT
       USING ((org_id = app_current_org()))
     POLICY "node_shift_templates_update" FOR UPDATE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
+      WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
 Triggers:
     node_shift_templates_set_updated_at BEFORE UPDATE ON node_shift_templates FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
@@ -641,32 +689,35 @@ Access method: heap
 
 ```
 \d+ profile_grants
-                                                Table "public.profile_grants"
-   Column   |           Type           | Collation | Nullable | Default | Storage | Compression | Stats target | Description 
-------------+--------------------------+-----------+----------+---------+---------+-------------+--------------+-------------
- profile_id | uuid                     |           | not null |         | plain   |             |              | 
- node_id    | uuid                     |           | not null |         | plain   |             |              | 
- org_id     | uuid                     |           | not null |         | plain   |             |              | 
- can_edit   | boolean                  |           | not null | true    | plain   |             |              | 
- created_at | timestamp with time zone |           | not null | now()   | plain   |             |              | 
- updated_at | timestamp with time zone |           | not null | now()   | plain   |             |              | 
+                                                                                                                                                                                                               Table "public.profile_grants"
+   Column   |           Type           | Collation | Nullable |      Default       | Storage  | Compression | Stats target |                                                                                                                                                          Description                                                                                                                                                           
+------------+--------------------------+-----------+----------+--------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ profile_id | uuid                     |           | not null |                    | plain    |             |              | 
+ node_id    | uuid                     |           | not null |                    | plain    |             |              | 
+ org_id     | uuid                     |           | not null |                    | plain    |             |              | 
+ created_at | timestamp with time zone |           | not null | now()              | plain    |             |              | 
+ updated_at | timestamp with time zone |           | not null | now()              | plain    |             |              | 
+ role       | text                     |           | not null | 'supervisor'::text | extended |             |              | The role this profile holds WITHIN this node's subtree. Replaces can_edit (0019). admin = site admin here; supervisor = may schedule here; viewer = read-only here. Multiple roles are multiple rows on different nodes. Strongest covering grant wins -- a deeper, weaker grant never subtracts from a broader, stronger one.
 Indexes:
     "profile_grants_pkey" PRIMARY KEY, btree (profile_id, node_id)
     "profile_grants_profile_id_idx" btree (profile_id)
+    "profile_grants_profile_role_idx" btree (profile_id, role)
+Check constraints:
+    "profile_grants_role_check" CHECK (role = ANY (ARRAY['admin'::text, 'supervisor'::text, 'viewer'::text]))
 Foreign-key constraints:
     "profile_grants_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "profile_grants_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
     "profile_grants_org_id_profile_id_fkey" FOREIGN KEY (org_id, profile_id) REFERENCES user_profiles(org_id, id)
 Policies:
     POLICY "profile_grants_delete" FOR DELETE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(node_id))))
     POLICY "profile_grants_insert" FOR INSERT
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(node_id))))
     POLICY "profile_grants_select" FOR SELECT
-      USING (((profile_id = app_current_profile_id()) OR (app_is_admin() AND (org_id = app_current_org()))))
+      USING (((profile_id = app_current_profile_id()) OR ((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(node_id)))))
     POLICY "profile_grants_update" FOR UPDATE
-      USING ((app_is_admin() AND (org_id = app_current_org())))
-      WITH CHECK ((app_is_admin() AND (org_id = app_current_org())))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(node_id))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(node_id))))
 Triggers:
     profile_grants_set_updated_at BEFORE UPDATE ON profile_grants FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap

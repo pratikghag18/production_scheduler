@@ -76,3 +76,37 @@ export function decideSessionUpdate(lastUserId: string | null, event: AuthEvent)
 export function canQueryAsUser(userId: string | null, loading: boolean): boolean {
   return !loading && userId !== null;
 }
+
+/* ===========================================================================
+ * D97 — who may open the admin screen (design plan §19.38).
+ * ======================================================================== */
+
+/**
+ * THREE STATES, NOT A BOOLEAN, AND THAT IS THE WHOLE POINT.
+ *
+ * `useSession` resolves the profile asynchronously — `loading` starts true
+ * with no profile at all. A boolean predicate has to answer *something*
+ * during that window, and both answers are wrong: `false` bounces a real
+ * admin who navigated straight to `/admin`, and `true` shows the screen to
+ * whoever turns out not to be one. **This is exactly D91 one component
+ * over** — there, gating a query without widening the render condition would
+ * have swapped seven console errors for a blank card, because `enabled:
+ * false` leaves `isLoading` FALSE. The fix there was to make the unresolved
+ * state explicit rather than let it collapse into one of the two answers, and
+ * it is the fix here.
+ *
+ * ONE implementation, because there are TWO call sites — the nav link and the
+ * route itself — and a nav link that disagrees with its own route is how a
+ * user ends up staring at a link that refuses them.
+ *
+ * FAILS CLOSED ON A ROLE IT DOES NOT RECOGNISE. `user_profiles.role` already
+ * allows `admin | supervisor | viewer`, and the three-tier model (§19.38) will
+ * add more. A client that has not been taught a new role must not decide it is
+ * probably fine — **this function is the single place to widen when that lands.**
+ */
+export type AdminAccess = "pending" | "granted" | "denied";
+
+export function adminAccess(role: string | null | undefined, loading: boolean): AdminAccess {
+  if (loading) return "pending";
+  return role === "admin" ? "granted" : "denied";
+}

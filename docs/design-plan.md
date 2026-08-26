@@ -3484,3 +3484,1132 @@ Merging them is not a favour, it is the cheaper build:
 
 **Revised queue: P1-5l + P1-5i as one build → P1-5k's brief → P1-5h.** Nodes and levels both get
 drag-to-reorder, with one set of pointer mechanics, one insertion caret, and one threshold.
+
+---
+
+### 19.36 Three parallel reviews, and what they found (Aug 26, 2026)
+
+Pratik asked whether the design session could work in parallel. It can: three read-only Sonnet
+agents ran concurrently on disjoint targets while the design session worked on migration 0017. All
+three found something. Findings below are triaged, not quoted — a flagged deviation is a lead.
+
+#### A. Adversarial review of P1-5j — the work the design session graded itself on
+
+This closes a real hole in the process: `findLevelOrderProblems` was written, tested and
+mutation-tested by the same session, which is precisely what verification-standard rule 2 exists to
+forbid. A fresh reviewer was given the migration as the authority and told to hunt the
+**stricter-than-server** direction specifically.
+
+**It could not break it.** 38/38 cold; a **2401-probe** malformed sweep (the full cross product of
+seven bad values in four argument positions) with zero throws; and no constructible input where the
+client reports a problem `save_hierarchy_levels` would allow — including the `cl.template_id`-only
+asymmetry it was pointed at, which it independently confirmed is mirrored correctly.
+
+**Two silent gaps in the SUITE, though, both real:**
+
+1. **No fixture ever gives a root `parentId: undefined`.** The code guards
+   `=== null || === undefined`; deleting the `undefined` half passes all 38. No live bug — the
+   direction is under-report, which is the safe one — but zero test pressure on a line a future
+   "simplification" would remove.
+2. **⭐ S12 is a vacuous case.** Deleting `if (templateId === null) return [];` outright changes
+   nothing observable: every later comparison is `own.templateId !== templateId`, no real level has a
+   null `templateId`, so the loop skips every node and still returns `[]`. **The guard is unreachable
+   in the same sense as U1** — kept for clarity, not for behaviour — but the case reads as a real
+   test and provides almost no kill pressure. **This is rule 3b landing on the design session's own
+   suite**: a case whose name promises more than its fixture can deliver.
+
+**Deliberately NOT fixed in this session.** Pratik has been handed a prediction of **491 tests in 17
+files** and may already be running it; moving the count now would break the one thing that makes his
+run self-verifying. Both go into P1-5l's build, which edits `levelDraft.test.ts` anyway for the
+`moveTo` action.
+
+#### B. Independent read of P1-5g's Part B — the half nobody could execute
+
+`NodeTreeEditor.tsx` and its stylesheet were written from prose and shipped without ever running.
+Reading them against §7 is the only check that exists, and the design session's own review had read
+them for the *predicted* defect (pointer capture) rather than line by line against the spec.
+
+1. **`releasePointerCapture` is never called.** §7.1 says *"Release capture, clear state."* Neither
+   `handleDragPointerUp` nor `handleDragPointerCancel` takes the event, so the call is not merely
+   omitted — it is inaccessible as written. **The corroborating tell: `DragState.pointerId` is
+   written at drag start and never read anywhere in the file.** Dead state is the fingerprint of a
+   dropped requirement. No user-visible symptom, because the Pointer Events spec has the UA release
+   capture implicitly on `pointerup`/`pointercancel` — but the code now carries a field whose only
+   purpose was the missing call.
+2. **The Escape listener is keyed on the wrong dependency.** `useEffect(..., [drag])`, and `drag` is
+   replaced with a fresh object on **every `pointermove`** — so a `window` keydown listener is torn
+   down and reinstalled dozens of times a second for the length of every drag. Not a correctness
+   bug (React runs cleanup and setup in the same commit, so no keystroke is missed) but exactly the
+   "removed on the wrong dependency" shape. Should key on `drag !== null`.
+3. Everything else in §7.1–§7.4 checks out, including two things the design session had asserted and
+   this reviewer verified independently: the `pointer-events: none` on the chip really is what stops
+   it becoming its own `elementFromPoint` hit, and `.dropOk` really does follow `.eligible` in
+   source order, so the dashed hint really is suppressed on the chosen target.
+4. It also names something §7 never wrote down: **the drag handle is keyboard-focusable and does
+   nothing on Enter or Space.** That IS the accepted trade — the "Move to…" menu is the keyboard
+   path, and P1-5g's non-goals say so — but §7 does not, so it reads as an oversight. Record it.
+
+**Both defects land in the exact block D95a rewrites**, so they fold into P1-5l rather than being
+patched twice.
+
+#### C. P1-5h groundwork — and the headline is that the feature's premise does not exist
+
+The roadmap has said for weeks that P1-5h is *"upsert-by-`external_id`"*. Measured:
+
+**`nodes` has no `external_id` column.** Grepping every migration finds exactly two, both in
+`20260821000002`: `operators.external_id` (with a real `unique (org_id, external_id)`) and
+`products.external_id` (with **no** uniqueness constraint on it at all). Nothing anywhere writes to
+either. So "upsert by external id" describes a target, not a mechanism, and **P1-5h needs its own
+migration before any of its client work can mean anything.** Not folded into 0017 — a column with no
+writer is exactly the kind of thing that drifts (see the `app.hierarchy_migration` hatch, unused
+since 0010).
+
+Four more facts a designer would otherwise have guessed at:
+
+- **`create_node` is insert-only.** No update path, no `on conflict`, no batch variant. A re-import
+  cannot use it for rows that already exist — it hits `path_collision` every time.
+- **Parent-before-child is structural, not stylistic.** It fails in `create_node`'s own parent
+  lookup before any trigger runs; a direct insert fails instead in `nodes_before_level`.
+- **The BOM claim in the roadmap is half right.** `app_trim_ws` does strip `U+FEFF`, so a BOM cannot
+  survive into a stored *name*. But it only ever runs on `p_name`. A BOM on the **header row's first
+  cell** is a column-mapping problem no schema guard touches, and it is the parser's job.
+- **A bulk import re-runs D85's exact path 5,000 times.** Every `create_node` ends in
+  `INSERT … RETURNING`, which applies `nodes_select` to the fresh row; that is safe today only
+  because migration 0013 restored the `app_is_admin() or` short-circuit. Design-plan §19.17 already
+  named bulk import as the shape most likely to re-expose it, and this is the first measurement
+  confirming the volume.
+- An empty-string parent reference reaching a `uuid` cast raises a raw **`22P02`**, outside the
+  twelve-code closed set.
+
+#### What this says about running agents in parallel
+
+Three concurrent read-only reviews on disjoint targets, no file contention, three real findings, and
+the design session kept working throughout. **The constraint is not agent count — it is that the
+review targets must be disjoint and read-only, and that briefs remain serial.** Two agents writing
+to one file is the thing to avoid, which is also why P1-5l and P1-5i must stay one agent (D95b).
+
+---
+
+### 19.37 Migration 0017 — the three node-mobility RPCs, prototyped and measured (Aug 26, 2026)
+
+All three exist and behave, on a scratch PG16 carrying all sixteen migrations and `seed.sql`, driven
+as a real `authenticated` admin. Written here before the migration file is assembled, because the
+decisions below were settled by running them, not by choosing them.
+
+#### `place_node(p_node_id, p_new_parent_id, p_index)` — D94's fix
+
+**It delegates every structural guard to `move_node` rather than restating one.** `move_node` already
+carries seven: admin, org scope, unknown node, NULL-parent-only-at-position-0, self-parent, unknown
+parent, descendant-cycle, level adjacency and path collision. `place_node` calls it and then
+renumbers. Brief-writing rule 4's strongest form — *make the two things the SAME CALL* — and it shows
+in the error output, where a refused place reports through the chain
+`place_node → move_node → api_raise` with the existing code. Calling it when the parent is unchanged
+is safe: that is a measured no-op.
+
+**Dense renumbering, 0..n-1. No gap scheme.** Gaps (10, 20, 30) would let a later insert avoid
+touching siblings, but every sibling in the database sits at `sort_order` 0 today, so the first
+placement has to renumber regardless — and a gap scheme re-collapses and needs a rebalancer nobody
+will maintain. Sibling counts here are small and this only ever rewrites one parent's children.
+After the renumber every `sort_order` is distinct, so `compareSiblings`' name and id tiebreaks can
+never fire again and the stored order becomes authoritative.
+
+**The SOURCE parent is deliberately not renumbered** when the parent changes. Removing an element
+does not change the relative order of the rest, so there is nothing to assert there — and the
+destination is renumbered precisely because that is where an ordinal was asserted.
+
+**`p_index` is clamped to `[0, n]`, and NULL coalesces to 0.** A drop can only produce an index in
+range; refusing an out-of-range one would hand the caller a refusal with nothing useful to do about
+it, and "before everything" / "after everything" are unambiguous.
+
+Measured: **Pratik's exact case** — `place_node(Cell 3, Line 1, 1)` returns Cell 1 / Cell 3 / Cell 2
+at `sort_order` 0/1/2 **with every `path` untouched**. Also measured: idempotent when repeated; clamps
+at both ends; cross-parent placement works and leaves the source alone; zero adjacency violations
+afterwards; NULL and unknown ids give `invalid_argument`; **an org-1 admin naming an org-2 node gets
+`invalid_argument` "node not found"**; a supervisor gets `not_permitted` from `place_node`'s own check
+before any delegation.
+
+#### `promote_node(p_node_id)` / `demote_node(p_node_id, p_new_parent_id)` — P1-5k
+
+Both are thin wrappers over one internal engine, **`app_relevel_subtree(p_node_id, p_new_parent_id,
+p_delta)`**, so the escape hatch, the subtree capture and the two post-write checks exist exactly
+once. Promote DERIVES its new parent (the grandparent, or NULL when the node becomes a root) and
+passes `-1`; demote is GIVEN one and passes `+1`.
+
+The order inside the engine is the part that matters, and each step was measured:
+
+1. Admin, org scope, resolve the node.
+2. **Capture the subtree ids BEFORE any write** — the re-parent rewrites every descendant's `path`,
+   so a `path <@` predicate evaluated afterwards reads a different tree.
+3. **Refuse up front if any distinct level in the subtree has no rung to land on.** This is the one
+   that mattered: measured before the guard existed, a demote off the bottom of the template did not
+   fail — the `position + 1` update matched zero rows, the parent change stood, and the tree was left
+   with an adjacency violation, silently, because the hatch was on.
+4. Hatch on, re-parent the one node, re-level the captured ids.
+5. **Hatch off inside the function, before the checks** — the setting is transaction-scoped and
+   nothing later should run unguarded.
+6. Adjacency, both halves, **scoped to the captured subtree**. Every internal link is inside it; the
+   only boundary is the moved node's own parent, which is checked on the moved node's own row.
+7. Scheduled work, same scope: runs first, assignments only when the run count is zero (D72).
+
+Measured, in order: a promote whose subtree holds a run and an assignment on the schedulable rung is
+refused with **`schedulable_level_locked`, count 1** — the exact damage §19.33 recorded as silent.
+**Move the work off first and the identical promote succeeds**: Line 1 becomes a Department, its two
+cells become Lines, the paths rewrite to `plant_1.line_1.cell_1`, and adjacency violations are **0**.
+That second half is what proves the check is a guard and not a lock-out. Promoting a root is refused
+(`level_mismatch`); demoting off the bottom is refused before any write; demoting onto a node at the
+wrong level is `level_mismatch`; demoting onto one's own descendant is `node_cycle`.
+
+**No thirteenth error code.** All four refusals reuse `level_mismatch`, `node_cycle`,
+`schedulable_level_locked` and `not_permitted`.
+
+#### Still to do on 0017
+
+Assemble the file, **with its own GRANT/REVOKE block covering all four new functions including
+`app_relevel_subtree`** — D93 is exactly the trap of creating functions and granting only a table —
+then the SQL cases and a mutation table, then `verify-db.sh` end to end.
+
+---
+
+### 19.38 D97 — the permission model Pratik asked for, and the three gaps between it and what exists (Aug 26, 2026)
+
+Pratik, after approving the escape-hatch lock: *"there are certain tasks only an admin should be
+able to do… there should be a system admin (all powers, any site), a site admin (changes only to a
+particular site they belong), user/supervisor (assignments only, no access to admin page). We don't
+want people lurking around where they have no knowledge or business."*
+
+**A REQUIREMENT, not a question.** Recorded as such. What follows is what it collides with, measured
+rather than read.
+
+#### The reading of "site", stated because it changes the design
+
+Today the tenant boundary is an **org**, and "Site" is also the name of the top LEVEL in the default
+hierarchy (Site → Department → Line → Work Cell). "Site admin" is therefore ambiguous. Taking
+*"a particular site they belong"* plus *"any site"* together, and given one company can hold several
+plants in one org, this is read as **a Site NODE inside the org** — which is exactly what
+`profile_grants` already points at. If he meant *org*, the shape below still holds but the grant
+target changes; one sentence from him settles it.
+
+#### What already exists, and it is more than expected
+
+- **Three roles are already in the schema**, not two: `user_profiles.role check (role in
+  ('admin','supervisor','viewer'))`. The app only ever uses two.
+- **`profile_grants(profile_id, node_id, can_edit)` already exists** and is already load-bearing:
+  `app_can_edit_node` is `app_is_admin() OR (app_can_write() AND EXISTS (SELECT 1 FROM
+  app_grant_paths(true) gp WHERE n.path <@ gp))`. **That ltree containment IS site-scoping**, already
+  wired into every node read and write. The machinery for a site admin is largely built.
+
+#### Gap 1 — nothing hides the admin page. Measured.
+
+**There is not one role check anywhere in the client.** `grep` for `profile.role` / `role ===` /
+`isAdmin` across `src/` returns only the dev profile switcher. `/admin` is an ordinary route with no
+guard, and the nav link is unconditional.
+
+Measured as the seeded supervisor: the admin page's own read returns **1 structure, 4 levels and 8
+nodes**. Writes are correctly refused (`create_node` → `not_permitted`), so nothing can be damaged —
+but the entire hierarchy admin screen renders, populated, for someone with no business there. That is
+precisely the complaint, and it is the cheapest thing on this page to fix.
+
+#### Gap 2 — "site admin" has nowhere to attach. 94 call sites.
+
+An admin today is all-or-nothing across the org, because **every admin function asks
+`app_is_admin()` and stops**. `grep -c` across the migrations: **94 occurrences.** The grant
+machinery that would scope them exists and is already correct; what does not exist is any admin
+function consulting it. Adding a tier is therefore not a schema change so much as a change to the
+question every one of those 94 places asks — from *"are you an admin?"* to *"are you an admin
+**for this node**?"*
+
+#### ⭐ Gap 3 — the system cannot tell which site you are acting in. This one is latent today and blocks the whole model.
+
+```sql
+create function app_current_org() ... as $$
+  SELECT org_id FROM user_profiles WHERE user_id = (SELECT auth.uid()) LIMIT 1;
+$$;
+```
+
+**`LIMIT 1` with no `ORDER BY`** — an arbitrary row tracking physical heap order. This is D87's exact
+shape, in the function that every tenant check in the product depends on. And `app_is_admin()` has
+**no org predicate at all**:
+
+```sql
+SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = (SELECT auth.uid()) AND role = 'admin');
+```
+
+so a user who is admin in one org and a supervisor in another is `app_is_admin() = true` in **both**.
+
+Both are harmless today for one reason only: **every seeded person has exactly one profile.**
+Verified by inserting a second profile for the Contoso admin in Northwind — the insert succeeds, and
+from that moment which org they act in is undefined. **A system admin who spans sites is, by
+definition, a person with more than one scope. The requirement cannot be built until "which scope am
+I acting in" is an answer rather than a guess** — it is the first thing the design has to settle, and
+it is a bigger change than the role tier itself.
+
+#### Proposed order
+
+1. **Lock the escape hatch** — approved, already folding into 0017. Free.
+2. **Hide the admin page from non-admins** — client-only, small, closes the lurking complaint today
+   and does not wait on any of the above. Route guard plus the nav link, off the role already on
+   `useSession`'s profile.
+3. **Design the three tiers properly**, starting with acting-scope, then the 94 call sites. Its own
+   design section, then its own brief. This is foundational and should not be rushed into the drag
+   work.
+4. **The drag build continues in parallel** — it is an agent's build against a finished design, and
+   the role work is the design session's. Genuinely concurrent, on disjoint files.
+
+**Not deferred quietly: item 3 is the largest single piece of work now on the list**, larger than
+P1-5k, because it touches every RLS policy and every admin RPC in the product.
+
+---
+
+### 19.39 D97 step 2 — the admin screen is admin-only. BUILT (Aug 26, 2026)
+
+The cheap half of §19.38, done in full rather than sketched, because it closes the actual complaint
+and waits on none of the foundational work.
+
+**One predicate, `adminAccess(role, loading)` in `features/auth/session.ts`, beside
+`canQueryAsUser`** — the module D91 created for exactly this reason. Two call sites depend on it
+agreeing with itself: the nav link in `AppShell` and the route guard. **A nav link that disagrees
+with its own route is how a user ends up staring at a link that refuses them.**
+
+**THREE STATES, NOT A BOOLEAN, and that is the whole design.** `useSession` resolves the profile
+asynchronously; `loading` starts true with no profile. A boolean has to answer *something* in that
+window and both answers are wrong — `false` bounces a real admin who navigated straight to `/admin`,
+`true` shows the screen to whoever turns out not to be one. **This is D91 one component over**: there,
+gating a query without widening the render condition would have swapped seven console errors for a
+blank card, because `enabled: false` leaves `isLoading` FALSE. The fix both times is to make the
+unresolved state explicit instead of letting it collapse into one of the two answers.
+
+**It fails closed on a role it does not recognise**, and case A8 pins it. `user_profiles.role` already
+allows `admin | supervisor | viewer` and the tier model will add more; an old client must refuse
+`site_admin` rather than decide a role with "admin" in the name is probably fine, because it has no
+idea how to scope the screen. **`adminAccess` is the single place to widen when that lands.**
+
+**The guard wraps the Suspense boundary, not the reverse**, so a non-admin never triggers the lazy
+`AdminPage` chunk fetch at all — the refusal costs no download.
+
+**This is a SECOND lock, not the lock.** The database is the authority and always was: every admin
+RPC opens with `app_is_admin()`, and a supervisor's writes were already refused (`not_permitted`,
+measured). This stops the screen being rendered to someone who cannot use it, and must never be
+treated as though it were what keeps the data safe.
+
+**Verification.** 11 cases (A1–A11), taking `session.test.ts` from 15 to 26 and the suite to a
+predicted **502 in 17 files**. **9 mutations, all caught, 26 of 26 reporting on every run.** The pair
+that earns its keep is A1/A2: a predicate written as
+`role === "admin" ? "granted" : loading ? "pending" : "denied"` passes A1 and fails A2 — **M2 is
+exactly that wrong ordering and A2 alone catches it.** `tsc -b --force` and `eslint src/` both clean.
+**Rendered and looked at** (`docs/mockups/d97-admin-gate.png`): admin sees Board | Admin; supervisor
+sees Board only, with the Admin link simply absent rather than present-and-dead; and a supervisor
+typing `/admin` gets a plain "Not available" with a way back, inside the real shell — not a blank
+page, not a crash, and not an alarming security notice for what is usually just the wrong bookmark.
+
+Files: `session.ts`, `session.test.ts`, `RequireAdmin.tsx` (new), `routes.tsx`, `AppShell.tsx`.
+
+---
+
+### 19.40 D98 — multi-role is the same change as site-admin, and doing it naively opens a cross-tenant hole. MEASURED (Aug 26, 2026)
+
+Pratik: *"a user can have multiple roles, for example a supervisor can be an admin as well, it is a
+case by case basis, not every supervisor will be an admin."*
+
+**A requirement.** And it turns out to be the SAME requirement as §19.38's site admin, not a second
+one — plus it walks straight into a latent privilege escalation.
+
+#### The two asks are one change
+
+Today a role belongs to a PERSON: `user_profiles.role text check (role in
+('admin','supervisor','viewer'))`, one value, with `unique (org_id, user_id)` — **one profile per
+person per org, so a second role is not merely absent, it is forbidden by a constraint.** And the
+roles are a LADDER: `app_can_write()` is `role in ('admin','supervisor')`, so admin implies
+supervisor by construction.
+
+Both asks dissolve if a role belongs to a **(person, scope)** pair instead:
+
+| what he asked for | what it becomes |
+| --- | --- |
+| system admin | admin, scoped to the whole org |
+| site admin | admin, scoped to one Site node's subtree |
+| supervisor | supervisor, scoped to their nodes |
+| "a supervisor who is also an admin" | two rows. Falls straight out. |
+
+**And that table already exists.** `profile_grants(profile_id, node_id, can_edit)` is exactly the
+(person, scope) table — `app_grant_paths` turns it into ltree paths and `n.path <@ gp` tests
+containment, already wired into every node read and write. It carries a BOOLEAN where it needs a
+ROLE. That is the shape of the change, and it is far less invention than it first looked.
+
+#### ⭐ But first: a viewer in one org can write to it if they are an admin in another. MEASURED.
+
+```sql
+create function app_is_admin() ... $$
+  SELECT EXISTS (SELECT 1 FROM user_profiles
+                 WHERE user_id = (SELECT auth.uid()) AND role = 'admin');
+$$;                                          -- NO org predicate
+
+create function app_current_org() ... $$
+  SELECT org_id FROM user_profiles WHERE user_id = (SELECT auth.uid()) LIMIT 1;
+$$;                                          -- LIMIT 1, NO ORDER BY
+```
+
+Nearly every write policy is `app_is_admin() and org_id = app_current_org()`. The first term asks
+*"are you an admin anywhere"*; the second asks *"which org am I in"* and answers with an arbitrary
+row. **The two terms can therefore be satisfied by two DIFFERENT profiles.**
+
+Constructed and run on the scratch database, as a real `authenticated` caller — a user given a
+**viewer** profile in Northwind and an **admin** profile in Contoso:
+
+```
+ app_says_admin |        acting_in        | actual_role_there
+----------------+-------------------------+-------------------
+ t              | Northwind Manufacturing | viewer
+```
+
+and then `create_node(null,'Escalated',0,null)` **SUCCEEDED**, writing a root node into the org where
+that person is a viewer.
+
+**This is not currently exploitable**: it needs a person with two profiles, and nothing in the
+product creates one — the seed never reuses a `user_id` across orgs, and no test in the repo
+constructs it. **It is exactly the shape of D83**, which was invisible for weeks for the same reason
+(one org in the seed, so no test could have caught it).
+
+**The consequence for the plan is the whole point: the multi-role feature makes "a person with more
+than one profile" the NORMAL case. The escalation must be closed BEFORE multi-role is switched on,
+not alongside it.** `app_current_org()` has ~100 call sites and `app_is_admin()` 82; "which scope am
+I acting in" has to become an answer rather than a guess, and that is the first piece of work.
+
+#### Three more findings from the same survey, each of which would have cost a cycle
+
+1. **`nodes_select`'s `app_is_admin() or` is load-bearing for a NON-permissions reason.** D85: it is
+   the only term that answers without reading `nodes`, which is what lets `INSERT … RETURNING`
+   see its own row. **A scoped admin check is by definition a table lookup.** Replace that term
+   naively and `create_node` breaks for every scoped admin — the same outage, on a narrower and
+   less-tested population. Case N1 in `70_hierarchy_test.sql` is the committed guard and must survive.
+2. **The seed masks the very behaviour the tests appear to prove.** `seed.sql` gives each admin an
+   explicit root `profile_grants` row, so admin writes to runs/assignments would still pass through
+   the GRANT branch even if the `app_is_admin()` bypass were deleted. **No current test can
+   distinguish "admin writes because of the bypass" from "admin writes because of the seeded
+   grant"** — verification-standard rule 3 exactly, in the fixture that guards permissions.
+3. **The client breaks first, and quietly.** `useSession` fetches the profile with
+   `.eq("user_id", …).maybeSingle()` and **no org filter**. `maybeSingle()` errors on two rows, the
+   error path sets `profile` to null, and the person becomes signed-in-but-role-less everywhere. It
+   fails closed, which is right, but silently — and it triggers on the first person who holds two
+   roles.
+
+#### And what it means for `adminAccess`, built hours earlier (§19.39)
+
+It takes one `role: string` and asks `role === "admin"`. Its docstring calls itself "the single place
+to widen", and it was right that widening would be needed — but it anticipated a **bigger enum**, not
+a **set of (role, scope) pairs**. Widening it is no longer adding a case; the input type changes.
+Case A8's assertion will not survive, though **its intent — refuse a shape you do not recognise
+rather than guess — is exactly what should carry forward.** Recorded rather than quietly patched: it
+is a good example of a design that was correctly built to be extended and still needs replacing,
+because the axis it will be extended along was not the one anticipated.
+
+---
+
+### 19.41 Migration 0017 — assembled, and the regression it caught in me (Aug 26, 2026)
+
+`supabase/migrations/20260826000017_node_mobility.sql`, 427 lines: `place_node`,
+`app_relevel_subtree` + `promote_node` + `demote_node`, the escape-hatch lock, and its own grant
+block.
+
+#### ⭐ The escape hatch turned out not to be needed at all
+
+§19.33 designed P1-5k around `app.hierarchy_migration`, on the reasoning that a bulk re-level cannot
+be done row by row. **Measured, that reasoning was wrong.** `nodes_before_level` fires per row and
+compares that row to its **parent** only — it never looks down at children. So if each node is moved
+*after* its parent already sits at its final level, every intermediate state is legal:
+
+```
+step 1  the moved node: new parent AND new level in ONE statement   -> trigger sees both, passes
+step 2  descendants, shallowest first                               -> each parent is already final
+```
+
+Measured with the trigger fully armed and the hatch never set: a three-generation promote across 14
+nodes, **0 adjacency violations**, paths cascaded correctly; and a demote in the other direction the
+same. **The invariant is now enforced CONTINUOUSLY rather than suspended and re-checked**, which is
+strictly safer — the post-write check drops from *the only thing standing between this and D92* to a
+second opinion. And it is why locking the hatch costs nothing: **nothing in the product uses it.**
+
+The lock itself: honoured only when `pg_has_role(current_user, <owner of nodes>, 'USAGE')` — no
+hardcoded role name, so it works on Supabase (`postgres`) and in the harness (`ubuntu`) alike;
+measured true for the owner, false for `authenticated` and `anon`. It **raises** rather than ignoring
+the flag, so a caller cannot believe they bypassed the check and hit a confusing adjacency error
+later.
+
+#### ⭐ And it caught a real regression I introduced — by running the WHOLE suite
+
+Assembling the trigger, I extracted its body programmatically from **0010** (rule 12: never
+hand-retype a function to change part of it) — and 0010 is not where it lives. **0014's
+`create or replace` is the live definition, because D86 added the TEMPLATE half of the rule there.**
+Extracting 0010's body silently reverted D86: a node could be inserted under a parent in a *different
+structure* whose position arithmetic happened to work.
+
+**Nothing in my own 33-case probe would have found it.** The whole suite did: `T7` in
+`90_hierarchy_template_test.sql` went from PASS to `caught=f`, and its own comment says it exists for
+exactly this and is not a duplicate of the level cases. **This is decision-record-drift rule 3, hit
+for the second time in this project** — the first was `create_node`, also re-created by a later
+migration than the one that introduced it. The rule is written down, I applied the technique it
+prescribes, and still took the body from the wrong file. **`grep -n "function <name>"` across ALL
+migrations and take the LAST hit is not advice, it is a step.** 0017 now carries that warning inline.
+
+#### N14 rewritten, N14b added
+
+`N14` asserted that a plain `authenticated` caller could set the hatch and skip the level check —
+true, deliberately removed, so the case now asserts the **refusal**. **N14b rescues the coverage N14
+was legitimately providing** (the hatch works, and the path cascade still runs underneath it), moved
+to the caller it is now reserved for: the owner. Same shape as L1/L1b when D92 landed.
+
+#### Where it stands
+
+- **`verify-db.sh` exit 0**, all 17 migrations apply cleanly from scratch, **108 named SQL cases**
+  (70_ now 57, 90_ 31, 80_ 20).
+- **33 of 33** on a purpose-built probe of the new functions: the reorder Pratik actually tried, path
+  immutability, clamping both ends, all seven delegated guards, cross-org refusal, non-admin refusal,
+  the stranded-work refusal and its repair, the up-front rung check, a three-generation promote, the
+  hatch lock in all four directions, and all eight grant/revoke assertions.
+- Two of those 33 failed on the first run and **both were my harness, not the code** — a malformed
+  subquery and a grep that matched the wrong output line. Instrument failures #27 and #28.
+
+#### ⚠️ NOT DONE, and it is the trap this project has been burned by
+
+**Those 33 checks live in a scratch script, not in `supabase/tests/`.** That is exactly rule 11's
+failure — a suite that ran once in a scratch container and vanished, leaving the most thoroughly
+validated code as the only code with no committed guard. **The next step is to write them into the
+committed suite and then mutation-test them**, not to move on. Nothing about 0017 should be called
+verified until that is done.
+
+---
+
+### 19.42 Migration 0017 — finished. 33 committed cases, 16 mutations (Aug 26, 2026)
+
+§19.41 ended with the checks living in a scratch script. They now live in
+`supabase/tests/75_node_mobility_test.sql`, 617 lines, **33 cases (M1–M33)**, picked up automatically
+by `verify-db.sh`'s `[1-9]*.sql` glob. **`verify-db.sh` exit 0; 141 named SQL cases** (70_ 57, 75_ 33,
+80_ 20, 90_ 31).
+
+#### The mutation table — 16 run, 13 caught, 3 executed and proved inert
+
+| | mutation | verdict | case |
+| --- | --- | --- | --- |
+| X2 | siblings never renumbered | caught | M1 |
+| X3 | the moved node is not spliced back in | caught | M3 |
+| X4 | `move_node` delegation dropped | caught | M8 |
+| X6 | the up-front rung check dropped | caught | **M17** |
+| X7 | the scheduled-work check dropped | caught | **M11** |
+| X8 | descendants updated deepest-first | caught | **M14** |
+| X9 | subtree captured after the re-parent | caught | M11 |
+| X10 | promote moves under the parent, not the grandparent | caught | M12 |
+| X11 | demote's same-level check dropped | caught | M18 |
+| X12 | demote's cycle check dropped | caught | M19 |
+| X13 | the hatch lock removed | caught | M22 |
+| X14 | the hatch lock inverted | caught | M24 |
+| X16 | both revokes forgotten for one function | caught | M29 |
+
+#### ⭐ X8 found a fixture that could not deliver what its case name promised
+
+**M14 was named "a THREE-generation promote" and could not test the thing it existed for.** It
+promoted Line 1, whose descendants are all Work Cells — **one depth band**. The loop that orders
+descendants shallowest-first therefore had nothing to order, and reversing it to deepest-first was
+**caught by nothing**. The entire justification for dropping the escape hatch is that ordering, and
+it was untested.
+
+Fixed by promoting **Assembly** instead: two bands of descendants (Lines, then Cells), which is the
+minimum that can tell top-down from bottom-up. X8 is now caught by M14 alone. **And the case asserts
+its own fixture depth** (`v_bands >= 2`) so it can never silently regress to the shallow version —
+rule 3b's remedy, not just its diagnosis.
+
+This is the third time the mutation run has found a hole in the case list rather than in the code
+(P1-5g's M2, P1-5j's U3, now this), and the first time the hole was in the case protecting the
+design's central claim.
+
+#### Three executed and proved INERT — kept, with reasons
+
+- **X1, the index clamp.** `least(greatest(...))` is behaviourally redundant: Postgres array slicing
+  already clamps out-of-range bounds, so `v_ids[1:99]` and `v_ids[1:3]` are the same value, and
+  `v_ids[1:-5]` is empty. **Kept as explicit intent** — the code should not depend on a reader
+  knowing PG's slice semantics — but no case can distinguish it, and none should be invented to.
+- **X5, `place_node`'s own admin check.** Removing it changes nothing because
+  `perform move_node(...)` runs its own `app_is_admin()` immediately after and raises the same
+  `not_permitted`. **Kept as a fail-fast guard**; genuinely redundant given the delegation.
+- **X15, the `REVOKE … FROM PUBLIC` line.** Inert on its own because the `REVOKE ALL … FROM anon` in
+  the DO block covers the same role. **The pair is belt-and-braces for each other, and X16 proves the
+  pair is not vacuous** — removing both is caught by M29. Reporting only X15 would have read as a
+  coverage hole; running X16 is what shows it is not.
+
+#### Instrument failures this session
+
+Two in the first probe run (a malformed subquery; a grep matching the wrong output line) and both
+were the harness, not the code — **#27 and #28**. The mutation runner counts cases that REPORTED and
+treats any drop from 33 as CRASHED, per #24.
+
+---
+
+### 19.43 Migration 0018 — the cross-company escalation, closed (Aug 26, 2026)
+
+D98's security half, alone, in four function bodies. **No table changes, no policy changes, no RPC
+signature changes.** It lands before anything switches multi-role on, and it is testable on its own.
+
+#### What was wrong, in one line
+
+Nearly every write policy is `app_is_admin() and org_id = app_current_org()`. The two terms ask
+different questions of different rows — *"are you an admin ANYWHERE"* and *"which org am I in"*,
+the latter answered by `LIMIT 1` with no `ORDER BY` — **so they can be satisfied by two different
+profiles.** Measured: a user made viewer in Northwind and admin in Contoso created a node in
+Northwind.
+
+#### The fix, in two moves
+
+1. **One acting profile, chosen deterministically.** `app_current_profile_id()` gains
+   `ORDER BY org_id, id`. Which org a multi-profile user acts in is still a *default* rather than a
+   choice — letting them choose is the next migration — but it is now stable and reproducible
+   instead of tracking physical heap order, which is D87's exact shape in the function every tenant
+   check depends on.
+2. **Everything else DERIVES from that one profile.** `app_current_org()` is now
+   `SELECT org_id FROM user_profiles WHERE id = app_current_profile_id()`, and `app_is_admin()` /
+   `app_can_write()` ask about that profile rather than about the user. Two functions each running
+   their own `LIMIT 1` could disagree about who you are *within a single statement*; deriving makes
+   that impossible by construction rather than by both happening to sort the same way.
+
+#### The trap that was flagged loudly and did not fire
+
+`app_is_admin()` is the term in `nodes_select` that answers **without reading `nodes`** — the
+property that lets `INSERT … RETURNING` see its own row, and whose loss killed `create_node` for
+every caller in D85. The new body still never touches `nodes`; it reads `user_profiles`. **Case A8
+exists to pin that**, and any future scoping of admin-ness that introduces a `nodes` lookup here
+re-breaks D85.
+
+#### Verification
+
+`supabase/tests/45_acting_scope_test.sql`, **11 cases (A1–A11)**. **`verify-db.sh` exit 0, 18
+migrations, 152 named SQL cases.** Five mutations, all caught.
+
+**The fixture is the test.** Every multi-profile case has to build its own second profile, because
+nothing in `seed.sql` creates one — which is precisely why the hole survived. And each of those
+cases **asserts its own fixture first** (*they really are an admin somewhere*), or it would pass for
+the wrong reason.
+
+**A6–A10 are the regression half, and they are not padding.** A security fix that quietly breaks the
+ordinary single-profile case is not a fix. **A10 is the one that matters most**: admin-here +
+viewer-elsewhere must *still be able to write here*. A change that made every multi-profile user
+powerless everywhere would pass A1 and be just as wrong.
+
+#### ⭐ A mutation found a missing case, for the third time this session
+
+Reverting **`app_can_write()`** to its unscoped form was **caught by nothing**. A2 covered
+`app_is_admin` for the multi-profile case; A7 covered `app_can_write` for the single-profile case;
+between them they left the one combination that matters uncovered. `app_can_write` gates every
+subtree edit through `app_can_edit_node`, so *"can write anywhere"* is the same class of escalation
+as *"admin anywhere"* — it just has one caller instead of eighty-two. **A11 is that case**, and Y4
+is now caught by it alone.
+
+The pattern across P1-5g's M2, P1-5j's U3, 0017's X8 and now this: **the mutation run keeps finding
+holes in the case list, not bugs in the code.** Four for four. That is the argument for running it
+every time, including — especially — when the code is believed correct.
+
+#### Instrument failure #29
+
+A4 used `min(uuid)`, which does not exist in Postgres (42883), and reported as a case failure rather
+than as the harness bug it was. Same shape as #25: the message named a missing function, not a wrong
+value.
+
+#### What this does NOT do
+
+It does not let a multi-site person choose which site they are acting for — they get the lowest
+org_id. **That is the next migration and it is a feature, not a fix.** Until it lands, a genuine
+system admin spanning two orgs can only act in one of them. Nobody is in that position today.
+
+---
+
+## §19.44 — Migration 0019: the (role, scope) permission model. Substrate only.
+
+**Status: built, verified, mutated, delivered. Not yet run on Pratik's machine.**
+
+### What Pratik asked for
+
+> *"there should be a system admin (who has all the powers to affect anything at any site), a site
+> admin (allowed to make changes only to a particular site they belong), user/supervisor (allowed to
+> only do assignments, does not have access to admin page)… We don't want people lurking around
+> where they have no knowledge or business."*
+>
+> *"a user can have multiple roles, for example, a supervisor can be an admin as well, it is a case
+> by case basis, not every supervisor will be an admin."*
+
+### The one idea
+
+**A role stops being a property of a person and becomes a property of a (person, place) pair.**
+`profile_grants` has carried `(profile_id, node_id)` since migration 0006 — it *already was* that
+pair. The only thing it said about the pair was a boolean, `can_edit`. 0019 replaces that boolean
+with **the role held there**.
+
+| Who | How it is expressed |
+|---|---|
+| System admin | `user_profiles.role = 'admin'` — org-wide, unchanged |
+| Site admin | a `profile_grants` row with `role = 'admin'` on a Site node |
+| Supervisor | a `profile_grants` row with `role = 'supervisor'` |
+| Viewer | a `profile_grants` row with `role = 'viewer'` |
+| **Multiple roles** | **multiple rows.** Supervisor on Line 3 *and* admin on Plant 2 is two grants. That is the whole mechanism. |
+
+**Why not a new table.** The primary key `(profile_id, node_id)` permits exactly one role per person
+per node, and that is correct rather than a limitation: admin ⊇ supervisor ⊇ viewer at a single
+node, so a second row on the *same* node could only ever be redundant with or dominated by the
+first. Multiple roles are multiple **places**, which the existing key models exactly.
+
+**Grants add power; they never subtract it.** Coverage is a union over every grant whose node is an
+ancestor-or-self of the row, and the strongest wins. Admin on Plant 1 plus viewer on Line 3 makes
+you an **admin** on Line 3. Anything else would make *"give this person read access to one line"*
+silently demote a plant admin — a booby trap, not a feature. Case **S7** pins it.
+
+### Scope, stated so 0020 is unambiguous
+
+**In:** the column, the backfill, the predicates, `app_can_edit_node`, and the four `nodes` policies
+— everything that decides *who is what, where*.
+
+**Out:** the call-site sweep. Every node RPC still opens with `if not app_is_admin() then
+api_raise('not_permitted')`, and every non-node policy still reads `app_is_admin() and org match`.
+**A site admin therefore gains no new ability from this migration**: the substrate admits them, the
+doors are still bolted. Case **S17** pins that on purpose, so 0020 has to rewrite it deliberately
+rather than find it broken.
+
+**Also out, and it matters:** the policies on `profile_grants` *itself* are untouched, so granting
+stays org-wide-admin-only. Not an oversight — the safe order. If 0020 lets a site admin write
+`profile_grants` without a subtree predicate, a site admin grants themselves `'admin'` on the root
+and the whole model is decorative. **That is item 1 in 0020 and it gets its own escalation test, the
+way D98 did.**
+
+### The new predicates
+
+| Function | Answers | Note |
+|---|---|---|
+| `app_grant_paths_for(text[])` | paths of my grants with these roles | the primitive; every other predicate is a phrasing of it |
+| `app_grant_paths(boolean)` | 0008's signature, kept | `require_edit` → `admin, supervisor`. Unchanged callers keep working |
+| `app_is_admin_on_path(ltree)` | admin over this **path**? | **takes a path, never reads `nodes`** — safe in an `INSERT … WITH CHECK` |
+| `app_is_admin_for(uuid)` | admin over this **node**? | tenant-scoped internally, 0012's shape. **Not** safe in a WITH CHECK |
+| `app_is_admin_anywhere()` | should I see the admin section at all? | **visibility only.** Never authorises a write — case S14 |
+
+### D85 is dissolved, not dodged
+
+0012 made `app_can_read_node` read `nodes`, and `create_node`'s `INSERT … RETURNING` returned zero
+rows for everyone. 0013 rescued it by putting `app_is_admin()` **first** in `nodes_select` — an
+admin-only term answerable from `user_profiles` alone, so admins short-circuit past the self-read.
+
+**That fix had an expiry date, and this migration is it.** A site admin is not `app_is_admin()`. The
+moment 0020 lets one create a node they fall through to the second term, hit the self-read, and get
+D85's silent empty RETURNING — the exact failure, on the exact path, for the exact reason.
+
+The real fix is to stop asking the table. `path` is a **column of the row under test**, populated by
+a BEFORE trigger, so the policy reads it directly:
+
+```sql
+create policy nodes_select on nodes for select
+  using (
+    org_id = app_current_org()
+    and (app_is_admin()
+         or exists (select 1 from app_grant_paths(false) gp where nodes.path <@ gp))
+  );
+```
+
+Measured before the migration was written: a supervisor ran `INSERT … RETURNING` under a policy of
+this shape and got `PathTest | plant_1.assembly.line_1.pathtest` back. Case **S10** is the standing
+version of that measurement, and mutation X5 (revert to the id-based self-read) is caught by it
+alone.
+
+### ⭐ A new finding: `level_mismatch` is standing in for `not_permitted`
+
+Found while mutating this migration, not by reading it.
+
+`nodes_check_level_adjacency()` is **SECURITY INVOKER** and resolves both the parent
+(`from nodes pn where pn.id = new.parent_id`) and the level
+(`from hierarchy_levels where id = new.level_id`) **as the caller**. For a site admin, anything
+outside their grant is invisible, the lookup returns no row, and the trigger reports:
+
+> `level_mismatch: node … level position is not exactly one below its parent's`
+
+**Measured:** a system admin moving Line 1 under Machining succeeds (`plant_1.machining.line_1`); a
+site admin of Assembly attempting the identical move gets `level_mismatch`. It is not a level
+problem at all — it is an invisibility problem wearing a level problem's error code, from a closed
+set of twelve the client switches on.
+
+No move that *should* be allowed is refused by this (a destination inside the grant is by definition
+visible), so it is a wrong-code defect, not a lockout. **It goes to 0020**, where `move_node` gains
+an `app_is_admin_for(new parent)` pre-check that fires *before* the trigger.
+
+**It also has a testing consequence, which is how it was found.** It **masks policy defects**: S11's
+first draft moved a node to an invisible destination, the trigger refused it before the policy was
+consulted, and a deliberately broken `WITH CHECK` (mutation X6) was caught by nothing. S11 now
+straddles between two **visible** nodes — an admin grant on Line 1 and a *viewer* grant on Line 2 —
+so the policy is the only thing that can say no.
+
+### Verification
+
+`scripts/verify-db.sh`: **171 named cases across 8 files, exit 0, zero `NOTICE: FAIL`**, plus the
+new step 5b's 5 upgrade cases. `46_scoped_roles_test.sql` is 19 cases, S1–S19.
+
+**The fixture is the test, and it is sharper here than in 45.** Every site admin in the file is given
+the org-wide role **`'viewer'`**. That is not colour: if the fixture made them an org-wide `'admin'`,
+`app_is_admin()` would be true and would short-circuit every predicate under test — all nineteen
+cases would pass against a migration that did nothing at all.
+
+#### Step 5b: the first migration whose *upgrade path* is tested
+
+Every numbered test runs against a database where all migrations have already been applied to an
+empty schema. **A migration whose job is to transform existing data therefore runs against zero rows
+and is, in effect, untested.** 0019's backfill could have read `can_edit = true` as `'admin'` —
+handing every existing subtree grantee the power to restructure the hierarchy, on the morning of the
+upgrade, with a fully green suite. Mutation **X8** does exactly that, and before step 5b existed it
+was caught by nothing.
+
+`verify-db.sh` now builds a **second database**, stops at 0018, plants a fixture in the old shape
+(one row per branch of the backfill's `CASE`), applies 0019 to it, and asserts the translation row
+by row — `upgrade_0019_backfill.sql`, cases U0–U4. **This is the pattern for any future
+data-transforming migration.**
+
+#### Mutation table — 16 deliberate breakages, 15 caught
+
+| # | Mutation | Verdict | Caught by |
+|---|---|---|---|
+| X1 | `app_grant_paths_for` ignores `p_roles` | caught | S5, S11, S15 |
+| X2 | `app_is_admin_on_path` containment reversed | caught | S3, S7, S8, S9, S10, S11, S12 |
+| X3 | `app_is_admin_for` drops its org predicate | caught | S6 |
+| X4 | `app_is_admin_anywhere` authorises the write | caught | S13 |
+| X5 | `nodes_select` reverts to the id-based self-read | caught | S10 |
+| X6 | `nodes_update` WITH CHECK relaxed | caught | S11 |
+| X7 | `nodes_update` USING relaxed | caught | S11, S15 |
+| X8 | backfill over-promotes `can_edit = true` to `'admin'` | caught | U2, U4 |
+| X9 | `app_grant_paths(true)` excludes admin grants | caught | S19 |
+| X10 | `app_can_edit_node` reverts to its 0012 form | caught | S8 |
+| X11 | role check constraint dropped | caught | S2 |
+| X12 | `nodes_delete` stays system-admin-only | caught | S12 |
+| X13 | supervisor grants treated as admin grants | caught | S5, S15 |
+| X14 | `nodes_insert` drops its org term | caught | S18 |
+| X15 | GRANT to `authenticated` removed, revoke kept | caught | S1 |
+| X16 | REVOKE FROM PUBLIC removed, grant kept | **not caught** | — (reasoned below) |
+
+**Three cases exist only because a mutation escaped.** S11's fixture was rebuilt (X6), S18 was
+written (X14), S19 was written (X9). **Five for five** across P1-5g's M2, P1-5j's U3, 0017's X8,
+0018's Y4 and now 0019 — the mutation run keeps finding holes in the *case list*, not bugs in the
+code.
+
+**X15 is worth its own line.** The first draft of the grant block was four bare
+`grant execute … to authenticated` statements — **and deleting one changed nothing**, because
+PostgreSQL grants EXECUTE on every new function to PUBLIC by default and `authenticated` is a member
+of PUBLIC. The grants would have shipped as decoration. The **revoke** is the load-bearing half,
+which is exactly the idiom 0009 and 0010 already use for every RPC; 0019 now matches it, and S1
+catches the grant going missing.
+
+**X16 is an accepted no-op, with a reason.** Removing `revoke … from public` leaves the function
+reachable by PUBLIC — but the guarded block immediately below explicitly revokes it from `anon`, and
+`authenticated` was going to get it anyway. It is defence in depth against a role that does not
+exist in this project yet (a bare login role, a future `service_role`). Adding a test for a role
+nobody has would be theatre; the line stays, the escape is recorded.
+
+**S18 is structural, not behavioural, and that is a deliberate concession.** Two behavioural routes
+at a cross-tenant insert were measured and *both* are refused before the policy is consulted, by the
+adjacency trigger's invisibility (under a parent: the other org's node; as a root: the other org's
+level). No query a client can issue distinguishes the org guard being present from it being absent.
+That does not make it redundant — it is shadowed by an accident of the trigger's security mode, and
+**0020 is likely to make that trigger SECURITY DEFINER precisely to fix the `level_mismatch`
+confusion above.** The moment it does, the guard is the only thing between two tenants. Asserting
+the policy *text* is the weakest thing that still catches someone deleting it.
+
+### What has to happen on Pratik's machine
+
+`npm run db:reset && npm run db:types`. **0019 changes `database.types.ts`** — four new functions and
+`profile_grants.can_edit` → `profile_grants.role`. Nothing in `src/` reads `can_edit` (checked), so
+no client code moves; the app suite should stay at **502 tests in 17 files**.
+
+### 0020, in order
+
+1. **`profile_grants` policies first.** A site admin must be able to grant *within their subtree*
+   and must not be able to grant themselves admin on the root. Own escalation test, D98 shape.
+2. **The RPC sweep.** 21 node-scoped call sites → `app_is_admin_for(...)`; 15 structure-scoped and
+   38 org-wide keep `app_is_admin()`; 8 ambiguous (`node_skill_requirements`,
+   `node_shift_templates`) need a decision. S17 gets rewritten here, on purpose.
+3. **`nodes_check_level_adjacency` → SECURITY DEFINER**, plus an `app_is_admin_for(new parent)`
+   pre-check in `move_node`, so a permission refusal says `not_permitted` and not `level_mismatch`.
+   Note that this un-shadows the tenant guard S18 protects.
+4. **The admin-page gate**, server and client: `app_is_admin_anywhere()` is the server half of D97's
+   `adminAccess()`, which currently fails closed on anything that is not org-wide `'admin'` — so a
+   site admin cannot see the admin page yet.
+
+---
+
+## §19.45 — Migration 0020: "each site is its own instance." IN PROGRESS.
+
+**Status: SUPERSEDED BY §19.46 — 0020 IS FINISHED.** This section records §1–§7 and the plan for the rest; §19.46 records what §8–§12 actually became, including the two sections this plan did not have (§8.0, §8.5) and the one it asked for and did not get (§11). **Read §19.46 before acting on anything below.**
+
+### The frame, in Pratik's words
+
+> *"the system-admin or company-admin has access to all sites across the company and they basically can change whatever they want at any site, but the site-admin who are locked to the site can do whatever changes are needed for that particular site… It is like **each site could have their own instance for the app** so they're part of the larger system but only get to access their own site."*
+
+That frame gives one test, and it decides every line: **can a site admin do this without touching another site?** If yes, it is theirs. The split is about **reach**, not about how much power to hand out.
+
+### Two things he corrected
+
+1. **Level vocabulary is a site admin's job**, not a company admin's. My §19.44 assumption was wrong.
+2. **"Site admins can't create people" was the wrong conclusion** from a right worry. There are three separate things — a login (auth; no invite flow exists for anyone yet), a company membership row (which carries the company-admin flag), and access to a place. Only the flag is an escalation. The rule is *"a site admin cannot write the company-admin field"*, not *"a site admin cannot add people."*
+
+### Two decisions asked and answered
+
+- **The shared lists** (operators, products, skills, shift patterns) **get an owning site.** A site admin creates and edits their site's entries and cannot touch another site's; entries with no owning site stay company-admin. `operators.home_node_id` already exists and is the natural hook; the other three need a column each. **Its own migration, after this one.**
+- **A new site gets its OWN COPY of a structure, chosen from existing shapes.** Not a shared reference.
+
+### ⚠️ What blocked the level vocabulary, and it was not a permission problem
+
+**A site's level wording does not live on the site.** It lives in a `hierarchy_templates` row, and **nothing had ever tied a template to a site** — `hierarchy_templates` has no node column and `nodes` has no template column (D86 chose that: a node's template is derived through its level). Two roots could quietly share one template, and a site admin renaming "Line" to "Cell Group" would have reshaped the other plant.
+
+Measured before writing anything: every template in the database is used by exactly one root. Nobody is sharing. But *"happens to be 1:1"* is not an invariant, and the model needs one.
+
+**§1–§3 make it one**: `hierarchy_templates.site_node_id` → the ROOT node, a partial unique index (one site, one structure), a composite `(org_id, site_node_id)` FK, and a trigger refusing any owner that is not a root. **Cost accepted knowingly**: a structure shared across several sites stops being expressible. "Roll this shape out to five plants" becomes a company-admin action that COPIES it into each — safer anyway, because they can then diverge.
+
+### ⭐ The backfill CANNOT help a `db:reset`, and the first version of this shipped broken
+
+`db:reset` (and `verify-db.sh`) apply every migration to an empty schema and only then run the seed. So at backfill time **there are no nodes**, nothing is claimed, and the statement is a no-op. **The first run left every template unowned — no site admin could have edited anything — and the entire numbered suite was green while it did.**
+
+Ownership on a fresh database is therefore established by the **seed**, which now claims each template for its single root and then **raises if any template is left unowned**. The migration's backfill exists for exactly one path — a real upgrade of a populated database — and `upgrade_0020_site_ownership.sql` (V0–V4) is the only thing that exercises it.
+
+This generalises: **any migration that transforms existing data is untested by a suite built from empty.** `verify-db.sh` now carries a table of upgrade checks (`UPGRADE_CHECKS`), each building its own database, applying migrations **stopping at** the one under test, planting a fixture in the old shape, applying that migration, and asserting. Add a row and a file that takes the migration path as `:mig`.
+
+### ⭐ Three existing cases said the guard was in the wrong place, and they were right
+
+Putting `app_is_admin_for_template` at the TOP of `save_hierarchy_levels`, `rename_hierarchy_template` and `delete_hierarchy_template` broke **T9, T10a and T18**: a mistyped or cross-tenant template id started answering `not_permitted` where it had answered `invalid_argument / not found`. The existence lookup is org-scoped, so cross-tenant callers still learn nothing either way — moving permission ahead of existence only made every typo in the caller's *own* org less informative. **The guard now sits immediately after the existence check**, and those three cases pin the ordering.
+
+### ⭐ The harness nearly reported a pass over a failure for the fourth time
+
+The generalised upgrade-check loop was first written as `echo "$UPGRADE_CHECKS" | while … done`. **A pipe makes the loop a subshell**, so every `note_fail` inside it would have set `FAILED=1` in a process that then exits — printing the failure and still exiting 0. Rewritten as a here-string. **Then deliberately broken (expected count 5 → 9) to confirm the script actually goes red: it does, exit 1.** See [[verify-db-harness-drift]].
+
+### `scripts/mutate-migration.py`
+
+The mutation discipline is now a committed tool rather than a scratch script rebuilt each session. It takes a migration and a JSON list of `[name, old, new]`, and for each one **builds a complete database from scratch** (harness + every migration with the target swapped + seed) and runs **every numbered test plus every upgrade check**. Rebuilding per mutation is the only honest way once a migration contains `ALTER TABLE` or `DROP POLICY`.
+
+Its docstring states the rule this project learned the hard way: **`NOT CAUGHT` means either a missing case or an inert mutation, and which one it is must be WRITTEN DOWN.** A verdict with no explanation is a hole.
+
+### Mutation table so far — 10 run, 3 caught, and that is the POINT
+
+`supabase/tests/mutations/0020.json`. Run: `python3 scripts/mutate-migration.py supabase/migrations/20260826000020_site_ownership.sql supabase/tests/mutations/0020.json`
+
+| # | Mutation | Verdict | Caught by |
+|---|---|---|---|
+| Z1 | backfill claims a SHARED template for one of its roots | caught | V2 |
+| Z2 | `site_node_id` uniqueness dropped (a site owns two structures) | **not caught** | — |
+| Z3 | a non-root may own a structure | caught | V4 |
+| Z4 | `app_is_admin_for_template` drops its org predicate | **not caught** | — |
+| Z5 | an UNOWNED structure becomes editable by any site admin | **not caught** | — |
+| Z6 | `save_hierarchy_levels` reverts to company-admin-only | **not caught** | — |
+| Z7 | `hierarchy_levels_update` loses its WITH CHECK scope | **not caught** | — |
+| Z8 | `hierarchy_templates_insert` lets a site admin create unowned structures | **not caught** | — |
+| Z9 | REVOKE FROM PUBLIC removed (grant kept) | **not caught** | — |
+| Z10 | GRANT to authenticated removed (revoke kept) | caught | 41 cases died |
+
+**Seven escapes, and not one of them is a surprise: `47_site_ownership_test.sql` DOES NOT EXIST YET.** This table is not a report card, it is the **specification for that file** — every "not caught" row names a case that has to be written. Z9/Z10 together prove the revoke/grant pair is load-bearing here in a way it was not in 0019 (the predicate is called from POLICIES, evaluated as the caller).
+
+### What is left in 0020
+
+1. **§8 — the node RPCs.** `create_node` / `rename_node` / `move_node` / `delete_node` / `place_node` / `promote_node` / `demote_node` still open with `if not app_is_admin()`. Each becomes node-scoped: admin for the node, and for `move`/`demote` for the NEW PARENT too; a parentless (root) operation stays company-admin. **Extract every body with `pg_get_functiondef` from the live database, never from the migration that first wrote it** — doc-drift rule 3 has bitten this project twice.
+2. **§9 — `profile_grants` policies.** A site admin may grant within their admin scope and must NOT be able to grant themselves admin on the root. Own escalation test, D98 shape. `user_profiles` stays company-admin — that is where the company-admin flag lives.
+3. **§10 — `create_node`'s root branch COPIES the chosen structure** into a new one owned by the new site (his answer above). Changes what `p_template_id` means: "the shape to copy from", not "the shape to use".
+4. **§11 — `nodes_check_level_adjacency` → SECURITY DEFINER**, plus an `app_is_admin_for(new parent)` pre-check in `move_node`, so a permission refusal says `not_permitted` and not `level_mismatch` (§19.44). **Note this un-shadows the tenant guard that case S18 protects structurally** — after it, S18 can and should become behavioural.
+5. **§12 — node-attachment policies**: `node_skill_requirements`, `node_shift_templates` → `app_is_admin_for(node_id)`. Safe in a WITH CHECK because `node_id` names an EXISTING row in a different table.
+6. **`47_site_ownership_test.sql`**, driven by the escape list above, then a full mutation re-run with every verdict explained.
+
+---
+
+## §19.46 — Migration 0020 FINISHED: §8–§12, the two sections the plan did not have, and the one it asked for and did not get
+
+**Status: built, verified, mutated, delivered. NOT yet run on Pratik's machine.**
+`scripts/verify-db.sh`: **221 named cases across 9 files, exit 0, zero `NOTICE: FAIL`** (171 → 211 numbered, plus 10 upgrade cases). Mutation table: **35 run, 34 caught, 1 escape explained.**
+
+### What §8–§12 do, in one table
+
+`app_is_admin_for(node)` everywhere a node is named; `app_is_admin()` kept for the three operations that are not *inside* a site because they are operations *on* one.
+
+| RPC | guard |
+|---|---|
+| `create_node`, no parent | `app_is_admin()` — it creates a SITE |
+| `create_node`, with a parent | `app_is_admin_for(p_parent_id)` |
+| `rename_node` | `app_is_admin_for(p_node_id)` — including a root, see §8.5 |
+| `delete_node`, a root | `app_is_admin()` — and this covers `deactivate` too, which takes the subtree |
+| `delete_node`, otherwise | `app_is_admin_for(p_node_id)` |
+| `move_node`, source is a root | `app_is_admin()` |
+| `move_node`, destination NULL | `app_is_admin()` — a parentless node IS a site |
+| `move_node`, otherwise | `app_is_admin_for(source)` **and** `app_is_admin_for(destination)` |
+| `place_node` | **no guard of its own** — `move_node` runs first (gotcha 17) |
+| `promote_node` / `demote_node` | **no guard of their own** — `app_relevel_subtree` has the only copy |
+| `app_relevel_subtree` | both ends; `app_is_admin()` when the destination is NULL |
+
+**Both ends of every move, and it is not belt-and-braces.** A grant covers a subtree *downward*, so being admin for a node says nothing about being admin for that node's grandparent, which is *above* the grant. A source-only guard lets a department admin promote a line clean out of their department. Mutation **Z20** deletes the destination half alone and case **W25** is the only thing that catches it.
+
+**Three guards were deliberately NOT written.** `place_node`, `promote_node` and `demote_node` carry none: a second copy of a check that always runs first cannot be mutation-tested — no case can distinguish deleting it from leaving it — and the honest response to an unfalsifiable guard is to remove it, not to keep it for comfort. **W22 and W26 exist to make those deletions safe rather than merely tidy**, by proving the remaining guard is reachable from every entry point (M30 in `75_` asserts `authenticated` can call `app_relevel_subtree` directly, so it is a public door whatever anyone intended).
+
+### §8.0 — `app_node_exists_in_org`, and why "not found" had become a lie
+
+Every node RPC opens with an org-scoped read of `nodes` **as the caller**. For a company admin an empty result really did mean "no such node". For a site admin it does not: everything outside their grant is invisible, so a real node in their own company read back as `invalid_argument / not found`. Same class of defect as §19.44's `level_mismatch` — a code from the closed twelve describing the wrong thing because a lookup could not see its subject.
+
+One SECURITY DEFINER predicate, scoped to `app_current_org()`, separates the two. **The tenant boundary keeps its silence**: another company's node is still "not found", which is what T9/T10a/T18 protect. Case **W14** asserts all three arms, and the third arm is the one that matters.
+
+#### ⭐ And the mutation run deleted the *second* helper, because its premise was false
+
+`app_node_parent_in_org` was written so `promote_node` could read a node's **grandparent** with RLS out of the way, reasoning that a site admin whose grant sits ON the parent cannot see the grandparent, so an RLS read returns NULL — indistinguishable from "the parent is a root", silently turning a promote into a site create.
+
+**Wrong, and only running it showed that.** The grandparent is not a row being read; it is the `parent_id` **column** of the parent's row, and the parent is necessarily visible to anyone who could name its child. *RLS filters rows; it does not blank out columns.* Measured side by side, both forms refuse identically (`not_permitted`). The helper is gone. This is [[decision-record-drift]] rule 6 applied to a rationale written twenty minutes earlier, and gotcha 17 applied to its own author.
+
+### ⭐ §8.5 — a site admin could not rename their own site, and the policy refusing it was not the one anybody would look at
+
+Not in the plan. Found by running §8, and it is the first thing a site admin would try.
+
+```
+site admin renames Line 1                        -> OK
+site admin renames PLANT 1 ITSELF                -> "new row violates RLS policy for nodes"
+department admin renames their own department    -> same refusal
+```
+
+**Why**: a grant is stored as a node id but *used* as a path (`app_grant_paths_for` joins to `nodes` and reads `n.path`). Renaming the grant node moves the whole scope — the new path `plant_one` is not `<@` the grant path `plant_1`, which the same statement has not yet published. Scope and row move together and the policy sees only one of them. D85's family.
+
+#### ⭐⭐ The measurement that mattered, and it took four bisection runs
+
+| what was opened | result |
+|---|---|
+| real UPDATE policy, cascade trigger disabled | FAILED |
+| `nodes_update` opened to `with check (true)` | **FAILED** |
+| `with check (true)` **+ open `nodes_select`** | OK |
+| real UPDATE policy + open `nodes_select` | OK |
+
+**AN UPDATE'S NEW ROW IS CHECKED AGAINST THE *SELECT* POLICY AS WELL AS THE UPDATE POLICY'S WITH CHECK.** A row you may edit but could not then see is refused — reported with `nodes_update`'s error message, naming a policy that is not the one saying no. **A fix applied to the obvious policy alone looks correct and changes nothing.** New gotcha 20.
+
+#### The fix, and the hole the obvious version would have opened
+
+- `app_is_admin_on_grant_node(uuid)` — answered from the grant's `node_id`, never from a path, so it survives a rename.
+- Added to **both** `nodes_select` and `nodes_update`'s WITH CHECK, as `parent_id is null and app_is_admin_on_grant_node(id)`.
+- `nodes_cascade_path` becomes SECURITY DEFINER: renaming a site rewrites every descendant's path, and that rewrite ran as the caller with every new path outside a grant still reading the old one. **The root row would pass and the cascade would fail.** Safe here in a way it was *not* safe for the adjacency trigger (§11 below): it decides nothing, maintains a derived column for rows whose triggering update was already authorised, carries its own tenant scope, and reads no session state — so there is no `current_user` for the security context to change the meaning of. `set search_path` added with it.
+
+**`parent_id is null` is load-bearing and is not a heuristic.** A plain "or I hold a grant on this node" term also lets a mid-tree admin **re-parent** their grant node — Line 1 out of Plant 1 and into Plant 2 — by a direct table update. Measured: for that pair the level rungs line up and nothing else refuses. Restricting the term to parentless rows means it only ever applies to a node not being put anywhere, and *detaching* to reach it is refused independently by the adjacency trigger. **Case W23 has both arms**, because "it is safe because something else refuses first" is exactly the shadowing gotcha 18 keeps catching this project with, and mutation **Z24** was NOT CAUGHT until the re-parent arm existed.
+
+**📌 Known limitation, recorded rather than left as folklore: a mid-tree admin still cannot rename the node their own grant sits on.** A site admin is unaffected (their grant is on the root, which W16 proves works). This bites a *department* admin renaming their department. Closing it means grants stopping being resolved through a mutable path — a schema change and its own migration; widening the term here reopens the re-parent hole. **Case W24 asserts the unwanted refusal on purpose**, so whoever fixes it has to delete that case deliberately, the way 0019's S17 had to be deleted by this migration.
+
+### §9 — who may hand out access
+
+`profile_grants` becomes node-scoped on all four commands; **`user_profiles` does not move.** Pratik's correction is the whole section: *"site admins can't create people"* was the wrong conclusion from a right worry — a login, a **company membership row** (which carries the company-admin flag) and **access to a place** are three things, and only the flag is an escalation.
+
+`app_is_admin_for(node_id)` is safe in a WITH CHECK here because `node_id` names a row in a **different** table, committed before the statement began. D85 only bites a policy asking about its own row.
+
+- **W28 is the escalation case**, both directions: upward (a department admin granting themselves admin on the plant) and sideways (a site admin granting themselves admin on another site). Direct table INSERTs, because that is the shape of the attack — there is no RPC to blame, only the policy.
+- **W29 is the positive half**, and without it the section is one long refusal that a migration granting nothing would pass entirely.
+
+**📌 Named cost, so it is a task and not a surprise:** `user_profiles_select` is still *own row, or company admin*, so a site admin can WRITE a grant for a person they cannot READ. Everything works — the FK resolves with RLS out of the way — but a UI cannot offer a person picker yet. That is `add_site_member`, the next RPC, where the reciprocal read gets designed rather than bolted on here.
+
+### §10 — a new site gets its own COPY of a structure
+
+`p_template_id` stops meaning *"the structure this root uses"* and starts meaning *"the structure to copy from"*.
+
+**This is what makes §1 true, not a nicety.** `nodes` has no template column (D86) — a node's structure is reached through its level — so nothing stopped two roots being built on one template's position-0 level, and §1's unique index **cannot see that happen**, because such a create never touches `hierarchy_templates` at all. Before §10, "one site, one structure" was enforced against the only path that could not violate it.
+
+Order: check the source has levels → create the template → copy every level *including `is_schedulable`* → create the root on the copy → **claim the copy for the root**. The claim cannot happen earlier: §1's composite FK points at a `nodes` row and §3 insists it be a root, which is exactly why `site_node_id` is nullable. The copy is named for the site, with a bounded suffix loop — `unique (org_id, name)` makes a collision a real path (**W36**), not defensive padding, and without the loop it raises a raw `23505` outside the twelve-code set.
+
+`create_node` now returns `template_id` — the id of the **copy**, never of the source, so a caller cannot go on to edit the shape they copied from. Additive; `database.types.ts` types this as `Json` and does not change shape.
+
+#### ⭐ It broke six existing cases, and every one had to be read before anything was touched
+
+Rule 1b. None was pinning a bug; all six were the correct contract for 0015 and the contract deliberately changed. The coverage each provided was **rescued**, one indirection further along:
+
+| case | was asserting | now asserts |
+|---|---|---|
+| T21 | both roots land ON the template each named | both land on a **copy of** the one each named, each copy owned by its own root, level names intact |
+| T24 | an omitted `p_template_id` resolves the sole template | it still resolves — and the root gets a copy of it |
+| T26 | a child lands on its parent's template | a child lands on its **parent's copy**, and makes no copy of its own (`template_id` is NULL) |
+| T32 | with RLS bypassed, the root branch is org-scoped | the **copy** is org 1's and carries org 1's wording |
+| L13 | a reorder stranding a lone ROOT is refused | same, against the structure the site actually owns — reordering the now-empty source strands nothing and the case would have passed for the wrong reason |
+| L16 | a broken second template in the SAME org does not block this one | same, but scrambling **the copy**, which is what holds the nodes — otherwise the two org-vs-template mutations go quietly uncaught for the third time |
+
+**L13 and L16 are rule 3b arriving on cases that were already correct.** Nobody changed them; the world moved and their fixtures stopped being able to deliver what their names claimed.
+
+**S17 was rewritten on purpose**, which is what 0019 split itself in half to make possible: its old form asserted that a site admin who could write the `nodes` table still could not call `create_node`. It now asserts all three halves of §8's rule — inside the grant succeeds, elsewhere in the company says `not_permitted` (not "not found"), a root create says `not_permitted`.
+
+### ⛔ §11 — the planned change this migration REFUSED to make
+
+§19.44 ended with an instruction to itself: make `nodes_check_level_adjacency` SECURITY DEFINER so a site admin reaching an invisible destination stops getting `level_mismatch`.
+
+**That instruction predates D97 and is now unsafe. Measured on a scratch PG16 carrying this exact migration:**
+
+```
+trigger as it ships (SECURITY INVOKER):
+  set local role authenticated; set local app.hierarchy_migration='on';
+  update nodes ...                          -> REFUSED   (D97 holding)
+same trigger, altered to SECURITY DEFINER:
+  identical statements                      -> ACCEPTED  (D97 BROKEN)
+```
+
+D97 gated the escape hatch on `pg_has_role(current_user, <owner of public.nodes>, 'USAGE')`. **Inside a SECURITY DEFINER function `current_user` IS the owner**, so the test becomes true for every caller and the hatch swings open for anyone signed in — undoing, as a side effect of fixing something else, the change Pratik asked for. `session_user` is not a repair either: under PostgREST it is `authenticator` and in this harness it is the superuser, so the test would disagree with production **in the direction that hides the hole**.
+
+**The defect is fixed anyway, without touching the trigger.** The wrong code was only ever produced by a lookup that could not see its subject, and §8 answers the permission question *before* any such lookup runs — `move_node` step 4b, and `app_node_exists_in_org` at every existence check. Every route a client has is an RPC and every one now says `not_permitted` (**W17**, both arms). What remains is a direct `UPDATE nodes SET parent_id` aimed at an invisible parent, which `nodes_update`'s WITH CHECK refuses in the next breath.
+
+**📌 Consequence, recorded rather than quietly dropped: 0019's case S18 STAYS STRUCTURAL.** §19.44 expected this migration to un-shadow the tenant guard on `nodes_insert`. It does not. Do not "upgrade" S18 without re-reading this. **W39 asserts both the behaviour and `prosecdef = false`**, so anyone later finishing §11 by flipping the flag meets a red test rather than nobody.
+
+### §12 — what hangs off a node belongs to the node
+
+`node_skill_requirements` and `node_shift_templates` → `app_is_admin_for(node_id)` on insert/update/delete; SELECT stays org-wide, because `nodes_select` is what decides visibility and a requirement row for an invisible node is a pair of ids resolving to nothing. **Both tables**, walked in W37 and W38 — D93's lesson is that a guard checking one member of a set will not tell you the migration forgot the set.
+
+### `47_site_ownership_test.sql` — 40 cases, W0–W39
+
+**Specified by a mutation run rather than written and then mutated.** With §1–§7 built and no test file, ten mutations were run and **seven escaped**; that list was the requirements document.
+
+**The fixture is the test, and it needed TWO SITES IN ONE ORG**, which the seed does not have — org 1 seeds a single root, so "another site" and "another tenant" would be the same fixture, and a cross-tenant refusal proves nothing about a cross-site one because org scoping refuses it three layers earlier. Plant 2 is built through the real RPCs, so §10's copy is exercised by the fixture itself. Every site admin holds the org-wide role **`viewer`** (0019's lesson: an org-wide `admin` would short-circuit every predicate under test).
+
+**W0 asserts the fixture**, per D86's corollary — an id typo is indistinguishable from the behaviour under test whenever the honest answer can be empty.
+
+#### ⭐ Two fixture people exist because a mutation escaped, and both are the same lesson
+
+1. **d3's supervisor grant on Machining.** A node a caller cannot SEE is already refused by §8.0's existence lookup, so a fixture where "not mine" always means "invisible" **cannot tell §8's own guards from that earlier refusal**. Measured: deleting `move_node`'s source check *and* its destination check were **both NOT CAUGHT**. A supervisor grant makes Machining visible and still not theirs — the only state those guards cover alone. W17 and W18 each gained a second arm.
+2. **d5, admin on Line 1 + supervisor on Machining.** To reach §8.5's WITH CHECK term a caller needs an admin grant ON a node that can be legally re-parented somewhere they can see. Without one person holding both, **Z24 was caught by nothing**.
+
+**This is the seventh consecutive migration where the mutation run found a hole in the CASE LIST rather than a bug in the code** — P1-5g's M2, P1-5j's U3, 0017's X8, 0018's Y4, 0019's X6/X9/X14, and now 0020's Z14/Z15/Z24.
+
+### Mutation table — 35 run, 34 caught
+
+`supabase/tests/mutations/0020.json`. Z1–Z10 are §1–§7's; Z11–Z35 are this session's.
+
+| # | Mutation | Verdict | Caught by |
+|---|---|---|---|
+| Z1 | backfill claims a SHARED template for one of its roots | caught | V2 |
+| Z2 | `site_node_id` uniqueness dropped | caught | W1 |
+| Z3 | a non-root may own a structure | caught | V4, W2 |
+| Z4 | `app_is_admin_for_template` drops its org predicate | caught | W3 |
+| Z5 | an UNOWNED structure becomes editable by any site admin | caught | W4, W7, W8, W10 |
+| Z6 | `save_hierarchy_levels` reverts to company-admin-only | caught | W6, W35 |
+| Z7 | `hierarchy_levels_update` loses its WITH CHECK scope | caught | W8 |
+| Z8 | `hierarchy_templates_insert` lets a site admin create unowned structures | caught | W9 |
+| Z9 | REVOKE FROM PUBLIC removed | caught | W12 |
+| Z10 | GRANT to `authenticated` removed | **CRASHED(140)** | 140 cases die — caught, loudly |
+| Z11 | `create_node`'s CHILD check removed | caught | W27 |
+| Z12 | a ROOT create stops being company-admin-only | caught | A1, S17, W15 |
+| Z13 | `rename_node`'s check removed | caught | W27 |
+| Z14 | `move_node`'s DESTINATION check removed | caught | W17 |
+| Z15 | `move_node`'s SOURCE check removed | caught | W18 |
+| Z16 | detaching a node into a site stops being company-admin-only | caught | W19 |
+| Z17 | moving a SITE stops being company-admin-only | caught | W20 |
+| Z18 | removing a SITE stops being company-admin-only | caught | W21 |
+| Z19 | `delete_node`'s node check removed | caught | W27 |
+| Z20 | `app_relevel_subtree`'s DESTINATION check removed | caught | W25 |
+| Z21 | `app_relevel_subtree` reverts to company-admin-only | caught | W25, W26 |
+| Z22 | `app_node_exists_in_org` drops its org scope | caught | C16–C18, M9, W14 |
+| Z23 | `app_node_exists_in_org` bypassed entirely | caught | S17, W13, W14 |
+| Z24 | `parent_id is null` dropped from `nodes_update`'s new term | caught | W23 |
+| Z25 | the new term dropped from `nodes_select` | caught | W16 |
+| Z26 | `nodes_cascade_path` back to SECURITY INVOKER | caught | W16 |
+| Z27 | `profile_grants_insert` reverts to company-admin-only | caught | W29 |
+| Z28 | `profile_grants_insert` loses the NODE scope | caught | W28 |
+| Z29 | `profile_grants_update` loses its USING scope | **not caught** | — inert, measured below |
+| Z30 | the copied structure is never claimed by its site | caught | T21, T24, W0, W34, W35 |
+| Z31 | the copy loses the schedulable flag | caught | L13, W34, W35 |
+| Z32 | the root is put on the SOURCE structure, not its copy | caught | L13, L16, T26, T32, W0, W7, W8, W10, W34 |
+| Z33 | the copy's name-collision loop removed | caught | W36 |
+| Z34 | `node_skill_requirements_insert` reverts to company-admin-only | caught | W37 |
+| Z35 | `node_shift_templates_insert` loses its node scope | caught | W38 |
+
+**Z10 is CRASHED, not NOT CAUGHT, and the distinction is the runner working.** Removing the grant kills 140 cases outright; the case *count* drops, which the runner scores as CRASHED rather than reading the absence of FAIL lines as "all clear". That counter exists because a dead server once scored as five clean passes (§19.29).
+
+#### ⭐ Z29 is inert, and the measurement is what says so
+
+`profile_grants_update`'s USING clause is **exactly shadowed by `profile_grants_select`**. Measured as a site admin: the number of rows they can SELECT that are neither their own nor inside their admin scope is **0**, and an `UPDATE ... WHERE profile_id <> me` touches only the three rows the USING clause would have permitted anyway. Every row the edit rule would refuse is already invisible.
+
+**The clause stays.** It is the semantically correct place for an edit rule, and the read rule may legitimately widen later — letting people see who else is on their team is a reasonable future change, and it would silently un-guard UPDATE. **W30 now asserts the shadow itself** (`selectable-but-not-editable rows = 0`), which turns that future widening from a surprise into a red test pointing at this paragraph. Same treatment as 0019's X16 and S18: an escape with a reason and a tripwire, not an escape with a blank.
+
+### What has to happen on Pratik's machine
+
+`npm run db:reset && npm run db:types`. **0020 changes `database.types.ts`**: `hierarchy_templates` gains `site_node_id`, and four new functions appear (`app_is_admin_for_template`, `app_node_exists_in_org`, `app_is_admin_on_grant_node`, plus 0019's set). Nothing in `src/` reads any of them yet, so no client code moves — **the app suite should stay at 502 tests in 17 files.** A different number means a test file did not load.

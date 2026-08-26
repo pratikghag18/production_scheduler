@@ -215,10 +215,15 @@ INSERT INTO user_profiles (id, org_id, user_id, role, default_create_mode) VALUE
   ('a0000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a3', 'supervisor', 'direct')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO profile_grants (profile_id, node_id, org_id, can_edit) VALUES
-  ('a0000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', true), -- Admin -> Plant 1 (root)
-  ('a0000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', true), -- Ana -> Assembly
-  ('a0000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', true)  -- Marco -> Machining
+-- `role` replaced `can_edit` in migration 0019: a grant now says WHICH role the
+-- profile holds inside that subtree, not merely whether it may write there.
+-- These three rows keep the access they have always had, spelled in the new
+-- vocabulary -- the admin's root grant is an 'admin' grant, and Ana and Marco,
+-- who could edit their subtrees and nothing else, are supervisors there.
+INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
+  ('a0000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'admin'),      -- Admin -> Plant 1 (root)
+  ('a0000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'supervisor'), -- Ana -> Assembly
+  ('a0000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 'supervisor')  -- Marco -> Machining
 ON CONFLICT DO NOTHING;
 
 -- ----------------------------------------------------------------------------
@@ -349,9 +354,9 @@ INSERT INTO user_profiles (id, org_id, user_id, role, default_create_mode) VALUE
   ('a000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-0000000000b2', 'supervisor', 'run')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO profile_grants (profile_id, node_id, org_id, can_edit) VALUES
-  ('a000000b-0000-0000-0000-000000000001', '3000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', true),
-  ('a000000b-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', true)
+INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
+  ('a000000b-0000-0000-0000-000000000001', '3000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'admin'),
+  ('a000000b-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', 'supervisor')
 ON CONFLICT DO NOTHING;
 
 -- ----------------------------------------------------------------------------
@@ -489,5 +494,46 @@ DO $$ BEGIN
           AND provider = 'email') <> 3
   THEN
     RAISE EXCEPTION 'seed assertion failed: auth.identities rows missing for the three dev users';
+  END IF;
+END $$;
+
+-- ----------------------------------------------------------------------------
+-- Each site owns its structure (migration 0020).
+--
+-- ⚠️ THIS CANNOT BE DONE BY THE MIGRATION, AND THAT IS EASY TO GET WRONG.
+-- 0020's backfill claims each template for the single root that already uses
+-- it — but `db:reset` applies every migration to an EMPTY schema and only then
+-- runs this file, so at backfill time there are no nodes and nothing is
+-- claimed. The migration's backfill exists for a real upgrade of a populated
+-- database; on a reset, ownership has to be established here, where the nodes
+-- finally exist. (Measured: without this block, `db:reset` left every template
+-- unowned and no site admin could edit their own level names.)
+--
+-- Same derivation and the same `having count(*) = 1` guard as the migration:
+-- a template used by two roots is left unowned rather than arbitrarily
+-- assigned to one of them.
+-- ----------------------------------------------------------------------------
+UPDATE hierarchy_templates t
+   SET site_node_id = c.root_id
+  FROM (
+    SELECT l.template_id,
+           (array_agg(n.org_id ORDER BY n.org_id))[1] AS org_id,
+           (array_agg(n.id     ORDER BY n.id))[1]     AS root_id
+      FROM hierarchy_levels l
+      JOIN nodes n ON n.level_id = l.id AND n.parent_id IS NULL
+     GROUP BY l.template_id
+    HAVING count(*) = 1
+  ) c
+ WHERE c.template_id = t.id
+   AND c.org_id = t.org_id
+   AND t.site_node_id IS DISTINCT FROM c.root_id;
+
+DO $$
+DECLARE v_unowned int; v_total int;
+BEGIN
+  SELECT count(*) FILTER (WHERE site_node_id IS NULL), count(*)
+    INTO v_unowned, v_total FROM hierarchy_templates;
+  IF v_unowned <> 0 THEN
+    RAISE EXCEPTION 'seed assertion failed: % of % hierarchy templates have no owning site — site admins could not edit their own level names', v_unowned, v_total;
   END IF;
 END $$;

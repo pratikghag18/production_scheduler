@@ -716,7 +716,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_T20;
 
-\echo 'T21: root, two shapes, one root created in EACH, each naming its own template'
+\echo 'T21: root, two shapes -- each root gets its OWN COPY of the shape it named'
 SAVEPOINT sp_T21;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
@@ -727,6 +727,10 @@ DECLARE
   v_plant_b      jsonb;
   v_compact_site uuid;
   v_pos0_levels  int;
+  v_a_tpl        uuid;
+  v_b_tpl        uuid;
+  v_a_names      text[];
+  v_b_names      text[];
 BEGIN
   v_compact_tpl := (create_hierarchy_template('Compact Plant')->>'id')::uuid;
   PERFORM save_hierarchy_levels(jsonb_build_array(
@@ -745,21 +749,44 @@ BEGIN
   v_plant_a := create_node(NULL, 'Plant A', 0, '21000000-0000-0000-0000-000000000001');
   v_plant_b := create_node(NULL, 'Plant B', 0, v_compact_tpl);
 
+  -- 0020 §10 CHANGED WHAT THIS CASE MEASURES, and the coverage it was giving
+  -- had to be rescued rather than dropped. It used to assert "the root landed
+  -- ON the template you named"; a root now lands on a COPY, so it asserts
+  -- "the root landed on a copy OF the template you named" -- one indirection
+  -- further along, but the same property, and still asserted on BOTH sides so
+  -- that an org-scoped (arbitrary-row) lookup fails whichever row it picks.
+  v_a_tpl := (v_plant_a->>'template_id')::uuid;
+  v_b_tpl := (v_plant_b->>'template_id')::uuid;
+
+  SELECT array_agg(hl.name ORDER BY hl.position) INTO v_a_names
+    FROM hierarchy_levels hl WHERE hl.template_id = v_a_tpl;
+  SELECT array_agg(hl.name ORDER BY hl.position) INTO v_b_names
+    FROM hierarchy_levels hl WHERE hl.template_id = v_b_tpl;
+
+  -- Two seeded/created shapes plus one copy each.
   SELECT count(*) INTO v_pos0_levels FROM hierarchy_levels
     WHERE org_id = '10000000-0000-0000-0000-000000000001' AND position = 0;
 
   IF v_plant_a->>'path' = 'plant_a'
      AND v_plant_a->>'parent_id' IS NULL
-     AND v_plant_a->>'level_id' = '20000000-0000-0000-0000-000000000000'
+     AND v_a_tpl IS DISTINCT FROM '21000000-0000-0000-0000-000000000001'
+     AND v_a_names = ARRAY['Site','Department','Line','Work Cell']
      AND v_plant_b->>'path' = 'plant_b'
      AND v_plant_b->>'parent_id' IS NULL
-     AND v_plant_b->>'level_id' = v_compact_site::text
-     AND v_pos0_levels = 2
+     AND v_b_tpl IS DISTINCT FROM v_compact_tpl
+     AND v_b_names = ARRAY['Site','Line']
+     -- each copy is owned by the root that caused it, which is what makes
+     -- "one site, one structure" true rather than merely indexed
+     AND (SELECT site_node_id FROM hierarchy_templates WHERE id = v_a_tpl)
+           = (v_plant_a->>'id')::uuid
+     AND (SELECT site_node_id FROM hierarchy_templates WHERE id = v_b_tpl)
+           = (v_plant_b->>'id')::uuid
+     AND v_pos0_levels = 4
   THEN
     RAISE NOTICE 'PASS T21';
   ELSE
-    RAISE NOTICE 'FAIL T21: plant_a=%, plant_b=%, compact_site=%, pos0_levels=%',
-      v_plant_a, v_plant_b, v_compact_site, v_pos0_levels;
+    RAISE NOTICE 'FAIL T21: plant_a=%, a_levels=%, plant_b=%, b_levels=%, pos0_levels=%',
+      v_plant_a, v_a_names, v_plant_b, v_b_names, v_pos0_levels;
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'FAIL T21: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
@@ -838,9 +865,17 @@ BEGIN
   -- one seeded template, which is the case every existing caller (three
   -- positional arguments, no p_template_id) must keep working under.
   v_res := create_node(NULL, 'Plant 9');
+  -- 0020 §10: the sole template is the SOURCE, and the root gets a copy of it.
+  -- Backward compatibility here means "the omitted argument still resolves",
+  -- not "the root joins that template".
   IF v_res->>'path' = 'plant_9'
-     AND v_res->>'level_id' = '20000000-0000-0000-0000-000000000000'
      AND v_res->>'parent_id' IS NULL
+     AND (v_res->>'template_id')::uuid IS DISTINCT FROM '21000000-0000-0000-0000-000000000001'
+     AND (SELECT array_agg(hl.name ORDER BY hl.position) FROM hierarchy_levels hl
+           WHERE hl.template_id = (v_res->>'template_id')::uuid)
+         = ARRAY['Site','Department','Line','Work Cell']
+     AND (SELECT site_node_id FROM hierarchy_templates
+           WHERE id = (v_res->>'template_id')::uuid) = (v_res->>'id')::uuid
   THEN
     RAISE NOTICE 'PASS T24';
   ELSE
@@ -914,11 +949,26 @@ BEGIN
   SELECT count(*) INTO v_pos1_levels FROM hierarchy_levels
     WHERE org_id = '10000000-0000-0000-0000-000000000001' AND position = 1;
 
+  -- 0020 §10: each root owns a COPY, so a child must land on ITS OWN PARENT'S
+  -- copy -- not on the shape that copy came from, and not on the other root's.
+  -- That is the same "the parent alone decides" property, now with two more
+  -- candidate templates in the org for a wrong answer to land in. A child
+  -- create makes no copy, so `template_id` comes back NULL: asserted, because
+  -- a child that silently forked its own structure is the defect this section
+  -- could most easily introduce.
   IF v_dept->>'path' = 'plant_a.dept_one'
-     AND v_dept->>'level_id' = '20000000-0000-0000-0000-000000000001'
+     AND v_dept->>'template_id' IS NULL
+     AND (SELECT hl.template_id FROM hierarchy_levels hl
+           WHERE hl.id = (v_dept->>'level_id')::uuid) = (v_plant_a->>'template_id')::uuid
+     AND (SELECT hl.name FROM hierarchy_levels hl
+           WHERE hl.id = (v_dept->>'level_id')::uuid) = 'Department'
      AND v_line->>'path' = 'plant_b.line_one'
-     AND v_line->>'level_id' = v_compact_line::text
-     AND v_pos1_levels = 2
+     AND v_line->>'template_id' IS NULL
+     AND (SELECT hl.template_id FROM hierarchy_levels hl
+           WHERE hl.id = (v_line->>'level_id')::uuid) = (v_plant_b->>'template_id')::uuid
+     AND (SELECT hl.name FROM hierarchy_levels hl
+           WHERE hl.id = (v_line->>'level_id')::uuid) = 'Line'
+     AND v_pos1_levels = 4
   THEN
     RAISE NOTICE 'PASS T26';
   ELSE
@@ -1082,12 +1132,20 @@ BEGIN
   SELECT hl.template_id, hl.org_id INTO v_tpl, v_org
     FROM hierarchy_levels hl WHERE hl.id = (v_res->>'level_id')::uuid;
 
-  IF v_tpl = '21000000-0000-0000-0000-000000000001'
+  -- 0020 §10: the root lands in a COPY, so the org scope is now asserted on
+  -- the copy -- which is created in `v_org_id`, from levels read out of the
+  -- resolved source. An unscoped count still sees both orgs' templates and
+  -- raises `ambiguous` above, so the first half of this case is unchanged;
+  -- this half now says "the copy is org 1's, and it carries org 1's wording".
+  IF v_tpl = (v_res->>'template_id')::uuid
+     AND v_tpl IS DISTINCT FROM '21000000-0000-0000-0000-000000000001'
      AND v_org = '10000000-0000-0000-0000-000000000001'
+     AND (SELECT array_agg(hl.name ORDER BY hl.position) FROM hierarchy_levels hl
+           WHERE hl.template_id = v_tpl) = ARRAY['Site','Department','Line','Work Cell']
   THEN
     RAISE NOTICE 'PASS T32';
   ELSE
-    RAISE NOTICE 'FAIL T32: landed in template % of org % (wanted org 1 Standard Plant)', v_tpl, v_org;
+    RAISE NOTICE 'FAIL T32: landed in template % of org % (wanted a copy of org 1 Standard Plant)', v_tpl, v_org;
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'FAIL T32: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
