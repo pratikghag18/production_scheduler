@@ -315,3 +315,216 @@
 .radioRow input {
   margin-top: 0.125rem;
 }
+
+
+/* ---------------------------------------------------------------------------
+   P1-5g — tree drag and drop.
+
+   Appended to `NodeTreeEditor.module.css`. Every length is `rem` (D84) and no
+   value here is ever set from a `style` prop except `--drop-rails`, which is a
+   UNITLESS COUNT — the rem arithmetic stays in this file, so the indent cannot
+   escape `scaleAudit` the way D90's inline `paddingLeft: depth * 18` did (D89).
+   Hairline borders stay in px, as everywhere else in this file.
+   --------------------------------------------------------------------------- */
+
+/* The drag handle. Always rendered — a hover-only affordance does not exist on
+   touch — but low-contrast until its row is hovered or it takes focus. */
+.dragHandle {
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  border: 0;
+  border-radius: 0.3125rem;
+  background: transparent;
+  color: var(--grid);
+  cursor: grab;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0;
+  /* A touch drag must move the node, not scroll the page. */
+  touch-action: none;
+}
+
+.row:hover .dragHandle,
+.dragHandle:focus-visible {
+  color: var(--ink-2);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+/* Every legal destination for the node currently being dragged. This is the
+   SAME SET "Move to…" lists, because it is the same `legalParentsFor` call —
+   two separately-derived lists that mostly agree is the failure this project
+   keeps paying for. */
+.eligible {
+  background: var(--page);
+  /* DASHED and on `--axis`, not `--grid`. The first version used `--page` on
+     `--surface` (a three-unit difference) with a `--grid` hairline, and the
+     rendering showed NOTHING — the one affordance drag adds over the menu was
+     invisible while every declaration was correct. D89's shape exactly.
+     Dashed rather than solid because these rows are POSSIBLE destinations, not
+     the chosen one; the chosen one is `.dropOk`, which is solid. */
+  outline: 1px dashed var(--axis);
+  outline-offset: -1px;
+}
+
+/* The row being dragged, shown as lifted out of the tree. `opacity` is safe
+   here — nothing inside it needs to out-render its parent. */
+.rowDragging {
+  opacity: 0.45;
+}
+
+/* The row under the pointer, when the drop is legal. */
+.dropOk {
+  background: var(--page);
+  box-shadow: inset 0 0 0 2px var(--signal-ok);
+  /* The chosen target is also an eligible one; suppress the dashed hint so the
+     two treatments do not stack on the same row. */
+  outline: none;
+}
+
+/* The row under the pointer, when it is not. */
+.dropBlocked {
+  box-shadow: inset 0 0 0 2px var(--crit);
+  cursor: not-allowed;
+}
+
+/* The "will adopt" tick: a stub at the target row's bottom edge, sitting in the
+   SAME rail a real child's elbow occupies, so it lines up with the children the
+   target already has instead of floating at an invented indent. That alignment
+   is what `dropRailIndex` computes from D90's `guides` ancestry.
+
+   It is deliberately NOT a horizontal line BETWEEN two rows. `move_node` CAN
+   reorder — it takes `p_sort_order int default null` and writes
+   `sort_order = coalesce(p_sort_order, sort_order)` (migration 0010) — but
+   P1-5g does not ship reordering, so a caret would promise an outcome the drop
+   does not deliver. A dropped node keeps its existing `sort_order` and lands
+   wherever `compareSiblings` puts it among its new siblings, which is not
+   necessarily last; an adopt mark on the PARENT is true regardless of where it
+   lands, and a caret between two rows would not be. */
+/* `position: relative` is LOAD-BEARING and was missing in the first version:
+   `.row` is not positioned, so the tick was laid out against the initial
+   containing block and rendered off the card entirely. The suite was green and
+   the affordance simply was not on screen. */
+.dropTick {
+  position: relative;
+}
+
+.dropTick::after {
+  content: "";
+  position: absolute;
+  left: calc(0.25rem + var(--drop-rails) * 1.125rem + 0.5rem);
+  bottom: calc(-1 * var(--row-pad-y));
+  width: 0.875rem;
+  border-top: 2px solid var(--signal-ok);
+}
+
+/* A whole site-structure block that cannot hold the dragged node at all
+   (`groupDropState` === "foreign"). Dimmed ONCE, rather than twenty rows each
+   refusing separately — which is what a cross-structure drag looks like on
+   screen, and the thing `canDropOn` returning false could never show. */
+/* Dimmed by COLOUR, never by `opacity` on the block.
+   The first version used `opacity: .42` on the group — and an `opacity` below 1
+   creates a stacking context its children cannot escape, so the red refusal
+   outline on the hovered row was dimmed by the very thing that was supposed to
+   explain it. The message you most need to read was the one you could least
+   see. Only text and rails are muted here; borders and outlines keep full
+   strength. */
+.groupForeign .name,
+.groupForeign .levelChip,
+.groupForeign .shapeName,
+.groupForeign .shapePath,
+.groupForeign .disclosure,
+.groupForeign .menuBtn {
+  color: var(--muted);
+}
+
+.groupForeign .guides {
+  opacity: 0.45;
+}
+
+.groupForeign .row {
+  cursor: not-allowed;
+}
+
+/* Said ONCE, on the block, so twenty rows do not each have to refuse
+   separately. This is what a cross-structure drag looks like on screen —
+   `canDropOn` returning false is the logic, and this is the affordance. */
+.foreignNote {
+  font-size: 0.6875rem;
+  color: var(--crit);
+  white-space: nowrap;
+}
+
+/* The chip that follows the pointer: what is being dragged, and the verdict.
+   `position: fixed` because it is chrome, not part of the tree's flow, and
+   `pointer-events: none` so it can never become its own drop target. */
+.dragChip {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  max-width: 20rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  box-shadow: 0 0.25rem 0.75rem rgb(0 0 0 / 18%);
+  font-size: 0.75rem;
+  /* The OFFSET from the pointer lives here, in `rem`, not in the `style` prop.
+     The component may only ever write raw `left`/`top` pixel coordinates,
+     because that is what `clientX`/`clientY` are; every dimension stays in the
+     stylesheet where `scaleAudit` can read it (D89). */
+  transform: translate(0.75rem, 1rem);
+}
+
+/* Near the right edge the chip flips to the pointer's left, so a refusal
+   message is never the thing that runs off screen. */
+.dragChipFlip {
+  transform: translate(calc(-100% - 0.75rem), 1rem);
+}
+
+.dragChipName {
+  display: block;
+  font-weight: 600;
+}
+
+.dragChipMsg {
+  display: block;
+  color: var(--ink-2);
+}
+
+.dragChipBlocked {
+  border-color: var(--crit);
+}
+
+.dragChipBlocked .dragChipMsg {
+  color: var(--crit);
+}
+
+/* While a drag is live, nothing in the tree should select text. */
+.dragging,
+.dragging * {
+  user-select: none;
+}
+
+/* The drag verdict, announced. The floating chip is `aria-hidden` chrome
+   following a pointer; this is the same sentence in a polite live region, so
+   the refusal reason exists for a screen reader and not only for an eye. */
+.srOnly {
+  position: absolute;
+  /* 0.0625rem == 1px at the default root. Written in `rem` because a raw px
+     length in a REM_SURFACE file is a `scaleAudit` failure (D84/D89) — and the
+     audit is right to insist even here, since the alternative is an exemption
+     that the next visually-hidden element inherits by accident. A hidden box
+     measuring 1.35px at 4K is harmless. */
+  width: 0.0625rem;
+  height: 0.0625rem;
+  margin: -0.0625rem;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

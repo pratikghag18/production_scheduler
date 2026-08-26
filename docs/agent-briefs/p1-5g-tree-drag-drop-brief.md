@@ -283,6 +283,28 @@ export function dropRailIndex(targetDepth: number): number;
 - `result.ok && result.noop` → `{ kind: "noop", reason: null }`
 - otherwise → `{ kind: "blocked", reason: result.reason }`
 
+**⭐ AMENDED Aug 26 — WRITE THOSE THREE AS DISCRIMINANT CHECKS, NOT AS THE
+COMPOUND CONDITIONS ABOVE.** The three bullets are the *truth table*; they are
+not the code. Written literally — `if (result.ok && !result.noop) {…}
+if (result.ok && result.noop) {…} return {…result.reason…}` — the file
+**does not typecheck**: TypeScript's control-flow analysis does not eliminate
+`CanDropResult`'s `{ok:true}` arm through a compound condition, so the trailing
+`result.reason` is `TS2339: Property 'reason' does not exist`. Order it as
+
+```
+if (!result.ok) { … blocked, using result.reason … }
+if (result.noop) { … noop … }
+… ok …
+```
+
+**Found by the agent that built this brief, not by the design session** — whose
+reference implementation ran under `node --experimental-strip-types`, which
+STRIPS types without checking them, so a purely-typing defect survived a green
+43-case run and a clean 12-mutation table. If you are writing a brief and your
+reference implementation only ever ran under strip-types, you have not
+typechecked it; `node node_modules/typescript/lib/tsc.js -b --force` works from
+the repo root and is the check that was missing here.
+
 `message` is chosen by a helper that reads the same `nodes`/`levels` and never
 changes `kind`. **The message table is a contract — §8 asserts these strings
 character for character, so produce them exactly.** `draggedName` falls back to
@@ -413,6 +435,36 @@ from a click. The handle has no click action, so `pointerdown` on it is
 unambiguously a drag start and no threshold logic exists to get wrong. It is
 always rendered (a hover-only affordance does not exist on touch) and
 low-contrast until its row is hovered or it takes focus.
+
+**KEEP THE POINTER MECHANICS IN ONE SELF-CONTAINED BLOCK.** The `DragState`
+type, the four pointer handlers, the `Escape` listener and the
+`elementFromPoint` hit test must sit together in one contiguous region of the
+file and must not be entangled with **this component's other state** — they own
+"a drag started on element X / the pointer is now over element Y / it was
+dropped / it was cancelled", and nothing about `collapsedIds`, the popover, or
+the add-root form.
+
+**⭐ AMENDED Aug 26.** This paragraph used to say the block must touch "nothing
+about levels, templates or `canDropOn`", which contradicts this same section's
+own worked example — `onPointerDown` calls
+`eligibleTargetIds(row.node.id, nodes, levels)`, and it has to. The requirement
+exists so that **P1-5i can LIFT the block into `LevelEditor`**, and what makes a
+lift hard is entanglement with a component's own state, not a call to a pure
+function that the lifted version will simply be handed. Calls into `treeDrag.ts`
+and the `nodes`/`levels` props are fine; a handler that reads or writes
+`collapsedIds` is not.
+
+This is not decoration. **P1-5i will put the same pointer mechanics into
+`LevelEditor`** to drag the level list, and two divergent copies of pointer
+handling is precisely what `useDragGesture` was extracted on the board to
+prevent — *"three separate copies of pointer handling is how the mockup's four
+`start*Drag` functions ended up subtly different from each other."* A shared
+hook is deliberately **not** being extracted now: P1-5i sits behind two other
+pieces of work, and an abstraction built for a caller that far off is
+speculative. The requirement above is what keeps the eventual lift mechanical
+instead of archaeological. **Do not create `useDragHandle.ts` or any shared
+hook in this brief** — that is a scope breach (§11), and if you think it is
+unavoidable, report it rather than doing it.
 
 **Each `<li>` gains `data-node-id={row.node.id}`.**
 

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { applyLevelAction, invalidNameIndices, MAX_LEVELS } from "@/features/admin/lib/levelDraft";
-import type { LevelAction, LevelDraft } from "@/features/admin/lib/levelDraft";
+import {
+  applyLevelAction,
+  findLevelOrderProblems,
+  invalidNameIndices,
+  MAX_LEVELS,
+} from "@/features/admin/lib/levelDraft";
+import type {
+  LevelAction,
+  LevelDraft,
+  LevelOrderLevel,
+  LevelOrderNode,
+} from "@/features/admin/lib/levelDraft";
 
 /**
  * Brief P1-5d §8 group L (20 assertions) for `applyLevelAction` /
@@ -174,5 +184,310 @@ describe("levelDraft.ts: invalidNameIndices", () => {
     ] as unknown as LevelDraft[];
     expect(() => invalidNameIndices(draft)).not.toThrow();
     expect(invalidNameIndices(draft)).toEqual([1, 2, 3]);
+  });
+});
+
+/* ===========================================================================
+ * Group S — `findLevelOrderProblems`, D92's client mirror (design plan §19.30).
+ *
+ * The server is the authority: migration 0016's two OUTCOME checks plus
+ * `save_hierarchy_levels`'s older check 7. These cases mirror what that
+ * function refuses, over the DRAFT order.
+ *
+ * THE FIXTURE IS LOAD-BEARING, one piece at a time:
+ *  - TWO templates in the SAME org. A second template in another ORG could not
+ *    tell org-scoping from template-scoping — D92's L16 needed three attempts
+ *    to learn that.
+ *  - Template U is STORED SCRAMBLED (its root's level at position 1, its
+ *    child's at 0). So a mirror that forgot to scope by template reports U's
+ *    two violations while editing T, and S1 fails.
+ *  - Template T has FIVE levels, the last of which is EMPTY, so "remove a level
+ *    that has nodes" (S9) and "remove one that does not" (S10) are both
+ *    reachable from one fixture.
+ *  - T has TWO roots, so `nodeCount` aggregation is testable (S2).
+ *  - T is three generations deep, so a swap can strand a child WITHOUT
+ *    stranding its own child (S2's Work Cell stays sound) — an aggregate
+ *    "is anything wrong" answer cannot pass S2.
+ * ======================================================================== */
+
+const T = "tpl-t";
+const U = "tpl-u";
+
+function lvl(id: string, templateId: string, position: number, name: string): LevelOrderLevel {
+  return { id, templateId, position, name };
+}
+
+function nd(id: string, parentId: string | null, levelId: string): LevelOrderNode {
+  return { id, parentId, levelId };
+}
+
+const T_LEVELS: LevelOrderLevel[] = [
+  lvl("t0", T, 0, "Site"),
+  lvl("t1", T, 1, "Department"),
+  lvl("t2", T, 2, "Line"),
+  lvl("t3", T, 3, "Work Cell"),
+  lvl("t4", T, 4, "Station"),
+];
+
+const U_LEVELS: LevelOrderLevel[] = [lvl("u0", U, 1, "Plant"), lvl("u1", U, 0, "Cell")];
+
+const LEVELS: LevelOrderLevel[] = [...T_LEVELS, ...U_LEVELS];
+
+const NODES: LevelOrderNode[] = [
+  nd("n1", null, "t0"),
+  nd("n2", null, "t0"),
+  nd("n3", "n1", "t1"),
+  nd("n4", "n3", "t2"),
+  nd("n5", "n4", "t3"),
+  nd("m1", null, "u0"),
+  nd("m2", "m1", "u1"),
+];
+
+/**
+ * A draft from a list of level ids, `null` for a brand-new row. Deliberately
+ * does NOT use `find(...)!` — a helper that throws scores a crash where a named
+ * failure belongs (verification-standard rule 6 #17).
+ */
+function draftOf(...ids: readonly (string | null)[]): LevelDraft[] {
+  return ids.map((id) => {
+    if (id === null) return { id: null, name: "New level", isSchedulable: false };
+    const known = LEVELS.find((l) => l.id === id);
+    return { id, name: known === undefined ? id : known.name, isSchedulable: false };
+  });
+}
+
+describe("levelDraft.ts: findLevelOrderProblems", () => {
+  it("S1: the stored order over a sound structure has no problems", () => {
+    expect(findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3", "t4"), LEVELS, NODES, T)).toEqual(
+      [],
+    );
+  });
+
+  it("S2: swapping the top two levels strands the roots and two generations of children", () => {
+    expect(findLevelOrderProblems(draftOf("t1", "t0", "t2", "t3", "t4"), LEVELS, NODES, T)).toEqual([
+      { kind: "root_below_first_level", levelId: "t0", levelName: "Site", nodeCount: 2 },
+      {
+        kind: "child_not_directly_below_parent",
+        levelId: "t1",
+        levelName: "Department",
+        nodeCount: 1,
+      },
+      { kind: "child_not_directly_below_parent", levelId: "t2", levelName: "Line", nodeCount: 1 },
+    ]);
+  });
+
+  // S3 is the half a parent join cannot see (0016's case T34): a structure with
+  // one root and NO children has no parent/child pair at all, so a mirror that
+  // implemented only the adjacency clause scores zero violations here while the
+  // root sits off position 0.
+  it("S3: a structure with one root and no children still reports the stranded root", () => {
+    const levels = [lvl("a0", "A", 0, "Site"), lvl("a1", "A", 1, "Area")];
+    const nodes = [nd("r1", null, "a0")];
+    const draft: LevelDraft[] = [
+      { id: "a1", name: "Area", isSchedulable: false },
+      { id: "a0", name: "Site", isSchedulable: true },
+    ];
+    expect(findLevelOrderProblems(draft, levels, nodes, "A")).toEqual([
+      { kind: "root_below_first_level", levelId: "a0", levelName: "Site", nodeCount: 1 },
+    ]);
+  });
+
+  // The mirror image of S3: the roots are untouched, so ONLY the adjacency
+  // clause fires. The expected ORDER is the point as much as the contents —
+  // "Line, Department, Work Cell" is neither the fixture's order nor
+  // alphabetical, so a sort by name or by input position fails here.
+  it("S4: swapping two middle levels leaves the roots alone and strands three children", () => {
+    expect(findLevelOrderProblems(draftOf("t0", "t2", "t1", "t3", "t4"), LEVELS, NODES, T)).toEqual([
+      { kind: "child_not_directly_below_parent", levelId: "t2", levelName: "Line", nodeCount: 1 },
+      {
+        kind: "child_not_directly_below_parent",
+        levelId: "t1",
+        levelName: "Department",
+        nodeCount: 1,
+      },
+      {
+        kind: "child_not_directly_below_parent",
+        levelId: "t3",
+        levelName: "Work Cell",
+        nodeCount: 1,
+      },
+    ]);
+  });
+
+  // ⭐ S5 IS THE CASE THIS WHOLE DESIGN EXISTS FOR — the client twin of the
+  // server's L15. The STORED positions are scrambled (Site at 1, Department at
+  // 0) and the draft drags them back into shape. The server permits this
+  // repair; a client that greyed out the populated rows would forbid it. It
+  // also pins that positions are read from the DRAFT INDEX and never from
+  // `level.position`: a mirror that read the stored positions reports two
+  // violations here.
+  it("S5: a scrambled stored order dragged back into shape has no problems (the repair)", () => {
+    const scrambled: LevelOrderLevel[] = [
+      lvl("t0", T, 1, "Site"),
+      lvl("t1", T, 0, "Department"),
+      lvl("t2", T, 2, "Line"),
+      lvl("t3", T, 3, "Work Cell"),
+      lvl("t4", T, 4, "Station"),
+      ...U_LEVELS,
+    ];
+    expect(
+      findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3", "t4"), scrambled, NODES, T),
+    ).toEqual([]);
+  });
+
+  it("S6: adding a level at the bottom moves nothing and has no problems", () => {
+    expect(
+      findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3", "t4", null), LEVELS, NODES, T),
+    ).toEqual([]);
+  });
+
+  // S7 and S8 are the two halves of "insert a level mid-hierarchy", the thing
+  // P1-5k will unlock. At the TOP every parent/child pair still lines up and
+  // only the root clause fires; ONE RUNG DOWN the roots are fine and only the
+  // adjacency clause fires, on exactly one level.
+  it("S7: inserting a level above the roots reports only the roots", () => {
+    expect(
+      findLevelOrderProblems(draftOf(null, "t0", "t1", "t2", "t3", "t4"), LEVELS, NODES, T),
+    ).toEqual([{ kind: "root_below_first_level", levelId: "t0", levelName: "Site", nodeCount: 2 }]);
+  });
+
+  it("S8: inserting a level below the roots reports only the level that lost its parent", () => {
+    expect(
+      findLevelOrderProblems(draftOf("t0", null, "t1", "t2", "t3", "t4"), LEVELS, NODES, T),
+    ).toEqual([
+      {
+        kind: "child_not_directly_below_parent",
+        levelId: "t1",
+        levelName: "Department",
+        nodeCount: 1,
+      },
+    ]);
+  });
+
+  it("S9: removing a level that still has nodes is reported, under its stored name", () => {
+    expect(findLevelOrderProblems(draftOf("t0", "t1", "t2", "t4"), LEVELS, NODES, T)).toEqual([
+      {
+        kind: "level_removed_with_nodes",
+        levelId: "t3",
+        levelName: "Work Cell",
+        nodeCount: 1,
+      },
+    ]);
+  });
+
+  it("S10: removing a level that has no nodes has no problems", () => {
+    expect(findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3"), LEVELS, NODES, T)).toEqual([]);
+  });
+
+  // The other direction of S1's scope claim, on the SAME fixture: template U is
+  // stored scrambled, and editing U in its stored order reports exactly its two
+  // violations. S1 (sound draft for T, U untouched and broken) and S11 together
+  // say the scope is the template, not the org.
+  it("S11: editing the other template reports that template's own problems", () => {
+    expect(findLevelOrderProblems(draftOf("u1", "u0"), LEVELS, NODES, U)).toEqual([
+      { kind: "root_below_first_level", levelId: "u0", levelName: "Plant", nodeCount: 1 },
+      { kind: "child_not_directly_below_parent", levelId: "u1", levelName: "Cell", nodeCount: 1 },
+    ]);
+  });
+
+  it("S12: a null templateId has no problems to report", () => {
+    expect(findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3", "t4"), LEVELS, NODES, null)).toEqual(
+      [],
+    );
+  });
+
+  // The admin has to be able to connect the message to a row on screen, so a
+  // level renamed in the draft is named by its DRAFT name, not the stored one.
+  it("S13: a level renamed in the draft is reported under the new name", () => {
+    const draft: LevelDraft[] = [
+      { id: "t1", name: "Department", isSchedulable: false },
+      { id: "t0", name: "Facility", isSchedulable: true },
+      { id: "t2", name: "Line", isSchedulable: false },
+      { id: "t3", name: "Work Cell", isSchedulable: false },
+      { id: "t4", name: "Station", isSchedulable: false },
+    ];
+    expect(findLevelOrderProblems(draft, LEVELS, NODES, T)[0]).toEqual({
+      kind: "root_below_first_level",
+      levelId: "t0",
+      levelName: "Facility",
+      nodeCount: 2,
+    });
+  });
+
+  it("S14: a level whose draft name is blank falls back to its stored name", () => {
+    const draft: LevelDraft[] = [
+      { id: "t1", name: "Department", isSchedulable: false },
+      { id: "t0", name: "   ", isSchedulable: true },
+      { id: "t2", name: "Line", isSchedulable: false },
+      { id: "t3", name: "Work Cell", isSchedulable: false },
+      { id: "t4", name: "Station", isSchedulable: false },
+    ];
+    expect(findLevelOrderProblems(draft, LEVELS, NODES, T)[0].levelName).toBe("Site");
+  });
+
+  // Verification-standard rule 4: a suite that only ever passes well-formed
+  // arguments tests the happy path of the error handling. `validateLevelDraft`
+  // shipped THROWING on a null name and nobody noticed for two briefs.
+  it("S15: a non-array draft, levels or nodes returns [] rather than throwing", () => {
+    const bad = null as unknown as LevelDraft[];
+    expect(findLevelOrderProblems(bad, LEVELS, NODES, T)).toEqual([]);
+    expect(findLevelOrderProblems(draftOf("t0"), bad as unknown as LevelOrderLevel[], NODES, T)).toEqual([]);
+    expect(findLevelOrderProblems(draftOf("t0"), LEVELS, bad as unknown as LevelOrderNode[], T)).toEqual([]);
+  });
+
+  it("S16: null, undefined and wrong-typed entries inside the arrays do not throw", () => {
+    const draft = [null, undefined, { id: 7, name: 3, isSchedulable: "yes" }, ...draftOf("t0")];
+    const levels = [null, undefined, { id: 7 }, ...LEVELS];
+    const nodes = [null, undefined, { id: 7, parentId: NaN, levelId: 7 }, ...NODES];
+    expect(() =>
+      findLevelOrderProblems(
+        draft as unknown as LevelDraft[],
+        levels as unknown as LevelOrderLevel[],
+        nodes as unknown as LevelOrderNode[],
+        T,
+      ),
+    ).not.toThrow();
+  });
+
+  // A node whose parent is not in the list, and a node on a level that is not
+  // in the list, are both skipped: the server can see rows this client read
+  // cannot, and guessing at them is how a client ends up stricter than the
+  // server. `n7` also drives the one path where the PARENT's level is unknown.
+  it("S17: nodes with an unreachable parent or an unknown level are skipped", () => {
+    const nodes = [...NODES, nd("n8", null, "t9"), nd("n7", "n8", "t2"), nd("n6", "ghost", "t2")];
+    expect(findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3", "t4"), LEVELS, nodes, T)).toEqual(
+      [],
+    );
+  });
+
+  // S18 was written because a mutation found the hole, not because the design
+  // predicted it: keying the tally on the level alone instead of on (kind,
+  // level) passed every case above. ONE LEVEL CAN CARRY TWO DIFFERENT KINDS OF
+  // PROBLEM, and a database scrambled by a pre-0016 save is exactly where that
+  // happens -- roots stay where they were while `create_node` puts new children
+  // one rung under a parent that has since moved. Here "Mid" holds a stranded
+  // ROOT and a stranded CHILD at the same time, and both have to be said.
+  it("S18: one level can carry both a stranded root and a stranded child", () => {
+    const levels = [
+      lvl("b0", "B", 0, "Top"),
+      lvl("b1", "B", 1, "Mid"),
+      lvl("b2", "B", 2, "Deep"),
+    ];
+    const nodes = [
+      nd("x1", null, "b1"),
+      nd("x2", null, "b0"),
+      nd("x4", "x2", "b2"),
+      nd("x3", "x4", "b1"),
+    ];
+    const draft: LevelDraft[] = [
+      { id: "b0", name: "Top", isSchedulable: false },
+      { id: "b1", name: "Mid", isSchedulable: false },
+      { id: "b2", name: "Deep", isSchedulable: true },
+    ];
+    expect(findLevelOrderProblems(draft, levels, nodes, "B")).toEqual([
+      { kind: "root_below_first_level", levelId: "b1", levelName: "Mid", nodeCount: 1 },
+      { kind: "child_not_directly_below_parent", levelId: "b1", levelName: "Mid", nodeCount: 1 },
+      { kind: "child_not_directly_below_parent", levelId: "b2", levelName: "Deep", nodeCount: 1 },
+    ]);
   });
 });

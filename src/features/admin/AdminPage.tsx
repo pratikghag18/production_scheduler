@@ -138,6 +138,12 @@ export default function AdminPage() {
                     <LevelEditor
                       key={resolvedShapeId}
                       levels={data.levels}
+                      /* D92's client mirror (§19.30): the level editor cannot
+                         say whether an order would strand anything without
+                         knowing where the nodes sit. Same COMPLETE array the
+                         tree gets -- `findLevelOrderProblems` scopes by
+                         template itself, as the RPC does. */
+                      nodes={data.nodes}
                       templateId={resolvedShapeId}
                     />
                   </ShapePicker>

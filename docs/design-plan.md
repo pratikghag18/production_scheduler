@@ -2928,7 +2928,7 @@ The raise aborts the transaction, so a refused save leaves the stored order unto
 it is a trap: a database already scrambled by a pre-0016 save could never be repaired, because the
 repair is itself a move of an in-use level. Asking whether the RESULT is sound instead permits the
 repair (**L15 repairs 12 violations**), refuses the damage, and — the reason it is worth writing this
-way — **needs no change when nodes become re-levellable (§19.30)**, since a save that reorders levels
+way — **needs no change when nodes become re-levellable (P1-5k)**, since a save that reorders levels
 and fixes the nodes in one transaction simply ends in a sound state.
 
 Running the check after the write rather than predicting it from `p_levels` is deliberate too: it
@@ -2997,7 +2997,490 @@ regardless: a migration that drops and recreates a function must carry one. (001
 
 #### What is left of P1-5j
 
-The client half: `LevelEditor` should grey out the rows it cannot move and say why, so Save is not
-where the admin first finds out. Because a node's parent is always one rung up, **the in-use levels
-are always the top ones** — so the UI rule is "the top N are pinned", not a per-row computation.
-`database.types.ts` is unaffected: the signature did not change.
+The client half. **The description that stood here was wrong and is superseded by §19.30** — it said
+to grey out the rows that cannot move, which would make the client stricter than the server and
+forbid the very repair L15 proves the server allows. The correct shape is to mirror 0016's OUTCOME
+check against the draft order and disable SAVE, not the arrows. `database.types.ts` is unaffected
+either way: the signature did not change.
+
+---
+
+### 19.30 P1-5j's client half — mirror the OUTCOME, do not grey out the rows (Aug 26, 2026)
+
+The first description of this half, written into §19.29 and the roadmap the same evening, was
+**wrong**. Recording why rather than quietly replacing it, because the mistake has a general shape.
+
+It said: *grey out the levels that have nodes; since a node's parent is always one rung up, the
+in-use levels are always the top ones, so the rule is "the top N are pinned".* The derivation is
+sound for valid data — populated positions do form a prefix — and it is still a useful thing to know
+about how the screen will look.
+
+**But it is the wrong RULE, because it is not the server's rule.** 0016 does not refuse *"a move of a
+level that has nodes"*. It refuses *"an order whose result strands a node"* — phrased that way
+deliberately (§19.29) so a database already scrambled by a pre-0016 save can be repaired, which case
+**L15** proves. A client that disabled the arrows on every populated level would forbid **exactly the
+repair the server permits**: the client stricter than the server, which is the one direction this
+project's authority rule forbids and the invariant `canDropOn` exists to hold.
+
+#### What it should be
+
+- **The arrows stay enabled** (and later the drag). The admin arranges freely.
+- **A pure function mirrors 0016's check against the DRAFT order**: every root would land on a
+  position-0 level, and every child exactly one position below its parent.
+- **Save is disabled while that fails**, naming the levels that would strand nodes — so the refusal
+  is on the button that performs the write, not on the controls that compose it.
+- **A scrambled structure therefore lights up the moment the admin drags it back into a sound
+  order.** The UI leads to the repair instead of blocking it.
+
+#### Two facts to build on, both checked rather than assumed
+
+- **`LevelEditor` does NOT currently receive `nodes`** — its props are `levels` and `templateId`
+  only. `AdminPage` has the node list (it passes it to `NodeTreeEditor`), so this half threads it
+  down. Four files: the pure module, its vitest suite, `LevelEditor.tsx`, `AdminPage.tsx`.
+- The natural home for the logic is beside `applyLevelAction` in
+  `src/features/admin/lib/levelDraft.ts`, which is already pure, already `import type`-only, and
+  already the module that owns "what this draft means".
+
+#### The general lesson
+
+**When a server guard is phrased as an OUTCOME, the client mirror must be phrased as an outcome
+too.** A client that re-derives the rule as a restriction on the *action* will diverge from a server
+that judges the *result* — and it will diverge in the direction that blocks legitimate work, which is
+the expensive direction. The tell that this was heading wrong: the client rule and the server rule
+could be stated in the same sentence only by dropping the word "result".
+
+---
+
+### 19.31 P1-5j's client half — BUILT (Aug 26, 2026)
+
+Built by the design session directly, per §19.30, in four files plus one deliberate fifth (below).
+
+#### `findLevelOrderProblems`, beside `applyLevelAction` in `levelDraft.ts`
+
+It mirrors **three** server questions, not two, because all three raise `level_in_use` and all three
+are the same question — *"what does this save do to the nodes that already exist?"*:
+
+| | server | when |
+| --- | --- | --- |
+| check 7 | a level being **removed** still has nodes | before the write |
+| D92 #1 | a **root** sits on a level whose position is not 0 | after the write |
+| D92 #2 | a **child**'s level is not exactly one below its parent's | after the write |
+
+Check 7 was folded in on purpose. Its refusal is unconditional — a level of this template that is
+dropped from the draft while nodes still sit on it is *always* refused — so reporting it cannot make
+the client stricter than the server, and leaving it out would have meant the `×` button kept the
+exact defect D92's client half exists to remove: Save as the place you find out.
+
+Positions come from the **draft index**, never from `hierarchy_levels.position` — the RPC takes the
+whole ordered array and the index IS the position (D70). That single choice is what makes the repair
+case work, and case S5 pins it: a stored order that is already scrambled, dragged back into shape,
+reports nothing.
+
+`levels` is passed **complete**, not filtered by template, and the function scopes by template
+itself, exactly as the RPC does (`nl.template_id = v_template_id` / `cl.template_id =
+v_template_id` — the template of the level the node ITSELF sits on, never its parent's).
+
+#### Threading `nodes` down
+
+`LevelEditor`'s props were `levels` and `templateId`. It now also takes `nodes` — the same complete
+array `NodeTreeEditor` already gets from `AdminPage`'s one shared `fetchHierarchyTree` read. The
+editor renders no node and never will; it needs the list only to answer the outcome question.
+
+#### The message
+
+Save goes dark and a short list appears above the buttons, each line describing the RESULT rather
+than a rule about which row may move:
+
+- *2 nodes on "Site" have no parent, and this order would leave them below the first level.*
+- *6 nodes on "Department" would no longer sit directly under their parent.*
+- *Removing "Work Cell" would leave 1 node with no level to sit on.*
+
+A level is named by its **draft** name, not its stored one, so the sentence points at a row that is
+actually on screen; a blank draft name falls back to the stored one (S13, S14).
+
+#### Verification
+
+- **18 cases** (S1–S18) in `src/test/levelDraft.test.ts`, taking that file from 20 to 38.
+- **11 designed mutations, all caught. 7 unprescribed, 6 caught.** Every run reported 38 of 38
+  cases, so no result was a dead runner scored as a pass.
+- **U1 executed and proved INERT, and kept**: `fateOf` returns another template's *stored* position
+  for a level this save does not touch. Unreachable — a node and its parent always share a template
+  (`nodes_check_level_adjacency`), and the node loop is pre-filtered to this template — so no
+  fixture can drive it. It is the faithful mirror of what the RPC would read, and it costs one line.
+- **⭐ U3 found a hole in the case list, and S18 was written because of it.** Keying the tally on the
+  level alone instead of on `(kind, level)` passed all seventeen cases that existed. **One level can
+  carry two different kinds of problem at once** — a stranded root and a stranded child — and that is
+  exactly what a database scrambled by a pre-0016 save looks like, since roots stay put while
+  `create_node` puts new children one rung under a parent that has moved. S18 is that fixture.
+- **`node node_modules/typescript/lib/tsc.js -b --force` → exit 0**, and `node
+  node_modules/eslint/bin/eslint.js .` → exit 0, both run by the design session on Pratik's own
+  machine. **This is new and it changes the handover**: `tsc` and `eslint` are pure JS and run under
+  the Linux node on the device VM even though `node_modules` holds Windows-ARM binaries. `vitest`
+  does NOT (`Cannot find module '@rollup/rollup-linux-arm64-gnu'`), and npm has no network there, so
+  the vitest count remains Pratik's to run. The tsc instrument was itself checked: an injected
+  `nodes={42}` produced `TS2322` on both call sites, so the clean run was a real run.
+- **RENDERED IN HEADLESS CHROMIUM AND LOOKED AT** (`docs/mockups/p1-5j-save-gate.png`), in three
+  states — a sound order with Save live, a swapped order with Save dark, and a removal with the
+  singular copy. Two defects came out of the picture that no case could see:
+  1. **The reasons read as three separate failures.** Every line wore `.errorLine`'s weight, colour
+     and 0.625rem top margin, including the heading, so nothing on screen said the sentences belonged
+     to the line above them. Fixed with `.problemList` / `.problemItem` — **the deliberate fifth
+     file**, `LevelEditor.module.css`, all in `rem` because it is a `REM_SURFACE`.
+  2. **The singular copy said "it" twice about two different things** — *""Department" still holds 1
+     node, so removing it would leave it nowhere to sit."* Rewritten as *"Removing "Department" would
+     leave 1 node with no level to sit on."* Only rendering the one-node state showed it; the
+     plural state reads fine and is what every earlier draft had in front of it.
+
+**What is NOT mirrored, deliberately:** check 8, `schedulable_level_locked` — moving the schedulable
+flag off a level that still has scheduled work. That is a question about ASSIGNMENTS, and this screen
+holds no assignment data. It still surfaces through `describeSchedulerError` on the round trip.
+
+---
+
+### 19.32 P1-5g — BUILT by a Sonnet agent, and reviewed (Aug 26, 2026)
+
+Delivered: `treeDrag.ts` (230), `treeDrag.test.ts` (341, **43 plain `it()`**),
+`NodeTreeEditor.tsx` (511 → 659), `NodeTreeEditor.module.css` (317 → 530). Nothing else in the
+working tree moved.
+
+#### The agent found a real defect IN THE BRIEF
+
+§6.3's worked pseudocode for `describeDrop` **does not typecheck**. Written as the brief has it —
+`if (result.ok && !result.noop) {…} if (result.ok && result.noop) {…} return {…result.reason…}` —
+TypeScript's control-flow analysis does not eliminate `CanDropResult`'s `{ok:true}` arm through a
+compound condition, so the trailing `result.reason` is `TS2339`. The agent restructured to plain
+discriminant checks (`if (!result.ok)` first, then `if (result.noop)`), re-ran all 43 cases and all
+12 mutations against the refactor with identical outcomes, and reported it. The brief has been
+amended. **This is brief-writing rule 12 landing on the design session again: the reference
+implementation was executed under `--experimental-strip-types`, which STRIPS types without checking
+them, so a pure typing defect could survive a green mutation run.**
+
+#### The independent review (verification-standard rule 2 — not a re-read of the report)
+
+- **Own shim, own harness, real modules by absolute path** — not the agent's scratch copies. 43 of
+  43 pass. The first run said 4 FAIL: my shim was missing `toBeNull`, `toBeGreaterThan` and
+  `toContain`. **Instrument failure #25** — and the tell was that all four failures were
+  `expect(...).toX is not a function`, an instrument shape, never an assertion shape.
+- **7 unprescribed mutations. 6 caught.** U1 — `eligibleTargetIds` keeping `legalParentsFor`'s
+  `(root)` entry — is **executed and INERT**, and provably so rather than by argument: probing every
+  node in the fixture shows `canDropOn(x, null)` is `{ok:true,noop:true}` for all three roots and
+  `level_mismatch` for everything else, so **no node is ever offered `(root)`** and no fixture can
+  drive the filter. It is kept for type narrowing (`ParentChoice.id` is `string | null`).
+- **Malformed-argument sweep, 70 probes.** Every throw is `nodes.map`/`levels.map` inside
+  `hierarchy.ts`, reached only by a non-array — which `src/lib/api/shapes.ts`'s parser cannot
+  produce. Pre-existing, out of P1-5g's scope, not filed. `dropRailIndex(NaN) → NaN` follows N6's
+  documented "recorded, not clamped" contract and lands in a CSS custom property, where an invalid
+  value simply drops the declaration.
+- **`tsc -b --force` exit 0 and `eslint .` exit 0**, run by the design session, not quoted from the
+  report.
+- **The predicted defect did not happen.** Pointer capture is correct: `setPointerCapture` on the
+  handle, `document.elementFromPoint(...).closest("[data-node-id]")` for the hit test rather than
+  `e.target`, and `.dragChip` is `position: fixed` with `pointer-events: none` — which it must be,
+  since the chip is rendered AT the pointer and would otherwise become its own hit-test result and
+  make `hoverId` permanently null.
+
+#### Rule 2c — rendered, and the alignment measured rather than eyeballed
+
+`docs/mockups/p1-5g-review-render.png`: dragging *Cell 1* shows two eligible Lines (one dashed, the
+hovered one solid with the adopt tick), the dragged row muted, and BOTH foreign blocks — *Compact
+Site* and *Unknown structure* — muted with "different structure — not a destination". Dragging
+*Line 1* onto a Site shows the red refusal outline and the reason in the chip.
+
+**The tick's claim is that it lines up with the elbows of the children the target already has**, so
+it was measured against a target that HAS one. Dropping *Line 2* onto *Packing*, whose child *Line 1*
+is one rung down: tick left edge **89.00px**, that child's elbow stroke **89.00px** — delta
+**0.00px** at both 640 and 1280, and **0.01px** at 2560 (106.10 vs 106.09), where the rail measures
+21.50px instead of 18.00px, so the whole affordance is scaling as `rem` should.
+
+One thing the picture reports that is NOT a defect: with two cards on one page both `position: fixed`
+chips land in the first card. That is the render harness, not the component — a real screen holds one
+tree.
+
+#### One judgment call the agent made and flagged, upheld
+
+§7.1 says the pointer block must "touch no tree-specific state… nothing about levels, templates or
+`canDropOn`", while the same section's own worked example has `onPointerDown` call
+`eligibleTargetIds(row.node.id, nodes, levels)`. The agent read "tree-specific state" as *this
+component's other state* (`collapsedIds`, `popover`) and kept the block contiguous and untangled from
+those. That is the right reading — the requirement exists so P1-5i can LIFT the block, and what makes
+a lift hard is entanglement with a component's own state, not a call to a pure function. **The brief's
+wording is what is wrong, and it is now amended.**
+
+---
+
+### 19.33 P1-5k — promote / demote a node and its subtree by one rung (design, Aug 26, 2026)
+
+Raised by Pratik as *"what if we changed a level's nature on the nodes?"* The hole underneath the
+question: **`nodes.level_id` is immutable.** Nothing in sixteen migrations updates it; `move_node`
+changes only `parent_id` and `sort_order`; and with one level per rung a node's level is fully
+determined by its parent's. So a subtree built at the wrong rung can only be deleted and rebuilt.
+
+Everything below was **measured on a scratch PG16** with all sixteen migrations and `seed.sql`, as
+real rows, not reasoned.
+
+#### 1. Why this cannot be done one row at a time — measured
+
+`nodes_before_level` fires `before insert or update of parent_id, level_id on nodes`. Promoting
+*Line 1* under Contoso means it becomes a child of *Plant 1* and its level becomes *Department*.
+Either half alone is refused:
+
+- `update nodes set parent_id = <grandparent>` → `level_mismatch`, *"node … level position is not
+  exactly one below its parent's"*.
+- `update nodes set level_id = <one up>` → **the same error**.
+
+There is no order that works. The operation is atomic or it is nothing, and that is exactly what
+**0010's `app.hierarchy_migration` escape hatch (D69) was reserved for** — its own comment names "the
+Phase-3 mid-level-insertion tool". P1-5k is the first caller.
+
+#### 2. What the hatch does and does not turn off — measured
+
+With `set local app.hierarchy_migration = 'on'`, both updates land. Afterwards:
+
+- **0 adjacency violations** in the org. The tree is structurally sound.
+- **The path triggers still ran.** `nodes_before_path` / `nodes_cascade_path` fire on
+  `update of name, parent_id` and are NOT gated by the hatch, so
+  `plant_1.assembly.line_1.cell_1` became `plant_1.line_1.cell_1` for the whole subtree with nothing
+  extra to write. **The hatch suspends the LEVEL invariant only.**
+- **1 run and 1 assignment were left sitting on a node that is no longer on the schedulable level**,
+  silently, with every structural check passing.
+
+That last line is the whole feature. The tree is perfect and the schedule is broken.
+
+#### 3. The stranded-work rule — and why it is scoped, not global
+
+Refuse. Phrased as an OUTCOME per rule 7b — *"after this move, does every run and assignment in the
+moved subtree still sit on a schedulable node?"* — never as *"a node with work may not be
+promoted"*, which would be the D92 mistake a second time.
+
+**But the outcome check is scoped to the MOVED SUBTREE, and that scoping is load-bearing.** A pure
+org-wide "no stranded work anywhere" check would refuse every promote and demote in the org for as
+long as one already-stranded run existed — and P1-5k offers no way to un-strand it, so the admin
+would be locked out with no repair path. Scoped to the subtree the check still permits a move that
+*fixes* a stranding (the answer after the move is what is asked), still refuses one that *causes*
+one, and leaves the rest of the org alone. **Everything the operation could have changed is inside
+the subtree, so the scoped check and a full outcome check see the same rows.**
+
+Code: `schedulable_level_locked`, already in the closed set, already meaning exactly this — check 8
+in `save_hierarchy_levels` refuses moving the schedulable flag off a level that still has work, and
+this is the same refusal from the other side. **No thirteenth code.** Note check 8's own shape:
+runs first, and assignments consulted only when the run count is zero, because after P1-4e a direct
+assignment can exist with no run at all (D72). P1-5k must count both.
+
+#### 4. The other four refusals, each measured rather than argued
+
+| | measured | raise |
+|---|---|---|
+| promote a node whose level is position 0 | there is no row at `position - 1` in that template — 0 rows | `level_mismatch` |
+| demote whose deepest descendant has no rung below | **the `position + 1` update matched 0 ROWS and the parent change stood — leaving 1 adjacency violation, silently, because the hatch was on** | `level_mismatch` |
+| the new parent already has a child of that name | **raw `23505 nodes_org_id_parent_id_name_key` — outside the twelve-code set** | catch and re-raise `path_collision` |
+| demote onto a target inside the node's own subtree | `path <@ path` | `node_cycle` |
+
+The second row is the one to take seriously. **A demote that runs off the bottom of the template
+does not fail — it half-succeeds and corrupts the tree.** The post-write adjacency check is not
+belt-and-braces here; it is the only thing standing between this feature and a fresh D92.
+
+#### 5. Shape
+
+**Two RPCs, not one with a nullable argument.**
+
+```
+promote_node(p_node_id uuid)                       returns jsonb
+demote_node (p_node_id uuid, p_new_parent_id uuid) returns jsonb
+```
+
+Promote's new parent is **derived** — the node's grandparent, or `null` when the node's parent is a
+root and the node itself becomes one. Demote's must be **chosen**: the target is a node at the
+node's own level, in the same template, outside its own subtree. That asymmetry is the design, and
+one function with `p_new_parent_id uuid default null` invites exactly the bug of demoting with no
+target. It also walks into a recorded trap — **generated types cannot express a nullable RPC
+argument**, so a shared signature would need a cast at every call site (§ the `createNode` /
+`moveNode` casts). Two signatures, both non-nullable, need none.
+
+#### 6. Body, in order — and the one ordering that matters
+
+1. Admin check, org scope, resolve the node. (D83: a SECURITY DEFINER function taking a node id must
+   scope by `app_current_org()` itself.)
+2. **Capture the subtree's node ids into an array FIRST, before any write.** The re-parent rewrites
+   every descendant's `path`, so a `path <@ …` predicate evaluated afterwards is reading a different
+   tree than the one the caller named. Capturing ids up front makes the two writes order-independent.
+3. Compute the destination level (`position ± 1`, same `template_id`) for every distinct level in the
+   subtree. Refuse if any is missing.
+4. `set local app.hierarchy_migration = 'on'`.
+5. Update `parent_id` on the one node; update `level_id` across the captured ids.
+6. **`set local app.hierarchy_migration = 'off'` — inside the function, before the checks.** The
+   setting is transaction-scoped, and nothing later in the transaction should run unguarded.
+7. Post-write outcome checks, reading real rows: 0016's two adjacency queries, then the scoped
+   schedulable-work query. Each raises; the raise aborts the transaction and nothing persists.
+8. Return the moved subtree.
+
+#### 7. ⚠️ OPEN — the escape hatch is not privileged, and nobody had checked
+
+Measured: `set local role authenticated; set local app.hierarchy_migration = 'on';` **succeeds.**
+`app.*` is a plain GUC and any role can set it, so the level-adjacency invariant holds only because
+no path lets a client run arbitrary SQL — PostgREST executes each RPC in its own transaction and
+offers no way to inject a `SET`. **Not reachable today, and it has been true since 0010.** But
+"unreachable because of something outside the database" is an unexamined claim about safety in a
+multi-tenant product (rule 5), and P1-5k is the first feature that makes the hatch load-bearing
+rather than theoretical. Worth deciding before the brief: leave it, or gate it on
+`current_user = <owner>` / a SECURITY DEFINER context. **Not fixed here — filed, and named as
+Pratik's call.**
+
+#### 8. What P1-5k does NOT do
+
+- It does not fix D92. Adjacency is a chain, so re-levelling is bulk or nothing; a level reorder
+  still has to be refused when it strands nodes.
+- It does not move work. A promote that would strand a run is refused, not repaired — the admin
+  moves the work first. Repair is a later feature and 0016's outcome phrasing already survives it.
+- It does not move a node between templates. Up and down within one shape only.
+- **It DOES unlock inserting a level mid-hierarchy** — the case §19.30's S7/S8 currently refuse:
+  insert the level, then promote or demote the subtrees that need to straddle it.
+
+---
+
+### 19.34 D94 — the first thing a real user tried was the one gesture P1-5g excluded (Aug 26, 2026)
+
+Pratik, minutes after P1-5g landed: *"I tried moving cell 3 between cell 1 and cell 2, but it turned
+red saying work cell can only sit under a line."*
+
+**The drag is doing exactly what the brief told it to do. The brief is wrong.**
+
+Cell 1, Cell 2 and Cell 3 are all children of Line 1 (`seed.sql`), so that gesture is a **sibling
+reorder**. P1-5g §5.1 decided *"drop means RE-PARENT, never re-order"* and §5.2 excluded the
+insertion caret. So the pointer resolved to a Work Cell row, `canDropOn(Cell 3, Cell 2)` returned
+`level_mismatch`, and `describeDrop` produced a correct explanation **of an operation he was not
+attempting**. Reproduced on the scratch DB as a real `authenticated` admin:
+`move_node(Cell 3, Cell 2)` → `level_mismatch`, *"the new parent is not exactly one level above the
+node's existing level"*.
+
+#### Why this got excluded, and why that reason had already evaporated
+
+P1-5g's first draft justified the exclusion as *"`move_node` cannot reorder siblings — it has no
+argument for one."* That was false, and it was caught before the brief shipped: `move_node` takes
+`p_sort_order int default null` and writes `sort_order = coalesce(p_sort_order, sort_order)`
+(migration 0010, its only definition). The rationale was corrected to *"deliberately out of scope"*
+and **the scope decision itself was never re-examined once its premise died.** That is the actual
+failure here, and it is a new shape: a conclusion outliving the argument that produced it. Brief-
+writing rule 12 caught the false claim; nothing went back and asked whether the decision it had been
+supporting still stood.
+
+#### What the server can already do — measured, not read
+
+As a real admin, in one transaction:
+
+```
+move_node(Cell 1, Line 1, 10)
+move_node(Cell 3, Line 1, 20)   ->  Cell 1, Cell 3, Cell 2
+move_node(Cell 2, Line 1, 30)
+```
+
+and **every `path` was untouched**, which is right: a reorder moves nothing in the tree. So the
+capability has been there since 0010 and only the client declines to use it.
+
+#### But one `move_node` call cannot express this reorder — also measured
+
+**`seed.sql` sets no `sort_order` at all, so every sibling in the database sits at 0.** There is no
+integer between 0 and 0. Measured cross-parent as well: `move_node(Cell 3, Line 2, 1)` against
+incumbents Cell 4 and Cell 5 — both at `sort_order` 0 — lands Cell 3 **after both of them**, not
+between them.
+
+**So this is not client-only work.** Placing a node at a position requires renumbering the
+destination's children, which is a multi-row write and must be atomic. Filed as **P1-5l**, and it
+needs migration 0017.
+
+#### P1-5l, proposed
+
+**One RPC, not two.** `place_node(p_node_id uuid, p_new_parent_id uuid, p_index int)`:
+
+- re-parents when the parent changes, reusing `move_node`'s existing guards (cycle, level adjacency,
+  path collision, org scope) rather than restating them;
+- then renumbers the destination's children `0, 1, 2, …` so the node lands at `p_index`;
+- atomic, one round trip, one gesture.
+
+`move_node` stays exactly as it is — it is what the "Move to…" menu calls, and that path re-parents
+without caring about position.
+
+**On the screen**: the top and bottom bands of a row mean *place before / after this row, as a
+sibling of it*; the middle band keeps today's *adopt into this row*. **An insertion caret IS correct
+here** — unlike P1-5g's adopt tick, a between-drop genuinely determines the resulting position, which
+is precisely the reason §5.1 gave for refusing a caret then. Legality for a between-drop is
+`canDropOn(dragged, referenceRow.parentId)` being `ok` **or `noop`** — the noop case is the pure
+reorder, and treating noop as illegal here is the mistake to avoid.
+
+**And the refusal message needs a same-level branch regardless.** When the dragged node and the
+hovered row are on the SAME level, "A Work Cell can only sit under a Line" answers a question the
+admin did not ask. Until P1-5l ships it should read as what it is — an attempt to reorder that is not
+supported yet — not as a lecture about levels.
+
+#### Queue
+
+**P1-5l jumps ahead of the P1-5k brief.** P1-5k re-levels a subtree that was built wrong; P1-5l fixes
+a gesture every admin will try in their first minute, and it was found by using the product rather
+than by reading it.
+
+---
+
+### 19.35 D95 — the whole row is the drag source (for a mouse), and levels get their drag WITH P1-5l (Aug 26, 2026)
+
+Both from Pratik, immediately after D94: *"Can't we make the whole row draggable instead of just one
+point?"* and *"When do levels get their own dragging?"*
+
+#### D95a — yes for mouse, no for touch, and that split IS the design
+
+A `⠿`-only hit target is a 1.375rem square in a row several inches wide. Widening it is right. But
+the handle is not arbitrary, and the reason is already in the stylesheet:
+
+```css
+.dragHandle {
+  cursor: grab;
+  /* A touch drag must move the node, not scroll the page. */
+  touch-action: none;
+}
+```
+
+`touch-action: none` is what makes a touch drag move the node instead of scrolling. **Put that on the
+whole row and there is no longer anywhere on the tree a finger can scroll from** — and the tree is
+most of the admin page's area. (Checked: the only `overflow-y: auto` in this component is on
+`.moveList`, the "Move to…" popover, so the scroller a touch drag would be fighting is the PAGE.)
+
+So:
+
+- **Mouse and pen: the whole `<li>` is the drag source.** `cursor: grab` moves onto `.row`.
+- **Touch: the handle stays the only drag source**, keeping its `touch-action: none` while the rest
+  of the row stays scrollable. `e.pointerType` is on the event already; this is a branch, not a
+  second implementation.
+- **`⠿` stays** — no longer the only hit area, but still the thing that tells you rows are draggable
+  at all. Removing it would make the affordance invisible and undiscoverable on every device.
+- **`closest("button")` guards the disclosure and `⋮`** so a pointerdown on either is a click, never
+  a drag.
+
+**And this costs the thing P1-5g was proud of.** §7.1 says *"a pointerdown on the handle is
+unambiguously a drag start and no threshold logic exists to get wrong."* On a whole row that stops
+being true: without a movement threshold every click on a row becomes a zero-length drag. So P1-5l
+gains a **drag threshold predicate — ~4px, pure, in the shared module, mutation-tested**. Trading a
+"nothing to get wrong" for a small testable thing is the right trade, but it must be made on purpose
+and the brief has to say so rather than quietly inheriting the old sentence.
+
+#### D95b — P1-5i ships WITH P1-5l, not after it
+
+The honest state of play: Pratik asked for level dragging two sessions ago (*"this should also be
+able to drag, don't you think?"*) and got **D92, D93, migration 0016 and a Save gate** instead. Every
+one of those was worth having and none of them was the drag.
+
+Merging them is not a favour, it is the cheaper build:
+
+- **The level list is the EASY case.** A flat list, no re-parenting, no illegal targets, no cross-
+  structure refusal — and **no server work at all**: `save_hierarchy_levels` already takes the whole
+  ordered array with the index AS the position (D70), so a level drag is a pure draft edit. No
+  migration, no `database.types.ts` regeneration. One new `{ kind: "moveTo", from, to }` beside
+  `moveUp`/`moveDown` in `levelDraft.ts`.
+- **P1-5j already built its safety net.** `findLevelOrderProblems` runs over the draft order, so a
+  drag that produces an order stranding nodes already disables Save with the reason. The dangerous
+  half of level dragging — the thing that made D92 — shipped this session.
+- **⭐ And the sequencing argument is the real one: P1-5l CHANGES the pointer block** (threshold, and
+  row bands for drop-between). Lifting the block into `LevelEditor` first and then changing it would
+  mean editing two copies — **exactly what P1-5g's "keep the pointer mechanics in one liftable
+  block" requirement (§7.1) exists to prevent.** Build it once, in its final shape, and use it in
+  both places in the same build.
+
+**Revised queue: P1-5l + P1-5i as one build → P1-5k's brief → P1-5h.** Nodes and levels both get
+drag-to-reorder, with one set of pointer mechanics, one insertion caret, and one threshold.

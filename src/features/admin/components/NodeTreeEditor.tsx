@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/lib/api";
 import {
   useCreateNode,
@@ -8,6 +8,13 @@ import {
 } from "../hooks/useHierarchyMutations";
 import { buildTreeRows, groupRowsByShape, legalParentsFor } from "../lib/treeView";
 import type { ShapeSummary } from "../lib/shapePicker";
+import {
+  describeDrop,
+  dropRailIndex,
+  eligibleTargetIds,
+  groupDropState,
+  type DropVerdict,
+} from "../lib/treeDrag";
 import { AdminPopover } from "./AdminPopover";
 import styles from "./NodeTreeEditor.module.css";
 
@@ -67,6 +74,82 @@ export function NodeTreeEditor({
   const moveMutation = useMoveNode();
   const deleteMutation = useDeleteNode();
 
+  // ---------------------------------------------------------------------------
+  // Drag pointer mechanics (brief P1-5g §7.1) -- KEPT SELF-CONTAINED. This
+  // region owns "a drag started on element X / the pointer is now over
+  // element Y / it was dropped / it was cancelled" and touches none of this
+  // component's OTHER state (collapse, popovers). P1-5i will put the same
+  // pointer mechanics into `LevelEditor` to drag the level list; keeping
+  // this physically isolated is what keeps that future lift mechanical
+  // instead of archaeological. No shared hook (`useDragHandle` or similar)
+  // is extracted in this brief (§11) -- LevelEditor is two other pieces of
+  // work away, and a hook built for a caller that far off is speculative.
+  // ---------------------------------------------------------------------------
+  type DragState = {
+    draggedId: string;
+    pointerId: number;
+    /** computed ONCE at drag start -- legalParentsFor is O(n) in canDropOn calls */
+    eligible: ReadonlySet<string>;
+    hoverId: string | null;
+    verdict: DropVerdict | null;
+    pointer: { x: number; y: number };
+  };
+
+  const [drag, setDrag] = useState<DragState | null>(null);
+
+  function handleDragPointerDown(nodeId: string, e: React.PointerEvent<HTMLButtonElement>) {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDrag({
+      draggedId: nodeId,
+      pointerId: e.pointerId,
+      eligible: eligibleTargetIds(nodeId, nodes, levels),
+      hoverId: null,
+      verdict: null,
+      pointer: { x: e.clientX, y: e.clientY },
+    });
+  }
+
+  function handleDragPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
+    setDrag((prev) => {
+      if (!prev) return prev;
+      // `elementFromPoint`, not `e.target` -- `setPointerCapture` routes
+      // every subsequent event to the handle, so `e.target` is always the
+      // handle and a naive implementation reports one unchanging hover row.
+      const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-node-id]");
+      const hoverId = hit ? hit.getAttribute("data-node-id") : null;
+      if (hoverId === prev.hoverId) {
+        return { ...prev, pointer: { x: e.clientX, y: e.clientY } };
+      }
+      const verdict = hoverId ? describeDrop(prev.draggedId, hoverId, nodes, levels, shapeSummaries) : null;
+      return { ...prev, pointer: { x: e.clientX, y: e.clientY }, hoverId, verdict };
+    });
+  }
+
+  function handleDragPointerUp() {
+    setDrag((prev) => {
+      // A `noop` verdict commits nothing -- dropping a node on the parent it
+      // already has is not an error and not a write.
+      if (prev && prev.verdict?.kind === "ok" && prev.hoverId) {
+        moveMutation.mutate({ nodeId: prev.draggedId, newParentId: prev.hoverId });
+      }
+      return null;
+    });
+  }
+
+  function handleDragPointerCancel() {
+    setDrag(null);
+  }
+
+  useEffect(() => {
+    if (!drag) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setDrag(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drag]);
+
   const rows = buildTreeRows(nodes, levels, collapsedIds);
   // `shapeSummaries` is structurally a `HierarchyTemplateRef[]` (id + name),
   // so the picker's own model is reused rather than threading a second list
@@ -75,6 +158,35 @@ export function NodeTreeEditor({
   const groups = groupRowsByShape(rows, levels, shapeSummaries);
   const showShapeHeadings = groups.length > 1;
   const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  // Drag chip presentation (§7.1). `flip` reads `window.innerWidth`, which is
+  // only ever consulted while a drag is live, so it is safe outside an effect.
+  const draggedName = drag ? (byId.get(drag.draggedId)?.name ?? "This node") : "";
+  const verdictBlocked = drag?.verdict?.kind === "blocked";
+  const flip = drag ? drag.pointer.x > window.innerWidth * 0.72 : false;
+
+  // Row classes (§7.1 table). Conditions accumulate rather than exclude: an
+  // eligible row that is also the hovered, legal drop target carries BOTH
+  // `.eligible` and `.dropOk` -- the stylesheet relies on `.dropOk` coming
+  // after `.eligible` in source order to suppress the dashed hint on the
+  // chosen target.
+  function rowClassName(nodeId: string): string {
+    if (!drag) return styles.row;
+    const classes = [styles.row];
+    if (nodeId === drag.draggedId) classes.push(styles.rowDragging);
+    if (drag.eligible.has(nodeId)) classes.push(styles.eligible);
+    if (drag.hoverId === nodeId) {
+      if (drag.verdict?.kind === "ok") classes.push(styles.dropOk, styles.dropTick);
+      else if (drag.verdict?.kind === "blocked") classes.push(styles.dropBlocked);
+      // "noop" gets no row treatment at all (§7.1) -- not styled here.
+    }
+    return classes.join(" ");
+  }
+
+  function rowStyle(row: { node: { id: string }; depth: number }): React.CSSProperties | undefined {
+    if (!drag || drag.hoverId !== row.node.id || drag.verdict?.kind !== "ok") return undefined;
+    return { "--drop-rails": dropRailIndex(row.depth) } as React.CSSProperties;
+  }
 
   function toggleCollapsed(nodeId: string) {
     setCollapsedIds((prev) => {
@@ -95,7 +207,7 @@ export function NodeTreeEditor({
   }
 
   return (
-    <section className={styles.card}>
+    <section className={drag ? `${styles.card} ${styles.dragging}` : styles.card}>
       <div className={styles.header}>
         <h2 className={styles.h2}>Nodes</h2>
         <button
@@ -193,19 +305,28 @@ export function NodeTreeEditor({
         The heading appears only when the org holds more than one structure: for
         the single-plant case it would be a label on the only thing there is.
       */}
-      {groups.map((group) => (
-        <div key={group.templateId ?? "__unresolved__"} className={styles.group}>
+      {groups.map((group) => {
+        const isForeignGroup =
+          drag !== null && groupDropState(drag.draggedId, group.templateId, nodes, levels) === "foreign";
+        return (
+        <div
+          key={group.templateId ?? "__unresolved__"}
+          className={isForeignGroup ? `${styles.group} ${styles.groupForeign}` : styles.group}
+        >
           {showShapeHeadings && (
             <div className={styles.shapeHead}>
               <b className={styles.shapeName}>{group.templateName ?? "Unknown structure"}</b>
               {group.levelPath.length > 0 && (
                 <span className={styles.shapePath}>{group.levelPath.join(" › ")}</span>
               )}
+              {isForeignGroup && (
+                <span className={styles.foreignNote}>different structure — not a destination</span>
+              )}
             </div>
           )}
           <ul className={styles.tree}>
             {group.rows.map((row) => (
-              <li key={row.node.id} className={styles.row}>
+              <li key={row.node.id} data-node-id={row.node.id} className={rowClassName(row.node.id)} style={rowStyle(row)}>
                 {/*
                   Tree guides, drawn from `row.guides` (D90). One fixed-width
                   rail per ancestor depth: it carries a vertical line when that
@@ -257,6 +378,18 @@ export function NodeTreeEditor({
 
                 <button
                   type="button"
+                  className={styles.dragHandle}
+                  aria-label={`Drag ${row.node.name}`}
+                  onPointerDown={(e) => handleDragPointerDown(row.node.id, e)}
+                  onPointerMove={handleDragPointerMove}
+                  onPointerUp={handleDragPointerUp}
+                  onPointerCancel={handleDragPointerCancel}
+                >
+                  ⠿
+                </button>
+
+                <button
+                  type="button"
                   className={styles.menuBtn}
                   aria-label={`Actions for ${row.node.name}`}
                   onClick={(e) => openMenu(row.node.id, e)}
@@ -267,7 +400,22 @@ export function NodeTreeEditor({
             ))}
           </ul>
         </div>
-      ))}
+        );
+      })}
+
+      {drag && (
+        <div
+          className={`${styles.dragChip}${verdictBlocked ? " " + styles.dragChipBlocked : ""}${flip ? " " + styles.dragChipFlip : ""}`}
+          style={{ left: drag.pointer.x, top: drag.pointer.y }}
+          aria-hidden="true"
+        >
+          <span className={styles.dragChipName}>{draggedName}</span>
+          {drag.verdict && <span className={styles.dragChipMsg}>{drag.verdict.message}</span>}
+        </div>
+      )}
+      <p className={styles.srOnly} aria-live="polite">
+        {drag?.verdict?.message ?? ""}
+      </p>
 
       {popover && (
         <NodePopoverContent

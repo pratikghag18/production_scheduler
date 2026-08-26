@@ -127,6 +127,25 @@
   color: var(--crit);
 }
 
+/* D92's refusal (design plan §19.30) has to read as ONE explanation, not as
+   three unrelated errors. Found by RENDERING it (verification-standard rule
+   2c): three sentences all wearing `.errorLine`'s weight, colour and 0.625rem
+   top margin look like three separate failures with no relationship to the
+   line above them. The heading keeps `.errorLine`; the reasons sit under it as
+   a tighter bulleted list. Everything in `rem` — this file is a REM_SURFACE
+   and `scaleAudit` walks the directory. */
+.problemList {
+  margin: 0.25rem 0 0;
+  padding: 0 0 0 1rem;
+  list-style: disc;
+}
+
+.problemItem {
+  margin: 0.1875rem 0 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

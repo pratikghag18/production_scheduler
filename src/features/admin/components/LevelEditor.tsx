@@ -1,8 +1,13 @@
 import { useState } from "react";
-import { describeSchedulerError, type HierarchyLevel } from "@/lib/api";
+import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/lib/api";
 import { useSaveHierarchyLevels } from "../hooks/useHierarchyMutations";
-import { applyLevelAction, invalidNameIndices, MAX_LEVELS } from "../lib/levelDraft";
-import type { LevelDraft } from "../lib/levelDraft";
+import {
+  applyLevelAction,
+  findLevelOrderProblems,
+  invalidNameIndices,
+  MAX_LEVELS,
+} from "../lib/levelDraft";
+import type { LevelDraft, LevelOrderProblem } from "../lib/levelDraft";
 import { validateLevelDraft } from "../lib/hierarchy";
 import { levelsForShape } from "../lib/shapePicker";
 import styles from "./LevelEditor.module.css";
@@ -35,6 +40,30 @@ const PREVIEW_REASON_TEXT: Record<string, string> = {
 };
 
 /**
+ * D92's refusal, said in the editor instead of on the round trip (§19.30).
+ * Every sentence describes the RESULT of saving this order, never a rule about
+ * which row may move -- the arrows stay live precisely so a structure already
+ * scrambled by a pre-0016 save can be dragged back into shape.
+ */
+function orderProblemText(problem: LevelOrderProblem): string {
+  const many = problem.nodeCount !== 1;
+  const count = many ? `${problem.nodeCount} nodes` : "1 node";
+  const them = many ? "them" : "it";
+  switch (problem.kind) {
+    case "level_removed_with_nodes":
+      return `Removing \u201C${problem.levelName}\u201D would leave ${count} with no level to sit on.`;
+    case "root_below_first_level":
+      return `${count} on \u201C${problem.levelName}\u201D ${many ? "have" : "has"} no parent, and this order would leave ${them} below the first level.`;
+    case "child_not_directly_below_parent":
+      return `${count} on \u201C${problem.levelName}\u201D would no longer sit directly under ${many ? "their" : "its"} parent.`;
+    default: {
+      const _exhaustive: never = problem.kind;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
  * D87 (brief P1-5f §7.4): which shape this editor edits is now the SHAPE
  * PICKER's decision, not something this component infers. `templateId` is
  * a required prop -- `null` means no shape is selected yet (an org with no
@@ -45,9 +74,19 @@ const PREVIEW_REASON_TEXT: Record<string, string> = {
  */
 export function LevelEditor({
   levels,
+  nodes,
   templateId,
 }: {
   levels: HierarchyLevel[];
+  /**
+   * D92's client mirror needs to know where the existing nodes sit (§19.30).
+   * This editor has no other use for them -- it does not render a single node --
+   * but the question "would this order strand anything" cannot be answered
+   * without them, and `AdminPage` already holds the list for the tree editor.
+   * The COMPLETE org list, not filtered by template: `findLevelOrderProblems`
+   * does its own template scoping, exactly as the RPC does.
+   */
+  nodes: BoardNode[];
   templateId: string | null;
 }) {
   const [draft, setDraft] = useState<readonly LevelDraft[]>(() =>
@@ -61,6 +100,9 @@ export function LevelEditor({
   // shape as `createNode`/`moveNode`'s documented nullability casts.
   const validation = validateLevelDraft(draft as LevelDraft[]);
   const invalidIndices = new Set(invalidNameIndices(draft));
+  // Mirrors what `save_hierarchy_levels` would say about this exact order
+  // (migration 0016 + its older check 7). NOT a rule about which rows may move.
+  const orderProblems = findLevelOrderProblems(draft, levels, nodes, templateId);
 
   function handleCancel() {
     setDraft(toDraft(levelsForShape(levels, templateId)));
@@ -169,6 +211,20 @@ export function LevelEditor({
           {PREVIEW_REASON_TEXT[validation.reason] ?? "This level list isn't valid yet."}
         </p>
       )}
+      {orderProblems.length > 0 && (
+        <div role="alert">
+          <p className={styles.errorLine}>
+            This order doesn't fit the structure that already exists:
+          </p>
+          <ul className={styles.problemList}>
+            {orderProblems.map((problem) => (
+              <li className={styles.problemItem} key={`${problem.kind}:${problem.levelId}`}>
+                {orderProblemText(problem)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {saveMutation.isError && (
         <p className={styles.errorLine} role="alert">
           {describeSchedulerError(saveMutation.error)}
@@ -187,7 +243,12 @@ export function LevelEditor({
           type="button"
           className={styles.saveBtn}
           onClick={handleSave}
-          disabled={!validation.ok || templateId === null || saveMutation.isPending}
+          disabled={
+            !validation.ok ||
+            templateId === null ||
+            orderProblems.length > 0 ||
+            saveMutation.isPending
+          }
         >
           {saveMutation.isPending ? "Saving…" : "Save"}
         </button>
