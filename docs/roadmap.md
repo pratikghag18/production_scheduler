@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-27, session 6 (**MIGRATION 0023 BUILT — the shared lists get an owner, and a product gets a colour of its own.** D101/D102 answered §19.57's two blockers, so this is the migration that gated all four SOON admin sections. `site_node_id` on operators/products/skills/shift_templates, NULL = company-wide; 21 write policies across SEVEN tables; `products.color_token`; the D93 hole on `resolve_shift_template` closed in passing. ⭐ **THE SCOPING DECISION THAT DECIDES EVERYTHING ELSE: 0023 changes WHO MAY EDIT and leaves every `_select` alone** — `check_eligibility` is SECURITY INVOKER, so a read narrowing would have become a silent write refusal one indirection along. **`verify-db.sh` exit 0, 23 migrations, 315 named cases** (271 before), 38 new + 6 upgrade. **28 mutations, 24 caught, 4 executed-and-inert with the fact each depends on pinned by a case.** ⭐⭐ **FOUR DEFECTS FOUND BEFORE IT SHIPPED AND NONE BY READING** — a root trigger answering the permission question, a palette one token wider than the stylesheet (caught by the upgrade test I had argued was unnecessary), **a cross-tenant leak in the colour picker** (found by an adversarial reviewer), and a nullable `color_token` a site admin could blank. ⚠️ **NEEDS `npm run db:reset && npm run db:types`.** Test count unchanged at 713 — nothing in `src/` reads the new columns yet. See §19.60.)
+**Last updated:** 2026-08-27, session 7 (**P1-5k'S CLIENT HALF IS BUILT — AND BUILDING IT FOUND TWO THINGS THE SERVER HAD BEEN SAYING WRONG SINCE 0017.** A promote or demote into a parent that already has that name raised a **raw `23505` with an empty DETAIL** — outside the twelve-code contract, and §19.33 §4 had measured it and written down "catch and re-raise `path_collision`" a day before 0017 shipped without it. And the stranded-work refusal — *the whole point of the feature* — carried `{reason, count}` where the client parser accepts only `{blocking_rows, level_id}`, so it decoded as `Unknown` and would have rendered as "Something went wrong." **Migration 0024** fixes both; it introduces no thirteenth code and no rule that was not already on paper. `verify-db.sh` exit 0, **24 migrations, 332 named cases** (315 before), 17 new; **11 mutations, 7 caught, 4 executed-and-inert with the fact each depends on pinned by a case.** Client: `relevel.ts` (**36 cases, 15 mutations, all caught**), two RPC wrappers, two hooks, and the `⋮` menu's two new entries — which **name the destination rung in the org's own words** ("Make this a Department") rather than saying "promote". ⚠️ **NEEDS `npm run db:reset`** (not `db:types` — 0024 adds no signature). Acceptance moves **713 → 751 in 20 files**. See §19.61.)
 
 ---
 
@@ -97,13 +97,14 @@
 >
 > **STATE.** **Verify the tip from `.git/refs/heads/Development`, never from this paragraph** — it said
 > `fc3367b` once and was already two commits stale the next time it was read. P1-6e is committed as
-> `261ad5d`; **D100 (the one shared drag surface) and migration 0023 are the session-6 commit that
-> follows it.** **23 migrations. 315 database checks** (271 before 0023). **Acceptance is 713 tests in
-> 19 files** — nothing in `src/` reads 0023's new columns yet, so the count did not move. If your count
+> `261ad5d`, D100 as `74bd689` and **migration 0023 as `0cbe023`; migration 0024 + P1-5k's client
+> half follow those.**
+> **24 migrations. 332 database checks** (271 two sessions ago). **Acceptance is 751 tests in 20 files**
+> — 713 plus 36 in group K of the new `relevel.test.ts` and 2 in `errors.test.ts`. If your count
 > differs, a test file did not load, which is how a broken suite once looked green. ⚠️ **`npm run
-> db:reset && npm run db:types` is owed**: 0023 is written and verified against a scratch database but
-> is not applied to the local one, and `app_profile_is_company_admin` (0022) and `products.color_token`
-> (0023) are both absent from `src/lib/database.types.ts`.
+> db:reset` is owed**: 0024 replaces `app_relevel_subtree` and is applied nowhere. **`db:types` is NOT
+> owed for it** — 0024 adds no signature, and `database.types.ts` was regenerated for 0023 on Aug 27
+> (it carries `color_token` and `app_profile_is_company_admin`).
 >
 > **HOW WE WORK — these are not preferences, each one was bought with a defect:**
 >
@@ -136,12 +137,10 @@
 > - **Explain in plain language in the chat, not jargon — draw it if that is clearer.** Keep the
 >   gameplan artifact updated; do not stop until you need me to do something or want my opinion.
 >
-> **NEXT, IN ORDER (Aug 27 session 6 — 0023 is built, so all four SOON sections are unblocked):**
+> **NEXT, IN ORDER (Aug 27 session 7 — 0023 and 0024 are built, so the four SOON sections are
+> unblocked and P1-5k is closed end to end):**
 >
-> 1. **P1-5k client half — promote/demote on screen.** SQL applied and tested since migration 0017.
->    Read §19.33 §4 first: a demote that runs off the bottom of the template half-succeeds and leaves
->    the tree corrupt. Single-file work; do it before anything fans out.
-> 2. **The pre-seat commit — one small commit that edits every SHARED file exactly once (§19.57).**
+> 1. **The pre-seat commit — one small commit that edits every SHARED file exactly once (§19.57).**
 >    All four sections turned on in `AdminPage.tsx`'s `SECTIONS` with empty placeholder panels; four
 >    empty stylesheets listed in `REM_SURFACES` **and** in R10's hardcoded copy of that list; four
 >    empty `src/lib/api/*.ts` modules exported from `index.ts`. **This is what makes parallel lanes
@@ -149,18 +148,18 @@
 >    column naming these same files, and without the pre-seat every lane would edit them and collide.
 >    **Every new drag-capable surface `composes:` from `dragSurface.module.css` (D100)** rather than
 >    starting a sixth copy — the drag audit (group G) fails the suite if it does not.
-> 3. **Shifts / Operators / Products — three build lanes, genuinely in parallel, after 1–2.** No
+> 2. **Shifts / Operators / Products — three build lanes, genuinely in parallel, after 1.** No
 >    decisions outstanding: 0023 gave each list an owner (`site_node_id`, NULL = company-wide) and
 >    gave products a palette token, so each lane owns only files it creates. **Two waves per lane:
 >    survey (read-only) → build → adversarial review by a different agent** — the reviewer found the
 >    cross-tenant leak in 0023's colour picker that reading had not, so the review wave is not
 >    optional. Never trust a lane's report of its own work; run the whole suite yourself after each.
-> 4. **P1-5h CSV import — NOT a fourth parallel lane yet. ⚠️ TWO missing premises.** `nodes` has no
+> 3. **P1-5h CSV import — NOT a fourth parallel lane yet. ⚠️ TWO missing premises.** `nodes` has no
 >    `external_id` column, and `products.external_id` exists with **no unique constraint**, so neither
 >    half can upsert. Also: `create_node` has cloned the hierarchy shape on every root create since
 >    0020, so a multi-site import would silently multiply `hierarchy_templates`, and `docs/api.md`
 >    §3.5 still documents the pre-0020 behaviour. A small migration has to land first.
-> 5. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
+> 4. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
 >    `import.meta.env.DEV`-gated switcher, so **until it lands Pratik is the only person who can log
 >    in** and nothing built in stages 05–11 is reachable by anyone else. The sign-in page is small and
 >    browser-only; invitations need a privileged server-side piece this project does not have.
@@ -172,9 +171,8 @@
 > bullet); and **neither drag has had a touch acceptance pass** — P1-6e gave the level list a `⠿` handle
 > with `touch-action: none` as a consequence of matching the tree's, and the tree has had one since
 > D95a, so what is actually outstanding is a finger on both, which nobody has run. ⚠️ **`npm run
-> db:reset && npm run db:types` is owed** (0023 unapplied; `app_profile_is_company_admin` and
-> `products.color_token` both missing from the generated types). ⚠️ **A site admin can edit no
-> operator, product or shift pattern** — 0023 closes this, but only once it is applied. ⚠️
+> db:reset` is owed** (0024 replaces `app_relevel_subtree` and is applied nowhere; `db:types` is not
+> owed — it was regenerated for 0023). ⚠️
 > **`dev_demo.sql` gives Plant 2 no rows of its own**, so a site admin signing in after 0023 sees the
 > new permission do nothing; a couple of Plant-2-owned rows there would make it visible.
 >
@@ -205,7 +203,7 @@ That is all it needs. Project memory carries every decision, the workflow, the e
 | App scaffold | repo root (`src/`, `supabase/`, `.github/`) | v1 (code complete, build/CI unvalidated) |
 | Folder conventions | `docs/conventions.md` | v1 |
 | Schema reference | `docs/schema.md` | regenerated by `scripts/verify-db.sh` on every run — **current as of migration 0023 (Aug 27)**: `site_node_id` on `operators`/`products`/`skills`/`shift_templates` and `products.color_token` now show in their `\d+` |
-| DB migrations, seed, SQL tests | `supabase/migrations/` (**23**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**17 numbered + 3 upgrade**, **315 named cases**, `verify-db.sh` exit 0) · `src/test/` (**19 test files, 713 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
+| DB migrations, seed, SQL tests | `supabase/migrations/` (**24**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**18 numbered + 3 upgrade**, **332 named cases**, `verify-db.sh` exit 0) · `src/test/` (**20 test files, 751 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27); migration `20260827000024_relevel_contract.sql` + `76_relevel_contract_test.sql` (**17 cases**) + `mutations/0024.json` (**11 mutations, 7 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
 | Database API contract | `docs/api.md` | v1 (P1-3a, Aug 22) — DB half only; HTTP-status mapping unverified (no Docker/PostgREST here); §3.5 (five hierarchy-admin RPCs) and six new error codes added (P1-5a, Aug 25) |
 | Generated DB types | `src/lib/database.types.ts` | **regenerated from the live local DB Aug 25 — 17 tables, 13 RPCs** (was Aug 22 / 8 RPCs, which cost P1-5b seven `tsc` errors). Regenerate with `supabase gen types typescript --local` in WSL whenever a migration adds or changes a function: **a migration and this file are ONE change, not two.** Note it can never express a nullable RPC argument — Postgres parameters carry no nullability, so `create_node`'s `p_parent_id` and `move_node`'s `p_new_parent_id` are cast at their call sites (see the note in `src/lib/api/hierarchy.ts`). |
 | TypeScript API client guide | `docs/api-client.md` | v1 (P1-3b, Aug 22) — code delivered; no npm in delivery container, acceptance pending user run. **"Hierarchy admin" section added (P1-5b, Aug 25).** |
@@ -283,6 +281,11 @@ Briefs build in the cloud container and deliver to this repo via a tarball throu
 
 ## State as of Aug 27, 2026 — read this before trusting the table above
 
+- **✅ P1-5k'S CLIENT HALF IS BUILT (§19.61)** — the `⋮` menu can now change a node's rung, and its whole subtree comes with it. `src/features/admin/lib/relevel.ts` (pure, **36 cases in group K, 15 mutations, all 15 caught**), `promoteNode`/`demoteNode` wrappers, `usePromoteNode`/`useDemoteNode`, two menu entries and a target picker. **The entries name the destination rung in the org's own words** — "Make this a Department", not "Promote" (D90: the screen speaks the customer's vocabulary). Acceptance **713 → 751 in 20 files**.
+- **⭐⭐ AND BUILDING THE SCREEN FOUND TWO SERVER DEFECTS THAT A SQL SUITE STRUCTURALLY CANNOT FIND — MIGRATION 0024.** Both are the answer to *"what does the user SEE when this is refused?"*, which no case in `75_node_mobility_test.sql` asks. (1) A promote or demote into a parent that already holds that name raised a **raw `23505` with an EMPTY DETAIL** — no machine code at all. (2) The stranded-work refusal, *the whole point of the feature*, carried `{reason, count}` where `parseSchedulerError` accepts only `{blocking_rows, level_id}`, so it decoded as `Unknown` and rendered as **"Something went wrong. Please try again."** `verify-db.sh` exit 0, **332 named cases** (315 before), 17 new in `76_relevel_contract_test.sql`; **11 mutations, 7 caught, 4 executed-and-inert, each with its pinning case named.**
+- **🔴 AND THE FIRST ONE HAD ALREADY BEEN MEASURED AND WRITTEN DOWN.** §19.33 §4, the day P1-5k was designed, recorded the raw `23505` on a scratch database and said "catch and re-raise `path_collision`". 0017 shipped without it and nothing noticed, because every case asserted what a LEGAL move does and none asserted what a COLLISION looks like. **A decision that never reaches the code is [[decision-record-drift]] with a measurement attached.**
+- **⭐ THE MENU SHOWS WHAT IT CANNOT DO, RATHER THAN HIDING IT.** "Move to…" can shorten a list because there IS a list; a rung move is one thing to click, and omitting it silently leaves an admin with a tree they cannot fix and no idea why. Every reason the client can see is written under the greyed entry; **scheduled work is deliberately not one of them** — the admin tree carries no run counts, and loading the schedule to draw a menu is not a trade worth making. That is exactly why 0024's payload fix matters.
+- **⭐ THE RENDER CAUGHT WHAT THE SUITE COULD NOT (rule 2c), TWICE.** Five states in headless Chromium against the real stylesheet, every label and refusal computed by the real modules: disabled entries kept `cursor: pointer` and a hover tint (they looked clickable and did nothing), and one sentence read *"leave scheduled work on a level that can't hold scheduled work"*. `--muted` on `--surface` is **3.50:1**, computed — that is the disabled label; the REASON beneath it is `--ink-2` at **7.73:1**, because the reason is the part that has to be read.
 - **✅ MIGRATION 0023 — THE SHARED LISTS GET AN OWNER, AND A PRODUCT GETS A COLOUR OF ITS OWN.** `site_node_id` (nullable, composite FK, **NULL = company-wide**) on `operators`, `products`, `skills`, `shift_templates`; ONE root-enforcing trigger across all four rather than four copies; 21 write policies rewritten across **seven** tables — the four owner-carrying ones ask their own column, `shifts` and `shift_breaks` ask their template (two hops for a break), and **`operator_skills` asks its OPERATOR** and gets no column of its own, because a row joining a Plant-1 operator to a company-wide skill has no derivable owner. Plus `products.color_token`, and the D93 hole on `resolve_shift_template` (anon-executable since 0005) closed on the way past. **`verify-db.sh` exit 0, 315 named cases, zero FAIL** — baseline re-run first, at 271, for exactly that reason. §19.60.
 - **⭐ THE SCOPING DECISION, AND IT DECIDES EVERY OTHER LINE: 0023 CHANGES WHO MAY *EDIT*, NOT WHO MAY *READ*.** Every `_select` policy is left exactly as 0008 wrote it. That is measured, not cautious: **`check_eligibility` is SECURITY INVOKER and reads `operator_skills` and `skills` AS THE CALLER**, so a skill the caller cannot see drops out of `held`, lands in `missing`, flips `eligible` to false — and `create_assignment` gates on that verdict. **A read narrowing becomes a silent write refusal one indirection along.** It is also exactly what Pratik said the rule was for shift patterns, and what 0020 §12 already decided for node attachments. **Case Q11 is the tripwire** so it cannot be narrowed by accident. **And INSERT is a real WIDENING**: `app_is_admin()` reads the org-wide flag, so before 0023 a site admin could write nothing in any of those seven tables, not even in their own site. All 21 policies are strict supersets — nothing here can regress a permission, and the only way to get it wrong is to hand out too much.
 - **🔴 FOUR DEFECTS CAUGHT BEFORE THIS SHIPPED, AND NOT ONE OF THEM BY READING THE CODE.** (1) **The root trigger was answering the permission question** — written first as plain plpgsql like 0020's, it resolved `nodes` as the caller, so a site admin naming another site's root got `not found` (a lie about a node that exists) instead of a refusal from the policy — **and it was masking the policy, which would have made every mutation of a WITH CHECK term look caught when it was the trigger catching it.** Now SECURITY DEFINER; Q6/Q9 assert `42501` so the two cannot swap jobs again. (2) **⭐⭐ The palette shipped one token wider than `tokens.css`** — `var(--product-5)` resolves to nothing and the product renders with **no colour at all**, which is strictly worse than the wrong one. **Found by the upgrade test I had argued in writing was unnecessary**, and unfindable on a fresh database because the seed has exactly four products. (3) **⭐⭐ A cross-tenant leak** — `app_pick_product_color` was SECURITY DEFINER, took the org as a free parameter, was granted to `authenticated`, and its own comment claimed it was "tenant-scoped internally". Any viewer in org 1 could ask it about org 2 and read back that tenant's palette usage. **D83/0012's finding verbatim, in a new function.** (4) **`color_token` was nullable** and a site admin could blank their own product's colour with an ordinary edit; case Q23 was asserting an invariant nothing enforced.

@@ -4,11 +4,14 @@ import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/l
 import {
   useCreateNode,
   useDeleteNode,
+  useDemoteNode,
   useMoveNode,
   usePlaceNode,
+  usePromoteNode,
   useRenameNode,
 } from "../hooks/useHierarchyMutations";
 import { buildTreeRows, groupRowsByShape, legalParentsFor } from "../lib/treeView";
+import { demoteTargets, destinationLevel, promoteVerdict } from "../lib/relevel";
 import type { ShapeSummary } from "../lib/shapePicker";
 import {
   describeDrop,
@@ -27,8 +30,9 @@ import styles from "./NodeTreeEditor.module.css";
 /**
  * The node tree editor (brief P1-5d §7.3/§6.2). Rows from `buildTreeRows`;
  * a disclosure triangle where `hasChildren`, indent by `depth`. Every row
- * gets a `⋮` menu -- Rename, Add child, Move to…, Delete -- each opening
- * an `AdminPopover` anchored at the button that opened it.
+ * gets a `⋮` menu -- Rename, Add child, Move to…, the two level moves
+ * (P1-5k) and Delete -- each opening an `AdminPopover` anchored at the button
+ * that opened it.
  *
  * Collapse state is component state keyed by node id, a `Set<string>`
  * (§4.2): no lookup table to keep in sync with the node list, so a stale
@@ -49,6 +53,7 @@ type PopoverState =
   | { mode: "rename"; nodeId: string; anchor: { x: number; y: number } }
   | { mode: "addChild"; nodeId: string; anchor: { x: number; y: number } }
   | { mode: "move"; nodeId: string; anchor: { x: number; y: number } }
+  | { mode: "demote"; nodeId: string; anchor: { x: number; y: number } }
   | { mode: "delete"; nodeId: string; anchor: { x: number; y: number } };
 
 export function NodeTreeEditor({
@@ -79,6 +84,8 @@ export function NodeTreeEditor({
   const createMutation = useCreateNode();
   const moveMutation = useMoveNode();
   const placeMutation = usePlaceNode();
+  const promoteMutation = usePromoteNode();
+  const demoteMutation = useDemoteNode();
   const deleteMutation = useDeleteNode();
 
   // ---------------------------------------------------------------------------
@@ -634,6 +641,8 @@ export function NodeTreeEditor({
           renameMutation={renameMutation}
           createMutation={createMutation}
           moveMutation={moveMutation}
+          promoteMutation={promoteMutation}
+          demoteMutation={demoteMutation}
           deleteMutation={deleteMutation}
         />
       )}
@@ -657,6 +666,8 @@ function NodePopoverContent({
   renameMutation,
   createMutation,
   moveMutation,
+  promoteMutation,
+  demoteMutation,
   deleteMutation,
 }: {
   popover: PopoverState;
@@ -668,6 +679,8 @@ function NodePopoverContent({
   renameMutation: ReturnType<typeof useRenameNode>;
   createMutation: ReturnType<typeof useCreateNode>;
   moveMutation: ReturnType<typeof useMoveNode>;
+  promoteMutation: ReturnType<typeof usePromoteNode>;
+  demoteMutation: ReturnType<typeof useDemoteNode>;
   deleteMutation: ReturnType<typeof useDeleteNode>;
 }) {
   const [text, setText] = useState(node?.name ?? "");
@@ -684,7 +697,9 @@ function NodePopoverContent({
           ? `Add child of "${node.name}"`
           : popover.mode === "move"
             ? `Move "${node.name}"`
-            : `Delete "${node.name}"`;
+            : popover.mode === "demote"
+              ? `Put "${node.name}" under…`
+              : `Delete "${node.name}"`;
 
   return (
     <AdminPopover anchor={popover.anchor} onClose={onClose} title={title}>
@@ -699,6 +714,14 @@ function NodePopoverContent({
           <button type="button" onClick={() => onSwitchMode("move")}>
             Move to…
           </button>
+          <LevelMoveEntries
+            node={node}
+            nodes={nodes}
+            levels={levels}
+            onDemote={() => onSwitchMode("demote")}
+            promoteMutation={promoteMutation}
+            onDone={onClose}
+          />
           <button type="button" onClick={() => onSwitchMode("delete")}>
             Delete
           </button>
@@ -753,6 +776,20 @@ function NodePopoverContent({
         />
       )}
 
+      {popover.mode === "demote" && (
+        <DemoteToList
+          nodeId={node.id}
+          nodes={nodes}
+          levels={levels}
+          onPick={(newParentId) =>
+            demoteMutation.mutate({ nodeId: node.id, newParentId }, { onSuccess: onClose })
+          }
+          isPending={demoteMutation.isPending}
+          error={demoteMutation.isError ? describeSchedulerError(demoteMutation.error) : null}
+          onCancel={onClose}
+        />
+      )}
+
       {popover.mode === "delete" && (
         <div className={styles.deleteConfirm}>
           <label className={styles.radioRow}>
@@ -801,6 +838,164 @@ function NodePopoverContent({
         </div>
       )}
     </AdminPopover>
+  );
+}
+
+/**
+ * P1-5k — the two menu entries that change a node's RUNG rather than its
+ * parent. Split out of the menu because each one has to answer "is this even
+ * possible" before it can be drawn, and the answers come from `relevel.ts`.
+ *
+ * ⭐ THEY NAME THE DESTINATION LEVEL, not the operation. "Make this a
+ * Department" rather than "Promote": the org has already told us what it calls
+ * its rungs (D90 — the screen speaks the customer's vocabulary), and a manager
+ * reading "promote" has to guess. `destinationLevel` returning null falls back
+ * to generic wording rather than hiding the control, because whether the action
+ * is OFFERED is a different question, answered below.
+ *
+ * ⚠️ A BLOCKED ENTRY IS SHOWN AND EXPLAINED, NEVER HIDDEN. "Move to…" can hide
+ * illegal targets because there is a list to shorten; here there is exactly one
+ * thing to click, and silently omitting it leaves the admin with a tree they
+ * cannot fix and no idea why. The reasons below are only the ones visible from
+ * the loaded tree — scheduled work is NOT among them (see `relevel.ts`), so the
+ * server can still refuse a click this menu allowed, and that refusal renders
+ * underneath.
+ */
+function LevelMoveEntries({
+  node,
+  nodes,
+  levels,
+  onDemote,
+  promoteMutation,
+  onDone,
+}: {
+  node: BoardNode;
+  nodes: BoardNode[];
+  levels: HierarchyLevel[];
+  onDemote: () => void;
+  promoteMutation: ReturnType<typeof usePromoteNode>;
+  onDone: () => void;
+}) {
+  const up = destinationLevel(node.id, nodes, levels, -1);
+  const down = destinationLevel(node.id, nodes, levels, 1);
+  const promote = promoteVerdict(node.id, nodes);
+  const demote = demoteTargets(node.id, nodes, levels);
+
+  const promoteWhyNot =
+    promote.ok === true
+      ? null
+      : promote.block.kind === "root"
+        ? "It is already at the top level."
+        : promote.block.underLabel === ""
+          ? `Something at the top level is already called "${node.name}".`
+          : `${promote.block.underLabel} already has something called "${node.name}".`;
+
+  const demoteWhyNot =
+    demote.ok === true
+      ? null
+      : demote.block.kind === "no-rung-below"
+        ? "This node, or something under it, has no level left to move down to."
+        : "Nothing else sits at this level for it to go under.";
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={promoteWhyNot !== null || promoteMutation.isPending}
+        onClick={() => promoteMutation.mutate(node.id, { onSuccess: onDone })}
+      >
+        {up === null ? "Move up a level" : `Make this a ${up.name}`}
+      </button>
+      {promoteWhyNot !== null && <p className={styles.menuNote}>{promoteWhyNot}</p>}
+      {promoteMutation.isError && (
+        <p className={styles.errorLine} role="alert">
+          {describeSchedulerError(promoteMutation.error)}
+        </p>
+      )}
+
+      <button type="button" disabled={demoteWhyNot !== null} onClick={onDemote}>
+        {down === null ? "Move down a level…" : `Make this a ${down.name}…`}
+      </button>
+      {demoteWhyNot !== null && <p className={styles.menuNote}>{demoteWhyNot}</p>}
+    </>
+  );
+}
+
+/**
+ * The demote target picker. Deliberately NOT `MoveToList` with a different
+ * predicate: "Move to…" lists legal PARENTS (one rung above the node), this
+ * lists nodes at the node's OWN rung, and merging them would mean one list
+ * component switching on which operation it is drawing.
+ *
+ * Blocked targets are LISTED, disabled, with the reason inline — the same
+ * choice `LevelMoveEntries` makes and for the same reason: a name clash is
+ * fixable, and a user who cannot see the clash cannot fix it.
+ */
+function DemoteToList({
+  nodeId,
+  nodes,
+  levels,
+  onPick,
+  isPending,
+  error,
+  onCancel,
+}: {
+  nodeId: string;
+  nodes: BoardNode[];
+  levels: HierarchyLevel[];
+  onPick: (newParentId: string) => void;
+  isPending: boolean;
+  error: string | null;
+  onCancel: () => void;
+}) {
+  const verdict = demoteTargets(nodeId, nodes, levels);
+
+  if (!verdict.ok) {
+    return (
+      <div>
+        <p className={styles.emptyChoices}>
+          {verdict.block.kind === "no-rung-below"
+            ? "This node, or something under it, has no level left to move down to."
+            : "Nothing else sits at this level for it to go under."}
+        </p>
+        <div className={styles.popActions}>
+          <button type="button" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <ul className={styles.moveList}>
+        {verdict.targets.map((target) => (
+          <li key={target.id}>
+            <button
+              type="button"
+              disabled={isPending || target.blocked !== null}
+              onClick={() => onPick(target.id)}
+            >
+              {target.label}
+            </button>
+            {target.blocked !== null && (
+              <p className={styles.menuNote}>Already has something with this name.</p>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <p className={styles.errorLine} role="alert">
+          {error}
+        </p>
+      )}
+      <div className={styles.popActions}>
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

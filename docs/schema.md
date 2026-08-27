@@ -11,8 +11,8 @@
 | `hierarchy_templates` | A named hierarchy SHAPE within an org (D86). One org may hold several, so different sites can be organised differently. |
 | `hierarchy_levels` | One template's ordered level list (Site/Department/Line/Work Cell, or whatever the site names them). Exactly one level per TEMPLATE may be `is_schedulable` — not one per org. |
 | `nodes` | Every unit at every level, self-referencing tree. `path` (ltree) is trigger-maintained from `parent_id`/`name` — never supplied by callers. |
-| `operators` | The roster. `home_node_id` is a default site/department for roster filtering. |
-| `products` | The catalog. No color column — color is a UI-only sku-to-token mapping. |
+| `operators` | The roster. `site_node_id` = the owning site (NULL = company-wide, 0023). ⚠️ NOT the same as `home_node_id`, which is an unenforced roster-filter default that may point at any node and is read by nothing. |
+| `products` | The catalog. `site_node_id` = the owning site (NULL = company-wide, 0023). `color_token` = the palette token this product renders in, e.g. `product-3` — NOT NULL, filled on insert, never a hex. |
 | `skills` | Named certifications. |
 | `operator_skills` | Who holds which skill, with optional expiry. |
 | `node_skill_requirements` | A skill required at a node; inherits down the subtree (ancestor union query). |

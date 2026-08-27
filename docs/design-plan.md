@@ -5754,3 +5754,107 @@ The new rule is least-used-in-scope, which buys two things the ordinal never had
 2. **`app_check_site_owner` is a three-way oracle** over node ids a site admin cannot SELECT: absent / mid-tree / a root that is not theirs. Uuids are unguessable and a site admin already knows their org has other sites; recorded in the function's own comment rather than closed.
 3. **The seed and `dev_demo.sql` own nothing**, so after `db:reset` **a site admin signing in sees the feature do nothing** — every row is company-wide and company-wide is company-admin-only. `dev_demo.sql` is the only fixture with a second plant and is where a couple of owned rows belong. 0020 hit exactly this and fixed it in the seed.
 4. **`app_is_admin_for_operator` is granted to `authenticated`** and, under R14's mutation, would answer about another tenant through the direct RPC path. Q34 pins the policy path only; the RPC path is unmeasured.
+
+---
+
+### 19.61 P1-5k client half — and the two things promote/demote were saying wrong (migration 0024, Aug 27, 2026)
+
+The SQL half of P1-5k shipped in **0017** and has been applied and tested since. This is the screen
+for it, and building the screen meant asking the one question a SQL suite never asks: **what does the
+user SEE when this is refused?** Both answers were wrong, and neither was visible from reading.
+
+#### 1. The two server defects, both measured on a scratch PG16 before a line of UI was written
+
+| | before | measured | after (0024) |
+|---|---|---|---|
+| destination already has that name | raw **`23505`**, `nodes_org_id_parent_id_name_key`, **DETAIL empty** | reproduced on both `promote_node` and `demote_node` | `path_collision` with `{path, existing_node_id}` |
+| the move would strand scheduled work | `{reason, count}` | `parseSchedulerError` accepts **only** `{blocking_rows, level_id}`, so it decoded as `Unknown` | `{blocking_rows, level_id, reason}` |
+
+The first is the one worth dwelling on: **§19.33 §4 measured it while P1-5k was being designed and
+wrote down "catch and re-raise `path_collision`" — and 0017 never did it.** A recorded decision that
+never reached the code, [[decision-record-drift]]'s exact shape, and nothing downstream noticed
+because no case asserted what a *collision* looked like; every case asserted what a *legal* move did.
+
+The second is worse in kind and quieter in effect. `app_relevel_subtree`'s stranded-work refusal is
+**the whole point of the feature** — it is what stands between a re-level and a schedule pointing at
+nodes that can no longer hold work — and it would have rendered as *"Something went wrong. Please
+try again."*
+
+**Neither is a new rule.** Both are the twelve-code contract (`docs/api.md` §1) being kept where it
+was already being broken, so 0024 introduces no thirteenth code and no behaviour that was not
+already on paper.
+
+#### 2. What 0024 does, and the one thing it deliberately keeps
+
+Extracted from the **live** database with `pg_get_functiondef` — `grep` returns `app_relevel_subtree`
+in 0017 **and** 0020, and 0020's re-emission is the live one, so extracting 0017 would have silently
+reverted its node-scoped admin check (rule 12, and the second time that trap has been stepped over
+rather than into).
+
+- A **prospective-path pre-check** over every node in the moved subtree, mirroring what
+  `create_node`, `rename_node` and `move_node` have each done since 0010.
+- The **stranded payload** reshaped, with `level_id` naming the level the blocking rows landed on —
+  which exists by construction, because rows were just counted there.
+- **17 cases** (`76_relevel_contract_test.sql`), **11 mutations, 7 caught, 4 executed-and-inert**,
+  each inert one with the fact it depends on pinned by a named case: the subtree exclusion (N12/N5),
+  the org filter that RLS already provides (**N15**), the destination check that runs first (**N16**),
+  and the path-prefix invariant (**N17**). **332 named database checks**, up from 315.
+
+**No `UPGRADE_CHECKS` row, deliberately**: 0024 transforms no data, it changes only what an
+already-failing call says. There is no before/after row state to compare.
+
+#### 3. The client half, and why the menu names a LEVEL instead of an operation
+
+`src/features/admin/lib/relevel.ts` — pure, `import type` only — answers three questions and no
+others: is a promote worth offering, which nodes could this be demoted under, and **what is the
+destination rung called**. That third one is the design decision:
+
+> **"Make this a Department"**, not "Promote". The org has already told us what it calls its rungs
+> (D90 — the screen speaks the customer's vocabulary), and a plant manager reading *promote* has to
+> guess. When the rung cannot be resolved the label falls back to "Move up a level" rather than
+> hiding the control, because whether the action is OFFERED is a different question.
+
+**Every mirror in this module fails OPEN** ([[verification-standard]] rule 8b): it decides only what
+a menu offers, so an unresolvable fact means *offer it and let the server refuse*. The forbidden
+direction is refusing client-side something the server would accept, because that is invisible — the
+user simply never sees the option.
+
+**⚠️ AND IT NEVER PREDICTS SCHEDULED WORK.** The admin tree carries no run or assignment counts, and
+loading the schedule to draw a menu is not a trade worth making. So the offer is made, the server
+refuses, and 0024 is what makes that refusal a sentence.
+
+**A blocked entry is shown and explained, never hidden** — the opposite of "Move to…", which can
+shorten a list because there is a list. Here there is exactly one thing to click, and silently
+omitting it leaves an admin with a tree they cannot fix and no idea why.
+
+**`canDropOn` is deliberately NOT reused.** It answers "may this node become a child of that one AT
+ITS CURRENT LEVEL" — target exactly one rung above. A demote changes the level as part of the same
+operation, so its target sits at the node's **own** rung, which `canDropOn` refuses by construction.
+Different questions about the same tree, not two copies of one question.
+
+#### 4. Verification
+
+- **36 cases** (group K, `src/test/relevel.test.ts`), **15 mutations, all 15 caught.**
+- Two cases were written wrong first and their own assertions caught it: K16 claimed a fixture state
+  the tree could not produce (`d1`'s subtree reaches the work cells, so it is blocked before any list
+  is built), and K26 claimed "no company at its own rung" while actually testing "no rung below".
+  Rule 3b, twice in one file.
+- **`describeSchedulerError` reworded**, because `schedulable_level_locked` now has two callers that
+  mean different things by it: `save_hierarchy_levels` refuses moving the **flag** off a level with
+  work, `app_relevel_subtree` refuses moving the **nodes** off the schedulable rung. *"The schedulable
+  level can't be changed"* was simply untrue of the second. Two new cases in `errors.test.ts`.
+- **Rendered and looked at** (rule 2c): five states in headless Chromium against the real stylesheet,
+  with every label and every refusal computed by the real modules and read into the page rather than
+  typed. The render is what caught the disabled entries keeping `cursor: pointer` and a hover tint —
+  they looked clickable and did nothing — and a sentence that read *"leave scheduled work on a level
+  that can't hold scheduled work"*.
+- **`--muted` on `--surface` is 3.50:1**, computed. That is the disabled-control colour; the *reason*
+  beneath each blocked entry is `--ink-2` at **7.73:1**, because the reason is the part that has to
+  be read.
+
+#### 5. What this does NOT do
+
+- It does not move work out of the way. A promote that would strand a run is refused, not repaired.
+- It does not offer a keyboard path distinct from the menu — the menu **is** the keyboard path.
+- It does not touch the drag. Drag re-parents; this re-levels; §19.34 is the record of what happens
+  when those two are confused.

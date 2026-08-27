@@ -27,8 +27,10 @@ import {
   createNode,
   deleteHierarchyTemplate,
   deleteNode,
+  demoteNode,
   moveNode,
   placeNode,
+  promoteNode,
   renameHierarchyTemplate,
   renameNode,
   saveHierarchyLevels,
@@ -41,8 +43,10 @@ import {
   type HierarchyTemplateSummary,
   type MoveNodeInput,
   type MoveNodeResult,
+  type DemoteNodeInput,
   type PlaceNodeInput,
   type PlacedSibling,
+  type ReleveledNode,
   type RenameNodeResult,
   type SchedulerError,
 } from "@/lib/api";
@@ -202,6 +206,41 @@ export function usePlaceNode() {
 
   return useMutation<PlacedSibling[], SchedulerError, PlaceNodeInput>({
     mutationFn: (input) => placeNode(input),
+    onSuccess: () => {
+      void invalidateHierarchy(queryClient);
+    },
+  });
+}
+
+/**
+ * `promote_node` / `demote_node` (P1-5k, migration 0017; error contract fixed
+ * by 0024). Move a node and its WHOLE SUBTREE one rung up or down.
+ *
+ * Two hooks for two RPCs, mirroring the API layer's own reason for splitting
+ * them: promote derives its destination, demote is given one.
+ *
+ * ⭐ NO OPTIMISTIC UPDATE, and here that is not just the file's house rule.
+ * A re-level rewrites `level_id` on every node in the subtree AND `path` on
+ * every one of them, and the RPC returns exactly that list. Reproducing it
+ * client-side would be a second implementation of the server's re-level, which
+ * is what the header forbids -- so this invalidates and lets the refetch redraw.
+ */
+export function usePromoteNode() {
+  const queryClient = useQueryClient();
+
+  return useMutation<ReleveledNode[], SchedulerError, string>({
+    mutationFn: (nodeId) => promoteNode(nodeId),
+    onSuccess: () => {
+      void invalidateHierarchy(queryClient);
+    },
+  });
+}
+
+export function useDemoteNode() {
+  const queryClient = useQueryClient();
+
+  return useMutation<ReleveledNode[], SchedulerError, DemoteNodeInput>({
+    mutationFn: (input) => demoteNode(input),
     onSuccess: () => {
       void invalidateHierarchy(queryClient);
     },

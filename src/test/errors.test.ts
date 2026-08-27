@@ -200,4 +200,27 @@ describe("describeSchedulerError — the six hierarchy codes (D74)", () => {
     const msgs = HIERARCHY_ERRORS.map(describeSchedulerError);
     expect(new Set(msgs).size).toBe(HIERARCHY_ERRORS.length);
   });
+
+  /*
+   * P1-5k gave `schedulable_level_locked` a SECOND caller that means something
+   * different by it: `save_hierarchy_levels` refuses moving the schedulable
+   * FLAG off a level with work, `app_relevel_subtree` refuses moving the NODES
+   * off the schedulable rung. The old sentence described only the first and was
+   * simply false about the second. These two cases pin the shape that has to
+   * work for both, including the payload-less variant the list above builds.
+   */
+  it("the stranded-work message names the count when the payload carries one", () => {
+    const msg = describeSchedulerError({
+      kind: "SchedulableLevelLocked",
+      blockingRows: 3,
+      levelId: "lvl-1",
+    } as SchedulerError);
+    expect(msg).toContain("3 runs or assignments");
+  });
+
+  it("and it still reads as a sentence when the payload carries none", () => {
+    const msg = describeSchedulerError({ kind: "SchedulableLevelLocked" } as SchedulerError);
+    expect(msg).toContain("scheduled work");
+    expect(msg).not.toContain("undefined");
+  });
 });

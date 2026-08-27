@@ -535,8 +535,30 @@ export function describeSchedulerError(e: SchedulerError): string {
       return "That level still has nodes on it and can't be removed.";
     case "NodeInUse":
       return "This node has children, runs, or assignments and can't be deleted.";
-    case "SchedulableLevelLocked":
-      return "The schedulable level can't be changed while it still has scheduled work.";
+    case "SchedulableLevelLocked": {
+      // ⚠️ THIS CODE HAS TWO CALLERS THAT MEAN DIFFERENT THINGS BY IT, and the
+      // message used to describe only one. `save_hierarchy_levels` raises it
+      // when the SCHEDULABLE FLAG is moved off a level that still has work;
+      // `app_relevel_subtree` (P1-5k) raises it when the NODES are moved off
+      // the schedulable rung instead. "The schedulable level can't be changed"
+      // was simply untrue of the second, which is the whole of what promote and
+      // demote refuse. What both have in common is the outcome, so that is what
+      // this says.
+      //
+      // `blockingRows` is typed `number`, but this branch is reached by any
+      // caller holding a `SchedulerError`, including tests that build the
+      // variant without a payload -- so the count is used only when it is
+      // really there, and the sentence still reads without it.
+      const n = e.blockingRows;
+      if (!Number.isFinite(n)) {
+        return "That would leave scheduled work on a level that can't hold it — move it first.";
+      }
+      const many = n !== 1;
+      const what = many ? `${n} runs or assignments` : "1 run or assignment";
+      return `That would leave ${what} on a level that can't hold scheduled work — move ${
+        many ? "them" : "it"
+      } first.`;
+    }
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";
     case "Unauthenticated":

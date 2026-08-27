@@ -302,6 +302,10 @@ if [ ! -f "$TESTS_DIR/51_shared_list_owners_test.sql" ]; then
   note_fail "51_shared_list_owners_test.sql not found in $TESTS_DIR (0023 requires it)"
   exit 1
 fi
+if [ ! -f "$TESTS_DIR/76_relevel_contract_test.sql" ]; then
+  note_fail "76_relevel_contract_test.sql not found in $TESTS_DIR (0024 requires it)"
+  exit 1
+fi
 if [ ! -f "$TESTS_DIR/90_hierarchy_template_test.sql" ]; then
   note_fail "90_hierarchy_template_test.sql not found in $TESTS_DIR (D86 requires it to run after 80_cross_org_test.sql)"
   exit 1

@@ -460,6 +460,85 @@ export async function placeNode(input: PlaceNodeInput): Promise<PlacedSibling[]>
 }
 
 // ---------------------------------------------------------------------------
+// promoteNode / demoteNode — `promote_node(p_node_id uuid)` and
+// `demote_node(p_node_id uuid, p_new_parent_id uuid)` (P1-5k, migration 0017,
+// re-issued by 0020 §8; error contract fixed by 0024).
+//
+// TWO FUNCTIONS, NOT ONE WITH A NULLABLE ARGUMENT, and the asymmetry is the
+// design (§19.33 §5): promote DERIVES its destination (the grandparent, or the
+// top level) while demote is GIVEN one. One shared signature with
+// `newParentId?: string | null` would invite demoting with no target, and would
+// hit the generated-nullability gap `createNode` documents above at a third
+// call site. Both signatures here are non-nullable, so neither needs the cast.
+//
+// Both return THE MOVED SUBTREE, every row of it, because every row's level
+// changed -- a caller that refetches only the moved node would redraw a tree
+// whose children still claim their old rung.
+//
+// Raises: not_permitted, invalid_argument, node_cycle, level_mismatch,
+// path_collision (0024), schedulable_level_locked (0024's payload). No new
+// error codes.
+// ---------------------------------------------------------------------------
+
+/** One row of the moved subtree, as `app_relevel_subtree` reports it back.
+ * `levelId` is the field that makes this different from `PlacedSibling`: a
+ * re-level is the one node write that changes it. */
+export interface ReleveledNode {
+  id: string;
+  name: string;
+  levelId: string;
+  parentId: string | null;
+  path: string;
+}
+
+function parseReleveledNodes(v: Json): ReleveledNode[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: ReleveledNode[] = [];
+  for (const entry of v) {
+    if (!isJsonObject(entry)) return null;
+    const { id, name, level_id, parent_id, path } = entry;
+    if (!isStr(id) || !isStr(name) || !isStr(level_id) || !isStrOrNull(parent_id) || !isStr(path)) {
+      return null;
+    }
+    out.push({ id, name, levelId: level_id, parentId: parent_id, path });
+  }
+  return out;
+}
+
+/** Generated signature: `{ p_node_id: string } -> Json`. */
+export async function promoteNode(nodeId: string): Promise<ReleveledNode[]> {
+  const { data, error } = await supabase.rpc("promote_node", { p_node_id: nodeId });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseReleveledNodes(data);
+  if (parsed === null) {
+    throw shapeMismatch("promote_node", "expected [{ id, name, level_id, parent_id, path }, ...]");
+  }
+  return parsed;
+}
+
+export interface DemoteNodeInput {
+  nodeId: string;
+  /** NOT nullable, unlike every other destination in this file: a demote has
+   * to land under something at the node's own level, and there is no such
+   * thing at the top. */
+  newParentId: string;
+}
+
+/** Generated signature: `{ p_new_parent_id: string; p_node_id: string } -> Json`. */
+export async function demoteNode(input: DemoteNodeInput): Promise<ReleveledNode[]> {
+  const { data, error } = await supabase.rpc("demote_node", {
+    p_node_id: input.nodeId,
+    p_new_parent_id: input.newParentId,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseReleveledNodes(data);
+  if (parsed === null) {
+    throw shapeMismatch("demote_node", "expected [{ id, name, level_id, parent_id, path }, ...]");
+  }
+  return parsed;
+}
+
+// ---------------------------------------------------------------------------
 // deleteNode — `delete_node(p_node_id uuid, p_mode text default
 // 'deactivate')`. Raises: not_permitted, invalid_argument (unrecognised or
 // NULL mode — D1's fix), node_in_use.

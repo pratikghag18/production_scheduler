@@ -289,6 +289,33 @@
   background: var(--page);
 }
 
+/*
+ * P1-5k — a menu entry that is offered but cannot be used, and the one line
+ * that says why. Both lists get the disabled rules together: `.menuList` and
+ * `.moveList` styled their buttons identically and neither said anything about
+ * `:disabled`, so a disabled entry kept `cursor: pointer` and still lit up on
+ * hover -- it looked clickable and did nothing, which is worse than being
+ * greyed out. D100's lesson one level down: two copies of a rule drift, so the
+ * disabled state is written once for both selectors rather than twice.
+ */
+.menuList button:disabled,
+.moveList button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.menuList button:disabled:hover,
+.moveList button:disabled:hover {
+  background: none;
+}
+
+.menuNote {
+  margin: 0 0 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--ink-2);
+}
+
 .emptyChoices {
   font-size: 0.7812rem;
   color: var(--ink-2);

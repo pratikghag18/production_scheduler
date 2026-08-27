@@ -1,0 +1,57 @@
+[
+ [
+  "S1 the collision pre-check is deleted entirely (the 0017 defect, restored)",
+  "  if v_existing is not null then\n    perform api_raise('path_collision', 'a node with this path already exists',\n      jsonb_build_object('path', v_new_path::text, 'existing_node_id', v_existing));\n  end if;",
+  "  if false then\n    perform api_raise('path_collision', 'a node with this path already exists',\n      jsonb_build_object('path', v_new_path::text, 'existing_node_id', v_existing));\n  end if;"
+ ],
+ [
+  "S2 the moved subtree is no longer excluded from its own candidates",
+  "    join nodes x on x.org_id = v_org_id and x.path = t.np and not (x.id = any(v_ids))",
+  "    join nodes x on x.org_id = v_org_id and x.path = t.np"
+ ],
+ [
+  "S3 the collision check stops scoping by org",
+  "    join nodes x on x.org_id = v_org_id and x.path = t.np and not (x.id = any(v_ids))\n   where n.id = any(v_ids)",
+  "    join nodes x on x.path = t.np and not (x.id = any(v_ids))\n   where n.id = any(v_ids)"
+ ],
+ [
+  "S4 the prospective path is built from the wrong label offset",
+  "                  then subpath(n.path, nlevel(v_node.path) - 1)\n                  else v_prefix || subpath(n.path, nlevel(v_node.path) - 1) end as np",
+  "                  then subpath(n.path, nlevel(v_node.path))\n                  else v_prefix || subpath(n.path, nlevel(v_node.path)) end as np"
+ ],
+ [
+  "S5 the NULL-prefix branch is dropped, so a promote to root builds a NULL path",
+  "      select case when v_prefix is null\n                  then subpath(n.path, nlevel(v_node.path) - 1)\n                  else v_prefix || subpath(n.path, nlevel(v_node.path) - 1) end as np",
+  "      select v_prefix || subpath(n.path, nlevel(v_node.path) - 1) as np"
+ ],
+ [
+  "S6 the new parent's path lookup drops its org scope",
+  "              else (select p.path from nodes p\n                     where p.id = p_new_parent_id and p.org_id = v_org_id) end",
+  "              else (select p.path from nodes p\n                     where p.id = p_new_parent_id) end"
+ ],
+ [
+  "S7 the stranded payload goes back to the shape the client cannot parse",
+  "      jsonb_build_object('blocking_rows', v_stranded, 'level_id', v_level_id,\n                         'reason', 'relevel strands scheduled work'));",
+  "      jsonb_build_object('count', v_stranded, 'level_id', v_level_id,\n                         'reason', 'relevel strands scheduled work'));"
+ ],
+ [
+  "S8 level_id is dropped from the stranded payload",
+  "      jsonb_build_object('blocking_rows', v_stranded, 'level_id', v_level_id,\n                         'reason', 'relevel strands scheduled work'));",
+  "      jsonb_build_object('blocking_rows', v_stranded,\n                         'reason', 'relevel strands scheduled work'));"
+ ],
+ [
+  "S9 level_id is picked from a SCHEDULABLE level instead of the one the work landed on",
+  "     where n.id = any(v_ids) and not hl.is_schedulable\n       and (exists (select 1 from runs r3 where r3.node_id = n.id)",
+  "     where n.id = any(v_ids) and hl.is_schedulable\n       and (exists (select 1 from runs r3 where r3.node_id = n.id)"
+ ],
+ [
+  "S10 the collision check looks only at the moved node, not at its subtree",
+  "   where n.id = any(v_ids)\n   order by x.path\n   limit 1;",
+  "   where n.id = p_node_id\n   order by x.path\n   limit 1;"
+ ],
+ [
+  "S11 the grant block hands app_relevel_subtree back to PUBLIC",
+  "revoke all on function app_relevel_subtree(uuid, uuid, int) from public;\ngrant execute on function app_relevel_subtree(uuid, uuid, int) to authenticated;",
+  "grant execute on function app_relevel_subtree(uuid, uuid, int) to public;"
+ ]
+]

@@ -641,6 +641,49 @@ one, and inviting a new person is a GoTrue operation that does not exist for
 company admins either. There is no "last admin" rule and no audit row for
 access changes; both are named in the migration as tasks.
 
+### 3.7 Changing a node's rung — `promote_node` / `demote_node` (P1-5k, migration 0017; error contract fixed by 0024)
+
+```
+promote_node(p_node_id uuid)                       returns jsonb
+demote_node (p_node_id uuid, p_new_parent_id uuid) returns jsonb
+```
+
+Move a node **and its whole subtree** one rung up or down inside its own site
+structure. Both return the moved subtree as an array of
+`{ id, name, level_id, parent_id, path }` — every row of it, because every row's
+level changed.
+
+**Two functions, not one with a nullable argument.** Promote **derives** its
+destination (the grandparent, or the top level when the parent is a root);
+demote is **given** one, and the target must be a node at the moving node's
+**own** level in the same structure. A shared signature with a nullable
+`p_new_parent_id` would invite demoting with no target, and generated types
+cannot express a nullable RPC argument anyway (§0).
+
+**Raises:**
+
+- `not_permitted` — not an admin, or no admin rights on the destination.
+- `invalid_argument` — unknown node, or unknown destination node.
+- `node_cycle` — demoting a node beneath its own descendant.
+- `level_mismatch` — a top-level node cannot be promoted; a target that is not
+  at the node's own level in the same structure; or **no destination rung for
+  some level in the subtree**, which is checked UP FRONT (`{reason: "no
+  destination level", delta}`).
+- **`path_collision`** — the destination already holds a node with this path
+  (`{path, existing_node_id}`). **NEW IN 0024**: this was a raw `23505` with an
+  empty DETAIL, outside the twelve-code contract entirely.
+- **`schedulable_level_locked`** — the move would leave runs or assignments on a
+  node that has just left the schedulable rung, `{blocking_rows, level_id,
+  reason}`. **The payload shape changed in 0024**: it was `{reason, count}`,
+  which `parseSchedulerError` cannot decode, so this refusal reached the client
+  as `Unknown`. `level_id` names the level the blocking rows landed on.
+
+⚠️ **`app_relevel_subtree(p_node_id, p_new_parent_id, p_delta)` is granted to
+`authenticated` and is therefore reachable directly**, not only through these
+two wrappers. It carries its own admin, org-scope and destination checks for
+that reason; case N16 in `76_relevel_contract_test.sql` calls it directly with a
+destination in another org.
+
 ## 4. RPC vs. plain PostgREST table writes
 
 Simple field edits — a run's `notes` or `planned_headcount`; an
