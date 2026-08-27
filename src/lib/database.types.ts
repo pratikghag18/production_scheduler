@@ -916,6 +916,10 @@ export type Database = {
         Args: { p_profile_id: string }
         Returns: boolean
       }
+      app_profile_is_company_admin: {
+        Args: { p_profile_id: string }
+        Returns: boolean
+      }
       app_relevel_subtree: {
         Args: { p_delta: number; p_new_parent_id: string; p_node_id: string }
         Returns: Json

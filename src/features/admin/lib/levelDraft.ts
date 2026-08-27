@@ -350,3 +350,108 @@ export function findLevelOrderProblems(
     return 0;
   });
 }
+
+/* ---------------------------------------------------------------------------
+   P1-6e — WHERE A LEVEL DRAG LANDS, AND THE TWO SEAMS THAT PROMISE NOTHING.
+
+   §19.50 closed exactly this on the NODE TREE, in `treeDrag.ts`'s
+   `rowDropZones`. The level list has its own copy of the rule and never got
+   the fix, because nobody could reach the gesture to notice: the drag shipped
+   in P1-5l and its grab target was 21 px of 526.
+
+   MEASURED once the grip made it reachable -- real markup, real stylesheet,
+   real layout engine, the component's own handlers driven over it, and the
+   result fed through the real `applyLevelAction`: on a four-row list,
+   231 of 528 drop pixels (43.8%) drew a caret and changed nothing. Two dead
+   seams per drag, on every drag, exactly as §19.50's second theorem says they
+   must be -- the seam directly above the dragged row and the seam directly
+   below it, which are the two places it already sits.
+
+   ⭐ AND THE SAME MEASUREMENT PROVED THE ALGEBRA CORRECT: across all 528 drop
+   pixels the caret's promise and `applyLevelAction`'s result agreed 528 times
+   out of 528, in both directions. The off-by-one below is right; what was
+   wrong was offering a move that is not a move.
+
+   THE RULE, AND WHY IT IS NOT THE TREE'S RULE.
+   §19.50 DROPS the dead zone and the row's surviving placement (adopt) takes
+   the whole row. A level row has no second meaning to fall back on -- it is
+   one seam per half and nothing else -- so dropping the zone would leave a
+   dead half-row with no feedback at all. Instead the dead half COLLAPSES INTO
+   THE LIVE ONE: the whole of the row above the dragged row means "land above
+   it", the whole of the row below means "land below it". Same principle
+   (§19.50's own words: "dropping it lets the surviving placement take the
+   whole row"), different mechanics, because a flat list has no adopt.
+
+   ⚠️ AND THE DRAGGED ROW IS NOT A SPECIAL CASE. Both of its halves are dead,
+   so both candidates below are refused and this returns `null` -- no caret,
+   which is what its 0.45 opacity is already saying. An explicit
+   `overIndex === from` branch was written first and DELETED: it is a second
+   copy of a check that always holds, which is gotcha 17 and cannot be
+   mutation-tested. The general rule subsumes it, and case P12 pins that.
+   --------------------------------------------------------------------------- */
+
+/** What a live level drag is currently promising. */
+export interface LevelDropTarget {
+  /**
+   * The seam the caret is drawn on, counted against the list AS DRAWN -- that
+   * is, with the dragged row still in it. Seam `i` is the gap above row `i`.
+   * ALWAYS `overIndex` or `overIndex + 1`, never anything else: the collapse
+   * only ever flips a caret to the other edge of the SAME row, so one row and
+   * only one row ever draws it. P13 asserts that as a property.
+   */
+  caretAt: number;
+  /**
+   * `moveTo`'s `to`, counted against the list with the dragged row already
+   * REMOVED. Guaranteed never to equal `from`, so every target this function
+   * returns is one that changes something.
+   */
+  landAt: number;
+}
+
+/**
+ * @param from       index of the row being dragged
+ * @param overIndex  index of the row under the pointer
+ * @param above      pointer is in the top half of that row (`t < 0.5`)
+ * @param count      number of rows in the draft
+ */
+export function levelDropTarget(
+  from: number,
+  overIndex: number,
+  above: boolean,
+  count: number,
+): LevelDropTarget | null {
+  if (!Number.isInteger(from) || !Number.isInteger(overIndex) || !Number.isInteger(count)) {
+    return null;
+  }
+  if (from < 0 || from >= count) return null;
+  if (overIndex < 0 || overIndex >= count) return null;
+
+  // A placement that lands where the row already is: seam `from` (immediately
+  // above it) and seam `from + 1` (immediately below it). They are the same
+  // position approached from either side -- §19.50's companion theorem.
+  const isNoop = (seam: number): boolean => seam === from || seam === from + 1;
+
+  // Seam `i` is the gap ABOVE row `i`, so the top half of row `i` is seam `i`
+  // and the bottom half is seam `i + 1` -- the same convention `resolveDropZone`
+  // uses on the tree, including that the midpoint belongs to the lower zone.
+  // The half the pointer is actually in is tried FIRST; the other edge of the
+  // same row is the collapse target.
+  const wanted = above ? overIndex : overIndex + 1;
+  const other = above ? overIndex + 1 : overIndex;
+  const caretAt = !isNoop(wanted) ? wanted : !isNoop(other) ? other : null;
+  if (caretAt === null) return null;
+
+  // ⭐ THE OFF-BY-ONE, AND IT NOW LIVES SOMEWHERE A TEST CAN REACH IT. It used
+  // to be `landingIndex` inside `LevelEditor.tsx`: documented at length and
+  // guarded by nothing. `moveTo`'s `to` is read against the list with the
+  // dragged row already spliced out, so every seam BELOW that row shifts down
+  // by one and every seam above it does not.
+  //
+  // ⚠️ `<`, not `<=`, and the two are INDISTINGUISHABLE HERE -- mutation W5,
+  // executed and measured INERT against all 25 cases. `caretAt` can never BE
+  // `from`, because `isNoop` refuses that seam. The inertness is a consequence
+  // of the collapse above, not of this line, so case P25 pins `caretAt !== from`
+  // directly: delete the collapse and P25 goes red in the same run that makes
+  // W5 live again.
+  return { caretAt, landAt: from < caretAt ? caretAt - 1 : caretAt };
+}

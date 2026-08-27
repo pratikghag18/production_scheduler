@@ -5218,3 +5218,255 @@ An empty `Has access (0)` still printed its column header — a table pretending
 - `siteAccess.test.ts` 79 → **81 cases** (A44 rewritten, A44b/A44c added). **48 mutations, all 48 caught**, including the two that matter here: candidates returning with no search (B50, the shape Pratik rejected) and candidates never returning at all (B51, the feature deleted).
 - `tsc -b --force` exit 0, `eslint .` exit 0, scale audit clean.
 - **Suite prediction 674 → 676, still 19 files.**
+
+---
+
+## §19.56 — P1-6e: the grip, and the bug that was hiding behind it
+
+Pratik put this first and called it "capability first". Two claims were already
+proved before this session started and they stayed separate all the way
+through: **the level drag is wired, and its target is unhittable.** What was
+*not* proved was correctness — nothing had ever driven the gesture.
+
+### The affordance
+
+Measured before, by hit-testing every pixel of a rendered row with the
+component's own guard: **21 px of 526 on the row's centre line**, three 7 px
+flex gutters, no handle, and `cursor: grab` nowhere. The only cursor that
+changed anywhere on the row was `pointer`, over the four controls that are
+precisely *not* draggable — the affordance pointed at the one place the
+gesture does not work.
+
+Three changes, and they answer three different questions:
+
+1. **A `⠿` handle**, first child of the row, declaration-identical to
+   `NodeTreeEditor.module.css`'s. It carries `touch-action: none` and its own
+   `onPointerDown`, which is not optional: `handleLevelPointerDown` refuses any
+   pointerdown inside a `button`, so without it the grip would have been the one
+   part of the row that could not start a drag. **It also closes the level half
+   of "no touch path for either drag"** — a consequence of matching the tree,
+   not a separate feature.
+2. **`cursor: grab` on `.row`, plus a hover tint.** The whole row has been a
+   mouse/pen drag source since D95a and said so nowhere. Measured after: the
+   grab cursor appears on exactly the 53 draggable pixels and nowhere else,
+   because the input, the buttons and the label each state their own — the
+   cursor now *is* the hit map.
+3. **The tint is `--ring`, not `--page`.** `--page` on `--surface` is a
+   three-unit difference and rendered as nothing in P1-5g. `--ring` over
+   `--surface` is `#e4e4e3`, plainly visible in the render.
+
+**⭐ AND THE RENDER FOUND A DEFECT IN THE FIX ITSELF.** The caret sits 3 px
+above the row it marks; the hover tint's `box-shadow` spread reaches 4 px above
+the same row. On every live drag the pointer is over a row, that row is hovered,
+and the band's top edge lands **one pixel** from the green rule — the caret
+stops reading as "it lands between these two rows" and starts reading as "this
+row has a green top border". `.dragging .row:hover` now stands the tint down
+while a drag is live, so the caret owns the seam. D99's corollary exactly: the
+state you need is the one with a neighbour.
+
+**⭐ AND A MEASURED CONTRAST FAILURE ON BOTH SURFACES.** The tree's `⠿` ships
+`color: var(--grid)`. Computed: `#e1e0d9` on `#fcfcfb` is **1.29:1**, and on the
+hover ground **1.04:1** — below the 3:1 a non-text affordance needs, and low
+enough that the handle reads as absent. Shipping the new grip at the same value
+would have been P1-6e's own defect in a different colour. Both files now use
+`--muted` (3.50:1 resting, `--ink-2` 6.24:1 on hover) and stay
+declaration-identical, which is the whole point of the copy.
+
+### ⭐⭐ The bug behind the affordance, and it is §19.50's bug on the other surface
+
+The Chrome bridge is not connected, so the running app could not be driven. The
+substitute: the **real** markup and the **real** stylesheet laid out by a real
+engine in headless Chromium, the component's own handlers driven over that
+geometry, and the result fed through the **real** `applyLevelAction`. 672
+pointer positions, four drag sources.
+
+Two answers came back:
+
+- **The algebra is correct. 528 of 528 drop pixels agreed with the caret**, in
+  both directions. `landingIndex`'s off-by-one was right.
+- **231 of those 528 (43.8%) drew a caret and changed nothing.**
+
+That is §19.50, on the surface §19.50 did not touch. It fixed `rowDropZones` in
+`treeDrag.ts`; the level list has its own copy of the rule, in the component,
+and never got it. The two dead seams are the seam directly above the dragged row
+and the seam directly below it — the same position approached from either side,
+exactly as §19.50's companion theorem says.
+
+**Nobody could have found this by opening the screen, because nobody could grab
+the row.** The affordance defect was hiding the behaviour defect.
+
+### The rule, and why it is NOT the tree's rule
+
+§19.50 **drops** the dead zone and the row's surviving placement (adopt) takes
+the whole row. A level row has no second meaning to fall back on — one seam per
+half and nothing else — so dropping the zone would leave a dead half-row with no
+feedback at all. Here the dead half **collapses into the live one**: the whole of
+the row above the dragged row means "land above it", the whole of the row below
+means "land below it". Same principle in §19.50's own words (*"dropping it lets
+the surviving placement take the whole row"*), different mechanics, because a
+flat list has no adopt.
+
+**And the dragged row is not a special case.** Both its halves are dead, both
+candidates are refused, the function returns `null` and no caret is drawn —
+which is what its 0.45 opacity was already saying. An explicit
+`overIndex === from` branch was written first and **deleted**: a second copy of
+a check that always holds is gotcha 17 and cannot be mutation-tested. Case P12
+pins that the general rule subsumes it.
+
+### Where it lives now
+
+`levelDropTarget` is in `levelDraft.ts`, beside `applyLevelAction` — the
+function it has to agree with. **`landingIndex` moved out of the component with
+it.** That off-by-one had a nineteen-line comment and no test able to reach it;
+it now has 25.
+
+### Verification
+
+- **25 committed cases (group P), green cold**, and the whole
+  `levelDraft.test.ts` re-run in a shim against the **delivered** module:
+  **79 reported, 79 pass, 0 fail, 0 crashed.**
+- **11 mutations. 10 CAUGHT, 1 executed and measured INERT**, killing cases
+  recorded per mutation, reproduced identically by the design session's own
+  reference run and by the committed suite:
+
+  | # | breakage | verdict | killed by |
+  |---|---|---|---|
+  | W1 | `isNoop` loses the seam-above term | CAUGHT | P7 P9 P12 P14 P17 P23 P24 P25 |
+  | W2 | `isNoop` loses the seam-below term | CAUGHT | P8 P10 P12 P14 P17 P23 P24 P25 |
+  | W3 | the collapse is deleted — the pre-P1-6e dead caret | CAUGHT | P7 P8 P9 P10 P12 P14 P17 P23 P24 P25 |
+  | W4 | the two candidates are tried in the wrong order | CAUGHT | P1 P2 P3 P4 P18 |
+  | W5 | the splice shift uses `<=` instead of `<` | **NOT CAUGHT — INERT** | — |
+  | W6 | the off-by-one is deleted, `landAt` is the seam | CAUGHT | P3 P4 P5 P8 P15 P16 P17 P18 P24 |
+  | W7 | the `overIndex` range guard is deleted | CAUGHT | P19 |
+  | W8 | the `from` range guard is deleted | CAUGHT | P20 |
+  | W9 | the integer guard is deleted | CAUGHT | P21 P22 |
+  | W10 | the half-split ignores `above` | CAUGHT | P2 P4 P10 P11 P18 |
+  | W11 | both halves dead falls back to the dead seam instead of `null` | CAUGHT | P12 P14 P17 P23 P25 |
+
+  **W5 is inert, and the reason is a consequence of the fix rather than of the
+  line it mutates.** `caretAt` can never *be* `from`, because `isNoop` refuses
+  that seam — so `<` and `<=` are indistinguishable over the whole reachable
+  domain. Rule 13 says report which kind: *a value no case can reach*. **Case
+  P25 pins the impossibility directly**, so deleting the collapse turns W5 live
+  and P25 red in the same run, instead of quietly reopening the boundary.
+- **Re-measured end to end after the fix, through the real modules: 396 caret
+  pixels, 0 dead, 0 disagreements with `applyLevelAction`.** 132 pixels draw no
+  caret (the dragged row's own body) and 144 are outside any row.
+- `tsc -b --force` exit 0, **instrument-checked** with an injected `TS2322` at
+  the expected line. `eslint` exit 0 on the three touched TS files (`eslint .`
+  over the whole repo exceeds the 45 s `device_bash` ceiling and is Pratik's
+  acceptance run).
+- Scale audit re-run against the real files: 6 `REM_SURFACES` entries, 6 admin
+  stylesheets on disk, zero unlisted, zero unscaled px lengths, control font
+  reset present. **Noted soft spot:** `unscaledPxLengths` exempts `box-shadow`
+  by property name as "decorative", and the new hover tint's shadow *spread*
+  carries real geometry. It is written in `rem` anyway, so nothing is wrong —
+  but the exemption's premise is now one case weaker than its comment claims.
+- **Rendered and looked at, four states** — `docs/mockups/p1-6e-level-grip.png`.
+
+### Not proved
+
+Nothing has still driven the *running application*. The probe supplies real
+geometry and calls the real modules, but the handlers it drives are a
+**transcription** of `LevelEditor.tsx`, not the component. It cannot see React
+state, pointer capture, `<StrictMode>` double-invocation, or the HMR path. The
+committed cases guard the rule; the browser still owes an acceptance pass — and
+the Chrome bridge (`mcp__claude-in-chrome__list_connected_browsers` returns `[]`)
+would remove that gap entirely if it were connected.
+
+---
+
+## §19.57 — Can four agents build Shifts, Operators, Products and Import in parallel? Measured, not argued
+
+Pratik asked directly. Four **read-only** survey agents were run concurrently,
+one per section, each told that the migrations are the authority and the
+narrative docs are not, and each required to return an exhaustive NEW/EDIT file
+table with a SHARED column. All four landed. They agree.
+
+### The answer: not as four build agents, and the reason is a short list of files
+
+Every one of the four sections edits the same handful of files, in the same
+places:
+
+| shared file | what each agent does to it | why it conflicts |
+|---|---|---|
+| `src/features/admin/AdminPage.tsx` | flip one `enabled: false` in the `SECTIONS` array **and** add one `{section === "x" && …}` block to the same JSX child list | two overlapping hunks, four times |
+| `src/test/scaleAudit.ts` | append its `.module.css` to `REM_SURFACES` | one sorted literal |
+| `src/test/scaleAudit.test.ts` | append to **R10's hardcoded copy of that list**, and change its title ("six" → N) | one sorted literal, and the case fails the build if missed |
+| `src/lib/api/index.ts` | one `export * from "./x";` line | same anchor |
+| `src/lib/database.types.ts` | regenerated wholesale, Docker-only, on Pratik's machine | unmergeable, and single-threaded by construction |
+| `docs/roadmap.md`, `docs/design-plan.md` | long prose appends | the worst textual collision in the repo |
+
+**And they all need the same migration.** "The shared lists get an owner" is
+*one* migration covering `operators`, `products`, `skills` and
+`shift_templates`: one sequence number, one policy surface, one
+`board_window` re-emission (which `0014:557-563` forbids hand-retyping), one
+`database.types.ts` regeneration. It cannot be four migrations and it cannot be
+co-authored — `docs/conventions.md:24` makes migrations append-only.
+
+### ⭐ But the collisions are all in files that can be edited ONCE, up front
+
+That is the finding that changes the answer from "no" to "yes, after two serial
+steps". Every shared edit above is small, mechanical, and knowable before any
+section is designed. So:
+
+**Serial step 1 (design session): migration 0023, the shared lists get an
+owner.** It is already item 3 on Pratik's own list. One migration, one test
+file, one mutation table.
+
+**Serial step 2 (Pratik): `db:reset`, `db:types`, commit.**
+
+**Serial step 3 (design session, one small commit): pre-seat every shared
+file.** All four sections turned on in `SECTIONS` with empty placeholder panels;
+all four stylesheets created empty and listed in `REM_SURFACES` **and** in
+R10's literal; all four `src/lib/api/*.ts` modules created empty and exported
+from `index.ts`. After that commit each section agent creates **only its own
+new files** and the collision surface is genuinely zero.
+
+**Then four lanes really are parallel**, because the FILE TABLEs minus the
+shared rows are disjoint: each is a panel, a stylesheet, a hook, a pure module,
+its vitest suite and one API module.
+
+### What the surveys found that nobody had asked for
+
+- **⚠️ `src/lib/database.types.ts` is one migration stale.**
+  `app_profile_is_company_admin` is granted to `authenticated`
+  (`0022:75-81`) and does **not** appear in the generated types. Verified
+  independently. `npm run db:types` is owed.
+- **⚠️ A site admin can edit no operator, no product and no shift pattern
+  today** — those policies still ask `app_is_admin()`, the org-wide flag —
+  **while `RequireAdmin` lets them onto the page** via
+  `app_is_admin_anywhere()`. Turning any of these four sections on before 0023
+  ships a screen that opens for a site admin and silently discards every edit.
+  That is 0022's lesson pointing the other way: **anything the client SHOWS,
+  the server must allow.**
+- **⚠️ The Shifts scope is genuinely undecided in writing.**
+  `design-plan.md:508` says shift patterns are a company-admin concern;
+  `roadmap.md:146-147` says they become site-owned. Nothing resolves it. It
+  decides whether Shifts carries zero migrations or shares 0023.
+- **⚠️ Products has no colour of its own.** `--product-1…4` are assigned
+  **positionally** and org-wide, so inserting a product re-shuffles the colours
+  of existing ones and the fifth product has none. A Products screen cannot
+  avoid showing a colour, and there is no stable colour to show.
+- **⚠️ "Products, their skill requirements and standard targets" is one third
+  of a feature.** Skill requirements attach to **nodes**, not products
+  (`0002:76`); standard targets do not exist in the schema at all.
+- **⭐ A second missing premise under CSV import, beyond `nodes.external_id`.**
+  `products.external_id` exists with **no unique constraint**
+  (`0002:34,38-39`), so the products half cannot upsert either. And
+  `create_node` **clones the hierarchy shape on every root create** since
+  `0020:861-914` — so importing a multi-site CSV silently multiplies
+  `hierarchy_templates`. `docs/api.md` §3.5 documents the pre-0020 behaviour
+  and is wrong before the brief is even written.
+- **The roadmap's own parallelism note is now out of date.** `:300` says
+  P1-5h *"is the only queued item with zero file overlap with the drag work"*.
+  True against the drag work; **false** against Shifts/Operators/Products,
+  which land in the same admin shell — and Import additionally touches seven
+  fixture files if `BoardNode` gains a field.
+
+### The one thing that did parallelise, immediately
+
+Four read-only surveys on disjoint targets, run concurrently, all four useful,
+zero conflict. That is the shape [[agent-run-hazards]] already records, and it
+held: **groundwork surveys for undesigned features are the reliable parallel
+lane, and building four screens at once is not.**

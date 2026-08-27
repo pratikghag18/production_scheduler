@@ -3,6 +3,7 @@ import {
   applyLevelAction,
   findLevelOrderProblems,
   invalidNameIndices,
+  levelDropTarget,
   MAX_LEVELS,
 } from "@/features/admin/lib/levelDraft";
 import type {
@@ -605,5 +606,219 @@ describe("levelDraft.ts: moveTo", () => {
     const before = names(BASE);
     applyLevelAction(BASE, { kind: "moveTo", from: 0, to: 3 });
     expect(names(BASE)).toBe(before);
+  });
+});
+
+/**
+ * P1-6e group P (25 cases) for `levelDropTarget` -- the seam a level drag
+ * lands on, and the two seams that promise nothing.
+ *
+ * Written and mutation-tested BEFORE this file was touched: 25 cases green
+ * cold, 11 mutations, 10 CAUGHT and 1 (W5) executed and measured INERT with
+ * the reason pinned by P25. The list itself came out of a measurement rather
+ * than a reading -- the real markup and stylesheet rendered in headless
+ * Chromium, the component's own handlers driven over that geometry, and the
+ * result fed through the real `applyLevelAction`: 528 of 528 drop pixels
+ * agreed with the caret, and 231 of them drew a caret that changed nothing.
+ */
+describe("levelDraft.ts: levelDropTarget", () => {
+  const NAMES = ["Site", "Department", "Line", "Work Cell"];
+  const ROWS: LevelDraft[] = NAMES.map((n, i) => ({
+    id: `l${i}`,
+    name: n,
+    isSchedulable: i === 3,
+  }));
+  const order = (rows: readonly LevelDraft[]): string => rows.map((r) => r.name).join(",");
+
+  // --- the plain seams, both directions ------------------------------------
+  it("P1: top half of a row well above the dragged one lands before it", () => {
+    expect(levelDropTarget(3, 0, true, 4)).toEqual({ caretAt: 0, landAt: 0 });
+  });
+
+  it("P2: bottom half of a row well above lands after it", () => {
+    expect(levelDropTarget(3, 0, false, 4)).toEqual({ caretAt: 1, landAt: 1 });
+  });
+
+  it("P3: top half of a row well below lands before it, shifted by the splice", () => {
+    expect(levelDropTarget(0, 3, true, 4)).toEqual({ caretAt: 3, landAt: 2 });
+  });
+
+  it("P4: bottom half of a row well below lands after it", () => {
+    expect(levelDropTarget(0, 3, false, 4)).toEqual({ caretAt: 4, landAt: 3 });
+  });
+
+  it("P5: the downward off-by-one is real -- caretAt 4 is landAt 3, not 4", () => {
+    const t = levelDropTarget(0, 3, false, 4);
+    expect(t && t.caretAt - t.landAt).toBe(1);
+  });
+
+  it("P6: the upward direction takes NO subtraction", () => {
+    const t = levelDropTarget(3, 1, true, 4);
+    expect(t && t.caretAt === t.landAt).toBe(true);
+  });
+
+  // --- the collapse ---------------------------------------------------------
+  // Dragging row 2: row 1's BOTTOM half is seam 2, which is where row 2 already
+  // is. Before P1-6e that half drew a caret and did nothing.
+  it("P7: bottom half of the row ABOVE the dragged one is dead, so it collapses up", () => {
+    expect(levelDropTarget(2, 1, false, 4)).toEqual({ caretAt: 1, landAt: 1 });
+  });
+
+  // Dragging row 1: row 2's TOP half is seam 2 == from + 1, the same position
+  // approached from the other side.
+  it("P8: top half of the row BELOW the dragged one is dead, so it collapses down", () => {
+    expect(levelDropTarget(1, 2, true, 4)).toEqual({ caretAt: 3, landAt: 2 });
+  });
+
+  it("P9: after the collapse the whole row above means one thing", () => {
+    expect(levelDropTarget(2, 1, true, 4)?.landAt).toBe(levelDropTarget(2, 1, false, 4)?.landAt);
+  });
+
+  it("P10: after the collapse the whole row below means one thing", () => {
+    expect(levelDropTarget(1, 2, true, 4)?.landAt).toBe(levelDropTarget(1, 2, false, 4)?.landAt);
+  });
+
+  it("P11: a row two away keeps BOTH of its halves -- the collapse is local", () => {
+    expect(levelDropTarget(0, 2, true, 4)?.landAt).not.toBe(
+      levelDropTarget(0, 2, false, 4)?.landAt,
+    );
+  });
+
+  // --- properties, swept over every input ----------------------------------
+  const sweep = (): Array<{
+    from: number;
+    over: number;
+    above: boolean;
+    count: number;
+    t: ReturnType<typeof levelDropTarget>;
+  }> => {
+    const out = [];
+    for (let count = 2; count <= 6; count++) {
+      for (let from = 0; from < count; from++) {
+        for (let over = 0; over < count; over++) {
+          for (const above of [true, false]) {
+            out.push({ from, over, above, count, t: levelDropTarget(from, over, above, count) });
+          }
+        }
+      }
+    }
+    return out;
+  };
+
+  it("P12: the dragged row itself promises nothing, from either half", () => {
+    expect([levelDropTarget(2, 2, true, 4), levelDropTarget(2, 2, false, 4)]).toEqual([null, null]);
+  });
+
+  it("P13: caretAt is always overIndex or overIndex+1, over every input", () => {
+    const bad = sweep().filter(
+      (s) => s.t !== null && s.t.caretAt !== s.over && s.t.caretAt !== s.over + 1,
+    );
+    expect(bad).toEqual([]);
+  });
+
+  it("P14: no target this function returns is a no-op, over every input", () => {
+    expect(sweep().filter((s) => s.t !== null && s.t.landAt === s.from)).toEqual([]);
+  });
+
+  it("P15: every returned landAt is a real position in the list", () => {
+    expect(
+      sweep().filter((s) => s.t !== null && (s.t.landAt < 0 || s.t.landAt >= s.count)),
+    ).toEqual([]);
+  });
+
+  // --- agreement with the reducer, which is the whole point ----------------
+  // ⭐ The expected order is derived from the CARET -- from `caretAt` against
+  // the list as DRAWN -- never from `landAt`. Deriving it from `landAt` would
+  // be the formula testing itself (verification-standard rule 3).
+  const promisedOrder = (from: number, caretAt: number): string =>
+    [
+      ...NAMES.slice(0, caretAt).filter((_, i) => i !== from),
+      NAMES[from],
+      ...NAMES.slice(caretAt).filter((_, i) => i + caretAt !== from),
+    ].join(",");
+
+  it("P16: the caret's promise is what applyLevelAction delivers, everywhere", () => {
+    const disagreements: string[] = [];
+    for (let from = 0; from < 4; from++) {
+      for (let over = 0; over < 4; over++) {
+        for (const above of [true, false]) {
+          const t = levelDropTarget(from, over, above, 4);
+          if (t === null) continue;
+          const got = order(applyLevelAction(ROWS, { kind: "moveTo", from, to: t.landAt }));
+          const want = promisedOrder(from, t.caretAt);
+          if (got !== want) disagreements.push(`${from}/${over}/${above}: ${got} != ${want}`);
+        }
+      }
+    }
+    expect(disagreements).toEqual([]);
+  });
+
+  it("P17: every returned target actually changes the order", () => {
+    const inert: string[] = [];
+    for (let from = 0; from < 4; from++) {
+      for (let over = 0; over < 4; over++) {
+        for (const above of [true, false]) {
+          const t = levelDropTarget(from, over, above, 4);
+          if (t === null) continue;
+          if (order(applyLevelAction(ROWS, { kind: "moveTo", from, to: t.landAt })) === NAMES.join(","))
+            inert.push(`${from}/${over}/${above}`);
+        }
+      }
+    }
+    expect(inert).toEqual([]);
+  });
+
+  it("P18: dragging the top row to the bottom row's lower half puts it last", () => {
+    const t = levelDropTarget(0, 3, false, 4);
+    expect(order(applyLevelAction(ROWS, { kind: "moveTo", from: 0, to: t?.landAt ?? -1 }))).toBe(
+      "Department,Line,Work Cell,Site",
+    );
+  });
+
+  // --- malformed arguments (verification-standard rule 4) ------------------
+  it("P19: an out-of-range overIndex promises nothing", () => {
+    expect([levelDropTarget(0, 4, true, 4), levelDropTarget(0, -1, true, 4)]).toEqual([null, null]);
+  });
+
+  it("P20: an out-of-range from promises nothing", () => {
+    expect([levelDropTarget(4, 1, true, 4), levelDropTarget(-1, 1, true, 4)]).toEqual([null, null]);
+  });
+
+  it("P21: a non-integer argument promises nothing", () => {
+    expect([
+      levelDropTarget(1.5, 2, true, 4),
+      levelDropTarget(1, 2.5, true, 4),
+      levelDropTarget(1, 2, true, 4.5),
+    ]).toEqual([null, null, null]);
+  });
+
+  it("P22: NaN and Infinity promise nothing", () => {
+    expect([
+      levelDropTarget(NaN, 1, true, 4),
+      levelDropTarget(1, NaN, true, 4),
+      levelDropTarget(1, 2, true, NaN),
+      levelDropTarget(Infinity, 1, true, 4),
+    ]).toEqual([null, null, null, null]);
+  });
+
+  it("P23: a one-row list has nowhere to go", () => {
+    expect([levelDropTarget(0, 0, true, 1), levelDropTarget(0, 0, false, 1)]).toEqual([null, null]);
+  });
+
+  it("P24: a two-row list can still swap, both ways", () => {
+    expect([levelDropTarget(0, 1, true, 2)?.landAt, levelDropTarget(1, 0, false, 2)?.landAt]).toEqual(
+      [1, 0],
+    );
+  });
+
+  // ⭐ P25 pins why mutation W5 is INERT. The splice shift is `from < caretAt`;
+  // `from <= caretAt` is a different expression with identical output, and no
+  // case can tell them apart -- because a returned `caretAt` is NEVER `from`.
+  // That is not luck, it is `isNoop`. Deleting the collapse turns W5 live and
+  // this case red in the same run, instead of quietly reopening the boundary.
+  it("P25: a returned caretAt is never a seam the dragged row already sits on", () => {
+    expect(
+      sweep().filter((s) => s.t !== null && (s.t.caretAt === s.from || s.t.caretAt === s.from + 1)),
+    ).toEqual([]);
   });
 });

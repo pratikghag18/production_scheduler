@@ -32,6 +32,9 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  /* P1-6e. The whole row has been a drag source for mouse and pen since P1-5l
+     (D95a) and said so nowhere. See the block at the foot of this file. */
+  cursor: grab;
 }
 
 .moveCol {
@@ -82,7 +85,18 @@
   border-color: var(--crit);
 }
 
+/* `cursor: grab` on `.row` inherits into everything inside it, so the two
+   controls that never had a cursor of their own have to state theirs, or the
+   row would promise a drag over a text field it refuses to start one from --
+   the same wrong-signal-in-the-wrong-place the grip exists to fix. The three
+   buttons already carry `pointer`. */
+.nameInput,
+.nameInputInvalid {
+  cursor: text;
+}
+
 .radioLabel {
+  cursor: pointer;
   flex: none;
   display: flex;
   align-items: center;
@@ -273,4 +287,92 @@
 .dragging,
 .dragging * {
   user-select: none;
+}
+
+/* ---------------------------------------------------------------------------
+   P1-6e — THE GRIP. A shipped mechanism nobody could find.
+
+   MEASURED before this existed, not reasoned: every pixel of a level row
+   hit-tested with the component's own guard (`closest("button, input, label")
+   !== null -> return`). 16.3% of the row started a drag, and along the row's
+   horizontal centre line **21 px of 526** -- three 7 px flex gutters between
+   the four controls. There was no handle and no `cursor: grab` anywhere; the
+   only cursor that changed on the row was `pointer`, over the buttons, which
+   are exactly the parts that are NOT draggable. The affordance pointed at the
+   one place the gesture does not work.
+
+   Two changes, because there are two questions and one answer cannot serve
+   both:
+
+   - **The handle** is a target you can hit, and it is the only one a finger
+     gets: `touch-action: none` lives here alone, since putting it on the whole
+     row would leave nowhere on this list for a touch to scroll from (D95a).
+   - **`cursor: grab` on `.row` plus a hover tint** is what tells a mouse that
+     the rest of the row drags too -- which it always did.
+
+   Declaration-for-declaration identical to `NodeTreeEditor.module.css`'s
+   `.dragHandle`, on purpose: two admin surfaces with the same gesture and two
+   different conventions is the thing this project keeps paying for.
+   --------------------------------------------------------------------------- */
+.dragHandle {
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  border: 0;
+  border-radius: 0.3125rem;
+  background: transparent;
+  /* ⚠️ `--muted`, NOT the `--grid` the tree shipped with. MEASURED: --grid
+     (#e1e0d9) on --surface (#fcfcfb) is **1.29:1**, and on the hover ground
+     (--ring over --surface, #e4e4e3) it is **1.04:1** — a grip that is
+     technically present and effectively not there, which is the exact defect
+     P1-6e exists to fix, arriving in a different colour. --muted is 3.50:1
+     resting and --ink-2 is 6.24:1 on hover. `NodeTreeEditor.module.css` was
+     changed in the same stroke so the two stay declaration-identical. */
+  color: var(--muted);
+  cursor: grab;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0;
+  /* A touch drag must move the level, not scroll the page. */
+  touch-action: none;
+}
+
+.row:hover .dragHandle,
+.dragHandle:focus-visible {
+  color: var(--ink-2);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+/* ⚠️ THE TINT IS `--ring`, NOT `--page`. `--page` on `--surface` is a
+   three-unit difference and it rendered as NOTHING in P1-5g -- measured, and
+   the reason `.eligible` in the tree is a dashed outline instead. The row has
+   no padding of its own, so the `box-shadow` spread is what lets the tint
+   reach past the flex box's edges without changing the row's geometry by a
+   single pixel; a `padding` here would move every row and re-open the seam the
+   caret is centred in. */
+.row:hover {
+  background: var(--ring);
+  border-radius: 0.3125rem;
+  box-shadow: 0 0 0 0.25rem var(--ring);
+}
+
+/* ⭐ FOUND BY RENDERING THE DRAG STATE, and only by that (rule 2c, and D99's
+   corollary: the state you need is the one with a NEIGHBOUR).
+
+   The caret sits at `-0.5 * --level-row-gap - 1px`, i.e. 3px above the row it
+   marks. The hover tint's `box-shadow` spread reaches 4px above the same row.
+   So on every live drag the pointer is over a row, that row is hovered, and the
+   band's top edge lands ONE PIXEL from the green rule -- the caret stops
+   reading as "the level lands between these two rows" and starts reading as
+   "this row has a green top border". Two marks competing for one seam.
+
+   The tint answers "can I grab this row". Once the row IS grabbed that question
+   is answered, so the tint stands down and the caret owns the seam. The grip's
+   own hover colour stays: it is inside the row, nowhere near the seam. */
+.dragging .row:hover {
+  background: none;
+  box-shadow: none;
 }

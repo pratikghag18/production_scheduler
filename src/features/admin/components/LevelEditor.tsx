@@ -6,6 +6,7 @@ import {
   applyLevelAction,
   findLevelOrderProblems,
   invalidNameIndices,
+  levelDropTarget,
   MAX_LEVELS,
 } from "../lib/levelDraft";
 import type { LevelDraft, LevelOrderProblem } from "../lib/levelDraft";
@@ -131,13 +132,18 @@ export function LevelEditor({
     from: number;
     pointerId: number;
     origin: { x: number; y: number };
-    /** null until `passedThreshold`: before that this is still a click. */
+    /**
+     * null until `passedThreshold`, AND null whenever the pointer is over a
+     * row that has nothing to promise -- which since P1-6e includes the
+     * dragged row itself. `levelDropTarget` decides; this only carries the
+     * answer.
+     */
     live: {
-      /** The row under the pointer. */
+      /** The row under the pointer -- the one row that draws the caret. */
       overIndex: number;
-      /** Top half of that row, i.e. the caret is above it rather than below. */
-      above: boolean;
-      /** The `to` for `moveTo` -- see `landingIndex`. */
+      /** The seam the caret sits on, always `overIndex` or `overIndex + 1`. */
+      caretAt: number;
+      /** The `to` for `moveTo`, against the list with the dragged row removed. */
       landAt: number;
     } | null;
   };
@@ -154,38 +160,73 @@ export function LevelEditor({
   }
 
   /**
-   * ⭐ THE OFF-BY-ONE, WRITTEN DOWN ONCE.
+   * ⭐ THE OFF-BY-ONE AND THE NO-OP RULE BOTH MOVED OUT (P1-6e).
    *
-   * `caretAt` is the SEAM the caret sits on, counted against the list as it is
-   * drawn: seam `i` is the gap above row `i`, so the top half of row `i` is
-   * seam `i` and the bottom half is seam `i + 1`. That is the same half-split
-   * `resolveDropZone` applies to a tree row, with the same convention that the
-   * midpoint belongs to the lower zone (`t < 0.5` is "above").
+   * This component used to carry `landingIndex` -- the seam-to-`to` conversion
+   * -- inline, with a long comment and no test able to reach it. It now lives
+   * in `levelDropTarget` beside `applyLevelAction`, which is the function it
+   * has to agree with, along with the rule that suppresses a caret promising a
+   * move the list will not make. 25 committed cases and 11 mutations.
    *
-   * `moveTo`'s `to`, though, is read against the list WITH THE DRAGGED ROW
-   * ALREADY REMOVED. Every seam BELOW the dragged row therefore shifts down by
-   * one; every seam above it does not. Hence the single `from < caretAt`
-   * subtraction, and hence dropping a row back onto its own two seams resolves
-   * to `to === from`, which `applyLevelAction` returns unchanged.
-   *
-   * `resolveDropZone` itself is deliberately NOT called here: it consumes
+   * `resolveDropZone` is still deliberately NOT called here: it consumes
    * `DropZone[]`, and a `DropZone` carries a `parentId` and a `DropVerdict` --
    * a parent and a legality this list does not have and §5.4 explicitly says it
-   * must not invent. What is shared is the RULE, not the call. See the report.
+   * must not invent. What is shared is the RULE, not the call.
    */
-  function landingIndex(from: number, caretAt: number): number {
-    return from < caretAt ? caretAt - 1 : caretAt;
-  }
 
   function handleLevelPointerDown(index: number, e: React.PointerEvent<HTMLLIElement>) {
     // Guard the controls. Unlike the tree, a level row holds a TEXT INPUT and a
     // radio as well as buttons: a pointerdown inside the name field must start
     // a text selection, not a drag.
     if (e.target instanceof Element && e.target.closest("button, input, label") !== null) return;
-    // D95a, and there is no `⠿` handle on this surface: a finger gets the ↑/↓
-    // arrows, which stay precisely because they are the non-pointer path.
+    // D95a: mouse and pen drag from anywhere on the row; touch does not, because
+    // `touch-action: none` on a whole row would leave a finger nowhere to scroll
+    // from. Touch gets the `⠿` handle (P1-6e) and the ↑/↓ arrows, which stay
+    // precisely because they are the non-pointer path.
+    //
+    // ⚠️ THIS COMMENT USED TO SAY "there is no `⠿` handle on this surface".
+    // That was true and it was the whole defect: the row was draggable for a
+    // mouse and said so nowhere, so 21 px of 526 on its centre line -- three
+    // 7 px gutters between the controls -- were the only place a drag could be
+    // started, and nothing pointed at them.
     if (!rowIsDragSource(e.pointerType)) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    commitLevelDrag({
+      from: index,
+      pointerId: e.pointerId,
+      origin: { x: e.clientX, y: e.clientY },
+      live: null,
+    });
+  }
+
+  /**
+   * P1-6e — THE GRIP'S OWN START. Mirrors `NodeTreeEditor`'s
+   * `handleHandlePointerDown`, and it is not optional decoration:
+   *
+   * 1. `handleLevelPointerDown` refuses any pointerdown inside a `button`, so
+   *    without this handler the grip would be the ONE part of the row that
+   *    cannot start a drag -- the same inversion the row already had, where the
+   *    only cursor that changed was `pointer`, over the four controls that are
+   *    precisely NOT draggable.
+   * 2. It is the TOUCH path. The row block refuses touch (`rowIsDragSource`,
+   *    D95a) because `touch-action: none` on a whole row leaves a finger
+   *    nowhere to scroll from; the handle carries that declaration alone, so a
+   *    finger can now drag a level as well as tap the arrows. That closes the
+   *    level half of the "no touch path for either drag" item, and it is a
+   *    consequence of matching the tree, not a separate feature.
+   */
+  function handleLevelHandlePointerDown(index: number, e: React.PointerEvent<HTMLButtonElement>) {
+    // The handle is a button whose default action we never want. `preventDefault`
+    // belongs here and NOT on the row, because a plain click on a row must still
+    // behave like a click (the same split the tree draws).
+    e.preventDefault();
+    const rowEl = e.currentTarget.closest("[data-level-index]");
+    if (!(rowEl instanceof HTMLElement)) return;
+    // Capture on the ROW, never on the button. `onPointerMove`/`onPointerUp`
+    // live on the `<li>`; `releaseLevelCapture` reads `e.currentTarget`, which
+    // for those events IS the `<li>`, so capturing anywhere else leaves the
+    // release asking the wrong element whether it holds the pointer.
+    rowEl.setPointerCapture(e.pointerId);
     commitLevelDrag({
       from: index,
       pointerId: e.pointerId,
@@ -222,10 +263,17 @@ export function LevelEditor({
     // `--chrome-scale` (D84) and a literal would stop matching at 4K.
     const t = rect.height > 0 ? offsetInRow(e.clientY, rect.top) / rect.height : 0;
     const above = !Number.isFinite(t) || t < 0.5;
-    const caretAt = above ? overIndex : overIndex + 1;
+    // The geometry is this component's job; every DECISION about the geometry
+    // is not. A null means "nothing to promise here" -- the dragged row's own
+    // two halves, and nothing else on a well-formed list.
+    const target = levelDropTarget(prev.from, overIndex, above, draft.length);
+    if (target === null) {
+      commitLevelDrag({ ...prev, live: null });
+      return;
+    }
     commitLevelDrag({
       ...prev,
-      live: { overIndex, above, landAt: landingIndex(prev.from, caretAt) },
+      live: { overIndex, caretAt: target.caretAt, landAt: target.landAt },
     });
   }
 
@@ -270,8 +318,13 @@ export function LevelEditor({
     if (!levelLive || !levelDrag) return styles.row;
     const classes = [styles.row];
     if (index === levelDrag.from) classes.push(styles.rowDragging);
+    // ONE row draws the caret -- the one under the pointer -- and which of its
+    // two edges is decided by the SEAM, not by which half the pointer is in.
+    // Since P1-6e those two can differ: a dead half collapses into the row's
+    // live edge, so the pointer can be in the top half of a row whose caret is
+    // drawn along its bottom.
     if (levelLive.overIndex === index) {
-      classes.push(levelLive.above ? styles.caretBefore : styles.caretAfter);
+      classes.push(levelLive.caretAt === index ? styles.caretBefore : styles.caretAfter);
     }
     return classes.join(" ");
   }
@@ -317,6 +370,19 @@ export function LevelEditor({
               onPointerUp={handleLevelPointerUp}
               onPointerCancel={handleLevelPointerCancel}
             >
+              {/* P1-6e: the grip comes FIRST, at the row's left edge, where a
+                  reorderable list is looked at. It is a real button so it takes
+                  focus and carries a label; the row handler's `closest("button")`
+                  guard is what stops the same pointerdown being claimed twice. */}
+              <button
+                type="button"
+                className={styles.dragHandle}
+                aria-label={`Drag ${level.name || "level"} to reorder`}
+                onPointerDown={(e) => handleLevelHandlePointerDown(index, e)}
+              >
+                ⠿
+              </button>
+
               <div className={styles.moveCol}>
                 <button
                   type="button"

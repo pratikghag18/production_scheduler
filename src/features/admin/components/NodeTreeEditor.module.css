@@ -336,7 +336,12 @@
   border: 0;
   border-radius: 0.3125rem;
   background: transparent;
-  color: var(--grid);
+  /* P1-6e, and this file had the defect first. MEASURED: --grid (#e1e0d9) on
+     --surface (#fcfcfb) is 1.29:1 — below the 3:1 a non-text affordance needs
+     and low enough that the handle reads as absent. --muted is 3.50:1.
+     Identical to `LevelEditor.module.css`'s `.dragHandle`, which is the whole
+     point of the copy. */
+  color: var(--muted);
   cursor: grab;
   font-size: 0.75rem;
   line-height: 1;
