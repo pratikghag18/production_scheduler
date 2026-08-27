@@ -305,13 +305,46 @@ export interface Product {
   sku: string;
   name: string;
   active: boolean;
+  /**
+   * The palette token this product renders in — `product-1` .. `product-4`
+   * (0023 §3, D102). A TOKEN NAME, NEVER A HEX: the board resolves it through
+   * `tokens.css`, which is what lets the palette be re-pointed in one place.
+   *
+   * ⭐ `board_window` has emitted this since 0023 and NOTHING READ IT. The
+   * board computed `var(--product-${(i % 4) + 1})` from a product's position
+   * in an org-wide, sku-ordered list instead — so a product's colour changed
+   * when a product it has nothing to do with was added or renamed, and the
+   * colour editor in the admin section would have been a lie. `BoardGrid` and
+   * `BoardToolbar` now read this field.
+   */
+  colorToken: string;
 }
 
+/**
+ * ⚠️ `color_token` IS THE ONE FIELD HERE THAT DOES NOT REJECT THE ROW, and the
+ * asymmetry is deliberate rather than an oversight.
+ *
+ * Every other field is identity or state: a product with no `sku` is not a
+ * product, and the whole payload failing is the honest answer. A colour is
+ * PRESENTATION — and this parser's failure mode is total, because
+ * `parseBoardWindow` returns `null` for the whole window if any one product
+ * fails, which `board.ts` turns into a thrown `shapeMismatch` and an empty
+ * board. Blanking an entire plant's schedule because one product's swatch is
+ * missing is not a trade anyone would make.
+ *
+ * So an absent or null `color_token` becomes `""`, and the two board call
+ * sites fall back to the first palette token for anything that is not a token
+ * `tokens.css` defines. That fallback is what makes this safe, and it is the
+ * same fallback that covers the OTHER way this goes wrong: 0023 §3 records
+ * that `app_product_palette()` shipped at eight entries against a stylesheet
+ * defining four, so `product-5` — a perfectly well-formed string — renders as
+ * no colour at all. A `isStr` check would not have caught that one either.
+ */
 function parseProduct(v: Json): Product | null {
   if (!isJsonObject(v)) return null;
-  const { id, sku, name, active } = v;
+  const { id, sku, name, active, color_token } = v;
   if (!isStr(id) || !isStr(sku) || !isStr(name) || !isBool(active)) return null;
-  return { id, sku, name, active };
+  return { id, sku, name, active, colorToken: isStr(color_token) ? color_token : "" };
 }
 
 export interface Skill {

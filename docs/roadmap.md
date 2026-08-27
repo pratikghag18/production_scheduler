@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-27, session 9 (**THE WRITE-ERROR CONTRACT — the one thing all three surveys found, fixed once before the lanes start.** Three concurrent read-only surveys over Shifts / Operators / Products agreed on something none of them was looking for: **not one of these sections has a single RPC.** Every write is a plain table write against 0023's policies — which is sanctioned — but the client's error layer was written when every write was an RPC. Measured on a scratch PG16: a refused create said **"You need to sign in to do that"** to a signed-in site admin; a refused edit passed **silently, zero rows, no error**; a duplicate name and a still-in-use delete both said "Something went wrong"; and **two overlapping shifts said "someone else changed this run first"**, because `23P01` was mapped unconditionally to the runs race. Five new kinds (`WriteRefused`, `DuplicateValue`, `StillInUse`, `InvalidValue`, `ShiftOverlap`), a `requireWritten` guard for the silent half, and **`42501` split by message** (row-level security vs a revoked function). **18 new cases, 11 mutations, all 11 caught**; every fixture is a message string measured by making the real statement fail, not composed. Acceptance **757 → 775 in 20 files. No migration.** See §19.63.)
+**Last updated:** 2026-08-27, session 10 (**THE THREE LANES ARE BUILT — AND THEN ATTACKED.** Shifts, Operators and Products were built in parallel on §19.62's seats against §19.63's error contract. The fence held: 21 files, exactly the three tables, no shared file touched twice; `tsc` 0, `eslint` 0, three green suites (91/66/96) and **20 unprescribed mutations of my own, all 20 caught**. **Eleven defects were still in the tree in that state.** The third wave — one read-only adversarial reviewer per lane, each hunting a named defect CLASS — found them; every one was reproduced here before a line changed, and two of the reviewers' claims did not survive that step. The worst: **a 16:00–00:00 shift said `crossesMidnight: false`** while its own label said `+1d`, so the break form withheld the "+1 day" box and the legal 23:45–00:00 break was **unenterable**; **`describeSpan` marked the day on the END only**, so two different storable break rows rendered the identical string and every after-midnight break read as starting twenty hours early; **editing a shift's times was permanently blocked** by a pre-existing stray break, because "already wrong" was decided by message-string equality and the message embeds the shift's own label; and **`previewUnavailable` was unreachable in the failure it was written for**, so a site admin whose hierarchy read failed was told they administer no site. **Nine mutations that a green suite ignored — eight now caught, one measured INERT and written down as such.** The picture caught two more: a break's Remove thrown level with the shift's Delete, and a pre-delete warning at **3.50:1**. Acceptance **1030 → 1040 in 23 files** — 20 → 23, because each lane brought its own new test file. **No migration.** ⚠️ **Five findings are NOT fixed** and need your call — top of the list, **every read in `src/lib/api/` is unbounded against `max_rows = 1000`, silently.** See §19.64.)
 
 ---
 
@@ -31,7 +31,7 @@
 - [x] Tech stack DECIDED (Aug 21): Supabase (Postgres+Auth+Realtime+RLS API) · React+TypeScript · static hosting (Vercel/Cloudflare Pages) · escape hatch to self-hosted documented in design plan §5
 - [x] **Repo scaffold + CI** — Vite/React-TS + Supabase client + CI. Authored by agent Aug 21 (unvalidated, no npm in container); `npm install` + full acceptance run completed on Pratik's machine Aug 22: typecheck, lint, format:check, unit tests, build, and Playwright e2e all green, `npm audit` reports 0 vulnerabilities.
 - [x] Database migrations from design plan §3/§14/§15/§16/§17 (incl. capacity trigger, shift tables, RLS policies) + seed scripts — **built and validated** (Sonnet, Aug 21) against a scratch PostgreSQL 16 instance; all 31 `docs/agent-briefs/p1-2-db-migrations-brief.md` §7 acceptance items pass via `scripts/verify-db.sh`. **Confirmed against real Supabase (Aug 22)**: all 9 migrations + seed applied cleanly via `supabase start` on WSL2/Docker, so the `auth.users` FK is real, not shimmed. `database.types.ts` generated from the live DB — all 17 tables and all 8 RPCs typed.
-- [ ] Org onboarding settings pages (same pattern as ⚙ Shifts): hierarchy level editor + node tree editor + CSV import (operators, products, tree) — **re-split repeatedly (§19.9, §19.13) and now EIGHT: P1-5a database half ✓; P1-5b client layer ✓; P1-5c board debts ✓; P1-5d admin screens ✓; P1-5e the D86 client work ✓; P1-5f D87 + the shape picker ✓; P1-5g tree drag-and-drop; P1-5h CSV import**. The split got finer because P1-4c cost 69k against P1-4b's 336k purely on tightness
+- [ ] Org onboarding settings pages (same pattern as ⚙ Shifts): hierarchy level editor + node tree editor + CSV import (operators, products, tree) — **re-split repeatedly (§19.9, §19.13) and now EIGHT: P1-5a database half ✓; P1-5b client layer ✓; P1-5c board debts ✓; P1-5d admin screens ✓; P1-5e the D86 client work ✓; P1-5f D87 + the shape picker ✓; P1-5g tree drag-and-drop; P1-5h CSV import**. **The Shifts, Operators and Products admin sections themselves landed Aug 27 as three parallel lanes (§19.64)** — the sections are switched on by `*_PANEL_READY` flags the panels export, so a section cannot appear without a panel behind it. The split got finer because P1-4c cost 69k against P1-4b's 336k purely on tightness
 - [ ] **Auth — THE FRONT DOOR IS NOT BUILT, and this line is how that hid.** Profiles, subtree grants and RLS wiring all shipped (P1-3b, then migrations 0019–0022), so the bullet read as nearly done. It was not. Measured by grep across `src/` on Aug 27: **no `signUp`, no `inviteUserByEmail`, no `signInWithOtp`, no `resetPasswordForEmail` anywhere.** The only way into the app is `DevProfileSwitcher`, which is `import.meta.env.DEV`-gated — **a production build has no way for any human to log in.** Split into the four real pieces:
   - [ ] **P1-6b — a real sign-in screen.** Browser-only `signInWithPassword`, no server piece. A `/sign-in` route outside `AppShell`, a gate that redirects a signed-out visitor and remembers where they were going (with an open-redirect guard), a Sign out control that is not DEV-gated, and the **"signed in but no `user_profiles` row in this org"** dead end — which is real, not hypothetical: `user_profiles` is unique on `(org_id, user_id)`, NOT `user_id`, so `useSession`'s `.maybeSingle()` has a legitimate way to come back empty
   - [ ] **P1-6c — invitations. This is the gate on a SECOND person using the product**, and the bigger half: it needs a privileged server-side piece (`auth.admin.inviteUserByEmail` behind an Edge Function or equivalent) and the project has no server-side code at all today
@@ -97,12 +97,13 @@
 >
 > **STATE.** **Verify the tip from `.git/refs/heads/Development`, never from this paragraph** — it said
 > `fc3367b` once and was already two commits stale the next time it was read. P1-6e is committed as
-> `261ad5d`, D100 as `74bd689`, migration 0023 as `0cbe023` and **0024 + P1-5k's client half as
-> `d37569c`** (which ran green at exactly the predicted 751). **The pre-seat commit follows those.**
-> **24 migrations. 332 database checks. Acceptance is 775 tests in 20 files** — 757 plus the 18 in
-> group W of `errors.test.ts`. If your count differs, a test file did not load, which is how a broken
-> suite once looked green. **No `db:reset` and no `db:types` are owed** — neither the pre-seat nor the
-> write-error contract carries a migration.
+> `261ad5d`, D100 as `74bd689`, migration 0023 as `0cbe023`, **0024 + P1-5k's client half as
+> `d37569c`**, the pre-seat as `b2e975d` and the write-error contract as `683197e`.
+> **The three build lanes follow those.**
+> **24 migrations. 332 database checks. Acceptance is 1040 tests in 23 files** — 775 in 20 files plus 91 products,
+> 69 operators, 103 shiftDraft and 2 in `shapes.test.ts`. If your count differs, a test file did not
+> load, which is how a broken suite once looked green. **No `db:types` is owed; `npm run db:reset`
+> still is** — 0024 replaces `app_relevel_subtree` and is applied nowhere.
 >
 > **HOW WE WORK — these are not preferences, each one was bought with a defect:**
 >
@@ -135,24 +136,31 @@
 > - **Explain in plain language in the chat, not jargon — draw it if that is clearer.** Keep the
 >   gameplan artifact updated; do not stop until you need me to do something or want my opinion.
 >
-> **NEXT, IN ORDER (Aug 27 session 8 — the pre-seat is committed, so the lanes can start):**
+> **NEXT, IN ORDER (Aug 27 session 10 — the three lanes are built and reviewed):**
 >
-> 1. **Shifts / Operators / Products — three build lanes, genuinely in parallel. THE PRE-SEAT IS
->    DONE (§19.62), so this is unblocked.** No
->    decisions outstanding: 0023 gave each list an owner (`site_node_id`, NULL = company-wide) and
->    gave products a palette token, and §19.62 pre-seated every shared file, so each lane owns only
->    files it creates. **Three waves per lane: survey (read-only) → build → adversarial review by a
->    different agent** — the reviewer found the
->    cross-tenant leak in 0023's colour picker that reading had not, so the review wave is not
->    optional. Never trust a lane's report of its own work; run the whole suite yourself after each.
-> 2. **P1-5h CSV import — NOT a fourth parallel lane yet. ⚠️ TWO missing premises.** `nodes` has no
->    `external_id` column, and `products.external_id` exists with **no unique constraint**, so neither
->    half can upsert. Also: `create_node` has cloned the hierarchy shape on every root create since
->    0020, so a multi-site import would silently multiply `hierarchy_templates`, and `docs/api.md`
->    §3.5 still documents the pre-0020 behaviour. A small migration has to land first.
-> 3. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
+> 1. **⚠️ THE 1000-ROW CEILING. Do this before any more screens are built on top of it.**
+>    `supabase/config.toml` sets `max_rows = 1000` and there is **no `.range(` or `.limit(` anywhere in
+>    `src/lib/api/`**. A capped response arrives as **200 with no error**, so every `if (error) throw`
+>    passes and `skipped` counts 0. It is not a lane defect — the hierarchy and board reads are the
+>    same — which is why it is its own step. At 500 people × 3 tickets the operators read starts
+>    dropping rows, and a dropped requirement row renders a confident **✓** for a place the server will
+>    refuse. Page every read, or assert the row count and refuse to render a truncated answer as the
+>    company's answer. See §19.64 §5.
+> 2. **The four other findings §19.64 §5 leaves open**, each needing a decision rather than a patch:
+>    `skipped` never reaching `workPlacesFor`; "can't tell" painted as a confident ✕ with no third
+>    state; `asOf` defaulting to today so every ✓ is a promise about today only; and `adminSiteIds`
+>    derived from STRUCTURE ownership rather than node grants, which locks a site admin out of products
+>    the server would let them write.
+> 3. **A couple of Plant-2-owned rows in `dev_demo.sql`.** 0023's whole point is invisible without
+>    them — a site admin signing in today sees the new permission do nothing.
+> 4. **P1-5h CSV import. ⚠️ TWO missing premises.** `nodes` has no `external_id` column, and
+>    `products.external_id` exists with **no unique constraint**, so neither half can upsert. Also:
+>    `create_node` has cloned the hierarchy shape on every root create since 0020, so a multi-site
+>    import would silently multiply `hierarchy_templates`, and `docs/api.md` §3.5 still documents the
+>    pre-0020 behaviour. A small migration has to land first.
+> 5. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
 >    `import.meta.env.DEV`-gated switcher, so **until it lands Pratik is the only person who can log
->    in** and nothing built in stages 05–11 is reachable by anyone else. The sign-in page is small and
+>    in** and nothing built in stages 05–12 is reachable by anyone else. The sign-in page is small and
 >    browser-only; invitations need a privileged server-side piece this project does not have.
 >
 > **Open and flagged, so none of it goes quiet:** X46 pins that a direct PostgREST `DELETE` on
@@ -194,7 +202,7 @@ That is all it needs. Project memory carries every decision, the workflow, the e
 | App scaffold | repo root (`src/`, `supabase/`, `.github/`) | v1 (code complete, build/CI unvalidated) |
 | Folder conventions | `docs/conventions.md` | v1 |
 | Schema reference | `docs/schema.md` | regenerated by `scripts/verify-db.sh` on every run — **current as of migration 0023 (Aug 27)**: `site_node_id` on `operators`/`products`/`skills`/`shift_templates` and `products.color_token` now show in their `\d+` |
-| DB migrations, seed, SQL tests | `supabase/migrations/` (**24**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**18 numbered + 3 upgrade**, **332 named cases**, `verify-db.sh` exit 0) · `src/test/` (**20 test files, 775 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27); migration `20260827000024_relevel_contract.sql` + `76_relevel_contract_test.sql` (**17 cases**) + `mutations/0024.json` (**11 mutations, 7 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
+| DB migrations, seed, SQL tests | `supabase/migrations/` (**24**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**18 numbered + 3 upgrade**, **332 named cases**, `verify-db.sh` exit 0) · `src/test/` (**23 test files, 1040 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27); migration `20260827000024_relevel_contract.sql` + `76_relevel_contract_test.sql` (**17 cases**) + `mutations/0024.json` (**11 mutations, 7 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
 | Database API contract | `docs/api.md` | v1 (P1-3a, Aug 22) — DB half only; HTTP-status mapping unverified (no Docker/PostgREST here); §3.5 (five hierarchy-admin RPCs) and six new error codes added (P1-5a, Aug 25) |
 | Generated DB types | `src/lib/database.types.ts` | **regenerated from the live local DB Aug 25 — 17 tables, 13 RPCs** (was Aug 22 / 8 RPCs, which cost P1-5b seven `tsc` errors). Regenerate with `supabase gen types typescript --local` in WSL whenever a migration adds or changes a function: **a migration and this file are ONE change, not two.** Note it can never express a nullable RPC argument — Postgres parameters carry no nullability, so `create_node`'s `p_parent_id` and `move_node`'s `p_new_parent_id` are cast at their call sites (see the note in `src/lib/api/hierarchy.ts`). |
 | TypeScript API client guide | `docs/api-client.md` | v1 (P1-3b, Aug 22) — code delivered; no npm in delivery container, acceptance pending user run. **"Hierarchy admin" section added (P1-5b, Aug 25).** |

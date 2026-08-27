@@ -13,4 +13,468 @@
  * `hierarchy.ts` for the pattern. `src/lib/api/` is the ONLY place allowed to
  * touch `supabase.rpc`, snake_case field names, or `database.types.ts`.
  */
-export {};
+/* ---------------------------------------------------------------------------
+   ⚠️ ONE CORRECTION TO THE HEADER ABOVE, MEASURED RATHER THAN ASSUMED.
+
+   It says "every wrapper calls one RPC". For operators there is no RPC to
+   call: `20260821000009_api_surface.sql` exposes nothing for operators,
+   skills, operator_skills or node_skill_requirements, and
+   `20260827000023_shared_list_owners.sql:484-530` puts the whole contract in
+   RLS policies on the tables themselves. Every write below is therefore a
+   plain `supabase.from(...)`, and the rest of the header stands verbatim:
+   snake_case stops at this file, reads go through a guard that returns `null`
+   rather than trusting the generated types, and errors become
+   `toSchedulerError(error)`.
+
+   ⭐ AND THAT CHANGE OF MECHANISM BRINGS ONE RULE AN RPC DID NOT NEED.
+   **Every write ends `.select()`, then `if (error) throw
+   toSchedulerError(error)`, then `requireWritten(data)`.** A policy's `WITH
+   CHECK` clause RAISES, but its `USING` clause merely FILTERS — so a refused
+   UPDATE or DELETE is a *success that changed nothing*, with no error to map.
+   `requireWritten` (errors.ts) turns an empty result into
+   `{kind:"WriteRefused"}`. This matters here more than anywhere: migration
+   0023 lets a SITE admin edit their own site's operators and refuses them the
+   company-wide ones, and without `.select()` the refusal looks exactly like a
+   save.
+
+   AUTHOR-ONLY — imports `@/lib/supabase`, so it is not runnable under
+   `node --experimental-strip-types`. The logic worth testing lives in
+   `src/features/admin/lib/operators.ts`, which is.
+   --------------------------------------------------------------------------- */
+import { supabase } from "@/lib/supabase";
+import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+import type { BoardNode, HierarchyLevel } from "./shapes";
+
+// ---------------------------------------------------------------------------
+// Row shapes. camelCase out; `home_node_id` and `certified_at` are read by
+// NOTHING in this app and are deliberately absent — a field on a type is an
+// invitation to surface it.
+// ---------------------------------------------------------------------------
+
+export interface OperatorRecord {
+  id: string;
+  displayName: string;
+  employeeRef: string | null;
+  active: boolean;
+  /** `null` = company-wide (0023). Otherwise the ROOT node that owns this person. */
+  siteNodeId: string | null;
+  /** `'manual'` by default; an imported person carries their source here. */
+  source: string;
+  externalId: string | null;
+}
+
+export interface SkillRecord {
+  id: string;
+  name: string;
+  siteNodeId: string | null;
+}
+
+export interface OperatorSkillRecord {
+  operatorId: string;
+  skillId: string;
+  /** `YYYY-MM-DD`, or `null` for "no expiry". */
+  expiresAt: string | null;
+}
+
+export interface NodeSkillRequirementRecord {
+  nodeId: string;
+  skillId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime guards.
+//
+// Each returns `null` on a shape mismatch rather than throwing, and the
+// caller SKIPS AND COUNTS. That is the opposite of `hierarchy.ts`'s
+// `parseXResult`/`shapeMismatch` idiom and the difference is deliberate:
+// those guard a single row whose absence is genuinely an error, while these
+// guard LISTS a screen renders, where one malformed row must never blank the
+// panel. The count is reported (`skipped`) rather than swallowed — a silently
+// shortened list is indistinguishable from a smaller company.
+//
+// The single-row payloads of the WRITES below are the other case, and they
+// use `shapeMismatch` accordingly.
+// ---------------------------------------------------------------------------
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function str(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+function strOrNull(v: unknown): string | null | undefined {
+  return v === null || typeof v === "string" ? (v as string | null) : undefined;
+}
+
+export function parseOperatorRecord(v: unknown): OperatorRecord | null {
+  if (!isRecord(v)) return null;
+  const id = str(v.id);
+  const displayName = str(v.display_name);
+  const employeeRef = strOrNull(v.employee_ref);
+  const siteNodeId = strOrNull(v.site_node_id);
+  const source = str(v.source);
+  const externalId = strOrNull(v.external_id);
+  if (id === null || displayName === null || source === null) return null;
+  if (employeeRef === undefined || siteNodeId === undefined || externalId === undefined) return null;
+  if (typeof v.active !== "boolean") return null;
+  return { id, displayName, employeeRef, active: v.active, siteNodeId, source, externalId };
+}
+
+export function parseSkillRecord(v: unknown): SkillRecord | null {
+  if (!isRecord(v)) return null;
+  const id = str(v.id);
+  const name = str(v.name);
+  const siteNodeId = strOrNull(v.site_node_id);
+  if (id === null || name === null || siteNodeId === undefined) return null;
+  return { id, name, siteNodeId };
+}
+
+export function parseOperatorSkillRecord(v: unknown): OperatorSkillRecord | null {
+  if (!isRecord(v)) return null;
+  const operatorId = str(v.operator_id);
+  const skillId = str(v.skill_id);
+  const expiresAt = strOrNull(v.expires_at);
+  if (operatorId === null || skillId === null || expiresAt === undefined) return null;
+  return { operatorId, skillId, expiresAt };
+}
+
+export function parseNodeSkillRequirementRecord(v: unknown): NodeSkillRequirementRecord | null {
+  if (!isRecord(v)) return null;
+  const nodeId = str(v.node_id);
+  const skillId = str(v.skill_id);
+  if (nodeId === null || skillId === null) return null;
+  return { nodeId, skillId };
+}
+
+function parseList<T>(rows: unknown, parse: (v: unknown) => T | null): { ok: T[]; skipped: number } {
+  if (!Array.isArray(rows)) return { ok: [], skipped: 0 };
+  const ok: T[] = [];
+  let skipped = 0;
+  for (const row of rows as unknown[]) {
+    const parsed = parse(row);
+    if (parsed === null) skipped += 1;
+    else ok.push(parsed);
+  }
+  return { ok, skipped };
+}
+
+function firstOrThrow<T>(rows: unknown, parse: (v: unknown) => T | null, what: string): T {
+  const written = requireWritten(rows as unknown[] | null);
+  const parsed = parse(written[0]);
+  if (parsed === null) throw shapeMismatch(what, "the written row did not parse");
+  return parsed;
+}
+
+/* ===========================================================================
+ * fetchOperatorsAdmin — one read, one spinner.
+ *
+ * Modelled on `fetchHierarchyTree` in `hierarchy.ts`: everything the screen
+ * needs in ONE `Promise.all`, deliberately, and not one `useQuery` per table.
+ * §19.47 settled that a level up — a second unresolved window is a second
+ * thing to fold into the loading state, and D91 is the standing reminder that
+ * `enabled: false` leaves `isLoading` FALSE.
+ *
+ * ⭐ SIX READS, NOT THE FOUR THIS SECTION'S TABLES ACCOUNT FOR, AND THE TWO
+ * EXTRA ARE THE POINT OF THE SCREEN. "Where can this person work" is half made
+ * of `nodes` and `hierarchy_levels`: the requirements inherit down the tree, and
+ * `is_schedulable` is what decides which nodes are places at all. The panel
+ * takes NO props (it cannot be handed `AdminPage`'s tree — that read is local
+ * to that component), so the tree is read here, in the same round trip, rather
+ * than through a second query the panel would have to fold in by hand.
+ *
+ * Reads are ORG-WIDE under RLS (0023 changed the WRITE policies only), so this
+ * is the whole company's answer, and a site admin sees people they may not
+ * edit. That asymmetry is real and the panel shows it rather than hiding it.
+ * =========================================================================== */
+
+export interface OperatorsAdminData {
+  operators: OperatorRecord[];
+  skills: SkillRecord[];
+  operatorSkills: OperatorSkillRecord[];
+  requirements: NodeSkillRequirementRecord[];
+  nodes: BoardNode[];
+  levels: HierarchyLevel[];
+  /** Rows across all six reads that did not parse. Shown, never swallowed. */
+  skipped: number;
+}
+
+export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
+  const [operatorsRes, skillsRes, operatorSkillsRes, requirementsRes, nodesRes, levelsRes] =
+    await Promise.all([
+      supabase
+        .from("operators")
+        .select("id, display_name, employee_ref, active, site_node_id, source, external_id")
+        .order("display_name"),
+      supabase.from("skills").select("id, name, site_node_id").order("name"),
+      supabase.from("operator_skills").select("operator_id, skill_id, expires_at"),
+      supabase.from("node_skill_requirements").select("node_id, skill_id"),
+      supabase
+        .from("nodes")
+        .select("id, parent_id, level_id, name, path, sort_order, active")
+        .order("sort_order"),
+      supabase
+        .from("hierarchy_levels")
+        .select("id, template_id, position, name, is_schedulable")
+        .order("position"),
+    ]);
+
+  // All six THROW on error, with no `editable_shape_ids`-style exception.
+  // Every one of them is this screen's content: without any of them the
+  // answer to "where can this person work" is not a shorter list, it is a
+  // WRONG list — and a wrong list here reads as a tick.
+  if (operatorsRes.error) throw toSchedulerError(operatorsRes.error);
+  if (skillsRes.error) throw toSchedulerError(skillsRes.error);
+  if (operatorSkillsRes.error) throw toSchedulerError(operatorSkillsRes.error);
+  if (requirementsRes.error) throw toSchedulerError(requirementsRes.error);
+  if (nodesRes.error) throw toSchedulerError(nodesRes.error);
+  if (levelsRes.error) throw toSchedulerError(levelsRes.error);
+
+  const operators = parseList(operatorsRes.data, parseOperatorRecord);
+  const skills = parseList(skillsRes.data, parseSkillRecord);
+  const operatorSkills = parseList(operatorSkillsRes.data, parseOperatorSkillRecord);
+  const requirements = parseList(requirementsRes.data, parseNodeSkillRequirementRecord);
+
+  const nodes: BoardNode[] = (nodesRes.data ?? []).map((r) => ({
+    id: r.id,
+    parentId: r.parent_id,
+    levelId: r.level_id,
+    name: r.name,
+    // `nodes.path` is a Postgres `ltree`, which has no JS mapping, so
+    // `supabase gen types` emits it as `unknown`. It is a string over the
+    // wire; cast at the single boundary, exactly as `fetchHierarchyTree` does.
+    // Nothing downstream of here parses it — `effectiveRequirements` walks
+    // `parentId` instead, and that file's header says why.
+    path: r.path as string,
+    sortOrder: r.sort_order,
+    active: r.active,
+  }));
+  const levels: HierarchyLevel[] = (levelsRes.data ?? []).map((r) => ({
+    id: r.id,
+    templateId: r.template_id,
+    position: r.position,
+    name: r.name,
+    isSchedulable: r.is_schedulable,
+  }));
+
+  return {
+    operators: operators.ok,
+    skills: skills.ok,
+    operatorSkills: operatorSkills.ok,
+    requirements: requirements.ok,
+    nodes,
+    levels,
+    skipped:
+      operators.skipped + skills.skipped + operatorSkills.skipped + requirements.skipped,
+  };
+}
+
+/* ===========================================================================
+ * Writes.
+ *
+ * Every one ends `.select(...)` -> `if (error) throw toSchedulerError(error)`
+ * -> `requireWritten(data)`. See the correction block at the top of this file
+ * for why that third step is not optional.
+ *
+ * `org_id` HAS NO DEFAULT on any of these tables, so every insert takes an
+ * explicit `orgId`. The caller reads it from `useSession().profile.orgId`;
+ * this layer never guesses it, because the only other place to get it would
+ * be a second query whose answer could disagree with the session's.
+ *
+ * The errors these raise, mapped by `toSchedulerError`:
+ *   23505 -> `{kind:"DuplicateValue"}`  — `unique (org_id, name)` on skills
+ *                                         (ORG-WIDE), `unique (org_id,
+ *                                         external_id)` on operators, and the
+ *                                         `(operator_id, skill_id)` primary
+ *                                         key on a re-grant.
+ *   23503 -> `{kind:"StillInUse"}`      — deleting someone `operator_skills`
+ *                                         or `assignments` still references;
+ *                                         neither FK has an ON DELETE clause.
+ *   42501 -> `{kind:"WriteRefused"}`    — an INSERT a `WITH CHECK` refused.
+ *   0 rows -> `{kind:"WriteRefused"}`   — an UPDATE or DELETE a `USING`
+ *                                         clause filtered away. Silent
+ *                                         without `requireWritten`.
+ * =========================================================================== */
+
+const OPERATOR_COLUMNS = "id, display_name, employee_ref, active, site_node_id, source, external_id";
+const SKILL_COLUMNS = "id, name, site_node_id";
+const OPERATOR_SKILL_COLUMNS = "operator_id, skill_id, expires_at";
+
+export interface CreateOperatorInput {
+  orgId: string;
+  displayName: string;
+  employeeRef: string | null;
+  /**
+   * The ROOT node that owns this person, or `null` for company-wide.
+   * A site admin MUST supply their own site: `operators_insert` refuses a
+   * `null` here for anyone who is not a company admin (0023), and the trigger
+   * `operators_check_site` refuses a node that is not a root.
+   */
+  siteNodeId: string | null;
+}
+
+export async function createOperator(input: CreateOperatorInput): Promise<OperatorRecord> {
+  const { data, error } = await supabase
+    .from("operators")
+    .insert({
+      org_id: input.orgId,
+      display_name: input.displayName,
+      employee_ref: input.employeeRef,
+      site_node_id: input.siteNodeId,
+    })
+    .select(OPERATOR_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseOperatorRecord, "createOperator");
+}
+
+export interface UpdateOperatorInput {
+  id: string;
+  displayName: string;
+  employeeRef: string | null;
+}
+
+export async function updateOperator(input: UpdateOperatorInput): Promise<OperatorRecord> {
+  const { data, error } = await supabase
+    .from("operators")
+    .update({ display_name: input.displayName, employee_ref: input.employeeRef })
+    .eq("id", input.id)
+    .select(OPERATOR_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseOperatorRecord, "updateOperator");
+}
+
+/**
+ * ⭐ THE MAIN ACTION (Pratik's decision). Deactivating keeps every assignment,
+ * every ticket and every audit trail intact and simply takes the person off
+ * the board; deleting is the secondary path below and usually refused.
+ */
+export async function setOperatorActive(input: {
+  id: string;
+  active: boolean;
+}): Promise<OperatorRecord> {
+  const { data, error } = await supabase
+    .from("operators")
+    .update({ active: input.active })
+    .eq("id", input.id)
+    .select(OPERATOR_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseOperatorRecord, "setOperatorActive");
+}
+
+/**
+ * Secondary, and expected to fail whenever the person has ever been used:
+ * `operator_skills` and `assignments` both reference `operators` with NO
+ * `ON DELETE`, so a scheduled or certified person raises 23503 ->
+ * `{kind:"StillInUse", usedBy}` — and `usedBy` is what lets the screen say
+ * what is blocking it instead of only that something is.
+ */
+export async function deleteOperator(id: string): Promise<void> {
+  const { data, error } = await supabase.from("operators").delete().eq("id", id).select("id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data as unknown[] | null);
+}
+
+export interface CreateSkillInput {
+  orgId: string;
+  name: string;
+  /** `null` = company-wide, which is what Pratik chose for skills by default. */
+  siteNodeId: string | null;
+}
+
+/**
+ * ⚠️ `unique (org_id, name)` IS ORG-WIDE, and a 23505 from here is NOT
+ * something to show the user. The screen checks
+ * `findExistingSkillByName` first and offers the existing ticket in one
+ * click; `{kind:"DuplicateValue"}` covers only the race where somebody else
+ * created it in between.
+ */
+export async function createSkill(input: CreateSkillInput): Promise<SkillRecord> {
+  const { data, error } = await supabase
+    .from("skills")
+    .insert({ org_id: input.orgId, name: input.name, site_node_id: input.siteNodeId })
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "createSkill");
+}
+
+export async function renameSkill(input: { id: string; name: string }): Promise<SkillRecord> {
+  const { data, error } = await supabase
+    .from("skills")
+    .update({ name: input.name })
+    .eq("id", input.id)
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "renameSkill");
+}
+
+/** Raises 23503 -> `{kind:"StillInUse"}` while any person holds it or any place requires it. */
+export async function deleteSkill(id: string): Promise<void> {
+  const { data, error } = await supabase.from("skills").delete().eq("id", id).select("id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data as unknown[] | null);
+}
+
+export interface GrantSkillInput {
+  orgId: string;
+  operatorId: string;
+  skillId: string;
+  /** `YYYY-MM-DD`, or `null` for a ticket that never expires. */
+  expiresAt: string | null;
+}
+
+/**
+ * ⭐ THE ONE WRITE THAT CHANGES SEVERAL ANSWERS AT ONCE. One row here can turn
+ * a handful of crosses green across the tree, because requirements inherit
+ * downward and this ticket satisfies every one of them.
+ *
+ * ⚠️ `operator_skills` FOLLOWS THE OPERATOR, not the skill:
+ * `app_is_admin_for_operator(operator_id)` (0023:402). So a SITE admin may
+ * legitimately say THEIR operator holds a COMPANY-WIDE skill they cannot
+ * themselves edit or delete. That is the intended asymmetry, not a bug to
+ * defend against here.
+ *
+ * `certified_at` is deliberately not written: nothing in this app reads it.
+ */
+export async function grantSkill(input: GrantSkillInput): Promise<OperatorSkillRecord> {
+  const { data, error } = await supabase
+    .from("operator_skills")
+    .insert({
+      org_id: input.orgId,
+      operator_id: input.operatorId,
+      skill_id: input.skillId,
+      expires_at: input.expiresAt,
+    })
+    .select(OPERATOR_SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseOperatorSkillRecord, "grantSkill");
+}
+
+export async function updateSkillExpiry(input: {
+  operatorId: string;
+  skillId: string;
+  expiresAt: string | null;
+}): Promise<OperatorSkillRecord> {
+  const { data, error } = await supabase
+    .from("operator_skills")
+    .update({ expires_at: input.expiresAt })
+    .eq("operator_id", input.operatorId)
+    .eq("skill_id", input.skillId)
+    .select(OPERATOR_SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseOperatorSkillRecord, "updateSkillExpiry");
+}
+
+export async function revokeSkill(input: {
+  operatorId: string;
+  skillId: string;
+}): Promise<void> {
+  const { data, error } = await supabase
+    .from("operator_skills")
+    .delete()
+    .eq("operator_id", input.operatorId)
+    .eq("skill_id", input.skillId)
+    .select("skill_id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data as unknown[] | null);
+}

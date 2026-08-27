@@ -1,16 +1,255 @@
 /**
- * Products — PRE-SEATED, EMPTY ON PURPOSE (§19.62).
+ * Products — the admin section's data layer (design plan §19.62, D102).
  *
- * The RPC wrappers for products go here. The file exists before they do so
- * that the lane which writes them never has to append a line to
- * `src/lib/api/index.ts` — measured across four concurrent surveys (§19.57),
- * that one line was a shared anchor every queued section would have edited.
+ * `src/lib/api/` is the ONLY place allowed to touch `supabase`, snake_case
+ * column names, or `database.types.ts` (docs/conventions.md). Everything past
+ * this file — the hook, the pure module, the panel — works in camelCase and
+ * never learns that `site_node_id` exists.
  *
- * The house rules for what goes in here, so the lane does not have to go
- * looking: every wrapper calls one RPC, throws `toSchedulerError(error)` on
- * failure, and parses `data` through a runtime guard that returns `null` on a
- * shape mismatch rather than trusting the generated types — see
- * `hierarchy.ts` for the pattern. `src/lib/api/` is the ONLY place allowed to
- * touch `supabase.rpc`, snake_case field names, or `database.types.ts`.
+ * ⚠️ THERE IS NO RPC FOR PRODUCTS, AND THAT CHANGES THE ERROR STORY. Every
+ * other write in this layer calls a function that ends in `api_raise`, so a
+ * refusal arrives with a machine code in `DETAIL`. Here the writes are plain
+ * PostgREST table calls and RLS is the only gate, so a refusal arrives as a
+ * bare SQLSTATE — which is exactly what §19.63's five extra `SchedulerError`
+ * kinds (`WriteRefused`, `DuplicateValue`, `StillInUse`, `InvalidValue`,
+ * `ShiftOverlap`) were added for. `toSchedulerError` already maps them.
+ *
+ * ⭐ AND THE HALF THAT RAISES NOTHING AT ALL. A policy's `WITH CHECK` clause
+ * raises 42501; its `USING` clause merely FILTERS. So a refused INSERT is an
+ * error, and a refused UPDATE or DELETE is a **success that changed nothing**.
+ * Every write below therefore ends `.select()`, maps the error, and passes the
+ * returned rows through `requireWritten` — which throws `WriteRefused` on an
+ * empty result. That third step is not optional and not decorative: without
+ * it, a site admin editing a company-wide product is told "saved".
+ *
+ * AUTHOR-ONLY — imports `@/lib/supabase`, so it is not runnable under
+ * `node --experimental-strip-types`. The logic that IS unit-tested lives in
+ * `src/features/admin/lib/products.ts`, which imports nothing at runtime.
  */
-export {};
+import type { TablesInsert } from "@/lib/database.types";
+import { supabase } from "@/lib/supabase";
+import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+
+/**
+ * One `products` row as the admin screen needs it.
+ *
+ * `siteNodeId` is the ROOT node whose site owns this product; **`null` means
+ * company-wide** (0023 §1's own column comment), which is a real value and not
+ * a missing one — a site admin may edit their own site's products and may not
+ * touch a company-wide one, so the null is load-bearing for permissions.
+ *
+ * `colorToken` is a palette token like `product-3`, NEVER a hex: the board
+ * resolves it through `tokens.css` (0023 §3). It is chosen by a BEFORE INSERT
+ * trigger and deliberately never re-picked, not even when the owner changes.
+ */
+export interface AdminProduct {
+  id: string;
+  sku: string;
+  name: string;
+  active: boolean;
+  /** `'manual'` for anything typed on this screen; imports set their own. */
+  source: string;
+  externalId: string | null;
+  /** `null` = company-wide. See the interface comment. */
+  siteNodeId: string | null;
+  colorToken: string;
+}
+
+/** The columns every read below selects, in one place so they cannot drift. */
+const PRODUCT_COLUMNS = "id, sku, name, active, source, external_id, site_node_id, color_token";
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * The shape guard: one raw row in, an `AdminProduct` or `null` out.
+ *
+ * Returns `null` rather than throwing, because the caller is a LIST a screen
+ * renders and one malformed row must not blank the panel (brief rule 3). The
+ * skip-and-count itself is `productRows()` in the pure module — this function
+ * only answers "is this row readable", which is the half that has to know
+ * snake_case and therefore has to live here.
+ */
+export function parseAdminProduct(row: unknown): AdminProduct | null {
+  if (!isRecord(row)) return null;
+  const { id, sku, name, active, source, external_id, site_node_id, color_token } = row;
+  if (
+    typeof id !== "string" ||
+    typeof sku !== "string" ||
+    typeof name !== "string" ||
+    typeof active !== "boolean" ||
+    typeof source !== "string" ||
+    !(external_id === null || typeof external_id === "string") ||
+    !(site_node_id === null || typeof site_node_id === "string") ||
+    typeof color_token !== "string"
+  ) {
+    return null;
+  }
+  return {
+    id,
+    sku,
+    name,
+    active,
+    source,
+    externalId: external_id,
+    siteNodeId: site_node_id,
+    colorToken: color_token,
+  };
+}
+
+/**
+ * Every product in the org, ordered by sku — reads are org-wide and 0023 left
+ * them that way on purpose (a site admin can SEE the whole catalogue; what
+ * changed is what they may WRITE).
+ *
+ * ⚠️ RETURNS `(AdminProduct | null)[]`, NULLS INCLUDED, and the nulls are the
+ * point. Dropping them here would make "three rows the client could not read"
+ * indistinguishable from "three rows that do not exist", and the panel is
+ * required to say how many it skipped. `productRows()` does the skipping and
+ * the counting, in a module a unit test can reach without a network.
+ *
+ * THROWS on a failed read, unlike `fetchAdminAnywhere` which fails closed:
+ * this is the screen's content, and an empty catalogue is a lie when the
+ * truth is that the read did not happen (`access.ts`'s header states the same
+ * split for the same reason).
+ */
+export async function fetchAdminProducts(): Promise<ReadonlyArray<AdminProduct | null>> {
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .order("sku");
+  if (error) throw toSchedulerError(error);
+  return (data ?? []).map((row) => parseAdminProduct(row));
+}
+
+export interface CreateProductInput {
+  /** `products.org_id` has NO DEFAULT — supplied from `useSession().profile.orgId`. */
+  orgId: string;
+  sku: string;
+  name: string;
+  /** `null` = company-wide, which the insert policy allows only to a company admin. */
+  siteNodeId: string | null;
+}
+
+/**
+ * ⭐ `color_token` IS OMITTED ON PURPOSE AND THE CAST IS WHY IT COMPILES.
+ *
+ * The column is `NOT NULL` with no default (0023 §3), so `supabase gen types`
+ * emits it as REQUIRED on `Insert`. It is filled by the BEFORE INSERT trigger
+ * `products_set_color_token`, which assigns unconditionally — anything sent
+ * from here would be overwritten on the way in. The generated type cannot
+ * express "a trigger supplies this", the same class of gap as `nodes.path`
+ * being typed `unknown` in `hierarchy.ts`, and regenerating will never change
+ * it. So the payload is built without the column and cast at this single
+ * boundary, with this comment, rather than sending a value that is a lie.
+ */
+type ProductInsert = TablesInsert<"products">;
+
+/**
+ * The same row with the trigger-filled column made optional. Written this way
+ * rather than as an `Omit`, so the assertion below is a legal narrowing of a
+ * genuine supertype (`ProductInsert` IS a `ProductInsertDraft`) instead of a
+ * `as unknown as` that would silence anything at all.
+ */
+type ProductInsertDraft = Omit<ProductInsert, "color_token"> &
+  Partial<Pick<ProductInsert, "color_token">>;
+
+export async function createProduct(input: CreateProductInput): Promise<AdminProduct> {
+  const payload: ProductInsertDraft = {
+    org_id: input.orgId,
+    sku: input.sku,
+    name: input.name,
+    site_node_id: input.siteNodeId,
+  };
+
+  const { data, error } = await supabase
+    .from("products")
+    .insert(payload as ProductInsert)
+    .select(PRODUCT_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstProduct(requireWritten(data), "products.insert");
+}
+
+export interface UpdateProductInput {
+  id: string;
+  sku: string;
+  name: string;
+}
+
+/**
+ * Renames / re-skus one product.
+ *
+ * ⚠️ DOES NOT TOUCH `site_node_id`, deliberately. Moving a product between
+ * owners does NOT re-pick its colour (0023 §3's trigger is INSERT-only, and
+ * its comment says why: a product that changes colour because somebody
+ * re-assigned it is the surprise D102 exists to remove), so a move would leave
+ * the row holding a token drawn from the OLD owner's palette — possibly a
+ * duplicate within the new one. Owner is set once, at creation.
+ */
+export async function updateProduct(input: UpdateProductInput): Promise<AdminProduct> {
+  const { data, error } = await supabase
+    .from("products")
+    .update({ sku: input.sku, name: input.name })
+    .eq("id", input.id)
+    .select(PRODUCT_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstProduct(requireWritten(data), "products.update");
+}
+
+export interface SetProductActiveInput {
+  id: string;
+  active: boolean;
+}
+
+/**
+ * Deactivate / reactivate — the MAIN action on this screen (Pratik's call).
+ * A deactivated product keeps every run and assignment it has ever been on and
+ * simply stops being offered for new work, which is what "we don't make that
+ * any more" actually means. Delete is the secondary action below.
+ */
+export async function setProductActive(input: SetProductActiveInput): Promise<AdminProduct> {
+  const { data, error } = await supabase
+    .from("products")
+    .update({ active: input.active })
+    .eq("id", input.id)
+    .select(PRODUCT_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstProduct(requireWritten(data), "products.setActive");
+}
+
+/**
+ * Hard delete.
+ *
+ * `runs` and `assignments` reference `(org_id, product_id)` with NO
+ * `ON DELETE` clause, so deleting a product that has ever been scheduled
+ * fails with `23503` — which `toSchedulerError` turns into
+ * `{ kind: "StillInUse", usedBy: "runs" }`, naming the table that is in the
+ * way. The panel says exactly that instead of "something went wrong".
+ *
+ * `.select()` then `requireWritten` for the reason in the file header: a
+ * DELETE the policy refuses removes zero rows and reports no error at all.
+ */
+export async function deleteProduct(id: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("products")
+    .delete()
+    .eq("id", id)
+    .select("id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data);
+}
+
+/**
+ * The written row, re-guarded. A write that comes back in a shape this client
+ * cannot read is a real bug and must be loud — unlike the LIST read above,
+ * there is no other row to fall back on, which is the same split
+ * `shapes.ts`'s header draws between a single row and a rendered list.
+ */
+function firstProduct(rows: ReadonlyArray<unknown>, what: string): AdminProduct {
+  const parsed = parseAdminProduct(rows[0]);
+  if (parsed === null) {
+    throw shapeMismatch(what, "expected a products row (see AdminProduct in products.ts)");
+  }
+  return parsed;
+}

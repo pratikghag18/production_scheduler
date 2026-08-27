@@ -167,21 +167,38 @@ export function BoardGrid({
   const scrollRef = useRef(scroll);
   scrollRef.current = scroll;
 
-  // --- product color cycling (mockup hardcodes 4; cycle by modulo for a
-  // larger catalogue) -----------------------------------------------------
-  const productIndexById = useMemo(() => {
-    const map = new Map<string, number>();
-    let i = 0;
-    for (const p of productById.values()) map.set(p.id, i++);
-    return map;
-  }, [productById]);
+  // --- product colour: THE PRODUCT'S OWN, NOT ITS POSITION (D102) ---------
+  //
+  // ⭐ THIS USED TO BE `var(--product-${(i % 4) + 1})` OVER A MAP BUILT BY
+  // ITERATION ORDER, AND THAT WAS A COLOUR THAT DID NOT BELONG TO ANYTHING.
+  // `board_window` emits products `ORDER BY p.sku` org-wide, so a product's
+  // colour was its alphabetical position among ALL the company's products:
+  // adding "Gadget Z" re-coloured Widget X and Widget Y, and two sites shared
+  // one 4-wide cycle. Migration 0023 §3 gave every product a `color_token` of
+  // its own, chosen once at insert and never re-picked; nothing in `src/` read
+  // it until now, which would have made the admin section's colour column a
+  // lie the moment it shipped.
+  //
+  // `productColorVar` in `src/features/admin/lib/products.ts` is the same
+  // function for the admin screen. It is NOT imported here: a feature may not
+  // import from another feature (docs/conventions.md), and the shared thing is
+  // the DATABASE column, not this three-line lookup.
   const productColorVar = useCallback(
     (productId: string | null) => {
       if (!productId) return "var(--muted)";
-      const i = productIndexById.get(productId) ?? 0;
-      return `var(--product-${(i % 4) + 1})`;
+      const token = productById.get(productId)?.colorToken;
+      // `tokens.css` defines `--product-1` .. `--product-4` and nothing else.
+      // A token outside that set -- absent, or a `product-5` from a widened
+      // palette (0023 §3 records that exact ship) -- resolves to NO COLOUR AT
+      // ALL, which reads as a design choice rather than as a bug. Fall back to
+      // the first palette entry instead. ⚠️ Widening the palette is
+      // `tokens.css`, `app_product_palette()`, `PRODUCT_PALETTE` in
+      // `src/features/admin/lib/products.ts` and this regex, in one commit.
+      return token !== undefined && /^product-[1-4]$/.test(token)
+        ? `var(--${token})`
+        : "var(--product-1)";
     },
-    [productIndexById],
+    [productById],
   );
 
   // --- collapse filtering: a row is hidden if any ancestor node id is

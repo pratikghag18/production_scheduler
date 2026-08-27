@@ -1,14 +1,5 @@
 /* ---------------------------------------------------------------------------
-   Products — PRE-SEATED PLACEHOLDER (§19.62).
-
-   This file exists before the section is built, and that is the whole point.
-   Four admin sections are queued and every one of them would otherwise edit the
-   same five shared files: `AdminPage.tsx`'s `SECTIONS` array AND its JSX child
-   list, `REM_SURFACES`, R10's hardcoded copy of that list, and
-   `src/lib/api/index.ts`. Measured across four concurrent surveys (§19.57):
-   the collisions are all mechanical and all knowable in advance. So they are
-   made ONCE, here, and after this commit each section's lane creates and edits
-   only its own files.
+   Products — the catalogue admin section (§19.62, D102).
 
    ⭐ `PRODUCTS_PANEL_READY` LIVES HERE, NOT IN `AdminPage.tsx`. The nav entry
    reads it, so turning this section on is a one-line edit to THIS file — the
@@ -16,16 +7,460 @@
    switched on without a panel behind it because the switch is part of the
    panel. Group H in `scaleAudit.test.ts` asserts the other half: every id in
    `SECTIONS` has a branch rendering it.
+
+   TAKES NO PROPS, deliberately. `AdminPage.tsx` renders `<ProductsPanel />`
+   and four lanes were queued against that file; a panel that needed props
+   would have made its shell a shared surface again. Everything this screen
+   needs it asks for itself — and the hierarchy read it asks for uses the SAME
+   query key `AdminPage` already uses, so React Query serves it from one
+   request rather than two.
+
+   DECIDES NOTHING ITSELF. Every rule on this screen — the palette, the owner
+   labels, who may write, what a draft must look like, what to say when a
+   delete is refused — is a function in `../lib/products.ts`, which is pure and
+   is what `src/test/products.test.ts` tests. This file renders what those
+   functions return.
    --------------------------------------------------------------------------- */
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { describeSchedulerError, fetchHierarchyTree, type SchedulerError } from "@/lib/api";
+import { useSession } from "@/features/auth/useSession";
+import { canQueryAsUser } from "@/features/auth/session";
+import { hierarchyKeys } from "../hooks/useHierarchyMutations";
+import {
+  canEditProduct,
+  describeDeleteRefusal,
+  describeWriteRefusal,
+  editRefusalNote,
+  matchesProductQuery,
+  ownerOptions,
+  partitionProducts,
+  productRows,
+  validateProductDraft,
+  type ProductRow,
+  type ProductSite,
+} from "../lib/products";
+import {
+  useAdminProducts,
+  useCreateProduct,
+  useDeleteProduct,
+  useSetProductActive,
+  useUpdateProduct,
+} from "../hooks/useProducts";
 import styles from "./ProductsPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
-export const PRODUCTS_PANEL_READY = false;
+export const PRODUCTS_PANEL_READY = true;
 
 export function ProductsPanel() {
+  const { session, profile, loading: sessionLoading } = useSession();
+  const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+
+  const productsQuery = useAdminProducts(canQuery);
+  // The SAME key `AdminPage` uses for its own copy of this read, so the two
+  // share one request and one cache entry. Reached through the shared
+  // `hierarchyKeys` prefix, so every hierarchy mutation already invalidates it.
+  const treeQuery = useQuery({
+    queryKey: [...hierarchyKeys.all, "tree"],
+    queryFn: fetchHierarchyTree,
+    enabled: canQuery,
+  });
+
+  const createMutation = useCreateProduct();
+  const updateMutation = useUpdateProduct();
+  const activeMutation = useSetProductActive();
+  const deleteMutation = useDeleteProduct();
+
+  const [query, setQuery] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ sku: "", name: "" });
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  const [newDraft, setNewDraft] = useState({ sku: "", name: "", siteNodeId: "" });
+  const [newErrors, setNewErrors] = useState<{ sku: string | null; name: string | null }>({
+    sku: null,
+    name: null,
+  });
+  const [formError, setFormError] = useState<string | null>(null);
+
+  /* -- who this person is, and what that lets them change --------------- */
+
+  const isCompanyAdmin = profile?.role === "admin";
+
+  // A ROOT node is a site (0023 §2's trigger refuses anything else as an
+  // owner), and `nodes_select` already limits this to the ones they may see.
+  const sites: readonly ProductSite[] = (treeQuery.data?.nodes ?? [])
+    .filter((n) => n.parentId === null)
+    .map((n) => ({ id: n.id, name: n.name }));
+
+  // ⚠️ FAILS CLOSED when `editable_shape_ids()` could not be read. That RPC is
+  // a PREVIEW and `filterEditableShapes` fails OPEN on it one screen over —
+  // right there, because the worst case is offering a structure the server
+  // then refuses. Here the worst case is offering a WRITE, so the answer flips:
+  // a company admin is unaffected either way (their answer comes from their
+  // own profile role), and a site admin whose preview failed sees a read-only
+  // catalogue with a reason rather than buttons that all fail.
+  const editableShapeIds = treeQuery.data?.editableShapeIds ?? null;
+  const siteNodeIds: Record<string, string | null> = treeQuery.data?.siteNodeIds ?? {};
+  const adminSiteIds: readonly string[] =
+    editableShapeIds === null
+      ? []
+      : editableShapeIds
+          .map((shapeId) => siteNodeIds[shapeId] ?? null)
+          .filter((id): id is string => id !== null);
+  // ⚠️ NOT gated on `treeQuery.data !== undefined`. That term made this flag
+  // unreachable in the failure it was written for: when the WHOLE tree read
+  // throws, `data` stays undefined for good (`retry: 1`, no refetch on focus),
+  // so `previewUnavailable` was false and the add-form fell through to "You
+  // don't administer a site, so there's nowhere to add a product." — a flat lie
+  // to a site admin whose writes the server would have accepted, with every row
+  // simultaneously labelled "Another site" and every button dead. The honest
+  // message is the one for a read we could not make, whichever read failed.
+  const previewUnavailable =
+    !isCompanyAdmin && (treeQuery.isError || editableShapeIds === null);
+
+  const owners = ownerOptions(sites, isCompanyAdmin, adminSiteIds);
+
+  // The owner picker's value, kept legal by construction. A site admin has no
+  // company-wide option at all (the insert policy refuses it), so an empty
+  // selection would be a form that cannot pass its own `canOwnProduct` check.
+  // Falls back to the first owner this person may actually use.
+  const ownerValue = owners.some((o) => (o.value ?? "") === newDraft.siteNodeId)
+    ? newDraft.siteNodeId
+    : (owners[0]?.value ?? "");
+
+  /* -- the catalogue ----------------------------------------------------- */
+
+  const view = productRows(productsQuery.data ?? [], sites);
+  const visible = view.rows.filter((r) => matchesProductQuery(r, query));
+  const { active, inactive } = partitionProducts(visible);
+
+  // BOTH reads, not just the products one. The tree is what decides who may
+  // edit what; rendering the catalogue before it lands showed a fully
+  // disabled, mislabelled screen for the width of that window.
+  const loading = !canQuery || productsQuery.isLoading || treeQuery.isLoading;
+
+  function clearRowError(id: string) {
+    setRowError((cur) => (cur !== null && cur.id === id ? null : cur));
+  }
+
+  function beginEdit(row: ProductRow) {
+    clearRowError(row.id);
+    setConfirmingId(null);
+    setEditingId(row.id);
+    setEditDraft({ sku: row.sku, name: row.name });
+  }
+
+  function saveEdit(row: ProductRow) {
+    const result = validateProductDraft({
+      sku: editDraft.sku,
+      name: editDraft.name,
+      siteNodeId: row.siteNodeId,
+    });
+    if (!result.ok) {
+      setRowError({ id: row.id, message: result.skuError ?? result.nameError ?? "" });
+      return;
+    }
+    clearRowError(row.id);
+    updateMutation.mutate(
+      { id: row.id, sku: result.value.sku, name: result.value.name },
+      {
+        onSuccess: () => setEditingId((cur) => (cur === row.id ? null : cur)),
+        onError: (err: SchedulerError) =>
+          setRowError({ id: row.id, message: describeWriteRefusal(err, describeSchedulerError(err)) }),
+      },
+    );
+  }
+
+  function toggleActive(row: ProductRow) {
+    clearRowError(row.id);
+    activeMutation.mutate(
+      { id: row.id, active: !row.active },
+      {
+        onError: (err: SchedulerError) =>
+          setRowError({ id: row.id, message: describeWriteRefusal(err, describeSchedulerError(err)) }),
+      },
+    );
+  }
+
+  function confirmDelete(row: ProductRow) {
+    clearRowError(row.id);
+    deleteMutation.mutate(row.id, {
+      onSuccess: () => setConfirmingId((cur) => (cur === row.id ? null : cur)),
+      onError: (err: SchedulerError) => {
+        setConfirmingId((cur) => (cur === row.id ? null : cur));
+        // `describeSchedulerError` already names the referencing table for a
+        // 23503; `describeDeleteRefusal` adds the way out.
+        setRowError({ id: row.id, message: describeDeleteRefusal(err, describeSchedulerError(err)) });
+      },
+    });
+  }
+
+  function submitNew() {
+    if (profile === null) return;
+    const siteNodeId = ownerValue === "" ? null : ownerValue;
+    const result = validateProductDraft({ sku: newDraft.sku, name: newDraft.name, siteNodeId });
+    if (!result.ok) {
+      setNewErrors({ sku: result.skuError, name: result.nameError });
+      setFormError(null);
+      return;
+    }
+    setNewErrors({ sku: null, name: null });
+    setFormError(null);
+    createMutation.mutate(
+      {
+        // `products.org_id` has NO DEFAULT (0002) — it comes from the session
+        // profile on every insert, never from a database default that is not there.
+        orgId: profile.orgId,
+        sku: result.value.sku,
+        name: result.value.name,
+        siteNodeId: result.value.siteNodeId,
+      },
+      {
+        onSuccess: () => setNewDraft({ sku: "", name: "", siteNodeId: ownerValue }),
+        onError: (err: SchedulerError) =>
+          setFormError(describeWriteRefusal(err, describeSchedulerError(err))),
+      },
+    );
+  }
+
+  /* -- render ------------------------------------------------------------ */
+
+  function renderRow(row: ProductRow) {
+    const editable = canEditProduct(row, isCompanyAdmin, adminSiteIds);
+    const note = editRefusalNote(row, isCompanyAdmin, adminSiteIds);
+    const isEditing = editingId === row.id;
+    const isConfirming = confirmingId === row.id;
+    const error = rowError !== null && rowError.id === row.id ? rowError.message : null;
+
+    return (
+      <li key={row.id} className={row.active ? styles.row : `${styles.row} ${styles.retired}`}>
+        <span className={styles.skuCell}>
+          {/* The product's OWN colour (0023 §3), not its position in a list.
+              `colorVar` has already fallen back if the token is one this
+              stylesheet does not define. */}
+          <span
+            className={styles.swatch}
+            style={{ background: row.colorVar }}
+            title={row.colorUnknown ? `Unknown colour ${row.colorToken}` : row.colorToken}
+            aria-hidden="true"
+          />
+          {isEditing ? (
+            <input
+              className={styles.input}
+              value={editDraft.sku}
+              aria-label="Product code"
+              onChange={(e) => setEditDraft((d) => ({ ...d, sku: e.target.value }))}
+            />
+          ) : (
+            <span className={styles.sku}>{row.sku}</span>
+          )}
+        </span>
+
+        {isEditing ? (
+          <input
+            className={styles.input}
+            value={editDraft.name}
+            aria-label="Product name"
+            onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
+          />
+        ) : (
+          <span className={styles.name}>{row.name}</span>
+        )}
+
+        <span className={styles.owner}>{row.owner}</span>
+
+        <span className={styles.actions}>
+          {isEditing ? (
+            <>
+              <button type="button" className={styles.primary} onClick={() => saveEdit(row)}>
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.quiet}
+                onClick={() => setEditingId(null)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              {/* ⭐ DEACTIVATE FIRST AND DELETE SECOND, and the order on screen
+                  is the decision: anything that has ever been scheduled can
+                  never be deleted at all (no ON DELETE on runs/assignments). */}
+              <button
+                type="button"
+                className={styles.primary}
+                disabled={!editable}
+                onClick={() => toggleActive(row)}
+              >
+                {row.active ? "Deactivate" : "Reactivate"}
+              </button>
+              <button
+                type="button"
+                className={styles.quiet}
+                disabled={!editable}
+                onClick={() => beginEdit(row)}
+              >
+                Rename
+              </button>
+              {isConfirming ? (
+                <button
+                  type="button"
+                  className={styles.danger}
+                  onClick={() => confirmDelete(row)}
+                >
+                  Delete for good?
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  disabled={!editable}
+                  onClick={() => setConfirmingId(row.id)}
+                >
+                  Delete
+                </button>
+              )}
+            </>
+          )}
+        </span>
+
+        {!row.active && <span className={styles.tag}>Not in use</span>}
+        {note !== null && <span className={styles.note}>{note}</span>}
+        {row.colorUnknown && (
+          <span className={styles.note}>
+            This product&rsquo;s colour ({row.colorToken}) is not one the board defines — it is
+            drawn in the first palette colour instead.
+          </span>
+        )}
+        {error !== null && <span className={styles.error}>{error}</span>}
+      </li>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className={styles.panel}>
+        <p className={styles.status}>Loading products…</p>
+      </div>
+    );
+  }
+
+  if (productsQuery.isError) {
+    return (
+      <div className={styles.panel}>
+        <p className={styles.error} role="alert">
+          {productsQuery.error
+            ? describeSchedulerError(productsQuery.error)
+            : "Something went wrong. Please try again."}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.panel}>
-      <p>Not built yet.</p>
+      <section className={styles.card}>
+        <h2 className={styles.h2}>Add a product</h2>
+        {owners.length === 0 ? (
+          <p className={styles.status}>
+            {previewUnavailable
+              ? "We couldn't check which sites you administer, so this list is read-only for now. Reload to try again."
+              : "You don't administer a site, so there's nowhere to add a product."}
+          </p>
+        ) : (
+          <div className={styles.form}>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Product code</span>
+              <input
+                className={styles.input}
+                value={newDraft.sku}
+                onChange={(e) => setNewDraft((d) => ({ ...d, sku: e.target.value }))}
+              />
+              {newErrors.sku !== null && <span className={styles.error}>{newErrors.sku}</span>}
+            </label>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Name</span>
+              <input
+                className={styles.input}
+                value={newDraft.name}
+                onChange={(e) => setNewDraft((d) => ({ ...d, name: e.target.value }))}
+              />
+              {newErrors.name !== null && <span className={styles.error}>{newErrors.name}</span>}
+            </label>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Belongs to</span>
+              {/* Only the owners the insert policy will actually accept — a
+                  site admin is never offered company-wide. */}
+              <select
+                className={styles.input}
+                value={ownerValue}
+                onChange={(e) => setNewDraft((d) => ({ ...d, siteNodeId: e.target.value }))}
+              >
+                {owners.map((o) => (
+                  <option key={o.value ?? "company"} value={o.value ?? ""}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" className={styles.primary} onClick={submitNew}>
+              Add
+            </button>
+          </div>
+        )}
+        {formError !== null && <p className={styles.error}>{formError}</p>}
+        <p className={styles.hint}>
+          A product&rsquo;s colour is chosen for it when it&rsquo;s created — the least-used one in
+          its owner&rsquo;s palette — and never changes afterwards.
+        </p>
+      </section>
+
+      <section className={styles.card}>
+        <h2 className={styles.h2}>Catalogue</h2>
+        <input
+          className={styles.search}
+          value={query}
+          placeholder="Search by code or name"
+          aria-label="Search products"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+
+        {view.skipped > 0 && (
+          <p className={styles.skippedLine}>
+            {view.skipped === 1
+              ? "1 product couldn't be read and isn't shown."
+              : `${view.skipped} products couldn't be read and aren't shown.`}
+          </p>
+        )}
+
+        <h3 className={styles.h3}>In use</h3>
+        {active.length === 0 ? (
+          <p className={styles.status}>Nothing here yet.</p>
+        ) : (
+          <ul className={styles.list}>
+            <li className={styles.head}>
+              <span>Code</span>
+              <span>Name</span>
+              <span>Belongs to</span>
+              <span />
+            </li>
+            {active.map(renderRow)}
+          </ul>
+        )}
+
+        {/* Retired products are an ordinary, populated part of this screen —
+            deactivate is the main action, so what has been deactivated has to
+            be somewhere you can find it and bring back. */}
+        <h3 className={styles.h3}>Not in use</h3>
+        {inactive.length === 0 ? (
+          <p className={styles.status}>Nothing retired.</p>
+        ) : (
+          <ul className={styles.list}>{inactive.map(renderRow)}</ul>
+        )}
+      </section>
     </div>
   );
 }

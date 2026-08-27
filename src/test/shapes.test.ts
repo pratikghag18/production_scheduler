@@ -83,7 +83,16 @@ const boardWindowJson: Json = {
     },
   ],
   products: [
-    { id: "60000000-0000-0000-0000-000000000001", sku: "WX", name: "Widget X", active: true },
+    {
+      id: "60000000-0000-0000-0000-000000000001",
+      sku: "WX",
+      name: "Widget X",
+      active: true,
+      // §19.64: the server has sent this since 0023 and `parseProduct` reads it
+      // now. The fixture carries it so the happy path matches the real payload
+      // rather than the subset the parser happens to tolerate.
+      color_token: "product-2",
+    },
   ],
   skills: [{ id: "40000000-0000-0000-0000-000000000001", name: "CNC" }],
   node_skill_requirements: [
@@ -374,5 +383,34 @@ describe("parseDeleteRunResult", () => {
 
   it("rejects null", () => {
     expect(parseDeleteRunResult(null)).toBeNull();
+  });
+});
+
+/*
+ * §19.64 — the one field in `parseProduct` that does not reject the row.
+ *
+ * `color_token` is presentation, and `parseBoardWindow` fails TOTALLY: one bad
+ * product nulls the whole window, which `board.ts` turns into a thrown
+ * `shapeMismatch` and an empty board. Blanking a plant's schedule because a
+ * swatch is missing is not a trade worth making, so an absent value degrades to
+ * `""` and the board falls back to the first palette token.
+ *
+ * Both halves of that trade are pinned here, because a leniency nobody asserts
+ * is indistinguishable from a parser that forgot the field.
+ */
+describe("parseProduct — the colour is presentation, not identity", () => {
+  it("reads the colour the server actually sends", () => {
+    const win = parseBoardWindow(boardWindowJson);
+    expect(win?.products[0]?.colorToken).toBe("product-2");
+  });
+
+  it("degrades a missing colour to empty rather than nulling the whole window", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { color_token?: string }[];
+    };
+    delete raw.products[0].color_token;
+    const win = parseBoardWindow(raw as unknown as Json);
+    expect(win).not.toBe(null);
+    expect(win?.products[0]?.colorToken).toBe("");
   });
 });

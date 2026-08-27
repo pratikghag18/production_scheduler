@@ -6017,3 +6017,188 @@ constraint, so `/"([^"]+)"/` returns `products` — a plausible-looking wrong
 answer. W5 is the case that fails when someone simplifies it.
 
 **Acceptance 757 → 775 in 20 files. No migration** — 0024 remains the last one.
+
+### 19.64 Three lanes built at once, then attacked — the eleven things that survived my own green suite (Aug 27, 2026)
+
+**Shifts, Operators and Products were built in parallel** on the seats §19.62
+laid down, against the write-error contract §19.63 settled. The fence held: 21
+files modified, exactly the three file tables, no shared file touched twice.
+`tsc` 0, `eslint` 0, all three suites green (91 / 66 / 96), and **20
+unprescribed mutations of my own across the three pure modules, all 20 caught.**
+
+**That was the state in which the following eleven defects were still in the
+tree.** Every one of them was found by the third wave — one read-only
+adversarial reviewer per lane, each told to hunt a named defect CLASS rather
+than to "review the code" — and every one was then reproduced by me before a
+line was changed. That reproduction step is not ceremony: of the reviewers'
+claims, **one was wrong on its own example** (a collision it predicted between
+two labels was real, but not for the pair it named), and **one turned out to be
+an inert mutation rather than a missing case** (V4 below). A green suite plus my
+own mutations plus a picture was not enough. The three-wave shape is what found
+these, and the wave that found them cost less than any of the three that built
+the lanes.
+
+#### 1. The six code defects
+
+**⚠️ `crossesMidnight` used `>` where the rest of the module uses `>= 1440`.**
+A shift stored `960..1440` is 16:00 until midnight. `dayOffset(1440)` is 1 and
+`span` prints `"16:00–00:00 +1d"` — but `crossesMidnight` said **false**, and
+that flag is what hands the break form its "+1 day" checkbox. Without the box,
+the only way to reach minute 1440 is the literal string `"24:00"`, which an
+`<input type="time">` can never emit. **So the legal wash-up break 23:45–00:00
+was unenterable**, refused by our own validator with "ends before it starts",
+on a row the database would have taken. One object was answering the same
+question three ways.
+
+**⚠️ `describeSpan` marked the day on the END only** — justified by `shifts`'
+own `CHECK (start_min < 1440)`, which is true of shifts and **not of breaks**.
+`shift_breaks` carries no range check at all, and the seed's own night shift
+stores breaks at 1440, 1560 and 1680. Measured: `{1440,1455}` and `{0,1455}` —
+two different, both-storable rows — rendered the **identical** string
+`"00:00–00:15 +1d"`, and every after-midnight break read as starting twenty
+hours before the shift it belongs to. The invariant was real; the function it
+was written for was not the only caller.
+
+**⚠️ `addedProblems` compared MESSAGE STRINGS**, and the outside-shift sentence
+embeds the shift's own label. So editing a shift's times rewrote the sentence
+for a break nobody had touched, the new string was absent from the "already
+wrong" set, and **the edit was blocked — permanently**, since the panel offers
+no way to move a break, only to remove it. The refusal then quoted the break
+rather than the times just changed. Reproduced end to end: 22:00–06:00 → 06:30
+on a shift carrying a stray 10:00–11:00 break. Identity is now
+`(field, shiftIndex, breakIndex)`; the message is what we SHOW, the coordinates
+are what make two problems the same problem.
+
+**⚠️ `previewUnavailable` was gated on `treeQuery.data !== undefined`**, which
+made it unreachable in the failure it was written for. When the whole hierarchy
+read throws, `data` stays undefined for good (`retry: 1`, no refetch on focus),
+so the flag was false and the add-form fell through to *"You don't administer a
+site, so there's nowhere to add a product."* — **a flat lie to a site admin
+whose writes the server would have accepted**, with every row simultaneously
+labelled "Another site" and every button dead. `loading` did not include that
+query either, so the same dead screen flashed on every normal load. This is the
+fail-closed trap from the other side: the fallback was chosen deliberately and
+documented, and the MESSAGE explaining it could not fire.
+
+**The operators headline counted places the list hides.** `summarisePlaces(places)`
+over a list rendered as `places.filter(p => p.active)` put *"2 of 6 places"*
+above five rows. Two numbers a reader cannot reconcile.
+
+**Two labels that made claims the panel itself contradicts.** The pattern list's
+**"Used by"** column counts DIRECT rows in `node_shift_templates`, but
+`resolve_shift_template` is nearest-ancestor-wins, so every descendant without
+an attachment of its own also uses the pattern — the panel's own hint says so
+two cards down. It is now **"Attached to"**, which is what it counts, and the
+delete warning that also counts direct rows stays as it was, because the FK
+counts direct rows. And the overlap banner said **"Two of these shifts share
+minutes"** over an `overlaps` array of PAIRS: five shifts in a row produced four
+of them, so a fixed "two" under-reported the mess by half.
+
+**One wording defect that shipped because no fixture ever reached it.**
+`describeSkillNameClash`'s site-owned arm produced *"There is already a existing
+Welding"* — ungrammatical, and it told the person nothing they did not already
+know. Every skill in the fixture had `siteNodeId: null`, so that arm had never
+once been evaluated. It now says **site-owned**, which is the part that decides
+whether they can reach the ticket at all.
+
+#### 2. The mutation table — nine deliberate breaks that the green suite ignored
+
+Run against the delivered modules, in the shim, at the counts shown.
+
+| # | mutation | before | after |
+|---|---|---|---|
+| V1 | `patternRows` stops computing `overlaps` at all | NOT CAUGHT | caught (V1) |
+| V2 | the 24h limit becomes exclusive (a legal 24h shift is refused) | NOT CAUGHT | caught (V2) |
+| V3 | a zero-length shift stops being refused | NOT CAUGHT | caught (V3) |
+| V4 | `breakProblems` drops its `usable` filter | NOT CAUGHT | **NOT CAUGHT — INERT** |
+| V5 | `crossesMidnight` boundary moves | NOT CAUGHT | caught (V5) |
+| V6 | `describeSpan` marks the end only | NOT CAUGHT | caught (V6) |
+| V7 | the path-cycle branch stops flagging truncation | NOT CAUGHT | caught (V1-ops) |
+| V8 | an EXPIRING ticket with an unreadable skill row stops counting | NOT CAUGHT | caught (V2-ops) |
+| V9 | a site-owned clash is described as company-wide | NOT CAUGHT | caught (V3-ops) |
+
+**V4's verdict is INERT, and writing that down is the point of the column.**
+`spansOverlap` guards empty ranges itself, and every comparison against `NaN` is
+false, so no input exists where the `usable` filter changes an answer. It is
+defensive duplication and it may stay. The case written for it pins what
+actually matters — an unreadable bound surfaces as exactly one `"empty"`, never
+as a phantom overlap and never silently dropped — and its comment says so
+rather than claiming coverage it does not have.
+
+**⚠️ Six NOT CAUGHT in one run is the signal §-standing says to distrust the
+instrument over.** So a control was run in the same harness: `spansOverlap`
+forced to always-false was **caught by 11 cases**, and the missing-parent branch
+of `labelFor` by W23. The instrument was fine; the case list had holes.
+
+#### 3. What the picture caught that the suite could not
+
+The render is the three panels' **real** stylesheets over an element-by-element
+transcription of their JSX, with every string computed by the lanes' own pure
+modules and read in as JSON. Two findings came from looking at it, and neither
+is expressible as an assertion:
+
+- **A break's "Remove" was thrown to the far right edge** by the same `.spacer`
+  the shift head uses — landing a few pixels from, and level with, the shift's
+  own **Delete**. Two different destructive actions on one sight-line, one of
+  them nowhere near the thing it removes. Inside a break row the spacer is now
+  a plain gap; the right-hand rail belongs to the shift.
+- **The pre-delete warning was `--muted`**, which measures **3.50:1** on
+  `--surface` — under AA for 12px text, and this line is the sentence that says
+  a delete is about to be refused. It is now `--ink-2` (6.7:1), matching
+  `ProductsPanel`'s `.note`, which is the same class of line.
+
+**And the first render was wrong about the panel, not about the CSS** — my
+transcription had put the list header INSIDE the pattern row, so the shift list
+appeared shoved into a grid column. Twenty minutes went into a layout defect
+that did not exist. A transcription is evidence only to the degree it is
+checked against the JSX line by line, and the first one was not.
+
+#### 4. Verification
+
+`tsc -b --force` 0, `eslint .` 0 errors 0 warnings, the D84 rem audit clean over
+all 11 surfaces, all three suites re-run in the shim against the delivered
+modules — **103 / 69 / 91** — and the nine mutations above re-run to confirm the
+new cases kill them. **Acceptance 1030 → 1040 in 23 files. No migration.** ⚠️ **The file count moves too — 20 → 23** — and saying so matters: a case count that rises while the FILE count sits still is exactly what a test file failing to load looks like.
+
+#### 5. Five findings NOT fixed here, because each needs a decision or a bigger change
+
+**⚠️ 1. Every read in `src/lib/api/` is unbounded, and PostgREST caps them at
+1000 rows — silently.** `supabase/config.toml` sets `max_rows = 1000`; there is
+no `.range(` or `.limit(` anywhere in `src/lib/api/`. A capped response arrives
+as **200 with no error**, so every `if (error) throw` passes and `skipped`
+counts 0. At 500 people × 3 tickets the `operator_skills` read — which has no
+`.order()` either, so *which* rows survive is arbitrary and changes between
+refetches — starts dropping rows, and a person's Forklift going missing renders
+a confident red ✕ reading "missing Forklift" for a place they are qualified for.
+Drop a `node_skill_requirements` row instead and it renders a confident **✓** for
+a place the server will refuse. **This is pre-existing and project-wide, not a
+lane defect** — it is the same in the hierarchy and board reads — which is
+exactly why it should be its own step rather than a patch inside this commit.
+
+**2. `skipped` never reaches the thing that computes the answer.** The operators
+read counts unparseable rows and shows a banner, but hands `workPlacesFor` the
+shortened arrays with no flag. A row that was DROPPED is indistinguishable from
+a row that does not exist, so the module's careful `complete: false` machinery
+cannot fire for it. The fix is to thread `skipped > 0` into `WorkPlaceInput`.
+
+**3. "Can't tell" is painted as a confident ✕.** `WorkPlace` carries `complete`
+and `unnamed` so the screen can distinguish a refusal from an unanswerable
+question; `PlaceRow` reads neither, and the stylesheet defines exactly two
+states. Below the responsive breakpoint the reason column collapses entirely,
+leaving a bare red cross with no explanation. A third mark is a design decision,
+not a bug fix.
+
+**4. `asOf` defaults to today**, so every ✓ is a promise about work booked
+today, while the server compares against the real shift window — essentially
+always in the future. Ana reads ✓ on 27 Aug and is refused for 5 Sep. Whether
+the default should be the board's planning window is Pratik's call.
+
+**5. `adminSiteIds` is derived from STRUCTURE ownership, not node grants.**
+`editable_shape_ids()` answers "which structures may I edit"; the product
+policies ask `app_is_admin_for(site_node_id)`, which never touches
+`hierarchy_templates`. A site whose root has no claimed template — which 0020's
+`having count(*) = 1` backfill deliberately creates for shared structures —
+drops out of `adminSiteIds` while remaining fully writable server-side. The
+error is one-directional and it is the CLOSED direction. Fixing it needs a read
+of the grants themselves, which the client does not currently make.
+

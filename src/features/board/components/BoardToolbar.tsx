@@ -110,11 +110,27 @@ export function BoardToolbar({
       )}
 
       <div className={styles.legend}>
-        {products.map((p, i) => (
+        {/* ⭐ THE PRODUCT'S OWN COLOUR, NOT ITS POSITION IN THIS LIST (D102).
+            This read `var(--product-${(i % 4) + 1})`, so the legend agreed with
+            the grid only because the grid made the same mistake: `board_window`
+            emits products `ORDER BY p.sku` org-wide, so adding or renaming any
+            product in the company re-coloured the others. Migration 0023 §3
+            gives every product a `color_token` chosen once at insert.
+            ⚠️ Falls back to the first palette entry for anything `tokens.css`
+            does not define -- `product-5` is a well-formed token that renders
+            as no colour at all (0023 §3 records that exact ship). Kept in step
+            with `BoardGrid.tsx`'s `productColorVar` and with `PRODUCT_PALETTE`
+            in `src/features/admin/lib/products.ts`, which a feature here may
+            not import (docs/conventions.md). */}
+        {products.map((p) => (
           <span key={p.id} className={styles.key}>
             <span
               className={styles.swatch}
-              style={{ background: `var(--product-${(i % 4) + 1})` }}
+              style={{
+                background: /^product-[1-4]$/.test(p.colorToken)
+                  ? `var(--${p.colorToken})`
+                  : "var(--product-1)",
+              }}
             />
             {p.name}
           </span>

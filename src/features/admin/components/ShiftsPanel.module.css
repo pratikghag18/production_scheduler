@@ -1,9 +1,413 @@
-/* Shift patterns — pre-seated (§19.62). One rule, so the file is real and the lane
-   that fills it never has to touch `REM_SURFACES` or R10's copy of it.
-   This is a SEED, not a shared surface: anything that ends up being shared
-   between panels belongs in one file both compose from (D100), not copied. */
+/* Shift patterns.
+
+   Sized in `rem`, not px (D84): the root font-size scales with `--chrome-scale`
+   (global.css), so the whole surface follows the viewport with nothing to
+   remember per-property. Hairline borders stay in px on purpose — a 1px rule
+   scaled up renders blurry, and the D84 audit exempts a <=2px border/outline
+   width for exactly that reason. No `--ui-scale` anywhere in this file; that
+   token is fitted board content only (D84/D76).
+
+   Same token vocabulary and spacing scale as SiteAccessPanel.module.css and
+   LevelEditor.module.css. `global.css` already declares `font: inherit` for
+   input/button/select/textarea (D89) — not restated here.
+
+   Nothing in this file is a drag surface: there is no reordering gesture on
+   this screen, so none of the shared drag rules appear here (D100). */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.card {
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  padding: 0.875rem 1rem;
+}
+
+.h2 {
+  margin: 0 0 0.625rem;
+  font-size: 0.875rem;
+}
+
+.h3 {
+  margin: 0.875rem 0 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.status {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+}
+
+.hint {
+  margin: 0 0 0.625rem;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+.errorLine {
+  margin: 0.375rem 0 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}
+
+.skippedLine {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+/* A saved row the database allows but the application does not: a break
+   outside its shift, two shifts that would now collide. Amber, not red —
+   nothing is broken, something needs looking at. Full width wherever it lands
+   inside a row grid; harmless in the flex rows it also appears in. */
+.problem {
+  grid-column: 1 / -1;
+  margin: 0.125rem 0 0;
+  font-size: 0.75rem;
+  color: var(--understaffed-fg);
+}
+
+/* --- controls ------------------------------------------------------------ */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin: 0 0 0.625rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+
+.input,
+.select,
+.timeInput {
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.input {
+  min-width: 11rem;
+}
+
+/* A clock face is four digits and a colon and never anything else, so it does
+   not need — and must not take — the width of a name field beside it. */
+.timeInput {
+  width: 7rem;
+}
+
+/* A clock face and its day flag are ONE value and read as one control. */
+.timeGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.dayCheck {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.btn,
+.primaryBtn,
+.dangerBtn {
+  flex: none;
+  font-size: 0.7188rem;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 0.4375rem;
+  border: 1px solid var(--axis);
+  background: var(--page);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.primaryBtn {
+  border-color: var(--ink-2);
+  color: var(--ink);
+}
+
+.dangerBtn {
+  color: var(--crit);
+}
+
+.btn:disabled,
+.primaryBtn:disabled,
+.dangerBtn:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.linkBtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* --- the pattern list ----------------------------------------------------
+   ONE GRID, SHARED BY THE HEADER AND EVERY ROW, for the reason
+   SiteAccessPanel.module.css spells out at length: a list of flex rows sizes
+   its columns from its own content, so every line lands at a different x and
+   the panel reads as ragged text rather than as data. The tracks are declared
+   once here and used by `.listHead` and `.patternRow` alike. */
+.list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.listHead,
+.patternRow {
+  display: grid;
+  grid-template-columns: minmax(9rem, 2fr) minmax(7rem, 1fr) 6rem 6rem 5rem;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.375rem;
+  padding: 0.5rem 0.625rem;
+}
+
+.listHead {
+  padding-top: 0;
+  padding-bottom: 0.25rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+
+.patternRow {
+  border: 1px solid var(--grid);
+  border-radius: 0.4375rem;
+}
+
+.patternRowOpen {
+  border-color: var(--axis);
+  background: var(--page);
+}
+
+/* A button that reads as the row's title: it opens the pattern, it does not
+   write anything. Reset to text, because the UA's button chrome in a data grid
+   makes every row look like a control. */
+.patternName {
+  grid-column: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
+
+.owner {
+  grid-column: 2;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.meta {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.rowActions {
+  grid-column: 5;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Anything that cannot fit a column takes its own full-width line underneath
+   rather than being squeezed into 5rem. */
+/* --ink-2, not --muted: this line is the WARNING that a delete is about to be
+   refused ("detach it below first"), which puts it in the same class as
+   ProductsPanel's `.note` rather than with a column header. --muted measures
+   3.50:1 on --surface, under AA for 12px text; --ink-2 is 6.7:1. */
+.rowNote {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.rowError {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}
+
+.confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+/* --- the inside of one pattern ------------------------------------------- */
+
+.detail {
+  /* Full width of the pattern row's grid — the shifts inside a pattern are not
+     a column of it. */
+  grid-column: 1 / -1;
+  margin: 0.625rem 0 0;
+  border: 1px solid var(--grid);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.shiftList {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.shiftRow {
+  border: 1px solid var(--grid);
+  border-radius: 0.4375rem;
+  padding: 0.5rem 0.625rem;
+}
+
+.shiftHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.shiftName {
+  font-size: 0.8125rem;
+}
+
+/* The times are the point of this screen, so they are the one thing here set
+   in a tabular face: 22:00–06:00 +1d has to line up down the column. */
+.shiftSpan {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.nextDayTag {
+  font-size: 0.6875rem;
+  border: 1px solid var(--axis);
+  border-radius: 0.3125rem;
+  padding: 0 0.25rem;
+  color: var(--ink-2);
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.breakList {
+  list-style: none;
+  margin: 0.375rem 0 0;
+  padding: 0 0 0 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border-left: 2px solid var(--grid);
+}
+
+/* A BREAK'S "Remove" STAYS NEXT TO THE BREAK. The row carries the same
+   `.spacer` the shift head does, and left to grow it threw the link to the far
+   right edge of the panel -- level with, and a few pixels from, the shift's own
+   Delete. Two different destructive actions on one sight-line, one of them
+   nowhere near the thing it removes. Inside a break row the spacer is a plain
+   gap; the right-hand rail belongs to the shift. */
+.breakRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.breakRow .spacer {
+  flex: 0 0 0.25rem;
+}
+
+.editRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+}
+
+/* --- where a pattern applies --------------------------------------------- */
+
+.nodeList {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.nodeRow {
+  display: grid;
+  grid-template-columns: minmax(9rem, 2fr) minmax(10rem, 2fr) 5rem;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.375rem;
+  border: 1px solid var(--grid);
+  border-radius: 0.4375rem;
+  padding: 0.4375rem 0.625rem;
+}
+
+.nodeName {
+  min-width: 0;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.nodeSelect {
+  width: 100%;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.nodeActions {
+  display: flex;
+  justify-content: flex-end;
 }

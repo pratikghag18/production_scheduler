@@ -7,3 +7,384 @@
   flex-direction: column;
   gap: 0.75rem;
 }
+
+/* Sized in `rem` throughout (D84): the root font-size scales with
+   `--chrome-scale` (global.css), so this whole surface follows the viewport
+   with nothing to remember per property. Hairline borders stay in px on
+   purpose — a 1px rule scaled up renders blurry. No `--ui-scale` anywhere
+   (that token is fitted BOARD content only). Same tokens and the same spacing
+   scale as `SiteAccessPanel.module.css`, which this is a sibling of; nothing
+   is copied from the drag surfaces, because nothing here drags. */
+
+.status {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.notice {
+  margin: 0;
+  border: 1px solid var(--warn);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.8125rem;
+}
+
+.skipped {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+.footnote {
+  margin: 0 0 0.5rem;
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+/* Two columns: WHO on the left, WHERE THEY CAN WORK on the right. The right
+   column is the wider of the two because it carries the answer this screen
+   exists to give; the left is a picker and stays a fixed, calm width. */
+.split {
+  display: grid;
+  grid-template-columns: 17rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.people,
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  padding: 0.875rem 1rem;
+}
+
+.h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.h3 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field,
+.inlineField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.inlineField {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.fieldLabel {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+}
+
+.peopleList,
+.places,
+.tickets,
+.ticketTypes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.peopleList {
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.person,
+.personOn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: none;
+  padding: 0.3125rem 0.5rem;
+  text-align: left;
+}
+
+.person:hover {
+  /* `--ring`, NOT `--drag-row-hover`. They resolve to the same colour today,
+     and that is exactly the trap: `--drag-*` belongs to the shared drag
+     surface (D100) and nothing here drags. Borrowing it would put this file in
+     the way of a future re-point of the drag vocabulary. */
+  background: var(--ring);
+}
+
+.personOn {
+  border-color: var(--axis);
+  background: var(--page);
+}
+
+.personName {
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.personMeta {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.badge {
+  margin-left: 0.375rem;
+  border: 1px solid var(--axis);
+  border-radius: 0.75rem;
+  padding: 0 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+}
+
+/* ---------------------------------------------------------------------------
+   ⭐ THE ANSWER, AND IT IS THE ONLY THING ON THIS SCREEN WITH COLOUR.
+
+   A tick and a cross, both on one grid so the reason column starts at the same
+   x on every line — the same lesson SiteAccessPanel.module.css records: a list
+   of independently-sized flex rows reads as ragged text rather than as data,
+   and this list is read by scanning DOWN the mark column.
+
+   `--signal-ok` and `--crit` are the board's own yes/no pair, reused rather
+   than reinvented (D100). The mark is not colour ALONE — ✓/✕ carry the meaning
+   for anyone who cannot separate the two hues.
+   --------------------------------------------------------------------------- */
+.placeYes,
+.placeNo {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(8rem, 1fr) minmax(0, 1.4fr);
+  gap: 0.5rem;
+  align-items: baseline;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 42rem) {
+  .placeYes,
+  .placeNo {
+    grid-template-columns: 1.25rem minmax(0, 1fr);
+  }
+}
+
+.placeYes {
+  background: var(--page);
+}
+
+.placeNo {
+  background: var(--break-hatch-bg);
+}
+
+.mark {
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.placeYes .mark {
+  color: var(--signal-ok);
+}
+
+.placeNo .mark {
+  color: var(--crit);
+}
+
+.placeLabel {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.placeWhy {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+/* Visually hidden but read aloud: the tick already says "yes" to a sighted
+   reader, and a repeated "can work here" beside every green row is noise. */
+.srHint {
+  position: absolute;
+  width: 0.0625rem;
+  height: 0.0625rem;
+  margin: -0.0625rem;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.asOfRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.asOfRow .field {
+  max-width: 13rem;
+}
+
+.summary {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.renameRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.renameRow .input {
+  width: auto;
+  max-width: 12rem;
+}
+
+.headMeta {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.ticket,
+.ticketType {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.8125rem;
+}
+
+.ticket:hover,
+.ticketType:hover {
+  background: var(--ring);
+}
+
+.ticketName,
+.ticketTypeName {
+  min-width: 8rem;
+}
+
+.ticketWhen {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+}
+
+.ticket .input,
+.ticketType .input {
+  width: auto;
+  max-width: 10rem;
+}
+
+.grantRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.grantRow .field {
+  max-width: 13rem;
+}
+
+/* The clash notice. Deliberately NOT styled as an error: a name that already
+   exists is not a mistake, it is the ticket you were about to create. */
+.reuse {
+  margin: 0;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.primary,
+.small,
+.danger {
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.3125rem 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.primary {
+  border-color: var(--ink-2);
+}
+
+.danger {
+  border-color: var(--crit);
+  color: var(--crit);
+}
+
+.primary:disabled,
+.small:disabled,
+.danger:disabled {
+  color: var(--muted);
+  border-color: var(--grid);
+}
+
+.link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-align: left;
+}
