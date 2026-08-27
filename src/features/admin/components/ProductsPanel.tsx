@@ -85,7 +85,9 @@ export function ProductsPanel() {
 
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState({ sku: "", name: "" });
+  const [editDraft, setEditDraft] = useState<{ sku: string; name: string; siteNodeId: string }>(
+    { sku: "", name: "", siteNodeId: "" },
+  );
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [recolouringId, setRecolouringId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
@@ -174,14 +176,19 @@ export function ProductsPanel() {
     clearRowError(row.id);
     setConfirmingId(null);
     setEditingId(row.id);
-    setEditDraft({ sku: row.sku, name: row.name });
+    setEditDraft({ sku: row.sku, name: row.name, siteNodeId: row.siteNodeId ?? "" });
   }
 
   function saveEdit(row: ProductRow) {
+    // ⭐ THE SCOPE IS PART OF THE EDIT NOW. It was set at creation and frozen,
+    // which meant a line could be reorganised and its products could not follow
+    // — and the create form had a picker while the edit form did not, which is
+    // the same shape of gap as a break that could only be deleted and retyped.
+    const nextScope = editDraft.siteNodeId === "" ? null : editDraft.siteNodeId;
     const result = validateProductDraft({
       sku: editDraft.sku,
       name: editDraft.name,
-      siteNodeId: row.siteNodeId,
+      siteNodeId: nextScope,
     });
     if (!result.ok) {
       setRowError({ id: row.id, message: result.skuError ?? result.nameError ?? "" });
@@ -189,7 +196,7 @@ export function ProductsPanel() {
     }
     clearRowError(row.id);
     updateMutation.mutate(
-      { id: row.id, sku: result.value.sku, name: result.value.name },
+      { id: row.id, sku: result.value.sku, name: result.value.name, siteNodeId: nextScope },
       {
         onSuccess: () => setEditingId((cur) => (cur === row.id ? null : cur)),
         onError: (err: SchedulerError) =>
@@ -319,12 +326,35 @@ export function ProductsPanel() {
           <span className={styles.name}>{row.name}</span>
         )}
 
-        {/* ⚠️ THE FULL PATH IS THE TOOLTIP, because after 0025 a scope can be
-            any node and "Line 1" is ambiguous the moment a second plant has
-            one. The column stays short; the disambiguation is one hover away. */}
-        <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
-          {row.owner}
-        </span>
+        {/* ⭐ THE "BELONGS TO" COLUMN IS THE CONTROL WHEN THE ROW IS BEING
+            EDITED. Pratik asked three times for a way to change where an
+            existing product belongs, and each time I had wired only the CREATE
+            form — the picker existed one card up and nowhere on the row. **The
+            edit path is not a smaller version of the create path; it is the
+            other half of it**, and every field the create form offers has to
+            be reachable here or the value is frozen at birth.
+
+            ⚠️ THE FULL PATH IS THE TOOLTIP when it is not being edited, because
+            a scope can be any node and "Line 1" is ambiguous the moment a
+            second plant has one. */}
+        {isEditing ? (
+          <select
+            className={styles.input}
+            aria-label="Belongs to"
+            value={editDraft.siteNodeId}
+            onChange={(e) => setEditDraft((d) => ({ ...d, siteNodeId: e.target.value }))}
+          >
+            {owners.map((o) => (
+              <option key={o.value ?? "company"} value={o.value ?? ""}>
+                {ownerLabels.get(o.value)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
+            {row.owner}
+          </span>
+        )}
 
         <span className={styles.actions}>
           {isEditing ? (

@@ -216,7 +216,11 @@ export function ShiftsPanel() {
   const [newName, setNewName] = useState("");
   const [newOwner, setNewOwner] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState<{ id: string; name: string } | null>(null);
+  const [renameDraft, setRenameDraft] = useState<{
+    id: string;
+    name: string;
+    siteNodeId: string;
+  } | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [shiftForm, setShiftForm] = useState<ShiftForm>(BLANK_SHIFT);
   const [shiftEdit, setShiftEdit] = useState<{ id: string; form: ShiftForm } | null>(null);
@@ -724,7 +728,15 @@ export function ShiftsPanel() {
             type="button"
             className={styles.btn}
             onClick={() =>
-              setRenameDraft(renaming ? null : { id: pattern.id, name: pattern.name })
+              setRenameDraft(
+                renaming
+                  ? null
+                  : {
+                      id: pattern.id,
+                      name: pattern.name,
+                      siteNodeId: pattern.siteNodeId ?? "",
+                    },
+              )
             }
           >
             {renaming ? "Cancel" : "Rename"}
@@ -737,8 +749,24 @@ export function ShiftsPanel() {
               className={styles.input}
               aria-label="Pattern name"
               value={renameDraft.name}
-              onChange={(e) => setRenameDraft({ id: pattern.id, name: e.target.value })}
+              onChange={(e) => setRenameDraft({ ...renameDraft, name: e.target.value })}
             />
+            {/* ⭐ AND WHERE IT BELONGS. Same gap as products and operators had:
+                a picker on the create form and nothing on the edit, so the
+                value was frozen at birth. Added here before it had to be
+                reported a fourth time. */}
+            <select
+              className={styles.select}
+              aria-label="Owned by"
+              value={renameDraft.siteNodeId}
+              onChange={(e) => setRenameDraft({ ...renameDraft, siteNodeId: e.target.value })}
+            >
+              {scopeChoices.map((o) => (
+                <option key={o.value ?? "company"} value={o.value ?? ""}>
+                  {indentedLabel(o)}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               className={styles.primaryBtn}
@@ -756,7 +784,11 @@ export function ShiftsPanel() {
                   return;
                 }
                 renamePattern.mutate(
-                  { templateId: pattern.id, name: renameDraft.name.trim() },
+                  {
+                    templateId: pattern.id,
+                    name: renameDraft.name.trim(),
+                    siteNodeId: renameDraft.siteNodeId === "" ? null : renameDraft.siteNodeId,
+                  },
                   { onSuccess: () => setRenameDraft(null), onError: (e) => fail(key, e) },
                 );
               }}

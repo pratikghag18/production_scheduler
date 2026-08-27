@@ -175,22 +175,45 @@ export interface UpdateProductInput {
   id: string;
   sku: string;
   name: string;
+  /** Where it belongs. Omit to leave alone; `null` moves it company-wide. */
+  siteNodeId?: string | null;
 }
 
 /**
  * Renames / re-skus one product.
  *
- * ⚠️ DOES NOT TOUCH `site_node_id`, deliberately. Moving a product between
- * owners does NOT re-pick its colour (0023 §3's trigger is INSERT-only, and
- * its comment says why: a product that changes colour because somebody
- * re-assigned it is the surprise D102 exists to remove), so a move would leave
- * the row holding a token drawn from the OLD owner's palette — possibly a
- * duplicate within the new one. Owner is set once, at creation.
+ * ⚠️ IT TOUCHES `site_node_id` NOW, AND THE OLD REASONING IS DEAD. This
+ * function used to say, in writing, that "owner is set once, at creation" —
+ * because moving a product between owners would leave it holding a colour token
+ * drawn from the OLD owner's palette, possibly a duplicate within the new one,
+ * and D102 exists to stop colours changing under people.
+ *
+ * That argument had a premise, and 0025 removed it: a colour can now be set by
+ * hand, so "the palette picked this for you and it might collide" is no longer
+ * a reason to freeze the owner — it is a reason to let someone change the
+ * colour, which they can. [[decision-record-drift]] rule 6: when you correct a
+ * premise, go back and re-examine the decision it was supporting.
+ *
+ * ⚠️ AND PRATIK ASKED THREE TIMES. Where something belongs is not a property of
+ * its birth; a line gets reorganised and its products move with it. A create
+ * form without a matching edit is the same defect as a break you could only
+ * delete and retype (§19.65) — build the edit path at the same time as the
+ * create path, every time.
+ *
+ * `siteNodeId` is OPTIONAL: omit it to leave the scope alone, pass `null` to
+ * move the product company-wide. `null` is a real value in this column, so
+ * "not supplied" cannot be spelled the same way.
  */
 export async function updateProduct(input: UpdateProductInput): Promise<AdminProduct> {
+  const patch: { sku: string; name: string; site_node_id?: string | null } = {
+    sku: input.sku,
+    name: input.name,
+  };
+  if ("siteNodeId" in input) patch.site_node_id = input.siteNodeId ?? null;
+
   const { data, error } = await supabase
     .from("products")
-    .update({ sku: input.sku, name: input.name })
+    .update(patch)
     .eq("id", input.id)
     .select(PRODUCT_COLUMNS);
   if (error) throw toSchedulerError(error);

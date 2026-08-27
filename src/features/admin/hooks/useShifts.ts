@@ -100,8 +100,14 @@ export function useCreatePattern() {
 }
 
 export function useRenamePattern() {
-  return useShiftWrite<ShiftTemplateRow, { templateId: string; name: string }>(
-    (v) => renamePattern(v.templateId, v.name),
+  return useShiftWrite<
+    ShiftTemplateRow,
+    { templateId: string; name: string; siteNodeId?: string | null }
+  >(
+    // ⚠️ `"siteNodeId" in v` and not `v.siteNodeId ?? undefined` — `null` is a
+    // real value here (company-wide), so collapsing the two would make a rename
+    // that did not mean to touch the scope silently move the pattern.
+    (v) => renamePattern(v.templateId, v.name, "siteNodeId" in v ? v.siteNodeId : undefined),
     true,
   );
 }

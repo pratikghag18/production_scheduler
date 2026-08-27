@@ -332,12 +332,31 @@ export interface UpdateOperatorInput {
   id: string;
   displayName: string;
   employeeRef: string | null;
+  /**
+   * Where this person belongs — `null` = company-wide. **Omit the field to
+   * leave it alone**; passing `null` MOVES them to company-wide, which is a
+   * different act and has to be expressible.
+   *
+   * ⚠️ `undefined` AND `null` MEAN DIFFERENT THINGS HERE and that is the whole
+   * reason this is optional rather than required. `siteNodeId: null` is a real
+   * value in this schema (0023's column comment says so), so "not supplied"
+   * cannot be spelled the same way as "set it to company-wide" — a rename that
+   * forgot the field would silently move the person.
+   */
+  siteNodeId?: string | null;
 }
 
 export async function updateOperator(input: UpdateOperatorInput): Promise<OperatorRecord> {
+  const patch: { display_name: string; employee_ref: string | null; site_node_id?: string | null } = {
+    display_name: input.displayName,
+    employee_ref: input.employeeRef,
+  };
+  // Only when the caller actually supplied it — see the interface comment.
+  if ("siteNodeId" in input) patch.site_node_id = input.siteNodeId ?? null;
+
   const { data, error } = await supabase
     .from("operators")
-    .update({ display_name: input.displayName, employee_ref: input.employeeRef })
+    .update(patch)
     .eq("id", input.id)
     .select(OPERATOR_COLUMNS);
   if (error) throw toSchedulerError(error);

@@ -305,10 +305,25 @@ export async function createPattern(input: CreatePatternInput): Promise<ShiftTem
 export async function renamePattern(
   templateId: string,
   name: string,
+  /**
+   * Where the pattern belongs. **Omit to leave it alone**; `null` moves it
+   * company-wide. `null` is a real value in this column, so "not supplied"
+   * cannot be spelled the same way as "make it company-wide".
+   *
+   * ⭐ IT TAKES A SCOPE BECAUSE THE CREATE FORM DOES. Pratik had to ask three
+   * times for the equivalent on products and operators, and the shape of the
+   * mistake was the same every time: a picker on the create form and nothing
+   * on the edit, so the value was frozen at birth. Adding it here before he
+   * finds it is the cheap half of that lesson.
+   */
+  siteNodeId?: string | null,
 ): Promise<ShiftTemplateRow> {
+  const patch: { name: string; site_node_id?: string | null } =
+    siteNodeId === undefined ? { name } : { name, site_node_id: siteNodeId };
+
   const { data, error } = await supabase
     .from("shift_templates")
-    .update({ name })
+    .update(patch)
     .eq("id", templateId)
     .select("id, name, site_node_id");
   if (error) throw toSchedulerError(error);

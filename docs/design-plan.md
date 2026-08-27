@@ -6539,3 +6539,91 @@ section.**
   refusal path and an override to get right, and doing the rename first would
   mean renaming everything twice.
 
+### D105 — What you can set once, you must be able to change (Aug 27, 2026)
+
+*"Still no option to change the area for an existing operator, edit does not have
+the option. No option to edit area for an existing product either. I've talked
+about this a couple of times now, please let me know if I'm unclear about certain
+instructions."*
+
+He was not unclear. **I built the CREATE path three times and left the EDIT path
+with fewer fields each time**, and did not see the pattern until the third
+report. From where I was standing the feature worked — the picker was there, on
+the form I had just finished.
+
+#### 1. Why it kept happening, and why it is worse than a missing control
+
+A create form without its matching edit does not merely lack a button. **It
+asserts that the value is a property of the row's birth** — which for
+where-something-belongs is simply false. A line gets reorganised and its
+products have to follow it.
+
+It had already happened once wearing different clothes: §19.65's break, which
+could only be deleted and retyped while `updateBreak` sat exported and
+unimported. Same defect, and I recorded the *instance* ("a dead export is the
+fingerprint of a dropped requirement") without generalising the *rule*.
+
+#### 2. What changed
+
+`updateProduct`, `updateOperator` and `renamePattern` all take an optional
+`siteNodeId`; all three edit forms carry the picker. **⚠️ Optional, and
+`undefined ≠ null`**: `null` is a real value in this column (company-wide), so
+"not supplied" cannot be spelled the same way as "move it company-wide", or a
+rename that forgot the field would silently move the row.
+
+**⚠️ AND `updateProduct`'S OWN COMMENT ARGUED AGAINST THIS.** It said, in
+writing, *"Owner is set once, at creation"* — because moving a product between
+owners would leave it holding a colour token drawn from the old owner's palette.
+That was a real argument with a premise, and **0025 removed the premise**: a
+colour can be set by hand now, so a possible collision is a reason to let someone
+change the colour, not to freeze the owner. [[doc_drift]] rule 6 — when you
+correct a premise, go back and re-examine the decision it was supporting.
+
+**Shift patterns got it too, unasked**, because they had the identical gap and
+he would have found it next.
+
+#### 3. The rule becomes a test — group J, 7 cases
+
+`scopeParityOffences` reads `src/lib/api/{products,operators,shifts}.ts` and
+fails if any scoped table can SET `site_node_id` at creation and not CHANGE it
+afterwards. **This is D89 and D100's move again: a rule that lives only as a
+habit will be forgotten by the next component.**
+
+**⚠️ AND THE AUDIT ITSELF FAILED TWICE BEFORE IT WORKED, both found by breaking
+working code rather than by reading it:**
+
+- **Instrument failure 42.** It sliced each write chain from the nearest `{`
+  before `.from("products")` — which is the `{ data, error }` destructuring on
+  the *same statement*, so the slice began AFTER the `patch` object three lines
+  above. **It reported a real-looking failure about correct code.** The function
+  is the unit that owns a write, so the function is the slice.
+- **Then it could not fail at all.** With the slicing fixed, deleting the exact
+  line the audit exists to protect left `site_node_id?: string | null` in the
+  patch TYPE, and a plain `includes` read that as a write. **The audit reported
+  nothing for the defect it was written to catch** — rule 3 arriving within the
+  hour. `writesScopeColumn` strips type declarations first, and case J4 pins it.
+- **And the rule had to become unconditional.** Written as "if it can be set it
+  must be changeable", a module that could do *neither* reported no offence at
+  all. J5 is that case.
+
+**3 mutations of the audit, all caught. Acceptance 1082 → 1089 in 24 files.**
+
+#### 4. Two things about how this was reported, which are also findings
+
+**The gameplan's stage borders had drifted from its own chips.** The left border
+comes from a class on the card and the DONE pill from a chip inside it — two
+statements of one fact, kept in step by hand, so of course stage 16 read DONE
+with an in-progress border for two sessions and every stage added after it did
+the same. **That is D100's defect appearing in the document that describes
+D100.** The class is now derived from the chip, computed for every card.
+
+**And the 1000-row finding was written in jargon he could not act on** — *"I have
+no idea what you need from me"*. It offered him a choice between paging and
+refusing to render, which are both *how* and neither of which is a business
+question. **Asking the user to arbitrate an implementation detail is not
+consultation, it is offloading.** The card now says what I am going to do, in one
+sentence, with the consequence in his terms ("about 350 people with three
+trainings each"), and asks nothing. **The decision: page every read to
+exhaustion, and where a screen COMPUTES rather than lists, refuse to show an
+answer built on a read known to be short.**
+

@@ -148,6 +148,7 @@ export function OperatorsPanel() {
   const [renaming, setRenaming] = useState(false);
   const [editName, setEditName] = useState("");
   const [editRef, setEditRef] = useState("");
+  const [editSite, setEditSite] = useState<string>("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const [grantId, setGrantId] = useState("");
@@ -288,8 +289,19 @@ export function OperatorsPanel() {
       setNotice(draft.message);
       return;
     }
+    // ⭐ THE AREA IS PART OF THE EDIT NOW, and it is the third time Pratik has
+    // had to ask. People move between areas — that is the whole reason an area
+    // is worth recording — and until this line the picker existed only on the
+    // "Add someone" form, so where somebody belonged was frozen at the moment
+    // they were created. **The edit path is the other half of the create path,
+    // not a smaller version of it.**
     updateOperator.mutate(
-      { id: selected.id, displayName: draft.displayName, employeeRef: draft.employeeRef },
+      {
+        id: selected.id,
+        displayName: draft.displayName,
+        employeeRef: draft.employeeRef,
+        siteNodeId: editSite === "" ? null : editSite,
+      },
       { onSuccess: () => setRenaming(false), onError: onErr },
     );
   }
@@ -586,6 +598,22 @@ export function OperatorsPanel() {
                       onChange={(e) => setEditRef(e.target.value)}
                       aria-label="Employee reference"
                     />
+                    {/* ⭐ WHERE THEY BELONG, EDITABLE. See `saveRename`.
+                        ⚠️ It filters the roster and nothing else in this
+                        release — the server does not yet refuse an assignment
+                        outside it, and no label here may imply that it does. */}
+                    <select
+                      className={styles.input}
+                      aria-label="Belongs to"
+                      value={editSite}
+                      onChange={(e) => setEditSite(e.target.value)}
+                    >
+                      {scopeChoices.map((o) => (
+                        <option key={o.value ?? "company"} value={o.value ?? ""}>
+                          {indentedLabel(o)}
+                        </option>
+                      ))}
+                    </select>
                     <button type="button" className={styles.small} disabled={busy} onClick={saveRename}>
                       Save
                     </button>
@@ -607,6 +635,7 @@ export function OperatorsPanel() {
                       onClick={() => {
                         setEditName(selected.displayName);
                         setEditRef(selected.employeeRef ?? "");
+                        setEditSite(selected.siteNodeId ?? "");
                         setRenaming(true);
                       }}
                     >

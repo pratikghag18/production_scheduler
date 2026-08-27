@@ -408,3 +408,133 @@ export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]
   }
   return [...used].filter((t) => !defined.has(t)).sort();
 }
+
+
+/* ===========================================================================
+ * D105 — CREATE/EDIT PARITY. A FIELD YOU CAN SET ONCE AND NEVER CHANGE.
+ *
+ * Pratik, three times across two days: *"No option to edit area for an existing
+ * product either... I've talked about this a couple of times now."*
+ *
+ * ⭐⭐ THE MISTAKE WAS THE SAME EVERY TIME AND I DID NOT SEE THE PATTERN. Build
+ * the CREATE path, wire its form, ship it — and leave the EDIT path with a
+ * subset of the fields. The value is then frozen at the moment the row was
+ * made, which is invisible from the create form (where everything works) and
+ * only shows up the day somebody reorganises a line and their products cannot
+ * follow. It had already happened once in a different costume: a break that
+ * could only be deleted and retyped (§19.65), where the update call existed
+ * and nothing on screen reached it.
+ *
+ * ⚠️ A CREATE FORM WITHOUT ITS MATCHING EDIT IS NOT A MISSING FEATURE, IT IS A
+ * WRONG DATA MODEL SHIPPED. It says "this is a property of the row's birth",
+ * which for where-something-belongs is simply false.
+ *
+ * So this stops being something I remember. For every table that carries
+ * `site_node_id`, the API module must both INSERT it and UPDATE it — checked
+ * from the source, in the runner that guards the repo.
+ *
+ * ⚠️ IT PARSES THE STATEMENT, NOT THE FILE. A file-wide `includes("site_node_id")`
+ * passes on the INSERT alone, which is exactly the state this audit exists to
+ * catch. Each `.from("table")` chain is sliced out and the column looked for
+ * inside the chain that writes.
+ * ======================================================================== */
+
+/** The API modules that own a scoped table, and the table each one writes. */
+export const SCOPED_WRITE_SURFACES: ReadonlyArray<{ file: string; table: string }> = [
+  { file: "src/lib/api/products.ts", table: "products" },
+  { file: "src/lib/api/operators.ts", table: "operators" },
+  { file: "src/lib/api/shifts.ts", table: "shift_templates" },
+];
+
+/** The column every one of them must be able to both set and change. */
+export const SCOPE_COLUMN = "site_node_id";
+
+interface WriteChain {
+  op: "insert" | "upsert" | "update";
+  body: string;
+}
+
+/**
+ * Every write chain against `table` in `source`, as `(op, body)` pairs.
+ *
+ * A chain runs from the top of the ENCLOSING FUNCTION to the next `.from(`.
+ *
+ * ⚠️ NOT FROM THE NEAREST `{`, WHICH IS WHAT THIS FIRST DID — and it reported a
+ * real-looking failure about correct code, which is instrument-failure 42. The
+ * nearest brace before `.from("products")` is the `{ data, error }`
+ * destructuring on the very same statement, so the slice began AFTER the
+ * `patch` object three lines above and the audit could not see the column being
+ * set. **A parser that finds fewer things than exist reads exactly like a file
+ * that contains fewer things** (instrument 37, again). The function is the unit
+ * that owns the write, so the function is the slice.
+ */
+export function writeChains(source: string, table: string): WriteChain[] {
+  const clean = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const out: WriteChain[] = [];
+  const from = new RegExp(`\\.from\\(\\s*["']${table}["']\\s*\\)`, "g");
+  const fnStarts = [...clean.matchAll(/^export (?:async )?function |^(?:async )?function /gm)].map(
+    (f) => f.index,
+  );
+  for (const m of clean.matchAll(from)) {
+    const before = fnStarts.filter((i) => i < m.index);
+    const start = before.length === 0 ? 0 : before[before.length - 1];
+    const nextFrom = clean.indexOf(".from(", m.index + 1);
+    const body = clean.slice(start, nextFrom === -1 ? clean.length : nextFrom);
+    const op = /\.(insert|upsert|update)\s*\(/.exec(clean.slice(m.index, nextFrom === -1 ? clean.length : nextFrom));
+    if (op !== null) out.push({ op: op[1] as WriteChain["op"], body });
+  }
+  return out;
+}
+
+/**
+ * Does this chain actually WRITE the column, as opposed to merely mentioning it?
+ *
+ * ⚠️ A TYPE ANNOTATION IS NOT A WRITE, and this audit's first version could not
+ * tell the difference — so deleting the one line that assigns the column left
+ * `site_node_id?: string | null` in the patch type three lines above, the
+ * `includes` test still passed, and **the audit reported nothing for the exact
+ * defect it was written to catch.** That is rule 3 arriving within the hour:
+ * half an audit's cases must run against synthetic input, because one that only
+ * ever looks at a clean repo passes for as long as the repo is clean and says
+ * nothing about whether it can fail at all.
+ */
+export function writesScopeColumn(body: string): boolean {
+  const withoutTypeDecls = body.replace(new RegExp(`${SCOPE_COLUMN}\\?\\s*:[^;,}]*`, "g"), "");
+  return withoutTypeDecls.includes(SCOPE_COLUMN);
+}
+
+/**
+ * Every scoped table whose API module cannot both SET and CHANGE its scope.
+ *
+ * ⭐ THE RULE IS UNCONDITIONAL, not "if it can set it, it must change it". The
+ * conditional version had a second hole: rename the column away everywhere and
+ * both halves go false, no offence is reported, and the audit sits green over a
+ * module that cannot express where anything belongs at all.
+ *
+ * Returns one string per offence, ready to print in a failure message.
+ */
+export function scopeParityOffences(
+  sources: ReadonlyMap<string, string>,
+  surfaces: ReadonlyArray<{ file: string; table: string }> = SCOPED_WRITE_SURFACES,
+): string[] {
+  const out: string[] = [];
+  for (const { file, table } of surfaces) {
+    const src = sources.get(file);
+    if (src === undefined) {
+      out.push(`${file}: not read`);
+      continue;
+    }
+    const chains = writeChains(src, table);
+    const creates = chains.filter((c) => c.op === "insert" || c.op === "upsert");
+    const updates = chains.filter((c) => c.op === "update");
+    if (creates.length === 0) out.push(`${file}: no insert into ${table}`);
+    if (updates.length === 0) out.push(`${file}: no update of ${table}`);
+    if (!creates.some((c) => writesScopeColumn(c.body))) {
+      out.push(`${file}: nothing sets ${table}.${SCOPE_COLUMN} at creation`);
+    }
+    if (!updates.some((c) => writesScopeColumn(c.body))) {
+      out.push(`${file}: nothing can CHANGE ${table}.${SCOPE_COLUMN} after creation`);
+    }
+  }
+  return out;
+}

@@ -25,6 +25,10 @@ import {
   parseSectionIds,
   sectionsWithoutPanels,
   auditAdminSections,
+  SCOPED_WRITE_SURFACES,
+  scopeParityOffences,
+  writeChains,
+  writesScopeColumn,
 } from "./scaleAudit";
 
 /**
@@ -481,5 +485,120 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
   it("H5: a file with no SECTIONS array reports no sections rather than throwing", () => {
     expect(parseSectionIds("export function P() { return null; }")).toEqual([]);
     expect(sectionsWithoutPanels("export function P() { return null; }")).toEqual([]);
+  });
+});
+
+
+/* ---------------------------------------------------------------------------
+   GROUP J — D105, CREATE/EDIT PARITY.
+
+   ⭐⭐ THIS GROUP EXISTS BECAUSE PRATIK HAD TO ASK THREE TIMES. "No option to
+   change the area for an existing operator." "No option to edit area for an
+   existing product either." "I've talked about this a couple of times now."
+
+   Every time, I had wired the CREATE form and left the EDIT path with fewer
+   fields — which freezes the value at the moment the row was made, is invisible
+   from the create form where everything works, and only surfaces the day
+   somebody reorganises a line. It is the same defect as a break that could only
+   be deleted and retyped (§19.65), and the same shape as D89 and D100: **a rule
+   that lives only as a habit will be forgotten by the next component.** So it
+   becomes a property the suite checks.
+
+   ⚠️ HALF OF THESE CASES RUN AGAINST SYNTHETIC SOURCE, and the first version of
+   this audit is why. It reported NOTHING for the exact defect it was written to
+   catch — the deleted assignment left a type annotation behind and a plain
+   `includes` could not tell them apart. An audit that only ever reads the real
+   repo passes for as long as the repo is clean and says nothing about whether
+   it can fail at all.
+   --------------------------------------------------------------------------- */
+describe("scaleAudit: what you can set once, you must be able to change (D105)", () => {
+  const sources = new Map(
+    SCOPED_WRITE_SURFACES.map((s) => [s.file, readFileSync(`${repoRoot}/${s.file}`, "utf8")]),
+  );
+
+  it("J1: every scoped table can both set and change where it belongs", () => {
+    expect(scopeParityOffences(sources)).toEqual([]);
+  });
+
+  it("J2: and the audit names all three surfaces, so none can be quietly dropped", () => {
+    // The list that drives a test is itself untested unless something asserts
+    // the list — three times over, on this project. A sorted literal.
+    expect(SCOPED_WRITE_SURFACES.map((s) => `${s.file}|${s.table}`).sort()).toEqual([
+      "src/lib/api/operators.ts|operators",
+      "src/lib/api/products.ts|products",
+      "src/lib/api/shifts.ts|shift_templates",
+    ]);
+  });
+
+  it("J3: it FAILS when the scope is set at creation and never changeable", () => {
+    // Pratik's defect, exactly: the create form works, the edit path silently
+    // omits the field.
+    const frozen = new Map(sources);
+    const src = sources.get("src/lib/api/products.ts")!;
+    frozen.set(
+      "src/lib/api/products.ts",
+      src.replace('if ("siteNodeId" in input) patch.site_node_id = input.siteNodeId ?? null;', ""),
+    );
+    expect(scopeParityOffences(frozen)).toEqual([
+      "src/lib/api/products.ts: nothing can CHANGE products.site_node_id after creation",
+    ]);
+  });
+
+  it("J4: a TYPE ANNOTATION is not a write", () => {
+    // ⚠️ The hole that made J3 pass vacuously in the first version. Deleting the
+    // assignment leaves `site_node_id?: string | null` in the patch type, and a
+    // plain `includes` reads that as "the column is written here".
+    expect(writesScopeColumn("const patch: { site_node_id?: string | null } = { name };")).toBe(
+      false,
+    );
+    expect(writesScopeColumn("patch.site_node_id = input.siteNodeId ?? null;")).toBe(true);
+    expect(writesScopeColumn("{ display_name: n, site_node_id: s }")).toBe(true);
+  });
+
+  it("J5: it FAILS when the column disappears from a module altogether", () => {
+    // The second hole: written as "if it can be set it must be changeable", a
+    // module that could do neither reported no offence at all.
+    const gone = new Map(sources);
+    gone.set(
+      "src/lib/api/operators.ts",
+      sources.get("src/lib/api/operators.ts")!.replaceAll("site_node_id", "xx_node_id"),
+    );
+    expect(scopeParityOffences(gone)).toEqual([
+      "src/lib/api/operators.ts: nothing sets operators.site_node_id at creation",
+      "src/lib/api/operators.ts: nothing can CHANGE operators.site_node_id after creation",
+    ]);
+  });
+
+  it("J6: a write chain is sliced from its FUNCTION, not from the nearest brace", () => {
+    // ⚠️ Instrument failure 42. The nearest `{` before `.from("products")` is the
+    // `{ data, error }` destructuring on the same statement, so slicing from
+    // there began AFTER the patch object and the audit reported a real-looking
+    // failure about correct code.
+    const src = [
+      "export async function updateThing(input) {",
+      "  const patch = { name: input.name };",
+      '  if (x) patch.site_node_id = input.s;',
+      "  const { data, error } = await supabase",
+      '    .from("products")',
+      "    .update(patch)",
+      "    .eq('id', input.id);",
+      "}",
+    ].join("\n");
+    const chains = writeChains(src, "products");
+    expect([chains.length, chains[0]?.op, writesScopeColumn(chains[0]?.body ?? "")]).toEqual([
+      1,
+      "update",
+      true,
+    ]);
+  });
+
+  it("J7: a module that never touches the table is reported, not skipped", () => {
+    const empty = new Map([["src/lib/api/products.ts", "export const nothing = 1;"]]);
+    expect(scopeParityOffences(empty, [{ file: "src/lib/api/products.ts", table: "products" }])).toEqual([
+      "src/lib/api/products.ts: no insert into products",
+      "src/lib/api/products.ts: no update of products",
+      "src/lib/api/products.ts: nothing sets products.site_node_id at creation",
+      "src/lib/api/products.ts: nothing can CHANGE products.site_node_id after creation",
+    ]);
   });
 });
