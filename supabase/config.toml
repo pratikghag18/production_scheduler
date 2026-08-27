@@ -12,7 +12,16 @@ max_rows = 1000
 [db]
 port = 54322
 shadow_port = 54320
-major_version = 15
+# WARNING 16, NOT 15. Everything that VALIDATES this schema targets PostgreSQL 16:
+# `scripts/verify-db.sh` pins /usr/lib/postgresql/16/bin and its first step is
+# "Locate PostgreSQL 16", migration 0004 says its peak query is "validated
+# against live PostgreSQL 16", and docs/schema.md says the same. Leaving this
+# at 15 meant developers ran a different major version from the one every
+# check was run against -- which makes the verification story untrue rather
+# than merely inconsistent.
+# WARNING Changing it needs `supabase stop && supabase start && npm run db:reset`:
+# the local volume holds PG15 data files and will not attach to a PG16 server.
+major_version = 16
 
 [db.pooler]
 enabled = false

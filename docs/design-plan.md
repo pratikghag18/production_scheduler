@@ -6848,3 +6848,312 @@ turned a long-standing state into what looked like a wall of new failures, on th
 run where he was checking whether a four-times-reported defect was finally fixed.
 `productsPanel.test.tsx` was the 44th and is now formatted. **An acceptance block is a
 claim that these commands pass; do not add a command to it you have not run.**
+
+---
+
+## §19.68 — "Why am I seeing Plant 1's product?" — the read side of the site-instance model
+
+**Pratik, signed in as the Plant 2 site admin, looking at the Products catalogue:**
+
+> *"When I'm logged in as site admin for plant 2, why am I seeing product which is
+> assigned to Plant 1? No member from one plant should see info for other plants, this
+> is irrespective of whether I'm in products or operators or shifts or anything."*
+
+**He is right, the leak is deliberate, I made it deliberately, and I wrote two tests
+whose entire job is to fail if anyone tries to close it.** This section records what is
+actually true today, why the obvious fix is not one line, and what replaces it.
+
+### 1. What is true today
+
+**Every `_select` policy on the shared lists is `org_id = app_current_org()` and has
+been since 0008.** Nothing in 0013, 0019, 0020, 0021, 0022, 0023, 0024 or 0025 touched
+one. That is `products`, `operators`, `skills`, `operator_skills`, `shift_templates`,
+`shifts`, `shift_breaks`, `hierarchy_levels` and `hierarchy_templates` — **anyone in
+the org reads all of them.**
+
+⭐ **And `nodes_select` is NOT org-wide** (0020): it is `path <@ any grant path`. That
+asymmetry is the whole screenshot. The Plant-1 product row reaches Quinn because
+`products_select` lets it; the Plant-1 node's *name* does not, because `nodes_select`
+refuses it. So the row arrives owner-less and `ownerLabel` prints **"Another site"** —
+a string I wrote to be honest about a case that should never have existed.
+
+**The schedule itself already works the way he is describing.** `runs_select` and
+`assignments_select` are `app_can_read_node(node_id)` — company admin, or the node is
+at-or-below something you hold a grant on. **The lists were simply never given the same
+rule.** That is the one-sentence version of this whole finding: *the board already
+obeys the site boundary; the things the board is made of do not.*
+
+### 2. Three things that make this bigger than a policy rewrite
+
+**(a) ⚠️ `check_eligibility` is SECURITY INVOKER and reads `skills` and
+`operator_skills` AS THE CALLER.** A skill the caller cannot see drops out of `held`,
+lands in `missing`, flips `eligible` to false — and `create_assignment` (0009:478) and
+`move_run` (0009:586, 613) gate on it. **A read narrowing becomes a silent write
+refusal one indirection along, with no error naming either.** This is why 0023 stopped
+at writes, and the reasoning was correct. It is not a reason to refuse the change; it
+is the first thing the change has to fix — **the function must become SECURITY DEFINER
+with its own explicit gate** (it already takes the node; `app_can_read_node(p_node_id)`
+is the gate), so that what a caller may *ask about* stops depending on what they may
+*list*.
+
+**(b) ⚠️ `board_window` is SECURITY INVOKER and returns the whole org's products.**
+Case S18 pins that on purpose — *"narrowing what is OFFERED must not un-schedule
+history"*. Both halves are right and they are not in conflict: the payload must carry
+every product **visible by scope OR referenced by a run or assignment inside the
+window**. Otherwise every historical band renders `(unknown product)` and, worse, they
+all collapse to one colour, because `BoardGrid`'s `productColorVar` falls through to
+the fallback token for a product it cannot resolve.
+
+**(c) ⚠️ `useRootPath()` RETURNS THE CONSTANT `"plant_1"` FOR EVERY USER.**
+`src/features/board/hooks/useRootPath.ts:14`. Quinn's board asks the server for Plant
+1's window. `runs_select` saves her from seeing Plant 1's runs, so it renders mostly
+empty rather than leaking — but **the main screen of the application is pointed at the
+wrong plant for everyone who is not in Plant 1**, and no amount of policy work fixes
+that. It is a bigger user-facing defect than the one he reported.
+
+### 3. What else the survey turned up
+
+- **`offeredHere` / `offeredAt` have ZERO production call sites.** They are written,
+  tested (X11 pins that an unreadable scope fails OPEN) and wired to nothing. **D103's
+  "where something belongs decides where it is OFFERED" was never built** — only the
+  picker half was. And the board's `Product` shape (`shapes.ts:303`) has no
+  `siteNodeId` at all, so they *could not* be wired without changing the payload.
+- **No admin panel filters by scope. All four label and render everything** —
+  `ProductsPanel` (`productRows` has no filter), `OperatorsPanel` (`operatorRows`
+  filters on active + text only; a Plant-1 skill shows to a Plant-2 admin with no badge
+  at all), `ShiftsPanel` (its "Where patterns apply" select offers every pattern in the
+  company). Only `SiteAccessPanel` is scoped, and only because its RPC takes a node id.
+- **Three different hand-written copies of one rule.** `ownerLabel` says "Another
+  site"; `scopeLabel` says "Somewhere else"; `shiftDraft` has a third copy that says
+  "Another site" again. D100's lesson, third occurrence.
+- **Nothing crashes if rows disappear — it degrades silently, in nine places.**
+  `(unknown product)`, `(unknown operator)`, `(a ticket you can't see)`, `"—"`, **raw
+  uuids leaking into `RunPopover`'s title and `OperatorPanel`'s node name**,
+  `CreatePopover` defaulting to `productId: ""`, requirement inheritance truncating at
+  a hidden ancestor, and the Access tab's plant list quietly shrinking. **Every one of
+  those is a place that will look like a new bug the day the reads narrow.**
+
+### 4. The tripwires that have to be rewritten, not deleted
+
+Closing this turns **two SQL cases and roughly six client cases red on purpose**:
+
+| case | what it asserts | which kind |
+|---|---|---|
+| `51_…` **Q11** | *"READS ARE STILL ORG-WIDE"* — a Plant-1 admin sees Plant 2's operator | **the contract changed** (rule 1b-ii) |
+| `52_…` **S18** | `board_window` returns Plant 2's product under `plant_1` | **still true, and must stay true** — it is about history, not about listing |
+| `products.test.ts` **L1, L8, O3, O4** | four rows including Plant 2's `GZ`; "Another site" | contract changed |
+| `shiftDraft.test.ts` | pattern owner reads "Another site" | contract changed |
+| `scope.test.ts` **X11** | an unreadable scope fails OPEN | **still true** — offering is not listing |
+
+⚠️ **Q11's comment predicts the exact failure this change must avoid**, so it is not
+merely to be flipped: it should be rewritten to assert that `check_eligibility` still
+answers correctly for a caller who can no longer list the skill. **That is the case
+that proves the fix, and it already exists in the wrong polarity.**
+
+### D107 — ownership decides who may READ, not only who may EDIT
+
+**This supersedes the rule 0023 set down and `site_instance_model.md` records as "the
+one to remember".** 0023 said *ownership decides who may edit; it does not decide who
+may read*, and gave a measured reason. The reason was real but it was an argument about
+`check_eligibility`'s implementation, not about the product — and **Pratik's frame was
+always a READ statement**: *"each site could have their own instance for the app… only
+get to access their own site."*
+
+The rule, and it is the same one `app_can_read_node` already implements for the
+schedule:
+
+> **You can read a shared row when it is company-wide (`site_node_id IS NULL`), or when
+> its owning node and one of your grants are on the same branch — either direction.**
+> Company admins read everything. A grant on Line 1 reads Plant 1's products, because
+> Plant 1 is above it; a grant on Plant 2 does not, because the two branches never
+> meet.
+
+**Company-wide stays visible to everybody** — that is what "we can have defaults"
+means, and it is why the three `Company-wide` rows in his screenshot are not part of
+the complaint.
+
+**And the corollary that makes it safe: what a function may ASK about must stop
+depending on what its caller may LIST.** Every SECURITY INVOKER function that reads a
+narrowed table becomes SECURITY DEFINER with an explicit gate of its own, or it inherits
+a permission model it was never written for. `check_eligibility` first.
+
+---
+
+## §19.69 — Migration 0026: the read side, built and measured
+
+**§19.68 described the hole. This is what closed it, and what the closing found.**
+
+### 1. The two defects, reproduced before anything was changed
+
+A PostgreSQL 16 instance was built in the session container from all 25 migrations
+plus `seed.sql` and `dev_demo.sql`, so both of these are measurements, not readings.
+
+**(a) The leak he reported.** As Quinn — org-wide `viewer`, one admin grant on Plant
+2 — with one product deliberately given to Plant 1:
+
+| what she could list | before |
+|---|---|
+| products | **4**, including Plant 1's, shown as `<<owner node not readable>>` |
+| operators / skills / shift_templates / shifts | **9 / 1 / 2 / 5** — the whole company |
+| **nodes / runs / assignments** | **5 / 0 / 0** — already correctly scoped |
+
+That last row is the finding in one line: **the schedule already obeyed the site
+boundary and the lists it is made of did not.**
+
+**(b) ⭐⭐ A SAFETY CHECK THAT ALREADY FAILED OPEN, AND NOBODY HAD LOOKED.**
+`check_eligibility` was SECURITY INVOKER, and its `required` CTE walks ANCESTORS
+through `nodes` — which 0020 already scoped. So a skill requirement placed on a node
+*above* your grant silently drops out of your answer. Same cell, same operator, same
+instant:
+
+```
+company admin                 -> eligible = false, missing = [CNC]
+Ana (supervisor on Assembly)  -> eligible = TRUE,  missing = []
+```
+
+**A supervisor could assign someone to a cell they are not trained for and the app
+would say it was fine.** This was live before 0026 and has nothing to do with the read
+leak — it was found only because D107 forced a hard look at that function.
+
+### 2. What 0026 does
+
+- **`app_can_read_owned(site_node)`** — the D107 rule: NULL owner, or company admin, or
+  the owner node and one of your grants are on the same branch, `n.path <@ gp OR gp <@
+  n.path`. **Both directions, and only one is obvious.** "Owner below your grant" is
+  the site admin looking down; "owner ABOVE your grant" is a line supervisor who must
+  still see the plant-wide list or their board is empty.
+- **Seven `_select` policies** rewritten, each keeping its `org_id` term — the tenant
+  boundary is not replaced by the site boundary, the site boundary is added inside it.
+  Dependents ask their parent: `shifts` → template, `shift_breaks` → shift,
+  `operator_skills` → **the operator**, because a row joining a Plant-1 operator to a
+  company-wide training has no derivable owner (0023's reason for giving it no column).
+- **`app_product_on_visible_schedule` / `app_operator_on_visible_schedule`** — a row
+  already on a schedule you can see stays readable. Without it every historical band
+  renders `(unknown product)` and `BoardGrid`'s colour lookup collapses them all onto
+  one palette token. **Offering is not listing and listing is not naming; this migration
+  narrows only listing.**
+- **`check_eligibility` becomes SECURITY DEFINER with one explicit gate**,
+  `app_can_read_node(p_node_id)` — the same predicate `runs_select` uses, so it refuses
+  exactly when reading the run would have refused. **The fix is not "keep the tables
+  readable". It is that what a function may ASK about must stop depending on what its
+  caller may LIST.**
+
+**Deliberately untouched:** `hierarchy_templates` / `hierarchy_levels`. 0020 §5 left
+those org-wide so the shape picker works, `nodes_select` already hides every node of
+another site, and bundling that decision here would make this migration's mutation
+table unreadable. Recorded as open, not forgotten.
+
+### 3. What broke, which was exactly two things, both on purpose
+
+Running the full suite against 0026 before touching any test:
+
+- **Q11** — *"READS ARE STILL ORG-WIDE. This is the tripwire on §9 item 1."* It went red.
+  **That is the alarm working.** Rewritten, not deleted (rule 1b-ii): it now asserts the
+  new contract, and the property it was protecting — that `check_eligibility` keeps
+  answering for a caller who cannot list the skill — is asserted directly as R12/R14.
+- **`60_api_test` item 26** — an allow-list I did not know existed: *"SECURITY DEFINER
+  found on non-exempt function(s): {check_eligibility}"*. A guard I was loosening.
+  ⚠️ **A guard that is only weakened is a guard that is gone**, so the exemption is
+  paired with R14, which asserts the property the exemption costs.
+
+Nothing else moved. 47, 48, 49, 51, 52, 70, 75, 76, 80, 90 all stayed green.
+
+**⚠️ And S18 turned out to be asking as the COMPANY ADMIN**, so after 0026 it can only
+catch a filter added inside `board_window`, never one added in the policies. Its name is
+still true, so it stays — with a comment saying what it does not cover, because a green
+case read as covering more than it does is worse than no case (rule 3b).
+
+### 4. `53_read_scoping_test.sql` — 18 cases, and the fixture is the test
+
+51's fixture, for 51's reasons (every site admin org-wide `viewer`, two sites in one
+org, an owned AND an unowned row of every kind), **plus one thing 51 did not need: a
+grant strictly BELOW an owner.** R4 (owner above you) and R17 (owner below you) are the
+two directions of one rule and **either one alone passes against a predicate that
+implements only the other half** — which the mutation table then proved.
+
+R9/R10/R11 are a case and its two controls: a Plant 1 product on a Plant 2 run is
+readable; without the run it is not; and a run at the *other* plant does not do it
+either.
+
+**Mutation table — 11 mutations, 10 caught, 1 live inert control:**
+
+| # | mutation | caught by |
+|---|---|---|
+| N1 | company-wide rows stop being visible | R2 |
+| N2 | company admins lose their bypass | R6 |
+| N3 | only "owner below your grant" | **R4** |
+| N4 | only "owner above your grant" | **R17** |
+| N5 | drop the on-a-visible-schedule clause | R9 |
+| N6 | drop the `org_id` term from the policy | R16 |
+| N7 | `operator_skills` follows the training, not the operator | R8 |
+| N8 | `shifts_select` back to org-wide | R7 |
+| N9 | `check_eligibility` left SECURITY INVOKER | **R12, R13** |
+| N10 | the gate removed | R14 |
+| N11 | **control: a comment word changed** | correctly NOT caught |
+
+N3 and N4 landing on R4 and R17 separately is the evidence that both halves of the rule
+are independently measured, rather than one case covering for the other.
+
+**Suite: 335 → 353 numbered checks, 0 failures**, plus the 21 upgrade checks
+(unchanged — 0026 transforms no data; §5 of the migration says so rather than assuming
+it, because 0023 talked itself out of an upgrade test and the test found a real defect).
+
+### 5. Three instrument failures on the way, all of them familiar
+
+1. **`SET LOCAL ROLE` outside a transaction block silently does nothing** (gotcha 10).
+   The first leak probe ran as superuser and "proved" Quinn could read another
+   **tenant's** product — an impossible result that should have been the tell.
+2. **A TEMP table is not readable by `authenticated`** (instrument 34). R12 died with
+   `permission denied for table r_fix`, which at a glance reads exactly like the RLS
+   refusal the case exists to measure. **Every fixture value is read into a variable
+   before the role change now, and the case says why.**
+3. **The suite's own PASS counter.** Files 10–60 report by `ON_ERROR_STOP` (silence is
+   a pass) and only 45–90 emit `NOTICE:  PASS`; a first counter matching `PASS ` also
+   matched each file's summary line *"see NOTICE output above for PASS/FAIL per case"*
+   and invented six failures. **`verify-db.sh` counts `NOTICE:  PASS` exactly, and the
+   probe now matches it** — the harness must read the signal the real runner reads.
+
+### 6. The hardcoded values, since he asked in the same breath
+
+Two full sweeps, client and database. **The database side came back genuinely clean**:
+zero literal UUIDs in any migration, zero literal ltree paths in executable SQL, zero
+org ids, and no backfill keyed to an id — the thing most worth finding is absent.
+
+Fixed here:
+- **`supabase/config.toml` said `major_version = 15`** while `verify-db.sh` pins
+  `/usr/lib/postgresql/16/bin`, migration 0004 claims validation "against live
+  PostgreSQL 16", and `docs/schema.md` says the same. Developers ran a different major
+  version from the one every check was run against. Now 16. ⚠️ Needs a
+  `supabase stop && start && db:reset`, which 0026 needs anyway.
+- **`validateLevelDraft` re-typed `MAX_LEVELS` as a bare `64`.** `hierarchy.ts` is
+  deliberately dependency-free so it cannot import the constant — **so the duplication
+  is the thing to guard, not the value.** The literal is named, and two new cases in
+  `hierarchy.test.ts` import `MAX_LEVELS` and bind the two copies behaviourally: change
+  either alone and one goes red.
+- **Five `\echo` lines in `80_cross_org_test.sql` contained unescaped apostrophes**
+  (`'C8: Ana's UPDATE…'`), so psql emitted `unterminated quoted string` four times on
+  every acceptance run and mangled the case labels. Noise that makes a real error easy
+  to miss. Reworded.
+
+**Recorded, not fixed** (each is its own decision, and none is wrong today):
+`BOARD_ZONE = "UTC"` with no per-site timezone anywhere in schema or client — the
+single thing most likely to be wrong for a real second tenant, and already a named
+deferral (D10); the board's `"en-US"` locale and a hand-rolled English `MONTHS` array;
+the efficiency clamp written `10–150` in two components against a database CHECK that
+allows up to 200%; `assignments.status` having **no CHECK constraint** while the
+capacity guard filters on `status <> 'cancelled'` — a novel or mistyped status is
+accepted and silently counts toward the cap; and the role vocabulary restated in six
+places across eight migrations with no enum.
+
+### 7. What is still open on D107
+
+**`useRootPath()` still returns the constant `"plant_1"` for every user.** 0026 does
+not touch it and cannot: the server now refuses to hand Quinn Plant 1's rows, but her
+board still *asks* for Plant 1's window. She sees an almost-empty board rather than
+someone else's — the leak is closed, the wrong-plant defect is not. It needs the root
+to come from the session and a picker when a person can see more than one, which is a
+screen, not a constant swap. Roadmap item 1(d).
+
+**And `offeredHere`/`offeredAt` still have zero call sites**, so a product is still
+offered on every cell in the company. 0026 makes that a smaller hole — you can only be
+offered what you can read — but D103's actual rule is still unbuilt.

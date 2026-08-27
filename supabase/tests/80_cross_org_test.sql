@@ -153,7 +153,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_C7;
 
-\echo 'C8: Ana's UPDATE of org-2 runs affects ZERO rows'
+\echo 'C8: an UPDATE by Ana of org-2 runs affects ZERO rows'
 SAVEPOINT sp_C8;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a2';
@@ -172,7 +172,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_C8;
 
-\echo 'C9: org-1 admin's UPDATE of org-2 runs affects ZERO rows'
+\echo 'C9: an UPDATE by the org-1 admin of org-2 runs affects ZERO rows'
 SAVEPOINT sp_C9;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
@@ -191,7 +191,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_C9;
 
-\echo 'C10: org-1 admin's DELETE of org-2 assignments affects ZERO rows'
+\echo 'C10: a DELETE by the org-1 admin of org-2 assignments affects ZERO rows'
 SAVEPOINT sp_C10;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
@@ -264,7 +264,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_C13;
 
-\echo 'C14: the shared SKU 'WX' resolves to org 1's Widget X, not Contoso's'
+\echo 'C14: the shared SKU WX resolves to Widget X in org 1, not to the Contoso row'
 SAVEPOINT sp_C14;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
@@ -282,7 +282,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_C14;
 
-\echo 'C15: the shared employee_ref EMP-001 resolves to org 1's Maria'
+\echo 'C15: the shared employee_ref EMP-001 resolves to Maria in org 1'
 SAVEPOINT sp_C15;
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';

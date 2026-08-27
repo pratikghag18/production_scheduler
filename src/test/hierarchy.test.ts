@@ -8,6 +8,11 @@ import {
   validateLevelDraft,
 } from "@/features/admin/lib/hierarchy";
 import type { LevelDraft, LevelRow, NodeRow } from "@/features/admin/lib/hierarchy";
+// ⚠️ IMPORTED ON PURPOSE, from the OTHER module. `hierarchy.ts` is
+// dependency-free by design and duplicates this number as a local constant;
+// these two cases are what stop the copies drifting, because they are the only
+// place both values meet.
+import { MAX_LEVELS } from "@/features/admin/lib/levelDraft";
 
 /**
  * Permanent guard for the P1-5b pure hierarchy layer.
@@ -480,6 +485,18 @@ describe("validateLevelDraft", () => {
     ["a blank name", [D("Plant", true), D("   ")], { ok: false, reason: "blank_name" }],
     ["exactly 64 is fine", [D("s", true), ...fill(63)], { ok: true }],
     ["65 is too many", [D("s", true), ...fill(64)], { ok: false, reason: "too_many" }],
+    // H-MAX: the same two boundaries expressed through `MAX_LEVELS` rather than
+    // through a literal. Change either copy of 64 alone and one of these fails.
+    [
+      `exactly MAX_LEVELS (${MAX_LEVELS}) is accepted`,
+      [D("s", true), ...fill(MAX_LEVELS - 1)],
+      { ok: true },
+    ],
+    [
+      `one more than MAX_LEVELS (${MAX_LEVELS + 1}) is too many`,
+      [D("s", true), ...fill(MAX_LEVELS)],
+      { ok: false, reason: "too_many" },
+    ],
     // too_many must precede schedulable_count...
     [
       "65 with zero schedulable still reports too_many",

@@ -329,15 +329,31 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q10;
 
-\echo 'Q11 ⭐⭐: READS ARE STILL ORG-WIDE. This is the tripwire on §9 item 1.'
+\echo 'Q11 ⭐⭐: READS ARE SITE-SCOPED NOW (D107/0026). This case CHANGED POLARITY — see the comment.'
 SAVEPOINT sp_Q11;
 DO $$
 DECLARE v_g1 int; v_g4 int; v_sk int; v_os int;
 BEGIN
-  -- 0023 changes who may EDIT and nothing else. If a later change narrows a
-  -- _select policy, this case goes red BEFORE `check_eligibility` starts
-  -- silently answering "not eligible" — which is the failure mode that made
-  -- leaving SELECT alone a requirement rather than a preference.
+  -- ⭐⭐ THIS CASE USED TO ASSERT THE OPPOSITE, AND IT WAS RIGHT TO. 0023 changed
+  -- who may EDIT and nothing else, and this was the tripwire on §9 item 1: it
+  -- was written to go red the moment anyone narrowed a `_select`, BEFORE
+  -- `check_eligibility` could start silently answering "not eligible".
+  --
+  -- ⚠️ IT WENT RED ON PURPOSE. Migration 0026 (D107) narrows exactly those
+  -- policies, because Pratik's own frame was always a read statement: "no
+  -- member from one plant should see info for other plants". The tripwire did
+  -- its job — it made the consequence impossible to ship by accident, and the
+  -- consequence it named is now FIXED rather than avoided: `check_eligibility`
+  -- is SECURITY DEFINER with its own gate, so its answer no longer depends on
+  -- what the caller may list. That property is asserted directly in
+  -- `53_read_scoping_test.sql` — R12 (it still names a training the caller
+  -- cannot see) and R14 (it refuses a node they cannot see). This is
+  -- verification rule 1b-ii: the cases were right and the CONTRACT changed, so
+  -- the case is rewritten to assert the same property one indirection along,
+  -- not deleted.
+  --
+  -- What it asserts now: the site admin of Plant 1 and a supervisor on Plant 1
+  -- see their own site's operator and the company-wide one, and NOT Plant 2's.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
   SET LOCAL ROLE authenticated;
   SELECT count(*) INTO v_g1 FROM operators WHERE id IN (
@@ -353,8 +369,10 @@ BEGIN
   SELECT count(*) INTO v_g4 FROM operators WHERE id IN (
     '50000000-0000-0000-0000-00000000ee01','50000000-0000-0000-0000-00000000ee02','50000000-0000-0000-0000-00000000ee03');
   RESET ROLE;
-  IF v_g1 = 3 AND v_g4 = 3 AND v_sk >= 3 AND v_os >= 1 THEN RAISE NOTICE 'PASS Q11';
-  ELSE RAISE NOTICE 'FAIL Q11: site_admin_sees=% supervisor_sees=% skills=% operator_skills=% (want 3,3,>=3,>=1)',
+  -- 2, not 3: their own site's operator plus the company-wide one. The third
+  -- is Plant 2's and is now invisible to both of them.
+  IF v_g1 = 2 AND v_g4 = 2 AND v_sk >= 3 AND v_os >= 1 THEN RAISE NOTICE 'PASS Q11';
+  ELSE RAISE NOTICE 'FAIL Q11: site_admin_sees=% supervisor_sees=% skills=% operator_skills=% (want 2,2,>=3,>=1)',
     v_g1, v_g4, v_sk, v_os; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q11;

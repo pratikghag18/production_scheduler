@@ -278,7 +278,15 @@ export function validateLevelDraft(draft: LevelDraft[]): ValidateLevelDraftResul
   if (draft.length === 0) {
     return { ok: false, reason: "empty" };
   }
-  if (draft.length > 64) {
+  // ⚠️ THE TWIN OF `MAX_LEVELS` IN `levelDraft.ts`, AND IT CANNOT IMPORT IT —
+  // this module is deliberately dependency-free (see the header), so the value
+  // is duplicated ON PURPOSE and the duplication is what needs guarding, not
+  // the value. `hierarchy.test.ts`'s H-MAX case binds the two BEHAVIOURALLY:
+  // it builds a draft of exactly `MAX_LEVELS` (imported from `levelDraft.ts`)
+  // and asserts this function accepts it, and one more and asserts it does
+  // not. Change either number alone and that case goes red.
+  const MAX_LEVELS_TWIN = 64;
+  if (draft.length > MAX_LEVELS_TWIN) {
     return { ok: false, reason: "too_many" };
   }
   const schedulableCount = draft.filter((d) => d?.isSchedulable === true).length;

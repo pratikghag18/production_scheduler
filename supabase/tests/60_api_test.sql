@@ -743,7 +743,20 @@ BEGIN
   SELECT COALESCE(array_agg(p.proname ORDER BY p.proname), ARRAY[]::text[]) INTO v_bad
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname = 'public'
-    AND p.proname IN ('board_window','capacity_probe','check_eligibility','create_run',
+    -- ⚠️ `check_eligibility` LEFT THIS LIST IN 0026 (D107), and loosening a
+    -- guard is exactly the mutation shape that makes a check less demanding
+    -- rather than wrong — so it is not simply removed. It became SECURITY
+    -- DEFINER because as an INVOKER it answered from what the CALLER could
+    -- LIST rather than from what is true: measured on a seeded database, the
+    -- same cell and the same person got `eligible=false` from a company admin
+    -- and `eligible=true` from a supervisor whose grant sat below the node
+    -- carrying the requirement. A safety check that failed open.
+    -- The property this exemption costs is asserted directly instead, in
+    -- `53_read_scoping_test.sql`: R14 pins that it REFUSES (PT403) a node the
+    -- caller cannot read, which is what INVOKER was buying here. The other
+    -- eight stay INVOKER and stay asserted; they all WRITE, and RLS must
+    -- govern those writes.
+    AND p.proname IN ('board_window','capacity_probe','create_run',
                        'create_assignment','move_run','apply_split_coverage','delete_run',
                        'operator_peak_load')
     AND p.prosecdef = true;

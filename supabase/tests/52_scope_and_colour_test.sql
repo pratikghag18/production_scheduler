@@ -528,6 +528,13 @@ BEGIN
   SET LOCAL ROLE authenticated;
   v_w := board_window('plant_1', now() - interval '1 day', now() + interval '1 day');
   RESET ROLE;
+  -- ⚠️ THIS CASE ASKS AS THE COMPANY ADMIN (a1), so after 0026 it can only
+  -- catch a filter added INSIDE `board_window` — it cannot catch one added in
+  -- the POLICIES, because a company admin passes those. That half is measured
+  -- in `53_read_scoping_test.sql` R9/R10/R11, which ask as a site admin whose
+  -- plant does not own the product but whose board carries it. Both halves are
+  -- needed and neither subsumes the other; this comment exists so the next
+  -- person does not read a green S18 as covering more than it does.
   -- ⭐⭐ THE CASE THAT STOPS THE OBVIOUS "IMPROVEMENT". Someone will eventually
   -- read D103 and move the filter into this function. If they do, a run that
   -- legitimately carried a product before it was re-scoped renders with no
