@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
+import {
+  describeSchedulerError,
+  isSchedulerError,
+  requireWritten,
+  toSchedulerError,
+} from "@/lib/api";
 import type { SchedulerError } from "@/lib/api";
 import * as fixtures from "./fixtures/postgrest-errors";
 
@@ -75,8 +80,40 @@ describe("toSchedulerError", () => {
     expect(err.kind).toBe("Unknown");
   });
 
-  it("falls through to Unknown when details is not JSON", () => {
+  /*
+   * ⚠️ THIS CASE CHANGED ITS ANSWER IN §19.63, AND IT IS THE SECOND KIND, NOT
+   * THE FIRST (verification-standard rule 1b-ii): the case was right and the
+   * CONTRACT changed. `nonJsonDetails` is a real foreign-key violation —
+   * deleting a run that assignments still reference — and it fell through to
+   * `Unknown` only because nothing yet had an answer for 23503. It has one now.
+   *
+   * The coverage the old case was legitimately providing — "a non-JSON
+   * `details` must not crash the parse path" — is rescued by the case below it,
+   * which uses an error with no recognised code so the parse path is actually
+   * reached.
+   */
+  it("reports a foreign-key violation as StillInUse, naming the referencing table", () => {
     const err = toSchedulerError(fixtures.nonJsonDetails);
+    expect(err.kind).toBe("StillInUse");
+    if (err.kind !== "StillInUse") throw new Error("unreachable");
+    expect(err.usedBy).toBe("assignments");
+  });
+
+  it("and reports no constraint when the message does not name one", () => {
+    // This fixture's message stops at `violates foreign key constraint` with no
+    // quoted name. The extractor must return undefined, not the table name it
+    // could have scraped from earlier in the sentence.
+    const err = toSchedulerError(fixtures.nonJsonDetails);
+    if (err.kind !== "StillInUse") throw new Error("unreachable");
+    expect(err.constraint).toBe(undefined);
+  });
+
+  it("falls through to Unknown when details is not JSON", () => {
+    const err = toSchedulerError({
+      message: "something went sideways",
+      details: "not json at all",
+      code: "XX000",
+    });
     expect(err.kind).toBe("Unknown");
   });
 
@@ -222,5 +259,146 @@ describe("describeSchedulerError — the six hierarchy codes (D74)", () => {
     const msg = describeSchedulerError({ kind: "SchedulableLevelLocked" } as SchedulerError);
     expect(msg).toContain("scheduled work");
     expect(msg).not.toContain("undefined");
+  });
+});
+
+/* ---------------------------------------------------------------------------
+   Group W (§19.63) — WHAT A TABLE WRITE FAILS WITH.
+
+   Everything above this block describes a refusal raised by `api_raise` with a
+   machine code in DETAIL. The three queued admin sections have no RPCs at all,
+   so they write their tables directly and fail with a bare SQLSTATE. Three
+   independent surveys found the same four wrong answers, and these cases are
+   what stops them coming back.
+
+   Every fixture used here was measured against the real schema; none was
+   composed by hand. See the header of `fixtures/postgrest-errors.ts`.
+   --------------------------------------------------------------------------- */
+describe("toSchedulerError — table writes (§19.63)", () => {
+  it("W1: a row refused by a policy is WriteRefused, not Unauthenticated", () => {
+    // The user is signed in. Telling them to sign in is how someone ends up
+    // signing out and back in to fix a permission they do not have.
+    expect(toSchedulerError(fixtures.rlsInsertRefused).kind).toBe("WriteRefused");
+  });
+
+  it("W2: the SAME SQLSTATE on a revoked function is still Unauthenticated", () => {
+    // 42501 means two things. If this case and W1 ever agree, the split is gone.
+    expect(toSchedulerError(fixtures.functionGrantRefused).kind).toBe("Unauthenticated");
+  });
+
+  it("W3: a duplicate key is DuplicateValue and names the constraint", () => {
+    const err = toSchedulerError(fixtures.duplicateSku);
+    expect(err.kind).toBe("DuplicateValue");
+    if (err.kind !== "DuplicateValue") throw new Error("unreachable");
+    expect(err.constraint).toBe("products_org_id_sku_key");
+  });
+
+  it("W4: a foreign-key violation is StillInUse and names what is using it", () => {
+    const err = toSchedulerError(fixtures.productStillReferenced);
+    expect(err.kind).toBe("StillInUse");
+    if (err.kind !== "StillInUse") throw new Error("unreachable");
+    expect(err.usedBy).toBe("runs");
+  });
+
+  it("W5: and it names the CONSTRAINT, not the table quoted before it", () => {
+    // The message is `update or delete on table "products" violates foreign key
+    // constraint "runs_..."`. Taking the first quoted string returns "products",
+    // which looks exactly like a correct answer.
+    const err = toSchedulerError(fixtures.productStillReferenced);
+    if (err.kind !== "StillInUse") throw new Error("unreachable");
+    expect(err.constraint).toBe("runs_org_id_product_id_fkey");
+  });
+
+  it("W6: a foreign-key violation with no detail line still reports StillInUse", () => {
+    const err = toSchedulerError({ ...fixtures.productStillReferenced, details: "" });
+    expect(err.kind).toBe("StillInUse");
+    if (err.kind !== "StillInUse") throw new Error("unreachable");
+    expect(err.usedBy).toBe(undefined);
+  });
+
+  it("W7: a CHECK violation is InvalidValue", () => {
+    const err = toSchedulerError(fixtures.badColourToken);
+    expect(err.kind).toBe("InvalidValue");
+    if (err.kind !== "InvalidValue") throw new Error("unreachable");
+    expect(err.constraint).toBe("products_color_token_shape");
+  });
+
+  it("W8: 23P01 naming the SHIFTS constraint is ShiftOverlap", () => {
+    expect(toSchedulerError(fixtures.shiftsOverlap).kind).toBe("ShiftOverlap");
+  });
+
+  it("W9: 23P01 naming the RUNS constraint is still RaceLost", () => {
+    // The existing behaviour, unchanged — `useMoveRun` retries on it.
+    expect(toSchedulerError(fixtures.bareExclusionViolation).kind).toBe("RaceLost");
+  });
+
+  it("W10: 23P01 naming an unknown constraint falls back to RaceLost", () => {
+    // A retry is the safe default for an exclusion constraint nobody has
+    // classified yet, so the fallback deliberately is not the new kind.
+    const err = toSchedulerError({
+      message: 'conflicting key value violates exclusion constraint "something_new"',
+      code: "23P01",
+    });
+    expect(err.kind).toBe("RaceLost");
+  });
+
+  it("W11: requireWritten throws WriteRefused when a write matched nothing", () => {
+    // A policy's USING clause filters instead of raising, so a refused UPDATE
+    // is a success that changed nothing.
+    let caught: unknown;
+    try {
+      requireWritten([]);
+    } catch (e) {
+      caught = e;
+    }
+    expect(isSchedulerError(caught)).toBe(true);
+    expect((caught as SchedulerError).kind).toBe("WriteRefused");
+  });
+
+  it("W12: requireWritten treats a null payload the same way", () => {
+    let caught: unknown;
+    try {
+      requireWritten(null);
+    } catch (e) {
+      caught = e;
+    }
+    expect((caught as SchedulerError).kind).toBe("WriteRefused");
+  });
+
+  it("W13: requireWritten returns the rows when the write landed", () => {
+    const rows = [{ id: "a" }];
+    expect(requireWritten(rows)).toEqual(rows);
+  });
+
+  it("W14: every new kind has its own sentence, and none leaks its discriminant", () => {
+    const kinds: SchedulerError[] = [
+      { kind: "WriteRefused" },
+      { kind: "DuplicateValue" },
+      { kind: "StillInUse" },
+      { kind: "InvalidValue" },
+      { kind: "ShiftOverlap" },
+    ];
+    const msgs = kinds.map(describeSchedulerError);
+    expect(new Set(msgs).size).toBe(kinds.length);
+    for (let i = 0; i < kinds.length; i++) {
+      expect(msgs[i].length).toBeGreaterThan(10);
+      expect(msgs[i]).not.toContain(kinds[i].kind);
+    }
+  });
+
+  it("W15: StillInUse names the table in its sentence when it knows one", () => {
+    expect(describeSchedulerError({ kind: "StillInUse", usedBy: "runs" })).toContain("runs");
+  });
+
+  it("W16: isSchedulerError recognises all five new kinds", () => {
+    for (const kind of [
+      "WriteRefused",
+      "DuplicateValue",
+      "StillInUse",
+      "InvalidValue",
+      "ShiftOverlap",
+    ]) {
+      expect(isSchedulerError({ kind })).toBe(true);
+    }
   });
 });

@@ -147,3 +147,59 @@ export const permissionDenied401 = {
 export const plainError = new Error("network request failed");
 
 export const nullError = null;
+
+/* ---------------------------------------------------------------------------
+   §19.63 — TABLE-WRITE FAILURES. Every message below was MEASURED on a scratch
+   PG16 carrying migrations 0001-0024, by making the real statement fail as
+   `authenticated`, not composed from memory. The exact wording is load-bearing
+   in two places: `constraintOf` anchors on the word `constraint`, and the
+   42501 split reads `row-level security`.
+   --------------------------------------------------------------------------- */
+
+/** A policy refused the row. The user IS signed in. */
+export const rlsInsertRefused = {
+  message: 'new row violates row-level security policy for table "products"',
+  details: "",
+  hint: null,
+  code: "42501",
+};
+
+/** Same SQLSTATE, entirely different meaning: the role may not call the function. */
+export const functionGrantRefused = {
+  message: "permission denied for function app_product_palette",
+  details: "",
+  hint: null,
+  code: "42501",
+};
+
+export const duplicateSku = {
+  message: 'duplicate key value violates unique constraint "products_org_id_sku_key"',
+  details: "",
+  hint: null,
+  code: "23505",
+};
+
+/** ⚠️ Quotes the TABLE before it names the constraint — the reason the extractor
+ *  anchors on the word `constraint` rather than taking the first quoted string. */
+export const productStillReferenced = {
+  message:
+    'update or delete on table "products" violates foreign key constraint "runs_org_id_product_id_fkey" on table "runs"',
+  details: 'Key is still referenced from table "runs".',
+  hint: null,
+  code: "23503",
+};
+
+export const badColourToken = {
+  message: 'new row for relation "products" violates check constraint "products_color_token_shape"',
+  details: "",
+  hint: null,
+  code: "23514",
+};
+
+/** The OTHER exclusion constraint — same SQLSTATE as a lost race. */
+export const shiftsOverlap = {
+  message: 'conflicting key value violates exclusion constraint "shifts_no_overlap_within_template"',
+  details: "Key conflicts with existing key.",
+  hint: null,
+  code: "23P01",
+};

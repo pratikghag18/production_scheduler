@@ -162,6 +162,50 @@ export type SchedulerError =
    * should refetch and retry once (see useMoveRun).
    */
   | { kind: "RaceLost" }
+  /*
+   * ⭐ §19.63 — THE FIVE BELOW EXIST BECAUSE NOT EVERY WRITE IS AN RPC.
+   *
+   * Everything above this line describes a refusal raised by `api_raise`
+   * inside a function, with a machine code in DETAIL. The admin sections for
+   * shifts, operators and products have NO RPCs at all (three independent
+   * surveys, Aug 27) — they write their tables directly and RLS is the only
+   * gate. A table write therefore fails with a bare Postgres SQLSTATE and no
+   * DETAIL, and before these kinds existed every one of them landed in
+   * `Unknown` or, worse, in a branch meant for something else.
+   *
+   * Every message text below was MEASURED on a scratch PG16 with the real
+   * schema, not guessed — see the case list in `errors.test.ts` group W.
+   */
+  /**
+   * SQLSTATE 42501 whose message names row-level security: the row was
+   * refused by a policy, and the user IS signed in.
+   *
+   * ⚠️ Also raised by hand for a write that matched NO rows — see
+   * `requireWritten`. A policy's `USING` clause FILTERS rather than raising,
+   * so a refused UPDATE or DELETE succeeds with zero rows and no error at all.
+   */
+  | { kind: "WriteRefused" }
+  /** SQLSTATE 23505. `constraint` is the constraint name, when the message carries one. */
+  | { kind: "DuplicateValue"; constraint?: string }
+  /**
+   * SQLSTATE 23503 — something still references the row being deleted.
+   * `usedBy` is the referencing TABLE, lifted from the detail line, so a
+   * caller can say what is in the way instead of only that something is.
+   */
+  | { kind: "StillInUse"; constraint?: string; usedBy?: string }
+  /** SQLSTATE 23514 — a CHECK constraint refused the value. */
+  | { kind: "InvalidValue"; constraint?: string }
+  /**
+   * SQLSTATE 23P01 naming `shifts_no_overlap_within_template`.
+   *
+   * ⚠️ THE SAME SQLSTATE AS `RaceLost`, WHICH IS WHY THE CONSTRAINT NAME IS
+   * READ. Two exclusion constraints exist — `runs_no_overlap_on_node` (0003)
+   * and this one (0005) — and the run one was the only one that could fire
+   * when the mapping was written. A shifts editor makes that false, and
+   * "someone else changed this run first" is a nonsense answer to two
+   * overlapping shifts.
+   */
+  | { kind: "ShiftOverlap" }
   /** PostgREST 401 / Postgres permission-denied (SQLSTATE 42501) on a function. */
   | { kind: "Unauthenticated" }
   /** Everything else. Carries the original error verbatim. */
@@ -181,6 +225,11 @@ const SCHEDULER_ERROR_KINDS: ReadonlySet<SchedulerError["kind"]> = new Set([
   "NodeInUse",
   "SchedulableLevelLocked",
   "RaceLost",
+  "WriteRefused",
+  "DuplicateValue",
+  "StillInUse",
+  "InvalidValue",
+  "ShiftOverlap",
   "Unauthenticated",
   "Unknown",
 ]);
@@ -408,6 +457,59 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
  * so that even a future edit that adds a throwing branch by mistake still
  * cannot turn a handled failure into a crash.
  */
+/**
+ * The one exclusion constraint that is NOT a lost race (0005:38-39).
+ *
+ * ⚠️ THIS IS A DATABASE NAME MIRRORED INTO THE CLIENT. Renaming the constraint
+ * without changing this string turns two overlapping shifts back into "someone
+ * else changed this run first". `30_shifts_test.sql` asserts the name exists in
+ * `pg_constraint` for exactly that reason.
+ */
+const SHIFT_OVERLAP_CONSTRAINT = "shifts_no_overlap_within_template";
+
+/**
+ * Postgres names the offending constraint in the message text of 23505 / 23503
+ * / 23514 / 23P01. MEASURED on the real schema rather than assumed:
+ *   duplicate key value violates unique constraint "products_org_id_sku_key"
+ *   new row for relation "products" violates check constraint "products_color_token_shape"
+ *   update or delete on table "products" violates foreign key constraint "runs_org_id_product_id_fkey" on table "runs"
+ *   conflicting key value violates exclusion constraint "shifts_no_overlap_within_template"
+ *
+ * The anchor is the WORD `constraint`, not the first quoted string: the foreign
+ * key message quotes the table before it names the constraint, so a bare
+ * `/"([^"]+)"/` returns "products" and reads as a plausible answer.
+ */
+function constraintOf(err: Record<string, unknown>): string | undefined {
+  const text = [err.message, err.details].filter((v) => typeof v === "string").join(" ");
+  const m = /constraint "([^"]+)"/.exec(text);
+  return m === null ? undefined : m[1];
+}
+
+/** `Key is still referenced from table "runs".` — the detail line of a 23503. */
+function referencedTable(err: Record<string, unknown>): string | undefined {
+  const text = typeof err.details === "string" ? err.details : "";
+  const m = /referenced from table "([^"]+)"/.exec(text);
+  return m === null ? undefined : m[1];
+}
+
+/**
+ * Throw when a table write matched nothing.
+ *
+ * ⭐ THE SILENT HALF OF RLS, AND THE REASON THIS EXISTS. A policy's `WITH
+ * CHECK` clause RAISES 42501; its `USING` clause merely FILTERS. So a refused
+ * INSERT is an error and a refused UPDATE or DELETE is a success that changed
+ * nothing — measured, `51_shared_list_owners_test.sql:251`. Every table write
+ * in `src/lib/api/` therefore ends `.select()` and passes the returned rows
+ * through here, so "you may not touch that row" cannot arrive as "saved".
+ */
+export function requireWritten<T>(rows: readonly T[] | null): readonly T[] {
+  if (rows === null || rows.length === 0) {
+    const refused: SchedulerError = { kind: "WriteRefused" };
+    throw refused;
+  }
+  return rows;
+}
+
 export function toSchedulerError(err: unknown): SchedulerError {
   try {
     if (err === null || err === undefined) {
@@ -424,7 +526,25 @@ export function toSchedulerError(err: unknown): SchedulerError {
     // a coincidental JSON `details` string on some other 23P01-coded error
     // can never mask it.
     if (code === "23P01") {
-      return { kind: "RaceLost" };
+      // Two exclusion constraints can raise this. The RUN one keeps the
+      // existing meaning exactly — including for any future third constraint,
+      // because a retry is the safe default and this branch has driven
+      // `useMoveRun`'s retry since P1-4.
+      return constraintOf(err) === SHIFT_OVERLAP_CONSTRAINT
+        ? { kind: "ShiftOverlap" }
+        : { kind: "RaceLost" };
+    }
+
+    // The three bare integrity violations a table write can produce. None of
+    // them goes through `api_raise`, so none carries a machine code in DETAIL.
+    if (code === "23505") {
+      return { kind: "DuplicateValue", constraint: constraintOf(err) };
+    }
+    if (code === "23503") {
+      return { kind: "StillInUse", constraint: constraintOf(err), usedBy: referencedTable(err) };
+    }
+    if (code === "23514") {
+      return { kind: "InvalidValue", constraint: constraintOf(err) };
     }
 
     // Permission denied: Postgres SQLSTATE 42501 (insufficient_privilege)
@@ -434,6 +554,22 @@ export function toSchedulerError(err: unknown): SchedulerError {
     // response (which does carry `status`) instead of just its `error`.
     const status = typeof err.status === "number" ? err.status : undefined;
     if (code === "42501" || status === 401) {
+      // ⭐ 42501 MEANS TWO DIFFERENT THINGS AND ONLY THE MESSAGE SEPARATES
+      // THEM. Both measured on the real schema:
+      //   RLS   new row violates row-level security policy for table "products"
+      //   GRANT permission denied for function app_product_palette
+      // The first is a signed-in user touching a row that is not theirs; the
+      // second is a role that may not call the function at all. Telling the
+      // first "You need to sign in to do that" is how a site admin ends up
+      // signing out and back in to fix a permission they do not have.
+      //
+      // The marker is English message text (`lc_messages` is the default on
+      // Supabase and in the scratch harness). If it ever stops matching, this
+      // falls back to the OLD behaviour rather than to nothing.
+      const message = typeof err.message === "string" ? err.message : "";
+      if (message.includes("row-level security")) {
+        return { kind: "WriteRefused" };
+      }
       return { kind: "Unauthenticated" };
     }
 
@@ -561,6 +697,18 @@ export function describeSchedulerError(e: SchedulerError): string {
     }
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";
+    case "WriteRefused":
+      return "You don't have permission to change that.";
+    case "DuplicateValue":
+      return "Something here already uses that name or code.";
+    case "StillInUse":
+      return e.usedBy === undefined
+        ? "Something else still uses this, so it can't be deleted."
+        : `It's still used by ${e.usedBy}, so it can't be deleted.`;
+    case "InvalidValue":
+      return "That value isn't allowed here.";
+    case "ShiftOverlap":
+      return "That shift overlaps another one in the same pattern.";
     case "Unauthenticated":
       return "You need to sign in to do that.";
     case "Unknown":

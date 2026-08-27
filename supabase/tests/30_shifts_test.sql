@@ -167,5 +167,37 @@ BEGIN
   END IF;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- §19.63 — THE CONSTRAINT NAME IS MIRRORED INTO THE CLIENT, SO IT IS PINNED.
+--
+-- `src/lib/api/errors.ts` reads the constraint name out of a 23P01 message to
+-- tell two overlapping shifts apart from a lost race on `runs` -- both raise
+-- the SAME SQLSTATE. That makes this identifier a contract, not an
+-- implementation detail: rename it here without touching the client and
+-- overlapping shifts silently start reporting "someone else changed this run
+-- first".
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_count int;
+BEGIN
+  SELECT count(*) INTO v_count FROM pg_constraint
+   WHERE conname = 'shifts_no_overlap_within_template'
+     AND conrelid = 'public.shifts'::regclass
+     AND contype = 'x';
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'FAIL: exclusion constraint shifts_no_overlap_within_template not found on shifts (found %)', v_count;
+  END IF;
+
+  -- And the run one still exists under its own name, because the client falls
+  -- back to "lost race" for every OTHER exclusion constraint.
+  SELECT count(*) INTO v_count FROM pg_constraint
+   WHERE conname = 'runs_no_overlap_on_node'
+     AND conrelid = 'public.runs'::regclass
+     AND contype = 'x';
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'FAIL: exclusion constraint runs_no_overlap_on_node not found on runs (found %)', v_count;
+  END IF;
+END $$;
+
 \echo '30_shifts_test.sql: all cases passed'
 ROLLBACK;

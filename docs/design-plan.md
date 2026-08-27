@@ -5936,3 +5936,84 @@ and its stylesheet, fills in its `src/lib/api` module, and flips one boolean in
 its own panel file. It appends to `docs/roadmap.md` and `docs/design-plan.md` —
 **the one shared surface that cannot be pre-seated**, which is why lanes hand
 their prose back rather than writing it, and the design session integrates.
+
+---
+
+### 19.63 What a table write fails with — the contract the three lanes all needed (Aug 27, 2026)
+
+Three read-only surveys ran concurrently over Shifts, Operators and Products.
+They agreed on the finding that mattered most, and none of them was looking for
+it: **none of these three sections has a single RPC.** Every write is a plain
+PostgREST table write, governed entirely by 0023's policies.
+
+That is fine — `docs/api.md` §4 already sanctions it, and `mutations.ts` has done
+it since P1-4. What was not fine is that **the client's error layer was written
+when every write was an RPC**, so a table write fails in ways it had no words
+for. All three lanes would have papered over the same four holes, three
+different ways. Spending it once, here, is the same move as the pre-seat.
+
+#### 1. The four wrong answers, all measured on a scratch PG16
+
+| what the user did | what Postgres said | what the app said |
+|---|---|---|
+| site admin creates a company-wide product | `42501 new row violates row-level security policy for table "products"` | **"You need to sign in to do that."** |
+| site admin edits a row they do not own | *nothing* — `USING` filters, so zero rows and no error | **"Saved."** |
+| duplicate SKU / skill name / pattern name | `23505 … unique constraint "products_org_id_sku_key"` | "Something went wrong." |
+| delete a product with runs against it | `23503 … foreign key constraint "runs_org_id_product_id_fkey"` | "Something went wrong." |
+| two overlapping shifts in one pattern | `23P01 … exclusion constraint "shifts_no_overlap_within_template"` | **"Someone else changed this run first."** |
+
+The last one is the sharpest. `23P01` was mapped unconditionally to `RaceLost`
+because, when that mapping was written, `runs_no_overlap_on_node` was the only
+exclusion constraint that could fire. A shifts editor makes that false.
+
+#### 2. Five kinds, and the two that needed a discriminator
+
+`WriteRefused`, `DuplicateValue`, `StillInUse`, `InvalidValue`, `ShiftOverlap`.
+Nothing here touches the twelve-code contract — these are bare SQLSTATEs that
+never went through `api_raise` at all.
+
+**`42501` means two different things and only the message separates them**, both
+measured: `new row violates row-level security policy for table "products"`
+(a signed-in user touching a row that is not theirs) versus `permission denied
+for function app_product_palette` (a role that may not call the function). The
+first is now `WriteRefused`; the second stays `Unauthenticated`, so the existing
+case for it is unchanged. **Telling the first "you need to sign in" is how a site
+admin ends up signing out and back in to fix a permission they do not have.**
+
+**`23P01` likewise**, by constraint name — and the fallback deliberately stays
+`RaceLost`, because a retry is the safe default for an exclusion constraint
+nobody has classified yet.
+
+⚠️ **The constraint name is a database identifier mirrored into the client**, so
+`30_shifts_test.sql` now asserts both names exist in `pg_constraint`. Renaming
+one without touching the other is exactly the drift [[doc_drift]] rule 3 records.
+
+#### 3. `requireWritten` — the silent half
+
+A policy's `WITH CHECK` **raises**; its `USING` clause **filters**. So a refused
+INSERT is an error and a refused UPDATE or DELETE is a success that changed
+nothing — measured in `51_shared_list_owners_test.sql:251`. Every table write in
+`src/lib/api/` now ends `.select()` and passes the rows through
+`requireWritten`, which throws `WriteRefused` on an empty result. Without it,
+"you may not touch that row" arrives as "saved" and the screen redraws unchanged.
+
+#### 4. Verification
+
+**18 new cases** (group W plus two rewritten), **11 mutations, all 11 caught.**
+Every fixture is a message string measured by making the real statement fail as
+`authenticated` against migrations 0001–0024 — none was composed from memory.
+
+**⚠️ And one existing case changed its answer, which is rule 1b-ii, not 1b.**
+`falls through to Unknown when details is not JSON` used a fixture that is a real
+foreign-key violation; it fell through to `Unknown` only because nothing had an
+answer for `23503` yet. **The case was right and the contract changed.** It now
+asserts `StillInUse`, and the coverage it was legitimately providing — a
+non-JSON `details` must not crash the parse path — is rescued by a new case
+using an error with no recognised code, so the parse path is actually reached.
+
+**The extractor anchors on the word `constraint`, not on the first quoted
+string.** The foreign-key message quotes the TABLE before it names the
+constraint, so `/"([^"]+)"/` returns `products` — a plausible-looking wrong
+answer. W5 is the case that fails when someone simplifies it.
+
+**Acceptance 757 → 775 in 20 files. No migration** — 0024 remains the last one.
