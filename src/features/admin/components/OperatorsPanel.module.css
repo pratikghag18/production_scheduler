@@ -1,0 +1,9 @@
+/* Operators — pre-seated (§19.62). One rule, so the file is real and the lane
+   that fills it never has to touch `REM_SURFACES` or R10's copy of it.
+   This is a SEED, not a shared surface: anything that ends up being shared
+   between panels belongs in one file both compose from (D100), not copied. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}

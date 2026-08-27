@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-27, session 7 (**P1-5k'S CLIENT HALF IS BUILT — AND BUILDING IT FOUND TWO THINGS THE SERVER HAD BEEN SAYING WRONG SINCE 0017.** A promote or demote into a parent that already has that name raised a **raw `23505` with an empty DETAIL** — outside the twelve-code contract, and §19.33 §4 had measured it and written down "catch and re-raise `path_collision`" a day before 0017 shipped without it. And the stranded-work refusal — *the whole point of the feature* — carried `{reason, count}` where the client parser accepts only `{blocking_rows, level_id}`, so it decoded as `Unknown` and would have rendered as "Something went wrong." **Migration 0024** fixes both; it introduces no thirteenth code and no rule that was not already on paper. `verify-db.sh` exit 0, **24 migrations, 332 named cases** (315 before), 17 new; **11 mutations, 7 caught, 4 executed-and-inert with the fact each depends on pinned by a case.** Client: `relevel.ts` (**36 cases, 15 mutations, all caught**), two RPC wrappers, two hooks, and the `⋮` menu's two new entries — which **name the destination rung in the org's own words** ("Make this a Department") rather than saying "promote". ⚠️ **NEEDS `npm run db:reset`** (not `db:types` — 0024 adds no signature). Acceptance moves **713 → 751 in 20 files**. See §19.61.)
+**Last updated:** 2026-08-27, session 8 (**THE PRE-SEAT COMMIT — §19.57's four collisions spent once, so the section lanes are now genuinely disjoint.** Every shared file the four queued admin sections would have edited is edited HERE, once: `AdminPage.tsx` (four imports, four `SECTIONS` entries, four JSX branches), `src/lib/api/index.ts`, `REM_SURFACES` and R10's copy of it. Four panel components + stylesheets and four `src/lib/api` modules created, owned by nobody but their lane. ⭐ **THE SWITCH MOVED INTO THE PANEL**: `SECTIONS` reads `SHIFTS_PANEL_READY` and friends from each panel's own file, so a lane turns its section on by editing ITS file — and **a section cannot be switched on without a panel behind it, because the switch is part of the panel.** ⭐ **And the other direction is audited**: group H (6 cases, 6 mutations, all caught) parses `SECTIONS` and requires a rendering branch for every id, because two lists that must agree referred to each other nowhere. **Nothing changes on screen** — all four flags are `false`, so the rail buttons stay disabled with their `soon` chips. Acceptance **751 → 757 in 20 files**; no migration, no `db:reset`. See §19.62.)
 
 ---
 
@@ -97,14 +97,12 @@
 >
 > **STATE.** **Verify the tip from `.git/refs/heads/Development`, never from this paragraph** — it said
 > `fc3367b` once and was already two commits stale the next time it was read. P1-6e is committed as
-> `261ad5d`, D100 as `74bd689` and **migration 0023 as `0cbe023`; migration 0024 + P1-5k's client
-> half follow those.**
-> **24 migrations. 332 database checks** (271 two sessions ago). **Acceptance is 751 tests in 20 files**
-> — 713 plus 36 in group K of the new `relevel.test.ts` and 2 in `errors.test.ts`. If your count
-> differs, a test file did not load, which is how a broken suite once looked green. ⚠️ **`npm run
-> db:reset` is owed**: 0024 replaces `app_relevel_subtree` and is applied nowhere. **`db:types` is NOT
-> owed for it** — 0024 adds no signature, and `database.types.ts` was regenerated for 0023 on Aug 27
-> (it carries `color_token` and `app_profile_is_company_admin`).
+> `261ad5d`, D100 as `74bd689`, migration 0023 as `0cbe023` and **0024 + P1-5k's client half as
+> `d37569c`** (which ran green at exactly the predicted 751). **The pre-seat commit follows those.**
+> **24 migrations. 332 database checks. Acceptance is 757 tests in 20 files** — 751 plus the 6 in
+> group H of `scaleAudit.test.ts`. If your count differs, a test file did not load, which is how a
+> broken suite once looked green. **No `db:reset` and no `db:types` are owed** — the pre-seat carries
+> no migration and adds no RPC.
 >
 > **HOW WE WORK — these are not preferences, each one was bought with a defect:**
 >
@@ -137,29 +135,22 @@
 > - **Explain in plain language in the chat, not jargon — draw it if that is clearer.** Keep the
 >   gameplan artifact updated; do not stop until you need me to do something or want my opinion.
 >
-> **NEXT, IN ORDER (Aug 27 session 7 — 0023 and 0024 are built, so the four SOON sections are
-> unblocked and P1-5k is closed end to end):**
+> **NEXT, IN ORDER (Aug 27 session 8 — the pre-seat is committed, so the lanes can start):**
 >
-> 1. **The pre-seat commit — one small commit that edits every SHARED file exactly once (§19.57).**
->    All four sections turned on in `AdminPage.tsx`'s `SECTIONS` with empty placeholder panels; four
->    empty stylesheets listed in `REM_SURFACES` **and** in R10's hardcoded copy of that list; four
->    empty `src/lib/api/*.ts` modules exported from `index.ts`. **This is what makes parallel lanes
->    possible at all** — measured, not assumed: four concurrent read-only surveys returned a SHARED
->    column naming these same files, and without the pre-seat every lane would edit them and collide.
->    **Every new drag-capable surface `composes:` from `dragSurface.module.css` (D100)** rather than
->    starting a sixth copy — the drag audit (group G) fails the suite if it does not.
-> 2. **Shifts / Operators / Products — three build lanes, genuinely in parallel, after 1.** No
+> 1. **Shifts / Operators / Products — three build lanes, genuinely in parallel. THE PRE-SEAT IS
+>    DONE (§19.62), so this is unblocked.** No
 >    decisions outstanding: 0023 gave each list an owner (`site_node_id`, NULL = company-wide) and
->    gave products a palette token, so each lane owns only files it creates. **Two waves per lane:
->    survey (read-only) → build → adversarial review by a different agent** — the reviewer found the
+>    gave products a palette token, and §19.62 pre-seated every shared file, so each lane owns only
+>    files it creates. **Three waves per lane: survey (read-only) → build → adversarial review by a
+>    different agent** — the reviewer found the
 >    cross-tenant leak in 0023's colour picker that reading had not, so the review wave is not
 >    optional. Never trust a lane's report of its own work; run the whole suite yourself after each.
-> 3. **P1-5h CSV import — NOT a fourth parallel lane yet. ⚠️ TWO missing premises.** `nodes` has no
+> 2. **P1-5h CSV import — NOT a fourth parallel lane yet. ⚠️ TWO missing premises.** `nodes` has no
 >    `external_id` column, and `products.external_id` exists with **no unique constraint**, so neither
 >    half can upsert. Also: `create_node` has cloned the hierarchy shape on every root create since
 >    0020, so a multi-site import would silently multiply `hierarchy_templates`, and `docs/api.md`
 >    §3.5 still documents the pre-0020 behaviour. A small migration has to land first.
-> 4. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
+> 3. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
 >    `import.meta.env.DEV`-gated switcher, so **until it lands Pratik is the only person who can log
 >    in** and nothing built in stages 05–11 is reachable by anyone else. The sign-in page is small and
 >    browser-only; invitations need a privileged server-side piece this project does not have.
@@ -203,7 +194,7 @@ That is all it needs. Project memory carries every decision, the workflow, the e
 | App scaffold | repo root (`src/`, `supabase/`, `.github/`) | v1 (code complete, build/CI unvalidated) |
 | Folder conventions | `docs/conventions.md` | v1 |
 | Schema reference | `docs/schema.md` | regenerated by `scripts/verify-db.sh` on every run — **current as of migration 0023 (Aug 27)**: `site_node_id` on `operators`/`products`/`skills`/`shift_templates` and `products.color_token` now show in their `\d+` |
-| DB migrations, seed, SQL tests | `supabase/migrations/` (**24**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**18 numbered + 3 upgrade**, **332 named cases**, `verify-db.sh` exit 0) · `src/test/` (**20 test files, 751 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27); migration `20260827000024_relevel_contract.sql` + `76_relevel_contract_test.sql` (**17 cases**) + `mutations/0024.json` (**11 mutations, 7 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
+| DB migrations, seed, SQL tests | `supabase/migrations/` (**24**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**18 numbered + 3 upgrade**, **332 named cases**, `verify-db.sh` exit 0) · `src/test/` (**20 test files, 757 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27); migration `20260827000024_relevel_contract.sql` + `76_relevel_contract_test.sql` (**17 cases**) + `mutations/0024.json` (**11 mutations, 7 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
 | Database API contract | `docs/api.md` | v1 (P1-3a, Aug 22) — DB half only; HTTP-status mapping unverified (no Docker/PostgREST here); §3.5 (five hierarchy-admin RPCs) and six new error codes added (P1-5a, Aug 25) |
 | Generated DB types | `src/lib/database.types.ts` | **regenerated from the live local DB Aug 25 — 17 tables, 13 RPCs** (was Aug 22 / 8 RPCs, which cost P1-5b seven `tsc` errors). Regenerate with `supabase gen types typescript --local` in WSL whenever a migration adds or changes a function: **a migration and this file are ONE change, not two.** Note it can never express a nullable RPC argument — Postgres parameters carry no nullability, so `create_node`'s `p_parent_id` and `move_node`'s `p_new_parent_id` are cast at their call sites (see the note in `src/lib/api/hierarchy.ts`). |
 | TypeScript API client guide | `docs/api-client.md` | v1 (P1-3b, Aug 22) — code delivered; no npm in delivery container, acceptance pending user run. **"Hierarchy admin" section added (P1-5b, Aug 25).** |
@@ -281,6 +272,10 @@ Briefs build in the cloud container and deliver to this repo via a tarball throu
 
 ## State as of Aug 27, 2026 — read this before trusting the table above
 
+- **✅ THE PRE-SEAT COMMIT IS DONE (§19.62)** — every shared file the four queued sections would have edited is edited once, here: `AdminPage.tsx` (four imports, four `SECTIONS` entries, four JSX branches), `src/lib/api/index.ts`, `REM_SURFACES`, and R10's hardcoded copy of that list. Four panel components + stylesheets and four `src/lib/api` modules created. **After this, a lane creates and edits only its own files.**
+- **⭐ THE SWITCH LIVES IN THE PANEL, NOT THE SHELL.** `SECTIONS` reads `SHIFTS_PANEL_READY` / `OPERATORS_PANEL_READY` / `PRODUCTS_PANEL_READY` / `IMPORT_PANEL_READY` from each panel's own file. **A section cannot be switched on without a panel behind it, because the switch is part of the panel** — the same "make it structural, not remembered" move as D84, D89 and D100.
+- **⭐ AND TWO LISTS THAT HAD TO AGREE NOW DO, BY TEST.** `SECTIONS` and the `{section === "x"}` chain referred to each other nowhere, so a rail button opening onto nothing was four accidents waiting to happen. **Group H: 6 cases, 6 mutations, all caught**; H2 pins the id list itself; **H6 exists because a greedy-regex mutation was invisible today and would have gone live the day someone wrote another object with an `id` after the array**; H4 exists because of instrument 37, a parser that reads comments.
+- **📌 NOTHING CHANGES ON SCREEN, DELIBERATELY.** All four flags are `false`, so the rail buttons stay disabled with their `soon` chips and the four panels are unreachable. **751 → 757 in 20 files. No migration, no `db:reset`, no `db:types`.**
 - **✅ P1-5k'S CLIENT HALF IS BUILT (§19.61)** — the `⋮` menu can now change a node's rung, and its whole subtree comes with it. `src/features/admin/lib/relevel.ts` (pure, **36 cases in group K, 15 mutations, all 15 caught**), `promoteNode`/`demoteNode` wrappers, `usePromoteNode`/`useDemoteNode`, two menu entries and a target picker. **The entries name the destination rung in the org's own words** — "Make this a Department", not "Promote" (D90: the screen speaks the customer's vocabulary). Acceptance **713 → 751 in 20 files**.
 - **⭐⭐ AND BUILDING THE SCREEN FOUND TWO SERVER DEFECTS THAT A SQL SUITE STRUCTURALLY CANNOT FIND — MIGRATION 0024.** Both are the answer to *"what does the user SEE when this is refused?"*, which no case in `75_node_mobility_test.sql` asks. (1) A promote or demote into a parent that already holds that name raised a **raw `23505` with an EMPTY DETAIL** — no machine code at all. (2) The stranded-work refusal, *the whole point of the feature*, carried `{reason, count}` where `parseSchedulerError` accepts only `{blocking_rows, level_id}`, so it decoded as `Unknown` and rendered as **"Something went wrong. Please try again."** `verify-db.sh` exit 0, **332 named cases** (315 before), 17 new in `76_relevel_contract_test.sql`; **11 mutations, 7 caught, 4 executed-and-inert, each with its pinning case named.**
 - **🔴 AND THE FIRST ONE HAD ALREADY BEEN MEASURED AND WRITTEN DOWN.** §19.33 §4, the day P1-5k was designed, recorded the raw `23505` on a scratch database and said "catch and re-raise `path_collision`". 0017 shipped without it and nothing noticed, because every case asserted what a LEGAL move does and none asserted what a COLLISION looks like. **A decision that never reaches the code is [[decision-record-drift]] with a measurement attached.**

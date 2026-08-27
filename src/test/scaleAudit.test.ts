@@ -21,6 +21,10 @@ import {
   unsharedDragRules,
   rawDragColours,
   undefinedDragTokens,
+  ADMIN_PAGE,
+  parseSectionIds,
+  sectionsWithoutPanels,
+  auditAdminSections,
 } from "./scaleAudit";
 
 /**
@@ -187,7 +191,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the seven admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the eleven admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -205,6 +209,14 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         "src/features/admin/components/SiteAccessPanel.module.css",
         // D100: the shared drag rules. Seventh surface, same two-place edit.
         "src/features/admin/components/dragSurface.module.css",
+        // §19.62: the four queued sections, pre-seated. Spending the two-place
+        // edit ONCE, up front, is the whole point of that commit — four lanes
+        // each doing it later is four chances to do what P1-6a's brief did and
+        // update one place of the two.
+        "src/features/admin/components/ShiftsPanel.module.css",
+        "src/features/admin/components/OperatorsPanel.module.css",
+        "src/features/admin/components/ProductsPanel.module.css",
+        "src/features/admin/components/ImportPanel.module.css",
       ].sort(),
     );
   });
@@ -388,5 +400,86 @@ describe("scaleAudit.ts: the drag audit (D100)", () => {
     expect(
       undefinedDragTokens(`:root { --drag-grip: red; }`, [`.x { color: var(--drag-invented); }`]),
     ).toEqual(["--drag-invented"]);
+  });
+});
+
+/**
+ * Group H (§19.62) — a rail button with nothing behind it.
+ *
+ * `AdminPage.tsx` holds two lists that must agree and never referred to each
+ * other: `SECTIONS`, which the left rail renders, and the `{section === "x"}`
+ * branches that decide what the content pane shows. The pre-seat commit put
+ * four new ids in the first; this is what stops the fifth from arriving without
+ * the second half.
+ *
+ * Half of these run against SYNTHETIC source, deliberately: a case that only
+ * ever reads the repo passes for as long as the repo is clean and says nothing
+ * about whether the matcher can fail at all (rule 3).
+ */
+describe("scaleAudit — every section in the rail has a panel (§19.62)", () => {
+  it("H1: every section the rail renders has a branch that renders it", () => {
+    expect(auditAdminSections(repoRoot)).toEqual([]);
+  });
+
+  it("H2: the six ids are exactly these, in rail order", () => {
+    // The list that drives H1 is itself untested unless something asserts it —
+    // deleting an entry from SECTIONS makes H1 *greener*, which is the shape
+    // R10 and G12 both exist to close.
+    const tsx = readFileSync(`${repoRoot}/${ADMIN_PAGE}`, "utf8");
+    expect(parseSectionIds(tsx)).toEqual([
+      "hierarchy",
+      "access",
+      "shifts",
+      "operators",
+      "products",
+      "import",
+    ]);
+  });
+
+  it("H3: a section with no branch is reported", () => {
+    const tsx = `
+      const SECTIONS: X = [
+        { id: "alpha", label: "Alpha", enabled: true },
+        { id: "beta", label: "Beta", enabled: false },
+      ];
+      function P() { return <>{section === "alpha" && <A />}</>; }
+    `;
+    expect(sectionsWithoutPanels(tsx)).toEqual(["beta"]);
+  });
+
+  it("H4: a COMMENTED-OUT branch does not count as a panel", () => {
+    // Instrument 37: a parser that reads comments finds branches that do not
+    // exist. `AdminPage.tsx`'s own comments name section ids, so this is the
+    // exact way this audit would report a clean bill of health over a hole.
+    const tsx = `
+      const SECTIONS: X = [{ id: "beta", label: "Beta", enabled: false }];
+      /* one day: {section === "beta" && <B />} */
+      // or maybe {section === "beta" && <B />}
+      function P() { return null; }
+    `;
+    expect(sectionsWithoutPanels(tsx)).toEqual(["beta"]);
+  });
+
+  it("H6: only the SECTIONS array is read, not every `id:` in the file", () => {
+    // Written because a mutation escaped: making the array match GREEDY runs it
+    // to the LAST `];` in the file, which today captures exactly the same ids
+    // and is therefore invisible — until the day someone writes another object
+    // with an `id` after it. This is the fixture that makes that difference
+    // observable, so the boundary cannot quietly re-open.
+    const tsx = `
+      const SECTIONS: X = [
+        { id: "alpha", label: "Alpha", enabled: true },
+      ];
+      const OTHER_THINGS = [
+        { id: "ghost", label: "Ghost" },
+      ];
+      function P() { return <>{section === "alpha" && <A />}</>; }
+    `;
+    expect(parseSectionIds(tsx)).toEqual(["alpha"]);
+  });
+
+  it("H5: a file with no SECTIONS array reports no sections rather than throwing", () => {
+    expect(parseSectionIds("export function P() { return null; }")).toEqual([]);
+    expect(sectionsWithoutPanels("export function P() { return null; }")).toEqual([]);
   });
 });

@@ -13,6 +13,14 @@ export * from "./mutations";
 export * from "./hierarchy";
 export * from "./access";
 
+// §19.62 — pre-seated for the four queued admin sections. Each is empty
+// today; the point is that the lane which fills it does not have to edit
+// THIS file, which every one of them would otherwise have appended to.
+export * from "./shifts";
+export * from "./operators";
+export * from "./products";
+export * from "./imports";
+
 // Re-exported so callers that need the raw `Json` type (e.g. shapes.test.ts
 // building RPC-payload fixtures) never have to import database.types.ts
 // themselves (self-review §9 item 5: nothing outside src/lib imports it).

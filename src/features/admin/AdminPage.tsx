@@ -17,6 +17,13 @@ import { LevelEditor } from "./components/LevelEditor";
 import { NodeTreeEditor } from "./components/NodeTreeEditor";
 import { ShapePicker } from "./components/ShapePicker";
 import { SiteAccessPanel } from "./components/SiteAccessPanel";
+// §19.62 — the four queued sections, PRE-SEATED. Each panel owns its own
+// `_PANEL_READY` flag, so the lane that builds one turns it on by editing its
+// OWN file and never this one. See any of the four for why.
+import { ShiftsPanel, SHIFTS_PANEL_READY } from "./components/ShiftsPanel";
+import { OperatorsPanel, OPERATORS_PANEL_READY } from "./components/OperatorsPanel";
+import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
+import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import styles from "./AdminPage.module.css";
 
 /**
@@ -37,13 +44,21 @@ import styles from "./AdminPage.module.css";
 
 type SectionId = "hierarchy" | "access" | "shifts" | "operators" | "products" | "import";
 
+/*
+ * ⭐ §19.62 — `enabled` IS NOT A LITERAL FOR THE QUEUED SECTIONS, AND THAT IS
+ * THE POINT. It reads the flag exported by each section's own panel, so a
+ * section can only be switched on by the file that holds the panel behind it —
+ * you cannot turn on a screen that does not exist, and the lane that builds one
+ * never edits this array. Group H in `scaleAudit.test.ts` guards the other
+ * direction: every id below has a branch rendering it.
+ */
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }> = [
   { id: "hierarchy", label: "Hierarchy", enabled: true },
   { id: "access", label: "Access", enabled: true },
-  { id: "shifts", label: "Shifts", enabled: false },
-  { id: "operators", label: "Operators", enabled: false },
-  { id: "products", label: "Products", enabled: false },
-  { id: "import", label: "Import", enabled: false },
+  { id: "shifts", label: "Shifts", enabled: SHIFTS_PANEL_READY },
+  { id: "operators", label: "Operators", enabled: OPERATORS_PANEL_READY },
+  { id: "products", label: "Products", enabled: PRODUCTS_PANEL_READY },
+  { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
 ];
 
 
@@ -216,6 +231,39 @@ export default function AdminPage() {
               viewerProfileId={profile?.id ?? null}
               viewerIsCompanyAdmin={profile?.role === "admin"}
             />
+          </>
+        )}
+
+        {/* §19.62 — the four queued sections. Unreachable until their panels
+            set `_PANEL_READY`, because the rail button stays disabled; they are
+            wired now so that the four lanes never edit this file. The heading
+            stays HERE, next to the two above it, so every section has the same
+            chrome without four copies of it (D100). */}
+        {section === "shifts" && (
+          <>
+            <h1 className={styles.h1}>Shifts</h1>
+            <ShiftsPanel />
+          </>
+        )}
+
+        {section === "operators" && (
+          <>
+            <h1 className={styles.h1}>Operators</h1>
+            <OperatorsPanel />
+          </>
+        )}
+
+        {section === "products" && (
+          <>
+            <h1 className={styles.h1}>Products</h1>
+            <ProductsPanel />
+          </>
+        )}
+
+        {section === "import" && (
+          <>
+            <h1 className={styles.h1}>Import</h1>
+            <ImportPanel />
           </>
         )}
       </div>

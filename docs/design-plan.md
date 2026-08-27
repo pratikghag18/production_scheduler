@@ -5858,3 +5858,81 @@ Different questions about the same tree, not two copies of one question.
 - It does not offer a keyboard path distinct from the menu — the menu **is** the keyboard path.
 - It does not touch the drag. Drag re-parents; this re-levels; §19.34 is the record of what happens
   when those two are confused.
+
+---
+
+### 19.62 The pre-seat commit — spending four collisions once (Aug 27, 2026)
+
+§19.57 measured, with four concurrent read-only surveys, that Shifts, Operators,
+Products and Import cannot be built by four agents at once — not because the
+work overlaps, but because **five shared files do**. It also found the thing that
+changes the answer: every one of those collisions is small, mechanical and
+knowable before any section is designed. This is the commit that spends them.
+
+#### 1. What was pre-seated
+
+| shared file | edited ONCE, here | what a lane does now |
+|---|---|---|
+| `AdminPage.tsx` | four imports, four `SECTIONS` entries, four JSX branches | **nothing** |
+| `src/lib/api/index.ts` | four `export *` lines | **nothing** |
+| `src/test/scaleAudit.ts` (`REM_SURFACES`) | four stylesheets listed | **nothing** |
+| `src/test/scaleAudit.test.ts` (R10's copy) | the same four, and the title | **nothing** |
+| `src/lib/database.types.ts` | untouched — no migration here | Pratik regenerates when a lane adds one |
+
+New, and owned by nobody but their lane: `ShiftsPanel.tsx`/`.module.css`,
+`OperatorsPanel.*`, `ProductsPanel.*`, `ImportPanel.*`, and
+`src/lib/api/{shifts,operators,products,imports}.ts`.
+
+#### 2. ⭐ The switch lives in the panel, not in the shell
+
+`SECTIONS` used to carry `enabled: false` as a literal. It now reads a flag the
+panel itself exports:
+
+```tsx
+{ id: "shifts", label: "Shifts", enabled: SHIFTS_PANEL_READY },
+```
+
+That is the difference between "the lane edits one line of a shared file" and
+"the lane edits its own file", and it makes the invariant structural rather than
+remembered: **a section cannot be switched on without a panel behind it, because
+the switch is part of the panel.** Same shape as D84 (scaling is the default),
+D89 (the control reset is global) and D100 (one drag surface): [[doc_drift]]
+rule 4 — *a rule that exists only as a habit will be forgotten by the next
+component.*
+
+#### 3. And the other direction is audited, because two lists had to agree
+
+`AdminPage.tsx` holds two lists that must match and never referred to each
+other: `SECTIONS`, which the rail renders, and the `{section === "x" && …}`
+chain, which decides what the pane shows. A section in the first and absent from
+the second is a rail button that opens onto nothing — and before this commit
+that was four waiting to happen.
+
+**Group H** (`scaleAudit.test.ts`, 6 cases) parses `SECTIONS` out of the file and
+requires a branch for every id. Half its cases run against synthetic source, so
+the matcher is proved able to fail; **H2 pins the id list itself**, because a
+list that drives a test is untested unless something asserts it — the hole R10
+and G12 each exist to close one level up.
+
+**Six mutations, all six caught**, and one of them earned a case: making the
+array match greedy runs it to the last `];` in the file, which captures exactly
+the same ids today and would therefore have been invisible until someone wrote
+another object with an `id` after it. **H6 is the fixture that makes that
+difference observable.** And **H4 exists because of instrument 37**: a parser
+that reads comments finds branches that do not exist, and `AdminPage.tsx`'s own
+comments name section ids.
+
+#### 4. What this changes on screen: nothing, deliberately
+
+All four flags are `false`, so all four rail buttons stay disabled with their
+`soon` chip and the four new panels are unreachable. The only thing that moved
+is where the switch lives. **Acceptance goes 751 → 757 in 20 files** — six new
+cases, no new file.
+
+#### 5. What a lane does now
+
+Creates its own pure module and vitest suite, its own hook, fills in its panel
+and its stylesheet, fills in its `src/lib/api` module, and flips one boolean in
+its own panel file. It appends to `docs/roadmap.md` and `docs/design-plan.md` —
+**the one shared surface that cannot be pre-seated**, which is why lanes hand
+their prose back rather than writing it, and the design session integrates.

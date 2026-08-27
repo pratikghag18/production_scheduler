@@ -93,6 +93,13 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/AdminPopover.module.css",
   "src/features/admin/components/ShapePicker.module.css",
   "src/features/admin/components/SiteAccessPanel.module.css",
+  // §19.62 — the four queued sections, pre-seated. Listed here AND in R10's
+  // copy of this list in the same commit, which is the two-place edit this
+  // pre-seat exists to spend once instead of four times.
+  "src/features/admin/components/ShiftsPanel.module.css",
+  "src/features/admin/components/OperatorsPanel.module.css",
+  "src/features/admin/components/ProductsPanel.module.css",
+  "src/features/admin/components/ImportPanel.module.css",
 ];
 
 /**
@@ -108,6 +115,65 @@ export const REM_SURFACES: readonly string[] = [
  * test failure rather than something noticed on a 4K monitor three briefs
  * later.
  */
+/**
+ * §19.62 — A SECTION IN THE NAV WITH NOTHING BEHIND IT.
+ *
+ * `AdminPage.tsx` holds two lists that have to agree and never referred to each
+ * other: the `SECTIONS` array the left rail renders, and the chain of
+ * `{section === "x" && …}` branches that decide what the content pane shows.
+ * A section present in the first and absent from the second is a rail button
+ * that opens onto nothing — and until the pre-seat commit that was FOUR waiting
+ * to happen, one per queued lane.
+ *
+ * This is a file-content audit for the same reason the rest of this file is:
+ * the rule is easy to state, invisible to `tsc`, and would otherwise be checked
+ * by someone clicking every item in the rail.
+ *
+ * ⚠️ COMMENTS ARE STRIPPED BEFORE PARSING, and that is not decoration. This
+ * file's own prose mentions `section === "x"`, and `AdminPage.tsx`'s comments
+ * name section ids; a parser that reads comments finds branches that do not
+ * exist and reports a clean bill of health. Instrument 37 on this project was
+ * exactly that mistake in a CSS extractor.
+ */
+export const ADMIN_PAGE = "src/features/admin/AdminPage.tsx";
+
+function stripTsComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
+/**
+ * The section ids the left rail renders, in source order.
+ *
+ * Returns `[]` when there is no `SECTIONS` array to read — a missing list is
+ * reported as "no sections", never as an exception, because this runs inside a
+ * test whose failure message should say what is wrong with the repo rather than
+ * a stack trace from a regex.
+ */
+export function parseSectionIds(tsx: string): string[] {
+  const src = stripTsComments(tsx);
+  const block = /const SECTIONS[^=]*=\s*\[([\s\S]*?)\]\s*;/.exec(src);
+  if (block === null) return [];
+  const ids: string[] = [];
+  const entry = /id:\s*"([^"]+)"/g;
+  let m = entry.exec(block[1]);
+  while (m !== null) {
+    ids.push(m[1]);
+    m = entry.exec(block[1]);
+  }
+  return ids;
+}
+
+/** Section ids with no `section === "id"` branch to render them. */
+export function sectionsWithoutPanels(tsx: string): string[] {
+  const src = stripTsComments(tsx);
+  return parseSectionIds(tsx).filter((id) => !src.includes(`section === "${id}"`));
+}
+
+/** `sectionsWithoutPanels` against the file on disk. */
+export function auditAdminSections(root: string, file: string = ADMIN_PAGE): string[] {
+  return sectionsWithoutPanels(fs.readFileSync(joinPath(root, file), "utf8"));
+}
+
 export const REM_SURFACE_DIR = "src/features/admin";
 
 export function missingRemSurfaces(
