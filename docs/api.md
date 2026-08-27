@@ -96,7 +96,7 @@ on a missing or null key.
   "runs": ["... rows on the returned nodes intersecting [p_from, p_to)"],
   "assignments": ["... rows on the returned nodes intersecting the window"],
   "operators": [{"id": "...", "home_node_id": "...", "display_name": "Maria", "employee_ref": "EMP-001", "active": true, "skill_ids": ["40000000-...0001"]}],
-  "products": [{"id": "...", "sku": "WX", "name": "Widget X", "active": true}],
+  "products": [{"id": "...", "sku": "WX", "name": "Widget X", "active": true, "color_token": "product-1"}],
   "skills": [{"id": "40000000-...0001", "name": "CNC"}],
   "node_skill_requirements": [{"node_id": "...cnc_line...", "skill_id": "40000000-...0001"}],
   "shift_templates": [{"id": "...", "name": "3 × 8h", "shifts": [{"id": "...", "name": "Shift 1", "start_min": 360, "end_min": 840, "breaks": [{"id": "...", "name": "Break 1", "start_min": 480, "end_min": 495}]}]}],

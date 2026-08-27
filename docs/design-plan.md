@@ -505,7 +505,7 @@ Interaction: at Compact zoom, drag-select snaps to shift boundaries (the §10 zo
 
 ### 16.3 Admin editing
 
-Shift configuration is org-admin surface: edit template/shift/break names and times, add/remove breaks, and re-point any node's template. Validation on save: breaks inside their shift; shifts within a template non-overlapping. Edits apply to the whole subtree immediately (schedule data is untouched — shifts are a rendering/snapping layer over exact-timestamp assignments, so redefining shifts never corrupts existing assignments).
+⛔ **SUPERSEDED IN PART by D101 (§19.59) and migration 0023: shift patterns are SITE-OWNED, and a site admin edits their own. Unowned patterns stay company-wide, which is what "we can have defaults" means. Ownership decides who may EDIT a pattern; nearest-ancestor resolution of which pattern APPLIES is unchanged.** Shift configuration is admin surface: edit template/shift/break names and times, add/remove breaks, and re-point any node's template. Validation on save: breaks inside their shift; shifts within a template non-overlapping. Edits apply to the whole subtree immediately (schedule data is untouched — shifts are a rendering/snapping layer over exact-timestamp assignments, so redefining shifts never corrupts existing assignments).
 
 ### 16.4 New open question
 
@@ -5651,6 +5651,17 @@ owns its colour.**
   so an unset product still has a stable colour and *"we can have defaults"* is
   literally true.
 - The palette grows past four. Four was the mockup's cast, not a design.
+  **⚠️ AMENDED WHEN 0023 WAS BUILT, and the amendment is the whole of the lesson:
+  it shipped at FOUR.** Widening it in the database alone is the wrong half of
+  the change — `tokens.css` defines `--product-1` through `--product-4` and
+  nothing else, so the moment `app_product_palette()` handed out `product-5` the
+  board resolved `var(--product-5)` to nothing and the product rendered with
+  **no colour at all**, which is strictly worse than the wrong one. It was
+  written at eight and `upgrade_0023_product_colour.sql` caught it: with six
+  products, two changed colour and the fifth came back `product-5`. On a fresh
+  database nothing would have shown it, because the seed has exactly four.
+  **The palette is as wide as the stylesheet and not one token wider**; widening
+  it is `app_product_palette()` + `tokens.css` + case Q31, in one commit.
 - A site admin edits the colour of the products their site owns; a company-wide
   product's colour is the company admin's. **No `(site, product)` override
   table** — that was the alternative and it is rejected here on purpose: it
@@ -5662,3 +5673,84 @@ owns its colour.**
 serial resource, so a migration plus its regenerated types is one round trip)
 and is now carrying: owning site on operators / products / skills /
 shift_templates, plus the product colour column and its default.
+
+---
+
+## §19.60 — Migration 0023: the shared lists get an owner, and a product gets a colour of its own
+
+**Status: built, applied to a scratch PostgreSQL 16 by the design session, and reviewed adversarially by two independent agents. `scripts/verify-db.sh` exit 0, 23 migrations, 315 named cases (271 before), 38 new cases in `51_shared_list_owners_test.sql` and 6 in `upgrade_0023_product_colour.sql`. 28 mutations, 24 caught and 4 executed-and-inert with the fact each depends on pinned by a case. NEEDS `npm run db:reset && npm run db:types`.**
+
+D101 and D102 answered §19.57's two blockers, so this is the migration that was gating all four SOON admin sections.
+
+### The scoping decision, and it is the one that decides everything else
+
+**0023 changes WHO MAY EDIT. It does not change who may READ.** Every `_select` policy is left exactly as 0008 wrote it, org-wide.
+
+That is a measured requirement, not caution. `check_eligibility` (0009) is `SECURITY INVOKER` and reads `operator_skills` and `skills` **as the caller**: a skill the caller cannot see drops out of its `held` CTE, lands in `missing`, and flips `eligible` to false — and `create_assignment` gates on that verdict. **A read narrowing would have become a silent write refusal one indirection along.** It is also exactly what Pratik said the rule was for shift patterns, and what 0020 §12 already decided for node attachments. Case **Q11** is the tripwire: it asserts the reads are still org-wide, so narrowing one goes red before eligibility starts quietly answering "no".
+
+### What it does
+
+| | |
+|---|---|
+| `site_node_id uuid` | nullable, composite `(org_id, site_node_id)` FK, on `operators` / `products` / `skills` / `shift_templates`. **NULL = company-wide**, which is what "we can have defaults" means. No unique index — a site has many of each, unlike `hierarchy_templates` |
+| root enforcement | **ONE** trigger function on four tables. Four copies would be D100's defect in SQL |
+| write policies | 21 rewritten across **seven** tables. Four ask their own column; `shifts` and `shift_breaks` ask their template (two hops for a break); `operator_skills` asks its **operator** |
+| `products.color_token` | NOT NULL, a palette **token name** never a hex, filled on insert by the least-used token **within the owner's scope** |
+| the D93 hole | `resolve_shift_template(uuid)` has been anon-executable since 0005. Closed in passing |
+| `board_window` | re-emitted by `pg_get_functiondef` extraction, one key added |
+| **not** done | no ownership backfill; no `_select` change; `node_shift_templates` untouched; no thirteenth error code |
+
+**`operators.home_node_id` is not this column**, however much it looks like it: its FK admits any node, every seeded value points at a Department or a Work Cell, and it is read by nothing anywhere. A backfill from it would have failed the root check on every row in the seed.
+
+**INSERT is a real widening.** `app_is_admin()` reads the org-wide flag, so before 0023 a site admin could write **nothing** in any of those seven tables. All 21 policies are strict supersets of 0008's; nothing here can regress a permission, and the only way to get it wrong is to hand out too much — which is what the review was for.
+
+### ⭐ Four defects found before this shipped, and none by reading
+
+**1. The root trigger was answering the permission question.** Written first as plain plpgsql, exactly like 0020's, it resolved `nodes` **as the caller** — so a site admin naming another site's root got `not found` from the trigger instead of a refusal from the policy. Measured: Q6 and Q9 came back `PT400`, not `42501`. Two things wrong, the second worse: "not found" was a lie about a node that exists (0020 §8.0, one table over), and **the trigger was masking the policy, which would have made every mutation of a WITH CHECK term look caught when it was the trigger catching it.** Now SECURITY DEFINER — safe here where 0020 §11 refused it for the adjacency trigger, because that one reaches D97's gate and reads `current_user`. Q6/Q9 assert `42501` so the two cannot swap jobs again.
+
+**2. ⭐⭐ The palette shipped at eight and the upgrade test caught it.** §9 had argued, in writing, that there was no `UPGRADE_CHECKS` row to write. Case Q24 proved otherwise: the colour backfill **is** a data transform. Writing `upgrade_0023_product_colour.sql` immediately found that with six products the fifth came back `product-5` — a token `tokens.css` does not define, so `var(--product-5)` resolves to nothing and the product renders with **no colour at all**. The seed has exactly four products, so no fresh-database test could ever have shown it. **An absence argued for in a comment is not the same as an absence measured.**
+
+**3. ⭐⭐ A cross-tenant leak, found by the adversarial reviewer.** `app_pick_product_color` was SECURITY DEFINER, took the org as a free parameter, was granted to `authenticated` — and its own comment claimed it was "tenant-scoped internally in 0012's shape". It was the opposite. It lives in `public`, so PostgREST exposed it: any viewer in org 1 could ask it about org 2 and read back which of another tenant's palette slots were least used. **D83/0012's finding, verbatim, in a new function.** And the obvious fix was measured wrong: `where p_org_id = app_current_org()` returns NULL during the backfill and the seed, where there is no session profile, so the guard would have written NULL into a NOT NULL column. **The boundary is a GRANT, not a predicate** — revoked from PUBLIC, granted to nobody, with the insert trigger made SECURITY DEFINER so it can still reach it. Case Q35 pins that `authenticated` cannot execute it, because a grant is a thing people delete (0019's X15).
+
+**4. `color_token` was nullable and its comment said "NULL only transiently".** The reviewer showed the UPDATE path made that untrue: a site admin may edit their own row, the CHECK permitted NULL, and no trigger fires on UPDATE — so a product could be left with no colour by an ordinary edit. Case Q23 was asserting an invariant nothing enforced. `set not null` after the backfill, and it retired mutation R23 as well, whose inertness had rested on a NULL being unwritable.
+
+Two smaller ones from the same reviews: a §6 comment cited 0019's `nodes` shape as its precedent when 0019 used `app_is_admin_on_path` **precisely because** `app_is_admin_for` reads `nodes` — the opposite of the truth; and case Q21's name claimed a cross-site pair its fixture could not deliver, because the fixture had no Plant-2-owned skill (**Q37** is that row).
+
+### ⭐ The colour, measured
+
+`board_window` emits products `ORDER BY p.sku` and the client takes the row's ordinal modulo four — **in two independent places**, `BoardGrid.tsx` and, separately, the legend in `BoardToolbar.tsx`. Against the seed that means:
+
+| product | renders as | whose comment says |
+|---|---|---|
+| Gadget Z | `--product-1` | "Widget X" |
+| Rework | `--product-2` | "Widget Y" |
+| Widget X | `--product-3` | "Gadget Z" |
+| Widget Y | `--product-4` | "Rework" |
+
+**All four have been wrong since P1-1**, because `tokens.css` was written from the mockup's insertion order and the server sorts by SKU. Nobody noticed because every colour is still a colour.
+
+The new rule is least-used-in-scope, which buys two things the ordinal never had: **inserting a product cannot change the colour of one that already exists**, and **two sites can both hold `product-1` without re-shuffling each other**. Over four tokens walked in sku order it reproduces the old assignment exactly, so an existing board does not move (upgrade V1). **On a fresh `db:reset` it does move, once**: no products exist at backfill time, so the insert trigger assigns in the seed's INSERT order and Widget X becomes `product-1` — which is what `tokens.css`'s own comments have always claimed. The reset path makes the file honest, and it will look like a regression the first time it is seen.
+
+### Verification
+
+- **`scripts/verify-db.sh` exit 0, cold: 315 named cases, zero `NOTICE: FAIL`.** Baseline before the migration was 271, re-run first for exactly that reason.
+- **38 cases (Q0–Q37)** in `51_shared_list_owners_test.sql`, on a fixture with **two sites in one org** (the seed has one) where **every site admin is an org-wide `viewer`** — 46's lesson, and Q0 asserts it, or `app_is_admin()` would short-circuit every predicate and the file would pass against a migration that did nothing. **And an owned AND an unowned row of every kind**, because a fixture where everything is owned cannot tell "that site's row" from "a company-wide row" and those are two different branches of one predicate.
+- **28 mutations. 24 caught, 4 executed and measured inert**, each with the fact its inertness depends on pinned by a case:
+
+  | # | verdict | note |
+  |---|---|---|
+  | R7, R15 | INERT | a `site_node_id is not null` term is redundant because `app_is_admin_for` is an `EXISTS` and an EXISTS never returns NULL. **Q32 pins that**, measured — the day it stops being an EXISTS, both go live and Q32 goes red in the same run |
+  | R14 | INERT | masked by `operator_skills`' composite FK in migration **0002**, a different file — rule 9b's exact shape. **Q34 pins the impossibility** |
+  | R23 | INERT | the trigger body only fills a NULL, and after fix 4 a NULL cannot be written. Inert **because of** the NOT NULL, not on its own |
+
+  ⚠️ Six mutations first came back **CRASHED**, and the cause was mine: a widened `USING` turns a silent zero-row refusal into a raised `42501`, and cases that only asserted `ROW_COUNT = 0` died instead of reporting. Rewritten to assert **the shape of the refusal** — `rows = 0 AND no exception` — which is rule 7e, and all six then named their killing case.
+- **The harness's own gap closed on the way past:** step 7 counts PASS notices only to phrase the result, never to require a number, so a deleted test file is 38 cases vanishing under a green run. `verify-db.sh` now guards `51_`'s existence, the same idiom as the 60/70/90 guards. **Fourth place this has had to be closed by hand.**
+- **`docs/schema.md`'s source heredoc** — inside `verify-db.sh`, not the generated file — said *"`products` … No color column"*. Corrected, along with the `operators` row, which now distinguishes `site_node_id` from `home_node_id`.
+- **Not verified by me:** anything in the client (nothing reads the new columns yet), and the migration against real Supabase.
+
+### Open, recorded, not closed
+
+1. **The root invariant is checked at write time and never re-checked.** `move_node` lets a company admin re-parent a site; every shared row owned by the old root then names a mid-tree node, and the admin of the new parent inherits them. Inherited from 0020 — `hierarchy_templates.site_node_id` has the identical shape — but 0023 multiplies it from one table to four.
+2. **`app_check_site_owner` is a three-way oracle** over node ids a site admin cannot SELECT: absent / mid-tree / a root that is not theirs. Uuids are unguessable and a site admin already knows their org has other sites; recorded in the function's own comment rather than closed.
+3. **The seed and `dev_demo.sql` own nothing**, so after `db:reset` **a site admin signing in sees the feature do nothing** — every row is company-wide and company-wide is company-admin-only. `dev_demo.sql` is the only fixture with a second plant and is where a couple of owned rows belong. 0020 hit exactly this and fixed it in the seed.
+4. **`app_is_admin_for_operator` is granted to `authenticated`** and, under R14's mutation, would answer about another tenant through the direct RPC path. Q34 pins the policy path only; the RPC path is unmeasured.

@@ -1,0 +1,142 @@
+[
+ [
+  "R1 the root check accepts any node, not just a site",
+  "  if v_parent_id is not null then\n    perform api_raise('invalid_argument',\n      'this can only be owned by a top-level site, not by a node inside one',",
+  "  if false then\n    perform api_raise('invalid_argument',\n      'this can only be owned by a top-level site, not by a node inside one',"
+ ],
+ [
+  "R2 the root check stops scoping by org",
+  "    from nodes where id = new.site_node_id and org_id = new.org_id;",
+  "    from nodes where id = new.site_node_id;"
+ ],
+ [
+  "R3 the root trigger goes back to SECURITY INVOKER (the Q6/Q9 defect)",
+  "create or replace function app_check_site_owner() returns trigger\nlanguage plpgsql security definer set search_path = public, pg_temp as $$",
+  "create or replace function app_check_site_owner() returns trigger\nlanguage plpgsql as $$"
+ ],
+ [
+  "R4 operators lose their root trigger entirely",
+  "create trigger operators_check_site\n  before insert or update of site_node_id, org_id on operators\n  for each row execute function app_check_site_owner();\n",
+  ""
+ ],
+ [
+  "R5 operators_update loses its WITH CHECK owner term (the push half)",
+  "create policy operators_update on operators for update\n  using (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))))\n  with check (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))));",
+  "create policy operators_update on operators for update\n  using (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))))\n  with check (org_id = app_current_org());"
+ ],
+ [
+  "R6 operators_update loses its USING owner term (the claim half)",
+  "create policy operators_update on operators for update\n  using (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))))",
+  "create policy operators_update on operators for update\n  using (org_id = app_current_org())"
+ ],
+ [
+  "R7 operators_insert drops the NULL guard, so a site admin can make a company-wide row",
+  "create policy operators_insert on operators for insert\n  with check (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))));",
+  "create policy operators_insert on operators for insert\n  with check (org_id = app_current_org()\n    and (app_is_admin() or app_is_admin_for(site_node_id) is not false));"
+ ],
+ [
+  "R8 shift_templates_update loses its owner term",
+  "create policy shift_templates_update on shift_templates for update\n  using (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))))",
+  "create policy shift_templates_update on shift_templates for update\n  using (org_id = app_current_org())"
+ ],
+ [
+  "R9 products_update loses its owner term",
+  "create policy products_update on products for update\n  using (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))))",
+  "create policy products_update on products for update\n  using (org_id = app_current_org())"
+ ],
+ [
+  "R10 skills_update loses its owner term",
+  "create policy skills_update on skills for update\n  using (org_id = app_current_org()\n    and (app_is_admin() or (site_node_id is not null and app_is_admin_for(site_node_id))))",
+  "create policy skills_update on skills for update\n  using (org_id = app_current_org())"
+ ],
+ [
+  "R11 shifts stop asking their template",
+  "create policy shifts_update on shifts for update\n  using (org_id = app_current_org() and app_is_admin_for_shift_template(template_id))",
+  "create policy shifts_update on shifts for update\n  using (org_id = app_current_org())"
+ ],
+ [
+  "R12 breaks ask the template directly, losing a hop",
+  "create policy shift_breaks_update on shift_breaks for update\n  using (org_id = app_current_org() and app_is_admin_for_shift(shift_id))",
+  "create policy shift_breaks_update on shift_breaks for update\n  using (org_id = app_current_org())"
+ ],
+ [
+  "R13 operator_skills follows the SKILL instead of the operator",
+  "create policy operator_skills_insert on operator_skills for insert\n  with check (org_id = app_current_org() and app_is_admin_for_operator(operator_id));",
+  "create policy operator_skills_insert on operator_skills for insert\n  with check (org_id = app_current_org());"
+ ],
+ [
+  "R14 app_is_admin_for_operator drops its own org term",
+  "    WHERE o.id = p_operator_id\n      AND o.org_id = app_current_org()",
+  "    WHERE o.id = p_operator_id"
+ ],
+ [
+  "R15 app_is_admin_for_shift_template loses the NULL guard, so a company-wide pattern becomes any site admin's",
+  "      AND (app_is_admin()\n           OR (t.site_node_id IS NOT NULL AND app_is_admin_for(t.site_node_id)))",
+  "      AND (app_is_admin()\n           OR app_is_admin_for(t.site_node_id) IS NOT FALSE)"
+ ],
+ [
+  "R16 the picker ignores the owner scope",
+  "     AND p.site_node_id IS NOT DISTINCT FROM p_site_node_id",
+  ""
+ ],
+ [
+  "R17 the picker takes the MOST used token",
+  "   ORDER BY count(p.id), t.pos",
+  "   ORDER BY count(p.id) DESC, t.pos"
+ ],
+ [
+  "R18 the picker's tie-break stops being the palette order",
+  "   ORDER BY count(p.id), t.pos",
+  "   ORDER BY count(p.id), t.token DESC"
+ ],
+ [
+  "R19 the palette widens without tokens.css (the shipped defect)",
+  "  SELECT ARRAY['product-1','product-2','product-3','product-4'];",
+  "  SELECT ARRAY['product-1','product-2','product-3','product-4',\n               'product-5','product-6','product-7','product-8'];"
+ ],
+ [
+  "R20 the colour backfill walks in an arbitrary order",
+  "            where color_token is null order by created_at, sku loop",
+  "            where color_token is null loop"
+ ],
+ [
+  "R21 the colour trigger never fires",
+  "create trigger products_set_color_token\n  before insert on products\n  for each row execute function products_set_color_token();\n",
+  ""
+ ],
+ [
+  "R22 the token CHECK admits a hex",
+  "  check (color_token is null or color_token ~ '^product-[1-9][0-9]*$');",
+  "  check (color_token is null or color_token is not null);"
+ ],
+ [
+  "R23 the colour trigger re-colours on UPDATE too",
+  "create trigger products_set_color_token\n  before insert on products",
+  "create trigger products_set_color_token\n  before insert or update of site_node_id on products"
+ ],
+ [
+  "R24 the D93 revoke on resolve_shift_template goes",
+  "revoke execute on function resolve_shift_template(uuid) from public;\n",
+  ""
+ ],
+ [
+  "R25 the new predicates keep their PUBLIC execute",
+  "revoke execute on function app_is_admin_for_operator(uuid) from public;\n",
+  ""
+ ],
+ [
+  "R26 board_window stops emitting the colour",
+  ", 'color_token', p.color_token)",
+  ")"
+ ],
+ [
+  "R27 the colour picker becomes callable by authenticated again (the leak)",
+  "revoke execute on function app_pick_product_color(uuid, uuid) from public;\n",
+  ""
+ ],
+ [
+  "R28 color_token loses its NOT NULL",
+  "alter table products alter column color_token set not null;\n",
+  ""
+ ]
+]

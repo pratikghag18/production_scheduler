@@ -468,6 +468,7 @@ export type Database = {
           home_node_id: string | null
           id: string
           org_id: string
+          site_node_id: string | null
           source: string
           updated_at: string
         }
@@ -480,6 +481,7 @@ export type Database = {
           home_node_id?: string | null
           id?: string
           org_id: string
+          site_node_id?: string | null
           source?: string
           updated_at?: string
         }
@@ -492,6 +494,7 @@ export type Database = {
           home_node_id?: string | null
           id?: string
           org_id?: string
+          site_node_id?: string | null
           source?: string
           updated_at?: string
         }
@@ -513,6 +516,13 @@ export type Database = {
           {
             foreignKeyName: "operators_org_id_home_node_id_fkey"
             columns: ["org_id", "home_node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "operators_org_id_site_node_id_fkey"
+            columns: ["org_id", "site_node_id"]
             isOneToOne: false
             referencedRelation: "nodes"
             referencedColumns: ["org_id", "id"]
@@ -540,33 +550,39 @@ export type Database = {
       products: {
         Row: {
           active: boolean
+          color_token: string
           created_at: string
           external_id: string | null
           id: string
           name: string
           org_id: string
+          site_node_id: string | null
           sku: string
           source: string
           updated_at: string
         }
         Insert: {
           active?: boolean
+          color_token: string
           created_at?: string
           external_id?: string | null
           id?: string
           name: string
           org_id: string
+          site_node_id?: string | null
           sku: string
           source?: string
           updated_at?: string
         }
         Update: {
           active?: boolean
+          color_token?: string
           created_at?: string
           external_id?: string | null
           id?: string
           name?: string
           org_id?: string
+          site_node_id?: string | null
           sku?: string
           source?: string
           updated_at?: string
@@ -578,6 +594,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "orgs"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_org_id_site_node_id_fkey"
+            columns: ["org_id", "site_node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
           },
         ]
       }
@@ -744,18 +767,21 @@ export type Database = {
           id: string
           name: string
           org_id: string
+          site_node_id: string | null
           updated_at: string
         }
         Insert: {
           id?: string
           name: string
           org_id: string
+          site_node_id?: string | null
           updated_at?: string
         }
         Update: {
           id?: string
           name?: string
           org_id?: string
+          site_node_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -765,6 +791,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "orgs"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_templates_org_id_site_node_id_fkey"
+            columns: ["org_id", "site_node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
           },
         ]
       }
@@ -819,6 +852,7 @@ export type Database = {
           id: string
           name: string
           org_id: string
+          site_node_id: string | null
           updated_at: string
         }
         Insert: {
@@ -826,6 +860,7 @@ export type Database = {
           id?: string
           name: string
           org_id: string
+          site_node_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -833,6 +868,7 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string
+          site_node_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -842,6 +878,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "orgs"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "skills_org_id_site_node_id_fkey"
+            columns: ["org_id", "site_node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
           },
         ]
       }
@@ -902,6 +945,15 @@ export type Database = {
       app_is_admin: { Args: never; Returns: boolean }
       app_is_admin_anywhere: { Args: never; Returns: boolean }
       app_is_admin_for: { Args: { p_node: string }; Returns: boolean }
+      app_is_admin_for_operator: {
+        Args: { p_operator_id: string }
+        Returns: boolean
+      }
+      app_is_admin_for_shift: { Args: { p_shift_id: string }; Returns: boolean }
+      app_is_admin_for_shift_template: {
+        Args: { p_template_id: string }
+        Returns: boolean
+      }
       app_is_admin_for_template: {
         Args: { p_template_id: string }
         Returns: boolean
@@ -912,6 +964,11 @@ export type Database = {
       }
       app_is_admin_on_path: { Args: { p_path: unknown }; Returns: boolean }
       app_node_exists_in_org: { Args: { p_node_id: string }; Returns: boolean }
+      app_pick_product_color: {
+        Args: { p_org_id: string; p_site_node_id: string }
+        Returns: string
+      }
+      app_product_palette: { Args: never; Returns: string[] }
       app_profile_exists_in_org: {
         Args: { p_profile_id: string }
         Returns: boolean

@@ -181,6 +181,7 @@ step "5b/5c. Upgrade paths: migrations that TRANSFORM EXISTING DATA"
 UPGRADE_CHECKS="
 20260826000019_scoped_roles.sql|upgrade_0019_backfill.sql|5
 20260826000020_site_ownership.sql|upgrade_0020_site_ownership.sql|5
+20260827000023_shared_list_owners.sql|upgrade_0023_product_colour.sql|6
 "
 
 run_upgrade_check() {
@@ -293,6 +294,14 @@ fi
 # this guard makes the requirement explicit and fails loudly if the file goes
 # missing, instead of silently running one fewer test -- the same idiom as the
 # 60_ and 70_ guards above.
+# 0023: same idiom, same reason. Step 7 counts PASS notices only to phrase the
+# result, never to require a number -- so a deleted or renamed test file is 38
+# cases vanishing under a green run. This is the harness's standing defect and
+# this is the fourth place it has had to be closed by hand.
+if [ ! -f "$TESTS_DIR/51_shared_list_owners_test.sql" ]; then
+  note_fail "51_shared_list_owners_test.sql not found in $TESTS_DIR (0023 requires it)"
+  exit 1
+fi
 if [ ! -f "$TESTS_DIR/90_hierarchy_template_test.sql" ]; then
   note_fail "90_hierarchy_template_test.sql not found in $TESTS_DIR (D86 requires it to run after 80_cross_org_test.sql)"
   exit 1
@@ -372,8 +381,8 @@ cat > "$SCHEMA_MD" <<'MD'
 | `hierarchy_templates` | A named hierarchy SHAPE within an org (D86). One org may hold several, so different sites can be organised differently. |
 | `hierarchy_levels` | One template's ordered level list (Site/Department/Line/Work Cell, or whatever the site names them). Exactly one level per TEMPLATE may be `is_schedulable` — not one per org. |
 | `nodes` | Every unit at every level, self-referencing tree. `path` (ltree) is trigger-maintained from `parent_id`/`name` — never supplied by callers. |
-| `operators` | The roster. `home_node_id` is a default site/department for roster filtering. |
-| `products` | The catalog. No color column — color is a UI-only sku-to-token mapping. |
+| `operators` | The roster. `site_node_id` = the owning site (NULL = company-wide, 0023). ⚠️ NOT the same as `home_node_id`, which is an unenforced roster-filter default that may point at any node and is read by nothing. |
+| `products` | The catalog. `site_node_id` = the owning site (NULL = company-wide, 0023). `color_token` = the palette token this product renders in, e.g. `product-3` — NOT NULL, filled on insert, never a hex. |
 | `skills` | Named certifications. |
 | `operator_skills` | Who holds which skill, with optional expiry. |
 | `node_skill_requirements` | A skill required at a node; inherits down the subtree (ancestor union query). |
