@@ -87,6 +87,7 @@ export function auditChromeFiles(
  */
 export const REM_SURFACES: readonly string[] = [
   "src/features/admin/AdminPage.module.css",
+  "src/features/admin/components/dragSurface.module.css",
   "src/features/admin/components/LevelEditor.module.css",
   "src/features/admin/components/NodeTreeEditor.module.css",
   "src/features/admin/components/AdminPopover.module.css",
@@ -218,4 +219,126 @@ export function auditRemSurfaces(
     file: f,
     offenders: unscaledPxLengths(fs.readFileSync(`${root}/${f}`, "utf8")),
   }));
+}
+
+
+/* ---------------------------------------------------------------------------
+   D100 — THE DRAG AUDIT. "MATCH THE COLOURS" MADE INTO A PROPERTY OF THE FILES.
+
+   Pratik, Aug 27: *"Can we make sure we match the colors on drag selection in
+   all areas, shouldn't this be done by default? It seems we're reinventing
+   stuff vs reusing it."*
+
+   Matching them by hand is the thing that failed: the node tree and the level
+   list each grew their own grip block, their own ghost opacity and their own
+   row hover — and the two hovers were DIFFERENT COLOURS, one of which
+   (`--page` on `--surface`, three units) had already been measured as
+   rendering nothing. Every declaration in both files was correct. The defect
+   was that there were two of them.
+
+   So the shared rules live in ONE file and both surfaces `composes:` them, and
+   this audit makes that a property the suite checks rather than a habit:
+
+     - `missingDragCompose`  — a drag surface that does not compose from the
+                               shared file has quietly started its own copy.
+     - `unsharedDragRules`   — the drag mechanics (`cursor: grab`,
+                               `user-select: none`, `touch-action: none`) and
+                               the shared tokens may be written in the shared
+                               file and NOWHERE else.
+     - `rawDragColours`      — a drag surface must reach a colour through a
+                               `--drag-*` / `--drop-*` token, never through the
+                               raw semantic one, so the two surfaces cannot
+                               diverge one edit at a time.
+
+   Same shape as `missingControlFontReset` (D89): the fix is a default, and the
+   audit is what stops the default being forgotten.
+
+   ⚠️ COMMENTS ARE STRIPPED FIRST, and this is not a nicety — these files
+   explain themselves in prose that quotes the very declarations being looked
+   for, and a matcher that reads comments flags the file documenting the rule.
+   That mistake has now been made three times on this project.
+   --------------------------------------------------------------------------- */
+
+/** The one file allowed to declare a shared drag rule. */
+export const DRAG_SHARED_SURFACE = "src/features/admin/components/dragSurface.module.css";
+
+/** Every stylesheet that participates in an admin drag gesture. */
+export const DRAG_SURFACES: readonly string[] = [
+  "src/features/admin/components/NodeTreeEditor.module.css",
+  "src/features/admin/components/LevelEditor.module.css",
+];
+
+/**
+ * Declarations that belong to `DRAG_SHARED_SURFACE` and to nothing else.
+ * Written whitespace-free because that is how they are compared.
+ */
+export const SHARED_DRAG_DECLARATIONS: readonly string[] = [
+  "cursor:grab",
+  "cursor:grabbing",
+  "user-select:none",
+  "touch-action:none",
+  "var(--drag-row-hover)",
+  "var(--drag-grip)",
+  "var(--drag-grip-hover)",
+  "var(--drag-ghost-opacity)",
+];
+
+/**
+ * Raw semantic colours a drag surface must not name directly. `--signal-ok` is
+ * the whole drag vocabulary's green; it is reached as `--drag-caret` (the
+ * insertion line) or `--drop-ok` (the chosen target), which is what lets the
+ * two be re-pointed at once.
+ */
+export const RAW_DRAG_COLOURS: readonly string[] = ["var(--signal-ok)"];
+
+function withoutComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/** Comment-free and whitespace-free, so `cursor : grab` and `cursor:grab` match. */
+function squeezed(css: string): string {
+  return withoutComments(css).replace(/\s+/g, "").toLowerCase();
+}
+
+/** True when a drag surface never composes from the shared file at all. */
+export function missingDragCompose(css: string): boolean {
+  return !squeezed(css).includes('from"./dragsurface.module.css"');
+}
+
+/** Shared drag rules a surface has re-declared locally. Empty is the pass. */
+export function unsharedDragRules(
+  css: string,
+  needles: readonly string[] = SHARED_DRAG_DECLARATIONS,
+): string[] {
+  const flat = squeezed(css);
+  return needles.filter((n) => flat.includes(n.replace(/\s+/g, "").toLowerCase()));
+}
+
+/** Raw semantic colours a surface reached past its drag tokens to name. */
+export function rawDragColours(
+  css: string,
+  needles: readonly string[] = RAW_DRAG_COLOURS,
+): string[] {
+  const flat = squeezed(css);
+  return needles.filter((n) => flat.includes(n.replace(/\s+/g, "").toLowerCase()));
+}
+
+/**
+ * Every `--drag-*` / `--drop-*` custom property READ anywhere in the given
+ * stylesheets that `tokens.css` does not DEFINE. A token nobody defines
+ * silently resolves to nothing, which for a colour means "transparent" and for
+ * an opacity means the declaration is dropped -- both of which look like a
+ * design choice rather than a typo.
+ */
+export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]): string[] {
+  const defined = new Set(
+    [...withoutComments(tokensCss).matchAll(/(--(?:drag|drop)-[a-z0-9-]+)\s*:/g)].map((m) => m[1]),
+  );
+  const used = new Set<string>();
+  for (const sheet of sheets) {
+    for (const m of withoutComments(sheet).matchAll(/var\(\s*(--(?:drag|drop)-[a-z0-9-]+)/g)) {
+      used.add(m[1]);
+    }
+  }
+  return [...used].filter((t) => !defined.has(t)).sort();
 }

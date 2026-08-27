@@ -63,4 +63,38 @@
   /* P1-4a addendum (see file header) */
   --avatar-fg: #fff;
   --understaffed-fg: #6b4c00;
+
+  /* -------------------------------------------------------------------------
+     DRAG AFFORDANCE — ONE SET OF VALUES FOR EVERY DRAGGABLE SURFACE (D100).
+
+     Pratik, Aug 27: *"Can we make sure we match the colors on drag selection in
+     all areas, shouldn't this be done by default? It seems we're reinventing
+     stuff vs reusing it."* He was right, and the audit that followed found the
+     two admin drag surfaces disagreeing in three places at once:
+
+       - the row hover was `--page` on the node tree and `--ring` on the level
+         list. `--page` on `--surface` is a THREE-UNIT difference — the exact
+         value P1-5g already measured as rendering nothing — so one surface's
+         hover was invisible and the other's was not;
+       - the level list faked its padding with a `box-shadow` spread because its
+         rows had none, while the tree used real padding;
+       - and every drag colour was written as the raw semantic token
+         (`--signal-ok`, `--crit`, `--axis`) in two files, so "matching" was a
+         thing somebody had to remember rather than a thing that was true.
+
+     This is D84's lesson in a second domain: **make it the behaviour of the
+     unit, not a discipline.** A drag surface names `--drag-*` / `--drop-*` and
+     cannot drift, and `dragSurface.module.css` owns the rules themselves.
+     `scaleAudit`'s drag audit fails the suite if either file re-declares one of
+     the shared rules or reaches past these tokens to the raw colour.
+     ------------------------------------------------------------------------- */
+  --drag-grip: var(--muted); /* 3.50:1 on --surface; --grid was 1.29:1 */
+  --drag-grip-hover: var(--ink-2);
+  --drag-row-hover: var(--ring);
+  --drag-ghost-opacity: 0.45;
+  --drag-caret: var(--signal-ok);
+  --drag-caret-knob: 0.4375rem;
+  --drop-ok: var(--signal-ok);
+  --drop-blocked: var(--crit);
+  --drop-eligible: var(--axis);
 }

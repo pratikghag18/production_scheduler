@@ -28,13 +28,16 @@
   gap: var(--level-row-gap);
 }
 
+/* D100: padding, radius, `cursor: grab` and the hover tint come from
+   `dragSurface.module.css`, the ONE copy shared with the node tree. This row
+   previously had no padding at all and faked it with a `box-shadow` spread so
+   the tint had something to fill — a reinvention of the tree's real padding,
+   and one of the three ways the two surfaces disagreed. */
 .row {
+  composes: dragRow from "./dragSurface.module.css";
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  /* P1-6e. The whole row has been a drag source for mouse and pen since P1-5l
-     (D95a) and said so nowhere. See the block at the foot of this file. */
-  cursor: grab;
 }
 
 .moveCol {
@@ -83,16 +86,6 @@
 
 .nameInputInvalid {
   border-color: var(--crit);
-}
-
-/* `cursor: grab` on `.row` inherits into everything inside it, so the two
-   controls that never had a cursor of their own have to state theirs, or the
-   row would promise a drag over a text field it refuses to start one from --
-   the same wrong-signal-in-the-wrong-place the grip exists to fix. The three
-   buttons already carry `pointer`. */
-.nameInput,
-.nameInputInvalid {
-  cursor: text;
 }
 
 .radioLabel {
@@ -234,7 +227,7 @@
 .caretBefore,
 .caretAfter {
   position: relative;
-  --caret-knob: 0.4375rem;
+  --caret-knob: var(--drag-caret-knob);
   --caret-half-rule: 0.0625rem;
 }
 
@@ -245,7 +238,7 @@
   left: 0;
   right: 0;
   height: 0;
-  border-top: 2px solid var(--signal-ok);
+  border-top: 2px solid var(--drag-caret);
   z-index: 1;
 }
 
@@ -265,7 +258,7 @@
   width: var(--caret-knob);
   height: var(--caret-knob);
   border-radius: 50%;
-  background: var(--signal-ok);
+  background: var(--drag-caret);
   z-index: 2;
 }
 
@@ -277,102 +270,49 @@
   bottom: calc(-0.5 * var(--level-row-gap) - var(--caret-knob) / 2);
 }
 
-/* The row being dragged, shown as lifted out of the list. Matches
-   `.rowDragging` in the node tree. */
+/* D100: both shared with the node tree. `.dragging` also switches OFF the row
+   hover tint while a drag is live — see below, and see `dragSurface.module.css`. */
 .rowDragging {
-  opacity: 0.45;
+  composes: ghost from "./dragSurface.module.css";
 }
 
-/* While a drag is live, nothing in the list should select text. */
-.dragging,
-.dragging * {
-  user-select: none;
+.dragging {
+  composes: noSelect from "./dragSurface.module.css";
 }
 
 /* ---------------------------------------------------------------------------
-   P1-6e — THE GRIP. A shipped mechanism nobody could find.
+   P1-6e / D100 — WHAT IS LEFT HERE AFTER THE SHARED FILE TOOK THE REST.
 
-   MEASURED before this existed, not reasoned: every pixel of a level row
-   hit-tested with the component's own guard (`closest("button, input, label")
-   !== null -> return`). 16.3% of the row started a drag, and along the row's
-   horizontal centre line **21 px of 526** -- three 7 px flex gutters between
-   the four controls. There was no handle and no `cursor: grab` anywhere; the
-   only cursor that changed on the row was `pointer`, over the buttons, which
-   are exactly the parts that are NOT draggable. The affordance pointed at the
-   one place the gesture does not work.
+   MEASURED before any of this existed, by hit-testing every pixel of a rendered
+   row with the component's own guard: 16.3% of the row started a drag, and along
+   the row's horizontal centre line **21 px of 526** — three 7 px flex gutters
+   between four controls. No handle, and no `cursor: grab` anywhere; the only
+   cursor that changed was `pointer`, over the buttons, which are exactly the
+   parts that are NOT draggable.
 
-   Two changes, because there are two questions and one answer cannot serve
-   both:
+   The grip, the grab cursor, the hover tint, the ghost and the text-selection
+   lock all now live in `dragSurface.module.css`. What stays here is the two
+   things this surface does differently, and both are geometry rather than
+   taste:
 
-   - **The handle** is a target you can hit, and it is the only one a finger
-     gets: `touch-action: none` lives here alone, since putting it on the whole
-     row would leave nowhere on this list for a touch to scroll from (D95a).
-   - **`cursor: grab` on `.row` plus a hover tint** is what tells a mouse that
-     the rest of the row drags too -- which it always did.
+   1. `cursor: grab` inherits into every child, so the two controls that never
+      had a cursor of their own have to state theirs — or the row promises a
+      drag over a text field it refuses to start one from, which is the
+      wrong-signal-in-the-wrong-place the grip exists to fix.
+   2. THE SEAM IS NOT WHERE THE TREE'S IS. `.tree` is a GAPLESS column, so row
+      i's bottom edge is row i+1's top edge and its caret sits at `top: 0`. This
+      list has `gap: var(--level-row-gap)` between rows, so the seam is a BAND,
+      not an edge, and the caret is centred in it. Reusing the tree's `0` here
+      would draw the caret against one row's edge rather than between two rows.
 
-   Declaration-for-declaration identical to `NodeTreeEditor.module.css`'s
-   `.dragHandle`, on purpose: two admin surfaces with the same gesture and two
-   different conventions is the thing this project keeps paying for.
+   Every length is `rem` apart from the 2px caret rule itself (a hairline,
+   exempt in `scaleAudit`'s `unscaledPxLengths`).
    --------------------------------------------------------------------------- */
 .dragHandle {
-  flex: none;
-  width: 1.375rem;
-  height: 1.375rem;
-  border: 0;
-  border-radius: 0.3125rem;
-  background: transparent;
-  /* ⚠️ `--muted`, NOT the `--grid` the tree shipped with. MEASURED: --grid
-     (#e1e0d9) on --surface (#fcfcfb) is **1.29:1**, and on the hover ground
-     (--ring over --surface, #e4e4e3) it is **1.04:1** — a grip that is
-     technically present and effectively not there, which is the exact defect
-     P1-6e exists to fix, arriving in a different colour. --muted is 3.50:1
-     resting and --ink-2 is 6.24:1 on hover. `NodeTreeEditor.module.css` was
-     changed in the same stroke so the two stay declaration-identical. */
-  color: var(--muted);
-  cursor: grab;
-  font-size: 0.75rem;
-  line-height: 1;
-  padding: 0;
-  /* A touch drag must move the level, not scroll the page. */
-  touch-action: none;
+  composes: grip from "./dragSurface.module.css";
 }
 
-.row:hover .dragHandle,
-.dragHandle:focus-visible {
-  color: var(--ink-2);
-}
-
-.dragHandle:active {
-  cursor: grabbing;
-}
-
-/* ⚠️ THE TINT IS `--ring`, NOT `--page`. `--page` on `--surface` is a
-   three-unit difference and it rendered as NOTHING in P1-5g -- measured, and
-   the reason `.eligible` in the tree is a dashed outline instead. The row has
-   no padding of its own, so the `box-shadow` spread is what lets the tint
-   reach past the flex box's edges without changing the row's geometry by a
-   single pixel; a `padding` here would move every row and re-open the seam the
-   caret is centred in. */
-.row:hover {
-  background: var(--ring);
-  border-radius: 0.3125rem;
-  box-shadow: 0 0 0 0.25rem var(--ring);
-}
-
-/* ⭐ FOUND BY RENDERING THE DRAG STATE, and only by that (rule 2c, and D99's
-   corollary: the state you need is the one with a NEIGHBOUR).
-
-   The caret sits at `-0.5 * --level-row-gap - 1px`, i.e. 3px above the row it
-   marks. The hover tint's `box-shadow` spread reaches 4px above the same row.
-   So on every live drag the pointer is over a row, that row is hovered, and the
-   band's top edge lands ONE PIXEL from the green rule -- the caret stops
-   reading as "the level lands between these two rows" and starts reading as
-   "this row has a green top border". Two marks competing for one seam.
-
-   The tint answers "can I grab this row". Once the row IS grabbed that question
-   is answered, so the tint stands down and the caret owns the seam. The grip's
-   own hover colour stays: it is inside the row, nowhere near the seam. */
-.dragging .row:hover {
-  background: none;
-  box-shadow: none;
+.nameInput,
+.nameInputInvalid {
+  cursor: text;
 }

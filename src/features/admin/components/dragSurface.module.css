@@ -1,0 +1,104 @@
+/* ---------------------------------------------------------------------------
+   D100 — THE ONE COPY OF EVERY RULE THE TWO ADMIN DRAG SURFACES SHARE.
+
+   Pratik, Aug 27, looking at the node tree and the level list side by side:
+   *"Can we make sure we match the colors on drag selection in all areas,
+   shouldn't this be done by default? It seems we're reinventing stuff vs
+   reusing it."*
+
+   They did not match, and "match them" would have been the wrong fix — it makes
+   agreement a thing somebody has to remember, which is precisely how they came
+   apart. Measured before this file existed:
+
+     | thing                | node tree                    | level list                     |
+     |----------------------|------------------------------|--------------------------------|
+     | row hover background | `--page` (3 units, invisible)| `--ring` (visible)             |
+     | row padding          | real, `--row-pad-y`          | none — faked with a box-shadow |
+     | grip                 | its own 14-line block        | a copy of that block           |
+     | ghost opacity        | `0.45`, written out          | `0.45`, written out again      |
+
+   So the rules live HERE and both surfaces `composes:` them. What stays local
+   is only what genuinely differs — the tree's caret indents to the dragged
+   node's depth and its rows are a gapless column, while the level list's caret
+   spans the full width and is centred in a real flex gap. Those two are
+   different geometry, not different taste, and each file says so where it
+   diverges.
+
+   Colours and sizes come from the `--drag-*` / `--drop-*` block in
+   `tokens.css`. Nothing in here or in either surface may write a raw
+   `--signal-ok`; `scaleAudit`'s drag audit fails the suite if one appears, or
+   if either surface grows its own copy of a rule below.
+
+   Every length is `rem` — this directory is walked by `scaleAudit`.
+   --------------------------------------------------------------------------- */
+
+/* A row you can pick up. Composed by `NodeTreeEditor`'s `.row` and
+   `LevelEditor`'s `.row`.
+
+   `--row-pad-y` is NAMED and not a literal because the tree's guide rails bleed
+   through exactly this much vertical padding to join up row to row; a literal
+   in two places drifts. The level list has no rails and simply inherits sane
+   padding it previously did not have — which is what the box-shadow spread was
+   imitating, badly. */
+.dragRow {
+  --row-pad-y: 0.25rem;
+  padding: var(--row-pad-y) 0.25rem;
+  border-radius: 0.375rem;
+  cursor: grab;
+}
+
+/* The whole row is a drag source for mouse and pen (D95a) and used to say so
+   nowhere. Note this is the ONE place the hover colour is written down. */
+.dragRow:hover {
+  background: var(--drag-row-hover);
+}
+
+/* ⚠️ Once the row IS grabbed, "you can grab this" is answered, and the hover
+   tint becomes a second mark competing with the caret for the same seam — on
+   the level list it landed ONE PIXEL from the caret rule and made it read as a
+   border rather than an insertion point. Found by rendering the drag state.
+   `.dragging` sits on each surface's container while a drag is live. */
+.dragging .dragRow:hover {
+  background: none;
+}
+
+/* The `⠿` grip. Always rendered — a hover-only affordance does not exist on
+   touch — and it is the ONLY drag path a finger gets, which is why
+   `touch-action: none` lives here and not on the row: putting it on a whole row
+   leaves nowhere on the surface for a finger to scroll from (D95a). */
+.grip {
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  border: 0;
+  border-radius: 0.3125rem;
+  background: transparent;
+  color: var(--drag-grip);
+  cursor: grab;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0;
+  touch-action: none;
+}
+
+.dragRow:hover .grip,
+.grip:focus-visible {
+  color: var(--drag-grip-hover);
+}
+
+.grip:active {
+  cursor: grabbing;
+}
+
+/* The row being dragged, shown as lifted out of the list. `opacity` is safe on
+   a row — nothing inside it needs to out-render its parent. It is NOT safe on a
+   group, and `NodeTreeEditor` says why where it dims a foreign structure. */
+.ghost {
+  opacity: var(--drag-ghost-opacity);
+}
+
+/* While a drag is live, nothing on the surface should select text. */
+.noSelect,
+.noSelect * {
+  user-select: none;
+}

@@ -370,19 +370,6 @@ export function LevelEditor({
               onPointerUp={handleLevelPointerUp}
               onPointerCancel={handleLevelPointerCancel}
             >
-              {/* P1-6e: the grip comes FIRST, at the row's left edge, where a
-                  reorderable list is looked at. It is a real button so it takes
-                  focus and carries a label; the row handler's `closest("button")`
-                  guard is what stops the same pointerdown being claimed twice. */}
-              <button
-                type="button"
-                className={styles.dragHandle}
-                aria-label={`Drag ${level.name || "level"} to reorder`}
-                onPointerDown={(e) => handleLevelHandlePointerDown(index, e)}
-              >
-                ⠿
-              </button>
-
               <div className={styles.moveCol}>
                 <button
                   type="button"
@@ -391,7 +378,15 @@ export function LevelEditor({
                   aria-label={`Move ${level.name || "level"} up`}
                   onClick={() => setDraft((d) => applyLevelAction(d, { kind: "moveUp", index }))}
                 >
-                  ↑
+                  {/* U+FE0E forces TEXT presentation. Without it Windows falls
+                      through to an emoji font and renders these two glyphs
+                      BLUE — the one colour on the level row that matches
+                      nothing else in the product, and immune to the
+                      `color: var(--ink-2)` above because an emoji glyph carries
+                      its own. Seen in Pratik's screenshot, not in any render
+                      here, because the container's font stack has no emoji
+                      face to fall through to. */}
+                  {"\u2191\uFE0E"}
                 </button>
                 <button
                   type="button"
@@ -400,7 +395,7 @@ export function LevelEditor({
                   aria-label={`Move ${level.name || "level"} down`}
                   onClick={() => setDraft((d) => applyLevelAction(d, { kind: "moveDown", index }))}
                 >
-                  ↓
+                  {"\u2193\uFE0E"}
                 </button>
               </div>
 
@@ -428,6 +423,33 @@ export function LevelEditor({
                 />
                 Schedulable
               </label>
+
+              {/* ⭐ D100 — THE GRIP SITS WHERE THE NODE TREE'S SITS: last but one,
+                  immediately before this row's own menu-equivalent (`×`), exactly
+                  as the tree puts `⠿` immediately before `⋮`.
+
+                  It shipped at the LEFT edge for one day and Pratik's first
+                  reaction was that it looked wrong: *"The drag is also present
+                  right next to arrows which seems weird."* He is right twice
+                  over. It put two ways of moving the same row side by side, so
+                  the pair read as one control with a broken half; and it made
+                  the two admin drag surfaces disagree about where a grip lives,
+                  which is the same reinvention D100 exists to stop. Left-edge is
+                  the more common convention in the abstract; matching the
+                  surface next to it wins, because these two screens are looked
+                  at together.
+
+                  It is a real button so it takes focus and carries a label; the
+                  row handler's `closest("button, input, label")` guard is what
+                  stops the same pointerdown being claimed twice. */}
+              <button
+                type="button"
+                className={styles.dragHandle}
+                aria-label={`Drag ${level.name || "level"} to reorder`}
+                onPointerDown={(e) => handleLevelHandlePointerDown(index, e)}
+              >
+                ⠿
+              </button>
 
               <button
                 type="button"

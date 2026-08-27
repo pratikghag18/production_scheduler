@@ -13,6 +13,14 @@ import {
   missingRemSurfaces,
   missingControlFontReset,
   RESET_CONTROLS,
+  DRAG_SHARED_SURFACE,
+  DRAG_SURFACES,
+  SHARED_DRAG_DECLARATIONS,
+  RAW_DRAG_COLOURS,
+  missingDragCompose,
+  unsharedDragRules,
+  rawDragColours,
+  undefinedDragTokens,
 } from "./scaleAudit";
 
 /**
@@ -179,7 +187,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the six admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the seven admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -195,6 +203,8 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         "src/features/admin/components/NodeTreeEditor.module.css",
         "src/features/admin/components/ShapePicker.module.css",
         "src/features/admin/components/SiteAccessPanel.module.css",
+        // D100: the shared drag rules. Seventh surface, same two-place edit.
+        "src/features/admin/components/dragSurface.module.css",
       ].sort(),
     );
   });
@@ -266,5 +276,117 @@ describe("D89: REM_SURFACES names every admin stylesheet on disk", () => {
     expect(missingRemSurfaces(root, undefined, short)).toEqual([
       "src/features/admin/components/ShapePicker.module.css",
     ]);
+  });
+});
+
+/**
+ * D100 group G (11 cases) — the drag audit.
+ *
+ * Pratik, Aug 27: *"Can we make sure we match the colors on drag selection in
+ * all areas, shouldn't this be done by default? It seems we're reinventing
+ * stuff vs reusing it."*
+ *
+ * The two admin drag surfaces had each grown their own grip block, their own
+ * ghost opacity and their own row hover — and the two hovers were different
+ * colours, one of which (`--page` on `--surface`, three units) had already been
+ * measured as rendering nothing. Every declaration in both files was correct;
+ * the defect was that there were two of them. These cases make "one copy" a
+ * property the suite checks rather than a habit somebody keeps.
+ *
+ * Half the group runs against synthetic CSS, on purpose: a case that only ever
+ * looks at the repo passes for as long as the repo is clean and says nothing
+ * about whether the matcher can fail at all (verification-standard rule 3).
+ */
+describe("scaleAudit.ts: the drag audit (D100)", () => {
+  const read = (f: string): string => readFileSync(`${repoRoot}/${f}`, "utf8");
+
+  it("G1: every drag surface composes from the shared file", () => {
+    expect(DRAG_SURFACES.filter((f) => missingDragCompose(read(f)))).toEqual([]);
+  });
+
+  it("G2: the compose matcher can fail — a surface with no compose is flagged", () => {
+    expect(missingDragCompose(`.row { display: flex; }`)).toBe(true);
+  });
+
+  it("G3: the compose matcher tolerates whitespace and case", () => {
+    expect(missingDragCompose(`.row { composes: dragRow from "./dragSurface.module.css"; }`)).toBe(
+      false,
+    );
+  });
+
+  it("G4: no drag surface re-declares a shared drag rule", () => {
+    const offenders = DRAG_SURFACES.flatMap((f) =>
+      unsharedDragRules(read(f)).map((rule) => `${f}: ${rule}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("G5: the shared file declares every one of them — the list is not vacuous", () => {
+    // Without this, deleting a needle from SHARED_DRAG_DECLARATIONS would make
+    // G4 greener rather than redder. A list that drives a test is itself
+    // untested unless something asserts the list.
+    const shared = read(DRAG_SHARED_SURFACE);
+    const absent = SHARED_DRAG_DECLARATIONS.filter((n) => unsharedDragRules(shared, [n]).length === 0);
+    expect(absent).toEqual([]);
+  });
+
+  it("G6: the rule matcher fires on a locally re-declared grab cursor", () => {
+    expect(unsharedDragRules(`.row { cursor : GRAB ; }`)).toEqual(["cursor:grab"]);
+  });
+
+  it("G7: a shared rule quoted inside a comment is not a re-declaration", () => {
+    // Instrument 37's family: these files explain themselves in prose that
+    // quotes the very declarations being looked for.
+    expect(unsharedDragRules(`/* the shared file sets cursor: grab here */\n.row{gap:1rem}`)).toEqual(
+      [],
+    );
+  });
+
+  it("G8: no drag surface reaches past its tokens to a raw semantic colour", () => {
+    const offenders = DRAG_SURFACES.flatMap((f) =>
+      rawDragColours(read(f)).map((c) => `${f}: ${c}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("G9: the raw-colour matcher fires, and RAW_DRAG_COLOURS is not empty", () => {
+    expect(RAW_DRAG_COLOURS.length).toBeGreaterThan(0);
+    expect(rawDragColours(`.caret { border-top: 2px solid var(--signal-ok); }`)).toEqual([
+      "var(--signal-ok)",
+    ]);
+  });
+
+  it("G10: every --drag-*/--drop-* token the surfaces read is defined in tokens.css", () => {
+    const sheets = [DRAG_SHARED_SURFACE, ...DRAG_SURFACES].map(read);
+    expect(undefinedDragTokens(read("src/styles/tokens.css"), sheets)).toEqual([]);
+  });
+
+  // ⭐ G12 EXISTS BECAUSE A MUTATION ESCAPED. Quietly deleting a needle from
+  // SHARED_DRAG_DECLARATIONS was caught by NOTHING: G4 finds one fewer thing to
+  // complain about and G5 has one fewer thing to require, so both go greener.
+  // Same hole R10 exists to close one level up — a list that drives a test is
+  // itself untested unless something asserts the list.
+  it("G12: SHARED_DRAG_DECLARATIONS is exactly these eight", () => {
+    expect([...SHARED_DRAG_DECLARATIONS].sort()).toEqual(
+      [
+        "cursor:grab",
+        "cursor:grabbing",
+        "user-select:none",
+        "touch-action:none",
+        "var(--drag-row-hover)",
+        "var(--drag-grip)",
+        "var(--drag-grip-hover)",
+        "var(--drag-ghost-opacity)",
+      ].sort(),
+    );
+  });
+
+  it("G11: the token matcher fires on one nobody defined", () => {
+    // A token nobody defines resolves to nothing: for a colour that is
+    // transparent, for an opacity the whole declaration is dropped. Both look
+    // like a design choice rather than a typo.
+    expect(
+      undefinedDragTokens(`:root { --drag-grip: red; }`, [`.x { color: var(--drag-invented); }`]),
+    ).toEqual(["--drag-invented"]);
   });
 });

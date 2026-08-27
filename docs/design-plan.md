@@ -5470,3 +5470,195 @@ Four read-only surveys on disjoint targets, run concurrently, all four useful,
 zero conflict. That is the shape [[agent-run-hazards]] already records, and it
 held: **groundwork surveys for undesigned features are the reliable parallel
 lane, and building four screens at once is not.**
+
+---
+
+## §19.58 — D100: one drag surface, two screens. "Shouldn't this be done by default?"
+
+Pratik, looking at the node tree and the level list side by side the morning
+after P1-6e:
+
+> *"Can we make sure we match the colors on drag selection in all areas,
+> shouldn't this be done by default? It seems we're reinventing stuff vs
+> reusing it. The drag is also present right next to arrows which seems weird."*
+
+Three separate observations, all correct, and the first one names the fix: **by
+default**, not by matching.
+
+### What was actually different, measured
+
+| | node tree | level list |
+|---|---|---|
+| row hover background | `--page` — three units on `--surface` | `--ring` |
+| row padding | real, `--row-pad-y` | none, faked with a `box-shadow` spread |
+| grip block | its own 14 lines | a copy of those 14 lines |
+| ghost opacity | `0.45`, written out | `0.45`, written out again |
+| grip position | last but one, before `⋮` | **first**, at the left edge |
+| caret / drop colour | `var(--signal-ok)` | `var(--signal-ok)` |
+
+**Every declaration in both files was correct. The defect was that there were
+two of them** — and one of the two hovers was the exact `--page`-on-`--surface`
+value P1-5g had already measured as rendering nothing, so "matching" would have
+meant copying an invisible tint onto the second screen.
+
+### The fix is D84's fix, in a second domain
+
+D84's lesson was *scaling is the behaviour of the UNIT, not a discipline*. Same
+move here:
+
+- **`src/styles/tokens.css` gains a `--drag-*` / `--drop-*` block.** Nothing in a
+  drag surface names `--signal-ok` any more; it names `--drag-caret` or
+  `--drop-ok`, so the two can be re-pointed in one place.
+- **`dragSurface.module.css` is new and owns the RULES**, not just the values:
+  `.dragRow` (padding, radius, `cursor: grab`, the hover tint, and the
+  suppression of that tint while a drag is live), `.grip`, `.ghost`,
+  `.noSelect`. Both surfaces `composes:` them.
+- **What stays local is only what genuinely differs**, and it is geometry rather
+  than taste: the tree's caret indents to the dragged node's depth in a gapless
+  column, the level list's spans the full width and is centred in a real flex
+  gap. Each file says so where it diverges.
+
+The level list gained real padding in the process and lost the `box-shadow`
+spread that was imitating it — the reinvention removing itself.
+
+### ⭐ And the audit, because a default that nobody checks is a habit
+
+`scaleAudit.ts` grows a drag audit with four functions and twelve cases
+(group G):
+
+- `missingDragCompose` — a drag surface that stops composing has started its own copy.
+- `unsharedDragRules` — `cursor: grab`, `cursor: grabbing`, `user-select: none`,
+  `touch-action: none` and the four shared tokens may be written in the shared
+  file and **nowhere else**.
+- `rawDragColours` — no drag surface may name `var(--signal-ok)` directly.
+- `undefinedDragTokens` — every `--drag-*` / `--drop-*` a surface reads must be
+  defined in `tokens.css`. An undefined token resolves to nothing: for a colour
+  that is transparent, for an opacity the whole declaration is dropped, and both
+  look like a design choice rather than a typo.
+
+**10 mutations, all 10 caught** — and the tenth exists because the ninth
+escaped:
+
+| # | breakage | verdict | killed by |
+|---|---|---|---|
+| V1 | the level list grows its own `cursor: grab` again | CAUGHT | G4 |
+| V2 | the node tree grows its own grip block again | CAUGHT | G4 |
+| V3 | the level caret goes back to the raw `--signal-ok` | CAUGHT | G8 |
+| V4 | the tree's drop ring goes back to the raw `--signal-ok` | CAUGHT | G8 |
+| V5 | a surface reads a token nobody defines | CAUGHT | G10 |
+| V6 | `--drag-row-hover` is deleted from `tokens.css` | CAUGHT | G10 |
+| V7 | the shared file stops declaring `touch-action` | CAUGHT | G5 |
+| V8 | the new stylesheet is dropped from `REM_SURFACES` | CAUGHT | R10 |
+| V9 | a needle is quietly removed from `SHARED_DRAG_DECLARATIONS` | **CAUGHT by G12, which exists because of this** | G12 |
+| V10 | the comment stripper is removed from the drag matchers | CAUGHT | G4, G7 |
+
+**V9 is the one to read.** Deleting `"user-select:none"` from the needle list was
+caught by *nothing*: G4 finds one fewer thing to complain about and G5 has one
+fewer thing to require, so both go **greener**. That is the standing finding *a
+list that drives a test is itself untested unless something asserts the list* —
+the same hole `R10` exists to close one level up — and **G12 is that assertion**,
+a sorted literal of all eight.
+
+Half of group G runs against synthetic CSS on purpose (rule 3): a case that only
+ever looks at the repo passes for as long as the repo is clean and says nothing
+about whether the matcher can fail at all.
+
+### The grip moved, and the reason is his
+
+*"The drag is also present right next to arrows which seems weird."* Right
+twice over: it put two ways of moving the same row side by side, so the pair
+read as one control with a broken half; and it made the two surfaces disagree
+about where a grip lives, which is the reinvention D100 exists to stop. It now
+sits **last but one, immediately before `×`** — exactly as the tree puts `⠿`
+immediately before `⋮`. Left-edge is the more common convention in the abstract;
+**matching the surface next to it wins, because these two screens are looked at
+together.**
+
+### ⭐ And a colour that matched nothing, visible only in HIS screenshot
+
+The level row's `↑` / `↓` render **blue** on his machine. Not a stylesheet bug:
+`U+2191` / `U+2193` have emoji presentation, Windows falls through to an emoji
+font, and an emoji glyph carries its own colour — immune to the
+`color: var(--ink-2)` two lines above it. **No render in this container could
+ever have shown it**, because the container's font stack has no emoji face to
+fall through to. Fixed with `U+FE0E`, the text-presentation selector.
+**Worth keeping as a class: a font-fallback defect is invisible to every
+screenshot taken on a different machine.**
+
+### Verification
+
+- `tsc -b --force` exit 0; `eslint` exit 0 on the four touched TS files.
+- Scale audit re-run against the real files: **7 `REM_SURFACES` entries, 7 admin
+  stylesheets on disk, zero unlisted, zero unscaled px lengths.**
+- `scaleAudit.test.ts` run end to end in a shim against the real module:
+  **45 reported, 45 pass** (33 before). `levelDraft.test.ts` re-run unchanged:
+  79 of 79.
+- **Rendered both surfaces side by side in three states and looked at the
+  picture** — `docs/mockups/d100-drag-surface.png`. `p1-6e-level-grip.png` was
+  regenerated from the current files rather than left showing the old left-edge
+  grip; a mockup that lies is decision-record drift with pictures.
+- **Re-measured after the move: the level row's centre line goes 21 px → 61 px**
+  (53 before the row gained real padding), and the grab cursor falls on exactly
+  those 61. The tree row measures 457 of 495, unchanged — a level row is mostly
+  a text field and can never match that, which is the whole reason it needs a
+  grip and the tree barely does.
+- **Suite prediction 701 → 713, still 19 files.**
+- **One instrument note, third occurrence:** the shim used for the run above was
+  missing `toMatch` and scored a real case as CRASHED. Grep the suite for the
+  matchers it uses before writing the shim.
+
+---
+
+## §19.59 — D101 and D102: shift patterns and product colours are the site admin's, with defaults
+
+Both asked in §19.57's blockers; both answered in one line:
+
+> *"The shift pattern will be per-site, we can have defaults but I'd rather the
+> site admin set them up for their site, same thing for colours."*
+
+### D101 — shift patterns are per-site
+
+This settles the contradiction §19.57 found between §16's *"attached to any
+node, org-admin"* and the roadmap's *"becomes site-owned"*. **Site-owned wins**,
+and it means shift templates join `operators` / `products` / `skills` in
+migration 0023 rather than sitting outside it. Consequences, so the brief is not
+written against a guess:
+
+- `shift_templates` and `shifts` are org-scoped today with no owning-node
+  column, and their RLS asks `app_is_admin()` — the org-wide flag. Both change.
+- *"We can have defaults"* is the same rule 0023 already carries for the other
+  lists: **an entry with no owner stays company-wide.** A company admin seeds a
+  standard pattern once; a site admin's own patterns sit alongside it.
+- **The nearest-ancestor inheritance (§16) is untouched.** Which template a node
+  runs is still resolved up the tree; ownership decides who may *edit* the
+  template, not which one applies.
+
+### D102 — a product's colour belongs to whoever owns the product
+
+Today `--product-1…4` are handed out **by position** in an org-wide list, so
+inserting a product re-shuffles the colours of the existing ones and the fifth
+product has none. §19.57 flagged it because a Products screen cannot avoid
+showing a colour and there was no stable one to show.
+
+The decision, in the same shape as everything else here: **whoever owns the row
+owns its colour.**
+
+- `products` gains a colour, stored as a **palette token name, never a hex** —
+  the board resolves it through `tokens.css`, so a theme change stays one edit
+  and the value cannot escape `scaleAudit`'s reach the way D89's inline
+  `paddingLeft` did.
+- Nullable, with a **deterministic default** assigned within the owner's scope,
+  so an unset product still has a stable colour and *"we can have defaults"* is
+  literally true.
+- The palette grows past four. Four was the mockup's cast, not a design.
+- A site admin edits the colour of the products their site owns; a company-wide
+  product's colour is the company admin's. **No `(site, product)` override
+  table** — that was the alternative and it is rejected here on purpose: it
+  makes one product two different colours on two boards, which is exactly the
+  confusion a colour exists to prevent, and it doubles the resolution path for a
+  case nobody has asked for.
+
+**Both land in migration 0023**, which is D96's rule (Pratik's CLI is the scarce
+serial resource, so a migration plus its regenerated types is one round trip)
+and is now carrying: owning site on operators / products / skills /
+shift_templates, plus the product colour column and its default.

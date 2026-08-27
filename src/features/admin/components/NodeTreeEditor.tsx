@@ -370,7 +370,7 @@ export function NodeTreeEditor({
     if (zone === null) return undefined;
     // The adopt tick sits at a CHILD's elbow -- one rail in from this row.
     if (zone.kind === "adopt") {
-      return { "--drop-rails": dropRailIndex(row.depth) } as React.CSSProperties;
+      return { "--tick-rails": dropRailIndex(row.depth) } as React.CSSProperties;
     }
     // The caret sits at the DRAGGED node's depth, and for a sibling placement
     // that is this reference row's own depth. `row.depth`, not `row.depth + 1`:

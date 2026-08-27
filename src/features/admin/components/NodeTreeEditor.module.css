@@ -98,15 +98,15 @@
   white-space: nowrap;
 }
 
+/* D100: padding, radius, `--row-pad-y`, `cursor: grab` and the hover tint all
+   come from `dragSurface.module.css` — the ONE copy shared with the level
+   list. `--row-pad-y` keeps its name there precisely because the guide rails
+   below bleed through exactly that much to join up row to row. */
 .row {
+  composes: dragRow from "./dragSurface.module.css";
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  /* Named, because the tree guides below must bleed through exactly this much
-     vertical padding to join up row-to-row. A literal in both places drifts. */
-  --row-pad-y: 0.25rem;
-  padding: var(--row-pad-y) 0.25rem;
-  border-radius: 0.375rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -166,9 +166,6 @@
   border-top: 1px solid var(--grid);
 }
 
-.row:hover {
-  background: var(--page);
-}
 
 .disclosure {
   flex: none;
@@ -321,42 +318,19 @@
    P1-5g — tree drag and drop.
 
    Appended to `NodeTreeEditor.module.css`. Every length is `rem` (D84) and no
-   value here is ever set from a `style` prop except `--drop-rails`, which is a
+   value here is ever set from a `style` prop except `--tick-rails`, which is a
    UNITLESS COUNT — the rem arithmetic stays in this file, so the indent cannot
    escape `scaleAudit` the way D90's inline `paddingLeft: depth * 18` did (D89).
    Hairline borders stay in px, as everywhere else in this file.
    --------------------------------------------------------------------------- */
 
-/* The drag handle. Always rendered — a hover-only affordance does not exist on
-   touch — but low-contrast until its row is hovered or it takes focus. */
+/* D100: the grip, its hover colour and its `touch-action` are ONE block, in
+   `dragSurface.module.css`. This file used to carry its own fourteen-line copy
+   and the level list carried a second — which is how the handle came to ship at
+   1.29:1 contrast on BOTH surfaces and get fixed on neither until it was
+   measured. */
 .dragHandle {
-  flex: none;
-  width: 1.375rem;
-  height: 1.375rem;
-  border: 0;
-  border-radius: 0.3125rem;
-  background: transparent;
-  /* P1-6e, and this file had the defect first. MEASURED: --grid (#e1e0d9) on
-     --surface (#fcfcfb) is 1.29:1 — below the 3:1 a non-text affordance needs
-     and low enough that the handle reads as absent. --muted is 3.50:1.
-     Identical to `LevelEditor.module.css`'s `.dragHandle`, which is the whole
-     point of the copy. */
-  color: var(--muted);
-  cursor: grab;
-  font-size: 0.75rem;
-  line-height: 1;
-  padding: 0;
-  /* A touch drag must move the node, not scroll the page. */
-  touch-action: none;
-}
-
-.row:hover .dragHandle,
-.dragHandle:focus-visible {
-  color: var(--ink-2);
-}
-
-.dragHandle:active {
-  cursor: grabbing;
+  composes: grip from "./dragSurface.module.css";
 }
 
 /* Every legal destination for the node currently being dragged. This is the
@@ -371,20 +345,20 @@
      invisible while every declaration was correct. D89's shape exactly.
      Dashed rather than solid because these rows are POSSIBLE destinations, not
      the chosen one; the chosen one is `.dropOk`, which is solid. */
-  outline: 1px dashed var(--axis);
+  outline: 1px dashed var(--drop-eligible);
   outline-offset: -1px;
 }
 
-/* The row being dragged, shown as lifted out of the tree. `opacity` is safe
-   here — nothing inside it needs to out-render its parent. */
+/* D100: shared with the level list. `opacity` is safe on a ROW; the note where
+   this file dims a foreign structure explains why it is not safe on a group. */
 .rowDragging {
-  opacity: 0.45;
+  composes: ghost from "./dragSurface.module.css";
 }
 
 /* The row under the pointer, when the drop is legal. */
 .dropOk {
   background: var(--page);
-  box-shadow: inset 0 0 0 2px var(--signal-ok);
+  box-shadow: inset 0 0 0 2px var(--drop-ok);
   /* The chosen target is also an eligible one; suppress the dashed hint so the
      two treatments do not stack on the same row. */
   outline: none;
@@ -392,7 +366,7 @@
 
 /* The row under the pointer, when it is not. */
 .dropBlocked {
-  box-shadow: inset 0 0 0 2px var(--crit);
+  box-shadow: inset 0 0 0 2px var(--drop-blocked);
   cursor: not-allowed;
 }
 
@@ -446,16 +420,16 @@
 .dropTick::after {
   content: "";
   position: absolute;
-  left: calc(0.25rem + var(--drop-rails) * 1.125rem + 0.5rem);
+  left: calc(0.25rem + var(--tick-rails) * 1.125rem + 0.5rem);
   /* Just INSIDE `.dropOk`'s 2px inset ring, not on it. `bottom: 0` was the
      first fix and it made the tick VANISH — the ring already paints the row's
-     outer 2px `--signal-ok`, so a 2px rule at the same coordinate is the same
+     outer 2px `--drop-ok`, so a 2px rule at the same coordinate is the same
      colour on the same pixels. That is the D89 family: an affordance that is
      not on screen, with a green suite either way. Rendered both ways before
      choosing this one. */
   bottom: 0.125rem;
   width: 0.875rem;
-  border-top: 2px solid var(--signal-ok);
+  border-top: 2px solid var(--drag-caret);
 }
 
 /* A whole site-structure block that cannot hold the dragged node at all
@@ -540,10 +514,10 @@
   color: var(--crit);
 }
 
-/* While a drag is live, nothing in the tree should select text. */
-.dragging,
-.dragging * {
-  user-select: none;
+/* D100: shared. This class also switches OFF the row hover tint while a drag is
+   live, so the caret owns the seam — see `dragSurface.module.css`. */
+.dragging {
+  composes: noSelect from "./dragSurface.module.css";
 }
 
 /* The drag verdict, announced. The floating chip is `aria-hidden` chrome
@@ -587,7 +561,7 @@
 
    The caret starts at the indent the dragged node will occupy and carries a
    knob there, so a caret at depth 3 cannot be read as one at depth 2.
-   `--caret-rails` is set inline per row exactly as `--drop-rails` is for the
+   `--caret-rails` is set inline per row exactly as `--tick-rails` is for the
    adopt tick, and is a UNITLESS COUNT — all the rem arithmetic stays here,
    where `scaleAudit` can read it (D89).
 
@@ -602,7 +576,7 @@
   position: relative;
   /* The knob's diameter, named so the centring arithmetic below reads as
      centring rather than as three unrelated magic numbers. */
-  --caret-knob: 0.4375rem;
+  --caret-knob: var(--drag-caret-knob);
   /* Half the 2px rule — where the line's own centre sits, measured from the
      seam the line is drawn against. */
   --caret-half-rule: 0.0625rem;
@@ -615,7 +589,7 @@
   left: calc(0.25rem + var(--caret-rails) * 1.125rem + 0.5rem);
   right: 0.25rem;
   height: 0;
-  border-top: 2px solid var(--signal-ok);
+  border-top: 2px solid var(--drag-caret);
   z-index: 1;
 }
 
@@ -637,7 +611,7 @@
   width: var(--caret-knob);
   height: var(--caret-knob);
   border-radius: 50%;
-  background: var(--signal-ok);
+  background: var(--drag-caret);
   z-index: 2;
 }
 
