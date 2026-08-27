@@ -56,13 +56,14 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { useSession } from "@/features/auth/useSession";
 import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import {
+  addedProblems,
   clockToMinutes,
   dayOffset,
   minutesToClock,
   patternRows,
   validatePatternDraft,
   type BreakDraft,
-  type DraftProblem,
+  type BreakView,
   type PatternDraft,
   type PatternView,
   type ShiftDraft,
@@ -74,6 +75,7 @@ import {
   useCreatePattern,
   useCreateShift,
   useDeleteBreak,
+  useUpdateBreak,
   useDeletePattern,
   useDeleteShift,
   useDetachPattern,
@@ -139,35 +141,9 @@ function toPatternDraft(p: PatternView, shifts: readonly ShiftDraft[]): PatternD
   return { id: p.id, name: p.name, shifts };
 }
 
-/**
- * The problems a change WOULD ADD, and only those.
- *
- * Validating the edited pattern on its own reports everything already wrong
- * with it — including rows this person has not touched and may not be able to
- * fix — which reads as "your new shift is invalid" when it is not. Comparing
- * against the same pattern before the change leaves exactly the sentences the
- * change is responsible for.
- *
- * ⚠️ IDENTITY IS (field, shiftIndex, breakIndex), NOT THE MESSAGE. The
- * outside-shift sentence embeds the SHIFT's own label, so editing the shift's
- * times rewrote the sentence for a break nobody had touched, the new string was
- * absent from `was`, and the edit was blocked — permanently, since the panel
- * offers no way to move a break, only to remove it. The refusal then quoted the
- * break, not the times the person had just changed. Measured 27 Aug on a night
- * shift carrying a stray 10:00–11:00 break, which the DB allows and
- * `patternRows` deliberately renders flagged. The message is what we SHOW; the
- * coordinates are what makes two problems the same problem.
- */
-function problemKey(p: DraftProblem): string {
-  return `${p.field}|${p.shiftIndex ?? "-"}|${p.breakIndex ?? "-"}`;
-}
-
-function addedProblems(before: PatternDraft, after: PatternDraft): string[] {
-  const was = new Set(validatePatternDraft(before).problems.map(problemKey));
-  return validatePatternDraft(after)
-    .problems.filter((p) => !was.has(problemKey(p)))
-    .map((p) => p.message);
-}
+/* `addedProblems` now lives in `../lib/shiftDraft` — it is pure, it is the
+   piece that carried the 27-Aug defect, and in here it had no test that could
+   reach it. Group W pins it. */
 
 function errorText(e: unknown): string {
   return isSchedulerError(e) ? describeSchedulerError(e) : "Something went wrong. Please try again.";
@@ -232,6 +208,7 @@ export function ShiftsPanel() {
   const deleteShift = useDeleteShift();
   const createBreak = useCreateBreak();
   const deleteBreak = useDeleteBreak();
+  const updateBreak = useUpdateBreak();
   const attachPattern = useAttachPattern();
   const detachPattern = useDetachPattern();
 
@@ -243,6 +220,11 @@ export function ShiftsPanel() {
   const [shiftForm, setShiftForm] = useState<ShiftForm>(BLANK_SHIFT);
   const [shiftEdit, setShiftEdit] = useState<{ id: string; form: ShiftForm } | null>(null);
   const [breakFor, setBreakFor] = useState<{ shiftId: string; form: BreakForm } | null>(null);
+  const [breakEdit, setBreakEdit] = useState<{
+    id: string;
+    shiftId: string;
+    form: BreakForm;
+  } | null>(null);
   const [attachDraft, setAttachDraft] = useState<Readonly<Record<string, string>>>({});
   /** Keyed by the row the message belongs to, so it never lands on a stranger. */
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
@@ -371,6 +353,55 @@ export function ShiftsPanel() {
     );
   }
 
+  /* ⭐ EDITING A BREAK IN PLACE. The write has existed since this panel was
+     built (`useUpdateBreak` -> `shift_breaks.update`) and nothing on screen
+     reached it, so the only way to move a break by five minutes was to delete
+     it and retype it -- which loses the name, and which is a DESTRUCTIVE action
+     offered for a non-destructive intent.
+
+     It validates exactly like the shift edit does: build the pattern as it
+     stands, build it with this break moved, and report only the problems the
+     MOVE is responsible for. `addedProblems` compares by (field, shift, break)
+     coordinates, so a different break already sitting outside its shift does
+     not block this one -- that was the defect found on 27 Aug. */
+  function submitBreakEdit(pattern: PatternView, shift: ShiftView, brk: BreakView) {
+    if (breakEdit === null) return;
+    const key = `edit-break-${brk.id}`;
+    clear(key);
+    const startMin = timeMinutes(breakEdit.form.start);
+    const endMin = timeMinutes(breakEdit.form.end);
+    const existing = pattern.shifts.map(toShiftDraft);
+    const edited = existing.map((sh) =>
+      sh.id === shift.id
+        ? {
+            ...sh,
+            breaks: sh.breaks.map((b) =>
+              b.id === brk.id
+                ? { id: b.id, name: breakEdit.form.name, startMin, endMin }
+                : b,
+            ),
+          }
+        : sh,
+    );
+    const problems = addedProblems(
+      toPatternDraft(pattern, existing),
+      toPatternDraft(pattern, edited),
+    );
+    if (problems.length > 0 || startMin === null || endMin === null) {
+      setRowError({ key, message: problems[0] ?? "Enter a start and an end time." });
+      return;
+    }
+    updateBreak.mutate(
+      {
+        breakId: brk.id,
+        name: breakEdit.form.name.trim() === "" ? "Break" : breakEdit.form.name.trim(),
+        startMin,
+        endMin,
+      },
+      { onSuccess: () => setBreakEdit(null), onError: (e) => fail(key, e) },
+    );
+  }
+
   function applyAttachment(nodeId: string, current: string | null) {
     if (orgId === null) return;
     const key = `node-${nodeId}`;
@@ -492,33 +523,117 @@ export function ShiftsPanel() {
           <p className={styles.rowError}>{errorFor(`edit-shift-${shift.id}`)}</p>
         )}
 
+        {/* ⭐ A TABLE, NOT A SENTENCE. Break names, clock spans and durations are
+            three columns a person reads DOWN -- "which one is the long one",
+            "do these two collide" -- and a flex row put every column at a
+            different x on every line, so nothing could be compared at a glance.
+            The header row is drawn once per shift because the list it labels is
+            nested two levels in; without it "15m" beside "08:00–08:15" reads as
+            a second time rather than a duration. */}
         {shift.breaks.length > 0 && (
           <ul className={styles.breakList}>
-            {shift.breaks.map((b) => (
-              <li className={styles.breakRow} key={b.id}>
-                <span>{b.name}</span>
-                <span className={styles.shiftSpan}>{b.span}</span>
-                <span className={styles.meta}>{b.duration}</span>
-                <span className={styles.spacer} />
-                <button
-                  type="button"
-                  className={styles.linkBtn}
-                  disabled={deleteBreak.isPending}
-                  onClick={() => {
-                    clear(`break-${b.id}`);
-                    deleteBreak.mutate(
-                      { breakId: b.id },
-                      { onError: (e) => fail(`break-${b.id}`, e) },
-                    );
-                  }}
-                >
-                  Remove
-                </button>
-                {errorFor(`break-${b.id}`) !== null && (
-                  <span className={styles.rowError}>{errorFor(`break-${b.id}`)}</span>
-                )}
-              </li>
-            ))}
+            <li className={styles.breakHead} aria-hidden="true">
+              <span>Break</span>
+              <span>Clock</span>
+              <span>Length</span>
+              <span />
+            </li>
+            {shift.breaks.map((b) => {
+              const editingBreak = breakEdit !== null && breakEdit.id === b.id;
+              return (
+                <li className={styles.breakRow} key={b.id}>
+                  <span className={styles.breakName}>{b.name}</span>
+                  <span className={styles.shiftSpan}>{b.span}</span>
+                  <span className={styles.meta}>{b.duration}</span>
+                  <span className={styles.breakActions}>
+                    <button
+                      type="button"
+                      className={styles.linkBtn}
+                      onClick={() => {
+                        clear(`edit-break-${b.id}`);
+                        setBreakEdit(
+                          editingBreak
+                            ? null
+                            : {
+                                id: b.id,
+                                shiftId: shift.id,
+                                form: {
+                                  name: b.name,
+                                  start: timeOf(b.startMin),
+                                  end: timeOf(b.endMin),
+                                },
+                              },
+                        );
+                      }}
+                    >
+                      {editingBreak ? "Cancel" : "Edit"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.linkBtn}
+                      disabled={deleteBreak.isPending}
+                      onClick={() => {
+                        clear(`break-${b.id}`);
+                        deleteBreak.mutate(
+                          { breakId: b.id },
+                          { onError: (e) => fail(`break-${b.id}`, e) },
+                        );
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </span>
+                  {editingBreak && breakEdit !== null && (
+                    <div className={styles.editRow}>
+                      <div className={styles.field}>
+                        <span className={styles.label}>Name</span>
+                        <input
+                          className={styles.input}
+                          aria-label="Break name"
+                          value={breakEdit.form.name}
+                          onChange={(e) =>
+                            setBreakEdit({
+                              ...breakEdit,
+                              form: { ...breakEdit.form, name: e.target.value },
+                            })
+                          }
+                        />
+                      </div>
+                      <TimeField
+                        label="Starts"
+                        value={breakEdit.form.start}
+                        allowNextDay={shift.crossesMidnight}
+                        onChange={(start) =>
+                          setBreakEdit({ ...breakEdit, form: { ...breakEdit.form, start } })
+                        }
+                      />
+                      <TimeField
+                        label="Ends"
+                        value={breakEdit.form.end}
+                        allowNextDay={shift.crossesMidnight}
+                        onChange={(end) =>
+                          setBreakEdit({ ...breakEdit, form: { ...breakEdit.form, end } })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className={styles.primaryBtn}
+                        disabled={updateBreak.isPending}
+                        onClick={() => submitBreakEdit(pattern, shift, b)}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  )}
+                  {errorFor(`break-${b.id}`) !== null && (
+                    <span className={styles.rowError}>{errorFor(`break-${b.id}`)}</span>
+                  )}
+                  {errorFor(`edit-break-${b.id}`) !== null && (
+                    <span className={styles.rowError}>{errorFor(`edit-break-${b.id}`)}</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -570,13 +685,23 @@ export function ShiftsPanel() {
     const confirming = confirmId === pattern.id;
     return (
       <li className={open ? `${styles.patternRow} ${styles.patternRowOpen}` : styles.patternRow} key={pattern.id}>
+        {/* ⚠️ IT HAS TO LOOK LIKE IT OPENS. This was a bare <button> styled with
+            `border:0; background:none`, i.e. indistinguishable from the text in
+            the column beside it — and the whole shift list of a pattern sits
+            behind it. Pratik found it by clicking on the off-chance. A caret
+            that turns, and a name that underlines on hover and focus, is the
+            smallest thing that says "there is more under here". */}
         <button
           type="button"
           className={styles.patternName}
           aria-expanded={open}
           onClick={() => setOpenId(open ? null : pattern.id)}
         >
-          {pattern.name}
+          <span className={styles.caret} aria-hidden="true">
+            {open ? "\u25be" : "\u25b8"}
+          </span>
+          <span className={styles.patternNameText}>{pattern.name}</span>
+          <span className={styles.openHint}>{open ? "hide shifts" : "show shifts"}</span>
         </button>
         <span className={styles.owner}>{pattern.ownerLabel}</span>
         <span className={styles.meta}>

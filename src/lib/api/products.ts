@@ -197,6 +197,49 @@ export async function updateProduct(input: UpdateProductInput): Promise<AdminPro
   return firstProduct(requireWritten(data), "products.update");
 }
 
+export interface SetProductColorInput {
+  id: string;
+  /** A token this stylesheet actually defines — see `PRODUCT_PALETTE`. */
+  colorToken: string;
+}
+
+/**
+ * Sets a product's colour by hand.
+ *
+ * ⭐ THE AUTOMATIC PICK STAYS THE DEFAULT (Pratik, Aug 27). 0023 §3 chooses the
+ * least-used token in the owner's palette at INSERT and D102's whole point was
+ * that a product's colour does not move under you — so nothing here re-picks,
+ * and nothing here fires on a rename or a re-assignment. This is a person
+ * deliberately overriding one row, which is a different act from the system
+ * changing its mind, and it is the only thing that writes this column after
+ * insert.
+ *
+ * ⚠️ A SEPARATE CALL FROM `updateProduct`, NOT AN EXTRA FIELD ON IT. The rename
+ * form and the swatch picker are two controls with two refusals; folding them
+ * into one statement would make a colour change able to fail on a duplicate SKU
+ * and a rename able to fail on a colour. One write, one thing that can be
+ * wrong with it.
+ *
+ * ⚠️ THE PALETTE CHECK IS THE CALLER'S, DELIBERATELY. The column is `NOT NULL`
+ * and CHECKed against `^product-[1-9][0-9]*$`, so the database refuses nonsense
+ * — but `product-9` PASSES that CHECK and renders as no colour at all, which is
+ * the exact defect 0023's upgrade test caught. The narrower rule ("a token
+ * `tokens.css` actually defines") lives in `features/admin/lib/products.ts`
+ * beside the palette itself, and `ProductsPanel` applies it before calling.
+ * It is NOT imported here: this module is what that file imports its types
+ * from, so reaching back into it would make a real runtime import cycle for a
+ * one-line guard.
+ */
+export async function setProductColor(input: SetProductColorInput): Promise<AdminProduct> {
+  const { data, error } = await supabase
+    .from("products")
+    .update({ color_token: input.colorToken })
+    .eq("id", input.id)
+    .select(PRODUCT_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstProduct(requireWritten(data), "products.setColor");
+}
+
 export interface SetProductActiveInput {
   id: string;
   active: boolean;

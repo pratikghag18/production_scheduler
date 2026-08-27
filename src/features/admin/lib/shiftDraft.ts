@@ -396,6 +396,37 @@ export interface DraftProblem {
   message: string;
 }
 
+/**
+ * The problems a change WOULD ADD, and only those.
+ *
+ * Validating the edited pattern on its own reports everything already wrong
+ * with it — including rows this person has not touched and may not be able to
+ * fix — which reads as "your new shift is invalid" when it is not. Comparing
+ * against the same pattern before the change leaves exactly the sentences the
+ * change is responsible for.
+ *
+ * ⚠️ IDENTITY IS (field, shiftIndex, breakIndex), NOT THE MESSAGE, and that
+ * distinction is the whole reason this lives here rather than in the panel.
+ * The outside-shift sentence EMBEDS the shift's own label, so editing a shift's
+ * times rewrites the sentence for a break nobody touched; keyed on the text,
+ * the old problem read as a new one and the edit was blocked — permanently,
+ * since the panel offers no way to move a break, only to remove it. Measured
+ * 27 Aug on a night shift carrying a stray 10:00–11:00 break, which the
+ * database allows and `patternRows` deliberately renders flagged. The message
+ * is what we SHOW; the coordinates are what make two problems the same
+ * problem.
+ */
+export function problemKey(p: DraftProblem): string {
+  return `${p.field}|${p.shiftIndex ?? "-"}|${p.breakIndex ?? "-"}`;
+}
+
+export function addedProblems(before: PatternDraft, after: PatternDraft): string[] {
+  const was = new Set(validatePatternDraft(before).problems.map(problemKey));
+  return validatePatternDraft(after)
+    .problems.filter((p) => !was.has(problemKey(p)))
+    .map((p) => p.message);
+}
+
 export interface DraftValidation {
   ok: boolean;
   /** The name as it would be WRITTEN — trimmed here because nothing trims it later. */

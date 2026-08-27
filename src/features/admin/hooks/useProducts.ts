@@ -26,11 +26,13 @@ import {
   deleteProduct,
   fetchAdminProducts,
   setProductActive,
+  setProductColor,
   updateProduct,
   type AdminProduct,
   type CreateProductInput,
   type SchedulerError,
   type SetProductActiveInput,
+  type SetProductColorInput,
   type UpdateProductInput,
 } from "@/lib/api";
 
@@ -78,6 +80,29 @@ export function useUpdateProduct() {
     mutationFn: (input) => updateProduct(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: productKeys.all });
+    },
+  });
+}
+
+/**
+ * Set one product's colour by hand.
+ *
+ * Its own mutation rather than a field on the rename, because it is its own
+ * control with its own refusal — see `setProductColor`'s header. The automatic
+ * pick at creation is untouched; this only ever overrides one row.
+ */
+export function useSetProductColor() {
+  const queryClient = useQueryClient();
+
+  return useMutation<AdminProduct, SchedulerError, SetProductColorInput>({
+    mutationFn: (input) => setProductColor(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      // ⭐ The BOARD draws from this column too (0023 §3 put `color_token` in
+      // `board_window`), so a colour change that only refreshed the admin list
+      // would leave the board showing the old swatch until something else
+      // happened to invalidate it.
+      void queryClient.invalidateQueries({ queryKey: ["board"] });
     },
   });
 }

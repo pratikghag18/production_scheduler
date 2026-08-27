@@ -183,6 +183,65 @@
   border: 1px solid var(--ring);
 }
 
+/* ⭐ THE SWATCH IS A BUTTON NOW, so it has to be big enough to hit and it has
+   to say so. 0.75rem was fine for a dot that only reported a fact; a control
+   gets 1rem plus a hover ring. Disabled it goes back to reading as a dot,
+   because for a product this person may not edit that is all it is. */
+.swatchBtn {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border-radius: 0.25rem;
+  border: 1px solid var(--ring);
+  cursor: pointer;
+}
+
+.swatchBtn:hover:not(:disabled),
+.swatchBtn:focus-visible {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink-2);
+}
+
+.swatchBtn:disabled {
+  cursor: default;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 0.1875rem;
+}
+
+/* Full-width under the row rather than squeezed into the code column. */
+.palette {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-top: 0.125rem;
+}
+
+.paletteChip {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border-radius: 0.25rem;
+  border: 1px solid var(--ring);
+  cursor: pointer;
+}
+
+.paletteChip:hover:not(:disabled),
+.paletteChip:focus-visible {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink-2);
+}
+
+/* The one it already is. A ring rather than a tick: the chip IS the colour, and
+   a glyph drawn on top of an arbitrary background has no contrast guarantee. */
+.paletteChipOn {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink);
+}
+
+.paletteChip:disabled {
+  cursor: default;
+}
+
 .sku {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

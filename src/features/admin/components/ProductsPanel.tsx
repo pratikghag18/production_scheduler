@@ -36,6 +36,9 @@ import {
   ownerOptions,
   partitionProducts,
   productRows,
+  isPaletteToken,
+  PRODUCT_PALETTE,
+  productColorVar,
   validateProductDraft,
   type ProductRow,
   type ProductSite,
@@ -45,6 +48,7 @@ import {
   useCreateProduct,
   useDeleteProduct,
   useSetProductActive,
+  useSetProductColor,
   useUpdateProduct,
 } from "../hooks/useProducts";
 import styles from "./ProductsPanel.module.css";
@@ -70,11 +74,13 @@ export function ProductsPanel() {
   const updateMutation = useUpdateProduct();
   const activeMutation = useSetProductActive();
   const deleteMutation = useDeleteProduct();
+  const colorMutation = useSetProductColor();
 
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({ sku: "", name: "" });
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [recolouringId, setRecolouringId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   const [newDraft, setNewDraft] = useState({ sku: "", name: "", siteNodeId: "" });
   const [newErrors, setNewErrors] = useState<{ sku: string | null; name: string | null }>({
@@ -239,11 +245,32 @@ export function ProductsPanel() {
           {/* The product's OWN colour (0023 §3), not its position in a list.
               `colorVar` has already fallen back if the token is one this
               stylesheet does not define. */}
-          <span
-            className={styles.swatch}
+          {/* ⭐ THE SWATCH IS THE CONTROL (Pratik, Aug 27). The colour is still
+              CHOSEN for a product when it is created — least-used in its
+              owner's palette, D102 — and that stays the default, because the
+              thing D102 exists to prevent is a colour moving on its own. What
+              was missing is a person deliberately overriding one row, which is
+              a different act. Clicking the swatch opens the palette; the
+              picker offers only tokens `tokens.css` defines, because
+              `product-9` passes the database CHECK and renders as no colour
+              at all. */}
+          <button
+            type="button"
+            className={styles.swatchBtn}
             style={{ background: row.colorVar }}
-            title={row.colorUnknown ? `Unknown colour ${row.colorToken}` : row.colorToken}
-            aria-hidden="true"
+            disabled={!editable}
+            aria-label={`Colour of ${row.sku}${editable ? " — change it" : ""}`}
+            title={
+              row.colorUnknown
+                ? `Unknown colour ${row.colorToken} — drawn in the first palette colour`
+                : editable
+                  ? "Change this product's colour"
+                  : row.colorToken
+            }
+            onClick={() => {
+              clearRowError(row.id);
+              setRecolouringId(recolouringId === row.id ? null : row.id);
+            }}
           />
           {isEditing ? (
             <input
@@ -327,6 +354,40 @@ export function ProductsPanel() {
           )}
         </span>
 
+        {recolouringId === row.id && editable && (
+          <span className={styles.palette} role="group" aria-label="Product colour">
+            {PRODUCT_PALETTE.map((token) => (
+              <button
+                key={token}
+                type="button"
+                className={
+                  token === row.colorToken
+                    ? `${styles.paletteChip} ${styles.paletteChipOn}`
+                    : styles.paletteChip
+                }
+                style={{ background: productColorVar(token) }}
+                aria-label={token}
+                aria-pressed={token === row.colorToken}
+                disabled={colorMutation.isPending}
+                onClick={() => {
+                  clearRowError(row.id);
+                  // The narrow rule — a token this stylesheet can actually
+                  // draw — is checked HERE, beside the palette it is about.
+                  // `setProductColor` deliberately does not import it.
+                  if (!isPaletteToken(token)) return;
+                  colorMutation.mutate(
+                    { id: row.id, colorToken: token },
+                    {
+                      onSuccess: () => setRecolouringId(null),
+                      onError: (e) =>
+                        setRowError({ id: row.id, message: describeWriteRefusal(e, "product") }),
+                    },
+                  );
+                }}
+              />
+            ))}
+          </span>
+        )}
         {!row.active && <span className={styles.tag}>Not in use</span>}
         {note !== null && <span className={styles.note}>{note}</span>}
         {row.colorUnknown && (
@@ -412,9 +473,14 @@ export function ProductsPanel() {
           </div>
         )}
         {formError !== null && <p className={styles.error}>{formError}</p>}
+        {/* ⚠️ This sentence used to end "and never changes afterwards", which
+            stopped being true the moment the swatch became a picker. A hint that
+            describes the old behaviour is worse than none: it tells someone the
+            control they are looking at does not exist. */}
         <p className={styles.hint}>
           A product&rsquo;s colour is chosen for it when it&rsquo;s created — the least-used one in
-          its owner&rsquo;s palette — and never changes afterwards.
+          its owner&rsquo;s palette — and never changes on its own afterwards. Click a swatch
+          in the list to set it by hand.
         </p>
       </section>
 

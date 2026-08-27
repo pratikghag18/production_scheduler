@@ -27,6 +27,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  addedProblems,
   breakProblems,
   clockToMinutes,
   dayOffset,
@@ -788,5 +789,97 @@ describe("shiftDraft: the boundaries the first pass left unpinned", () => {
 
   it("V7: a plain day shift gains no day markers from V6's fix", () => {
     expect(describeSpan(DAY)).toBe("06:00–14:00");
+  });
+});
+
+/* ---------------------------------------------------------------------------
+   GROUP W — `addedProblems`: only the problems THIS change is responsible for.
+
+   It moved out of `ShiftsPanel.tsx` on 27 Aug, where it was pure logic with no
+   test that could reach it — and where it had shipped a defect that made a
+   shift's times permanently uneditable. W3 is that defect, pinned.
+   --------------------------------------------------------------------------- */
+describe("shiftDraft: the problems a change is responsible for", () => {
+  /** A pattern with one night shift carrying one break, both configurable. */
+  function pat(endMin: number, breaks: { name: string; startMin: number; endMin: number }[]) {
+    return {
+      id: "t1",
+      name: "3 x 8h",
+      shifts: [
+        {
+          id: "s3",
+          name: "Shift 3",
+          startMin: 1320,
+          endMin,
+          breaks: breaks.map((b) => ({ id: b.name, ...b })),
+        },
+      ],
+    };
+  }
+
+  it("W1: reports a problem the change actually introduced", () => {
+    const before = pat(1800, []);
+    const after = pat(1800, [{ name: "Stray", startMin: 600, endMin: 660 }]);
+    expect(addedProblems(before, after)).toEqual([
+      "10:00–11:00 falls outside the shift (22:00–06:00 +1d).",
+    ]);
+  });
+
+  it("W2: stays silent about a problem that was already there", () => {
+    const stray = [{ name: "Stray", startMin: 600, endMin: 660 }];
+    expect(addedProblems(pat(1800, stray), pat(1800, stray))).toEqual([]);
+  });
+
+  it("W3: a stray break does not block an edit to the SHIFT's own times", () => {
+    // ⚠️ THE 27-AUG DEFECT. The outside-shift sentence embeds the shift's own
+    // label, so moving the end 06:00 -> 06:30 rewrites it. Keyed on the TEXT,
+    // the untouched break's problem read as one this edit had added and the
+    // save never left the browser — with the refusal quoting the break rather
+    // than the times just changed, and no way out except deleting the break.
+    const stray = [{ name: "Stray", startMin: 600, endMin: 660 }];
+    expect(addedProblems(pat(1800, stray), pat(1830, stray))).toEqual([]);
+  });
+
+  it("W4: two breaks with the SAME sentence are two problems, not one", () => {
+    // The other half of keying on coordinates: identical text at different
+    // coordinates must not collapse, or adding a second identical mistake
+    // would report nothing at all.
+    const one = [{ name: "A", startMin: 600, endMin: 660 }];
+    const two = [
+      { name: "A", startMin: 600, endMin: 660 },
+      { name: "B", startMin: 600, endMin: 660 },
+    ];
+    // B's sentence is WORD-FOR-WORD A's, and A's was already in the "before"
+    // set. It still comes through, because A's problem is (break-time, 0, 0)
+    // and B's is (break-time, 0, 1). Keyed on the text it would have been
+    // swallowed and the second mistake would have reported nothing at all.
+    // The overlap is real too: two breaks on the same minutes collide.
+    expect(addedProblems(pat(1800, one), pat(1800, two))).toEqual([
+      "10:00–11:00 falls outside the shift (22:00–06:00 +1d).",
+      "Overlaps A.",
+    ]);
+  });
+
+  it("W6: two problems of DIFFERENT kinds on one shift do not collide", () => {
+    // ⚠️ Found by mutation: dropping `field` from the key went NOT CAUGHT, and
+    // it is a real hole rather than an inert change. A shift-name problem and a
+    // shift-time problem both carry (shiftIndex 0, breakIndex null), so without
+    // the field they key identically — and a shift that already had a naming
+    // problem could then be given an illegal time and the save would go through
+    // silently. The pre-existing problem must mask ITSELF and nothing else.
+    const named = (name: string, endMin: number) => ({
+      id: "t1",
+      name: "3 x 8h",
+      shifts: [{ id: "s1", name, startMin: 360, endMin, breaks: [] }],
+    });
+    expect(addedProblems(named("", 840), named("", 360))).toEqual([
+      "This shift ends before it starts. For a night shift, mark the end as +1 day.",
+    ]);
+  });
+
+  it("W5: a problem that is FIXED by the change is not reported as added", () => {
+    const stray = [{ name: "Stray", startMin: 600, endMin: 660 }];
+    const moved = [{ name: "Stray", startMin: 1440, endMin: 1500 }];
+    expect(addedProblems(pat(1800, stray), pat(1800, moved))).toEqual([]);
   });
 });

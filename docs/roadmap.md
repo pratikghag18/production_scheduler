@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-27, session 10 (**THE THREE LANES ARE BUILT — AND THEN ATTACKED.** Shifts, Operators and Products were built in parallel on §19.62's seats against §19.63's error contract. The fence held: 21 files, exactly the three tables, no shared file touched twice; `tsc` 0, `eslint` 0, three green suites (91/66/96) and **20 unprescribed mutations of my own, all 20 caught**. **Eleven defects were still in the tree in that state.** The third wave — one read-only adversarial reviewer per lane, each hunting a named defect CLASS — found them; every one was reproduced here before a line changed, and two of the reviewers' claims did not survive that step. The worst: **a 16:00–00:00 shift said `crossesMidnight: false`** while its own label said `+1d`, so the break form withheld the "+1 day" box and the legal 23:45–00:00 break was **unenterable**; **`describeSpan` marked the day on the END only**, so two different storable break rows rendered the identical string and every after-midnight break read as starting twenty hours early; **editing a shift's times was permanently blocked** by a pre-existing stray break, because "already wrong" was decided by message-string equality and the message embeds the shift's own label; and **`previewUnavailable` was unreachable in the failure it was written for**, so a site admin whose hierarchy read failed was told they administer no site. **Nine mutations that a green suite ignored — eight now caught, one measured INERT and written down as such.** The picture caught two more: a break's Remove thrown level with the shift's Delete, and a pre-delete warning at **3.50:1**. Acceptance **1030 → 1040 in 23 files** — 20 → 23, because each lane brought its own new test file. **No migration.** ⚠️ **Five findings are NOT fixed** and need your call — top of the list, **every read in `src/lib/api/` is unbounded against `max_rows = 1000`, silently.** See §19.64.)
+**Last updated:** 2026-08-27, session 11 (**PRATIK USED THE THREE SCREENS AND RETURNED SIX NOTES IN TEN MINUTES — five of them things no test could have found**, because each is about what a screen fails to OFFER. Breaks were a flex row and are now a table (⚠️ and the first attempt stretched the name column across the whole panel — the same disease as the Remove link, caught by the render and nothing else). **A break could only be deleted and retyped — and `useUpdateBreak` had been built, exported and reachable from nothing on screen**; dead state is the fingerprint of a dropped requirement, and a dead EXPORT is the same fingerprint one level up. **Nothing said a pattern row opens** — it was a `<button>` with `border:0;background:none`, pixel-identical to the text beside it, with the whole shift list behind it. **The swatch is now a colour picker (D102 amended):** the automatic pick stays the default, nothing re-picks on its own, a person may override one row. `addedProblems` moved out of the panel into `shiftDraft` where it can be tested — **group W, 6 cases, and mutation W-M3 found a SECOND hole**: without `field` in the key, a shift that already had a naming problem could be given an illegal time and save silently. **Acceptance 1040 → 1046 in 23 files. No migration.** ⭐ **AND D103 IS DECIDED: "belongs to" becomes a SCOPE** — a product scoped to Line 1 is offered at or below Line 1 and nowhere else; **operators are deliberately excluded** and stay a roster filter, because `check_eligibility` already answers where a person may work. That is the next migration. See §19.65.)
 
 ---
 
@@ -100,8 +100,8 @@
 > `261ad5d`, D100 as `74bd689`, migration 0023 as `0cbe023`, **0024 + P1-5k's client half as
 > `d37569c`**, the pre-seat as `b2e975d` and the write-error contract as `683197e`.
 > **The three build lanes follow those.**
-> **24 migrations. 332 database checks. Acceptance is 1040 tests in 23 files** — 775 in 20 files plus 91 products,
-> 69 operators, 103 shiftDraft and 2 in `shapes.test.ts`. If your count differs, a test file did not
+> **24 migrations. 332 database checks. Acceptance is 1046 tests in 23 files** — 775 in 20 files plus 91 products,
+> 69 operators, 109 shiftDraft and 2 in `shapes.test.ts`. If your count differs, a test file did not
 > load, which is how a broken suite once looked green. **No `db:types` is owed; `npm run db:reset`
 > still is** — 0024 replaces `app_relevel_subtree` and is applied nowhere.
 >
@@ -146,19 +146,26 @@
 >    dropping rows, and a dropped requirement row renders a confident **✓** for a place the server will
 >    refuse. Page every read, or assert the row count and refuse to render a truncated answer as the
 >    company's answer. See §19.64 §5.
-> 2. **The four other findings §19.64 §5 leaves open**, each needing a decision rather than a patch:
+> 2. **⭐ D103 — "belongs to" becomes a SCOPE (§19.65).** Decided Aug 27. The migration is a WIDENING with no
+>    backfill (`app_check_site_owner` stops requiring a root; every existing NULL-or-root row stays legal), the
+>    permission half already works (`app_is_admin_for` takes any node), and the board filters CLIENT-side from
+>    `site_node_id` added to `board_window`'s products and skills, because one window spans many nodes and there
+>    is no single node to filter by. **Operators are excluded on purpose** — roster filter only.
+>    ⚠️ **A run already carrying an out-of-scope product must keep rendering it.** Scoping what is OFFERED does
+>    not un-schedule history, and that is the half a "just filter the list" build gets wrong.
+> 3. **The four other findings §19.64 §5 leaves open**, each needing a decision rather than a patch:
 >    `skipped` never reaching `workPlacesFor`; "can't tell" painted as a confident ✕ with no third
 >    state; `asOf` defaulting to today so every ✓ is a promise about today only; and `adminSiteIds`
 >    derived from STRUCTURE ownership rather than node grants, which locks a site admin out of products
 >    the server would let them write.
-> 3. **A couple of Plant-2-owned rows in `dev_demo.sql`.** 0023's whole point is invisible without
+> 4. **A couple of Plant-2-owned rows in `dev_demo.sql`.** 0023's whole point is invisible without
 >    them — a site admin signing in today sees the new permission do nothing.
-> 4. **P1-5h CSV import. ⚠️ TWO missing premises.** `nodes` has no `external_id` column, and
+> 5. **P1-5h CSV import. ⚠️ TWO missing premises.** `nodes` has no `external_id` column, and
 >    `products.external_id` exists with **no unique constraint**, so neither half can upsert. Also:
 >    `create_node` has cloned the hierarchy shape on every root create since 0020, so a multi-site
 >    import would silently multiply `hierarchy_templates`, and `docs/api.md` §3.5 still documents the
 >    pre-0020 behaviour. A small migration has to land first.
-> 5. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
+> 6. **P1-6b/c/d — the front door. PARKED, NOT FORGOTTEN.** There is no sign-in screen at all, only a
 >    `import.meta.env.DEV`-gated switcher, so **until it lands Pratik is the only person who can log
 >    in** and nothing built in stages 05–12 is reachable by anyone else. The sign-in page is small and
 >    browser-only; invitations need a privileged server-side piece this project does not have.
@@ -202,7 +209,7 @@ That is all it needs. Project memory carries every decision, the workflow, the e
 | App scaffold | repo root (`src/`, `supabase/`, `.github/`) | v1 (code complete, build/CI unvalidated) |
 | Folder conventions | `docs/conventions.md` | v1 |
 | Schema reference | `docs/schema.md` | regenerated by `scripts/verify-db.sh` on every run — **current as of migration 0023 (Aug 27)**: `site_node_id` on `operators`/`products`/`skills`/`shift_templates` and `products.color_token` now show in their `\d+` |
-| DB migrations, seed, SQL tests | `supabase/migrations/` (**24**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**18 numbered + 3 upgrade**, **332 named cases**, `verify-db.sh` exit 0) · `src/test/` (**23 test files, 1040 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27); migration `20260827000024_relevel_contract.sql` + `76_relevel_contract_test.sql` (**17 cases**) + `mutations/0024.json` (**11 mutations, 7 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
+| DB migrations, seed, SQL tests | `supabase/migrations/` (**24**), `supabase/seed.sql` (**TWO orgs**), `supabase/tests/` (**18 numbered + 3 upgrade**, **332 named cases**, `verify-db.sh` exit 0) · `src/test/` (**23 test files, 1046 tests**) | v1 (P1-2, Aug 21) — built + validated; migration `20260821000009_api_surface.sql` and `60_api_test.sql` added (P1-3a, Aug 22); migration `20260825000010_hierarchy_admin.sql` and `70_hierarchy_test.sql` added, `00_harness.sql` GoTrue-shim fix (P1-5a, Aug 25); migration `20260825000011_trim_whitespace.sql` + cases W1-W7 and the **UTF-8 harness fix (D80)** (design session, Aug 25); migration `20260827000023_shared_list_owners.sql` + `51_shared_list_owners_test.sql` (**38 cases**) + `upgrade_0023_product_colour.sql` (**6 cases**) + `mutations/0023.json` (**28 mutations, 24 caught, 4 inert-and-pinned**) added (design session, Aug 27); migration `20260827000024_relevel_contract.sql` + `76_relevel_contract_test.sql` (**17 cases**) + `mutations/0024.json` (**11 mutations, 7 caught, 4 inert-and-pinned**) added (design session, Aug 27) |
 | Database API contract | `docs/api.md` | v1 (P1-3a, Aug 22) — DB half only; HTTP-status mapping unverified (no Docker/PostgREST here); §3.5 (five hierarchy-admin RPCs) and six new error codes added (P1-5a, Aug 25) |
 | Generated DB types | `src/lib/database.types.ts` | **regenerated from the live local DB Aug 25 — 17 tables, 13 RPCs** (was Aug 22 / 8 RPCs, which cost P1-5b seven `tsc` errors). Regenerate with `supabase gen types typescript --local` in WSL whenever a migration adds or changes a function: **a migration and this file are ONE change, not two.** Note it can never express a nullable RPC argument — Postgres parameters carry no nullability, so `create_node`'s `p_parent_id` and `move_node`'s `p_new_parent_id` are cast at their call sites (see the note in `src/lib/api/hierarchy.ts`). |
 | TypeScript API client guide | `docs/api-client.md` | v1 (P1-3b, Aug 22) — code delivered; no npm in delivery container, acceptance pending user run. **"Hierarchy admin" section added (P1-5b, Aug 25).** |

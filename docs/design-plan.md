@@ -6202,3 +6202,162 @@ drops out of `adminSiteIds` while remaining fully writable server-side. The
 error is one-directional and it is the CLOSED direction. Fixing it needs a read
 of the grants themselves, which the client does not currently make.
 
+### 19.65 Six things Pratik found by using the screens — and D103, what "belongs to" is going to mean (Aug 27, 2026)
+
+The three sections went in front of him and came back with six notes in about
+ten minutes. **Five of the six are things no test I could have written would
+have found**, because each is about what the screen fails to OFFER rather than
+about what it computes wrongly — and a suite only ever checks the things
+somebody thought to build.
+
+#### 1. Breaks were a sentence; they needed a table
+
+*"Why are the breaks not in tabular form?"*
+
+They were a flex row: name, clock span, duration, all at a different x on every
+line. The two questions a person actually asks of a break list — **which is the
+long one**, and **do these two collide** — both need reading down a column, and
+there were no columns. Four fixed-width columns now, tabular figures, a header
+per shift because the list is nested two levels in and `15m` beside
+`08:00–08:15` otherwise reads as a second time rather than a duration.
+
+**⚠️ And the first attempt was the same defect again.** `minmax(6rem, 1.6fr)`
+for the name column stretched it to the panel's full width and put "Lunch" and
+"10:00–10:30" six hundred pixels apart — a table whose columns are that far
+apart is a flex row with extra steps, and it is exactly the disease that had
+just been fixed on the *Remove* link. Fixed widths and `justify-content: start`.
+**The render caught it; nothing else would have.**
+
+#### 2. A break could only be deleted and retyped — and the write already existed
+
+*"There is no option to edit an existing break, the only option is to remove it
+completely and add again, not very user friendly."*
+
+`useUpdateBreak` → `updateBreak` → `shift_breaks.update` was **built, exported,
+covered by the write-error contract, and reachable from nothing on screen.** So
+moving a break by five minutes meant a destructive action offered for a
+non-destructive intent, and it silently lost the break's name.
+
+**The tell is one the P1-5g review already named: dead state is the fingerprint
+of a dropped requirement.** A dead *export* is the same fingerprint one level
+up. `grep` for exported writers with no importer is a cheap check and this
+project has now been bitten by the shape twice.
+
+#### 3. Nothing said a pattern row opens
+
+*"I pressed on an existing shift pattern to open the details, there is nothing
+pointing towards that it can be done for a new user, they'll be clueless."*
+
+The pattern name was a `<button>` with `border: 0; background: none` — pixel
+identical to the plain text in the column beside it — and the entire shift list
+of that pattern was behind it. He found it by clicking on the off-chance. A
+caret that turns, an underline that darkens on hover and focus, and a
+"show shifts" hint that appears on hover: one affordance in three parts.
+
+**This is D90's rule arriving from the other direction.** D90 was "the screen
+must say what a row IS"; this is "the screen must say what a row DOES". Both are
+invisible to every assertion in the suite.
+
+#### 4. Colour is now the user's to set (D102 amended)
+
+*"No option to edit or assign colour for the user."*
+
+D102 said a product's colour is chosen for it and never changes, and the reason
+was good: a colour that moves on its own is a surprise, and one that moves
+because someone re-assigned the product is worse. **That argument is about the
+SYSTEM changing its mind. It says nothing about a person deciding.**
+
+So: the automatic pick at creation stays exactly as it was, nothing re-picks on
+a rename or a re-assignment, and **the swatch is now a button** that opens the
+four-token palette. `setProductColor` is its own call rather than a field on
+`updateProduct` — one write, one thing that can be wrong with it, so a colour
+change cannot fail on a duplicate SKU.
+
+**⚠️ And the hint under the form had to change in the same breath.** It ended
+*"and never changes afterwards"*, which became false the moment the picker
+existed. **A hint describing the old behaviour is worse than no hint: it tells
+someone the control they are looking at does not exist.** ([[doc_drift]] rule 4
+and rule 17's second bullet, on a user-facing string this time.)
+
+**⚠️ One import was written and backed out.** `setProductColor` first validated
+the token against `PRODUCT_PALETTE` by importing `isPaletteToken` from
+`features/admin/lib/products` — which is the ONLY `src/lib/ → src/features/`
+import in the repo, and a real runtime cycle, because that file imports its
+types from `src/lib/api`. The narrow rule now lives beside the palette and the
+panel applies it; the API layer documents why it does not.
+
+#### 5. `addedProblems` moved out of the panel, and the mutation found a second hole
+
+The break editor needed the same "only the problems THIS change caused"
+validation the shift editor uses — which was **pure logic sitting in a `.tsx`
+file where no test could reach it**, and which had carried the 27 Aug defect
+(§19.64). It is now `shiftDraft.addedProblems`, with **group W, six cases**.
+W3 is that defect pinned in the pure layer.
+
+**Four mutations, and the third was not inert.** Dropping `field` from
+`problemKey` went NOT CAUGHT — and it is a real hole, not a masked change: a
+shift-name problem and a shift-time problem both carry
+`(shiftIndex 0, breakIndex null)`, so without the field they key identically and
+**a shift that already had a naming problem could be given an illegal time with
+the save going through silently.** W6 is that case. This is the third time a
+mutation has found a hole rather than a bug in code I had just written.
+
+#### 6. Verification
+
+`tsc` 0, `eslint` 0, the D84 rem audit clean over all 11 surfaces, the shift
+suite re-run in the shim against the delivered module — **109** — and the four
+`addedProblems` mutations re-run to confirm the new cases kill them. The three
+panels re-rendered and read. **Acceptance 1040 → 1046 in 23 files. No
+migration.**
+
+---
+
+### D103 — "Belongs to" becomes a SCOPE, not just an owner
+
+*"The products/operators/shifts could belong to a particular hierarchy within
+the plant and not necessarily to the whole plant... how do we assign them to a
+specific hierarchy level so the lower levels inherit them?"*
+
+Two things that sentence could mean were drawn and put to him, and **he chose
+the larger one**: ownership decides **where a thing is offered**, not only who
+may edit it. A product scoped to Line 1 is offered on every cell at or below
+Line 1 and nowhere else; company-wide stays the everywhere fallback.
+
+**⭐ AND OPERATORS ARE DELIBERATELY NOT PART OF THAT RULE (his call).** Where a
+person may work is already answered by tickets and requirements. A second
+mechanism that can disagree with `check_eligibility` would mean two systems
+saying no for different reasons with nothing on screen able to reconcile them.
+**An operator's scope filters the roster and nothing else** — who you see and
+who you administer, never who may be assigned where.
+
+**The shape, and why it is cheaper than it looks:**
+
+1. **The migration is a WIDENING, so there is no backfill.** Every existing row
+   holds `NULL` or a root node id, and both stay legal. The only change is that
+   `app_check_site_owner` stops requiring `parent_id is null`. **Nothing in
+   `UPGRADE_CHECKS` is owed** — but rule 5b says the argument for that is not
+   the evidence, so it gets an upgrade case anyway.
+2. **The permission half already works.** `app_is_admin_for(node_id)` takes any
+   node and covers its subtree; only the trigger was forcing roots. No policy
+   changes.
+3. **Resolution is one predicate**: available at node X when the scope is NULL
+   or `X.path <@ scope.path`. That is the same nearest-ancestor family
+   `resolve_shift_template` already lives in.
+4. **The board filters CLIENT-SIDE, from data it already holds.** `board_window`
+   returns the whole org's products and skills and the client already has every
+   node's `path`, so the migration adds `site_node_id` to those two payload
+   objects and a pure `availableAt(scopeId, nodePath, nodes)` does the rest.
+   **Filtering server-side is not an option**: one board window spans many
+   nodes, so there is no single node to filter by.
+5. **The pickers change from "roots only" to a depth-indented tree** — the
+   `NodeAttachmentView` shape the shifts panel already builds is exactly that,
+   so it is reused rather than rebuilt.
+
+**⚠️ The one thing to decide while building it, not after: what a run ALREADY
+carrying an out-of-scope product does.** Scoping the picker does not un-schedule
+history, and it must not — a product moved to Line 1 tomorrow was legitimately
+run on Line 2 yesterday. So the filter belongs to what is OFFERED, and every
+read-back path must keep rendering a product it would no longer offer. That is
+the same rule the retired-product list already follows, and it is the half a
+"just filter the list" implementation gets wrong.
+
