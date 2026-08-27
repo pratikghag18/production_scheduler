@@ -1,0 +1,225 @@
+/**
+ * scope.ts — where a product, a person, a training or a shift pattern BELONGS,
+ * and therefore where it is offered. Migration 0025 / D103.
+ *
+ * ---------------------------------------------------------------------------
+ * PRATIK, Aug 27:
+ *   "The products/operators/shifts could belong to a particular hierarchy
+ *    within the plant and not necessarily to the whole plant... how do we
+ *    assign them to a specific hierarchy level so the lower levels inherit
+ *    them?"
+ *
+ * He was shown the two things that sentence could mean — "it decides who may
+ * EDIT it" and "it decides WHERE it is offered" — and chose the second.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐⭐ THE RULE, AND IT IS ONE LINE: available at X when the scope is NULL, or
+ * when X is AT OR BELOW the scope node.
+ *
+ *   scope NULL          -> everywhere (company-wide, the fallback)
+ *   scope = Line 1      -> Line 1 itself, and every cell under it
+ *   scope = Assembly    -> Assembly, both its lines, and all their cells
+ *
+ * ⚠️ "AT OR BELOW" INCLUDES THE NODE ITSELF, and that is load-bearing rather
+ * than pedantic. Postgres' `<@` is reflexive and `52_scope_and_colour_test.sql`
+ * case S9 pins it on the server; an implementation here that tested strict
+ * descent would agree with the server on every cell and disagree on the one
+ * node the user actually picked.
+ *
+ * ⚠️ AND THIS IS A UNION, NOT NEAREST-ANCESTOR-WINS. It looks exactly like
+ * `resolve_shift_template` from a distance and it is the opposite shape. A node
+ * runs exactly ONE shift pattern, so that resolution sorts by depth and takes
+ * one. A node OFFERS MANY products, so every scope that covers it applies: the
+ * line's product, the department's, and the company-wide one, all three. Case
+ * S10 exists because reusing the `ORDER BY nlevel(...) DESC LIMIT 1` shape here
+ * would silently offer one product out of three and look completely reasonable.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐ WHY THE PATH AND NOT THE PARENT CHAIN. `BoardNode.path` is the node's
+ * ltree path, maintained by a trigger, and it is the SAME value the server
+ * compares. Walking `parentId` instead would be a second implementation of
+ * ancestry that can disagree with the first — and `operators.ts` already
+ * carries a cycle guard precisely because a hand-walked chain can be malformed.
+ * A prefix test cannot loop.
+ *
+ * ⚠️ THE PREFIX TEST IS ON LABELS, NOT CHARACTERS. `plant1.line1` is NOT an
+ * ancestor of `plant1.line10`, and a naive `startsWith` says it is. Every
+ * comparison here goes through `isAtOrBelow`, which requires the next character
+ * to be a separator or the end of the string.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐ EVERYTHING HERE FAILS OPEN. If a scope names a node this client cannot
+ * read — outside the reader's grant, or dropped by a truncated response — the
+ * honest answer is "I cannot tell", and the choice is to OFFER it rather than
+ * hide it. Hiding is invisible and permanent: a product that silently stops
+ * being offered looks exactly like a product nobody created. Offering something
+ * the server then refuses is loud, recoverable, and lands on the write-error
+ * contract (§19.63), which was built for exactly this.
+ *
+ * ⚠️ Note this is the OPPOSITE default from `ProductsPanel`'s edit rights, and
+ * deliberately so ([[verification-standard]] rule 8b): that decides whether to
+ * offer a WRITE, where the worst case is a button that always fails. This
+ * decides what a list SHOWS, where the worst case is work nobody can schedule.
+ */
+
+/** The shape this module needs from a node. `BoardNode` satisfies it. */
+export interface ScopeNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  /** The ltree path, dot-separated. The same value the server compares. */
+  path: string;
+}
+
+/**
+ * Is `target` at or below `ancestor`, comparing ltree paths label by label?
+ *
+ * ⚠️ NOT `startsWith`. Labels are separated by `.`, so `plant1.line1` is a
+ * prefix of the STRING `plant1.line10` and is not an ancestor of that NODE.
+ * Six products on ten lines is enough for that to bite, and the failure is
+ * silent — a product offered one line over, with nothing on screen wrong.
+ */
+export function isAtOrBelow(targetPath: string, ancestorPath: string): boolean {
+  if (targetPath === ancestorPath) return true;
+  return targetPath.startsWith(ancestorPath + ".");
+}
+
+/**
+ * Is a thing scoped to `scopeNodeId` offered at the node `targetPath`?
+ *
+ * @param scopeNodeId `null` means company-wide — offered everywhere.
+ * @param nodesById   every node this client can read, keyed by id.
+ *
+ * FAILS OPEN on an unreadable scope node — see the file header.
+ */
+export function offeredAt(
+  scopeNodeId: string | null,
+  targetPath: string,
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): boolean {
+  if (scopeNodeId === null) return true;
+  const scope = nodesById.get(scopeNodeId);
+  if (scope === undefined) return true; // cannot tell -> offer it, let the server decide
+  return isAtOrBelow(targetPath, scope.path);
+}
+
+/** Everything in `items` that is offered at `targetPath`. Order is preserved. */
+export function offeredHere<T extends { siteNodeId: string | null }>(
+  items: readonly T[],
+  targetPath: string,
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): T[] {
+  return items.filter((i) => offeredAt(i.siteNodeId, targetPath, nodesById));
+}
+
+/* ===========================================================================
+ * The picker.
+ * ======================================================================== */
+
+export interface ScopeOption {
+  /** `null` for the company-wide entry, which is always first. */
+  value: string | null;
+  /** The node's own name — the label is built from this plus `depth`. */
+  name: string;
+  /** 0 for a root; used to indent. */
+  depth: number;
+}
+
+const COMPANY_WIDE: ScopeOption = { value: null, name: "Everywhere (company-wide)", depth: 0 };
+
+/**
+ * The "Belongs to" list, in tree order, depth-indented.
+ *
+ * ⭐ IT IS BUILT FROM THE PATH, NOT BY RECURSION. Sorting by path puts every
+ * node immediately after its parent and before its parent's next sibling —
+ * which is what tree order IS — and counting the labels gives the depth. A
+ * recursive walk over `parentId` would need a cycle guard and would drop any
+ * node whose parent this reader cannot see; sorting cannot do either.
+ *
+ * ⚠️ A NODE WHOSE PARENT IS UNREADABLE IS STILL LISTED, at the depth its own
+ * path implies. It will look over-indented rather than disappear, and that is
+ * the right trade: an admin of a department who cannot read the plant above it
+ * must still be able to scope things to their own department.
+ *
+ * @param canEdit ids the caller may scope TO. When given, everything else is
+ *   dropped — a picker that offers a node the server will refuse is a control
+ *   whose only outcome is an error message. When omitted, every node is
+ *   offered, which is right for a company admin.
+ */
+export function scopeOptions(
+  nodes: readonly ScopeNode[],
+  canEdit?: ReadonlySet<string>,
+): ScopeOption[] {
+  const usable = canEdit === undefined ? nodes : nodes.filter((n) => canEdit.has(n.id));
+  const sorted = [...usable].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return [
+    COMPANY_WIDE,
+    ...sorted.map((n) => ({ value: n.id, name: n.name, depth: n.path.split(".").length - 1 })),
+  ];
+}
+
+/** `"— — Line 1"` — the indent an option element cannot express with CSS. */
+export function indentedLabel(option: ScopeOption): string {
+  if (option.value === null) return option.name;
+  // A non-breaking figure space, doubled per level. Leading ordinary spaces are
+  // collapsed by every browser's <option> rendering; this survives.
+  return `${"  ".repeat(option.depth)}${option.name}`;
+}
+
+/**
+ * The sentence a row shows for where it belongs.
+ *
+ * ⚠️ AN UNREADABLE SCOPE READS AS "Somewhere else", NEVER AS "Company-wide".
+ * Those are the two answers a reader must never confuse: one means everyone can
+ * use it, the other means this person cannot see where it lives. 0023's
+ * `ownerLabel` made exactly this distinction for sites and it survives here.
+ */
+export function scopeLabel(
+  scopeNodeId: string | null,
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): string {
+  if (scopeNodeId === null) return "Company-wide";
+  const node = nodesById.get(scopeNodeId);
+  return node === undefined ? "Somewhere else" : node.name;
+}
+
+/**
+ * The full path of a scope, for a tooltip: `"Plant 1 › Assembly › Line 1"`.
+ *
+ * Walks the parent chain rather than the path, because the path holds SLUGS and
+ * this has to show NAMES. It therefore needs the cycle guard `operators.ts`
+ * needed, and truncates rather than looping.
+ */
+export function scopePathLabel(
+  scopeNodeId: string | null,
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): string {
+  if (scopeNodeId === null) return "Company-wide";
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let cur = nodesById.get(scopeNodeId);
+  let truncated = false;
+  while (cur !== undefined) {
+    if (seen.has(cur.id)) {
+      truncated = true;
+      break;
+    }
+    seen.add(cur.id);
+    names.push(cur.name);
+    if (cur.parentId === null) break;
+    const parent = nodesById.get(cur.parentId);
+    if (parent === undefined) {
+      truncated = true;
+      break;
+    }
+    cur = parent;
+  }
+  if (names.length === 0) return "Somewhere else";
+  names.reverse();
+  return truncated ? `… › ${names.join(" › ")}` : names.join(" › ");
+}
+
+/** `ScopeNode`s keyed by id — every function above takes this. */
+export function scopeIndex(nodes: readonly ScopeNode[]): Map<string, ScopeNode> {
+  return new Map(nodes.map((n) => [n.id, n]));
+}

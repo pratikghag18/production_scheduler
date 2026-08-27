@@ -34,6 +34,7 @@ import {
   type OperatorLike,
   type WorkPlace,
 } from "../lib/operators";
+import { indentedLabel, scopeOptions } from "../lib/scope";
 import {
   useCreateOperator,
   useCreateSkill,
@@ -207,11 +208,20 @@ export function OperatorsPanel() {
   const heldIds = new Set(tickets.map((t) => t.skillId));
   const grantable = skills.filter((s) => !heldIds.has(s.id));
 
-  // The roots — the only nodes migration 0023's `operators_check_site` trigger
-  // accepts as an owner. Company-wide (`null`) is the default and is what a
-  // company admin normally wants; a SITE admin must name their own site or
-  // `operators_insert` refuses the row.
-  const roots = (data?.nodes ?? []).filter((n) => n.parentId === null);
+  // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). Pratik, Aug 27: *"I do want to
+  // be able to assign operators to a specific hierarchy level, there are
+  // facilities where certain people can only work in certain areas."* Until
+  // 0025 `operators_check_site` refused anything but a root, so this filtered
+  // to `parentId === null`.
+  //
+  // ⚠️ IN THIS RELEASE THE AREA IS PRESENTATION ONLY — it says where a person
+  // belongs and filters the roster; it does NOT refuse an assignment. Refusing
+  // one, with a supervisor override that records a reason, is his call of the
+  // same day and is a change to `check_eligibility` and `assign_operator` in
+  // its own migration. Until that lands, nothing here may imply the server is
+  // enforcing it.
+  const scopeNodes = data?.nodes ?? [];
+  const scopeChoices = scopeOptions(scopeNodes);
 
   const clash = findExistingSkillByName(skills, newSkill);
   const deleteCheck = selected === null ? null : deletePrecheck(selected, operatorSkills);
@@ -466,10 +476,9 @@ export function OperatorsPanel() {
               value={draftSite}
               onChange={(e) => setDraftSite(e.target.value)}
             >
-              <option value="">Everywhere (company-wide)</option>
-              {roots.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
+              {scopeChoices.map((o) => (
+                <option key={o.value ?? "company"} value={o.value ?? ""}>
+                  {indentedLabel(o)}
                 </option>
               ))}
             </select>

@@ -182,6 +182,7 @@ UPGRADE_CHECKS="
 20260826000019_scoped_roles.sql|upgrade_0019_backfill.sql|5
 20260826000020_site_ownership.sql|upgrade_0020_site_ownership.sql|5
 20260827000023_shared_list_owners.sql|upgrade_0023_product_colour.sql|6
+20260827000025_scope_and_colour.sql|upgrade_0025_scope_widening.sql|5
 "
 
 run_upgrade_check() {

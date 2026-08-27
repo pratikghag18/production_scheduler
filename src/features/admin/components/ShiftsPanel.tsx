@@ -69,6 +69,7 @@ import {
   type ShiftDraft,
   type ShiftView,
 } from "../lib/shiftDraft";
+import { indentedLabel, scopeOptions } from "../lib/scope";
 import {
   useAttachPattern,
   useCreateBreak,
@@ -231,7 +232,15 @@ export function ShiftsPanel() {
 
   const view = patternRows(query.data);
   const pending = !canQuery || query.isLoading;
-  const roots = view.nodes.filter((n) => n.depth === 0);
+  // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). `patternRows` already returns
+  // every node with its depth and path for the attachment card below, so the
+  // owner picker and the attachment picker now offer the same tree — which is
+  // the point: a pattern owned by Assembly and attached to a cell under
+  // Assembly is the ordinary case, and until 0025 the first half of that
+  // sentence could not be said.
+  const scopeChoices = scopeOptions(
+    view.nodes.map((n) => ({ id: n.nodeId, name: n.nodeName, parentId: null, path: n.path })),
+  );
 
   function fail(key: string, e: unknown) {
     setRowError({ key, message: errorText(e) });
@@ -930,10 +939,9 @@ export function ShiftsPanel() {
                   value={newOwner}
                   onChange={(e) => setNewOwner(e.target.value)}
                 >
-                  <option value="">Company-wide</option>
-                  {roots.map((n) => (
-                    <option value={n.nodeId} key={n.nodeId}>
-                      {n.nodeName}
+                  {scopeChoices.map((o) => (
+                    <option value={o.value ?? ""} key={o.value ?? "company"}>
+                      {indentedLabel(o)}
                     </option>
                   ))}
                 </select>

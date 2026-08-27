@@ -6361,3 +6361,181 @@ read-back path must keep rendering a product it would no longer offer. That is
 the same rule the retired-product list already follows, and it is the half a
 "just filter the list" implementation gets wrong.
 
+### 19.66 Migration 0025 — D103 built: "belongs to" is a scope, and a colour may be a colour (Aug 27, 2026)
+
+Pratik picked meaning B off the drawing, then opened the app and found the thing
+he had asked for was not there — because §19.65 had *recorded* D103 and built
+nothing. **A decision written down and not built is indistinguishable, from the
+screen, from a decision nobody made.** This is that, built.
+
+#### 1. The migration is a widening, and that is the whole risk
+
+`app_check_site_owner` loses exactly one branch: the one requiring
+`parent_id is null`. Every existing row holds NULL or a root id and both stay
+legal, so **nothing is backfilled** and **no policy changes at all** —
+`app_is_admin_for(node_id)` has taken any node and covered its subtree since
+0019, and only the trigger was forcing roots.
+
+**⚠️ WHICH IS PRECISELY WHY THE TEST FILE IS SHAPED THE WAY IT IS.** A widening
+is the one migration shape where a suite goes green over a change that went too
+far: everything legal before is legal after, so every pre-existing case passes
+no matter what. So **more than half of `52_scope_and_colour_test.sql` asserts
+what must STILL BE REFUSED** — the org boundary (now the trigger's *only*
+remaining branch, and therefore load-bearing rather than one of two), the
+supervisor who is not an admin, the site admin reaching outside their grant, and
+five near-miss colour spellings.
+
+#### 2. Two existing cases went red, and both were rule 1b-ii
+
+`51_`'s **Q12** asserted a mid-tree node is refused with `reason: 'not a root
+node'`; **Q27** asserted a hex raises `23514`. Both were correct for as long as
+the contract was what it was. **The cases were right and the contract changed** —
+and both were rewritten in place rather than deleted, with the coverage they
+were legitimately providing rescued: Q12 now pins the widening and points at Q13
+(the org branch it used to share the work with), and Q27 walks four spellings
+instead of one, so a CHECK widened into uselessness fails it.
+
+#### 3. The colour union
+
+`products_color_token_shape` becomes `product-N` **or** `#rrggbb`, lower case,
+six digits, both anchored. **D102's argument survives untouched**: the four
+tokens are still the presets, still what a new product is given, still the thing
+that follows `tokens.css`. What is added is the case the palette cannot serve —
+more than four products in one area that have to be told apart.
+
+**⚠️ One canonical spelling per colour**, which is why `#FFF`, `#FFFFFF` and
+`white` are all refused. The client is lenient about what a person *types*
+(`normaliseHexInput` accepts `#1BAF7A`, `1baf7a`, `#1ba`, and trims) and strict
+about what it *stores* — refusing a typed `#1BAF7A` with "that value isn't
+allowed here" would be technically correct and indefensible.
+
+**⚠️ And the hex is a FILL, never a text colour.** `RunBand` and `DirectBlock`
+mix it into `--surface` at 16–22%; `AssignmentChip` uses it as a 3px border. So
+there is no contrast obligation on a user-picked colour. There is also no theme
+to adapt to — `tokens.css` defines no dark variant of `--product-N`. If one ever
+lands, the four tokens follow it and a stored hex does not; that is the cost of
+the freedom and 0025's §2 records it so nobody rediscovers it.
+
+#### 4. Three copies of one rule, found while adding a branch to it
+
+Turning a stored colour into CSS was written out in
+`features/admin/lib/products.ts`, in `BoardGrid.tsx` and in `BoardToolbar.tsx` —
+**with a comment on the board copies saying they were "kept in step with" the
+admin one.** That sentence is the definition of a rule that is a habit rather
+than a default, and D100 already measured what happens next.
+
+Adding the hex arm is exactly the edit that would have made them disagree: a
+hand-set colour correct on the admin screen and drawn as `--product-1` on the
+board. **`src/lib/productColor.ts` is now the one place**, in `src/lib/` rather
+than a feature because a board feature may not import from admin — which is
+*why* the copies existed. D100's rule 2e, arriving a second time: the answer to
+a mismatch is not "match them", it is "make it impossible to mismatch".
+
+#### 5. The client mirror, and the direction it fails
+
+`src/features/admin/lib/scope.ts` — `offeredAt`, `offeredHere`, `scopeOptions`,
+`scopeLabel`, `scopePathLabel`. **26 cases; 9 mutations, all 9 caught.**
+
+- **⚠️ IT IS A UNION, NOT NEAREST-ANCESTOR-WINS.** It looks identical to
+  `resolve_shift_template` from a distance and is the opposite shape: a node
+  runs ONE shift pattern, and OFFERS MANY products. Anyone reusing that
+  function's `ORDER BY nlevel(...) DESC LIMIT 1` here would silently offer one
+  product out of three. SQL case S10 and JS case X9 both exist to say so.
+- **⚠️ THE PREFIX TEST IS ON LABELS, NOT CHARACTERS.** `plant1.line1` is a
+  string prefix of `plant1.line10` and is not its ancestor. The fixture has both
+  in it; mutation Y1 (a bare `startsWith`) is caught by three cases. Ten lines
+  is not an exotic plant.
+- **⭐ AND IT FAILS OPEN** — the opposite default from `canEditProduct`, and
+  rule 8b is why. This decides what a list SHOWS, where a wrong "no" is
+  invisible and permanent; that decides whether to offer a WRITE.
+
+#### 6. `canEditProduct` flips to fail-open, closing §19.64's finding 5
+
+The review wave measured that `adminSiteIds` — derived from `editable_shape_ids()`,
+i.e. STRUCTURE ownership — is not the question the product policies ask, which is
+`app_is_admin_for(site_node_id)` over node GRANTS. A site whose root has no
+claimed structure (0020's `having count(*) = 1` backfill creates exactly that for
+any shared shape) dropped out while remaining fully writable server-side.
+
+**0025 made it worse before it made it better**: under D103 a scope can be any
+node, so "is the scope one of my sites" is not even the right shape of question.
+
+So the default flips, and **rule 8b is the reason: ask what the answer buys.**
+When the fail-closed choice was made, a refused write said *"You need to sign in
+to do that"* or silently did nothing. §19.63 changed that — it now reads *"You
+don't have permission to change this."* **A wrong "yes" is one clear sentence; a
+wrong "no" is still invisible.** Company-wide stays company-admin-only, because
+that answer comes from the profile role with no grant lookup and there is
+nothing to fail open about.
+
+#### 7. Verification
+
+**verify-db.sh exit 0.** `52_scope_and_colour_test.sql` **19 cases**,
+`upgrade_0025_scope_widening.sql` **5**, database total **332 → 356**.
+**15 mutations, none uncaught** — 12 killed by cases, one (S1) killing 52_'s
+fixture outright, and two (S5, S10) failing the BUILD, which is the strongest
+instrument there is. Both verdicts are recorded as such rather than as "caught",
+because a mutation that stops the seed applying and a mutation a case notices are
+different facts.
+
+**⚠️ MUTATION S8 FOUND A REAL HOLE.** An unanchored hex arm went NOT CAUGHT:
+every other spelling in case S14 fails on LENGTH as well as content, so none of
+them could tell an anchored pattern from a "contains" one. `'teal #1baf7a'` is
+the only input that separates them — and it is exactly what a paste from a
+design tool looks like.
+
+Client: `tsc` 0, `eslint` 0, rem audit clean, suites re-run in the shim —
+**scope 26 / products 101 / shiftDraft 109 / operators 69** — and **11 client
+mutations, all caught after two more holes were closed**: `normaliseHexInput`
+accepting any six characters (every "not a colour" fixture failed on length too),
+and `colorUnknown` flagging a legal hex (nothing asserted the flag for a hex
+row). **Acceptance 1046 → 1082 in 24 files.**
+
+#### 8. What is NOT in this migration, deliberately
+
+**The operators' area rule.** Pratik corrected his earlier answer — he does want
+people assignable to a level, because *"there are facilities where certain people
+can only work in certain areas"* — and chose **refused by the server, with a
+supervisor override that records a reason.** That is a change to
+`check_eligibility` and `assign_operator`, and `assignments` already carries
+`eligibility_override`, `override_reason` and `created_by` from 0003, so the
+pattern exists and does not need inventing.
+
+**⚠️ It should be a SECOND flag, not the existing one.** A supervisor overriding
+"missing Welding" must not silently also place someone in an area they are not
+cleared for; conflating them means the weaker override grants the stronger one.
+
+**And the board's filtering.** `board_window` now REPORTS each scope and filters
+nothing, which is the point: **narrowing what is OFFERED must never change what
+the board can DRAW.** A product moved under Line 1 today was legitimately run on
+Line 2 yesterday and that run has to keep rendering it. Case S18 exists to fail
+the day someone moves the filter into the function.
+
+---
+
+### D104 — Trainings, not tickets (Pratik, Aug 27) — DECIDED, NOT BUILT
+
+*"I don't like the name, it's something like Training, where is X person trained
+and signed off to work. Maybe we need a section for trainings where the
+supervisor can add trainings."*
+
+He chose the largest of the three options: **rename, sign-off fields, and its own
+section.**
+
+- **The vocabulary changes and the schema keeps its names.** "Training" replaces
+  "ticket" in every label; `skills` / `operator_skills` stay as they are. That is
+  D90's precedent exactly — the UI says "site structure" and the database says
+  `hierarchy_templates`.
+- **What is genuinely missing is the RECORD.** `operator_skills` holds only
+  `expires_at`. A training record wants **trained on**, **signed off by** (a
+  named person, FK to `user_profiles`), and the expiry it already has. "Who
+  signed this off" is the question an audit asks and the current table cannot
+  answer at all.
+- **Its own section**, so a supervisor manages the catalogue and sees who holds
+  what — rather than the catalogue living behind a link inside Operators, which
+  is where it is today.
+- **⚠️ AND IT LANDS AFTER THE AREA RULE, NOT BEFORE.** Both touch
+  `operator_skills` and the operators screen; the area rule is the one with a
+  refusal path and an override to get right, and doing the rename first would
+  mean renaming everything twice.
+

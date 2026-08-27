@@ -31,6 +31,7 @@
  * `"WX "` forever. Trimming here is therefore the only trim there is.
  */
 import type { AdminProduct, SchedulerError } from "@/lib/api";
+import { isHexColorToken, productColorCss } from "@/lib/productColor";
 
 /* ===========================================================================
  * §1. The palette.
@@ -89,7 +90,13 @@ export function isPaletteToken(token: string | null | undefined): token is strin
  * a bug. Anything outside the four falls back to the first token instead.
  */
 export function productColorVar(token: string | null | undefined): string {
-  return `var(--${isPaletteToken(token) ? token : FALLBACK_COLOR_TOKEN})`;
+  // ⭐ ONE RULE, ONE FILE (`src/lib/productColor.ts`). This used to be written
+  // out here AND in `BoardGrid.tsx` AND in `BoardToolbar.tsx`, with a comment
+  // on the board copies saying they were "kept in step with" this one — which
+  // is D100's defect exactly: every declaration correct, and the defect was
+  // that there were three of them. 0025 §2 added a second branch to the rule,
+  // which is the edit that would have made them disagree.
+  return productColorCss(token);
 }
 
 /* ===========================================================================
@@ -180,7 +187,11 @@ export function productRows(
       ...p,
       owner: ownerLabel(p.siteNodeId, sites),
       colorVar: productColorVar(p.colorToken),
-      colorUnknown: !isPaletteToken(p.colorToken),
+      // A HEX IS NOT UNKNOWN. This flag drives the "this colour is not one the
+      // board defines" warning, and after 0025 a hand-set hex is both perfectly
+      // legal and perfectly drawable — warning about it would be the screen
+      // complaining about a value it just helped somebody choose.
+      colorUnknown: !isPaletteToken(p.colorToken) && !isHexColorToken(p.colorToken),
     });
   }
   return { rows, skipped };
@@ -244,13 +255,50 @@ export function canOwnProduct(
   return adminSiteIds.includes(siteNodeId);
 }
 
-/** Whether this person may rename, deactivate or delete this exact product. */
+/**
+ * Whether this person may rename, deactivate or delete this exact product.
+ *
+ * ⭐⭐ THIS FAILS OPEN FOR A SITE ADMIN NOW, AND THE CHANGE IS DELIBERATE.
+ *
+ * It used to be `canOwnProduct(...)`, i.e. "is this product's scope one of the
+ * sites I administer" — with `adminSiteIds` derived from which STRUCTURES this
+ * person may edit (`editable_shape_ids()`). The adversarial review of 27 Aug
+ * measured that those are not the same question: the product policies ask
+ * `app_is_admin_for(site_node_id)`, which reads node GRANTS and never touches
+ * `hierarchy_templates`. A site whose root has no claimed structure — which
+ * 0020's `having count(*) = 1` backfill deliberately creates for any shared
+ * shape — dropped out of `adminSiteIds` while remaining fully writable on the
+ * server. The error was one-directional and it was the CLOSED direction: a
+ * whole screen dead for exactly the people the feature exists for.
+ *
+ * ⚠️ AND 0025 MADE IT WORSE BEFORE IT MADE IT BETTER. Under D103 a scope can be
+ * any node, so "is the scope one of my sites" is not even the right shape of
+ * question any more — a product scoped to a line inside a site I administer is
+ * mine to edit, and a root-id list cannot say so.
+ *
+ * ⭐ SO THE DEFAULT FLIPS, AND [[verification-standard]] RULE 8b IS WHY: ask
+ * what the answer buys. When this was written a refused write said
+ * *"You need to sign in to do that"* or silently did nothing, so guessing
+ * wrong meant a screen that lied. §19.63's contract changed that — a refusal
+ * now arrives as `WriteRefused` and reads *"You don't have permission to change
+ * this."* **A wrong "yes" is now one clear sentence; a wrong "no" is still
+ * invisible and permanent.**
+ *
+ * A company admin is unaffected. Someone who administers NOWHERE still gets
+ * `false`, because that answer needs no grant read to be certain of.
+ */
 export function canEditProduct(
   row: Pick<AdminProduct, "siteNodeId">,
   isCompanyAdmin: boolean,
   adminSiteIds: readonly string[],
+  adminAnywhere = false,
 ): boolean {
-  return canOwnProduct(row.siteNodeId, isCompanyAdmin, adminSiteIds);
+  if (canOwnProduct(row.siteNodeId, isCompanyAdmin, adminSiteIds)) return true;
+  // Company-wide rows stay company-admin-only: that one IS knowable from the
+  // profile role alone, with no grant lookup, so there is nothing to fail open
+  // about.
+  if (row.siteNodeId === null) return false;
+  return adminAnywhere;
 }
 
 /** Why the controls on this row are dead, in the row's own terms. */
@@ -258,11 +306,14 @@ export function editRefusalNote(
   row: Pick<AdminProduct, "siteNodeId">,
   isCompanyAdmin: boolean,
   adminSiteIds: readonly string[],
+  adminAnywhere = false,
 ): string | null {
-  if (canEditProduct(row, isCompanyAdmin, adminSiteIds)) return null;
+  if (canEditProduct(row, isCompanyAdmin, adminSiteIds, adminAnywhere)) return null;
+  // With `canEditProduct` failing open for anyone who administers somewhere,
+  // the only note left is the one that needs no grant read to be sure of.
   return row.siteNodeId === null
     ? "Company-wide — only a company admin can change this."
-    : "Owned by another site.";
+    : "You don't administer anywhere, so this is read-only.";
 }
 
 /**
@@ -286,6 +337,71 @@ export function ownerOptions(
     }
   }
   return options;
+}
+
+/* ===========================================================================
+ * §4b. COLOUR, WHEN IT IS NOT A PALETTE TOKEN (0025 §2, D102 amended).
+ *
+ * Pratik, Aug 27: *"The color should show a colour picker and an ability to
+ * enter hex code."*
+ *
+ * ⚠️ THE DATABASE ACCEPTS TWO SHAPES AND THIS CLIENT MUST DISTINGUISH THEM,
+ * because they render differently: a token becomes `var(--product-N)` and
+ * follows the stylesheet, a hex is used as written and does not. One character
+ * tells them apart, and the CHECK guarantees nothing else can arrive.
+ * ======================================================================== */
+
+/**
+ * Is this a literal colour rather than a palette token?
+ *
+ * ⚠️ ANCHORED, and mutation S8 on the server side is why. An unanchored test
+ * calls `"teal #1baf7a"` a hex, and that string is exactly what a paste from a
+ * design tool looks like.
+ *
+ * Delegates to `isHexColorShape` above rather than repeating the regex: two
+ * copies of a shape rule is [[D100]]'s defect in miniature.
+ */
+export function isHexColor(token: string | null | undefined): token is string {
+  return isHexColorToken(token);
+}
+
+/**
+ * What a person typed, turned into what the column will accept — or `null` if
+ * it will not.
+ *
+ * ⭐ IT IS LENIENT ABOUT THE THINGS A PERSON ACTUALLY TYPES AND STRICT ABOUT
+ * WHAT IT STORES. `#1BAF7A`, `1baf7a` and ` #1baf7a ` are all the colour the
+ * user meant and none of them is storable; the CHECK takes exactly one
+ * spelling, so this is the one place that normalises to it. Rejecting a typed
+ * `#1BAF7A` with "that value isn't allowed here" would be technically correct
+ * and indefensible.
+ *
+ * ⚠️ THREE-DIGIT FORM IS EXPANDED, NOT REFUSED. `#1ba` is a colour every design
+ * tool will hand you. Expanding it here keeps one canonical spelling in the
+ * column, which is what stops `#FFF` and `#ffffff` being two rows meaning one
+ * thing — the reason the server refuses the short form at all.
+ */
+export function normaliseHexInput(typed: string): string | null {
+  const t = typed.trim().toLowerCase();
+  const body = t.startsWith("#") ? t.slice(1) : t;
+  if (/^[0-9a-f]{3}$/.test(body)) {
+    return `#${body[0]}${body[0]}${body[1]}${body[1]}${body[2]}${body[2]}`;
+  }
+  if (/^[0-9a-f]{6}$/.test(body)) return `#${body}`;
+  return null;
+}
+
+/**
+ * The value an `<input type="color">` needs, for any stored colour.
+ *
+ * That control has no concept of a token and no empty state — it must be handed
+ * a six-digit hex or it silently shows black. A token has no hex on this side
+ * (it lives in `tokens.css`), so the caller passes the computed value it
+ * already reads off the row; this only guards the shape.
+ */
+export function colorInputValue(token: string, computedHex: string | null): string {
+  if (isHexColor(token)) return token;
+  return isHexColor(computedHex) ? computedHex : "#000000";
 }
 
 /* ===========================================================================

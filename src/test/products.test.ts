@@ -38,8 +38,10 @@ import {
   describeDeleteRefusal,
   describeWriteRefusal,
   editRefusalNote,
+  isHexColor,
   isPaletteToken,
   matchesProductQuery,
+  normaliseHexInput,
   ownerLabel,
   ownerOptions,
   partitionProducts,
@@ -338,8 +340,109 @@ describe("editRefusalNote", () => {
     expect(editRefusalNote(WX, false, [PLANT_1])).toContain("company admin");
   });
 
-  it("W12: names another site as the reason", () => {
-    expect(editRefusalNote(GZ, false, [PLANT_1])).toContain("another site");
+  it("W12: someone who administers NOWHERE is told exactly that", () => {
+    // ⚠️ RULE 1b-ii: THIS CASE WAS RIGHT AND THE CONTRACT CHANGED. It used to
+    // assert the note said "another site", which was correct while
+    // `canEditProduct` decided from `adminSiteIds` alone. The 27-Aug review
+    // measured that `adminSiteIds` (derived from STRUCTURE ownership) is not
+    // the question the policy asks (node GRANTS), so a site admin could be
+    // locked out of their own products — a wrong "no", which is invisible and
+    // permanent. With §19.63's contract in place a wrong "yes" is one clear
+    // sentence, so the default flipped. The note that remains is the one that
+    // needs no grant read to be certain of.
+    expect(editRefusalNote(GZ, false, [PLANT_1], false)).toContain("administer anywhere");
+  });
+
+  it("W12b: and someone who administers SOMEWHERE is no longer refused on a guess", () => {
+    // The half W12 cannot see. Without this, flipping the default back to
+    // fail-closed would leave the whole group green.
+    expect(editRefusalNote(GZ, false, [PLANT_1], true)).toBe(null);
+    expect(canEditProduct(GZ, false, [PLANT_1], true)).toBe(true);
+  });
+
+  it("W12c: company-wide stays company-admin-only, however wide the grants", () => {
+    // ⭐ THE ONE REFUSAL THAT IS STILL CERTAIN. It comes from the profile role,
+    // with no grant lookup, so there is nothing to fail open about — and it is
+    // what stops the flip above from handing every site admin the company's
+    // shared rows.
+    expect(canEditProduct(WX, false, [PLANT_1], true)).toBe(false);
+    expect(editRefusalNote(WX, false, [PLANT_1], true)).toContain("company admin");
+  });
+});
+
+describe("colour: a token or a hex (0025 §2)", () => {
+  it("W12d: a lower-case six-digit hex is a hex", () => {
+    expect(isHexColor("#1baf7a")).toBe(true);
+  });
+
+  it("W12e: and nothing else is — the test is ANCHORED", () => {
+    // ⚠️ Mutation S8 on the server found the unanchored version. A string that
+    // CONTAINS a hex is what a paste from a design tool looks like.
+    expect([
+      isHexColor("teal #1baf7a"),
+      isHexColor("#1BAF7A"),
+      isHexColor("#1ba"),
+      isHexColor("1baf7a"),
+      isHexColor("product-1"),
+      isHexColor(null),
+    ]).toEqual([false, false, false, false, false, false]);
+  });
+
+  it("W12f: a hex renders as itself, not through var()", () => {
+    // The defect this exists to prevent: a hand-set colour falling through the
+    // unknown-token path and drawing every such product in --product-1, which
+    // is a colour picker that appears to do nothing.
+    expect(productColorVar("#1baf7a")).toBe("#1baf7a");
+  });
+
+  it("W12g: a palette token still renders through var()", () => {
+    expect(productColorVar("product-3")).toBe("var(--product-3)");
+  });
+
+  it("W12h: an unknown token still falls back to the first palette entry", () => {
+    // `product-5` passes the database CHECK and resolves to NO COLOUR AT ALL.
+    expect(productColorVar("product-5")).toBe("var(--product-1)");
+  });
+
+  it("W12i: what a person types is normalised to the one spelling the CHECK takes", () => {
+    // ⭐ LENIENT ABOUT INPUT, STRICT ABOUT STORAGE. Refusing a typed `#1BAF7A`
+    // with "that value isn't allowed here" would be technically correct and
+    // indefensible.
+    expect([
+      normaliseHexInput("#1BAF7A"),
+      normaliseHexInput("1baf7a"),
+      normaliseHexInput("  #1baf7a  "),
+      normaliseHexInput("#1ba"),
+    ]).toEqual(["#1baf7a", "#1baf7a", "#1baf7a", "#11bbaa"]);
+  });
+
+  it("W12j: and anything that is not a colour comes back null, not a guess", () => {
+    expect([
+      normaliseHexInput("teal"),
+      normaliseHexInput(""),
+      normaliseHexInput("#12345"),
+      normaliseHexInput("#1baf7ax"),
+      // ⭐ FOUND BY MUTATION Z6, NOT BY READING. Every string above fails on
+      // LENGTH as well as on content, so none of them can tell a length check
+      // from a hex-digit check — `body.length === 6` passes all four. Six
+      // characters that are not hex digits is the only input that separates
+      // them, and "zzzzzz" is what a half-finished paste looks like.
+      normaliseHexInput("zzzzzz"),
+      normaliseHexInput("#nofill"),
+    ]).toEqual([null, null, null, null, null, null]);
+  });
+
+  it("W12k: a row with a hand-set hex is not flagged as an unknown colour", () => {
+    // ⭐ FOUND BY MUTATION Z8. `colorUnknown` drives the "this colour is not one
+    // the board defines" warning, and after 0025 a hex is both legal and
+    // drawable — warning about it would be the screen complaining about a value
+    // it just helped somebody choose. Nothing asserted the flag for a hex row,
+    // so reverting it to `!isPaletteToken(...)` alone was invisible.
+    const view = productRows(
+      [{ ...WY, colorToken: "#1baf7a" }, { ...WX, colorToken: "product-5" }],
+      SITES,
+    );
+    expect(view.rows.map((r) => r.colorUnknown)).toEqual([false, true]);
   });
 });
 

@@ -359,25 +359,40 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q11;
 
-\echo 'Q12: a node that is not a ROOT cannot own a shared row'
+\echo 'Q12: a node INSIDE a site can own a shared row (0025/D103 widened this)'
+-- ⚠️ RULE 1b-ii: THIS CASE WAS RIGHT AND THE CONTRACT CHANGED. Until 0025 it
+-- asserted the opposite -- that a mid-tree node is refused with
+-- reason='not a root node' -- and it was correct for as long as ownership meant
+-- only "who may edit". D103 makes it mean "where this applies", and
+-- "applies to Assembly and everything under it" is the sentence the product has
+-- to be able to express. So the branch is gone and the case now pins the
+-- widening in the same place.
+--
+-- ⭐ THE COVERAGE THE OLD CASE PROVIDED IS NOT LOST. It proved the trigger fires
+-- and can refuse; Q13 (another org's node) still proves exactly that, and is now
+-- the ONLY refusal branch left in the function, which makes it load-bearing
+-- rather than one of two.
 SAVEPOINT sp_Q12;
 DO $$
-DECLARE v_detail jsonb; v_raw text;
+DECLARE v_owner uuid; v_err text := NULL;
 BEGIN
-  -- As the company admin, so the ONLY thing that can refuse this is the trigger.
+  -- As the company admin, so the ONLY thing that could refuse this is the trigger.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
     UPDATE operators SET site_node_id = '30000000-0000-0000-0000-000000000002'
      WHERE id = '50000000-0000-0000-0000-00000000ee03';
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL;
-    BEGIN v_detail := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_err = RETURNED_SQLSTATE;
   END;
+  SELECT site_node_id INTO v_owner FROM operators
+   WHERE id = '50000000-0000-0000-0000-00000000ee03';
   RESET ROLE;
-  IF v_detail->>'error' = 'invalid_argument' AND v_detail->>'reason' = 'not a root node'
+  -- Asserts the STATE, not merely that nothing was raised: a silent zero-row
+  -- refusal by a USING clause looks identical to success from the outside.
+  IF v_err IS NULL AND v_owner = '30000000-0000-0000-0000-000000000002'
   THEN RAISE NOTICE 'PASS Q12';
-  ELSE RAISE NOTICE 'FAIL Q12: detail=%', v_detail; END IF;
+  ELSE RAISE NOTICE 'FAIL Q12: sqlstate=% owner=% (want no error, owner set to the mid-tree node)',
+    v_err, v_owner; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q12;
 
@@ -682,17 +697,38 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q26;
 
-\echo 'Q27: a hex is refused — the column stores a token or nothing'
+\echo 'Q27: a lower-case six-digit hex is accepted; every other spelling is not (0025 §2)'
+-- ⚠️ RULE 1b-ii AGAIN: this case asserted that '#eb6834' raises 23514, and it
+-- was right for as long as the column held only palette tokens. Pratik asked
+-- for a hex on Aug 27, so 0025 widened the CHECK to a UNION of two disjoint
+-- shapes.
+--
+-- ⭐ AND THE COVERAGE IS RESCUED RATHER THAN DELETED. The old case's real job
+-- was "the CHECK actually rejects something" -- which a widened constraint can
+-- silently stop doing. So this now walks FOUR spellings: the one legal hex, and
+-- the three near-misses that must still fail. An implementation that widened to
+-- `color_token IS NOT NULL` passes the first and fails the rest.
 SAVEPOINT sp_Q27;
 DO $$
-DECLARE v_state text;
+DECLARE v_ok text; v_short text := NULL; v_upper text := NULL; v_named text := NULL;
 BEGIN
   RESET ROLE;
-  BEGIN
-    UPDATE products SET color_token = '#eb6834' WHERE id = '60000000-0000-0000-0000-00000000ee01';
-  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
-  IF v_state = '23514' THEN RAISE NOTICE 'PASS Q27';
-  ELSE RAISE NOTICE 'FAIL Q27: sqlstate=% (want 23514, a check violation)', v_state; END IF;
+  UPDATE products SET color_token = '#eb6834' WHERE id = '60000000-0000-0000-0000-00000000ee01';
+  SELECT color_token INTO v_ok FROM products WHERE id = '60000000-0000-0000-0000-00000000ee01';
+
+  BEGIN UPDATE products SET color_token = '#eb6' WHERE id = '60000000-0000-0000-0000-00000000ee01';
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_short = RETURNED_SQLSTATE; END;
+
+  BEGIN UPDATE products SET color_token = '#EB6834' WHERE id = '60000000-0000-0000-0000-00000000ee01';
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_upper = RETURNED_SQLSTATE; END;
+
+  BEGIN UPDATE products SET color_token = 'orange' WHERE id = '60000000-0000-0000-0000-00000000ee01';
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_named = RETURNED_SQLSTATE; END;
+
+  IF v_ok = '#eb6834' AND v_short = '23514' AND v_upper = '23514' AND v_named = '23514'
+  THEN RAISE NOTICE 'PASS Q27';
+  ELSE RAISE NOTICE 'FAIL Q27: stored=% short=% upper=% named=% (want #eb6834 then three 23514s)',
+    v_ok, v_short, v_upper, v_named; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q27;
 

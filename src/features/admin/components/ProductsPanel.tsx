@@ -33,10 +33,11 @@ import {
   describeWriteRefusal,
   editRefusalNote,
   matchesProductQuery,
-  ownerOptions,
   partitionProducts,
   productRows,
   isPaletteToken,
+  isHexColor,
+  normaliseHexInput,
   PRODUCT_PALETTE,
   productColorVar,
   validateProductDraft,
@@ -51,6 +52,12 @@ import {
   useSetProductColor,
   useUpdateProduct,
 } from "../hooks/useProducts";
+import {
+  indentedLabel,
+  scopeIndex,
+  scopeOptions,
+  scopePathLabel,
+} from "../lib/scope";
 import styles from "./ProductsPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
@@ -92,12 +99,16 @@ export function ProductsPanel() {
   /* -- who this person is, and what that lets them change --------------- */
 
   const isCompanyAdmin = profile?.role === "admin";
+  const adminAnywhere = profile?.adminAnywhere === true;
 
-  // A ROOT node is a site (0023 §2's trigger refuses anything else as an
-  // owner), and `nodes_select` already limits this to the ones they may see.
-  const sites: readonly ProductSite[] = (treeQuery.data?.nodes ?? [])
-    .filter((n) => n.parentId === null)
-    .map((n) => ({ id: n.id, name: n.name }));
+  // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). Until 0025 the trigger refused
+  // anything but a root as an owner, so this filtered to `parentId === null`.
+  // Pratik: *"how do we assign them to a specific hierarchy level so the lower
+  // levels inherit them?"* — so the picker is the tree now, and `nodes_select`
+  // already limits it to what this person may see.
+  const allNodes = treeQuery.data?.nodes ?? [];
+  const nodesById = scopeIndex(allNodes);
+  const sites: readonly ProductSite[] = allNodes.map((n) => ({ id: n.id, name: n.name }));
 
   // ⚠️ FAILS CLOSED when `editable_shape_ids()` could not be read. That RPC is
   // a PREVIEW and `filterEditableShapes` fails OPEN on it one screen over —
@@ -125,7 +136,16 @@ export function ProductsPanel() {
   const previewUnavailable =
     !isCompanyAdmin && (treeQuery.isError || editableShapeIds === null);
 
-  const owners = ownerOptions(sites, isCompanyAdmin, adminSiteIds);
+  // ⭐ THE PICKER FAILS OPEN AND THE SERVER DECIDES. `ownerOptions` narrowed the
+  // list to `adminSiteIds`, which is derived from STRUCTURE ownership and is
+  // not the question the insert policy asks (see `canEditProduct`'s header) —
+  // so a site admin whose root has no claimed structure was offered nothing at
+  // all. Offering a node the server then refuses costs one clear sentence now
+  // that §19.63's contract exists; offering nothing costs the whole feature.
+  const owners = isCompanyAdmin
+    ? scopeOptions(allNodes)
+    : scopeOptions(allNodes).filter((o) => o.value !== null);
+  const ownerLabels = new Map(owners.map((o) => [o.value, indentedLabel(o)]));
 
   // The owner picker's value, kept legal by construction. A site admin has no
   // company-wide option at all (the insert policy refuses it), so an empty
@@ -233,8 +253,12 @@ export function ProductsPanel() {
   /* -- render ------------------------------------------------------------ */
 
   function renderRow(row: ProductRow) {
-    const editable = canEditProduct(row, isCompanyAdmin, adminSiteIds);
-    const note = editRefusalNote(row, isCompanyAdmin, adminSiteIds);
+    // The fourth argument is the fail-open one — see `canEditProduct`'s header.
+    // `adminAnywhere` is `app_is_admin_anywhere()`, fetched with the profile,
+    // and it is a `boolean | null`: `=== true` rather than a truthiness test,
+    // because "we could not ask" must not read as "yes".
+    const editable = canEditProduct(row, isCompanyAdmin, adminSiteIds, adminAnywhere);
+    const note = editRefusalNote(row, isCompanyAdmin, adminSiteIds, adminAnywhere);
     const isEditing = editingId === row.id;
     const isConfirming = confirmingId === row.id;
     const error = rowError !== null && rowError.id === row.id ? rowError.message : null;
@@ -295,7 +319,12 @@ export function ProductsPanel() {
           <span className={styles.name}>{row.name}</span>
         )}
 
-        <span className={styles.owner}>{row.owner}</span>
+        {/* ⚠️ THE FULL PATH IS THE TOOLTIP, because after 0025 a scope can be
+            any node and "Line 1" is ambiguous the moment a second plant has
+            one. The column stays short; the disambiguation is one hover away. */}
+        <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
+          {row.owner}
+        </span>
 
         <span className={styles.actions}>
           {isEditing ? (
@@ -386,6 +415,62 @@ export function ProductsPanel() {
                 }}
               />
             ))}
+            {/* ⭐ THE PALETTE IS THE SHORTCUT; THE FIELD IS THE ANSWER.
+                Pratik asked for both, and they are not the same control: four
+                swatches cover the common case in one click, and a company with
+                six products on one line needs a colour the palette does not
+                have. `normaliseHexInput` is deliberately lenient about what a
+                person types (`#1BAF7A`, `1baf7a`, `#1ba`) and strict about
+                what it stores, because the CHECK takes exactly one spelling
+                and refusing a typed `#1BAF7A` would be indefensible. */}
+            <input
+              type="color"
+              className={styles.colorField}
+              aria-label="Pick a colour"
+              value={isHexColor(row.colorToken) ? row.colorToken : "#1baf7a"}
+              disabled={colorMutation.isPending}
+              onChange={(e) => {
+                const hex = normaliseHexInput(e.target.value);
+                if (hex === null) return;
+                clearRowError(row.id);
+                colorMutation.mutate(
+                  { id: row.id, colorToken: hex },
+                  {
+                    onError: (err) =>
+                      setRowError({ id: row.id, message: describeWriteRefusal(err, "product") }),
+                  },
+                );
+              }}
+            />
+            <input
+              type="text"
+              className={styles.hexField}
+              aria-label="Colour hex code"
+              placeholder="#1baf7a"
+              defaultValue={isHexColor(row.colorToken) ? row.colorToken : ""}
+              disabled={colorMutation.isPending}
+              onBlur={(e) => {
+                const typed = e.target.value.trim();
+                if (typed === "") return;
+                const hex = normaliseHexInput(typed);
+                if (hex === null) {
+                  setRowError({
+                    id: row.id,
+                    message: "That isn't a colour — use a hex code like #1baf7a.",
+                  });
+                  return;
+                }
+                clearRowError(row.id);
+                colorMutation.mutate(
+                  { id: row.id, colorToken: hex },
+                  {
+                    onSuccess: () => setRecolouringId(null),
+                    onError: (err) =>
+                      setRowError({ id: row.id, message: describeWriteRefusal(err, "product") }),
+                  },
+                );
+              }}
+            />
           </span>
         )}
         {!row.active && <span className={styles.tag}>Not in use</span>}
@@ -453,8 +538,11 @@ export function ProductsPanel() {
             </label>
             <label className={styles.field}>
               <span className={styles.fieldLabel}>Belongs to</span>
-              {/* Only the owners the insert policy will actually accept — a
-                  site admin is never offered company-wide. */}
+              {/* ⭐ THE WHOLE TREE, INDENTED (0025 / D103). Company-wide is
+                  offered only to a company admin, because that one refusal IS
+                  knowable from the profile role with no grant lookup. Every
+                  node below it is offered to anyone who administers anywhere,
+                  and the server has the final say. */}
               <select
                 className={styles.input}
                 value={ownerValue}
@@ -462,7 +550,7 @@ export function ProductsPanel() {
               >
                 {owners.map((o) => (
                   <option key={o.value ?? "company"} value={o.value ?? ""}>
-                    {o.label}
+                    {ownerLabels.get(o.value)}
                   </option>
                 ))}
               </select>

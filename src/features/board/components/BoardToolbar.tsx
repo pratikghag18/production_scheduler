@@ -1,4 +1,5 @@
 import type { Product } from "@/lib/api";
+import { productColorCss } from "@/lib/productColor";
 import { ZOOMS, type ZoomIndex } from "../lib/geometry";
 import { formatDayLabel, addMinutes } from "../lib/time";
 import styles from "./BoardToolbar.module.css";
@@ -116,21 +117,17 @@ export function BoardToolbar({
             emits products `ORDER BY p.sku` org-wide, so adding or renaming any
             product in the company re-coloured the others. Migration 0023 §3
             gives every product a `color_token` chosen once at insert.
-            ⚠️ Falls back to the first palette entry for anything `tokens.css`
-            does not define -- `product-5` is a well-formed token that renders
-            as no colour at all (0023 §3 records that exact ship). Kept in step
-            with `BoardGrid.tsx`'s `productColorVar` and with `PRODUCT_PALETTE`
-            in `src/features/admin/lib/products.ts`, which a feature here may
-            not import (docs/conventions.md). */}
+            ⭐ THE RULE ITSELF LIVES IN `src/lib/productColor.ts` NOW. It used
+            to be written out here, in `BoardGrid.tsx` and in the admin lib,
+            with a comment saying the three were kept in step by hand -- and
+            0025 §2 then added a hex arm to it. That is D100's defect, and the
+            fix is the same one: move the rule somewhere every feature may
+            import from, rather than matching three copies. */}
         {products.map((p) => (
           <span key={p.id} className={styles.key}>
             <span
               className={styles.swatch}
-              style={{
-                background: /^product-[1-4]$/.test(p.colorToken)
-                  ? `var(--${p.colorToken})`
-                  : "var(--product-1)",
-              }}
+              style={{ background: productColorCss(p.colorToken) }}
             />
             {p.name}
           </span>

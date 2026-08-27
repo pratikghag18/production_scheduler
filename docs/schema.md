@@ -228,9 +228,9 @@ Access method: heap
 
 ```
 \d+ operators
-                                                                                                                                                                              Table "public.operators"
-    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                      Description                                                                                                                      
---------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                        Table "public.operators"
+    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                Description                                                                                                                 
+--------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  id           | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
  org_id       | uuid                     |           | not null |                   | plain    |             |              | 
  home_node_id | uuid                     |           |          |                   | plain    |             |              | 
@@ -241,7 +241,7 @@ Access method: heap
  active       | boolean                  |           | not null | true              | plain    |             |              | 
  created_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The ROOT node whose site owns this operator (0023). NULL = company-wide: readable by everyone in the org and editable only by a company admin. NOT the same thing as home_node_id, which is an unenforced roster-filter default pointing at any node.
+ site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this person BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: in 0025 this filters the roster and nothing else. Whether an assignment OUTSIDE it is refused is a separate migration; see this file header.
 Indexes:
     "operators_pkey" PRIMARY KEY, btree (id)
     "operators_org_home_node_idx" btree (org_id, home_node_id)
@@ -275,9 +275,9 @@ Access method: heap
 
 ```
 \d+ products
-                                                                                                                                                      Table "public.products"
-    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                             Description                                                                                              
---------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                                                                                      Table "public.products"
+    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                                                                                              Description                                                                                                                                                                                              
+--------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  id           | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
  org_id       | uuid                     |           | not null |                   | plain    |             |              | 
  sku          | text                     |           | not null |                   | extended |             |              | 
@@ -287,15 +287,15 @@ Access method: heap
  active       | boolean                  |           | not null | true              | plain    |             |              | 
  created_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The ROOT node whose site owns this product (0023). NULL = company-wide.
- color_token  | text                     |           | not null |                   | extended |             |              | The palette token this product renders in, e.g. product-3 (0023, D102). NEVER a hex -- the board resolves it through tokens.css. NULL only transiently: app_pick_product_color() fills it on insert.
+ site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this product BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. Not merely who may edit it: everything at or below this node may use the product and nothing outside it may. Resolution is target.path <@ scope.path, the same shape as resolve_shift_template.
+ color_token  | text                     |           | not null |                   | extended |             |              | How this product is drawn on the board. EITHER a palette token name (product-1 .. product-4, defined in tokens.css and chosen automatically at INSERT by products_set_color_token) OR a literal lower-case six-digit hex (#1baf7a) set by hand. NOT NULL. WARNING: a token follows the stylesheet, a hex does not. The trigger only ever writes tokens, so a hex is always a deliberate human choice.
 Indexes:
     "products_pkey" PRIMARY KEY, btree (id)
     "products_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
     "products_org_id_sku_key" UNIQUE CONSTRAINT, btree (org_id, sku)
     "products_org_site_idx" btree (org_id, site_node_id)
 Check constraints:
-    "products_color_token_shape" CHECK (color_token IS NULL OR color_token ~ '^product-[1-9][0-9]*$'::text)
+    "products_color_token_shape" CHECK (color_token IS NULL OR color_token ~ '^product-[1-9][0-9]*$'::text OR color_token ~ '^#[0-9a-f]{6}$'::text)
 Foreign-key constraints:
     "products_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "products_org_id_site_node_id_fkey" FOREIGN KEY (org_id, site_node_id) REFERENCES nodes(org_id, id)
@@ -322,15 +322,15 @@ Access method: heap
 
 ```
 \d+ skills
-                                                                                                                     Table "public.skills"
-    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                            Description                                                            
---------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+-----------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                         Table "public.skills"
+    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                Description                                                                                                                
+--------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  id           | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
  org_id       | uuid                     |           | not null |                   | plain    |             |              | 
  name         | text                     |           | not null |                   | extended |             |              | 
  created_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The ROOT node whose site owns this skill (0023). NULL = company-wide, which is the expected case: a qualification is not a place.
+ site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this training BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: training NAMES remain unique per ORG (Pratik, Aug 27) -- the scope says where it is offered, never that two sites may hold the same name.
 Indexes:
     "skills_pkey" PRIMARY KEY, btree (id)
     "skills_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
@@ -528,14 +528,14 @@ Access method: heap
 
 ```
 \d+ shift_templates
-                                                                                                                                                                                                                  Table "public.shift_templates"
-    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                                                             Description                                                                                                                                                              
---------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                 Table "public.shift_templates"
+    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                            Description                                                                                                                             
+--------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  id           | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
  org_id       | uuid                     |           | not null |                   | plain    |             |              | 
  name         | text                     |           | not null |                   | extended |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The ROOT node whose site owns this shift pattern (0023, D101). NULL = company-wide, so a company admin can seed a standard pattern once and each site adds its own alongside. Ownership decides who may EDIT the pattern, never which pattern a node RUNS -- that is still nearest-ancestor resolution through node_shift_templates.
+ site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this pattern BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: distinct from ATTACHMENT -- node_shift_templates says which node RUNS a pattern and needs app_is_admin_for(node_id); this says who owns it and where it is offered.
 Indexes:
     "shift_templates_pkey" PRIMARY KEY, btree (id)
     "shift_templates_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)

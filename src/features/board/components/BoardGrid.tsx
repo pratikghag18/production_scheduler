@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { HierarchyLevel, Product, BoardOperator } from "@/lib/api";
+import { productColorCss } from "@/lib/productColor";
 import type { BoardIndex, BoardRow } from "../lib/boardIndex";
 import {
   ZOOMS,
@@ -187,16 +188,11 @@ export function BoardGrid({
     (productId: string | null) => {
       if (!productId) return "var(--muted)";
       const token = productById.get(productId)?.colorToken;
-      // `tokens.css` defines `--product-1` .. `--product-4` and nothing else.
-      // A token outside that set -- absent, or a `product-5` from a widened
-      // palette (0023 §3 records that exact ship) -- resolves to NO COLOUR AT
-      // ALL, which reads as a design choice rather than as a bug. Fall back to
-      // the first palette entry instead. ⚠️ Widening the palette is
-      // `tokens.css`, `app_product_palette()`, `PRODUCT_PALETTE` in
-      // `src/features/admin/lib/products.ts` and this regex, in one commit.
-      return token !== undefined && /^product-[1-4]$/.test(token)
-        ? `var(--${token})`
-        : "var(--product-1)";
+      // ⭐ ONE RULE, ONE FILE. This branch was written out here, in
+      // `BoardToolbar.tsx` and in the admin lib, with a comment claiming the
+      // three were kept in step by hand — and 0025 §2 then added a hex arm,
+      // which is the edit that makes hand-kept copies disagree. D100, again.
+      return productColorCss(token);
     },
     [productById],
   );
