@@ -23,9 +23,22 @@ import styles from "./DevProfileSwitcher.module.css";
  * developing.
  */
 const DEV_PROFILES = [
-  { label: "Admin", email: "admin@example.test" },
-  { label: "Ana", email: "ana@example.test" },
-  { label: "Marco", email: "marco@example.test" },
+  { label: "Admin (company)", email: "admin@example.test" },
+  { label: "Ana (supervisor)", email: "ana@example.test" },
+  { label: "Marco (supervisor)", email: "marco@example.test" },
+  // ⭐ THE TWO SITE ADMINS, AND THEY ONLY EXIST AFTER `supabase/dev_demo.sql`
+  // HAS BEEN RUN — see that file's header for why they are not in `seed.sql`
+  // (measured: a second plant in the seed turns 8 test files red, and several
+  // of those cases exist BECAUSE org 1 holds exactly one structure).
+  //
+  // They are what makes migrations 0019-0021 visible at all: every seeded
+  // person is either the company admin, for whom no rule applies, or a
+  // supervisor, who cannot open the admin screen. Signing in as one of these
+  // is the only way to see a site admin run one plant and be refused on the
+  // other. Picking one before running the script fails to sign in, which is
+  // the honest outcome rather than a hidden option.
+  { label: "Dana (site admin, Plant 1)", email: "dana@example.test" },
+  { label: "Quinn (site admin, Plant 2)", email: "quinn@example.test" },
 ] as const;
 
 const DEV_PASSWORD = "devpassword";

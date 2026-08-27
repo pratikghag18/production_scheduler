@@ -5062,3 +5062,159 @@ Neither is visible to a passing suite. Both took one screenshot.
 1. **A department admin gets `"no-place"`.** A structure is owned by a ROOT (0020 §1), so somebody who administers a department administers no structure and this panel has nothing to be about. Correct today, named in 0021 §7, and it needs a real answer eventually — most likely `site_people` being reachable for any node the caller administers, which the RPC already supports.
 2. **The role control renders the raw enum text** (`admin` / `supervisor` / `viewer`, lower case). Fine, but it is the only place in the product showing a database value unformatted.
 3. **Nothing here has been seen against a real Supabase.** The wire shapes of all four RPCs are still reasoning from precedent — `site_people`'s payload most of all, since `buildAccessRows` is written against the shape the SQL tests assert rather than against a response anyone has received.
+
+---
+
+## §19.53 — The demo cast, an id collision that broke two orgs, and the panel that had no control of its own
+
+Two defects, both found by Pratik in the running app within minutes of each other, and the first is the worst thing I have shipped in this project.
+
+### ⭐⭐ D100 — `dev_demo.sql` hijacked org 2's two accounts
+
+The script created its two site admins at `00000000-…-0000000000b1` and `…b2`. **Those ids are not free**: `seed.sql` hands them to org 2's company admin and to Sofia. What followed was silent at every step:
+
+1. `INSERT INTO auth.users (id, email) … ON CONFLICT (id) DO NOTHING` — did **nothing**, because the rows existed.
+2. The GoTrue credentials `UPDATE`, keyed by those ids, then **renamed org 2's admin to `dana@example.test`** and Sofia to `quinn@example.test`, and set both passwords to the dev one.
+3. The `user_profiles` insert hung a **second, org-1 profile** off each of those accounts.
+
+`user_profiles` is unique on `(org_id, user_id)`, **not** on `user_id`, so step 3 is perfectly legal. The damage surfaced two layers away: `user_profiles_select` admits a row on `user_id = auth.uid()`, so signing in returned **two** rows, and `loadProfile` reads that with **`.maybeSingle()`, which errors on more than one row**. The session therefore had *no profile at all* — no Admin link for anybody, and a board that told a site admin holding a grant that they "may not have a grant on any node".
+
+**Why my own assertions missed it.** The script asserted its own properties — two plants, two structures, Dana runs Plant 1, both org-wide viewers — and every one of them was **true**. Not one of them asked whether the ids had belonged to somebody else first. *The demo was internally consistent and externally destructive.*
+
+Three things changed:
+
+- New ids (`…dec1`/`…dec2`, `dec00000-…`), chosen after **enumerating every id `seed.sql` uses** rather than assuming.
+- **A precondition that refuses to run**: if either auth id exists with any other email, the script raises and names it. Measured — squatting an id produces `dev_demo refuses to run: … is already someone.else@example.test`.
+- **The assertion whose absence let it ship**: no demo account may hold a profile in more than one org. Counting the demo's own rows could never have seen this; counting rows *per account* does.
+
+**The general lesson, and it is rule 3's in a new place: an id you did not verify is free is a fixture that can pass every check while overwriting somebody.** The seed's id space is a shared resource and this file is the first thing to write into it from outside.
+
+### D101 — the Access panel was scoped by a control on a different tab
+
+"Where is Plant 1?" The panel derived its site from `resolvedShapeId`, which is owned by the **structure picker on the Hierarchy tab**. A company admin standing on the Access tab was shown whichever plant that other tab happened to have selected, with no control and nothing on screen explaining why.
+
+The panel now owns its selection: `resolvePlace(places, selectedId)` in the pure layer (same falls-back-never-sticks shape as `resolveSelectedShape`, and the same reason — a selection pointing at a place you no longer administer must fall back rather than ask the server about something it will refuse). `AdminPage` builds the list from the structures the viewer may edit, **named by the SITE that owns each** rather than by the structure: an admin is looking for "Plant 2", not "Standard Plant". The picker renders only when there is more than one — a site admin administers one plant, and a one-item dropdown answers nothing.
+
+### Also this round
+
+- **Uniform button widths.** `Remove`/`Add`/`Remove`/`Cancel` were each as wide as their own label, so the right edge of the list zig-zagged. One `min-width` set from the longest label.
+- **`ON CONFLICT` on `auth.identities` lost its column target.** That constraint is GoTrue's, not this project's, and it has been renamed across versions; naming columns infers a constraint that may not exist on the reader's Supabase. A bare `DO NOTHING` works against any of them — and this file cannot be tested against a real Supabase from the design container, which is exactly when to prefer the portable form.
+
+### Verification
+
+- `siteAccess.test.ts` **57 → 72 cases**; **38 mutations, all 38 caught**.
+- `tsc -b --force` exit 0, `eslint .` exit 0, scale audit clean (6 surfaces, zero unscaled px, nothing unlisted).
+- The corrected `dev_demo.sql` run twice on a fresh database: org 2's two accounts **intact**, every demo account holding **exactly one** profile, Dana 13 visible nodes and one shape, Quinn 5 and a different one, `app_is_admin_anywhere()` true for both.
+- **Suite prediction 652 → 667, still 19 files.**
+
+### D102 — the panel was a list of flex rows, so it had no columns at all
+
+*"The data and columns should be presented in a structural manner; buttons and text in weird locations doesn't look professional."* Reported from the running app, and correct.
+
+Every row was a flex container sizing its own children from its own content, so the description, the role control and the action each landed at a different x on every line. Nothing was misaligned by a bug — there were simply **no columns**, only twelve independent rows that happened to contain similar things.
+
+Rebuilt on **one grid template declared once and used by both the header and every row**: two `fr` tracks for the person and their access, then two FIXED tracks for the role control and the action. Fixed on purpose — a control that sizes to its own label is what made the right-hand edge zig-zag, and `width: 100%` inside a fixed track makes every select and every button identical whether it offers three roles or one.
+
+Two things fell out of the rebuild that are worth recording:
+
+- **Anything that cannot fit a column takes its own full-width line**: the explanation of a missing button, the error, the remove confirmation. The first attempt put the note in the 6.5rem action column, where *"You can't take away your own admin access here."* wrapped to four lines.
+- **The plant picker reused `.select` and stretched across the whole card**, because that class is now a grid item sized to fill column 3. It sits outside the grid and needed its own rule. Visible the instant the grid landed, and invisible to every test — the same class of finding as the two in §19.52, and the third and fourth time on this screen that a render has been the only thing that could see the defect.
+
+`describeAccess` is now rendered for candidates too. It reads "No access", which is true, and it stops column 2 being a hole that made the two lists look like different tables.
+
+No test changes: the grid is layout, and the pure layer was untouched. `tsc` exit 0, `eslint` exit 0, scale audit clean — six surfaces, zero unscaled pixel lengths.
+
+---
+
+## §19.54 — Migration 0022: a company admin's row is not a site admin's to edit
+
+**Status: applied and green. `verify-db.sh` exit 0, 22 migrations, `49_company_admin_rows_test.sql` 9 cases, 271 SQL cases in total, cold. 8 mutations, all 8 caught. Client mirror: `siteAccess.test.ts` 72 → 79, 44 mutations all caught. `tsc` and `eslint` exit 0. NEEDS `npm run test` — predicted 674 in 19 files.**
+
+*"I logged in as Dana and I have ability to remove the company admin, this is a very big issue."*
+
+### Measured before deciding the size of the fix
+
+```
+site admin removes the company admin's grant on Plant 1 -> ALLOWED, row deleted
+the company admin immediately afterwards
+    app_is_admin       = true
+    admin_for(Plant 1) = true
+    nodes visible      = 18 / 18
+```
+
+**Not an escalation, and it took nothing away.** A company admin's authority is `user_profiles.role`, and 0020 §9 keeps that field company-admin-only — a site admin cannot write it. The grant they could delete is redundant for that person.
+
+Answering that honestly mattered more than fixing it quickly. It is still wrong, for three reasons:
+
+1. **A role inversion** — the person with less authority editing the record of the person with more. Harmless *today* only because of a fact in a different table, which is the exact shape that becomes a hole when the model changes.
+2. **It lies.** The button appears to remove a company admin's access and removes nothing; only the row's wording moves.
+3. If that person ever loses the org-wide flag, a grant a site admin silently deleted is gone.
+
+### ⭐ The server was fixed first, and the order is the whole point
+
+The cheap fix was to hide the button. That would have **broken the invariant this entire feature rests on**, stated in `shapePicker.ts` and again in `siteAccess.ts`: *anything the client hides, the server must also refuse; never the converse.* A client that hides a permitted action is a feature nobody can reach — the same failure as `filterEditableShapes` failing closed, which §19.51 rejected for the same reason.
+
+So: `app_profile_is_company_admin` (the third of 0020 §8.0's family — org-scoped, boolean, grants nothing, because a site admin cannot SELECT `user_profiles` at all), and one guard in each write RPC. **Both bodies were extracted from the LIVE database with `pg_get_functiondef`** and edited by string replacement with a uniqueness assertion, never retyped (rule 12).
+
+`NOT app_is_admin()` is half the condition and **X43/X44/G3/G4 are why**: a guard keyed only on the target's flag stops two company admins being peers, and one keyed only on the caller refuses everybody and breaks the whole screen. Mutations Z3 and Z4 are those two mistakes; both caught.
+
+### Where the guard sits, and the case that proves it
+
+`remove_site_member` checks it **after** "there is nothing here to remove" and **before** the self-rule. **X45 is the only state that can tell those apart**: a company admin who holds no grant on the node, so both rules are live at once. The absent row is the truer sentence — putting the new guard first answers "you may not edit that person" about a row that is not there, sending an admin to argue about permissions over a typo. Mutation Z7 swaps them; caught by X45 alone.
+
+### ⭐ The gap this does NOT close, asserted rather than left to be found
+
+`profile_grants`' RLS is untouched, so a caller reaching **PostgREST directly** can still delete a company admin's grant on a node they administer — 0020 §9's policy asks only `app_is_admin_for(node_id)`. The guard is on the RPCs, which is where the screen goes.
+
+That is a choice, not an oversight: putting it in the policy means `profile_grants_delete` reading `user_profiles`, and a policy that delegates into another table's contents is precisely what verification rule 9 warns about — it greps clean and inherits every hole of the thing it reads. **Case X46 asserts the gap directly**, the way 0020's W24 asserts its unwanted refusal: whoever closes it deletes that case deliberately.
+
+### The client half, and one case the first run killed
+
+`protectedRow` folds into `canRemoveAccess`, plus a new `canSetRole` — **separate from `allowedRoles` on purpose**: one decides whether the control belongs on the row at all, the other narrows which options it offers. A control showing one option and writing nothing is worse than no control, because it looks live.
+
+**G5**: the two company-admin rows do NOT get the same sentence. One genuinely has nothing to take away; the other *has* something and the viewer is simply not the person who may touch it. Saying "nothing" to the second would be the same lie the button told.
+
+**G7 started as an ordering assertion and the first run killed it.** It claimed the protection outranks the self-rule; `removalReason` answers `"self"`, because `selfLocked` is checked first. Both refuse, so nothing unsafe turns on the order — and the state it described (a row that is both *you* and a company admin, seen by a viewer who is not one) is a contradiction: if that row is you and it is a company admin, you are one. Reachable only as a transient artefact while the session's own profile resolves. Pinning an arbitrary order on an input nobody can produce deliberately is rule 3b's trap; rewritten to assert **the property** — a protected row is never editable and never without an explanation — swept over every combination.
+
+### ⭐ Rule 0, twice now, and the pattern is clear
+
+`tsc` rejected `withGrant !== without` as **TS2367**: two string literal types that provably cannot overlap. That is the second "so it cannot come back" inequality in this file to turn out vacuous — A30 was the first. **Once both sides narrow to literals the compiler has already proved the claim**, and writing it costs a red build rather than buying coverage. `node --experimental-strip-types` was green on both.
+
+### Verification
+
+- `49_company_admin_rows_test.sql` **9 cases**; 271 SQL cases total across 22 migrations, cold, `verify-db.sh` exit 0.
+- **8 mutations, all 8 caught.** Z3 was caught by 48's **X36** rather than 49's own X44 — the two files were already covering the same property from opposite sides, which is the good kind of redundancy.
+- Client: `siteAccess.test.ts` 72 → **79 cases**, **44 mutations, all 44 caught**.
+- `tsc -b --force` exit 0, `eslint .` exit 0, scale audit clean.
+- **No `UPGRADE_CHECKS` row and no `upgrade_0022_*.sql`**: no column, table, policy or trigger, and nothing transformed. Stated in the migration header.
+- **Suite prediction 667 → 674, still 19 files.**
+
+---
+
+## §19.55 — "Why show people if they're not assigned to a plant?" — adding becomes an action
+
+Not a bug report. A design question, and the right one:
+
+> *"Shouldn't Quinn not be visible here at all since he's not assigned to Plant 1? Why show people if they're not assigned to a plant? What is the idea?"*
+
+**The idea was sound and the shape was wrong.** That list is the pool you add *from* — it is the entire reason 0021 exists, because 0020 gave a site admin the power to grant access and then left them unable to SEE anybody to grant it to (0020 §9's own words: *"a UI cannot offer a person picker yet"*). Quinn appeared because he is addable, not because he is associated with Plant 1.
+
+**But a standing list of everyone in the company, sitting under the people who actually have access, asserts a relationship that does not exist.** It reads as "these people are somehow associated with this plant" when the only thing true of them is that they work here. In a real company it also buries the member list under hundreds of strangers.
+
+The member list is the screen. **Adding is an action**, and an action's subject appears when you go looking for it. `partitionAccess` now returns candidates only for a non-blank query; the section below the members reads *"Search above by email address to give someone access to Plant 1."* until somebody searches.
+
+Three things fall out of that:
+
+- **It retires 0021 §3's unbounded-list limit** in the place that was actually hurting. A company of ten thousand no longer renders ten thousand rows, because nothing renders until a query narrows it. The server still returns everyone, and the honest place to bound *that* remains `site_people` with a documented limit — not a client that quietly drops people.
+- **One box, two questions.** Blank: "who can get in here". Typed: that, plus "who could I add". A second search box for the picker would have been clutter, and `.trim()` decides both "does this match everyone" and "is this a search at all", so the two can never disagree about a box cleared to spaces (A44c).
+- **A44 was rewritten, not deleted** — rule 1b-ii. It asserted that a blank query lists every candidate, which was the correct contract for the shape that shipped first. A44b is the other half: a rule that returned candidates *never* would pass A44 and destroy the only reason the screen exists.
+
+### And one more thing the render caught
+
+An empty `Has access (0)` still printed its column header — a table pretending to have rows. Both headers are now hidden when their list is empty, with a sentence in their place that distinguishes *"nobody has access yet"* from *"nobody with access matches this search"*. **Fifth defect on this screen found by looking at it rather than by running anything.**
+
+### Verification
+
+- `siteAccess.test.ts` 79 → **81 cases** (A44 rewritten, A44b/A44c added). **48 mutations, all 48 caught**, including the two that matter here: candidates returning with no search (B50, the shape Pratik rejected) and candidates never returning at all (B51, the feature deleted).
+- `tsc -b --force` exit 0, `eslint .` exit 0, scale audit clean.
+- **Suite prediction 674 → 676, still 19 files.**

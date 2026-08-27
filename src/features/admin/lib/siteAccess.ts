@@ -195,6 +195,39 @@ function selfLocked(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
 }
 
 /**
+ * ⭐ A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT (migration 0022).
+ *
+ * Found on the running screen: signed in as a site admin, the company admin's
+ * row offered a role control and a Remove button, and **the server allowed
+ * both.** Measured, it was not an escalation and took nothing away — a company
+ * admin's authority is `user_profiles.role`, which a site admin cannot write
+ * — but it is a role inversion, and a button that appears to remove somebody's
+ * access and removes nothing.
+ *
+ * ⚠️ THE SERVER WAS FIXED FIRST, AND THAT ORDER IS THE POINT. Hiding a
+ * permitted action would have broken this file's own invariant — anything the
+ * client hides, the server must also refuse. 0022 refuses it; this mirrors it.
+ * `49_company_admin_rows_test.sql` X41/X42 are the server-side twins of the
+ * two cases below.
+ *
+ * Two company admins are peers, so the viewer's own flag is half the test.
+ */
+function protectedRow(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return row.companyAdmin && !viewerIsCompanyAdmin;
+}
+
+/**
+ * May this screen offer a role control for this person at all?
+ *
+ * Distinct from `allowedRoles`, which narrows WHICH roles: this answers
+ * whether the control belongs on the row. A control that offers exactly one
+ * option and writes nothing is worse than no control — it looks live.
+ */
+export function canSetRole(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return !protectedRow(row, viewerIsCompanyAdmin);
+}
+
+/**
  * Which roles this screen may offer for this person, in `GRANT_ROLES` order.
  *
  * `['admin']` alone when the self-rule is locked — NOT an empty list. An empty
@@ -223,6 +256,7 @@ export function allowedRoles(
  */
 export function canRemoveAccess(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
   if (row.directRole === null) return false;
+  if (protectedRow(row, viewerIsCompanyAdmin)) return false;
   return !selfLocked(row, viewerIsCompanyAdmin);
 }
 
@@ -238,7 +272,18 @@ export function canRemoveAccess(row: AccessRow, viewerIsCompanyAdmin: boolean): 
  */
 export function describeAccess(row: AccessRow, nodeName: string | null): string {
   const place = nodeName ?? "this place";
-  if (row.companyAdmin) return "Company admin — reaches every plant";
+  if (row.companyAdmin) {
+    // ⭐ A COMPANY ADMIN CAN ALSO HOLD A GRANT HERE, AND THE ROW HAS TO SAY
+    // SO. Found by Pratik on the real screen: the seeded company admin holds
+    // an admin grant on Plant 1 as well as the org-wide flag, so the row read
+    // "Company admin — reaches every plant" beside a role control that was
+    // editing something else entirely. Set that control to `viewer` and the
+    // sentence would not change — because it would still be true — and the
+    // change would look like it had done nothing. Case A50.
+    return row.directRole === null
+      ? "Company admin — reaches every plant"
+      : `Company admin — and ${roleWord(row.directRole).toLowerCase()} of ${place}`;
+  }
   if (row.directRole === "admin") return `Admin of ${place}`;
   if (row.directRole === "supervisor") return `Supervisor on ${place}`;
   if (row.directRole === "viewer") return `Can view ${place}`;
@@ -259,26 +304,65 @@ function roleWord(role: GrantRole): string {
 }
 
 /**
+ * Why a row offers no Remove button — as a REASON rather than a sentence.
+ *
+ * ⭐ THIS EXISTS BECAUSE ONE OF THOSE REASONS NEEDS A BUTTON, NOT PROSE.
+ * "Their access sits further down the tree — open that place to change it"
+ * was the first version, and Pratik hit it on the real screen within minutes:
+ * **there was no way to open that place.** The panel was pinned to the site
+ * root, so the sentence instructed the user to do something the app could not
+ * do. Correct in the model, useless on the screen — the D99 family.
+ *
+ * The component switches on this and renders a way IN for `"inherited"`,
+ * using `row.inheritedGrants` for the places. `removalNote` below is the prose
+ * for the other reasons and is DERIVED from this one, so the branch order
+ * lives in exactly one place and the two cannot drift.
+ */
+export type RemovalReason = "removable" | "self" | "company-admin" | "inherited" | "none";
+
+export function removalReason(row: AccessRow, viewerIsCompanyAdmin: boolean): RemovalReason {
+  if (canRemoveAccess(row, viewerIsCompanyAdmin)) return "removable";
+  if (selfLocked(row, viewerIsCompanyAdmin)) return "self";
+  // Before `inherited`, and D7 is the case: a company admin who also holds a
+  // grant below still reads as a company admin, because that is the route that
+  // decides what they reach.
+  if (row.companyAdmin) return "company-admin";
+  if (row.inheritedGrants.length > 0) return "inherited";
+  return "none";
+}
+
+/**
  * Why a row offers no Remove button. `null` when it does offer one — a caller
  * that renders this unconditionally would print an explanation next to a live
  * button, so the null is the signal and not an oversight.
  */
 export function removalNote(row: AccessRow, viewerIsCompanyAdmin: boolean): string | null {
-  if (canRemoveAccess(row, viewerIsCompanyAdmin)) return null;
-  if (selfLocked(row, viewerIsCompanyAdmin)) {
+  const reason = removalReason(row, viewerIsCompanyAdmin);
+  if (reason === "removable") return null;
+  if (reason === "self") {
     return "You can't take away your own admin access here.";
   }
-  if (row.companyAdmin) {
+  if (reason === "company-admin") {
     // ⭐ SHORT, AND THE RENDER IS WHY. The first version read "Company admins
     // reach every plant; there's no access here to take away." — which is
     // word-for-word what `describeAccess` already says two columns to the
     // left, so the row printed the same sentence twice. A green suite cannot
     // see that; a screenshot can (rule 2c). This note's only job is to explain
     // the ABSENCE of the button, and the reason is already on the row.
-    return "Nothing to take away here.";
+    // ⚠️ TWO ROWS REACH THIS AND THEY ARE NOT THE SAME SENTENCE. A company
+    // admin with no grant here genuinely has nothing to take away. One who
+    // ALSO holds a grant has something — the viewer is simply not the person
+    // who may touch it (0022). Saying "nothing" to the second would be the
+    // same lie the button used to tell.
+    return row.directRole === null
+      ? "Nothing to take away here."
+      : "Company admins aren't managed from a site.";
   }
-  if (row.inheritedGrants.length > 0) {
-    return "Their access sits further down the tree — open that place to change it.";
+  if (reason === "inherited") {
+    // The component turns each place in `row.inheritedGrants` into a way in,
+    // so this sentence is now FOLLOWABLE rather than an instruction with no
+    // handle. Short for that reason — the places are buttons, not prose.
+    return "Their access sits further down the tree:";
   }
   return "No access here to take away.";
 }
@@ -309,17 +393,43 @@ export function matchesQuery(row: AccessRow, query: string): boolean {
  * different rules is how the picker and the member list end up disagreeing
  * about where somebody is, and the server's order is already deterministic
  * and collation-independent.
+ *
+ * ⭐ CANDIDATES ARE RETURNED ONLY FOR A NON-BLANK QUERY, AND THAT IS THE
+ * SHAPE OF THE SCREEN, NOT AN OPTIMISATION.
+ *
+ * The first version listed everybody in the company permanently, underneath
+ * the people who actually have access. Pratik, on the running screen:
+ * *"Shouldn't Quinn not be visible here at all since he's not assigned to
+ * Plant 1? Why show people if they're not assigned to a plant?"*
+ *
+ * He is right, and the reason is not length. A standing list of everyone,
+ * sitting under the member list, ASSERTS A RELATIONSHIP THAT DOES NOT EXIST —
+ * it reads as "these people are somehow associated with this plant" when the
+ * only thing true of them is that they work at the company. The member list
+ * is the screen; adding somebody is an ACTION, and an action's subject
+ * appears when you go looking for it.
+ *
+ * It also retires the unbounded-list limit 0021 §3 recorded: a company of ten
+ * thousand no longer renders ten thousand rows, because nothing renders until
+ * a query narrows it. The server still returns everyone — the honest place to
+ * bound that is `site_people` with a documented limit, not a client that
+ * quietly drops people.
+ *
+ * ⚠️ MEMBERS ARE STILL FILTERED BY THE QUERY, AND STILL LISTED WHEN IT IS
+ * BLANK. The two lists answer different questions: "who can get in here" is
+ * the default view, "who could I add" is a search.
  */
 export function partitionAccess(
   rows: readonly AccessRow[],
   query: string,
 ): { members: AccessRow[]; candidates: AccessRow[] } {
+  const searching = typeof query === "string" && query.trim() !== "";
   const members: AccessRow[] = [];
   const candidates: AccessRow[] = [];
   for (const row of rows) {
     if (!matchesQuery(row, query)) continue;
     if (row.hasAccess) members.push(row);
-    else candidates.push(row);
+    else if (searching) candidates.push(row);
   }
   return { members, candidates };
 }
@@ -361,4 +471,35 @@ export function accessPanelState(
   if (peopleError) return "error";
   if (peopleLoading) return "pending";
   return "ready";
+}
+
+/** One place this panel can be about: a site the viewer administers. */
+export interface AccessPlace {
+  nodeId: string;
+  name: string;
+}
+
+/**
+ * Which place the panel is showing. Falls back, never sticks.
+ *
+ * ⭐ THIS EXISTS BECAUSE THE PANEL HAD NO CONTROL OF ITS OWN. It was scoped by
+ * the structure picker — which lives on the Hierarchy tab — so a company admin
+ * standing on the Access tab was shown whichever plant that other tab happened
+ * to have selected, with no way to change it and nothing on screen explaining
+ * why. Pratik's words: "Where is Plant 1?" The panel now owns its selection.
+ *
+ * Same shape and the same reason as `resolveSelectedShape`: the case that
+ * matters is the selection pointing at something that is no longer in the
+ * list — after switching companies, or after losing a grant — where the honest
+ * answer is the first surviving place rather than a blank screen.
+ */
+export function resolvePlace(
+  places: readonly AccessPlace[],
+  selectedId: string | null,
+): string | null {
+  if (!Array.isArray(places) || places.length === 0) return null;
+  if (selectedId !== null && places.some((p) => p.nodeId === selectedId)) {
+    return selectedId;
+  }
+  return places[0].nodeId;
 }

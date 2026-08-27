@@ -34,11 +34,15 @@ import {
   allowedRoles,
   buildAccessRows,
   canRemoveAccess,
+  canSetRole,
   describeAccess,
   accessPanelState,
   matchesQuery,
   partitionAccess,
   removalNote,
+  removalReason,
+  resolvePlace,
+  type AccessPlace,
   type AccessRow,
   type GrantRole,
 } from "../features/admin/lib/siteAccess.ts";
@@ -346,12 +350,35 @@ check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {
 // A28–A34 — describeAccess. The sentence under the address.
 // ---------------------------------------------------------------------------
 
-check("A28 ⭐: the company-admin flag outranks a grant on this node", () => {
+check("A28: a company admin with no grant here reads as a company admin", () => {
   // The most powerful route in wins, because that is the one deciding what
-  // the person can do. Removing the grant would change nothing for them.
-  const r = stranger({ companyAdmin: true, directRole: "admin" });
+  // the person can do.
+  const r = stranger({ companyAdmin: true });
   return describeAccess(r, "Plant 1") === "Company admin — reaches every plant" ||
     describeAccess(r, "Plant 1");
+});
+
+check("A50 ⭐: ...but a company admin who ALSO holds a grant here must say both", () => {
+  // ⭐ FOUND ON THE REAL SCREEN, NOT BY A TEST. The seeded company admin holds
+  // an admin grant on Plant 1 as well as the org-wide flag, so the row read
+  // "Company admin — reaches every plant" beside a role control that was
+  // editing the GRANT. Setting that control to `viewer` would leave the
+  // sentence unchanged — it is still true — and the change would look like it
+  // had done nothing at all.
+  //
+  // A28 stays: precedence is unchanged, the flag still leads. What changed is
+  // that the row now names what the control is editing.
+  const r = stranger({ companyAdmin: true, directRole: "admin" });
+  const s = describeAccess(r, "Plant 1");
+  return (s === "Company admin — and admin of Plant 1" &&
+    s !== describeAccess(stranger({ companyAdmin: true }), "Plant 1")) || s;
+});
+
+check("A51: and it names the role the control is actually showing", () => {
+  // `viewer` reads "and viewer of", not a hardcoded "admin" — the specific
+  // way a copy-paste of A50 would be wrong.
+  const s = describeAccess(stranger({ companyAdmin: true, directRole: "viewer" }), "Plant 1");
+  return s === "Company admin — and viewer of Plant 1" || s;
 });
 
 check("A29: a direct admin names the place", () => {
@@ -457,13 +484,35 @@ check("A43 ⭐: a person with no address survives an empty query and no other", 
   return (matchesQuery(g, "") && !matchesQuery(g, "a")) || "wrong match for a missing address";
 });
 
-check("A44: the two lists split on whether the person can get in at all", () => {
+check("A44: with no search, the screen is the member list and nothing else", () => {
+  // ⭐ REWRITTEN WHEN THE CONTRACT CHANGED (rule 1b-ii, not 1b): the old case
+  // asserted that a blank query lists every candidate, which was correct for
+  // the shape that shipped first and is exactly what Pratik pushed back on —
+  // a standing list of everyone in the company, sitting under the people who
+  // actually have access, asserts a relationship that does not exist.
   const { members, candidates } = partitionAccess(VIEW.rows, "");
   const m = members.map((r) => r.profileId).sort().join(",");
-  const c = candidates.map((r) => r.profileId).sort().join(",");
   const wantM = [P_BOSS, P_DANA, P_MIX, P_RAJ, P_SAM].sort().join(",");
-  const wantC = [P_GHOST, P_NONE].sort().join(",");
-  return (m === wantM && c === wantC) || `members=${m} candidates=${c}`;
+  return (m === wantM && candidates.length === 0) ||
+    `members=${m} candidates=${candidates.length} (want 0)`;
+});
+
+check("A44b ⭐: a search is what produces candidates", () => {
+  // The other half. A rule that returned candidates never would pass A44 and
+  // break the only reason this screen exists — 0020 §9's named gap was that a
+  // site admin could grant access to somebody they could not find.
+  const { candidates } = partitionAccess(VIEW.rows, "nobody");
+  return (candidates.length === 1 && candidates[0].profileId === P_NONE) ||
+    JSON.stringify(candidates.map((r) => r.email));
+});
+
+check("A44c: a whitespace-only search is still no search", () => {
+  // Ties to A41: `.trim()` decides both "does this match everyone" and "is
+  // this a search at all", so the two can never disagree about a box the user
+  // has cleared to spaces.
+  const { members, candidates } = partitionAccess(VIEW.rows, "   \t ");
+  return (members.length === 5 && candidates.length === 0) ||
+    `members=${members.length} candidates=${candidates.length}`;
 });
 
 check("A45 ⭐: neither list is re-sorted — the server's order survives", () => {
@@ -557,6 +606,227 @@ check("C8: every combination returns one of the four, and none throws", () => {
           const s = accessPanelState(a, b, c, d);
           if (!vals.includes(s)) return `${a},${b},${c},${d} -> ${s}`;
         }
+      }
+    }
+  }
+  return true;
+});
+
+// ---------------------------------------------------------------------------
+// D1–D6 — removalReason. The reason, not the sentence.
+//
+// ⭐ THIS SPLIT EXISTS BECAUSE ONE REASON NEEDS A BUTTON. "Their access sits
+// further down the tree — open that place to change it" was correct and
+// unfollowable: the panel was pinned to the site root and there was no way to
+// open that place. The component now switches on the reason and renders a way
+// in. `removalNote` is derived from `removalReason`, so the branch order lives
+// in one place — D6 is what stops them drifting.
+// ---------------------------------------------------------------------------
+
+check("D1: a removable row's reason is removable", () => {
+  const r = removalReason(stranger({ directRole: "supervisor" }), false);
+  return r === "removable" || r;
+});
+
+check("D2: your own admin access here", () => {
+  const r = removalReason(stranger({ isSelf: true, directRole: "admin" }), false);
+  return r === "self" || r;
+});
+
+check("D3: a company admin with nothing to remove", () => {
+  const r = removalReason(stranger({ companyAdmin: true, hasAccess: true }), false);
+  return r === "company-admin" || r;
+});
+
+check("D4 ⭐: access from below is its own reason, because it gets a button", () => {
+  const row = stranger({ inheritedGrants: [grant(DEPT, "Assembly", "admin")], hasAccess: true });
+  return removalReason(row, false) === "inherited" || removalReason(row, false);
+});
+
+check("D7 ⭐: a company admin who ALSO holds a grant below still reads as a company admin", () => {
+  // ⭐ ADDED BY THE MUTATION RUN (B37). Swapping the `inherited` and
+  // `company-admin` branches was NOT CAUGHT: no fixture row held both, so the
+  // order was untested. The state is real — a company admin can perfectly well
+  // also be named on a department — and the order matters, because
+  // "access from below" would offer them a way in they do not need while
+  // hiding the reason they actually reach everything.
+  const row = stranger({
+    companyAdmin: true,
+    inheritedGrants: [grant(DEPT, "Assembly", "admin")],
+    hasAccess: true,
+  });
+  return removalReason(row, false) === "company-admin" || removalReason(row, false);
+});
+
+check("D5: a stranger with nothing at all", () => {
+  const r = removalReason(stranger(), false);
+  return r === "none" || r;
+});
+
+check("D6 ⭐: removalNote and removalReason cannot disagree", () => {
+  // Every combination that reaches this module: the note is null exactly when
+  // the reason is "removable", and non-null otherwise. Two independent branch
+  // ladders is how a row ends up with an explanation beside a live button.
+  const rows: AccessRow[] = [
+    stranger({ directRole: "supervisor" }),
+    stranger({ directRole: "admin" }),
+    stranger({ isSelf: true, directRole: "admin" }),
+    stranger({ isSelf: true, directRole: "viewer" }),
+    stranger({ companyAdmin: true, hasAccess: true }),
+    stranger({ companyAdmin: true, directRole: "admin", hasAccess: true }),
+    stranger({ inheritedGrants: [grant(DEPT, "Assembly", "admin")], hasAccess: true }),
+    stranger(),
+  ];
+  for (const row of rows) {
+    for (const isCA of [true, false]) {
+      const reason = removalReason(row, isCA);
+      const note = removalNote(row, isCA);
+      if ((reason === "removable") !== (note === null)) {
+        return `${reason} / ${String(note)} (companyAdminViewer=${isCA})`;
+      }
+      if (reason !== "removable" && (note === null || note.trim() === "")) {
+        return `${reason} produced an empty note`;
+      }
+    }
+  }
+  return true;
+});
+
+// ---------------------------------------------------------------------------
+// E1–E6 — resolvePlace. The panel's own control.
+//
+// ⭐ It had none: the Access tab was scoped by the structure picker on the
+// HIERARCHY tab, so a company admin was shown whichever plant that other tab
+// had selected and could not change it. "Where is Plant 1?" — and there was no
+// answer on the screen.
+// ---------------------------------------------------------------------------
+
+const PLACES = [
+  { nodeId: PLANT, name: "Plant 1" },
+  { nodeId: "n-p2", name: "Plant 2" },
+];
+
+check("E1: a live selection is kept", () => {
+  return resolvePlace(PLACES, "n-p2") === "n-p2" || String(resolvePlace(PLACES, "n-p2"));
+});
+
+check("E2: no selection yet falls to the first place", () => {
+  return resolvePlace(PLACES, null) === PLANT || String(resolvePlace(PLACES, null));
+});
+
+check("E3 ⭐: a selection that is no longer in the list falls back, it does not stick", () => {
+  // The case that matters: a plant you administered and no longer do. Sticking
+  // leaves the panel asking the server about a place it will refuse, and the
+  // screen shows an error where a working list belongs.
+  return resolvePlace(PLACES, "gone") === PLANT || String(resolvePlace(PLACES, "gone"));
+});
+
+check("E4: no places at all is null, not a crash", () => {
+  return resolvePlace([], "anything") === null || String(resolvePlace([], "anything"));
+});
+
+check("E5: a single place needs no selection", () => {
+  const one = [{ nodeId: PLANT, name: "Plant 1" }];
+  return resolvePlace(one, null) === PLANT || String(resolvePlace(one, null));
+});
+
+check("E6: a malformed list is treated as empty and never throws", () => {
+  for (const bad of [null, undefined, "x", 7, {}]) {
+    if (resolvePlace(bad as unknown as AccessPlace[], null) !== null) return JSON.stringify(bad);
+  }
+  return true;
+});
+
+// ---------------------------------------------------------------------------
+// G1–G7 — a company admin's row is not a site admin's to edit (0022).
+//
+// ⭐ FOUND ON THE RUNNING SCREEN: signed in as a site admin, the company
+// admin's row offered a role control and a Remove button, and the SERVER
+// allowed both. Measured — no escalation, nothing taken away, because a
+// company admin's authority is `user_profiles.role` and a site admin cannot
+// write it. Still a role inversion, and a button that removes nothing.
+//
+// ⚠️ The server was fixed FIRST (migration 0022). Hiding a permitted action
+// would have broken this file's own invariant. `49_`'s X41/X42 are the
+// server-side twins of G1 and G2.
+// ---------------------------------------------------------------------------
+
+const companyAdminHere = (over: Partial<AccessRow> = {}) =>
+  stranger({ companyAdmin: true, directRole: "admin", hasAccess: true, ...over });
+
+check("G1 ⭐: a site admin is offered no Remove on a company admin's row", () => {
+  return canRemoveAccess(companyAdminHere(), false) === false ||
+    "the screen offered to remove a company admin";
+});
+
+check("G2 ⭐: ...and no role control either", () => {
+  // A control that offers one option and writes nothing is worse than no
+  // control: it looks live.
+  return canSetRole(companyAdminHere(), false) === false || "the screen offered a role control";
+});
+
+check("G3 ⭐: two company admins are peers — the flag is HALF the test", () => {
+  // The half a `row.companyAdmin`-only rule would fail. 49's X44 is the
+  // server-side twin, and 48's X36 catches the same mutation from the
+  // self-rule side.
+  const row = companyAdminHere();
+  return (canRemoveAccess(row, true) === true && canSetRole(row, true) === true) ||
+    `remove=${canRemoveAccess(row, true)} setRole=${canSetRole(row, true)}`;
+});
+
+check("G4: an ordinary person is still fully editable by a site admin", () => {
+  // The other half: a guard that fired on everybody would pass G1 and G2 and
+  // break the entire feature. 49's X43.
+  const row = stranger({ directRole: "supervisor", hasAccess: true });
+  return (canSetRole(row, false) === true && canRemoveAccess(row, false) === true) ||
+    `remove=${canRemoveAccess(row, false)} setRole=${canSetRole(row, false)}`;
+});
+
+check("G5 ⭐: the two company-admin rows do NOT get the same sentence", () => {
+  // One genuinely has nothing to take away. The other HAS something — the
+  // viewer is simply not the person who may touch it. Saying "nothing" to the
+  // second would be the same lie the button used to tell.
+  //
+  // ⚠️ AND THE OBVIOUS `withGrant !== without` IS NOT HERE. `tsc` rejects it as
+  // TS2367 — two string literal types that provably cannot overlap. This is
+  // the SECOND time a "so it cannot come back" inequality has turned out to be
+  // vacuous (A30 was the first), and the pattern is now clear: once both sides
+  // narrow to literals the compiler has already proved the claim, and writing
+  // it costs a red build rather than buying coverage. Rule 0, twice.
+  const withGrant = removalNote(companyAdminHere(), false);
+  const without = removalNote(stranger({ companyAdmin: true, hasAccess: true }), false);
+  return (withGrant === "Company admins aren't managed from a site." &&
+    without === "Nothing to take away here.") ||
+    `${String(withGrant)} / ${String(without)}`;
+});
+
+check("G6: the reason behind both is company-admin", () => {
+  const a = removalReason(companyAdminHere(), false);
+  const b = removalReason(stranger({ companyAdmin: true, hasAccess: true }), false);
+  return (a === "company-admin" && b === "company-admin") || `${a} / ${b}`;
+});
+
+check("G7 ⭐: whatever else is true of a protected row, it is never removable", () => {
+  // ⭐ THIS CASE STARTED AS AN ORDERING ASSERTION AND THE FIRST RUN KILLED IT.
+  // It claimed "the protection outranks the self-rule", and `removalReason`
+  // answers "self" — because `selfLocked` is checked first. Both refuse, so
+  // nothing unsafe turns on the order, and the state it described (a row that
+  // is BOTH you and a company admin, seen by a viewer who is not one) is a
+  // contradiction: if that row is you and it is a company admin, you are one.
+  // It is reachable only as a transient artefact while the session's own
+  // profile is still resolving.
+  //
+  // Pinning an arbitrary order on an input nobody can produce deliberately is
+  // rule 3b's trap. The PROPERTY is what matters and it holds on every
+  // combination, so that is what is asserted.
+  for (const isSelf of [true, false]) {
+    for (const directRole of ["admin", "supervisor", "viewer", null] as const) {
+      const row = stranger({ companyAdmin: true, hasAccess: true, isSelf, directRole });
+      if (canRemoveAccess(row, false) || canSetRole(row, false)) {
+        return `isSelf=${isSelf} directRole=${String(directRole)} was editable`;
+      }
+      if (removalNote(row, false) === null) {
+        return `isSelf=${isSelf} directRole=${String(directRole)} had no explanation`;
       }
     }
   }

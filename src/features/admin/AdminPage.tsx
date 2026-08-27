@@ -99,8 +99,24 @@ export default function AdminPage() {
   // `data?.siteNodeIds[resolvedShapeId] ?? null`, because `resolvedShapeId`
   // is `string | null` and `data` is `undefined` until the query resolves --
   // indexing a `Record<string, ...>` with `string | null` does not compile.
-  const siteNodeId =
-    data && resolvedShapeId !== null ? (data.siteNodeIds[resolvedShapeId] ?? null) : null;
+  // The places the Access panel may be about: one per structure this person
+  // may edit, named by the SITE that owns it rather than by the structure —
+  // "Plant 2" is what an admin is looking for, not "Standard Plant (copy)".
+  //
+  // ⚠️ Derived from `summaries` (already filtered to what they may edit) and
+  // NOT from the Hierarchy tab's current selection. The panel used to follow
+  // that selection, which meant a company admin on the Access tab was shown
+  // whichever plant a different tab had chosen, with no way to change it.
+  const accessPlaces = data
+    ? summaries
+        .map((shape) => {
+          const nodeId = data.siteNodeIds[shape.id] ?? null;
+          if (nodeId === null) return null;
+          const node = data.nodes.find((n) => n.id === nodeId);
+          return node ? { nodeId, name: node.name } : null;
+        })
+        .filter((p): p is { nodeId: string; name: string } => p !== null)
+    : [];
 
   return (
     <div className={styles.page}>
@@ -195,7 +211,7 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Access</h1>
             <SiteAccessPanel
-              siteNodeId={siteNodeId}
+              places={accessPlaces}
               treeLoading={hierarchyLoading}
               viewerProfileId={profile?.id ?? null}
               viewerIsCompanyAdmin={profile?.role === "admin"}

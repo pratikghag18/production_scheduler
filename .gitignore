@@ -21,3 +21,9 @@ _delivery/
 # until Aug 25 and both guarantee spurious diffs and merge conflicts.
 tsconfig.tsbuildinfo
 checks.txt
+
+# Supabase Studio writes a copy of anything pasted into its SQL editor here
+# ("Untitled query 481.sql" and friends). They are duplicates of files that
+# already live in supabase/ -- committing one means two copies of the same
+# script drifting apart, and the copy is the one nobody edits.
+supabase/snippets/
