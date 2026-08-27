@@ -6627,3 +6627,224 @@ trainings each"), and asks nothing. **The decision: page every read to
 exhaustion, and where a screen COMPUTES rather than lists, refuse to show an
 answer built on a read known to be short.**
 
+
+---
+
+## §19.67 — Four reports, one word: "Rename" was the only door to "Belongs to"
+
+**Pratik, four times: *"I still cannot edit a product."*** Migration 0025 was in,
+D105's create/edit parity was in, `updateProduct` took a scope, the row's editor
+had a "Belongs to" picker, group J of `scaleAudit` was green, and the screen was
+still, to him, a screen with no way to change where a product belongs.
+
+**Three previous attempts read the code and concluded it was correct. They were
+right about the code and wrong about the screen.** This one started by rendering
+it.
+
+### 1. What was actually on the screen
+
+The panel was mounted in headless Chromium against fixtures taken from
+`supabase/seed.sql` — the real `ProductsPanel`, the real `../lib/products` and
+`../lib/scope`, with only the I/O leaves stubbed. Signed in as **Admin
+(company)**, every catalogue row offered exactly three controls:
+
+> `Deactivate` · `Rename` · `Delete`
+
+**There is no control named "Edit" anywhere on the row, and the "Belongs to"
+column is static text.** The picker, the code field and the name field all live
+behind `Rename` — and `Rename` is a promise that only the name changes. A person
+looking for a way to move a product to a line reads that row and correctly
+concludes the product cannot be moved. He was never going to press it.
+
+Press it and everything works: the editor opens with a code box, a name box, a
+**Belongs to** select carrying `Everywhere (company-wide)` and every node
+indented beneath it, and Save sends
+`{id, sku, name, siteNodeId: "<node>"}` — the scope, key present, correct value.
+**The feature was complete. The doorway was mislabelled.**
+
+`ShiftsPanel` had the identical defect: its `{renaming ? "Cancel" : "Rename"}`
+toggle opens a draft carrying the pattern's name **and its `Owned by` scope**.
+`OperatorsPanel` did not — its equivalent button already said `Edit`, which is
+exactly why the operator half of D105 stopped being reported and the product
+half did not.
+
+### 2. The fix
+
+Both buttons now read **Edit**, with a `title` that names what is behind them
+("Change its code, name, or where it belongs"). Nothing else in the write path
+moved, because nothing else was wrong.
+
+### 3. Why every test was green while he was blocked — and this is the bigger finding
+
+**`scaleAudit` group J was written to make this exact defect impossible, and it
+cannot see this screen at all.** `scopeParityOffences` opens three files —
+`src/lib/api/products.ts`, `operators.ts`, `shifts.ts` — slices the text around
+each `.from("products")`, and asks whether the substring `site_node_id` survives
+inside a window that also contains `.update(`. Today `products.ts:212` satisfies
+that, so the audit reports zero offences.
+
+⚠️ **The audit would report zero offences with `ProductsPanel.tsx` deleted from
+the repo.** It asks whether the DATA LAYER can express the change. Everything
+between that and a person making the change — the hook, the panel, the
+permission predicate, the feature flag, and the word on the button — was
+unmeasured, because **no test in this repo mounted a single React component.**
+24 test files, `jsdom` configured, `@testing-library/react` installed, an
+`afterEach(cleanup)` in `src/test/setup.ts` waiting for a caller — and the only
+file that imported the library called `renderHook`, never `render`.
+
+**That is the second time this project has had a green test over a live
+failure**, and both times the instrument was measuring the thing it could reach
+rather than the thing that mattered. Group J is not deleted — the data-layer
+parity rule is still worth holding — but it may never again be cited as evidence
+that a user can do something.
+
+### 4. `productsPanel.test.tsx` — the first test in this repo that mounts a component
+
+Seven cases, and the load-bearing choice is that they look for controls **by
+accessible name**, the way a person looks for them:
+
+| | |
+|---|---|
+| T1 | every row offers a control named `Edit`, and none named `Rename` |
+| T2 | that control opens a form carrying the `Belongs to` picker |
+| T3 | the picker opens on the row's CURRENT scope, not a default |
+| T4 | a company admin is offered company-wide and every node, indented |
+| T5 | changing the picker and saving SENDS the new scope |
+| T6 | a row left company-wide sends `null`, **with the key present** (`undefined ≠ null`) |
+| T7 | a site admin gets a disabled `Edit` on a company-wide row, and is told why |
+
+**Mutation table — 7 mutations, 7 caught, run in the browser against the real
+component, plus one live inert control:**
+
+| # | mutation | expected | verdict |
+|---|---|---|---|
+| M1 | the button says `Rename` again (**the shipped defect**) | T1 | CAUGHT |
+| M2 | the edit row renders no picker at all | T2 T3 T4 T5 | CAUGHT |
+| M3 | `beginEdit` seeds the draft scope as `""` instead of the row's | T3 | CAUGHT |
+| M4 | `saveEdit` drops `siteNodeId` from the payload | T5 T6 | CAUGHT |
+| M5 | company-wide is never offered, even to a company admin | T4 | CAUGHT |
+| M6 | `editable` forced true | T7 | CAUGHT |
+| M7 | **control: a comment word changed** | nothing | correctly NOT caught |
+
+⚠️ **And the probe itself failed three times before it measured anything**, each
+failure reading exactly like a broken screen. (i) React 19 renders roots
+concurrently, so setting a module-global identity in a loop leaked the LAST
+case's profile into all three panels — every row rendered disabled and the first
+photograph was a picture of the wrong user. (ii) `flushSync` does **not** flush a
+root's initial mount, so the next build read every host div while it was still
+empty and scored **all seven checks FAIL against working code**. (iii) Under
+`--virtual-time-budget` a `setTimeout` tick fires *before* React's scheduler
+`MessageChannel` task, so a timer-based wait reads the same empty DOM.
+**Seven simultaneous FAILs is the same signal as 28 simultaneous NOT CAUGHTs:
+suspect the instrument, not the code** — that rule paid for itself three times in
+one afternoon.
+
+### 5. The other thing the render found, and it is not the label
+
+**With the data as `seed.sql` leaves it, the Products screen is completely dead
+for every admin who is not a company admin.** No product row in `seed.sql` names
+a `site_node_id`, so all five are company-wide; `canEditProduct` returns false
+for a company-wide row unless the caller's own profile role is `admin`; and Dana
+and Quinn — the two site admins in `dev_demo.sql`, both org-wide `viewer` — see
+four rows with every control greyed and the same sentence four times: *"Company-
+wide — only a company admin can change this."*
+
+**The client is right and the server agrees** (`products_update`'s `USING` and
+`WITH CHECK` both demand `app_is_admin()` or a non-null scope they administer),
+so this is not a permission bug. It is the demo data making a working screen
+look broken to two of the three identities that can reach it — which is roadmap
+item 6, and it is now worth more than it looked.
+
+### D106 — a control may not be named after less than it does
+
+**D105: what you can SET once, you must be able to CHANGE. D106 is its other
+half: the control that opens the change has to say so.** A button labelled
+`Rename` sitting beside a field called `Belongs to` is not an incomplete
+affordance, it is a *false* one — it tells the person the other fields are not
+there, and they stop looking. Four rounds of "I still cannot edit a product"
+were spent on a screen where the answer was one press away behind a word that
+promised something narrower.
+
+The rule, and it is now T1: **when a control opens a form, its name must not be
+narrower than the fields in that form.** If the form edits a name and a scope,
+the button is `Edit`, not `Rename`. The audit that enforces it has to ask the
+question the way a user asks it — by the name on the control — because every
+audit that asked it of the module underneath answered "fine" for four rounds.
+
+### §19.67 continued — the test I wrote to close this shipped broken, and the reason is the same shape as the defect
+
+**Pratik ran it: 5 of the 8 cases failed.** `Test Files 1 failed | 24 passed (25)`,
+`Tests 5 failed | 1091 passed (1096)`. `tsc` clean, `eslint` clean, `vite build` clean,
+and **every one of the five failures was in `productsPanel.test.tsx`, all from one
+helper line.** T1 (the label) and T7 (the site admin) passed — so the FIX was real and
+the app was never in question. The test was.
+
+```
+TestingLibraryElementError: Found multiple elements with the role "textbox"
+and name "Product code"
+```
+
+**⭐ WHY, AND IT IS RULE 2b §3 AGAIN IN A NEW COSTUME.** I verified the file in a
+browser probe that found the row's boxes with `input[aria-label="Product code"]` — an
+**attribute** match, which sees one element. Testing Library computes the
+**accessible name**, and the *Add a product* card's field is labelled "Product code"
+by its own visible `<label>`, so `getByRole` saw **two** and threw. The probe scored
+**7/7 PASS on a file that could not run.** *"Which assertion does the shim implement
+differently from the real one?"* — this time it was not the assertion, it was the
+**query**, which is the half I had not thought to ask about.
+
+**And the disagreement was hiding a real thing about the screen, not just about the
+test.** With the row's boxes labelled plainly, opening an editor put **two controls
+named "Product code" and two named "Belongs to"** on one screen with nothing to tell
+them apart — which is precisely what someone using a screen reader has to resolve by
+guessing. The row's controls are now named for their row (`Product code for WX`,
+`Name for WX`, `Where WX belongs`), matching the convention the swatch button in the
+same file already used. The Add card keeps the plain names, because its labels are
+visible text and an `aria-label` that disagrees with a visible label is its own defect.
+**T8 is the case that pins it**, and it asserts the count, not the absence.
+
+**⭐⭐ THE PROBE NOW BUNDLES THE REAL `@testing-library/dom`** — `aria-query` and
+`dom-accessibility-api` included, 197 modules, with only the failure-message
+formatters stubbed. There is no longer a query semantics gap between what the probe
+measures and what `vitest` will run. Three things that fell out of doing it, each of
+which had looked like broken code:
+- **Bare-specifier resolution created a SECOND React.** Once the bundler could resolve
+  `require("react")` into `node_modules`, the component was built by one copy and
+  rendered by another: *"Cannot read properties of null (reading 'useContext')"*.
+  Vendored ids are now matched **before** node resolution.
+- **The same widening silently un-stubbed `@tanstack/react-query`**, so every render
+  died on *"No QueryClient set"*. A stub keyed by specifier is only a stub while the
+  specifier is unresolvable — **widening a resolver disarms every stub it can now
+  resolve**, and that is invisible until something throws.
+- **One `try`/`catch` per stage.** `vitest` renders each `it` on its own, so one throw
+  fails one case; a single promise chain lets one throw blank the whole table.
+
+**Mutation table, re-run through the real matchers — 8 mutations, 8 caught, 1 live
+inert control:**
+
+| # | mutation | expected | verdict |
+|---|---|---|---|
+| **M8** | **the row's boxes go back to the plain `aria-label` — the state that actually shipped** | T2 T3 T4 T5 T6 T8 | **CAUGHT, and it reproduces Pratik's run exactly: 5 fail, T1 and T7 pass** |
+| M1 | the button says `Rename` again (the original defect) | T1, and every stage that must press it | CAUGHT |
+| M2 | the edit row renders no picker at all | T2 T3 T4 T5 | CAUGHT |
+| M3 | `beginEdit` seeds the draft scope as `""` | T3 | CAUGHT |
+| M4 | `saveEdit` drops `siteNodeId` from the payload | T5 T6 | CAUGHT |
+| M5 | company-wide never offered, even to a company admin | T4 | CAUGHT |
+| M6 | `editable` forced true | T7 | CAUGHT |
+| M7 | **control: a comment word changed** | nothing | correctly NOT caught |
+
+**M8 is the entry that matters.** Before this rewrite the probe scored it PASS; it now
+scores it exactly as `vitest` did. **A verification instrument that cannot reproduce
+the failure you already know about has not been tested — it has been agreed with.**
+
+#### The other half of that run, which was noise and should have been checked first
+
+`npm run format:check` reported **44 files** with style issues. **Forty-three of them
+were already non-conforming and have nothing to do with this work** — the generated
+`database.types.ts`, six `supabase/tests/mutations/*.json`, twelve test files, eight
+`src/lib/api/` files, `NodeTreeEditor`, `SiteAccessPanel`, `BoardToolbar`. **I put
+`format:check` into an acceptance block without ever having seen it pass**, which
+turned a long-standing state into what looked like a wall of new failures, on the one
+run where he was checking whether a four-times-reported defect was finally fixed.
+`productsPanel.test.tsx` was the 44th and is now formatted. **An acceptance block is a
+claim that these commands pass; do not add a command to it you have not run.**

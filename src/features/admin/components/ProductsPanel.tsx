@@ -307,7 +307,13 @@ export function ProductsPanel() {
             <input
               className={styles.input}
               value={editDraft.sku}
-              aria-label="Product code"
+              /* ⚠️ NAMED FOR ITS ROW, not just for its field. The ADD card one
+                 card up has a field whose visible label is also "Product code",
+                 so while a row is open there were two controls on this screen
+                 with the same accessible name and nothing to tell them apart —
+                 which is what anyone not using a mouse hears. The swatch above
+                 already names its row; these now match it. */
+              aria-label={`Product code for ${row.sku}`}
               onChange={(e) => setEditDraft((d) => ({ ...d, sku: e.target.value }))}
             />
           ) : (
@@ -319,7 +325,7 @@ export function ProductsPanel() {
           <input
             className={styles.input}
             value={editDraft.name}
-            aria-label="Product name"
+            aria-label={`Name for ${row.sku}`}
             onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
           />
         ) : (
@@ -340,7 +346,7 @@ export function ProductsPanel() {
         {isEditing ? (
           <select
             className={styles.input}
-            aria-label="Belongs to"
+            aria-label={`Where ${row.sku} belongs`}
             value={editDraft.siteNodeId}
             onChange={(e) => setEditDraft((d) => ({ ...d, siteNodeId: e.target.value }))}
           >
@@ -383,13 +389,24 @@ export function ProductsPanel() {
               >
                 {row.active ? "Deactivate" : "Reactivate"}
               </button>
+              {/* ⭐ THE DOOR HAS TO SAY WHAT IS BEHIND IT (D106, §19.67).
+                  This button opens a form that changes the product's code, its
+                  name AND where it belongs — and it was labelled "Rename",
+                  which names the narrowest of the three. Pratik reported "I
+                  still cannot edit a product" four times against a screen where
+                  the picker was already wired and already worked: he was never
+                  going to press "Rename" to change an area, and nothing else on
+                  the row offered to. D105 says what you can SET once you must be
+                  able to CHANGE; D106 is its other half — a control may not be
+                  named after less than it does. */}
               <button
                 type="button"
                 className={styles.quiet}
                 disabled={!editable}
+                title="Change its code, name, or where it belongs"
                 onClick={() => beginEdit(row)}
               >
-                Rename
+                Edit
               </button>
               {isConfirming ? (
                 <button

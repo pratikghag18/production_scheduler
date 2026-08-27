@@ -727,6 +727,7 @@ export function ShiftsPanel() {
           <button
             type="button"
             className={styles.btn}
+            title="Change its name or where it belongs"
             onClick={() =>
               setRenameDraft(
                 renaming
@@ -739,7 +740,10 @@ export function ShiftsPanel() {
               )
             }
           >
-            {renaming ? "Cancel" : "Rename"}
+            {/* ⭐ "Edit", not "Rename" — D106. The draft this opens carries
+                the pattern's name AND its "Owned by" scope, so the old label
+                named half of it. Same defect as the products row, same fix. */}
+            {renaming ? "Cancel" : "Edit"}
           </button>
         </div>
 
