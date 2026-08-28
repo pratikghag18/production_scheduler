@@ -7120,11 +7120,8 @@ zero literal UUIDs in any migration, zero literal ltree paths in executable SQL,
 org ids, and no backfill keyed to an id — the thing most worth finding is absent.
 
 Fixed here:
-- **`supabase/config.toml` said `major_version = 15`** while `verify-db.sh` pins
-  `/usr/lib/postgresql/16/bin`, migration 0004 claims validation "against live
-  PostgreSQL 16", and `docs/schema.md` says the same. Developers ran a different major
-  version from the one every check was run against. Now 16. ⚠️ Needs a
-  `supabase stop && start && db:reset`, which 0026 needs anyway.
+- ~~**`supabase/config.toml` said `major_version = 15`** … Now 16.~~ **⛔ WRONG, AND IT
+  BROKE HIS `db:reset`. See §8.**
 - **`validateLevelDraft` re-typed `MAX_LEVELS` as a bare `64`.** `hierarchy.ts` is
   deliberately dependency-free so it cannot import the constant — **so the duplication
   is the thing to guard, not the value.** The literal is named, and two new cases in
@@ -7157,3 +7154,257 @@ screen, not a constant swap. Roadmap item 1(d).
 **And `offeredHere`/`offeredAt` still have zero call sites**, so a product is still
 offered on every cell in the company. 0026 makes that a smaller hole — you can only be
 offered what you can read — but D103's actual rule is still unbuilt.
+
+
+### 8. ⚠️ The `major_version` "fix" was wrong, and the way it was wrong is the finding
+
+`config.toml` said `major_version = 15`. `verify-db.sh` pins
+`/usr/lib/postgresql/16/bin`, migration 0004 says its peak query was "validated against
+live PostgreSQL 16", and `docs/schema.md` agrees. I read that as an inconsistency with
+an obvious direction and set it to 16.
+
+**His next command:**
+
+```
+npm run db:reset
+Failed reading config: Invalid db.major_version: 16.
+```
+
+**The Supabase CLI ships 15 or 17 for local development and rejects 16 outright.** So
+16 was never a value that could make the two agree — the edit did not close a gap, it
+stopped the database from resetting at all, on the run where the whole point was to
+apply 0026. Reverted, with the reason written into the file so nobody re-derives it.
+
+**Three things worth keeping from that:**
+
+1. **The observation was real and the conclusion was not.** Local development runs
+   PostgreSQL **15** and the SQL suite is validated on **16** — that gap is genuine and
+   is still open. But 16 is not one of the two available answers, so closing it properly
+   means moving both to 17, which is an upgrade with its own testing.
+   ⚠️ **0026 itself is unaffected**: a scan for anything newer than PostgreSQL 10 —
+   `MERGE`, SQL/JSON, `any_value`, `NULLS NOT DISTINCT`, `pg_input_is_valid` — comes
+   back empty. It is `create policy`, `exists`, ltree `<@` and SECURITY DEFINER
+   functions, all of which behave identically on 15. Low risk, not zero, and his
+   `db:reset` is the real test.
+2. **⭐ A CONFIG VALUE IS VALIDATED BY A TOOL I CANNOT RUN, AND THAT MAKES IT A
+   DIFFERENT CLASS OF EDIT FROM CODE.** `tsc`, `eslint` and the SQL suite all run here,
+   so a mistake in those is caught before he sees it. Nothing in this session validates
+   `config.toml` — the Supabase CLI does, on his machine, and it is the only thing that
+   can. **An edit whose only validator is on the other side of the bridge gets stated
+   as a proposal, not shipped inside an acceptance block.**
+3. **⭐⭐ AND THE ACCEPTANCE BLOCK ITSELF WAS WRONG IN A WAY THE PROJECT ALREADY KNEW
+   ABOUT.** It opened with `supabase stop` / `supabase start` in **PowerShell**, where
+   the CLI is not on `PATH` — a trap already recorded in the project's own notes as
+   *"Supabase CLI in WSL, npm in PowerShell; mixing them is how a command comes back
+   'not found'"*. And it asked him to run `scripts/verify-db.sh`, which needs a
+   PostgreSQL 16 client he has no reason to have — **the SQL suite is this session's to
+   run, not his**, and it had already been run here.
+   **The working shape is neither shell-switching nor bash:** `package.json` already
+   wraps the CLI (`db:start`, `db:stop`, `db:reset`), and `npm run` resolves it where
+   bare PowerShell does not — which is exactly why `npm run db:reset` got far enough to
+   report a config error while `supabase stop` could not start at all. **The evidence
+   for the right answer was inside the failure I caused.**
+
+---
+
+## §19.70 — Migration 0027: the board stops opening on somebody else's plant
+
+**This finishes D107.** 0026 stopped the server handing a Plant 2 admin Plant 1's
+rows; the board still *asked* for Plant 1, so Quinn got an empty board instead of
+someone else's. The leak was closed and the wrong-plant defect was not.
+
+The constant, and it had been there since P1-4a with a comment admitting it:
+
+```ts
+const ORG_ROOT_PATH = "plant_1";           // "not derived from the session/profile in any way yet"
+export function useRootPath(): string { return ORG_ROOT_PATH; }
+```
+
+### 1. ⭐⭐ The obvious replacement is wrong, and the fixture is what proves it
+
+"The roots you can see" — `parent_id IS NULL` — is the right answer for a company
+admin and for a site admin, and it is **nothing at all** for a supervisor: a grant sits
+on a DEPARTMENT and `nodes_select` never gives them the root above it. Measured on a
+seeded database before a line was written:
+
+| | `parent_id IS NULL` | no VISIBLE parent |
+|---|---|---|
+| company admin | Plant 1, Plant 2 | Plant 1, Plant 2 |
+| Quinn (site admin, Plant 2) | Plant 2 | Plant 2 |
+| **Ana (supervisor on Assembly)** | **(nothing)** | **Assembly** |
+| **Marco (supervisor on Machining)** | **(nothing)** | **Machining** |
+
+**Ana's board is not broken today only because the constant happens to name an ancestor
+of hers.** Replacing it with "your roots" would have shipped a brand-new empty-board
+defect inside the fix for the old one — and every fixture built from company admins and
+site admins alone would have passed.
+
+So the question is neither "which sites do you administer" nor "which nodes are roots".
+It is **which nodes can you see whose parent you cannot** — the top of your visible
+forest, one rule for all four shapes of person. `visible_board_roots()`, 0027.
+
+**⚠️ SECURITY INVOKER, the opposite of every helper 0026 added.** There, the caller's
+visibility was the wrong input to the question; here it *is* the question. The
+`NOT EXISTS` runs under `nodes_select` as the caller, so the function can never return
+a node they could not already SELECT — case V4 asserts exactly that by joining its own
+output back through `nodes`. DEFINER would silently turn it into "the real roots of the
+org", which is what V5 pins.
+
+### 2. Ten cases, and one of them turned a dead guard live
+
+**Mutation table — 6 mutations, 5 caught, 1 live inert control:**
+
+| # | mutation | caught by |
+|---|---|---|
+| P1 | `parent_id IS NULL` instead of "no visible parent" | **V3** |
+| P2 | SECURITY DEFINER | V2 V3 V4 V5 V8 |
+| P3 | drop the `org_id` term | **V9 — see below** |
+| P4 | drop `active DESC` from the ordering | V6 |
+| P5 | exclude inactive tops entirely | V6 |
+| P6 | **control: a comment word changed** | correctly NOT caught |
+
+**⭐ P3 came back NOT CAUGHT the first time, and the fix was a case, not a shrug.**
+`nodes_select` already carries `org_id = app_current_org()`, and the function is
+INVOKER, so under RLS the policy refuses another tenant first and the function's own
+term never decides anything — a guard nobody was testing (rule 7d). But it is not
+redundant: **`service_role` has BYPASSRLS**, so anything calling this server-side gets
+no policy at all and that term becomes the only thing between one tenant and another.
+**V9 runs the function from a session that bypasses RLS and asserts it still scopes to
+one org** — first proving the bypass is real, so the case cannot pass vacuously. P3 went
+from NOT CAUGHT to caught, and a dead line became a live one.
+
+**⚠️ AND THE FILE'S FIRST DRAFT SKIPPED ITSELF.** It gated every case on Plant 2
+existing — i.e. on `dev_demo.sql` — and **`db:reset` wipes that every time**, so in the
+standard suite run all ten cases would have skipped while the file reported green.
+**A test that skips itself in the normal run is a test that does not exist.** It now
+builds its own second plant through the real `create_node` RPC, the way 51 and 53 do,
+and uses seed's own Ana for the case that matters.
+
+### 3. The client half
+
+`rootSelection.ts` is the pure rule; the hook is wiring. Seven cases, and **W5 is the
+one to keep**: the remembered choice lives in a Zustand store that **outlives the
+identity that made it** — the dev switcher changes person with no reload, React Query
+resets its cache on that and the store does not. Without dropping a selection the
+server no longer offers, switching Dana → Quinn reproduces the original defect one
+layer up, and *invisibly*, because the server answers with an empty board rather than
+an error. W6 pins that matching is exact: `plant_1` is an ltree ancestor of
+`plant_1.assembly`, so anything `startsWith`-flavoured would call it a hit.
+
+**The header now names the place** — "Board · Plant 2 · Thu Aug 27 – Sat Aug 29" — with
+a picker only when there is more than one. One place is not a choice, and a permanently
+disabled control is worse than none.
+
+**Nowhere to open is a real state, not an error** (V8): an org member with no grant on
+any node has no board, and the sentence says so about *them* rather than about the app.
+
+### 4. ⚠️ The render harness had been lying for three sessions
+
+Rule 2c says render it and look. The first picture showed the place name and the date
+jammed together with no gap — a layout defect that did not exist. **The CSS module
+classes were never applied at all**, and had not been in any render this session:
+
+TypeScript emits `__importDefault(require("./X.module.css")).default.header` under
+`esModuleInterop`. The harness's identity `Proxy` answers `__esModule` with the truthy
+**string** `"__esModule"`, so the interop helper hands back the proxy unchanged, then
+`.default` yields the string `"default"`, and `"default".header` is `undefined`.
+**Every `className` rendered as nothing.** The proxy now answers `__esModule` with
+`true` and `default` with itself.
+
+**The tell was in the picture and I had already explained it away once** — the products
+render three sections ago showed `WXWidget XCompany-wide` run together and I called it
+unimportant. It was the same bug. **Nothing about those earlier findings changes** —
+they were about which controls exist and what they are named, which is markup, and I
+had deliberately claimed nothing about layout. But the reason I claimed nothing was
+caution, not knowledge, and caution is not a substitute for a working instrument.
+
+**Suite: 353 → 363 numbered checks (+21 upgrade = 384), zero failures. App tests 1099 →
+1106 in 26 files.**
+
+---
+
+## §19.71 — "Why is Plant 1 different?" — the history exception leaking into the catalogue
+
+**Pratik, Aug 28, signed in as the Plant 1 admin:** *"plant 1 admin can see products from
+other site, while plant 2 admin can only see their own and company wide products, plant 2
+admin is behaving correctly. Why is plant 1 admin different?"*
+
+His screen: `GZ — Plant 1`, **`RW — Another site`**, `WX/WY — Company-wide`.
+
+### 1. Measured, not reasoned
+
+Reproduced on a seeded database by giving `RW` to another site and asking the two
+predicates separately, as Dana:
+
+| sku | belongs to | `app_can_read_owned` | `app_product_on_visible_schedule` |
+|---|---|---|---|
+| GZ | Plant 1 | **t** | t |
+| **RW** | **Another site** | **f** | **t** |
+| WX | Plant 1 | t | t |
+| WY | Another site | **f** | **t** |
+
+**`by scope = false`, `on a run she can see = true`.** The row is admitted purely by
+0026's history clause: `RW` is on a run at Cell 7, inside Plant 1. **The asymmetry is not
+a rule difference between the two admins — it is which products happen to be scheduled
+where.** Quinn saw nothing extra because none of Plant 1's products are on runs in her
+plant.
+
+### 2. ⭐⭐ The defect is mine, and §19.68 wrote the rule it broke
+
+That section says, in its own words: *"Offering is not listing and listing is not naming;
+this migration only narrows LISTING."* And then I implemented the **naming** exception —
+the board must be able to name a product already on its own history, or every band renders
+`(unknown product)` in one fallback colour — **as a clause in the read policy**, which is
+the listing layer. It was the widest possible place to put it.
+
+**The exception is still right and stays.** Cases R9/R10/R11 and S18 exist for it and all
+still pass. What was wrong is that the admin catalogue inherited it.
+
+### 3. The fix, and where it belongs
+
+`productRows` now drops a row whose owner is a site this person cannot see, and counts it.
+The catalogue is the list of products you administer; the board is what is scheduled.
+
+- **⚠️ `sites === null` MEANS THE STRUCTURE READ FAILED, AND NOTHING IS FILTERED.** `sites`
+  is derived from `treeQuery.data?.nodes ?? []`, so "the read failed" and "you can see no
+  nodes" are the same empty array. Filtering on that would empty the catalogue of every
+  owned product and blame ownership — §19.64's rule 8d, a fail-closed branch telling a lie.
+  The signature is `readonly ProductSite[] | null` so the caller must say which it is, and
+  `ProductsPanel` passes `treeQuery.isSuccess ? sites : null`.
+- **A count, and no identity.** The panel says *"1 product scheduled here belongs to another
+  site, so it isn't listed."* Saying nothing leaves *"why is Rework on my board and not in
+  my list?"* unanswerable; naming it would be the leak the filter exists to close. **The
+  count is a fact about HIS OWN site** — something foreign is scheduled here — never a way
+  to learn anything about the other one.
+
+**Six cases (L24–L29). 5 mutations, 4 caught, 1 live inert control**, run against the real
+module under `--experimental-strip-types`:
+
+| # | mutation | caught by |
+|---|---|---|
+| Q1 | drop the failed-read guard | L28 |
+| Q2 | drop the company-wide guard | L24 L25 L26 L29 |
+| Q3 | invert the membership test | L24 L27 L29 |
+| Q4 | `elsewhere = 1` instead of `+= 1` | **L29 only** |
+| Q5 | control: a comment word | correctly NOT caught |
+
+**⭐ Q4 is caught by exactly one case, and it is the one I nearly did not write.** `L5`
+already established "counts every malformed row, not just the first" for `skipped`; the new
+counter needed the same case and a single-foreign-row fixture cannot provide it. **When you
+add a counter, copy the existing counter's case list, not just its shape.**
+
+### 4. ⚠️ The same leak is still open in two more places
+
+The clause has a twin — `app_operator_on_visible_schedule` — and the same reasoning applies
+wherever a list shows rows that are only readable because of the schedule:
+
+- **`operatorRows`** takes an `options` object and no node list at all, so an operator owned
+  by another site who is assigned to one of your cells appears in your people list **with no
+  indication whatsoever** — worse than the product case, which at least said "Another site".
+- **`shiftDraft.ts:764`** has its own `"Another site"` fallback for pattern owners, which is
+  the same tell.
+
+**Stage 21 goes back to In progress.** The claim it makes — *no member from one plant should
+see info for other plants* — is true of products and not yet of people. Three rushed fixes
+would be worse than one careful pass, and the pass needs its own fixture work: `operatorRows`
+has no visibility input to filter on.

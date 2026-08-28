@@ -12,16 +12,51 @@ max_rows = 1000
 [db]
 port = 54322
 shadow_port = 54320
-# WARNING 16, NOT 15. Everything that VALIDATES this schema targets PostgreSQL 16:
-# `scripts/verify-db.sh` pins /usr/lib/postgresql/16/bin and its first step is
-# "Locate PostgreSQL 16", migration 0004 says its peak query is "validated
-# against live PostgreSQL 16", and docs/schema.md says the same. Leaving this
-# at 15 meant developers ran a different major version from the one every
-# check was run against -- which makes the verification story untrue rather
-# than merely inconsistent.
-# WARNING Changing it needs `supabase stop && supabase start && npm run db:reset`:
-# the local volume holds PG15 data files and will not attach to a PG16 server.
-major_version = 16
+# ⚠️ 15 IS CORRECT, AND 16 IS NOT AN OPTION. A previous session changed this to
+# 16 on the reasoning that `scripts/verify-db.sh` pins /usr/lib/postgresql/16/bin
+# and migration 0004 says its peak query was "validated against live PostgreSQL
+# 16". That was the wrong conclusion from a real observation: the Supabase CLI
+# only ships 15 or 17 for local development and rejects 16 outright --
+#     Failed reading config: Invalid db.major_version: 16.
+# -- so the change did not make the two agree, it stopped `db:reset` from running
+# at all. DO NOT SET THIS TO 16.
+#
+# ⚠️ THE GAP IT WAS TRYING TO FIX IS REAL AND IS STILL OPEN: local development
+# and every migration run here are PostgreSQL 15, while the SQL suite is validated
+# on PostgreSQL 16 (that is simply the version the verification host has). Nothing
+# the schema uses -- ltree, RLS policies, SECURITY DEFINER, generated columns --
+# differs between the two, so the risk is low rather than zero. Closing it properly
+# means moving BOTH to 17, which is a deliberate upgrade with its own testing, not
+# a one-line edit. Recorded in docs/roadmap.md.
+major_version = 15
+
+# ---------------------------------------------------------------------------
+# Which SQL files `supabase db reset` runs after the migrations.
+#
+# WHY THIS EXISTS: `dev_demo.sql` creates Plant 2, Dana and Quinn -- the only
+# way to SEE the site-instance model in the running app -- and `db:reset` wiped
+# it every single time, leaving "Invalid login credentials" and a manual
+# paste into Studio's SQL editor as the only way back.
+#
+# ⛔ IT CANNOT SIMPLY GO IN `seed.sql`. MEASURED: a second plant in the seed
+# turns 8 SQL test files and ~18 named cases red, because "org 1 holds exactly
+# one structure" is load-bearing for them (90_'s T32 asserts that an omitted
+# template id RESOLVES when there is only one, and that path stops existing the
+# moment a second plant does).
+#
+# ⭐ Listing it here instead is safe precisely because `scripts/verify-db.sh`
+# does NOT use `db reset` -- it builds its own scratch database by applying
+# `supabase/migrations/*.sql` itself and then `seed.sql` alone. So the SQL suite
+# never sees Plant 2 and those 18 cases stay green, while the DEV database you
+# actually sign in to always has the demo cast. `dev_demo.sql` is idempotent by
+# construction, so re-running it on every reset builds no second Plant 2.
+#
+# ⚠️ `seed.sql` IS LISTED EXPLICITLY AND MUST STAY THAT WAY. Supabase runs it by
+# default only while `sql_paths` is absent; the moment this key exists, this
+# list is the whole answer and omitting seed.sql silently empties the database.
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql", "./dev_demo.sql"]
 
 [db.pooler]
 enabled = false

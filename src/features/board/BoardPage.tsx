@@ -6,6 +6,7 @@ import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useRootPath } from "./hooks/useRootPath";
+import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
 import { useBoardViewStore } from "./store/boardView";
 import { useDragGesture } from "./hooks/useDragGesture";
 import { buildBoardIndex, type BoardIndex } from "./lib/boardIndex";
@@ -45,7 +46,13 @@ const OPERATOR_PANEL_COLLAPSE_QUERY = "(max-width: 899px)";
  */
 export default function BoardPage() {
   const { session, profile, loading: sessionLoading } = useSession();
-  const rootPath = useRootPath();
+  const {
+    rootPath,
+    roots,
+    isLoading: rootsLoading,
+    isError: rootsError,
+    selectRootPath,
+  } = useRootPath();
 
   const zoomIndex = useBoardViewStore((s) => s.zoomIndex);
   const setZoomIndex = useBoardViewStore((s) => s.setZoomIndex);
@@ -103,7 +110,13 @@ export default function BoardPage() {
   // Do not query as nobody: until the session resolves, an RLS-scoped read can
   // only come back 401. One shared predicate, never re-derived inline (§19.8).
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
-  const boardQuery = useBoardWindow(rootPath, from, to, canQuery);
+  // ⚠️ AND NOT UNTIL WE KNOW WHERE. `rootPath` is null while the places read is
+  // in flight and stays null for someone with no access to any of them; asking
+  // `board_window` for `""` would be the old hardcoded constant with extra
+  // steps. The empty string can never reach the server because `enabled` is
+  // false whenever it would be used — it exists only to keep the query key a
+  // stable shape.
+  const boardQuery = useBoardWindow(rootPath ?? "", from, to, canQuery && rootPath !== null);
 
   // T4: spinner only on "pending" with no cached data; keep rendering
   // stale data during a background refetch (isFetching), with a subtle
@@ -171,7 +184,9 @@ export default function BoardPage() {
   );
 
   const dragApi = useDragGesture({
-    rootPath,
+    // Only ever used to build cache keys, and unreachable while null: with no
+    // place to open there is no board and nothing to drag.
+    rootPath: rootPath ?? "",
     from,
     to,
     index: emptyIndex,
@@ -254,6 +269,20 @@ export default function BoardPage() {
     );
   }
 
+  // ⭐ NOWHERE TO OPEN IS A REAL STATE, NOT AN ERROR. An org member with no
+  // grant on any node has no board — pinned server-side by 0027's case V8 —
+  // and the honest sentence describes THEM rather than the app. Rendering a
+  // spinner forever, or "no data", would both be lies.
+  if (!rootsLoading && !rootsError && roots.length === 0) {
+    return (
+      <div className={styles.panel}>
+        <h1>Board</h1>
+        <p>{NO_PLACES_MESSAGE}</p>
+        <DevProfileSwitcher />
+      </div>
+    );
+  }
+
   const popover = dragApi.popover;
 
   return (
@@ -297,6 +326,9 @@ export default function BoardPage() {
       <DevProfileSwitcher />
 
       <BoardToolbar
+        roots={roots}
+        rootPath={rootPath}
+        onRootChange={selectRootPath}
         zoomIndex={zoomIndex}
         onZoomChange={setZoomIndex}
         windowStartDate={windowStartDate}

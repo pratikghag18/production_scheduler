@@ -210,11 +210,11 @@ describe("productRows", () => {
   });
 
   it("L6: an all-malformed payload yields no rows and a full count", () => {
-    expect(productRows([null, null], SITES)).toEqual({ rows: [], skipped: 2 });
+    expect(productRows([null, null], SITES)).toEqual({ rows: [], skipped: 2, elsewhere: 0 });
   });
 
   it("L7: an empty payload is not an error", () => {
-    expect(productRows([], SITES)).toEqual({ rows: [], skipped: 0 });
+    expect(productRows([], SITES)).toEqual({ rows: [], skipped: 0, elsewhere: 0 });
   });
 
   it("L8: preserves the server's sku ordering rather than re-sorting", () => {
@@ -284,6 +284,66 @@ describe("matchesProductQuery", () => {
 
   it("L23: does not match an unrelated term", () => {
     expect(matchesProductQuery(rowFor("GZ"), "widget")).toBe(false);
+  });
+
+  /* ---------------------------------------------------------------------
+   * L24-L29 - a product owned by a site you cannot see is not your catalogue.
+   *
+   * ⭐ WHY THESE EXIST. Migration 0026 narrowed the read to "company-wide, or
+   * the same branch as one of your grants", and then admitted ONE more thing
+   * on purpose: a row already on a run you can see, so the board can name its
+   * own history instead of drawing "(unknown product)". Pratik, signed in as
+   * the Plant 1 admin, saw `Rework - Another site` in his catalogue. Measured
+   * on a live database, that row scored `app_can_read_owned = false` and
+   * `app_product_on_visible_schedule = true` — admitted purely by the history
+   * clause. The exception belongs to the BOARD; this is where it stops
+   * leaking into the list.
+   * ------------------------------------------------------------------- */
+  const FOREIGN = product({
+    id: "p-fx",
+    sku: "FX",
+    name: "Foreign Widget",
+    siteNodeId: "30000000-0000-0000-0000-0000000000ff", // a site not in SITES
+  });
+
+  it("L24: a product owned by a site you cannot see is not in the catalogue", () => {
+    expect(productRows([WX, FOREIGN], SITES).rows.map((r) => r.sku)).toEqual(["WX"]);
+  });
+
+  it("L25: and it is counted, so its absence can be explained", () => {
+    expect(productRows([WX, FOREIGN], SITES).elsewhere).toBe(1);
+  });
+
+  it("L26: a company-wide product is never counted as elsewhere", () => {
+    // WX has `siteNodeId: null`. The two branches are different answers and a
+    // fixture where everything is owned cannot tell them apart (rule 3g).
+    expect(productRows([WX], SITES).elsewhere).toBe(0);
+    expect(productRows([WX], SITES).rows.map((r) => r.sku)).toEqual(["WX"]);
+  });
+
+  it("L27: a product owned by a site you CAN see stays", () => {
+    expect(productRows([WY], SITES).rows.map((r) => r.sku)).toEqual(["WY"]);
+    expect(productRows([WY], SITES).elsewhere).toBe(0);
+  });
+
+  it("L28 ⭐: when the structure read FAILED, nothing is filtered", () => {
+    // `null` means "we could not find out", which is NOT the same as "you can
+    // see no sites". Filtering on a failed read would empty the catalogue of
+    // every owned product and blame it on ownership - §19.64 rule 8d, a
+    // fail-closed branch that tells a lie. Every row is kept, and the owner
+    // reads "Another site" because that is the honest label for an owner we
+    // cannot name.
+    const view = productRows([WX, WY, FOREIGN], null);
+    expect(view.rows.map((r) => r.sku)).toEqual(["WX", "WY", "FX"]);
+    expect(view.elsewhere).toBe(0);
+    expect(view.rows.find((r) => r.sku === "WY")?.owner).toBe("Another site");
+  });
+
+  it("L29: counts EVERY foreign row, not just the first", () => {
+    // L5 already establishes this shape for `skipped`. Without it, `elsewhere`
+    // assigned rather than incremented passes every other case in this group.
+    const OTHER = product({ id: "p-fy", sku: "FY", siteNodeId: "30000000-0000-0000-0000-0000000000fe" });
+    expect(productRows([FOREIGN, WX, OTHER], SITES).elsewhere).toBe(2);
   });
 });
 

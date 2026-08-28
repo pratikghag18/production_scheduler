@@ -937,6 +937,13 @@ export type Database = {
       }
       app_can_edit_node: { Args: { p_node: string }; Returns: boolean }
       app_can_read_node: { Args: { p_node: string }; Returns: boolean }
+      app_can_read_operator: { Args: { p_operator: string }; Returns: boolean }
+      app_can_read_owned: { Args: { p_site_node: string }; Returns: boolean }
+      app_can_read_shift: { Args: { p_shift: string }; Returns: boolean }
+      app_can_read_shift_template: {
+        Args: { p_template: string }
+        Returns: boolean
+      }
       app_can_write: { Args: never; Returns: boolean }
       app_current_org: { Args: never; Returns: string }
       app_current_profile_id: { Args: never; Returns: string }
@@ -964,9 +971,17 @@ export type Database = {
       }
       app_is_admin_on_path: { Args: { p_path: unknown }; Returns: boolean }
       app_node_exists_in_org: { Args: { p_node_id: string }; Returns: boolean }
+      app_operator_on_visible_schedule: {
+        Args: { p_operator: string }
+        Returns: boolean
+      }
       app_pick_product_color: {
         Args: { p_org_id: string; p_site_node_id: string }
         Returns: string
+      }
+      app_product_on_visible_schedule: {
+        Args: { p_product: string }
+        Returns: boolean
       }
       app_product_palette: { Args: never; Returns: string[] }
       app_profile_exists_in_org: {
@@ -1103,6 +1118,14 @@ export type Database = {
       site_people: { Args: { p_node_id: string }; Returns: Json }
       slugify: { Args: { input: string }; Returns: string }
       text2ltree: { Args: { "": string }; Returns: unknown }
+      visible_board_roots: {
+        Args: never
+        Returns: {
+          id: string
+          name: string
+          path: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

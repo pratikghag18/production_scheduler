@@ -33,6 +33,7 @@ import { supabase } from "@/lib/supabase";
 import type { Json } from "@/lib/database.types";
 import { shapeMismatch, toSchedulerError } from "./errors";
 import type { BoardNode, HierarchyLevel } from "./shapes";
+import type { BoardRoot } from "@/features/board/lib/rootSelection";
 
 // ---------------------------------------------------------------------------
 // Local runtime guards (shapes.ts's equivalents are not exported — see file
@@ -704,4 +705,36 @@ export async function fetchHierarchyTree(): Promise<{
   }
 
   return { templates, levels, nodes, editableShapeIds, siteNodeIds };
+}
+
+/**
+ * Where the board should open for whoever is signed in: the top of their
+ * visible forest — every node they can read whose parent they cannot.
+ * Migration 0027.
+ *
+ * ⚠️ NOT "the roots you can see". A supervisor's grant sits on a department
+ * and `nodes_select` never gives them the root above it, so `parent_id IS
+ * NULL` returns NOTHING for them and their board would open on nothing at
+ * all. The server-side header (0027) carries the measurement.
+ *
+ * ⚠️ AND `Array.isArray` RATHER THAN A TRUTHY TEST. On the wire this is
+ * whatever PostgREST decided to send; a non-array is a shape this client
+ * cannot read, and treating it as "no places" would tell the person they have
+ * no access when in fact we failed to ask. That distinction is the difference
+ * between D96's honest refusal and a lie, so the two paths differ: an error
+ * throws, and only a real empty array means "nowhere".
+ */
+export async function fetchVisibleBoardRoots(): Promise<BoardRoot[]> {
+  const { data, error } = await supabase.rpc("visible_board_roots");
+  if (error) throw toSchedulerError(error);
+  if (!Array.isArray(data)) {
+    throw toSchedulerError({
+      message: "visible_board_roots did not return a list",
+      code: "PGRST000",
+      details: null,
+      hint: null,
+      name: "ShapeError",
+    });
+  }
+  return data.map((r) => ({ id: r.id, name: r.name, path: r.path }));
 }

@@ -130,9 +130,12 @@ export const UNKNOWN_SITE_LABEL = "Another site";
  */
 export function ownerLabel(
   siteNodeId: string | null,
-  sites: readonly ProductSite[],
+  sites: readonly ProductSite[] | null,
 ): string {
   if (siteNodeId === null) return COMPANY_WIDE_LABEL;
+  // `null` means the structure read did not land, so we cannot NAME the owner
+  // and must not pretend the row belongs elsewhere either.
+  if (sites === null) return UNKNOWN_SITE_LABEL;
   const site = sites.find((s) => s.id === siteNodeId);
   return site === undefined ? UNKNOWN_SITE_LABEL : site.name;
 }
@@ -155,6 +158,13 @@ export interface ProductView {
   rows: readonly ProductRow[];
   /** How many rows arrived in a shape this client could not read. */
   skipped: number;
+  /**
+   * How many rows belong to a site this person cannot see, and are therefore
+   * NOT in the catalogue. See `productRows` — this is a count of something
+   * about THEIR OWN site (a foreign product is scheduled here), never a way to
+   * learn anything about the other site.
+   */
+  elsewhere: number;
 }
 
 /**
@@ -174,13 +184,36 @@ export interface ProductView {
  */
 export function productRows(
   parsed: ReadonlyArray<AdminProduct | null>,
-  sites: readonly ProductSite[],
+  sites: readonly ProductSite[] | null,
 ): ProductView {
   const rows: ProductRow[] = [];
   let skipped = 0;
+  let elsewhere = 0;
   for (const p of parsed) {
     if (p === null) {
       skipped += 1;
+      continue;
+    }
+    // ⭐⭐ A PRODUCT OWNED BY A SITE YOU CANNOT SEE IS NOT PART OF YOUR
+    // CATALOGUE (Pratik, Aug 28). 0026 narrowed the READ to "company-wide, or
+    // the same branch as one of your grants" — and then admitted one more
+    // thing on purpose: a row that is already on a run you can see, so the
+    // board can NAME its own history instead of drawing "(unknown product)".
+    //
+    // That exception belongs to the BOARD and it leaked into this list. Signed
+    // in as the Plant 1 admin he saw `Rework — Another site`: measured, that
+    // row scored `app_can_read_owned = false` and
+    // `app_product_on_visible_schedule = true`, so it was admitted purely by
+    // the history clause. The design note for 0026 said "offering is not
+    // listing and listing is not naming" and then put the naming exception in
+    // the policy, which is the listing layer. This is where that gets undone.
+    //
+    // ⚠️ `sites === null` means the structure read FAILED, not that the person
+    // sees nothing. Filtering then would empty the catalogue of every owned
+    // product and blame it on ownership — §19.64's rule 8d, a fail-closed
+    // branch telling a lie. When we cannot tell, we keep the row.
+    if (p.siteNodeId !== null && sites !== null && !sites.some((s) => s.id === p.siteNodeId)) {
+      elsewhere += 1;
       continue;
     }
     rows.push({
@@ -194,7 +227,7 @@ export function productRows(
       colorUnknown: !isPaletteToken(p.colorToken) && !isHexColorToken(p.colorToken),
     });
   }
-  return { rows, skipped };
+  return { rows, skipped, elsewhere };
 }
 
 /**

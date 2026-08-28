@@ -2,6 +2,7 @@ import type { Product } from "@/lib/api";
 import { productColorCss } from "@/lib/productColor";
 import { ZOOMS, type ZoomIndex } from "../lib/geometry";
 import { formatDayLabel, addMinutes } from "../lib/time";
+import { shouldOfferRootPicker, type BoardRoot } from "../lib/rootSelection";
 import styles from "./BoardToolbar.module.css";
 
 /** 92-day cap: `board_window` raises `invalid_argument` past it (T6, docs/api.md §2). */
@@ -15,6 +16,9 @@ const MAX_WINDOW_DAYS = 92;
  * bug.
  */
 export function BoardToolbar({
+  roots,
+  rootPath,
+  onRootChange,
   zoomIndex,
   onZoomChange,
   windowStartDate,
@@ -25,6 +29,9 @@ export function BoardToolbar({
   products,
   isFetching,
 }: {
+  roots: BoardRoot[];
+  rootPath: string | null;
+  onRootChange: (path: string) => void;
   zoomIndex: ZoomIndex;
   onZoomChange: (index: ZoomIndex) => void;
   windowStartDate: Date;
@@ -41,6 +48,34 @@ export function BoardToolbar({
   return (
     <header className={styles.header}>
       <h1 className={styles.title}>Board</h1>
+
+      {/* ⭐ WHICH PLACE THIS IS. The board showed the word "Board" and nothing
+          else for as long as it opened on a hardcoded `plant_1` — there was
+          only ever one answer, so naming it would have been noise. Now that it
+          follows who you are, "which plant am I looking at" is a real question
+          and the header is where it gets answered.
+
+          ⚠️ A PICKER ONLY WHEN THERE IS A CHOICE. One place is not a choice,
+          and a permanently-disabled control is worse than none — so a person
+          who administers one site reads a label and everyone else gets a
+          select. `shouldOfferRootPicker` owns that rule so it is testable
+          without rendering anything. */}
+      {shouldOfferRootPicker(roots) ? (
+        <select
+          className={styles.rootPicker}
+          aria-label="Which place to show"
+          value={rootPath ?? ""}
+          onChange={(e) => onRootChange(e.target.value)}
+        >
+          {roots.map((r) => (
+            <option key={r.id} value={r.path}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        roots.length === 1 && <span className={styles.rootName}>{roots[0].name}</span>
+      )}
       <span className={styles.date}>
         {formatDayLabel(windowStartDate)} – {formatDayLabel(addMinutes(windowEnd, -1440))}
       </span>

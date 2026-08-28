@@ -159,7 +159,12 @@ export function ProductsPanel() {
 
   /* -- the catalogue ----------------------------------------------------- */
 
-  const view = productRows(productsQuery.data ?? [], sites);
+  // ⚠️ `null`, NOT `sites`, WHEN THE STRUCTURE READ FAILED. `sites` is derived
+  // from `treeQuery.data?.nodes ?? []`, so a failed read and "you can see no
+  // nodes" are the same empty array — and `productRows` would read that as
+  // "every owned product belongs elsewhere" and quietly empty the catalogue.
+  // Passing `null` says we could not find out, and it keeps every row.
+  const view = productRows(productsQuery.data ?? [], treeQuery.isSuccess ? sites : null);
   const visible = view.rows.filter((r) => matchesProductQuery(r, query));
   const { active, inactive } = partitionProducts(visible);
 
@@ -634,6 +639,20 @@ export function ProductsPanel() {
             {view.skipped === 1
               ? "1 product couldn't be read and isn't shown."
               : `${view.skipped} products couldn't be read and aren't shown.`}
+          </p>
+        )}
+
+        {/* ⭐ A FACT ABOUT THIS SITE, NOT ABOUT THE OTHER ONE. These rows are
+            readable only because they are already on a run here, and they are
+            kept out of the catalogue because they are not this person's to
+            manage. Saying nothing would leave "why is Rework on my board and
+            not in my list?" unanswerable; naming them would be the leak the
+            filter exists to close. So: a count, and no identity. */}
+        {view.elsewhere > 0 && (
+          <p className={styles.skippedLine}>
+            {view.elsewhere === 1
+              ? "1 product scheduled here belongs to another site, so it isn't listed."
+              : `${view.elsewhere} products scheduled here belong to another site, so they aren't listed.`}
           </p>
         )}
 

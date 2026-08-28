@@ -24,6 +24,7 @@ export interface BoardViewState {
   windowStartDate: Date;
   windowDayCount: number;
   operatorPanelOpen: boolean;
+  selectedRootPath: string | null;
   /** Bumped to ask `BoardGrid` to scroll the current instant into view. */
   scrollToNowNonce: number;
 
@@ -32,6 +33,7 @@ export interface BoardViewState {
   setWindowStartDate: (date: Date) => void;
   setWindowDayCount: (days: number) => void;
   setOperatorPanelOpen: (open: boolean) => void;
+  setSelectedRootPath: (path: string) => void;
   toggleCollapsed: (nodeId: string) => void;
   shiftWindowByDays: (delta: number) => void;
   goToToday: () => void;
@@ -59,6 +61,7 @@ export const useBoardViewStore = create<BoardViewState>((set) => ({
   windowStartDate: defaultWindowStart(),
   windowDayCount: 3, // D17
   operatorPanelOpen: true,
+  selectedRootPath: null,
   // Starts at 1, not 0, so the first mount scrolls to now exactly once.
   scrollToNowNonce: 1,
 
@@ -67,6 +70,15 @@ export const useBoardViewStore = create<BoardViewState>((set) => ({
   setWindowStartDate: (date) => set({ windowStartDate: date }),
   setWindowDayCount: (days) => set({ windowDayCount: days }),
   setOperatorPanelOpen: (open) => set({ operatorPanelOpen: open }),
+
+  /**
+   * Which place the board is showing. ⚠️ A REMEMBERED CHOICE OUTLIVES THE
+   * IDENTITY THAT MADE IT — the dev switcher changes person with no reload,
+   * and React Query resets its cache on that while this store does not. So
+   * this is only ever a HINT: `resolveRootPath` drops it when the server's
+   * list no longer contains it. See `../lib/rootSelection`, case W5.
+   */
+  setSelectedRootPath: (path) => set({ selectedRootPath: path }),
 
   /**
    * Prev/Next day. Moves the window start by whole UTC days so D14 (the
