@@ -74,9 +74,13 @@ describe("scope: is a node at or below another", () => {
 });
 
 describe("scope: what is offered where", () => {
-  it("X8: a company-wide thing is offered everywhere", () => {
-    expect(offeredAt(null, CELL1.path, BY_ID)).toBe(true);
-    expect(offeredAt(null, PLANT2.path, BY_ID)).toBe(true);
+  it("X8 ⭐ (rewritten by 0028): a PLANT-scoped thing is offered everywhere inside that plant, and nowhere in the other", () => {
+    // This case used to read "a company-wide thing is offered everywhere" and
+    // passed `null`. D108 removed the state; the widest scope that still
+    // exists is a plant root, and the second expectation is the half the old
+    // case could not make — `null` was offered in Plant 2 as well.
+    expect(offeredAt(PLANT.id, CELL1.path, BY_ID)).toBe(true);
+    expect(offeredAt(PLANT.id, PLANT2.path, BY_ID)).toBe(false);
   });
 
   it("X9: every covering scope applies — this is a UNION, not nearest-ancestor-wins", () => {
@@ -86,7 +90,7 @@ describe("scope: what is offered where", () => {
     const items = [
       { siteNodeId: LINE1.id, sku: "SLA" },
       { siteNodeId: ASSY.id, sku: "SDP" },
-      { siteNodeId: null, sku: "SCW" },
+      { siteNodeId: PLANT.id, sku: "SCW" },
     ];
     expect(offeredHere(items, CELL1.path, BY_ID).map((i) => i.sku)).toEqual(["SLA", "SDP", "SCW"]);
   });
@@ -97,7 +101,7 @@ describe("scope: what is offered where", () => {
     const items = [
       { siteNodeId: LINE1.id, sku: "SLA" },
       { siteNodeId: ASSY.id, sku: "SDP" },
-      { siteNodeId: null, sku: "SCW" },
+      { siteNodeId: PLANT.id, sku: "SCW" },
     ];
     expect(offeredHere(items, CELL10.path, BY_ID).map((i) => i.sku)).toEqual(["SDP", "SCW"]);
   });
@@ -111,7 +115,7 @@ describe("scope: what is offered where", () => {
 
   it("X12: offeredHere preserves the order it was given", () => {
     const items = [
-      { siteNodeId: null, sku: "B" },
+      { siteNodeId: ASSY.id, sku: "B" },
       { siteNodeId: PLANT.id, sku: "A" },
     ];
     expect(offeredHere(items, CELL1.path, BY_ID).map((i) => i.sku)).toEqual(["B", "A"]);
@@ -119,17 +123,22 @@ describe("scope: what is offered where", () => {
 });
 
 describe("scope: the picker", () => {
-  it("X13: company-wide is always the first option, and its value is null", () => {
+  it("X13 ⭐ (inverted by 0028): there is NO company-wide option — the list is exactly the nodes", () => {
+    // It used to assert the opposite: a `null`-valued entry first, and
+    // `NODES.length + 1` options. D108 removed the entry, and the length is
+    // asserted alongside so "no null in the list" cannot pass on an empty one.
     const opts = scopeOptions(NODES);
-    expect([opts[0].value, opts.length]).toEqual([null, NODES.length + 1]);
+    expect(opts.length).toBe(NODES.length);
+    expect(opts.some((o) => (o.value as unknown) === null)).toBe(false);
   });
 
   it("X14: nodes come back in TREE order — a parent immediately before its children", () => {
     // Sorting by path IS tree order. Asserted as a literal list rather than by
     // re-deriving it from `path`, which would be deriving the expected value
     // from the thing under test.
+    // ⭐ 0028: the first entry used to be "Everywhere (company-wide)". D108
+    // deleted it; the tree order this case exists to pin is unchanged.
     expect(scopeOptions(NODES).map((o) => o.name)).toEqual([
-      "Everywhere (company-wide)",
       "Plant 1",
       "Assembly",
       "Line 1",
@@ -145,9 +154,12 @@ describe("scope: the picker", () => {
     expect([byName.get("Plant 1"), byName.get("Assembly"), byName.get("Cell 1")]).toEqual([0, 1, 3]);
   });
 
-  it("X16: with an edit set, only nodes in it are offered — plus company-wide", () => {
+  it("X16: with an edit set, only nodes in it are offered — and nothing else at all", () => {
+    // ⭐ 0028: the title read "— plus company-wide", and that entry was the one
+    // thing the edit set could not filter out. It no longer exists, so the list
+    // is now exactly the set.
     const opts = scopeOptions(NODES, new Set([LINE1.id, CELL1.id]));
-    expect(opts.map((o) => o.name)).toEqual(["Everywhere (company-wide)", "Line 1", "Cell 1"]);
+    expect(opts.map((o) => o.name)).toEqual(["Line 1", "Cell 1"]);
   });
 
   it("X17: a node whose parent is unreadable is still offered, at its own depth", () => {
@@ -156,7 +168,6 @@ describe("scope: the picker", () => {
     // this node entirely.
     const opts = scopeOptions([LINE1, CELL1]);
     expect(opts.map((o) => [o.name, o.depth])).toEqual([
-      ["Everywhere (company-wide)", 0],
       ["Line 1", 2],
       ["Cell 1", 3],
     ]);
@@ -167,16 +178,19 @@ describe("scope: the picker", () => {
     expect(indentedLabel(line1!)).toBe("    Line 1");
   });
 
-  it("X19: company-wide is never indented", () => {
-    expect(indentedLabel({ value: null, name: "Everywhere (company-wide)", depth: 0 })).toBe(
-      "Everywhere (company-wide)",
-    );
+  it("X19 ⭐ (rewritten by 0028): a root is never indented", () => {
+    // Was "company-wide is never indented", on the entry D108 deleted. A depth
+    // of 0 is now only ever a root, and the assertion is the same shape.
+    expect(indentedLabel({ value: PLANT.id, name: "Plant 1", depth: 0 })).toBe("Plant 1");
   });
 });
 
 describe("scope: what a row says about where it belongs", () => {
-  it("X20: null reads as company-wide", () => {
-    expect(scopeLabel(null, BY_ID)).toBe("Company-wide");
+  it("X20 ⭐ (rewritten by 0028): a scope this client cannot read says so — and never says \"Company-wide\"", () => {
+    // `scopeLabel(null, ...)` returned "Company-wide" until D108 removed the
+    // state. The remaining answer is the one that mattered: an unreadable
+    // owner must read as somewhere else, never as everyone's.
+    expect(scopeLabel("n-nobody-can-see-this", BY_ID)).toBe("Somewhere else");
   });
 
   it("X21: a readable scope reads as its node's name", () => {

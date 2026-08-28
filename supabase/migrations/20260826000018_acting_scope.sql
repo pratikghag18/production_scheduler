@@ -28,7 +28,7 @@
 -- test constructs it. That is exactly why it survived. It is the same shape as
 -- D83, which was invisible for weeks because the seed had one org.
 --
--- IT MATTERS NOW because the role model Pratik asked for -- system admin, site
+-- IT MATTERS NOW because the role model the maintainer asked for -- system admin, site
 -- admin, supervisor, and one person holding more than one -- makes "a person
 -- with more than one profile" the NORMAL case. This closes first, alone, so it
 -- is testable on its own and lands before anything switches multi-role on.

@@ -92,9 +92,14 @@ export function ProductsPanel() {
   const [recolouringId, setRecolouringId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   const [newDraft, setNewDraft] = useState({ sku: "", name: "", siteNodeId: "" });
-  const [newErrors, setNewErrors] = useState<{ sku: string | null; name: string | null }>({
+  const [newErrors, setNewErrors] = useState<{
+    sku: string | null;
+    name: string | null;
+    owner: string | null;
+  }>({
     sku: null,
     name: null,
+    owner: null,
   });
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -105,7 +110,7 @@ export function ProductsPanel() {
 
   // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). Until 0025 the trigger refused
   // anything but a root as an owner, so this filtered to `parentId === null`.
-  // Pratik: *"how do we assign them to a specific hierarchy level so the lower
+  // The maintainer: *"how do we assign them to a specific hierarchy level so the lower
   // levels inherit them?"* — so the picker is the tree now, and `nodes_select`
   // already limits it to what this person may see.
   const allNodes = treeQuery.data?.nodes ?? [];
@@ -144,16 +149,20 @@ export function ProductsPanel() {
   // so a site admin whose root has no claimed structure was offered nothing at
   // all. Offering a node the server then refuses costs one clear sentence now
   // that §19.63's contract exists; offering nothing costs the whole feature.
-  const owners = isCompanyAdmin
-    ? scopeOptions(allNodes)
-    : scopeOptions(allNodes).filter((o) => o.value !== null);
+  //
+  // ⭐ 0028 / D108 COLLAPSED THE TWO BRANCHES THAT USED TO BE HERE. A company
+  // admin got the list with a "company-wide" entry on top and everybody else
+  // got the same list with that entry filtered back out. `scopeOptions` no
+  // longer emits it, so there is one list and `isCompanyAdmin` no longer
+  // decides anything about this control.
+  const owners = scopeOptions(allNodes);
   const ownerLabels = new Map(owners.map((o) => [o.value, indentedLabel(o)]));
 
-  // The owner picker's value, kept legal by construction. A site admin has no
-  // company-wide option at all (the insert policy refuses it), so an empty
-  // selection would be a form that cannot pass its own `canOwnProduct` check.
-  // Falls back to the first owner this person may actually use.
-  const ownerValue = owners.some((o) => (o.value ?? "") === newDraft.siteNodeId)
+  // The owner picker's value, kept legal by construction: falls back to the
+  // first owner this person may actually use. `""` survives only when the list
+  // itself is empty — the structure read did not land — and `submitNew` then
+  // refuses with a message rather than sending a null the database rejects.
+  const ownerValue = owners.some((o) => o.value === newDraft.siteNodeId)
     ? newDraft.siteNodeId
     : (owners[0]?.value ?? "");
 
@@ -189,7 +198,10 @@ export function ProductsPanel() {
     // which meant a line could be reorganised and its products could not follow
     // — and the create form had a picker while the edit form did not, which is
     // the same shape of gap as a break that could only be deleted and retyped.
-    const nextScope = editDraft.siteNodeId === "" ? null : editDraft.siteNodeId;
+    // ⭐ 0028: `""` used to be folded to `null`, meaning company-wide. There is
+    // no such destination now, so the empty string travels as itself and
+    // `validateProductDraft` refuses it with a message beside the picker.
+    const nextScope = editDraft.siteNodeId;
     const result = validateProductDraft({
       sku: editDraft.sku,
       name: editDraft.name,
@@ -236,14 +248,14 @@ export function ProductsPanel() {
 
   function submitNew() {
     if (profile === null) return;
-    const siteNodeId = ownerValue === "" ? null : ownerValue;
+    const siteNodeId = ownerValue;
     const result = validateProductDraft({ sku: newDraft.sku, name: newDraft.name, siteNodeId });
     if (!result.ok) {
-      setNewErrors({ sku: result.skuError, name: result.nameError });
+      setNewErrors({ sku: result.skuError, name: result.nameError, owner: result.ownerError });
       setFormError(null);
       return;
     }
-    setNewErrors({ sku: null, name: null });
+    setNewErrors({ sku: null, name: null, owner: null });
     setFormError(null);
     createMutation.mutate(
       {
@@ -281,7 +293,7 @@ export function ProductsPanel() {
           {/* The product's OWN colour (0023 §3), not its position in a list.
               `colorVar` has already fallen back if the token is one this
               stylesheet does not define. */}
-          {/* ⭐ THE SWATCH IS THE CONTROL (Pratik, Aug 27). The colour is still
+          {/* ⭐ THE SWATCH IS THE CONTROL (the maintainer, Aug 27). The colour is still
               CHOSEN for a product when it is created — least-used in its
               owner's palette, D102 — and that stays the default, because the
               thing D102 exists to prevent is a colour moving on its own. What
@@ -338,7 +350,7 @@ export function ProductsPanel() {
         )}
 
         {/* ⭐ THE "BELONGS TO" COLUMN IS THE CONTROL WHEN THE ROW IS BEING
-            EDITED. Pratik asked three times for a way to change where an
+            EDITED. The maintainer asked three times for a way to change where an
             existing product belongs, and each time I had wired only the CREATE
             form — the picker existed one card up and nowhere on the row. **The
             edit path is not a smaller version of the create path; it is the
@@ -397,7 +409,7 @@ export function ProductsPanel() {
               {/* ⭐ THE DOOR HAS TO SAY WHAT IS BEHIND IT (D106, §19.67).
                   This button opens a form that changes the product's code, its
                   name AND where it belongs — and it was labelled "Rename",
-                  which names the narrowest of the three. Pratik reported "I
+                  which names the narrowest of the three. The maintainer reported "I
                   still cannot edit a product" four times against a screen where
                   the picker was already wired and already worked: he was never
                   going to press "Rename" to change an area, and nothing else on
@@ -468,7 +480,7 @@ export function ProductsPanel() {
               />
             ))}
             {/* ⭐ THE PALETTE IS THE SHORTCUT; THE FIELD IS THE ANSWER.
-                Pratik asked for both, and they are not the same control: four
+                The maintainer asked for both, and they are not the same control: four
                 swatches cover the common case in one click, and a company with
                 six products on one line needs a colour the palette does not
                 have. `normaliseHexInput` is deliberately lenient about what a
@@ -590,22 +602,25 @@ export function ProductsPanel() {
             </label>
             <label className={styles.field}>
               <span className={styles.fieldLabel}>Belongs to</span>
-              {/* ⭐ THE WHOLE TREE, INDENTED (0025 / D103). Company-wide is
-                  offered only to a company admin, because that one refusal IS
-                  knowable from the profile role with no grant lookup. Every
-                  node below it is offered to anyone who administers anywhere,
-                  and the server has the final say. */}
+              {/* ⭐ THE WHOLE TREE, INDENTED (0025 / D103, D109). Every node is
+                  offered to anyone who administers anywhere and the server has
+                  the final say. 0028 removed the company-wide entry that used
+                  to sit on top for a company admin — there is nowhere for it
+                  to point. */}
               <select
                 className={styles.input}
                 value={ownerValue}
                 onChange={(e) => setNewDraft((d) => ({ ...d, siteNodeId: e.target.value }))}
               >
                 {owners.map((o) => (
-                  <option key={o.value ?? "company"} value={o.value ?? ""}>
+                  <option key={o.value} value={o.value}>
                     {ownerLabels.get(o.value)}
                   </option>
                 ))}
               </select>
+              {newErrors.owner !== null && (
+                <span className={styles.error}>{newErrors.owner}</span>
+              )}
             </label>
             <button type="button" className={styles.primary} onClick={submitNew}>
               Add

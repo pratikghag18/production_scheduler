@@ -766,7 +766,7 @@ Ask of every expression: *at what input does this stop changing?*
 - The **PostgREST HTTP-status mapping** for the new `invalid_argument` payloads. Unchanged
   from the existing contract, but no Docker here to prove it.
 - **Real Supabase.** `scripts/verify-db.sh` proves the SQL cases pass on scratch PG16;
-  `supabase db reset` on Pratik's machine proves the migration applies. **Keep those two
+  `supabase db reset` on the maintainer's machine proves the migration applies. **Keep those two
   claims separate in your report.** They have been conflated before.
 
 ---
@@ -788,8 +788,8 @@ collides with the feature it accompanies (rule 10). If a requirement here forces
 - No edits to `src/features/board/**`, `package.json`, or migrations 0001–0014.
 - No `git` commands of any kind. Reading `.git/HEAD` or `.git/refs/**` is a plain file read
   and is fine; **running git leaves a `.git/index.lock` you cannot delete**, which blocks
-  every subsequent git command until Pratik removes it by hand.
-- Do not commit or push. Pratik reviews and commits.
+  every subsequent git command until the maintainer removes it by hand.
+- Do not commit or push. The maintainer reviews and commits.
 
 ---
 

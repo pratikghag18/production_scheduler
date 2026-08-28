@@ -455,7 +455,7 @@ Complaint from review: the design plan records decisions but not state. Fixed by
 
 ## 16. Addendum v1.3 — shift definitions and breaks (Aug 21, 2026)
 
-Spec from Pratik at v2.1 sign-off. All SQL validated on live PostgreSQL 16.
+Spec from the maintainer at v2.1 sign-off. All SQL validated on live PostgreSQL 16.
 
 ### 16.1 Model
 
@@ -654,7 +654,7 @@ Scope fence and conventions were checked by grep across the whole delivery, all 
 
 **D17 as written anchored the default window to the Monday of the current week.** That was wrong, and it was wrong for a revealing reason: the rule was chosen to line up with the *seed's* anchor (D10, "day 0 = Monday of the current week in UTC"), which is a fixture concern. It leaked into the product. Open the board on a Friday and the useful part of the schedule sits four days off the right-hand edge — the user has to go looking for the present before they can do anything.
 
-**Revised:** the default window starts on **today** (`startOfUtcDay(now)`), keeping the 3-day span. Surfaced by Pratik at P1-4a acceptance.
+**Revised:** the default window starts on **today** (`startOfUtcDay(now)`), keeping the 3-day span. Surfaced by the maintainer at P1-4a acceptance.
 
 Two things landed with it, both gaps in the P1-4a brief rather than in the build:
 
@@ -749,7 +749,7 @@ The *real* risk was different and worse than a no-op. A browser lacking the capa
 
 ### 18.10 D46 amended — the board fits its height automatically (Aug 25, 2026)
 
-**P1-4c's D46 was wrong, and Pratik was right to push on it.** It made density a manual setting, reasoning that a 4K screen might be a wall display or a dense planning station and the pixel count cannot distinguish them. True — and it answered the wrong question. **The variable that matters is row count, not screen size**, and row count is not a property of the display at all: an admin sees 7 cells, an Assembly supervisor 5, a line supervisor 2, on the same monitor. No fixed density fills the viewport for all three, so density buttons only move the dead space around rather than removing it.
+**P1-4c's D46 was wrong, and the maintainer was right to push on it.** It made density a manual setting, reasoning that a 4K screen might be a wall display or a dense planning station and the pixel count cannot distinguish them. True — and it answered the wrong question. **The variable that matters is row count, not screen size**, and row count is not a property of the display at all: an admin sees 7 cells, an Assembly supervisor 5, a line supervisor 2, on the same monitor. No fixed density fills the viewport for all three, so density buttons only move the dead space around rather than removing it.
 
 Measured against the seed board at Standard, natural content height is **740px for Admin, 544px for Ana, 254px for a two-cell line supervisor**. Required scale to fill:
 
@@ -1100,7 +1100,7 @@ exists precisely to prevent that; it was applied to one of the two statements.
 
 ### 19.7 D75/D76 — the density control is gone, and the decision record did not say so (Aug 25, 2026)
 
-Surfaced by Pratik when a debugging instruction referenced a toolbar button that does not exist.
+Surfaced by the maintainer when a debugging instruction referenced a toolbar button that does not exist.
 The instruction was wrong; chasing *why* it was wrong found a documentation gap that had been
 sitting there since the control was removed.
 
@@ -1192,7 +1192,7 @@ must be table-driven: ~200 lines for 74 assertions here, against 1,453 lines for
 
 ### 19.10 D77 — portaled floating UI is chrome too, and the popover scaling pass was `font-size`-only (Aug 25, 2026)
 
-Raised by Pratik: "I thought the scaling for pop windows was fixed, what's wrong?" Three separate
+Raised by the maintainer: "I thought the scaling for pop windows was fixed, what's wrong?" Three separate
 things were tangled together, and only one of them was a regression.
 
 **1. Nothing broke. The popovers were scaling — by about 1.09.** Under Fit, `--ui-scale` *is* the fit
@@ -1248,7 +1248,7 @@ mislabelling every non-`api_raise` failure as `22P02`, and P1-5b's mutation runn
 
 ### 19.11 The popover width has never scaled — an inline style has been overriding the CSS all along (Aug 25, 2026)
 
-Surfaced only because Pratik pasted a measurement that did not match a prediction: `--chrome-scale`
+Surfaced only because the maintainer pasted a measurement that did not match a prediction: `--chrome-scale`
 ≈ 1.243 and a font of 13.67px (= 11 × 1.243, so the token *is* reaching the subtree), but a popover
 **272px** wide where `260 × 1.243 = 323px` was expected.
 
@@ -1848,7 +1848,7 @@ Site → Department → Line → Cell at one plant and Site → Line → Cell at
 Lines would have to sit at position 1 and position 2 simultaneously.
 
 That is a consequence of D69/D70. It was never written down as a constraint, and it contradicts a
-requirement Pratik stated at the start of this project: hierarchy levels are whatever the site wants.
+requirement the maintainer stated at the start of this project: hierarchy levels are whatever the site wants.
 **I recorded it as an open question and asked him to re-decide it, which was the wrong move and he
 said so** — a gap between the code and a requirement already given is a DEFECT, not a question. It is
 fixed in §19.18. The note stays because the shape of the mistake is worth keeping: finding an
@@ -2031,7 +2031,7 @@ the requirement has teeth instead of being enforced only by a fixture nobody wou
 
 ### 19.19 D87 — `create_node` still looks a level up by `(org_id, position)` (Aug 25, 2026)
 
-**Open. Found by Pratik asking "how would one add one more hierarchy?", not by any test.**
+**Open. Found by the maintainer asking "how would one add one more hierarchy?", not by any test.**
 
 §19.18 moved level identity from `(org_id, position)` to `(template_id, position)`. It did not move
 the two places `create_node` (migration 0010, untouched by 0014) resolves a level:
@@ -2182,7 +2182,7 @@ returns an EMPTY template on purpose. `fetchHierarchyTree` does not read
 
 ### 19.21 D88 — per-site timezone: site-local, wall-clock, Phase 2 (Aug 25, 2026)
 
-Flagged as blocking-adjacent since D86, decided with Pratik today. The mismatch was narrow
+Flagged as blocking-adjacent since D86, decided with the maintainer today. The mismatch was narrow
 and specific, and worth stating because it is not what "we hardcoded UTC" sounds like:
 
 - **Runs and assignments are `tstzrange`** — absolute instants. Already zone-independent and
@@ -2201,7 +2201,7 @@ seed to UTC.
 - **D88a — the board's axis is SITE-LOCAL.** `board_window` already takes one `p_root_path`,
   so a board usually *is* one site. A 06:00 shift must read 06:00 to the people working it.
 - **D88b — a shift keeps its posted WALL-CLOCK start across a DST change.** On the changeover
-  day that shift is 7 or 9 hours long and the crew works it short or long. Pratik's call, and
+  day that shift is 7 or 9 hours long and the crew works it short or long. The maintainer's call, and
   it matches how plants actually post schedules.
 - **D88c — Phase 2, not v1.** Recorded now so nothing new is built assuming UTC; scheduled
   after P1-5f/5g/5h. Nothing shipped is wrong for a single-zone customer.
@@ -2358,7 +2358,7 @@ cases as written, not of the requirement. See [[brief-writing-rules]] rule 14.
 
 ### 19.23 D89 — the hole D84 left: form controls do not inherit fonts (Aug 25, 2026)
 
-Reported by Pratik for the **third** time, as "the popup scaling is so bad, why do I have to keep
+Reported by the maintainer for the **third** time, as "the popup scaling is so bad, why do I have to keep
 talking about this?" He is right that it kept coming back, and the reason is worth stating plainly:
 every previous fix treated an instance.
 
@@ -2458,7 +2458,7 @@ about. The second is the one that would have caught P1-5f; the first is the one 
 #### One thing deliberately not fixed here
 
 The console shows seven `401 (Unauthorized)` responses on first load — the hierarchy reads and
-`board_window` firing before the dev sign-in resolves. Every check Pratik ran then worked, so this is
+`board_window` firing before the dev sign-in resolves. Every check the maintainer ran then worked, so this is
 noise rather than breakage, but it is the §19.8 class of problem (a query firing against an identity
 that is not established yet) and it wastes a round trip per query on every load. Filed rather than
 fixed, because it is unrelated to D89 and wants its own measurement.
@@ -2467,7 +2467,7 @@ fixed, because it is unrelated to D89 and wants its own measurement.
 
 ### 19.24 D90 — the node tree lost its meaning when shapes went per-site (Aug 25, 2026)
 
-Raised by Pratik looking at the built admin screen: *"there should be a better way to visualize this,
+Raised by the maintainer looking at the built admin screen: *"there should be a better way to visualize this,
 one which leaves no ambiguity."* He is right, and this is a defect we introduced rather than a
 matter of taste.
 
@@ -2498,7 +2498,7 @@ two-shape dataset:
 
 #### Two decisions already taken
 
-- **D90a — the section is renamed "Site Structure"** (Pratik's wording, from "Site type" and
+- **D90a — the section is renamed "Site Structure"** (the maintainer's wording, from "Site type" and
   "Structure"). It reads correctly in the flow that actually matters: the shape dropdown when adding
   a root becomes *"which site structure does Plant 2 use?"*, a question a plant manager can answer.
   "Shape" was abstract, and "Hierarchy type" collides with the admin section it sits inside.
@@ -2508,7 +2508,7 @@ two-shape dataset:
 
 #### Decided: option B, and why C was dropped
 
-**Option B built.** Pratik's reason for rejecting C is sharper than the one in the mockup and is
+**Option B built.** the maintainer's reason for rejecting C is sharper than the one in the mockup and is
 worth keeping: the mockup argued C loses the whole-tree overview and complicates drag. The real flaw
 is **the first column**. The panes only have a well-defined header *after* a root is selected — the
 Site column itself mixes roots of every structure, and it only looks coherent because both seeded
@@ -2554,7 +2554,7 @@ plain sight.**
 #### The guides were promised and not built — and building them found a real bug
 
 The mockup drew vertical connector lines and the covering note called them "cheap and worth adding
-alongside whichever option". Option B then shipped without them. Pratik: *"I don't see the vertical
+alongside whichever option". Option B then shipped without them. The maintainer: *"I don't see the vertical
 line as in the proposals."*
 
 The mockup got them free from nested `<div>`s, whose borders end where the container ends.
@@ -2610,7 +2610,7 @@ paragraph.**
 
 ### 19.25 D91 — do not query as nobody: the 401s on every page load (Aug 25, 2026)
 
-Seven red `401 (Unauthorized)` lines in the console on every load, spotted by Pratik in a screenshot
+Seven red `401 (Unauthorized)` lines in the console on every load, spotted by the maintainer in a screenshot
 taken for a different reason. Nothing was broken — the data arrived and every acceptance check
 passed — which is exactly why it had survived.
 
@@ -2670,7 +2670,7 @@ will be forgotten by the next component.**
 
 ### 19.26 P1-5g written — the refusal is the feature, and the render found three defects (Aug 25, 2026)
 
-P1-5d shipped half the re-parenting decision. Pratik chose *"both — drag, with the menu as
+P1-5d shipped half the re-parenting decision. The maintainer chose *"both — drag, with the menu as
 fallback"*; the menu exists (`⋮` → **Move to…**, listing exactly `legalParentsFor`) and
 `NodeTreeEditor.tsx` has zero drag handlers. Brief written:
 `docs/agent-briefs/p1-5g-tree-drag-drop-brief.md`. Four files, two of them executable.
@@ -2783,13 +2783,13 @@ guards that exist because of earlier ones:
    the mutation run is what exposed it: M2 (reordering the explain branches) was caught by *nothing*
    until case V14 was added.
 
-**Prediction for Pratik's acceptance run: 430 → 473 tests, 16 → 17 files.**
+**Prediction for the maintainer's acceptance run: 430 → 473 tests, 16 → 17 files.**
 
 ---
 
 ### 19.27 D92 — reordering a level silently corrupts every node under it (Aug 25, 2026)
 
-Raised by Pratik looking at the Levels card: *"This should also be able to drag, don't you think?"* The
+Raised by the maintainer looking at the Levels card: *"This should also be able to drag, don't you think?"* The
 answer is yes (§19.28), but checking what a level reorder actually does first turned up a defect in
 the **↑/↓ buttons that already ship**.
 
@@ -2853,7 +2853,7 @@ Also measured, on the corrupted tree:
 `LevelEditor` renders ↑/↓ per row wired to `applyLevelAction({kind:"moveUp"|"moveDown"})`, then
 **Save** calls `saveHierarchyLevels`. `validateLevelDraft` checks array-ness, emptiness, the 64 cap,
 exactly-one-schedulable and blank names — **nothing about positions or nodes**. So the whole path is
-open, and the screenshot Pratik sent is a picture of it.
+open, and the screenshot the maintainer sent is a picture of it.
 
 #### The fix, and why it is a refusal rather than a cascade
 
@@ -2886,7 +2886,7 @@ the nodes, and nothing is watching that direction.**
 
 ### 19.28 P1-5i — dragging the level list (Aug 25, 2026)
 
-Pratik's actual question. **Yes**, and it is materially cheaper than the tree drag, for one reason:
+The maintainer's actual question. **Yes**, and it is materially cheaper than the tree drag, for one reason:
 **a level reorder has no illegal target.** The list is a local `LevelDraft[]` until Save, the array
 index IS the position (D70), and `validateLevelDraft` cares about names, the cap and the schedulable
 count — none of which a reorder changes. So there is no `canDropOn`, no refusal, no explanation
@@ -3113,11 +3113,11 @@ actually on screen; a blank draft name falls back to the stored one (S13, S14).
   exactly what a database scrambled by a pre-0016 save looks like, since roots stay put while
   `create_node` puts new children one rung under a parent that has moved. S18 is that fixture.
 - **`node node_modules/typescript/lib/tsc.js -b --force` → exit 0**, and `node
-  node_modules/eslint/bin/eslint.js .` → exit 0, both run by the design session on Pratik's own
+  node_modules/eslint/bin/eslint.js .` → exit 0, both run by the design session on the maintainer's own
   machine. **This is new and it changes the handover**: `tsc` and `eslint` are pure JS and run under
   the Linux node on the device VM even though `node_modules` holds Windows-ARM binaries. `vitest`
   does NOT (`Cannot find module '@rollup/rollup-linux-arm64-gnu'`), and npm has no network there, so
-  the vitest count remains Pratik's to run. The tsc instrument was itself checked: an injected
+  the vitest count remains the maintainer's to run. The tsc instrument was itself checked: an injected
   `nodes={42}` produced `TS2322` on both call sites, so the clean run was a real run.
 - **RENDERED IN HEADLESS CHROMIUM AND LOOKED AT** (`docs/mockups/p1-5j-save-gate.png`), in three
   states — a sound order with Save live, a swapped order with Save dark, and a removal with the
@@ -3210,7 +3210,7 @@ wording is what is wrong, and it is now amended.**
 
 ### 19.33 P1-5k — promote / demote a node and its subtree by one rung (design, Aug 26, 2026)
 
-Raised by Pratik as *"what if we changed a level's nature on the nodes?"* The hole underneath the
+Raised by the maintainer as *"what if we changed a level's nature on the nodes?"* The hole underneath the
 question: **`nodes.level_id` is immutable.** Nothing in sixteen migrations updates it; `move_node`
 changes only `parent_id` and `sort_order`; and with one level per rung a node's level is fully
 determined by its parent's. So a subtree built at the wrong rung can only be deleted and rebuilt.
@@ -3323,7 +3323,7 @@ offers no way to inject a `SET`. **Not reachable today, and it has been true sin
 multi-tenant product (rule 5), and P1-5k is the first feature that makes the hatch load-bearing
 rather than theoretical. Worth deciding before the brief: leave it, or gate it on
 `current_user = <owner>` / a SECURITY DEFINER context. **Not fixed here — filed, and named as
-Pratik's call.**
+The maintainer's call.**
 
 #### 8. What P1-5k does NOT do
 
@@ -3339,7 +3339,7 @@ Pratik's call.**
 
 ### 19.34 D94 — the first thing a real user tried was the one gesture P1-5g excluded (Aug 26, 2026)
 
-Pratik, minutes after P1-5g landed: *"I tried moving cell 3 between cell 1 and cell 2, but it turned
+The maintainer, minutes after P1-5g landed: *"I tried moving cell 3 between cell 1 and cell 2, but it turned
 red saying work cell can only sit under a line."*
 
 **The drag is doing exactly what the brief told it to do. The brief is wrong.**
@@ -3421,7 +3421,7 @@ than by reading it.
 
 ### 19.35 D95 — the whole row is the drag source (for a mouse), and levels get their drag WITH P1-5l (Aug 26, 2026)
 
-Both from Pratik, immediately after D94: *"Can't we make the whole row draggable instead of just one
+Both from the maintainer, immediately after D94: *"Can't we make the whole row draggable instead of just one
 point?"* and *"When do levels get their own dragging?"*
 
 #### D95a — yes for mouse, no for touch, and that split IS the design
@@ -3462,7 +3462,7 @@ and the brief has to say so rather than quietly inheriting the old sentence.
 
 #### D95b — P1-5i ships WITH P1-5l, not after it
 
-The honest state of play: Pratik asked for level dragging two sessions ago (*"this should also be
+The honest state of play: The maintainer asked for level dragging two sessions ago (*"this should also be
 able to drag, don't you think?"*) and got **D92, D93, migration 0016 and a Save gate** instead. Every
 one of those was worth having and none of them was the drag.
 
@@ -3489,7 +3489,7 @@ drag-to-reorder, with one set of pointer mechanics, one insertion caret, and one
 
 ### 19.36 Three parallel reviews, and what they found (Aug 26, 2026)
 
-Pratik asked whether the design session could work in parallel. It can: three read-only Sonnet
+The maintainer asked whether the design session could work in parallel. It can: three read-only Sonnet
 agents ran concurrently on disjoint targets while the design session worked on migration 0017. All
 three found something. Findings below are triaged, not quoted — a flagged deviation is a lead.
 
@@ -3518,7 +3518,7 @@ asymmetry it was pointed at, which it independently confirmed is mirrored correc
    test and provides almost no kill pressure. **This is rule 3b landing on the design session's own
    suite**: a case whose name promises more than its fixture can deliver.
 
-**Deliberately NOT fixed in this session.** Pratik has been handed a prediction of **491 tests in 17
+**Deliberately NOT fixed in this session.** the maintainer has been handed a prediction of **491 tests in 17
 files** and may already be running it; moving the count now would break the one thing that makes his
 run self-verifying. Both go into P1-5l's build, which edits `levelDraft.test.ts` anyway for the
 `moveTo` action.
@@ -3621,7 +3621,7 @@ destination is renumbered precisely because that is where an ordinal was asserte
 range; refusing an out-of-range one would hand the caller a refusal with nothing useful to do about
 it, and "before everything" / "after everything" are unambiguous.
 
-Measured: **Pratik's exact case** — `place_node(Cell 3, Line 1, 1)` returns Cell 1 / Cell 3 / Cell 2
+Measured: **the maintainer's exact case** — `place_node(Cell 3, Line 1, 1)` returns Cell 1 / Cell 3 / Cell 2
 at `sort_order` 0/1/2 **with every `path` untouched**. Also measured: idempotent when repeated; clamps
 at both ends; cross-parent placement works and leaves the source alone; zero adjacency violations
 afterwards; NULL and unknown ids give `invalid_argument`; **an org-1 admin naming an org-2 node gets
@@ -3670,9 +3670,9 @@ then the SQL cases and a mutation table, then `verify-db.sh` end to end.
 
 ---
 
-### 19.38 D97 — the permission model Pratik asked for, and the three gaps between it and what exists (Aug 26, 2026)
+### 19.38 D97 — the permission model the maintainer asked for, and the three gaps between it and what exists (Aug 26, 2026)
 
-Pratik, after approving the escape-hatch lock: *"there are certain tasks only an admin should be
+The maintainer, after approving the escape-hatch lock: *"there are certain tasks only an admin should be
 able to do… there should be a system admin (all powers, any site), a site admin (changes only to a
 particular site they belong), user/supervisor (assignments only, no access to admin page). We don't
 want people lurking around where they have no knowledge or business."*
@@ -3807,7 +3807,7 @@ Files: `session.ts`, `session.test.ts`, `RequireAdmin.tsx` (new), `routes.tsx`, 
 
 ### 19.40 D98 — multi-role is the same change as site-admin, and doing it naively opens a cross-tenant hole. MEASURED (Aug 26, 2026)
 
-Pratik: *"a user can have multiple roles, for example a supervisor can be an admin as well, it is a
+The maintainer: *"a user can have multiple roles, for example a supervisor can be an admin as well, it is a
 case by case basis, not every supervisor will be an admin."*
 
 **A requirement.** And it turns out to be the SAME requirement as §19.38's site admin, not a second
@@ -3961,7 +3961,7 @@ to the caller it is now reserved for: the owner. Same shape as L1/L1b when D92 l
 
 - **`verify-db.sh` exit 0**, all 17 migrations apply cleanly from scratch, **108 named SQL cases**
   (70_ now 57, 90_ 31, 80_ 20).
-- **33 of 33** on a purpose-built probe of the new functions: the reorder Pratik actually tried, path
+- **33 of 33** on a purpose-built probe of the new functions: the reorder the maintainer actually tried, path
   immutability, clamping both ends, all seven delegated guards, cross-org refusal, non-admin refusal,
   the stranded-work refusal and its repair, the up-front rung check, a three-generation promote, the
   hatch lock in all four directions, and all eight grant/revoke assertions.
@@ -4120,9 +4120,9 @@ system admin spanning two orgs can only act in one of them. Nobody is in that po
 
 ## §19.44 — Migration 0019: the (role, scope) permission model. Substrate only.
 
-**Status: built, verified, mutated, delivered. Not yet run on Pratik's machine.**
+**Status: built, verified, mutated, delivered. Not yet run on the maintainer's machine.**
 
-### What Pratik asked for
+### What the maintainer asked for
 
 > *"there should be a system admin (who has all the powers to affect anything at any site), a site
 > admin (allowed to make changes only to a particular site they belong), user/supervisor (allowed to
@@ -4309,7 +4309,7 @@ That does not make it redundant — it is shadowed by an accident of the trigger
 confusion above.** The moment it does, the guard is the only thing between two tenants. Asserting
 the policy *text* is the weakest thing that still catches someone deleting it.
 
-### What has to happen on Pratik's machine
+### What has to happen on the maintainer's machine
 
 `npm run db:reset && npm run db:types`. **0019 changes `database.types.ts`** — four new functions and
 `profile_grants.can_edit` → `profile_grants.role`. Nothing in `src/` reads `can_edit` (checked), so
@@ -4335,7 +4335,7 @@ no client code moves; the app suite should stay at **502 tests in 17 files**.
 
 **Status: SUPERSEDED BY §19.46 — 0020 IS FINISHED.** This section records §1–§7 and the plan for the rest; §19.46 records what §8–§12 actually became, including the two sections this plan did not have (§8.0, §8.5) and the one it asked for and did not get (§11). **Read §19.46 before acting on anything below.**
 
-### The frame, in Pratik's words
+### The frame, in the maintainer's words
 
 > *"the system-admin or company-admin has access to all sites across the company and they basically can change whatever they want at any site, but the site-admin who are locked to the site can do whatever changes are needed for that particular site… It is like **each site could have their own instance for the app** so they're part of the larger system but only get to access their own site."*
 
@@ -4413,7 +4413,7 @@ Its docstring states the rule this project learned the hard way: **`NOT CAUGHT` 
 
 ## §19.46 — Migration 0020 FINISHED: §8–§12, the two sections the plan did not have, and the one it asked for and did not get
 
-**Status: built, verified, mutated, delivered. NOT yet run on Pratik's machine.**
+**Status: built, verified, mutated, delivered. NOT yet run on the maintainer's machine.**
 `scripts/verify-db.sh`: **221 named cases across 9 files, exit 0, zero `NOTICE: FAIL`** (171 → 211 numbered, plus 10 upgrade cases). Mutation table: **35 run, 34 caught, 1 escape explained.**
 
 ### What §8–§12 do, in one table
@@ -4485,7 +4485,7 @@ department admin renames their own department    -> same refusal
 
 ### §9 — who may hand out access
 
-`profile_grants` becomes node-scoped on all four commands; **`user_profiles` does not move.** Pratik's correction is the whole section: *"site admins can't create people"* was the wrong conclusion from a right worry — a login, a **company membership row** (which carries the company-admin flag) and **access to a place** are three things, and only the flag is an escalation.
+`profile_grants` becomes node-scoped on all four commands; **`user_profiles` does not move.** the maintainer's correction is the whole section: *"site admins can't create people"* was the wrong conclusion from a right worry — a login, a **company membership row** (which carries the company-admin flag) and **access to a place** are three things, and only the flag is an escalation.
 
 `app_is_admin_for(node_id)` is safe in a WITH CHECK here because `node_id` names a row in a **different** table, committed before the statement began. D85 only bites a policy asking about its own row.
 
@@ -4535,7 +4535,7 @@ same trigger, altered to SECURITY DEFINER:
   identical statements                      -> ACCEPTED  (D97 BROKEN)
 ```
 
-D97 gated the escape hatch on `pg_has_role(current_user, <owner of public.nodes>, 'USAGE')`. **Inside a SECURITY DEFINER function `current_user` IS the owner**, so the test becomes true for every caller and the hatch swings open for anyone signed in — undoing, as a side effect of fixing something else, the change Pratik asked for. `session_user` is not a repair either: under PostgREST it is `authenticator` and in this harness it is the superuser, so the test would disagree with production **in the direction that hides the hole**.
+D97 gated the escape hatch on `pg_has_role(current_user, <owner of public.nodes>, 'USAGE')`. **Inside a SECURITY DEFINER function `current_user` IS the owner**, so the test becomes true for every caller and the hatch swings open for anyone signed in — undoing, as a side effect of fixing something else, the change the maintainer asked for. `session_user` is not a repair either: under PostgREST it is `authenticator` and in this harness it is the superuser, so the test would disagree with production **in the direction that hides the hole**.
 
 **The defect is fixed anyway, without touching the trigger.** The wrong code was only ever produced by a lookup that could not see its subject, and §8 answers the permission question *before* any such lookup runs — `move_node` step 4b, and `app_node_exists_in_org` at every existence check. Every route a client has is an RPC and every one now says `not_permitted` (**W17**, both arms). What remains is a direct `UPDATE nodes SET parent_id` aimed at an invisible parent, which `nodes_update`'s WITH CHECK refuses in the next breath.
 
@@ -4610,7 +4610,7 @@ D97 gated the escape hatch on `pg_has_role(current_user, <owner of public.nodes>
 
 **The clause stays.** It is the semantically correct place for an edit rule, and the read rule may legitimately widen later — letting people see who else is on their team is a reasonable future change, and it would silently un-guard UPDATE. **W30 now asserts the shadow itself** (`selectable-but-not-editable rows = 0`), which turns that future widening from a surprise into a red test pointing at this paragraph. Same treatment as 0019's X16 and S18: an escape with a reason and a tripwire, not an escape with a blank.
 
-### What has to happen on Pratik's machine
+### What has to happen on the maintainer's machine
 
 `npm run db:reset && npm run db:types`. **0020 changes `database.types.ts`**: `hierarchy_templates` gains `site_node_id`, and four new functions appear (`app_is_admin_for_template`, `app_node_exists_in_org`, `app_is_admin_on_grant_node`, plus 0019's set). Nothing in `src/` reads any of them yet, so no client code moves — **the app suite should stay at 502 tests in 17 files.** A different number means a test file did not load.
 
@@ -4671,7 +4671,7 @@ Design-session probe under `--experimental-strip-types`: **19 assertions, 8 muta
 
 **N4 is why A17 exists.** It fell to a 64-pair malformed sweep and to nothing else, so the committed suite would not have caught it — a sweep in a scratch harness is not a regression test. Rule 4's "record a clean sweep as a pass" has a corollary: **when the sweep is the ONLY thing that catches a mutation, the sweep has found a missing committed case.**
 
-`node node_modules/typescript/lib/tsc.js -b --force` exit 0 and `node node_modules/eslint/bin/eslint.js .` exit 0, both on Pratik's machine. **Instrument-checked**: a deliberate 2-argument call was injected into `RequireAdmin.tsx`, `TS2554: Expected 3 arguments, but got 2` fired at the expected line, and the restore re-ran clean.
+`node node_modules/typescript/lib/tsc.js -b --force` exit 0 and `node node_modules/eslint/bin/eslint.js .` exit 0, both on the maintainer's machine. **Instrument-checked**: a deliberate 2-argument call was injected into `RequireAdmin.tsx`, `TS2554: Expected 3 arguments, but got 2` fired at the expected line, and the restore re-ran clean.
 
 ### A1–A11 gained an argument and kept their meaning
 
@@ -4752,7 +4752,7 @@ The React half: the ~4px pointer threshold, the whole-row drag source with `poin
 
 ## §19.49 — P1-5l/P1-5i part B built, and D99: a shipped affordance that was rendering into the wrong row
 
-**Status: built by a Sonnet agent from `docs/agent-briefs/p1-5l-drag-to-reorder-brief.md`, reviewed independently, `tsc` and `eslint` exit 0 on Pratik's machine. NEEDS `npm run test` — predicted 580 in 18 files.**
+**Status: built by a Sonnet agent from `docs/agent-briefs/p1-5l-drag-to-reorder-brief.md`, reviewed independently, `tsc` and `eslint` exit 0 on the maintainer's machine. NEEDS `npm run test` — predicted 580 in 18 files.**
 
 ### ⭐ D99 — the adopt tick has been rendering 4px into the NEXT row since P1-5g
 
@@ -4857,7 +4857,7 @@ examples.
 ### Verification
 
 - **Probe: 41 assertions, all passing**, written in the design session and run against the file
-  as delivered to Pratik's machine (re-staged and byte-compared to the delivered copy first, so
+  as delivered to the maintainer's machine (re-staged and byte-compared to the delivered copy first, so
   this is the module that ships, not a local variant). Five of the 41 are new and are the rule
   itself — D35 the seam approached from above, D36 the same seam from below, D37 a real reorder
   keeping both zones, D38/D39 the same pair among *roots*. **D38's first draft measured nothing**:
@@ -4898,7 +4898,7 @@ second look; and `treeDrag.test.ts`'s header comment still says "43 cases".
 
 ## §19.51 — Migration 0021: the reciprocal read 0020 named, and the three pieces of code the mutation run deleted
 
-**Status: written, applied and green on a scratch PG16 in the design session — 21 migrations, `48_site_membership_test.sql` 41 cases, 262 SQL cases total, cold, from scratch, twice. 32 mutations, 30 caught. `eslint .` exit 0. `tsc` has ONE error and it is the expected one — see "what Pratik owes" at the end.**
+**Status: written, applied and green on a scratch PG16 in the design session — 21 migrations, `48_site_membership_test.sql` 41 cases, 262 SQL cases total, cold, from scratch, twice. 32 mutations, 30 caught. `eslint .` exit 0. `tsc` has ONE error and it is the expected one — see "what the maintainer owes" at the end.**
 
 ### What it is, in his frame
 
@@ -4988,7 +4988,7 @@ X16's first run reported `sqlstate=42501, detail=<NULL>` and read exactly like "
 2. **`site_people`, `set_site_member` and `remove_site_member` have no client caller at all yet**, so their jsonb shapes are unexercised outside SQL. That is stage 10's work.
 3. **Nothing here has been seen on screen.** The shape picker's filter changes what a real admin sees and has not been rendered (rule 2c). It should be, with a site-admin session, before it is called done.
 
-### What Pratik owes, in order
+### What the maintainer owes, in order
 
 1. `npm run db:reset && npm run db:types` — applies 0021 and regenerates the types, which is what clears the single `tsc` error.
 2. `npm run test` → **595 in 18 files**.
@@ -5067,7 +5067,7 @@ Neither is visible to a passing suite. Both took one screenshot.
 
 ## §19.53 — The demo cast, an id collision that broke two orgs, and the panel that had no control of its own
 
-Two defects, both found by Pratik in the running app within minutes of each other, and the first is the worst thing I have shipped in this project.
+Two defects, both found by the maintainer in the running app within minutes of each other, and the first is the worst thing I have shipped in this project.
 
 ### ⭐⭐ D100 — `dev_demo.sql` hijacked org 2's two accounts
 
@@ -5215,7 +5215,7 @@ An empty `Has access (0)` still printed its column header — a table pretending
 
 ### Verification
 
-- `siteAccess.test.ts` 79 → **81 cases** (A44 rewritten, A44b/A44c added). **48 mutations, all 48 caught**, including the two that matter here: candidates returning with no search (B50, the shape Pratik rejected) and candidates never returning at all (B51, the feature deleted).
+- `siteAccess.test.ts` 79 → **81 cases** (A44 rewritten, A44b/A44c added). **48 mutations, all 48 caught**, including the two that matter here: candidates returning with no search (B50, the shape the maintainer rejected) and candidates never returning at all (B51, the feature deleted).
 - `tsc -b --force` exit 0, `eslint .` exit 0, scale audit clean.
 - **Suite prediction 674 → 676, still 19 files.**
 
@@ -5223,7 +5223,7 @@ An empty `Has access (0)` still printed its column header — a table pretending
 
 ## §19.56 — P1-6e: the grip, and the bug that was hiding behind it
 
-Pratik put this first and called it "capability first". Two claims were already
+The maintainer put this first and called it "capability first". Two claims were already
 proved before this session started and they stayed separate all the way
 through: **the level drag is wired, and its target is unhittable.** What was
 *not* proved was correctness — nothing had ever driven the gesture.
@@ -5354,7 +5354,7 @@ it now has 25.
   caret (the dragged row's own body) and 144 are outside any row.
 - `tsc -b --force` exit 0, **instrument-checked** with an injected `TS2322` at
   the expected line. `eslint` exit 0 on the three touched TS files (`eslint .`
-  over the whole repo exceeds the 45 s `device_bash` ceiling and is Pratik's
+  over the whole repo exceeds the 45 s `device_bash` ceiling and is the maintainer's
   acceptance run).
 - Scale audit re-run against the real files: 6 `REM_SURFACES` entries, 6 admin
   stylesheets on disk, zero unlisted, zero unscaled px lengths, control font
@@ -5378,7 +5378,7 @@ would remove that gap entirely if it were connected.
 
 ## §19.57 — Can four agents build Shifts, Operators, Products and Import in parallel? Measured, not argued
 
-Pratik asked directly. Four **read-only** survey agents were run concurrently,
+The maintainer asked directly. Four **read-only** survey agents were run concurrently,
 one per section, each told that the migrations are the authority and the
 narrative docs are not, and each required to return an exhaustive NEW/EDIT file
 table with a SHARED column. All four landed. They agree.
@@ -5394,7 +5394,7 @@ places:
 | `src/test/scaleAudit.ts` | append its `.module.css` to `REM_SURFACES` | one sorted literal |
 | `src/test/scaleAudit.test.ts` | append to **R10's hardcoded copy of that list**, and change its title ("six" → N) | one sorted literal, and the case fails the build if missed |
 | `src/lib/api/index.ts` | one `export * from "./x";` line | same anchor |
-| `src/lib/database.types.ts` | regenerated wholesale, Docker-only, on Pratik's machine | unmergeable, and single-threaded by construction |
+| `src/lib/database.types.ts` | regenerated wholesale, Docker-only, on the maintainer's machine | unmergeable, and single-threaded by construction |
 | `docs/roadmap.md`, `docs/design-plan.md` | long prose appends | the worst textual collision in the repo |
 
 **And they all need the same migration.** "The shared lists get an owner" is
@@ -5411,10 +5411,10 @@ steps". Every shared edit above is small, mechanical, and knowable before any
 section is designed. So:
 
 **Serial step 1 (design session): migration 0023, the shared lists get an
-owner.** It is already item 3 on Pratik's own list. One migration, one test
+owner.** It is already item 3 on the maintainer's own list. One migration, one test
 file, one mutation table.
 
-**Serial step 2 (Pratik): `db:reset`, `db:types`, commit.**
+**Serial step 2 (the maintainer): `db:reset`, `db:types`, commit.**
 
 **Serial step 3 (design session, one small commit): pre-seat every shared
 file.** All four sections turned on in `SECTIONS` with empty placeholder panels;
@@ -5475,7 +5475,7 @@ lane, and building four screens at once is not.**
 
 ## §19.58 — D100: one drag surface, two screens. "Shouldn't this be done by default?"
 
-Pratik, looking at the node tree and the level list side by side the morning
+The maintainer, looking at the node tree and the level list side by side the morning
 after P1-6e:
 
 > *"Can we make sure we match the colors on drag selection in all areas,
@@ -5669,7 +5669,7 @@ owns its colour.**
   confusion a colour exists to prevent, and it doubles the resolution path for a
   case nobody has asked for.
 
-**Both land in migration 0023**, which is D96's rule (Pratik's CLI is the scarce
+**Both land in migration 0023**, which is D96's rule (the maintainer's CLI is the scarce
 serial resource, so a migration plus its regenerated types is one round trip)
 and is now carrying: owning site on operators / products / skills /
 shift_templates, plus the product colour column and its default.
@@ -5686,7 +5686,7 @@ D101 and D102 answered §19.57's two blockers, so this is the migration that was
 
 **0023 changes WHO MAY EDIT. It does not change who may READ.** Every `_select` policy is left exactly as 0008 wrote it, org-wide.
 
-That is a measured requirement, not caution. `check_eligibility` (0009) is `SECURITY INVOKER` and reads `operator_skills` and `skills` **as the caller**: a skill the caller cannot see drops out of its `held` CTE, lands in `missing`, and flips `eligible` to false — and `create_assignment` gates on that verdict. **A read narrowing would have become a silent write refusal one indirection along.** It is also exactly what Pratik said the rule was for shift patterns, and what 0020 §12 already decided for node attachments. Case **Q11** is the tripwire: it asserts the reads are still org-wide, so narrowing one goes red before eligibility starts quietly answering "no".
+That is a measured requirement, not caution. `check_eligibility` (0009) is `SECURITY INVOKER` and reads `operator_skills` and `skills` **as the caller**: a skill the caller cannot see drops out of its `held` CTE, lands in `missing`, and flips `eligible` to false — and `create_assignment` gates on that verdict. **A read narrowing would have become a silent write refusal one indirection along.** It is also exactly what the maintainer said the rule was for shift patterns, and what 0020 §12 already decided for node attachments. Case **Q11** is the tripwire: it asserts the reads are still org-wide, so narrowing one goes red before eligibility starts quietly answering "no".
 
 ### What it does
 
@@ -5877,7 +5877,7 @@ knowable before any section is designed. This is the commit that spends them.
 | `src/lib/api/index.ts` | four `export *` lines | **nothing** |
 | `src/test/scaleAudit.ts` (`REM_SURFACES`) | four stylesheets listed | **nothing** |
 | `src/test/scaleAudit.test.ts` (R10's copy) | the same four, and the title | **nothing** |
-| `src/lib/database.types.ts` | untouched — no migration here | Pratik regenerates when a lane adds one |
+| `src/lib/database.types.ts` | untouched — no migration here | the maintainer regenerates when a lane adds one |
 
 New, and owned by nobody but their lane: `ShiftsPanel.tsx`/`.module.css`,
 `OperatorsPanel.*`, `ProductsPanel.*`, `ImportPanel.*`, and
@@ -6191,7 +6191,7 @@ not a bug fix.
 **4. `asOf` defaults to today**, so every ✓ is a promise about work booked
 today, while the server compares against the real shift window — essentially
 always in the future. Ana reads ✓ on 27 Aug and is refused for 5 Sep. Whether
-the default should be the board's planning window is Pratik's call.
+the default should be the board's planning window is the maintainer's call.
 
 **5. `adminSiteIds` is derived from STRUCTURE ownership, not node grants.**
 `editable_shape_ids()` answers "which structures may I edit"; the product
@@ -6202,7 +6202,7 @@ drops out of `adminSiteIds` while remaining fully writable server-side. The
 error is one-directional and it is the CLOSED direction. Fixing it needs a read
 of the grants themselves, which the client does not currently make.
 
-### 19.65 Six things Pratik found by using the screens — and D103, what "belongs to" is going to mean (Aug 27, 2026)
+### 19.65 Six things the maintainer found by using the screens — and D103, what "belongs to" is going to mean (Aug 27, 2026)
 
 The three sections went in front of him and came back with six notes in about
 ten minutes. **Five of the six are things no test I could have written would
@@ -6363,7 +6363,7 @@ the same rule the retired-product list already follows, and it is the half a
 
 ### 19.66 Migration 0025 — D103 built: "belongs to" is a scope, and a colour may be a colour (Aug 27, 2026)
 
-Pratik picked meaning B off the drawing, then opened the app and found the thing
+The maintainer picked meaning B off the drawing, then opened the app and found the thing
 he had asked for was not there — because §19.65 had *recorded* D103 and built
 nothing. **A decision written down and not built is indistinguishable, from the
 screen, from a decision nobody made.** This is that, built.
@@ -6493,7 +6493,7 @@ row). **Acceptance 1046 → 1082 in 24 files.**
 
 #### 8. What is NOT in this migration, deliberately
 
-**The operators' area rule.** Pratik corrected his earlier answer — he does want
+**The operators' area rule.** the maintainer corrected his earlier answer — he does want
 people assignable to a level, because *"there are facilities where certain people
 can only work in certain areas"* — and chose **refused by the server, with a
 supervisor override that records a reason.** That is a change to
@@ -6513,7 +6513,7 @@ the day someone moves the filter into the function.
 
 ---
 
-### D104 — Trainings, not tickets (Pratik, Aug 27) — DECIDED, NOT BUILT
+### D104 — Trainings, not tickets (the maintainer, Aug 27) — DECIDED, NOT BUILT
 
 *"I don't like the name, it's something like Training, where is X person trained
 and signed off to work. Maybe we need a section for trainings where the
@@ -6632,7 +6632,7 @@ answer built on a read known to be short.**
 
 ## §19.67 — Four reports, one word: "Rename" was the only door to "Belongs to"
 
-**Pratik, four times: *"I still cannot edit a product."*** Migration 0025 was in,
+**The maintainer, four times: *"I still cannot edit a product."*** Migration 0025 was in,
 D105's create/edit parity was in, `updateProduct` took a scope, the row's editor
 had a "Belongs to" picker, group J of `scaleAudit` was green, and the screen was
 still, to him, a screen with no way to change where a product belongs.
@@ -6773,7 +6773,7 @@ audit that asked it of the module underneath answered "fine" for four rounds.
 
 ### §19.67 continued — the test I wrote to close this shipped broken, and the reason is the same shape as the defect
 
-**Pratik ran it: 5 of the 8 cases failed.** `Test Files 1 failed | 24 passed (25)`,
+**The maintainer ran it: 5 of the 8 cases failed.** `Test Files 1 failed | 24 passed (25)`,
 `Tests 5 failed | 1091 passed (1096)`. `tsc` clean, `eslint` clean, `vite build` clean,
 and **every one of the five failures was in `productsPanel.test.tsx`, all from one
 helper line.** T1 (the label) and T7 (the site admin) passed — so the FIX was real and
@@ -6824,7 +6824,7 @@ inert control:**
 
 | # | mutation | expected | verdict |
 |---|---|---|---|
-| **M8** | **the row's boxes go back to the plain `aria-label` — the state that actually shipped** | T2 T3 T4 T5 T6 T8 | **CAUGHT, and it reproduces Pratik's run exactly: 5 fail, T1 and T7 pass** |
+| **M8** | **the row's boxes go back to the plain `aria-label` — the state that actually shipped** | T2 T3 T4 T5 T6 T8 | **CAUGHT, and it reproduces the maintainer's run exactly: 5 fail, T1 and T7 pass** |
 | M1 | the button says `Rename` again (the original defect) | T1, and every stage that must press it | CAUGHT |
 | M2 | the edit row renders no picker at all | T2 T3 T4 T5 | CAUGHT |
 | M3 | `beginEdit` seeds the draft scope as `""` | T3 | CAUGHT |
@@ -6853,7 +6853,7 @@ claim that these commands pass; do not add a command to it you have not run.**
 
 ## §19.68 — "Why am I seeing Plant 1's product?" — the read side of the site-instance model
 
-**Pratik, signed in as the Plant 2 site admin, looking at the Products catalogue:**
+**The maintainer, signed in as the Plant 2 site admin, looking at the Products catalogue:**
 
 > *"When I'm logged in as site admin for plant 2, why am I seeing product which is
 > assigned to Plant 1? No member from one plant should see info for other plants, this
@@ -6955,7 +6955,7 @@ that proves the fix, and it already exists in the wrong polarity.**
 **This supersedes the rule 0023 set down and `site_instance_model.md` records as "the
 one to remember".** 0023 said *ownership decides who may edit; it does not decide who
 may read*, and gave a measured reason. The reason was real but it was an argument about
-`check_eligibility`'s implementation, not about the product — and **Pratik's frame was
+`check_eligibility`'s implementation, not about the product — and **the maintainer's frame was
 always a READ statement**: *"each site could have their own instance for the app… only
 get to access their own site."*
 
@@ -7325,7 +7325,7 @@ caution, not knowledge, and caution is not a substitute for a working instrument
 
 ## §19.71 — "Why is Plant 1 different?" — the history exception leaking into the catalogue
 
-**Pratik, Aug 28, signed in as the Plant 1 admin:** *"plant 1 admin can see products from
+**The maintainer, Aug 28, signed in as the Plant 1 admin:** *"plant 1 admin can see products from
 other site, while plant 2 admin can only see their own and company wide products, plant 2
 admin is behaving correctly. Why is plant 1 admin different?"*
 
@@ -7408,3 +7408,190 @@ wherever a list shows rows that are only readable because of the schedule:
 see info for other plants* — is true of products and not yet of people. Three rushed fixes
 would be worse than one careful pass, and the pass needs its own fixture work: `operatorRows`
 has no visibility input to filter on.
+
+---
+
+## §19.72 — Ownership is the whole rule: D108, D109, D110, D111, D112 (migration 0028)
+
+**The maintainer, 28 August, having read §19.71 and decided the model was wrong rather than the code:**
+
+> *"Hold on, what I think we need to do is a complete refresh of data. I think we should
+> remove company-wide as an option for products and operators. Each site (or the highest
+> hierarchy level) has its own set of products and operators. **No product or operator can be
+> assigned where it does not belong.** When it is deleted, we give a warning to the user that
+> all the corresponding data will be deleted and encourage them deactivate to retain the data
+> instead. This will be handled by site admin so it their call in the end. … **a person under
+> no circumstances should be able to see data for other plants unless they are system admin,
+> period.**"*
+
+He was asked four questions where the answer changed what got built, and answered:
+
+- **D109 — ownership is a scope at ANY level.** Not roots only. A product can belong to
+  Line 1 and be offered on Line 1 and nowhere else. This is D103's rule, finally mandatory.
+- **D111 — no company-wide row anywhere, but plants can COPY from a starter library a
+  company admin curates.** Applies to shift patterns and trainings as well as products and
+  people. A copy is an ordinary owned row with no link back.
+- **D110 — delete keeps the past.** The row disappears from the list and from anything not
+  yet started; completed runs keep their record of it. The dialog names the counts and offers
+  Deactivate first.
+- **D112 — wipe and rebuild the demo world:** three generic plants, everything owned.
+
+### D108 — there is no company-wide row
+
+`site_node_id` is `NOT NULL` on `products`, `operators`, `skills` and `shift_templates`. The
+read rule loses its first branch and becomes one sentence with no *except*: **you may read a
+row when the node that owns it and one of your grants are on the same branch, either
+direction.** Company admins read everything.
+
+### ⭐⭐ Why this is a better fix than §19.71 was, and the proof
+
+0026 kept one deliberate exception: a foreign-owned row stayed readable *while it sat on a run
+you could see*, so the board could name its own history instead of drawing "(unknown
+product)". §19.71 is the record of that exception leaking into the products catalogue, which is
+what the maintainer found. The patch there was owed twice more — operators and shift patterns — and
+would have been owed again for every screen added afterwards.
+
+D109 removes the *precondition* instead of the exception:
+
+> **Constraint C.** A run's product must be owned by an ancestor-or-self of the run's node.
+> Likewise an assignment's operator, a node's training requirements, and a node's shift
+> pattern.
+>
+> **Claim.** Under C, `app_product_on_visible_schedule(p)` implies
+> `app_can_read_owned(owner(p))` — the exception admits no row the rule would not already
+> admit.
+>
+> **Proof.** Let `r` be a run's node and `o` the owning node of its product, so `o.path @>
+> r.path` by C. Suppose the caller can read `r`. `app_can_read_node` (0012) admits exactly two
+> ways: `app_is_admin()`, and then `app_can_read_owned` is true by its own first branch; or
+> there is a grant path `g` with `r.path <@ g`. Then `o` and `g` are both ancestors-or-self of
+> `r`, and the ancestors of a node are totally ordered by `@>`, so `o <@ g OR g <@ o` — which
+> is exactly what `app_can_read_owned(o)` tests. ∎
+
+So `app_product_on_visible_schedule` and `app_operator_on_visible_schedule` were **deleted**,
+and `55_ownership_scope_test.sql` carries both halves of the argument: **N12** measures the
+invariant over every row in the database rather than over this file's fixture, and **N13**
+asserts the two functions no longer exist *and* that the policy no longer names them.
+
+⚠️ **The proof depends on `app_can_read_node` admitting only `n.path <@ gp`.** If it is ever
+widened to the either-direction form `app_can_read_owned` uses, the second case changes shape.
+It still holds, but it is a second argument and not the same one.
+
+### What the migration also had to do
+
+1. **An owner cannot be moved out from under its own history.** Without this, §4's guards are
+   checked at write time and never re-checked: re-home a Plant 1 product to Plant 2 and every
+   run it already has becomes a foreign-owned row on a Plant 1 board — the leak restored, with
+   no insert to catch it. `owner_change_blocked` names the count. This is [[doc-drift]]
+   shape 4 arriving in a place that would have cost the whole fix.
+2. **⭐ Two join tables were still readable org-wide and nobody had looked.**
+   `node_skill_requirements_select` and `node_shift_templates_select` carried only the org
+   term, so a Plant 2 supervisor could list which trainings Plant 1's cells require and which
+   pattern each runs. Found while writing §4, fixed here.
+3. **A person may only hold a training on their own branch.** The same leak one join further
+   out: a Plant 2 operator holding a Plant 1 training names a row they cannot see. ⚠️ **This
+   rule is comparability, not containment** — a Plant-1-wide person holding a Line 1 training
+   is ordinary; a Plant 2 person holding a Plant 1 training is not. N7 asserts both directions,
+   and mutation **M7** (comparability narrowed to containment) is caught only by the positive
+   half.
+4. **`check_eligibility`'s hazard (a) became unreachable**, by the same ancestor-chain argument:
+   if you can read the cell, you can read every training required there. R12 in `53_` was
+   rewritten to assert the corollary rather than the workaround. ⚠️ **The DEFINER gate stays
+   necessary** — hazard (b), the ancestor walk through the scoped `nodes` table, is a different
+   mechanism and R13 is still what measures it.
+
+### The bug the fresh path could not see
+
+§1 of the migration shipped with `select count(*), min(n.id) into v_roots, v_root`. **There is
+no `min(uuid)` aggregate in PostgreSQL.** That line executes only on a real upgrade — on a
+fresh database the loop has no iterations, because nothing is company-wide — so every one of
+the 403 checks passed and the migration would have failed on the first tenant that actually
+had data. `upgrade_0028_ownership_backfill.sql` found it on its first run. **This is the entire
+argument for the UPGRADE_CHECKS rule, arriving as a live example rather than a principle.**
+
+### Deliberately not done, and why
+
+- **No default owner.** A BEFORE INSERT trigger filling the owner with the org's only root
+  when there is exactly one would leave ~50 fixture inserts untouched and would even be *true*
+  in a one-plant org. It is not done: a client that forgot to send an owner would be invisible
+  on a one-plant database and would start mis-assigning the day a second plant appeared —
+  which is the shape of the defect this migration exists because of.
+- **Two tripwires changed sqlstate and one of them needed a new case to prove it was a
+  strengthening.** `51_`'s Q22 went from `42501` (you may not administer that person) to
+  `PT409` (nobody may write that row). That reads exactly like an expectation edited to match
+  new behaviour — the thing [[verification-standard]] rule 2e forbids. **Q22b asks as the
+  company admin, whom no permission check refuses, and gets `PT409` too.** A weakening could
+  not produce that answer.
+
+### Numbers
+
+**408 database checks pass** (384 before: +18 in `55_`, +5 in the upgrade file, +1 for Q22b),
+run here on a real PG16, exit 0. **Ten deliberate breakages of 0028: nine caught, one NOT
+CAUGHT and that one is the inert control** (two characters of a comment). A separate instrument
+control — removing the assignment scope guard, which must be caught — came back caught, so a
+NOT CAUGHT verdict elsewhere would have meant something.
+
+Client half: every `null` owner branch removed, the picker's "Everywhere (company-wide)" entry
+**not built rather than filtered out**, and `ownerOptions` deleted rather than narrowed for
+N13's reason — a helper that still knows how to emit a company-wide owner is a loaded gun for
+whoever restores it next. Choosing an owner is now a required field with its own error beside
+its own control. `tsc` is clean. ⚠️ **The eight cases in `productsPanel.test.tsx` are React and
+cannot be executed from this session** — four of them were rewritten here, and the maintainer's
+`npm run test` is what checks them.
+
+### Still ahead in this stage
+
+Migration 0029 (D110, deactivate and a delete that keeps the past — `skills` and
+`shift_templates` have no `active` column yet), migration 0030 (D111, the starter library),
+the three-plant demo world (D112), and wiring `offeredHere` to the board so a product is only
+*offered* where it belongs. The server refuses it either way; the picker offering it is a
+D106-shaped defect and it is the next client commit.
+
+### §19.72a — what his run found, and the two consequences it made me write down
+
+Eight cases went red on his machine after I reported the tree clean. Every one was mine, and
+three of them are lessons rather than typos.
+
+**1. `tsc` over the bridge is not a typecheck after a migration changes a column.**
+`src/lib/database.types.ts` is *generated*, and only the maintainer can generate it — `npm run db:types`
+needs the local Supabase stack. I typechecked 0028's client half against a copy that still
+called `site_node_id` nullable, reported "tsc clean", and the moment he regenerated, two real
+errors appeared: `updateOperator` and `renameShiftTemplate` still built `site_node_id?: string
+| null` patches. [[decision-record-drift]] rule 2 has said since P1-5b that a migration and its
+regenerated types are **one change**; this is the day it cost something. **The honest sentence
+is "typecheck is inconclusive here until you run `db:types`", not "tsc clean".**
+
+**2. `tsc` cannot see a string expectation, so deleting a concept needs a grep, not a compiler.**
+Six cases asserted the literal `"Everywhere (company-wide)"` or the *"only a company admin can
+change this"* note. They compiled perfectly and failed at runtime. I had fixed exactly the ones
+the compiler flagged and stopped. **After removing a concept, grep the tests for its words.**
+
+**3. A test that breaks a source by string match must assert that the match happened.**
+`scaleAudit`'s **J3** — the case that proves the D105 audit can fail at all — mutates
+`api/products.ts` by replacing one exact line. 0028 reworded that line, the `replace` matched
+nothing, the "frozen" copy was not frozen, and J3 reported that the audit had stopped working.
+**It had not; the mutation had.** It failed loudly only because it expected a non-empty result
+— a mutation expecting `[]` would have gone quietly green and measured nothing for good.
+`expect(cut).not.toBe(src)` is now in J3, and belongs in every source-mutating case.
+
+And a fourth, smaller: **my probe and my test disagreed about the same call.** The probe
+asserted `productRows(...).rows.length === 0` and passed; the case beside it read
+`view.rows[0].owner`, on a call that returns no rows. Write the probe *from* the test's literal
+or the test *from* the probe — never both independently, or a green probe becomes evidence for
+a red case.
+
+### Two consequences of D108 that are worth stating rather than discovering
+
+- **`canOwnProduct` tests flat membership, not ancestry.** D109 lets ownership name any node,
+  but the client preview asks `adminSiteIds.includes(siteNodeId)` — so a product owned by a
+  *line* inside a plant you administer is not matched, and the answer comes from the fail-open
+  path rather than from the rule. The server is right (`app_is_admin_for` walks ancestors); the
+  preview is coarse. **W4 now asserts both halves** so nobody fixes one without the other.
+- **D108 widened `canEditProduct`'s fail-open, and deleted the case that bounded it.** W12c
+  existed to stop the 27-Aug fail-open flip handing every site admin the company's shared rows;
+  the one certain refusal it relied on — "this row is company-wide" — no longer exists. The
+  preview now says yes to strictly more than it did. The server is unchanged and still decides,
+  but this is a real widening and it should not be found later as a surprise.
+
+**Final state: 408 database checks, 1105 app tests in 26 files, `tsc` 0 against the regenerated
+types, and 65 probe assertions across five probes run against the real modules.**

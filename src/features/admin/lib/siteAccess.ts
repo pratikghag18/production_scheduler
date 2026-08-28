@@ -274,7 +274,7 @@ export function describeAccess(row: AccessRow, nodeName: string | null): string 
   const place = nodeName ?? "this place";
   if (row.companyAdmin) {
     // ⭐ A COMPANY ADMIN CAN ALSO HOLD A GRANT HERE, AND THE ROW HAS TO SAY
-    // SO. Found by Pratik on the real screen: the seeded company admin holds
+    // SO. Found by the maintainer on the real screen: the seeded company admin holds
     // an admin grant on Plant 1 as well as the org-wide flag, so the row read
     // "Company admin — reaches every plant" beside a role control that was
     // editing something else entirely. Set that control to `viewer` and the
@@ -308,7 +308,7 @@ function roleWord(role: GrantRole): string {
  *
  * ⭐ THIS EXISTS BECAUSE ONE OF THOSE REASONS NEEDS A BUTTON, NOT PROSE.
  * "Their access sits further down the tree — open that place to change it"
- * was the first version, and Pratik hit it on the real screen within minutes:
+ * was the first version, and the maintainer hit it on the real screen within minutes:
  * **there was no way to open that place.** The panel was pinned to the site
  * root, so the sentence instructed the user to do something the app could not
  * do. Correct in the model, useless on the screen — the D99 family.
@@ -398,7 +398,7 @@ export function matchesQuery(row: AccessRow, query: string): boolean {
  * SHAPE OF THE SCREEN, NOT AN OPTIMISATION.
  *
  * The first version listed everybody in the company permanently, underneath
- * the people who actually have access. Pratik, on the running screen:
+ * the people who actually have access. The maintainer, on the running screen:
  * *"Shouldn't Quinn not be visible here at all since he's not assigned to
  * Plant 1? Why show people if they're not assigned to a plant?"*
  *
@@ -486,7 +486,7 @@ export interface AccessPlace {
  * the structure picker — which lives on the Hierarchy tab — so a company admin
  * standing on the Access tab was shown whichever plant that other tab happened
  * to have selected, with no way to change it and nothing on screen explaining
- * why. Pratik's words: "Where is Plant 1?" The panel now owns its selection.
+ * why. The maintainer's words: "Where is Plant 1?" The panel now owns its selection.
  *
  * Same shape and the same reason as `resolveSelectedShape`: the case that
  * matters is the selection pointing at something that is no longer in the

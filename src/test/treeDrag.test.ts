@@ -349,7 +349,7 @@ describe("treeDrag", () => {
 /* ===========================================================================
  * Group R — `rowDropZones` / `resolveDropZone` (P1-5l, design plan §19.48).
  *
- * ⭐ WHY THIS GROUP EXISTS. The first gesture Pratik tried was the one P1-5g
+ * ⭐ WHY THIS GROUP EXISTS. The first gesture the maintainer tried was the one P1-5g
  * excluded: *"I tried moving cell 3 between cell 1 and cell 2, but it turned
  * red."* Those are siblings, so it is a REORDER, and P1-5g only ever offered
  * re-parenting. The drag did what the brief said; the brief was wrong (D94).

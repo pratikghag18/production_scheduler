@@ -34,7 +34,7 @@ Reporting §8 or §9 as NOT RUN makes the delivery incomplete.
 7. **`src/styles/global.css`**, **`index.html`** — the height chain and the (already present) viewport meta.
 8. **`docs/design-plan.md` §18–§18.8** — the board's decisions.
 
-Files are on the device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler`. Stage with `device_stage_files`.
+Files are on the device at `<repo root>`. Stage with `device_stage_files`.
 
 ---
 

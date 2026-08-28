@@ -64,9 +64,9 @@ Two mount hazards that still apply:
 
 - **`device_bash` cannot delete or move files** (`unlink` is not permitted). Keep every scratch file
   in `/tmp` **inside your own container**, never under the repo. If you strand one anyway, report its
-  full path so Pratik can remove it.
+  full path so the maintainer can remove it.
 - **Do not run `git` at all.** Every git command through `device_bash` leaves a `.git/index.lock` you
-  cannot remove, which then warns on all of Pratik's git commands. Do not commit or push.
+  cannot remove, which then warns on all of the maintainer's git commands. Do not commit or push.
 
 After writing each file, verify it with `wc -l` and `md5sum` and report both.
 

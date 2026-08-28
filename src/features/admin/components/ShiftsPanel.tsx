@@ -268,7 +268,10 @@ export function ShiftsPanel() {
       return;
     }
     createPattern.mutate(
-      { orgId, name: newName.trim(), siteNodeId: newOwner === "" ? null : newOwner },
+      // ⭐ 0028: `""` was company-wide and is now "nothing chosen"; the picker
+      // has no empty entry to select, so this can only be empty when the
+      // structure read did not land, and the server refuses it with a sentence.
+      { orgId, name: newName.trim(), siteNodeId: newOwner },
       {
         onSuccess: () => setNewName(""),
         onError: (e) => fail("new", e),
@@ -701,7 +704,7 @@ export function ShiftsPanel() {
         {/* ⚠️ IT HAS TO LOOK LIKE IT OPENS. This was a bare <button> styled with
             `border:0; background:none`, i.e. indistinguishable from the text in
             the column beside it — and the whole shift list of a pattern sits
-            behind it. Pratik found it by clicking on the off-chance. A caret
+            behind it. The maintainer found it by clicking on the off-chance. A caret
             that turns, and a name that underlines on hover and focus, is the
             smallest thing that says "there is more under here". */}
         <button
@@ -791,7 +794,7 @@ export function ShiftsPanel() {
                   {
                     templateId: pattern.id,
                     name: renameDraft.name.trim(),
-                    siteNodeId: renameDraft.siteNodeId === "" ? null : renameDraft.siteNodeId,
+                    siteNodeId: renameDraft.siteNodeId,
                   },
                   { onSuccess: () => setRenameDraft(null), onError: (e) => fail(key, e) },
                 );
@@ -805,7 +808,7 @@ export function ShiftsPanel() {
           <p className={styles.rowError}>{errorFor(`rename-${pattern.id}`)}</p>
         )}
 
-        {/* ⚠️ DELETE IS THE ONLY REMOVAL THERE IS. Pratik's standing decision is
+        {/* ⚠️ DELETE IS THE ONLY REMOVAL THERE IS. The maintainer's standing decision is
             that deactivating is the main action wherever a thing has an on/off
             flag — `shift_templates` has none, so there is nothing to deactivate
             here and this is the whole of it.

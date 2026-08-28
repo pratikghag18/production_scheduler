@@ -102,7 +102,7 @@ export function useCreatePattern() {
 export function useRenamePattern() {
   return useShiftWrite<
     ShiftTemplateRow,
-    { templateId: string; name: string; siteNodeId?: string | null }
+    { templateId: string; name: string; siteNodeId?: string }
   >(
     // ⚠️ `"siteNodeId" in v` and not `v.siteNodeId ?? undefined` — `null` is a
     // real value here (company-wide), so collapsing the two would make a rename

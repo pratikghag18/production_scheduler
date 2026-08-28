@@ -17,9 +17,14 @@
  *
  *   Plant 1  — the site the viewer administers, in most cases
  *   Plant 2  — a site they do not
- *   (null)   — company-wide, which is a VALUE and not an absence
  *
- *   WX  company-wide   product-1   active
+ * ⭐ THERE IS NO THIRD ENTRY ANY MORE. It read "(null) — company-wide, which
+ * is a VALUE and not an absence", and migration 0028 / D108 removed the state:
+ * `site_node_id` is NOT NULL on all four shared lists. Every case that turned
+ * on it was rewritten rather than deleted, each with a note saying what it used
+ * to assert — grep this file for "0028".
+ *
+ *   WX  Plant 1        product-1   active
  *   WY  Plant 1        product-2   active
  *   GZ  Plant 2        product-3   inactive
  *   RW  Plant 1        product-9   active     <- a token tokens.css never defines
@@ -27,7 +32,6 @@
 import { describe, expect, it } from "vitest";
 import type { AdminProduct, SchedulerError } from "@/lib/api";
 import {
-  COMPANY_WIDE_LABEL,
   FALLBACK_COLOR_TOKEN,
   NAME_MAX_LENGTH,
   PRODUCT_PALETTE,
@@ -43,7 +47,6 @@ import {
   matchesProductQuery,
   normaliseHexInput,
   ownerLabel,
-  ownerOptions,
   partitionProducts,
   productColorVar,
   productRows,
@@ -68,7 +71,7 @@ function product(over: Partial<AdminProduct> = {}): AdminProduct {
     active: true,
     source: "manual",
     externalId: null,
-    siteNodeId: null,
+    siteNodeId: PLANT_1,
     colorToken: "product-1",
     ...over,
   };
@@ -155,12 +158,17 @@ describe("the palette", () => {
 });
 
 /* ===========================================================================
- * Group O — owners. `site_node_id IS NULL` is company-wide, not missing.
+ * Group O — owners. `site_node_id` is NOT NULL since 0028 / D108: there is no
+ * company-wide product, so the only question left is whether the reader can
+ * NAME the owner.
  * ======================================================================== */
 
 describe("owner labelling", () => {
-  it("O1: a null owner is company-wide, not blank", () => {
-    expect(ownerLabel(null, SITES)).toBe(COMPANY_WIDE_LABEL);
+  // O1 — was "a null owner is company-wide, not blank". D108 deleted the
+  // state and `ownerLabel`'s null branch with it, so the case that replaces it
+  // is the one the null branch used to hide: an owner the reader CAN name.
+  it("O1: an owner that is in the sites list is named", () => {
+    expect(ownerLabel(PLANT_2, SITES)).toBe("Plant 2");
   });
 
   it("O2: a known site is named", () => {
@@ -177,8 +185,13 @@ describe("owner labelling", () => {
     expect(ownerLabel(PLANT_2, []).includes(PLANT_2)).toBe(false);
   });
 
-  it("O5: a company-wide owner is still company-wide with no sites loaded", () => {
-    expect(ownerLabel(null, [])).toBe(COMPANY_WIDE_LABEL);
+  // O5 — was "a company-wide owner is still company-wide with no sites
+  // loaded". What is worth pinning now is the OTHER null: `sites === null`
+  // means the structure read did not land, and that must not be reported as
+  // though the owner were elsewhere — it is the same fail-closed-honestly rule
+  // as rule 8d.
+  it("O5: a failed structure read reads as another site, not as blank", () => {
+    expect(ownerLabel(PLANT_1, null)).toBe(UNKNOWN_SITE_LABEL);
   });
 });
 
@@ -225,8 +238,23 @@ describe("productRows", () => {
     expect(rowFor("WY").owner).toBe("Plant 1");
   });
 
-  it("L10: resolves a company-wide row's owner label", () => {
-    expect(rowFor("WX").owner).toBe(COMPANY_WIDE_LABEL);
+  // L10 — was "resolves a company-wide row's owner label". D108 deleted that
+  // state; the label that still needs pinning is the one for an owner the
+  // reader cannot name, because it is the only remaining answer that is not a
+  // node name and the one a reader must never mistake for "everyone's".
+  // L10 — was "resolves a company-wide row's owner label". D108 deleted that
+  // state. ⚠️ AND MY FIRST REPLACEMENT WAS WRONG IN A WAY WORTH KEEPING A NOTE
+  // OF: it built a foreign-owned row and read `view.rows[0].owner`, but
+  // `productRows` FILTERS foreign-owned rows into `elsewhere` (§19.71) — so
+  // there is no row 0. The probe I ran beside it asserted `rows.length === 0`
+  // and passed, and I did not notice the two disagreed. `ownerLabel` is where
+  // the label is decided and O3/O4 already test it directly; what belongs here
+  // is the LIST's behaviour, which is to drop the row and count it.
+  it("L10: a row whose owner is outside the sites list is dropped from the list and counted", () => {
+    const view = productRows([product({ sku: "ZZ", siteNodeId: PLANT_2 })], [
+      { id: PLANT_1, name: "Plant 1" },
+    ]);
+    expect([view.rows.length, view.elsewhere]).toEqual([0, 1]);
   });
 
   it("L11: resolves each row's colour to a CSS value", () => {
@@ -292,7 +320,7 @@ describe("matchesProductQuery", () => {
    * ⭐ WHY THESE EXIST. Migration 0026 narrowed the read to "company-wide, or
    * the same branch as one of your grants", and then admitted ONE more thing
    * on purpose: a row already on a run you can see, so the board can name its
-   * own history instead of drawing "(unknown product)". Pratik, signed in as
+   * own history instead of drawing "(unknown product)". The maintainer, signed in as
    * the Plant 1 admin, saw `Rework - Another site` in his catalogue. Measured
    * on a live database, that row scored `app_can_read_owned = false` and
    * `app_product_on_visible_schedule = true` — admitted purely by the history
@@ -314,9 +342,13 @@ describe("matchesProductQuery", () => {
     expect(productRows([WX, FOREIGN], SITES).elsewhere).toBe(1);
   });
 
-  it("L26: a company-wide product is never counted as elsewhere", () => {
-    // WX has `siteNodeId: null`. The two branches are different answers and a
-    // fixture where everything is owned cannot tell them apart (rule 3g).
+  it("L26: a product owned by a site you CAN see is never counted as elsewhere", () => {
+    // ⚠️ WAS "a company-wide product is never counted as elsewhere", and its
+    // comment said "WX has `siteNodeId: null`" — true until 0028 and false
+    // after it, while the case went on passing. **A stale comment on a green
+    // test is how the next reader learns the wrong rule.** WX is owned by
+    // Plant 1 now, which is in SITES, so this is the negative half of L24 and
+    // it still needs a fixture that is not uniformly foreign (rule 3g).
     expect(productRows([WX], SITES).elsewhere).toBe(0);
     expect(productRows([WX], SITES).rows.map((r) => r.sku)).toEqual(["WX"]);
   });
@@ -352,7 +384,7 @@ describe("matchesProductQuery", () => {
  * ======================================================================== */
 
 describe("canOwnProduct / canEditProduct", () => {
-  it("W1: a company admin may edit a company-wide product", () => {
+  it("W1: a company admin may edit a product, with no grants at all", () => {
     expect(canEditProduct(WX, true, [])).toBe(true);
   });
 
@@ -365,9 +397,19 @@ describe("canOwnProduct / canEditProduct", () => {
     expect(canEditProduct(WY, false, [PLANT_1])).toBe(true);
   });
 
-  // W4 — and the other half, which is the one a collapse would break.
-  it("W4: a site admin may NOT edit a company-wide product", () => {
-    expect(canEditProduct(WX, false, [PLANT_1])).toBe(false);
+  // W4 ⭐ REWRITTEN BY 0028, AND IT NOW RECORDS A KNOWN COARSENESS RATHER THAN
+  // A REFUSAL. It used to be "a site admin may NOT edit a company-wide
+  // product"; D108 deleted the row type. What took its place is the gap D109
+  // opened: ownership may now name ANY node, but `canOwnProduct` tests flat
+  // membership in `adminSiteIds`, not ancestry — so a product owned by a LINE
+  // inside a plant this person administers is not recognised, and the answer
+  // comes from the fail-open path instead of from the rule. The server gets it
+  // right (`app_is_admin_for` walks ancestors); the preview is coarser, and
+  // both halves are asserted so nobody "fixes" one without the other.
+  it("W4: a product owned BELOW a site you administer is not matched by the preview, and falls open", () => {
+    const lineOwned = product({ sku: "LN", siteNodeId: "n-line-1-inside-plant-1" });
+    expect(canOwnProduct(lineOwned.siteNodeId, false, [PLANT_1])).toBe(false);
+    expect(canEditProduct(lineOwned, false, [PLANT_1], true)).toBe(true);
   });
 
   it("W5: a site admin may NOT edit another site's product", () => {
@@ -382,12 +424,16 @@ describe("canOwnProduct / canEditProduct", () => {
     expect(canEditProduct(GZ, false, [PLANT_1, PLANT_2])).toBe(true);
   });
 
-  it("W8: canOwnProduct refuses company-wide to a site admin, matching the insert policy", () => {
-    expect(canOwnProduct(null, false, [PLANT_1])).toBe(false);
+  // W8/W9 — both used to pass `null` for company-wide: refused to a site
+  // admin, allowed to a company admin. D108 removed the argument. What is left
+  // to pin is the pair that still differs: a site admin is refused a site they
+  // do not administer, and a company admin is refused nothing.
+  it("W8: canOwnProduct refuses a site admin a site they do not administer", () => {
+    expect(canOwnProduct(PLANT_2, false, [PLANT_1])).toBe(false);
   });
 
-  it("W9: canOwnProduct allows company-wide to a company admin", () => {
-    expect(canOwnProduct(null, true, [])).toBe(true);
+  it("W9: canOwnProduct allows a company admin any site, with no grants at all", () => {
+    expect(canOwnProduct(PLANT_2, true, [])).toBe(true);
   });
 });
 
@@ -396,9 +442,18 @@ describe("editRefusalNote", () => {
     expect(editRefusalNote(WY, false, [PLANT_1])).toBe(null);
   });
 
-  it("W11: names company-wide as the reason, not a generic refusal", () => {
-    expect(editRefusalNote(WX, false, [PLANT_1])).toContain("company admin");
-  });
+  /* ⭐ W11 WAS DELETED BY 0028, AND SO WAS W12c BELOW. Both asserted the
+   * "Company-wide — only a company admin can change this." note, and D108
+   * deleted the state that produced it. There is nothing to put in their place
+   * that W12 does not already say: with `canEditProduct` failing open for
+   * anyone who administers somewhere, ONE refusal note remains.
+   *
+   * ⚠️ THAT IS A REAL WIDENING AND IT IS WORTH SAYING OUT LOUD. W12c existed to
+   * stop the 27-Aug fail-open flip handing every site admin the company's
+   * shared rows; the certain refusal it relied on no longer exists, so the
+   * preview now says "yes" to strictly more than it did. The server is
+   * unchanged and still decides — see §19.72.
+   */
 
   it("W12: someone who administers NOWHERE is told exactly that", () => {
     // ⚠️ RULE 1b-ii: THIS CASE WAS RIGHT AND THE CONTRACT CHANGED. It used to
@@ -420,14 +475,6 @@ describe("editRefusalNote", () => {
     expect(canEditProduct(GZ, false, [PLANT_1], true)).toBe(true);
   });
 
-  it("W12c: company-wide stays company-admin-only, however wide the grants", () => {
-    // ⭐ THE ONE REFUSAL THAT IS STILL CERTAIN. It comes from the profile role,
-    // with no grant lookup, so there is nothing to fail open about — and it is
-    // what stops the flip above from handing every site admin the company's
-    // shared rows.
-    expect(canEditProduct(WX, false, [PLANT_1], true)).toBe(false);
-    expect(editRefusalNote(WX, false, [PLANT_1], true)).toContain("company admin");
-  });
 });
 
 describe("colour: a token or a hex (0025 §2)", () => {
@@ -506,37 +553,22 @@ describe("colour: a token or a hex (0025 §2)", () => {
   });
 });
 
-describe("ownerOptions", () => {
-  it("W13: offers a company admin company-wide first", () => {
-    expect(ownerOptions(SITES, true, [])[0]).toEqual({ value: null, label: COMPANY_WIDE_LABEL });
-  });
-
-  it("W14: offers a company admin every site", () => {
-    expect(ownerOptions(SITES, true, []).length).toBe(3);
-  });
-
-  // W15 — offering company-wide to a site admin would be a form that fails on
-  // submit, which is the exact defect `editable_shape_ids` was added to close
-  // one screen over.
-  it("W15: never offers company-wide to a site admin", () => {
-    expect(ownerOptions(SITES, false, [PLANT_1]).some((o) => o.value === null)).toBe(false);
-  });
-
-  it("W16: offers a site admin only the sites they administer", () => {
-    expect(ownerOptions(SITES, false, [PLANT_1]).map((o) => o.label)).toEqual(["Plant 1"]);
-  });
-
-  it("W17: offers nothing to somebody who administers no site", () => {
-    expect(ownerOptions(SITES, false, [])).toEqual([]);
-  });
-});
+/* ⭐ THE `ownerOptions` GROUP (W13-W17) WENT WITH THE FUNCTION IN 0028.
+ *
+ * All five cases were about a company-wide entry and a flat list of site
+ * ROOTS. D108 removed the entry and D109 removed the "roots only" premise: a
+ * product can belong to Line 1. The screen has used `scopeOptions` from
+ * `scope.ts` since 0025, and its own cases (X13-X19 in `scope.test.ts`) carry
+ * the picker's contract, including the inverted X13 that pins the absence of
+ * the company-wide entry.
+ */
 
 /* ===========================================================================
  * Group V — the draft. `unique (org_id, sku)` makes a typo permanent.
  * ======================================================================== */
 
-function draft(over: Partial<{ sku: string; name: string; siteNodeId: string | null }> = {}) {
-  return { sku: "WX-1", name: "Widget X", siteNodeId: null, ...over };
+function draft(over: Partial<{ sku: string; name: string; siteNodeId: string }> = {}) {
+  return { sku: "WX-1", name: "Widget X", siteNodeId: PLANT_1, ...over };
 }
 
 describe("validateProductDraft", () => {
@@ -559,9 +591,17 @@ describe("validateProductDraft", () => {
     expect(result.ok === true && result.value.siteNodeId).toBe(PLANT_1);
   });
 
-  it("V5: carries a null owner through as null, not as a blank string", () => {
-    const result = validateProductDraft(draft({ siteNodeId: null }));
-    expect(result.ok === true && result.value.siteNodeId).toBe(null);
+  // V5 — was "carries a null owner through as null, not as a blank string",
+  // back when `null` meant company-wide and had to survive the round trip
+  // distinct from `""`. D108 removed the value, and the empty string changed
+  // meaning from "nothing typed" to "nothing chosen" — which is now a
+  // REFUSAL with its own message, beside its own control.
+  it("V5 ⭐: refuses a draft with no owner chosen, and says so about the owner", () => {
+    const result = validateProductDraft(draft({ siteNodeId: "" }));
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.ownerError).toBe("Choose where this product belongs.");
+    // and it does not blame the sku or the name for it
+    expect(result.ok === false && [result.skuError, result.nameError]).toEqual([null, null]);
   });
 
   it("V6: refuses a blank sku", () => {

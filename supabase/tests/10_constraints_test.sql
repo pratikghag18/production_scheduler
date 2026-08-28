@@ -201,8 +201,8 @@ BEGIN
     VALUES (v_level_b, v_org_b, v_tpl_b, 0, 'Cell', true);
   INSERT INTO nodes (id, org_id, level_id, parent_id, name)
     VALUES (v_node_b, v_org_b, v_level_b, NULL, 'B Cell 1');
-  INSERT INTO operators (id, org_id, display_name)
-    VALUES (v_operator_b, v_org_b, 'Org B Operator');
+  INSERT INTO operators (id, org_id, display_name, site_node_id)
+    VALUES (v_operator_b, v_org_b, 'Org B Operator', v_node_b);
 
   BEGIN
     -- org A's node, org A's org_id, but an operator that only exists under org B.

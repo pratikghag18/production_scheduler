@@ -34,7 +34,7 @@ Reporting §6 or §7 as NOT RUN makes the delivery incomplete.
 7. **`src/styles/global.css`** — the `--ui-scale` block and its `@supports` guard.
 8. **`docs/design-plan.md` §18.9** — what P1-4c did and what it deliberately left.
 
-Files are on the device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler`. Stage with `device_stage_files`.
+Files are on the device at `<repo root>`. Stage with `device_stage_files`.
 
 ---
 

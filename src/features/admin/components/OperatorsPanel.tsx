@@ -209,7 +209,7 @@ export function OperatorsPanel() {
   const heldIds = new Set(tickets.map((t) => t.skillId));
   const grantable = skills.filter((s) => !heldIds.has(s.id));
 
-  // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). Pratik, Aug 27: *"I do want to
+  // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). The maintainer, Aug 27: *"I do want to
   // be able to assign operators to a specific hierarchy level, there are
   // facilities where certain people can only work in certain areas."* Until
   // 0025 `operators_check_site` refused anything but a root, so this filtered
@@ -258,7 +258,9 @@ export function OperatorsPanel() {
         orgId,
         displayName: draft.displayName,
         employeeRef: draft.employeeRef,
-        siteNodeId: draftSite === "" ? null : draftSite,
+        // ⭐ 0028: `""` used to mean company-wide. It now means "nothing
+        // chosen", and the guard above refuses before we get here.
+        siteNodeId: draftSite,
       },
       {
         onSuccess: (created) => {
@@ -289,18 +291,26 @@ export function OperatorsPanel() {
       setNotice(draft.message);
       return;
     }
-    // ⭐ THE AREA IS PART OF THE EDIT NOW, and it is the third time Pratik has
+    // ⭐ THE AREA IS PART OF THE EDIT NOW, and it is the third time the maintainer has
     // had to ask. People move between areas — that is the whole reason an area
     // is worth recording — and until this line the picker existed only on the
     // "Add someone" form, so where somebody belonged was frozen at the moment
     // they were created. **The edit path is the other half of the create path,
     // not a smaller version of it.**
+    // ⚠️ 0028 / D108: `""` used to fold to `null` — company-wide. It now means
+    // "nothing chosen", and the one thing it must NOT become is `undefined`,
+    // because an absent key means "leave it alone" and the screen would show a
+    // move that never happened. Refuse instead, with a sentence.
+    if (editSite === "") {
+      setNotice("Choose where this person belongs.");
+      return;
+    }
     updateOperator.mutate(
       {
         id: selected.id,
         displayName: draft.displayName,
         employeeRef: draft.employeeRef,
-        siteNodeId: editSite === "" ? null : editSite,
+        siteNodeId: editSite,
       },
       { onSuccess: () => setRenaming(false), onError: onErr },
     );
@@ -357,21 +367,32 @@ export function OperatorsPanel() {
       setNotice("Your profile hasn't loaded yet — try again in a moment.");
       return;
     }
+    // Needed since 0028: the new training is owned by whoever is being
+    // ticketed, so there is no training to make without a person selected.
+    if (selected === null) {
+      setNotice("Pick a person first — a new training belongs where they do.");
+      return;
+    }
     const name = newSkill.trim();
     if (name === "") return;
-    // ⭐ THE CLASH IS NOT AN ERROR (Pratik's decision: skill names stay
+    // ⭐ THE CLASH IS NOT AN ERROR (the maintainer's decision: skill names stay
     // company-wide). An exact clash never reaches the database at all — the
     // screen offers the existing ticket instead, one click away, above.
     if (clash !== null && clash.exact) {
       setNotice(describeSkillNameClash(clash));
       return;
     }
-    // `site_node_id: null` — company-wide, by that same decision. A site admin
-    // is refused here by `skills_insert`, and that refusal is honest: they may
-    // still ATTACH any company-wide ticket to their own people, because
-    // `operator_skills` follows the OPERATOR, not the skill.
+    // ⭐⭐ 0028 CHANGED WHO OWNS A TRAINING MADE HERE, AND THERE IS ONLY ONE
+    // ANSWER LEFT. It used to be created company-wide (`site_node_id: null`),
+    // which a site admin was then refused by `skills_insert` — honest, but it
+    // meant a supervisor could never make a ticket from this screen at all.
+    // D108 removed company-wide, and D109 says the training must be owned at or
+    // above wherever it is used. The person being ticketed is the only place
+    // this screen knows about, so the training belongs where THEY belong: the
+    // `operator_skills` guard added in 0028 requires the two to be on one
+    // branch, and this is the choice that satisfies it by construction.
     createSkill.mutate(
-      { orgId, name, siteNodeId: null },
+      { orgId, name, siteNodeId: selected.siteNodeId },
       {
         onSuccess: (skill) => attachSkill(skill.id, grantExpiry === "" ? null : grantExpiry),
         // The race: somebody else created it between the check and the insert.
@@ -641,7 +662,7 @@ export function OperatorsPanel() {
                     >
                       Edit
                     </button>
-                    {/* ⭐ DEACTIVATE IS THE MAIN ACTION (Pratik's decision):
+                    {/* ⭐ DEACTIVATE IS THE MAIN ACTION (the maintainer's decision):
                         it keeps every assignment, ticket and audit row intact
                         and simply takes the person off the board. */}
                     <button
@@ -849,7 +870,7 @@ export function OperatorsPanel() {
                 </button>
               </div>
               {/* ⭐ THE CLASH THAT IS NOT AN ERROR. Skill names are company-wide
-                  (`unique (org_id, name)`), and Pratik's decision is that they
+                  (`unique (org_id, name)`), and the maintainer's decision is that they
                   stay that way — so typing a name that already exists is not a
                   mistake, it is finding the ticket you were about to make. The
                   screen says so and attaches it in one click; a raw

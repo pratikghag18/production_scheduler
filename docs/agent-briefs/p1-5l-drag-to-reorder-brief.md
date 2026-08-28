@@ -413,7 +413,7 @@ chase mine.
    in its own `device_bash` call**; it lands near the 45s limit.
 2. `node node_modules/eslint/bin/eslint.js .` → exit 0.
 3. **You cannot run `vitest`** — the installed rollup binary is win32-arm64 and
-   npm has no network on that VM. The count is Pratik's to run. Say so.
+   npm has no network on that VM. The count is the maintainer's to run. Say so.
 4. Report: what you changed, **which mutation broke which case**, every
    assumption you made, and **every place the brief was wrong**. Expect to find
    some; a flagged deviation is a lead, and briefs here have been wrong before.

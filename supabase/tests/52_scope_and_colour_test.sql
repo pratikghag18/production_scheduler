@@ -2,7 +2,7 @@
 -- 52_scope_and_colour_test.sql — migration 0025, D103: "belongs to" becomes a
 -- SCOPE, and a colour may be a colour.
 --
--- PRATIK'S WORDS (D103):
+-- THE MAINTAINER'S WORDS (D103):
 --   "The products/operators/shifts could belong to a particular hierarchy
 --    within the plant and not necessarily to the whole plant... how do we
 --    assign them to a specific hierarchy level so the lower levels inherit
@@ -89,12 +89,14 @@ BEGIN
     -- would be refused one layer earlier and prove nothing about the policy.
     ('f0000000-0000-0000-0000-000000000003', v_dept, '10000000-0000-0000-0000-000000000001','supervisor');
 
-  -- One product scoped to a LINE, one to the DEPARTMENT above it, one
-  -- company-wide. Three answers to "is this offered at Cell A".
+  -- One product scoped to a LINE, one to the DEPARTMENT above it, one to the
+  -- PLANT ROOT above that. Three answers to "is this offered at Cell A", and
+  -- ⭐ the third used to be company-wide (NULL) -- 0028/D108 abolished that
+  -- state, so the widest scope this file can express is now the root.
   INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
     ('61000000-0000-0000-0000-00000000ff01','10000000-0000-0000-0000-000000000001','SLA','S Line A Product', v_line_a),
     ('61000000-0000-0000-0000-00000000ff02','10000000-0000-0000-0000-000000000001','SDP','S Dept Product',   v_dept),
-    ('61000000-0000-0000-0000-00000000ff03','10000000-0000-0000-0000-000000000001','SCW','S Company Product', NULL),
+    ('61000000-0000-0000-0000-00000000ff03','10000000-0000-0000-0000-000000000001','SCW','S Plant-wide Product', '30000000-0000-0000-0000-000000000001'::uuid),
     -- Scoped to the OTHER site. S18 needs a product that must never be OFFERED
     -- under plant_1 and must still be RETURNED by the read.
     ('61000000-0000-0000-0000-00000000ff04','10000000-0000-0000-0000-000000000001','SP2','S Plant 2 Product',
@@ -180,7 +182,7 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_S2;
 
-\echo 'S3: NULL still means company-wide and is still accepted'
+\echo 'S3 ⭐ (inverted by 0028): NULL no longer means company-wide — it is refused, because there is no company-wide'
 SAVEPOINT sp_S3;
 DO $$
 DECLARE v_got uuid; v_err text := NULL;
@@ -192,8 +194,13 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_err = RETURNED_SQLSTATE; END;
   SELECT site_node_id INTO v_got FROM products WHERE id = '61000000-0000-0000-0000-00000000ff01';
   RESET ROLE;
-  IF v_err IS NULL AND v_got IS NULL THEN RAISE NOTICE 'PASS S3';
-  ELSE RAISE NOTICE 'FAIL S3: sqlstate=% scope=% (want no error, NULL)', v_err, v_got; END IF;
+  -- ⭐⭐ INVERTED BY 0028. 0025 widened the scope picker so a site admin could
+  -- clear a product back to company-wide, and S3 asserted that widening. D108
+  -- removes the destination: there is nowhere to clear it TO. The refusal is
+  -- the NOT NULL constraint itself (23502), and the row must be untouched --
+  -- asserting only the error would pass if the update half-applied.
+  IF v_err = '23502' AND v_got IS NOT NULL THEN RAISE NOTICE 'PASS S3';
+  ELSE RAISE NOTICE 'FAIL S3: sqlstate=% scope=% (want 23502, unchanged)', v_err, v_got; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_S3;
 
@@ -463,7 +470,7 @@ DECLARE v_got text;
 BEGIN
   RESET ROLE;
   INSERT INTO products (org_id, sku, name, site_node_id)
-    VALUES ('10000000-0000-0000-0000-000000000001','SNEW','S New Product', NULL);
+    VALUES ('10000000-0000-0000-0000-000000000001','SNEW','S New Product', '30000000-0000-0000-0000-000000000001'::uuid);
   SELECT color_token INTO v_got FROM products
    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND sku = 'SNEW';
   -- ⭐ D102 SURVIVES 0025 INTACT. Widening what the column ACCEPTS must not

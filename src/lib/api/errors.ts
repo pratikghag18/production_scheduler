@@ -50,7 +50,10 @@ export type SchedulerErrorCode =
   | "level_mismatch"
   | "level_in_use"
   | "node_in_use"
-  | "schedulable_level_locked";
+  | "schedulable_level_locked"
+  // Migration 0028 / D109. The closed set is fourteen now, not twelve.
+  | "not_offered_here"
+  | "owner_change_blocked";
 
 export type SchedulerError =
   | {
@@ -145,6 +148,34 @@ export type SchedulerError =
       assignments: number;
     }
   /**
+   * Migration 0028 / D109: the thing being scheduled does not belong here.
+   * `jsonb_build_object('kind', ..., 'id', ..., 'owner_node_id', ..., 'node_id', ...)`
+   * — read from the migration's own `api_raise` calls, and pinned BY KEY in
+   * `55_ownership_scope_test.sql` case N3.
+   *
+   * `kind` says which list the row came from: `product`, `operator`, `skill`,
+   * `shift_template`, `operator_home` or `operator_skill`.
+   */
+  | {
+      kind: "NotOfferedHere";
+      what: string;
+      id: string;
+      ownerNodeId: string;
+      nodeId: string;
+    }
+  /**
+   * Migration 0028 §5: this row is already used outside the site it is being
+   * moved to. `jsonb_build_object('kind', ..., 'id', ..., 'new_owner_node_id',
+   * ..., 'stranded', ...)`; pinned by key in `55_`'s N9.
+   */
+  | {
+      kind: "OwnerChangeBlocked";
+      what: string;
+      id: string;
+      newOwnerNodeId: string;
+      stranded: number;
+    }
+  /**
    * `save_hierarchy_levels`: the schedulable level is changing while it
    * still has runs or direct assignments (D72).
    * `jsonb_build_object('blocking_rows', v_blocking_count, 'level_id', v_old_schedulable_level_id)`.
@@ -224,6 +255,8 @@ const SCHEDULER_ERROR_KINDS: ReadonlySet<SchedulerError["kind"]> = new Set([
   "LevelInUse",
   "NodeInUse",
   "SchedulableLevelLocked",
+  "NotOfferedHere",
+  "OwnerChangeBlocked",
   "RaceLost",
   "WriteRefused",
   "DuplicateValue",
@@ -415,6 +448,40 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
           children: detail.children,
           runs: detail.runs,
           assignments: detail.assignments,
+        };
+      }
+      return undefined;
+    }
+    case "not_offered_here": {
+      if (
+        hasStringProp(detail, "kind") &&
+        hasStringProp(detail, "id") &&
+        hasStringProp(detail, "owner_node_id") &&
+        hasStringProp(detail, "node_id")
+      ) {
+        return {
+          kind: "NotOfferedHere",
+          what: detail.kind,
+          id: detail.id,
+          ownerNodeId: detail.owner_node_id,
+          nodeId: detail.node_id,
+        };
+      }
+      return undefined;
+    }
+    case "owner_change_blocked": {
+      if (
+        hasStringProp(detail, "kind") &&
+        hasStringProp(detail, "id") &&
+        hasStringProp(detail, "new_owner_node_id") &&
+        hasNumberProp(detail, "stranded")
+      ) {
+        return {
+          kind: "OwnerChangeBlocked",
+          what: detail.kind,
+          id: detail.id,
+          newOwnerNodeId: detail.new_owner_node_id,
+          stranded: detail.stranded,
         };
       }
       return undefined;
@@ -671,6 +738,30 @@ export function describeSchedulerError(e: SchedulerError): string {
       return "That level still has nodes on it and can't be removed.";
     case "NodeInUse":
       return "This node has children, runs, or assignments and can't be deleted.";
+    case "NotOfferedHere": {
+      // ⚠️ THE SENTENCE HAS TO NAME THE THING, NOT THE RULE. "Scope violation"
+      // is what the constraint is called; what the person did was put a Plant 2
+      // product on a Plant 1 cell, and the only useful thing to say is which
+      // kind of row was in the wrong place and what to do instead.
+      const noun =
+        e.what === "operator" || e.what === "operator_home"
+          ? "That person"
+          : e.what === "skill" || e.what === "operator_skill"
+            ? "That training"
+            : e.what === "shift_template"
+              ? "That shift pattern"
+              : "That product";
+      return e.what === "operator_home"
+        ? "That home cell is outside the site this person belongs to."
+        : `${noun} belongs to a different part of the structure, so it can't be used here.`;
+    }
+    case "OwnerChangeBlocked": {
+      const n = e.stranded;
+      const where = Number.isFinite(n)
+        ? `${n} scheduled ${n === 1 ? "item" : "items"}`
+        : "work already scheduled";
+      return `This is already used outside the site you're moving it to (${where}). Move or remove those first.`;
+    }
     case "SchedulableLevelLocked": {
       // ⚠️ THIS CODE HAS TWO CALLERS THAT MEAN DIFFERENT THINGS BY IT, and the
       // message used to describe only one. `save_hierarchy_levels` raises it

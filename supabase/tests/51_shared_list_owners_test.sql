@@ -2,7 +2,7 @@
 -- 51_shared_list_owners_test.sql — migration 0023, "the shared lists get an
 -- owner, and a product gets a colour of its own."
 --
--- PRATIK'S WORDS (D101/D102):
+-- THE MAINTAINER'S WORDS (D101/D102):
 --   "The shift pattern will be per-site, we can have defaults but I'd rather
 --    the site admin set them up for their site, same thing for colours."
 --
@@ -18,7 +18,7 @@
 -- because org scoping already refuses it three layers earlier.
 --
 -- ⭐⭐ AND IT NEEDS BOTH AN OWNED AND AN UNOWNED ROW OF EVERY KIND. NULL is not
--- an edge case here, it is the company-wide default Pratik asked for. A fixture
+-- an edge case here, it is the company-wide default the maintainer asked for. A fixture
 -- in which everything is owned cannot tell "you may not edit that site's row"
 -- from "you may not edit a company-wide row", and those are two different
 -- refusals reached through two different branches of one predicate.
@@ -83,12 +83,15 @@ BEGIN
   INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES
     ('50000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','Q P1 Operator','30000000-0000-0000-0000-000000000001'::uuid),
     ('50000000-0000-0000-0000-00000000ee02','10000000-0000-0000-0000-000000000001','Q P2 Operator', v_p2),
-    ('50000000-0000-0000-0000-00000000ee03','10000000-0000-0000-0000-000000000001','Q Shared Operator', NULL);
+    -- ⭐ 0028/D108: was NULL (company-wide) until this migration. Re-homed to
+    -- LINE 1, a scope strictly inside Plant 1, so the cases that used it keep
+    -- a third owner to talk about instead of losing their subject.
+    ('50000000-0000-0000-0000-00000000ee03','10000000-0000-0000-0000-000000000001','Q Line-1 Operator', '30000000-0000-0000-0000-000000000004'::uuid);
 
   INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES
     ('70000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','Q P1 Pattern','30000000-0000-0000-0000-000000000001'::uuid),
     ('70000000-0000-0000-0000-00000000ee02','10000000-0000-0000-0000-000000000001','Q P2 Pattern', v_p2),
-    ('70000000-0000-0000-0000-00000000ee03','10000000-0000-0000-0000-000000000001','Q Standard Pattern', NULL);
+    ('70000000-0000-0000-0000-00000000ee03','10000000-0000-0000-0000-000000000001','Q Line-1 Pattern', '30000000-0000-0000-0000-000000000004'::uuid);
 
   INSERT INTO shifts (id, org_id, template_id, name, start_min, end_min) VALUES
     ('71000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-00000000ee01','Q Day', 360, 840),
@@ -104,7 +107,11 @@ BEGIN
 
   INSERT INTO skills (id, org_id, name, site_node_id) VALUES
     ('40000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','Q Welding','30000000-0000-0000-0000-000000000001'::uuid),
-    ('40000000-0000-0000-0000-00000000ee02','10000000-0000-0000-0000-000000000001','Q Shared Skill', NULL);
+    ('40000000-0000-0000-0000-00000000ee02','10000000-0000-0000-0000-000000000001','Q Line-1 Skill', '30000000-0000-0000-0000-000000000004'::uuid),
+    -- ⭐ Added by 0028. Q21's unreachable row used to be the SEEDED
+    -- company-wide training; the seed now owns it at the Plant 1 root, which
+    -- g1 administers, so the case needed a row on the OTHER plant instead.
+    ('40000000-0000-0000-0000-00000000ee04','10000000-0000-0000-0000-000000000001','Q P2 Welding', v_p2);
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
   RAISE EXCEPTION 'FIXTURE FAILED (rows): % (sqlstate %)', SQLERRM, SQLSTATE;
@@ -113,7 +120,7 @@ END $$;
 -- Q0 asserts the fixture itself. D86's corollary: an id typo is
 -- indistinguishable from the behaviour under test whenever the honest answer
 -- can be empty.
-\echo 'Q0: the fixture is well-formed — two sites in ONE org, and an owned AND an unowned row of every kind'
+\echo 'Q0: the fixture is well-formed — two sites in ONE org, and EVERY row owned (0028/D108 abolished the unowned state)'
 SAVEPOINT sp_Q0;
 DO $$
 DECLARE v_p2 uuid; v_roots int; v_owned int; v_unowned int; v_admins int;
@@ -123,15 +130,21 @@ BEGIN
    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND parent_id IS NULL;
   -- Org-scoped: without it this case fails the day org 2 owns an operator,
   -- for a reason that has nothing to do with the fixture it exists to prove.
+  -- ⚠️ FIXTURE-SCOPED, not org-scoped. Before 0028 the seed's nine operators
+  -- were all unowned, so an org-wide count of owned rows happened to equal this
+  -- file's three. They are all owned now and the org-wide number is 12, which
+  -- says nothing about this fixture. Count the rows this file inserted.
   SELECT count(*) INTO v_owned FROM operators
-   WHERE org_id = '10000000-0000-0000-0000-000000000001' AND site_node_id IS NOT NULL;
+   WHERE id::text LIKE '50000000-0000-0000-0000-00000000ee%' AND site_node_id IS NOT NULL;
   SELECT count(*) INTO v_unowned FROM operators
    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND site_node_id IS NULL;
   SELECT count(*) INTO v_admins FROM user_profiles
    WHERE id::text LIKE 'e0000000%' AND role = 'admin';
-  IF v_roots >= 2 AND v_p2 IS NOT NULL AND v_owned = 2 AND v_unowned >= 1 AND v_admins = 0
+  -- ⭐ 0028 inverted the last term rather than deleting it: a fixture that still
+  -- had an unowned row would mean the NOT NULL never took.
+  IF v_roots >= 2 AND v_p2 IS NOT NULL AND v_owned = 3 AND v_unowned = 0 AND v_admins = 0
   THEN RAISE NOTICE 'PASS Q0';
-  ELSE RAISE NOTICE 'FAIL Q0: roots=% p2=% owned=% unowned=% org_wide_admins_among_g=% (want >=2, not null, 2, >=1, 0)',
+  ELSE RAISE NOTICE 'FAIL Q0: roots=% p2=% owned=% unowned=% org_wide_admins_among_g=% (want >=2, not null, 3, 0, 0)',
     v_roots, v_p2, v_owned, v_unowned, v_admins; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q0;
@@ -178,21 +191,33 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q2;
 
-\echo 'Q3 ⭐: ...and cannot touch a COMPANY-WIDE one either — NULL has no site to be an admin of'
+\echo 'Q3 ⭐ (rewritten by 0028): ...and cannot MAKE one company-wide either — NULL is not a site, and now not a value'
 SAVEPOINT sp_Q3;
 DO $$
 DECLARE v_rows int; v_state text;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
   SET LOCAL ROLE authenticated;
+  -- Q3 used to assert that a site admin could not EDIT a company-wide operator.
+  -- D108 removed the row type, so the question became whether they can CREATE
+  -- one -- the door the old case was guarding, one step earlier. `ee01` is a
+  -- row g1 owns and may otherwise edit freely (Q1), so a refusal here can only
+  -- be about the NULL.
   BEGIN
-    UPDATE operators SET display_name = 'renamed by g1'
-     WHERE id = '50000000-0000-0000-0000-00000000ee03';
+    UPDATE operators SET site_node_id = NULL
+     WHERE id = '50000000-0000-0000-0000-00000000ee01';
     GET DIAGNOSTICS v_rows = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_rows = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q3';
-  ELSE RAISE NOTICE 'FAIL Q3: rows=% (want 0) — a site admin edited a company-wide default', v_rows; END IF;
+  -- ⚠️ 42501, NOT 23502, AND THE REASON IS WORTH KNOWING. The NOT NULL never
+  -- gets a chance: an UPDATE's NEW row is checked against the policy's WITH
+  -- CHECK first (postgres gotcha 20), and `app_is_admin_for(NULL)` is false, so
+  -- RLS refuses before the constraint would. The stronger, constraint-level
+  -- refusal is pinned directly in 55_'s N1, where a superuser tries it.
+  IF v_state = '42501'
+     AND (SELECT site_node_id FROM operators WHERE id='50000000-0000-0000-0000-00000000ee01') IS NOT NULL
+  THEN RAISE NOTICE 'PASS Q3';
+  ELSE RAISE NOTICE 'FAIL Q3: rows=% sqlstate=% (want 42501 and the row untouched)', v_rows, v_state; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q3;
 
@@ -340,7 +365,7 @@ BEGIN
   -- `check_eligibility` could start silently answering "not eligible".
   --
   -- ⚠️ IT WENT RED ON PURPOSE. Migration 0026 (D107) narrows exactly those
-  -- policies, because Pratik's own frame was always a read statement: "no
+  -- policies, because the maintainer's own frame was always a read statement: "no
   -- member from one plant should see info for other plants". The tripwire did
   -- its job — it made the consequence impossible to ship by accident, and the
   -- consequence it named is now FIXED rather than avoided: `check_eligibility`
@@ -458,7 +483,7 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q14;
 
-\echo 'Q15 ⭐: ...and touches neither the other site''s pattern nor the company-wide DEFAULT'
+\echo 'Q15 ⭐ (rewritten by 0028): ...touches the other site''s pattern not at all, and its OWN line''s pattern yes — D109''s ancestor rule'
 SAVEPOINT sp_Q15;
 DO $$
 DECLARE v_other int; v_default int; v_state text;
@@ -472,8 +497,14 @@ BEGIN
     GET DIAGNOSTICS v_default = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_other = 0 AND v_default = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q15';
-  ELSE RAISE NOTICE 'FAIL Q15: other_site=% company_default=% (want 0,0)', v_other, v_default; END IF;
+  -- ⭐ The second half INVERTED, and it is the more interesting half now.
+  -- `ee03` was company-wide and unreachable; it is owned by Line 1, and g1
+  -- administers Plant 1, which CONTAINS Line 1. `app_is_admin_for` is an admin
+  -- grant on an ancestor-or-self, so a plant admin edits their own line's rows.
+  -- That is D109 working. Pairing it with the untouched other-site row is what
+  -- stops "1" here reading as the narrowing having failed.
+  IF v_other = 0 AND v_default = 1 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q15';
+  ELSE RAISE NOTICE 'FAIL Q15: other_site=% own_line=% (want 0,1)', v_other, v_default; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q15;
 
@@ -575,7 +606,7 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q20;
 
-\echo 'Q21: skills — a site admin edits their own; the SEEDED company-wide one stays out of reach (Q37 has the cross-site half)'
+\echo 'Q21 (rewritten by 0028): skills — a site admin edits their own; the OTHER PLANT''s stays out of reach (Q37 has the cross-site half)'
 SAVEPOINT sp_Q21;
 DO $$
 DECLARE v_mine int; v_shared int; v_state text;
@@ -585,12 +616,16 @@ BEGIN
   UPDATE skills SET name = 'Q Welding (edited)' WHERE id = '40000000-0000-0000-0000-00000000ee01';
   GET DIAGNOSTICS v_mine = ROW_COUNT;
   BEGIN
-    UPDATE skills SET name = 'x' WHERE id = '40000000-0000-0000-0000-000000000001';
+    -- ⭐ was the seeded company-wide training; the seed now owns it at the
+    -- Plant 1 root, which g1 administers, so it stopped being unreachable for
+    -- a reason that has nothing to do with this case. A Plant 2 row does the
+    -- job the old one was doing.
+    UPDATE skills SET name = 'x' WHERE id = '40000000-0000-0000-0000-00000000ee04';
     GET DIAGNOSTICS v_shared = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
   IF v_mine = 1 AND v_shared = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q21';
-  ELSE RAISE NOTICE 'FAIL Q21: mine=% seeded_shared=% (want 1,0)', v_mine, v_shared; END IF;
+  ELSE RAISE NOTICE 'FAIL Q21: mine=% other_plant=% (want 1,0)', v_mine, v_shared; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q21;
 
@@ -619,10 +654,46 @@ BEGIN
     v_theirs := 'ok';
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_theirs = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_mine = 'ok' AND v_theirs = '42501' THEN RAISE NOTICE 'PASS Q22';
-  ELSE RAISE NOTICE 'FAIL Q22: own_operator=% other_site_operator=% (want ok, 42501)', v_mine, v_theirs; END IF;
+  -- ⭐ 0028 CHANGED THE SECOND HALF'S SQLSTATE, AND IT IS A STRENGTHENING, NOT
+  -- A MATCHED EXPECTATION. It used to be 42501: g1 may not administer the other
+  -- plant's operator. It is now PT409 `not_offered_here`, raised by the scope
+  -- guard before RLS is consulted, because a Plant 2 person may not hold a
+  -- Plant 1 training AT ALL. The distinction is testable and Q22b tests it: the
+  -- COMPANY ADMIN, who passes every permission check, is refused the same row.
+  -- A weakening could not do that.
+  IF v_mine = 'ok' AND v_theirs = 'PT409' THEN RAISE NOTICE 'PASS Q22';
+  ELSE RAISE NOTICE 'FAIL Q22: own_operator=% other_site_operator=% (want ok, PT409)', v_mine, v_theirs; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q22;
+
+\echo 'Q22b ⭐⭐ (new in 0028): and the COMPANY ADMIN is refused the same row — which is what makes Q22 a strengthening rather than a moved goalpost'
+SAVEPOINT sp_Q22b;
+DO $$
+DECLARE v_state text;
+BEGIN
+  -- Q22's second half changed sqlstate from 42501 to PT409 under 0028. That
+  -- reads exactly like an expectation edited to match new behaviour, which is
+  -- the thing [[verification-standard]] rule 2e forbids. The difference is
+  -- testable: 42501 is about WHO is asking, PT409 is about WHAT is being
+  -- written. So ask as the one person no permission check refuses. If this
+  -- ever comes back 'ok', the constraint has become advisory and Q22 really
+  -- has been weakened.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    INSERT INTO operator_skills (operator_id, skill_id, org_id)
+      VALUES ('50000000-0000-0000-0000-00000000ee02','40000000-0000-0000-0000-000000000001',
+              '10000000-0000-0000-0000-000000000001');
+    v_state := 'ok';
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
+  RESET ROLE;
+  IF v_state = 'PT409' THEN RAISE NOTICE 'PASS Q22b';
+  ELSE RAISE NOTICE 'FAIL Q22b: company admin got % (want PT409)', v_state; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  RAISE NOTICE 'FAIL Q22b: unexpected exception % (%)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_Q22b;
 
 -- ---------------------------------------------------------------------------
 -- COLOUR (D102) — "we can have defaults but I'd rather the site admin set them
@@ -717,7 +788,7 @@ ROLLBACK TO SAVEPOINT sp_Q26;
 
 \echo 'Q27: a lower-case six-digit hex is accepted; every other spelling is not (0025 §2)'
 -- ⚠️ RULE 1b-ii AGAIN: this case asserted that '#eb6834' raises 23514, and it
--- was right for as long as the column held only palette tokens. Pratik asked
+-- was right for as long as the column held only palette tokens. The maintainer asked
 -- for a hex on Aug 27, so 0025 widened the CHECK to a UNION of two disjoint
 -- shapes.
 --
@@ -868,7 +939,7 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q32;
 
-\echo 'Q33 ⭐: a site admin cannot edit the SHIFTS inside the company-wide pattern either'
+\echo 'Q33 ⭐ (rewritten by 0028): the shifts inside a pattern owned by their OWN line are theirs to edit — the hop still follows the template'
 SAVEPOINT sp_Q33;
 DO $$
 DECLARE v_rows int; v_state text;
@@ -888,8 +959,14 @@ BEGIN
     GET DIAGNOSTICS v_rows = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_rows = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q33';
-  ELSE RAISE NOTICE 'FAIL Q33: rows=% sqlstate=% (want 0, silent) — a site admin edited the company default', v_rows, v_state; END IF;
+  -- ⭐ INVERTED WITH Q15, for the same reason and by the same mechanism:
+  -- `ee03`'s pattern is owned by Line 1, inside the plant g1 administers. What
+  -- this case actually pins is that `shifts` still answers through
+  -- `app_is_admin_for_shift_template` -- a DIFFERENT mechanism from the
+  -- template's own column, and the one nothing reached before R15 found it.
+  -- Q15's first half keeps the refusal, on the other plant's template.
+  IF v_rows = 1 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q33';
+  ELSE RAISE NOTICE 'FAIL Q33: rows=% sqlstate=% (want 1, silent)', v_rows, v_state; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q33;
 

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 0023 — the shared lists get an owner, and a product gets a colour of its own.
 --
--- PRATIK'S WORDS (D101/D102, design plan §19.59):
+-- THE MAINTAINER'S WORDS (D101/D102, design plan §19.59):
 --   "The shift pattern will be per-site, we can have defaults but I'd rather
 --    the site admin set them up for their site, same thing for colours."
 --
@@ -21,7 +21,7 @@
 --   `create_assignment` gates on that. **A read narrowing would become a write
 --   refusal one indirection along, with no error anywhere.**
 --
--- It is also exactly what Pratik said the rule was for shift patterns:
+-- It is also exactly what the maintainer said the rule was for shift patterns:
 -- ownership decides who may EDIT a pattern, not which pattern applies. 0020 §12
 -- took the same position for node attachments and said so.
 --
@@ -47,7 +47,7 @@
 -- §1. The owning site, on all four shared lists.
 --
 -- NULLABLE, and here that is the FEATURE rather than a concession to creation
--- order: an unowned row is the company-wide default Pratik asked for. "We can
+-- order: an unowned row is the company-wide default the maintainer asked for. "We can
 -- have defaults" and "NULL" are the same sentence.
 --
 -- The composite `(org_id, site_node_id)` foreign key is the D3 idiom every

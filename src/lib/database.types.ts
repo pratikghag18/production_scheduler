@@ -468,7 +468,7 @@ export type Database = {
           home_node_id: string | null
           id: string
           org_id: string
-          site_node_id: string | null
+          site_node_id: string
           source: string
           updated_at: string
         }
@@ -481,7 +481,7 @@ export type Database = {
           home_node_id?: string | null
           id?: string
           org_id: string
-          site_node_id?: string | null
+          site_node_id: string
           source?: string
           updated_at?: string
         }
@@ -494,7 +494,7 @@ export type Database = {
           home_node_id?: string | null
           id?: string
           org_id?: string
-          site_node_id?: string | null
+          site_node_id?: string
           source?: string
           updated_at?: string
         }
@@ -556,7 +556,7 @@ export type Database = {
           id: string
           name: string
           org_id: string
-          site_node_id: string | null
+          site_node_id: string
           sku: string
           source: string
           updated_at: string
@@ -569,7 +569,7 @@ export type Database = {
           id?: string
           name: string
           org_id: string
-          site_node_id?: string | null
+          site_node_id: string
           sku: string
           source?: string
           updated_at?: string
@@ -582,7 +582,7 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string
-          site_node_id?: string | null
+          site_node_id?: string
           sku?: string
           source?: string
           updated_at?: string
@@ -767,21 +767,21 @@ export type Database = {
           id: string
           name: string
           org_id: string
-          site_node_id: string | null
+          site_node_id: string
           updated_at: string
         }
         Insert: {
           id?: string
           name: string
           org_id: string
-          site_node_id?: string | null
+          site_node_id: string
           updated_at?: string
         }
         Update: {
           id?: string
           name?: string
           org_id?: string
-          site_node_id?: string | null
+          site_node_id?: string
           updated_at?: string
         }
         Relationships: [
@@ -852,7 +852,7 @@ export type Database = {
           id: string
           name: string
           org_id: string
-          site_node_id: string | null
+          site_node_id: string
           updated_at: string
         }
         Insert: {
@@ -860,7 +860,7 @@ export type Database = {
           id?: string
           name: string
           org_id: string
-          site_node_id?: string | null
+          site_node_id: string
           updated_at?: string
         }
         Update: {
@@ -868,7 +868,7 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string
-          site_node_id?: string | null
+          site_node_id?: string
           updated_at?: string
         }
         Relationships: [
@@ -971,17 +971,17 @@ export type Database = {
       }
       app_is_admin_on_path: { Args: { p_path: unknown }; Returns: boolean }
       app_node_exists_in_org: { Args: { p_node_id: string }; Returns: boolean }
-      app_operator_on_visible_schedule: {
-        Args: { p_operator: string }
+      app_owner_covers: {
+        Args: { p_node: string; p_owner: string }
+        Returns: boolean
+      }
+      app_owner_covers_in_org: {
+        Args: { p_node: string; p_org: string; p_owner: string }
         Returns: boolean
       }
       app_pick_product_color: {
         Args: { p_org_id: string; p_site_node_id: string }
         Returns: string
-      }
-      app_product_on_visible_schedule: {
-        Args: { p_product: string }
-        Returns: boolean
       }
       app_product_palette: { Args: never; Returns: string[] }
       app_profile_exists_in_org: {

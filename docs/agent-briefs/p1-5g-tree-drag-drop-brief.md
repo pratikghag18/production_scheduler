@@ -9,7 +9,7 @@ brief was written; Part B was rendered in headless Chromium and looked at.
 
 ## 1. What this brief is for, in one paragraph
 
-P1-5d shipped half the re-parenting decision. Pratik chose *"both — drag, with
+P1-5d shipped half the re-parenting decision. The maintainer chose *"both — drag, with
 the menu as fallback"*, and the menu exists: `⋮` → **Move to…**, listing exactly
 `legalParentsFor`. `NodeTreeEditor.tsx` has **zero drag handlers** today. This
 brief adds the other half. Almost all of it is wiring: `canDropOn` is the ONE
@@ -30,7 +30,7 @@ words and on screen, is what this brief actually owes.
 ### 2.1 What you can and cannot run
 
 - **You cannot run `npm`.** No `tsc`, no `vitest`, no `eslint`, no `vite build`,
-  no browser. Pratik runs the acceptance on his machine.
+  no browser. The maintainer runs the acceptance on his machine.
 - **You CAN run `node --experimental-strip-types`.** Part A
   (`src/features/admin/lib/treeDrag.ts`) is `import type`-only for its types and
   takes two REAL value imports over relative `./x.ts` paths, which strip-types
@@ -1118,7 +1118,7 @@ reasoning and has produced confident wrong answers here twice. Instead:
 ### 10.3 Not verifiable here
 
 - **Everything in Part B.** No npm, no React, no real browser DOM. `tsc`, ESLint,
-  the production build and the in-browser behaviour are Pratik's run.
+  the production build and the in-browser behaviour are the maintainer's run.
 - **Pointer capture semantics.** `setPointerCapture` / `elementFromPoint` were
   reasoned from spec, not exercised — the rendering was static markup, not a
   live drag. **This is the single most likely place for a real defect in this
@@ -1176,7 +1176,7 @@ Fenced by **property**, not by a blanket file prohibition (brief-writing rule
 - [ ] `NodeTreeEditor.module.css` gained §7.2's block **verbatim**, appended.
 - [ ] No file outside §3's table changed. Any breach of §11 reported explicitly.
 - [ ] Your report quotes its dependencies and evaluates them (§10.2).
-- [ ] **The prediction for Pratik's run: `npm run test` goes 430 → 473, in 17
+- [ ] **The prediction for the maintainer's run: `npm run test` goes 430 → 473, in 17
       files.** If your count differs, say so and reconcile it before reporting —
       a suite that adds zero to the framework's own number is P1-5f's defect
       arriving again.

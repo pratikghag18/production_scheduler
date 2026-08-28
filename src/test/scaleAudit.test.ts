@@ -298,7 +298,7 @@ describe("D89: REM_SURFACES names every admin stylesheet on disk", () => {
 /**
  * D100 group G (11 cases) — the drag audit.
  *
- * Pratik, Aug 27: *"Can we make sure we match the colors on drag selection in
+ * The maintainer, Aug 27: *"Can we make sure we match the colors on drag selection in
  * all areas, shouldn't this be done by default? It seems we're reinventing
  * stuff vs reusing it."*
  *
@@ -492,7 +492,7 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
 /* ---------------------------------------------------------------------------
    GROUP J — D105, CREATE/EDIT PARITY.
 
-   ⭐⭐ THIS GROUP EXISTS BECAUSE PRATIK HAD TO ASK THREE TIMES. "No option to
+   ⭐⭐ THIS GROUP EXISTS BECAUSE THE MAINTAINER HAD TO ASK THREE TIMES. "No option to
    change the area for an existing operator." "No option to edit area for an
    existing product either." "I've talked about this a couple of times now."
 
@@ -531,14 +531,26 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
   });
 
   it("J3: it FAILS when the scope is set at creation and never changeable", () => {
-    // Pratik's defect, exactly: the create form works, the edit path silently
+    // The maintainer's defect, exactly: the create form works, the edit path silently
     // omits the field.
+    //
+    // ⚠️⚠️ THE BREAKAGE IS ASSERTED BEFORE IT IS USED, AND THAT LINE IS THE
+    // POINT OF THIS COMMENT. This case mutates a real source file by matching
+    // one exact line. Migration 0028 reworded that line — `?? null` went away
+    // with the company-wide state — so the `replace` silently matched nothing,
+    // the "frozen" copy was not frozen, and J3 reported that the audit had
+    // stopped working. It had not; the MUTATION had. A test that breaks a
+    // source by string match and does not check that the match happened is a
+    // test that quietly measures nothing the day somebody rewords the line, and
+    // this one only failed loudly because it expected a non-empty result.
     const frozen = new Map(sources);
     const src = sources.get("src/lib/api/products.ts")!;
-    frozen.set(
-      "src/lib/api/products.ts",
-      src.replace('if ("siteNodeId" in input) patch.site_node_id = input.siteNodeId ?? null;', ""),
+    const cut = src.replace(
+      "if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;",
+      "",
     );
+    expect(cut).not.toBe(src);
+    frozen.set("src/lib/api/products.ts", cut);
     expect(scopeParityOffences(frozen)).toEqual([
       "src/lib/api/products.ts: nothing can CHANGE products.site_node_id after creation",
     ]);
@@ -552,6 +564,8 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
       false,
     );
     expect(writesScopeColumn("patch.site_node_id = input.siteNodeId ?? null;")).toBe(true);
+    // and the post-0028 spelling, which no longer coalesces
+    expect(writesScopeColumn("patch.site_node_id = input.siteNodeId;")).toBe(true);
     expect(writesScopeColumn("{ display_name: n, site_node_id: s }")).toBe(true);
   });
 

@@ -93,7 +93,7 @@ export function useUpdateOperator() {
   });
 }
 
-/** The main action for taking someone off the board (Pratik's decision). */
+/** The main action for taking someone off the board (the maintainer's decision). */
 export function useSetOperatorActive() {
   const invalidate = useInvalidateOperators();
   return useMutation<OperatorRecord, SchedulerError, { id: string; active: boolean }>({

@@ -2,7 +2,7 @@
 -- 53_read_scoping_test.sql — migration 0026, D107: "ownership decides who may
 -- READ, not only who may edit."
 --
--- PRATIK'S WORDS (Aug 27, looking at the Products catalogue as the Plant 2
+-- THE MAINTAINER'S WORDS (Aug 27, looking at the Products catalogue as the Plant 2
 -- site admin):
 --   "why am I seeing product which is assigned to Plant 1? No member from one
 --    plant should see info for other plants, this is irrespective of whether
@@ -82,7 +82,12 @@ BEGIN
   INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
     ('60000000-0000-0000-0000-00000000ff01', v_org,'RP1','R P1 Product','30000000-0000-0000-0000-000000000001'::uuid),
     ('60000000-0000-0000-0000-00000000ff02', v_org,'RP2','R P2 Product', v_p2),
-    ('60000000-0000-0000-0000-00000000ff03', v_org,'RSH','R Shared Product', NULL),
+    -- ⭐ 0028/D108: THERE IS NO COMPANY-WIDE ROW ANY MORE. This row was NULL
+    -- until 0028 and every case that used it asserted "everyone sees it".
+    -- It is now owned by LINE 1 -- a third scope, two levels down -- so the
+    -- same cases now assert the opposite and the file keeps a row whose owner
+    -- is neither of the two plant roots. 55_'s N1 pins that NULL is refused.
+    ('60000000-0000-0000-0000-00000000ff03', v_org,'RL1','R Line-1 Product', '30000000-0000-0000-0000-000000000004'::uuid),
     -- ⭐ owned by ASSEMBLY, strictly BELOW the Plant 1 root: the mirror of the
     -- row g3 uses. Without it, a rule written as "owner above me only" passes
     -- every other case in this file.
@@ -91,21 +96,28 @@ BEGIN
   INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES
     ('50000000-0000-0000-0000-00000000ff01', v_org,'R P1 Operator','30000000-0000-0000-0000-000000000001'::uuid),
     ('50000000-0000-0000-0000-00000000ff02', v_org,'R P2 Operator', v_p2),
-    ('50000000-0000-0000-0000-00000000ff03', v_org,'R Shared Operator', NULL);
+    ('50000000-0000-0000-0000-00000000ff03', v_org,'R Line-1 Operator', '30000000-0000-0000-0000-000000000004'::uuid);
 
   INSERT INTO skills (id, org_id, name, site_node_id) VALUES
     ('40000000-0000-0000-0000-00000000ff01', v_org,'R P1 Training','30000000-0000-0000-0000-000000000001'::uuid),
     ('40000000-0000-0000-0000-00000000ff02', v_org,'R P2 Training', v_p2),
-    ('40000000-0000-0000-0000-00000000ff03', v_org,'R Shared Training', NULL);
+    ('40000000-0000-0000-0000-00000000ff03', v_org,'R Line-1 Training', '30000000-0000-0000-0000-000000000004'::uuid),
+    -- A second PLANT 2 training that nobody holds. R12 needs a requirement
+    -- the operator FAILS, and ff02 is the one they hold.
+    ('40000000-0000-0000-0000-00000000ff05', v_org,'R P2 Training Two', v_p2);
 
+  -- ⚠️ 0028 constrains this join too: a person may only hold a training on
+  -- their own branch. The P1 operator (owner = Plant 1 root) may hold the
+  -- Line-1 training because the two are comparable; the P2 operator may not,
+  -- so they hold their own plant's. 55_'s N7 asserts the refusal.
   INSERT INTO operator_skills (org_id, operator_id, skill_id) VALUES
     (v_org,'50000000-0000-0000-0000-00000000ff01','40000000-0000-0000-0000-00000000ff03'),
-    (v_org,'50000000-0000-0000-0000-00000000ff02','40000000-0000-0000-0000-00000000ff03');
+    (v_org,'50000000-0000-0000-0000-00000000ff02','40000000-0000-0000-0000-00000000ff02');
 
   INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES
     ('70000000-0000-0000-0000-00000000ff01', v_org,'R P1 Pattern','30000000-0000-0000-0000-000000000001'::uuid),
     ('70000000-0000-0000-0000-00000000ff02', v_org,'R P2 Pattern', v_p2),
-    ('70000000-0000-0000-0000-00000000ff03', v_org,'R Standard Pattern', NULL);
+    ('70000000-0000-0000-0000-00000000ff03', v_org,'R Line-1 Pattern', '30000000-0000-0000-0000-000000000004'::uuid);
 
   INSERT INTO shifts (id, org_id, template_id, name, start_min, end_min) VALUES
     ('71000000-0000-0000-0000-00000000ff01', v_org,'70000000-0000-0000-0000-00000000ff01','R Day', 360, 840),
@@ -121,7 +133,7 @@ EXCEPTION WHEN OTHERS THEN
   RAISE EXCEPTION 'FIXTURE FAILED (rows): % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;
 
-\echo 'R0: the fixture is well-formed — two sites in one org, owned AND unowned rows, and a grant BELOW an owner'
+\echo 'R0: the fixture is well-formed — two sites in one org, EVERY row owned, and a grant BELOW an owner'
 SAVEPOINT sp_R0;
 DO $$
 DECLARE v_p2 uuid; v_roots int; v_owned int; v_unowned int; v_orgadmins int; v_below int;
@@ -143,9 +155,13 @@ BEGIN
     JOIN nodes rt ON rt.id = '30000000-0000-0000-0000-000000000001'
    WHERE pg.profile_id = 'f0000000-0000-0000-0000-000000000003'
      AND gn.path <@ rt.path AND gn.path <> rt.path;
-  IF v_roots >= 2 AND v_owned >= 2 AND v_unowned >= 1 AND v_orgadmins = 0 AND v_below = 1
+  -- ⭐ 0028/D108 INVERTED THIS TERM. It used to demand at least one UNOWNED row,
+  -- because company-wide was a state the file had to exercise. There is no such
+  -- state now, and a fixture that still had one would mean the NOT NULL did not
+  -- take -- so the same count is asserted at zero rather than deleted.
+  IF v_roots >= 2 AND v_owned >= 2 AND v_unowned = 0 AND v_orgadmins = 0 AND v_below = 1
   THEN RAISE NOTICE 'PASS R0';
-  ELSE RAISE NOTICE 'FAIL R0: roots=% owned=% unowned=% org_admins=% grant_below_root=% (want >=2,>=2,>=1,0,1)',
+  ELSE RAISE NOTICE 'FAIL R0: roots=% owned=% unowned=% org_admins=% grant_below_root=% (want >=2,>=2,0,0,1)',
     v_roots, v_owned, v_unowned, v_orgadmins, v_below; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R0;
@@ -170,7 +186,7 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_R1;
 
-\echo 'R2: ...but company-wide rows stay visible to that same person — NULL is a VALUE, not an absence'
+\echo 'R2 ⭐ (rewritten by 0028): the row that USED to be company-wide is now owned by Line 1, and the Plant 2 admin sees none of it. D108: there is no row everybody can see.'
 SAVEPOINT sp_R2;
 DO $$
 DECLARE p int; o int; s int; t int;
@@ -182,8 +198,8 @@ BEGIN
   SELECT count(*) INTO s FROM skills          WHERE id='40000000-0000-0000-0000-00000000ff03';
   SELECT count(*) INTO t FROM shift_templates WHERE id='70000000-0000-0000-0000-00000000ff03';
   RESET ROLE;
-  IF p=1 AND o=1 AND s=1 AND t=1 THEN RAISE NOTICE 'PASS R2';
-  ELSE RAISE NOTICE 'FAIL R2: product=% operator=% training=% pattern=% (want all 1)', p,o,s,t; END IF;
+  IF p=0 AND o=0 AND s=0 AND t=0 THEN RAISE NOTICE 'PASS R2';
+  ELSE RAISE NOTICE 'FAIL R2: product=% operator=% training=% pattern=% (want all 0)', p,o,s,t; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R2;
 
@@ -296,61 +312,121 @@ ROLLBACK TO SAVEPOINT sp_R8;
 -- Without R9 every historical band on their board renders "(unknown product)"
 -- and `BoardGrid`'s colour lookup collapses them all to one palette token.
 -- ---------------------------------------------------------------------------
-\echo 'R9 ⭐: a Plant 1 product scheduled on a Plant 2 node stays READABLE to the Plant 2 admin'
+\echo 'R9 ⭐⭐ (rewritten by 0028): a Plant 1 product CANNOT BE SCHEDULED on a Plant 2 node at all'
+-- ---------------------------------------------------------------------------
+-- ⭐⭐ THESE THREE CASES USED TO ASSERT THE OPPOSITE, AND THAT IS THE POINT.
+--
+-- Until 0028 the read rule carried an exception -- a foreign-owned product on
+-- a run you can see stayed readable -- so that the board could name its own
+-- history. R9 built exactly that configuration and asserted the product was
+-- visible. §19.71 then showed the same exception leaking into the products
+-- CATALOGUE, where the maintainer found it.
+--
+-- D109 removes the configuration instead of the exception. A run's product
+-- must be owned by an ancestor-or-self of the run's node, so "a Plant 1
+-- product on a Plant 2 board" is not a thing that can exist, and the
+-- exception it justified was deleted in 0028 §6. R9-R11 are the empirical
+-- half of that migration's proof: R9 that the write is refused, R10 that a
+-- legal write in the same shape still succeeds (or R9 would pass with the
+-- feature broken), R11 that the products a person can see are exactly the
+-- ones their own board can name -- which is what the exception was for.
+-- ---------------------------------------------------------------------------
 SAVEPOINT sp_R9;
 DO $$
-DECLARE v_line uuid; v_seen int;
+DECLARE v_line uuid; v_err text := 'no error'; v_detail text := '-'; v_runs int;
 BEGIN
   SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
-  INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
-  VALUES ('10000000-0000-0000-0000-000000000001', v_line,
-          '60000000-0000-0000-0000-00000000ff01',
-          tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f2', true);
-  SET LOCAL ROLE authenticated;
-  SELECT count(*) INTO v_seen FROM products WHERE id='60000000-0000-0000-0000-00000000ff01';
-  RESET ROLE;
-  IF v_seen=1 THEN RAISE NOTICE 'PASS R9';
-  ELSE RAISE NOTICE 'FAIL R9: the product on their own board is invisible to them (saw %)', v_seen; END IF;
+  BEGIN
+    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    VALUES ('10000000-0000-0000-0000-000000000001', v_line,
+            '60000000-0000-0000-0000-00000000ff01',
+            tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLSTATE;
+    -- The payload SHAPE, by key, not the message (doc_drift rule 7).
+    GET STACKED DIAGNOSTICS v_detail = PG_EXCEPTION_DETAIL;
+    v_detail := coalesce(
+      (SELECT string_agg(k, ',' ORDER BY k)
+         FROM jsonb_object_keys(nullif(v_detail, '')::jsonb) k), '-');
+  END;
+  SELECT count(*) INTO v_runs FROM runs
+   WHERE node_id = v_line AND product_id = '60000000-0000-0000-0000-00000000ff01';
+  IF v_err = 'PT409' AND v_runs = 0 AND v_detail = 'error,id,kind,node_id,owner_node_id'
+  THEN RAISE NOTICE 'PASS R9';
+  ELSE RAISE NOTICE 'FAIL R9: sqlstate=% runs=% detail_keys=% (want PT409, 0, error,id,kind,node_id,owner_node_id)',
+    v_err, v_runs, v_detail; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R9;
 
-\echo 'R10: the CONTROL for R9 — without that run the same product is invisible, so R9 is not vacuous'
+\echo 'R10: the CONTROL for R9 — the SAME write with the plant''s OWN product succeeds, so R9 is not passing because runs are broken'
 SAVEPOINT sp_R10;
 DO $$
-DECLARE v_seen int;
+DECLARE v_line uuid; v_err text := 'no error'; v_runs int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f2', true);
-  SET LOCAL ROLE authenticated;
-  SELECT count(*) INTO v_seen FROM products WHERE id='60000000-0000-0000-0000-00000000ff01';
-  RESET ROLE;
-  IF v_seen=0 THEN RAISE NOTICE 'PASS R10';
-  ELSE RAISE NOTICE 'FAIL R10: visible with no run — R9 proves nothing (saw %)', v_seen; END IF;
+  SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
+  BEGIN
+    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    VALUES ('10000000-0000-0000-0000-000000000001', v_line,
+            '60000000-0000-0000-0000-00000000ff02',
+            tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
+  EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM; END;
+  SELECT count(*) INTO v_runs FROM runs
+   WHERE node_id = v_line AND product_id = '60000000-0000-0000-0000-00000000ff02';
+  IF v_err = 'no error' AND v_runs = 1 THEN RAISE NOTICE 'PASS R10';
+  ELSE RAISE NOTICE 'FAIL R10: err=% runs=% (want no error, 1)', v_err, v_runs; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R10;
 
-\echo 'R11: and a run on the OTHER plant does not make it readable — the run must be one you can see'
+\echo 'R11 ⭐⭐: THE PROOF, MEASURED — every product on a run the Plant 2 admin can read is a product they can read'
 SAVEPOINT sp_R11;
 DO $$
-DECLARE v_seen int;
+DECLARE v_line uuid; v_unnameable int;
 BEGIN
+  SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
+  -- Their own board, populated legally.
   INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
-  VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000007',
-          '60000000-0000-0000-0000-00000000ff01', tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
+  VALUES ('10000000-0000-0000-0000-000000000001', v_line,
+          '60000000-0000-0000-0000-00000000ff02',
+          tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f2', true);
   SET LOCAL ROLE authenticated;
-  SELECT count(*) INTO v_seen FROM products WHERE id='60000000-0000-0000-0000-00000000ff01';
+  -- Read every run RLS lets them have, then ask how many name a product RLS
+  -- does NOT let them have. Under the deleted exception this could only be
+  -- zero because of the exception; now it is zero by construction, and if a
+  -- future change breaks the constraint this counts the "(unknown product)"
+  -- bands before a user has to.
+  SELECT count(*) INTO v_unnameable
+    FROM runs r
+   WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.id = r.product_id);
   RESET ROLE;
-  IF v_seen=0 THEN RAISE NOTICE 'PASS R11';
-  ELSE RAISE NOTICE 'FAIL R11: a run they cannot see made the product readable (saw %)', v_seen; END IF;
+  IF v_unnameable = 0 THEN RAISE NOTICE 'PASS R11';
+  ELSE RAISE NOTICE 'FAIL R11: % run(s) on their own board name a product they cannot read', v_unnameable; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  RAISE NOTICE 'FAIL R11: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R11;
 
 -- ---------------------------------------------------------------------------
--- ⭐⭐ `check_eligibility`. R12 is the case 0023 said made this whole migration
+-- ⭐⭐ `check_eligibility`. R12 was the case 0023 said made this whole migration
 -- impossible; R13 is a hole that was ALREADY OPEN before it.
+--
+-- ⭐⭐ 0028 REWROTE R12, AND THE REASON IS THE SECOND COROLLARY OF ITS PROOF.
+-- R12 used to place a PLANT 1 training requirement on a PLANT 2 cell and assert
+-- that the Plant 2 admin, who could not LIST that training, still got a correct
+-- "not eligible, and here is which one". D109 makes that configuration
+-- impossible -- a requirement's training must be owned by an ancestor-or-self
+-- of the node -- and the same ancestor-chain argument that killed the history
+-- clause applies here: if you can read the CELL, the owner of anything required
+-- there is comparable to one of your grants, so you can read the TRAINING too.
+-- Hazard (a) of 0026 §3 is now unreachable rather than handled.
+--
+-- So R12 asserts the corollary instead of the workaround: the caller CAN list
+-- it, and the answer is still right. ⚠️ THIS DOES NOT MAKE THE DEFINER GATE
+-- UNNECESSARY -- hazard (b), the ancestor walk through the scoped `nodes`
+-- table, is a different mechanism and R13 is still the case that measures it.
 -- ---------------------------------------------------------------------------
-\echo 'R12 ⭐⭐: the qualification check still names a training the CALLER cannot list'
+\echo 'R12 ⭐⭐ (rewritten by 0028): a training required where you can see is a training you can list — and the answer still names it'
 SAVEPOINT sp_R12;
 DO $$
 DECLARE v_ans jsonb; v_can_list int; v_line uuid;
@@ -360,25 +436,27 @@ BEGIN
   -- "permission denied for table r_fix" -- indistinguishable, at a glance, from
   -- the RLS refusal this case exists to measure.
   SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
-  -- a requirement for a PLANT 1 training, on a PLANT 2 cell, asked by the Plant 2 admin
+  -- A requirement on a PLANT 2 cell, for PLANT 2's OWN training. Under D109
+  -- there is no other legal shape; 55_'s N6 asserts the illegal one is refused.
   INSERT INTO node_skill_requirements (node_id, skill_id, org_id)
-  VALUES (v_line, '40000000-0000-0000-0000-00000000ff01','10000000-0000-0000-0000-000000000001')
+  VALUES (v_line, '40000000-0000-0000-0000-00000000ff05','10000000-0000-0000-0000-000000000001')
   ON CONFLICT DO NOTHING;
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f2', true);
   SET LOCAL ROLE authenticated;
-  SELECT count(*) INTO v_can_list FROM skills WHERE id='40000000-0000-0000-0000-00000000ff01';
+  SELECT count(*) INTO v_can_list FROM skills WHERE id='40000000-0000-0000-0000-00000000ff05';
   v_ans := check_eligibility(v_line,
                              '50000000-0000-0000-0000-00000000ff02',
                              tstzrange(now(), now()+interval '1 day'));
   RESET ROLE;
-  -- ⚠️ THE WHOLE POINT: they cannot LIST the training (v_can_list = 0) and the
-  -- answer must STILL be "not eligible, and here is which one". This is 0023's
-  -- stated hazard asserted directly instead of avoided.
-  IF v_can_list = 0
+  -- ⚠️ THE WHOLE POINT, INVERTED BY 0028: they CAN list the training now
+  -- (v_can_list = 1, the corollary), and the answer is still "not eligible,
+  -- and here is which one". Both halves matter -- asserting only the listing
+  -- would pass with `check_eligibility` returning nonsense.
+  IF v_can_list = 1
      AND (v_ans->>'eligible')::boolean = false
      AND jsonb_array_length(v_ans->'missing_skills') = 1
   THEN RAISE NOTICE 'PASS R12';
-  ELSE RAISE NOTICE 'FAIL R12: can_list=% eligible=% missing=% (want 0,false,1)',
+  ELSE RAISE NOTICE 'FAIL R12: can_list=% eligible=% missing=% (want 1,false,1)',
     v_can_list, v_ans->>'eligible', v_ans->'missing_skills'; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R12;

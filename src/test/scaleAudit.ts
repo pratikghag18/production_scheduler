@@ -291,7 +291,7 @@ export function auditRemSurfaces(
 /* ---------------------------------------------------------------------------
    D100 — THE DRAG AUDIT. "MATCH THE COLOURS" MADE INTO A PROPERTY OF THE FILES.
 
-   Pratik, Aug 27: *"Can we make sure we match the colors on drag selection in
+   The maintainer, Aug 27: *"Can we make sure we match the colors on drag selection in
    all areas, shouldn't this be done by default? It seems we're reinventing
    stuff vs reusing it."*
 
@@ -413,7 +413,7 @@ export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]
 /* ===========================================================================
  * D105 — CREATE/EDIT PARITY. A FIELD YOU CAN SET ONCE AND NEVER CHANGE.
  *
- * Pratik, three times across two days: *"No option to edit area for an existing
+ * The maintainer, three times across two days: *"No option to edit area for an existing
  * product either... I've talked about this a couple of times now."*
  *
  * ⭐⭐ THE MISTAKE WAS THE SAME EVERY TIME AND I DID NOT SEE THE PATTERN. Build

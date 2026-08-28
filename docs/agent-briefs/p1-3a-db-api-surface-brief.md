@@ -18,7 +18,7 @@ Do not write TypeScript in this brief. Do not touch `src/`.
 4. `docs/mockups/model-hybrid.html` — for the *interaction* the split-coverage popover and run move must be able to support. You are building the data the mockup's UX needs, not the UX.
 5. `supabase/tests/20_capacity_test.sql` — the existing test idiom you will extend.
 
-Files are on the device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler` (`$HOME/mnt/production_scheduler` for `device_bash`). Stage them with `device_stage_files` to read them in the container.
+Files are on the device at `<repo root>` (`$HOME/mnt/production_scheduler` for `device_bash`). Stage them with `device_stage_files` to read them in the container.
 
 ## 1. Environment (verified 2026-08-21 — read before planning)
 

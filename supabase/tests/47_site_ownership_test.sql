@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 47_site_ownership_test.sql — migration 0020, "each site is its own instance."
 --
--- Pratik's frame, and the one test it gives, which decides every case below:
+-- The maintainer's frame, and the one test it gives, which decides every case below:
 --
 --   "the system-admin or company-admin has access to all sites across the
 --    company and they basically can change whatever they want at any site, but
@@ -297,7 +297,7 @@ SAVEPOINT sp_W6;
 DO $$
 DECLARE v_res jsonb; v_names text[];
 BEGIN
-  -- This is the thing Pratik corrected me about: level vocabulary is a site
+  -- This is the thing the maintainer corrected me about: level vocabulary is a site
   -- admin's job, not a company admin's. It was only ever unsafe because
   -- structures were unowned, and §1-§3 fixed that.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', true);
@@ -1176,7 +1176,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_W28;
 
-\echo 'W29: ⭐ a site admin CAN give someone access to their own site -- what Pratik asked for'
+\echo 'W29: ⭐ a site admin CAN give someone access to their own site -- what the maintainer asked for'
 SAVEPOINT sp_W29;
 DO $$
 DECLARE v_n int;
@@ -1366,7 +1366,7 @@ DO $$
 DECLARE
   v_made jsonb; v_tpl uuid; v_names text[]; v_src_names text[]; v_sched int;
 BEGIN
-  -- Pratik, asked and answered: a new site is set up by choosing an existing
+  -- The maintainer, asked and answered: a new site is set up by choosing an existing
   -- shape, and it gets a copy, not a reference. Four things are asserted
   -- because four different mistakes are possible: the copy exists, it is NOT
   -- the source, it carries the source's wording, and it carries the
@@ -1493,9 +1493,18 @@ BEGIN
               (SELECT id FROM skills WHERE org_id = '10000000-0000-0000-0000-000000000001' LIMIT 1));
   EXCEPTION WHEN OTHERS THEN v_s1 := SQLSTATE || ' ' || SQLERRM; END;
   BEGIN
+    -- ⚠️ 0028 MADE THE SKILL'S OWNER MATTER HERE. This case is about WHO may
+    -- write, so it must not trip the scope guard on the way in: naming a Plant
+    -- 1 training on a Plant 2 cell now raises PT409 before RLS is consulted,
+    -- and the case would stop measuring permission entirely. Name a training
+    -- Plant 2 owns, so the only thing left to refuse is the caller.
+    -- (55_'s N6 covers the scope refusal itself.)
     INSERT INTO node_skill_requirements (org_id, node_id, skill_id)
       VALUES ('10000000-0000-0000-0000-000000000001', v_p2_cell,
-              (SELECT id FROM skills WHERE org_id = '10000000-0000-0000-0000-000000000001' LIMIT 1));
+              (SELECT s.id FROM skills s JOIN nodes n ON n.id = s.site_node_id
+                JOIN nodes c ON c.id = v_p2_cell
+                WHERE s.org_id = '10000000-0000-0000-0000-000000000001'
+                  AND n.path @> c.path LIMIT 1));
   EXCEPTION WHEN OTHERS THEN v_s2 := SQLSTATE; END;
   RESET ROLE;
   SELECT count(*) INTO v_mine FROM node_skill_requirements
@@ -1535,8 +1544,17 @@ BEGIN
               '30000000-0000-0000-0000-000000000009', v_tpl);
   EXCEPTION WHEN OTHERS THEN v_s1 := SQLSTATE || ' ' || SQLERRM; END;
   BEGIN
+    -- ⚠️ Same 0028 correction as W37: `v_tpl` is a Plant 1 pattern, and putting
+    -- it on a Plant 2 line now trips the scope guard (PT409) before RLS gets a
+    -- say, which would turn a permission case into a constraint case. Use a
+    -- pattern that covers the Plant 2 line, so the caller is the only thing
+    -- wrong with the write.
     INSERT INTO node_shift_templates (org_id, node_id, template_id)
-      VALUES ('10000000-0000-0000-0000-000000000001', v_p2_line, v_tpl);
+      VALUES ('10000000-0000-0000-0000-000000000001', v_p2_line,
+              (SELECT t.id FROM shift_templates t JOIN nodes n ON n.id = t.site_node_id
+                JOIN nodes c ON c.id = v_p2_line
+                WHERE t.org_id = '10000000-0000-0000-0000-000000000001'
+                  AND n.path @> c.path LIMIT 1));
   EXCEPTION WHEN OTHERS THEN v_s2 := SQLSTATE; END;
   RESET ROLE;
   SELECT count(*) INTO v_mine FROM node_shift_templates
@@ -1561,7 +1579,7 @@ BEGIN
   -- 0020 to make `nodes_check_level_adjacency` SECURITY DEFINER, so that a
   -- destination a site admin cannot see stops being reported as
   -- `level_mismatch`. MEASURED on this schema: doing that reopens the escape
-  -- hatch D97 closed at Pratik's request, because D97's gate is
+  -- hatch D97 closed at the maintainer's request, because D97's gate is
   -- `pg_has_role(current_user, <owner>, 'USAGE')` and inside a SECURITY DEFINER
   -- function `current_user` IS the owner -- so the test becomes true for
   -- everybody signed in.

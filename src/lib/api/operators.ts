@@ -57,7 +57,7 @@ export interface OperatorRecord {
   employeeRef: string | null;
   active: boolean;
   /** `null` = company-wide (0023). Otherwise the ROOT node that owns this person. */
-  siteNodeId: string | null;
+  siteNodeId: string;
   /** `'manual'` by default; an imported person carries their source here. */
   source: string;
   externalId: string | null;
@@ -66,7 +66,7 @@ export interface OperatorRecord {
 export interface SkillRecord {
   id: string;
   name: string;
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 export interface OperatorSkillRecord {
@@ -113,11 +113,16 @@ export function parseOperatorRecord(v: unknown): OperatorRecord | null {
   const id = str(v.id);
   const displayName = str(v.display_name);
   const employeeRef = strOrNull(v.employee_ref);
-  const siteNodeId = strOrNull(v.site_node_id);
+  // ⭐ `str`, not `strOrNull`, since 0028. The column is NOT NULL, so a null
+  // here means the read did not come from a database this client understands.
+  // The row is REJECTED rather than coerced — it is then counted as skipped and
+  // said out loud, which is the only honest thing to do with a person whose
+  // plant the screen cannot name.
+  const siteNodeId = str(v.site_node_id);
   const source = str(v.source);
   const externalId = strOrNull(v.external_id);
-  if (id === null || displayName === null || source === null) return null;
-  if (employeeRef === undefined || siteNodeId === undefined || externalId === undefined) return null;
+  if (id === null || displayName === null || source === null || siteNodeId === null) return null;
+  if (employeeRef === undefined || externalId === undefined) return null;
   if (typeof v.active !== "boolean") return null;
   return { id, displayName, employeeRef, active: v.active, siteNodeId, source, externalId };
 }
@@ -126,8 +131,8 @@ export function parseSkillRecord(v: unknown): SkillRecord | null {
   if (!isRecord(v)) return null;
   const id = str(v.id);
   const name = str(v.name);
-  const siteNodeId = strOrNull(v.site_node_id);
-  if (id === null || name === null || siteNodeId === undefined) return null;
+  const siteNodeId = str(v.site_node_id);
+  if (id === null || name === null || siteNodeId === null) return null;
   return { id, name, siteNodeId };
 }
 
@@ -311,7 +316,7 @@ export interface CreateOperatorInput {
    * `null` here for anyone who is not a company admin (0023), and the trigger
    * `operators_check_site` refuses a node that is not a root.
    */
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 export async function createOperator(input: CreateOperatorInput): Promise<OperatorRecord> {
@@ -337,22 +342,24 @@ export interface UpdateOperatorInput {
    * leave it alone**; passing `null` MOVES them to company-wide, which is a
    * different act and has to be expressible.
    *
-   * ⚠️ `undefined` AND `null` MEAN DIFFERENT THINGS HERE and that is the whole
-   * reason this is optional rather than required. `siteNodeId: null` is a real
-   * value in this schema (0023's column comment says so), so "not supplied"
-   * cannot be spelled the same way as "set it to company-wide" — a rename that
-   * forgot the field would silently move the person.
+   * ⚠️ OPTIONAL, AND THE REASON SURVIVED 0028 IN A NEW SHAPE. Before D108 the
+   * three states were `string` (move them), `null` (company-wide) and
+   * `undefined` (leave it alone), so "not supplied" could not be spelled as
+   * `null`. D108 deleted the middle one. What still matters is the other pair:
+   * an ABSENT key means "leave it alone", so a rename that forgot the field
+   * must not send one — and a re-home that sent nothing would silently keep
+   * the old owner while the screen showed the new one.
    */
-  siteNodeId?: string | null;
+  siteNodeId?: string;
 }
 
 export async function updateOperator(input: UpdateOperatorInput): Promise<OperatorRecord> {
-  const patch: { display_name: string; employee_ref: string | null; site_node_id?: string | null } = {
+  const patch: { display_name: string; employee_ref: string | null; site_node_id?: string } = {
     display_name: input.displayName,
     employee_ref: input.employeeRef,
   };
   // Only when the caller actually supplied it — see the interface comment.
-  if ("siteNodeId" in input) patch.site_node_id = input.siteNodeId ?? null;
+  if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;
 
   const { data, error } = await supabase
     .from("operators")
@@ -364,7 +371,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Operat
 }
 
 /**
- * ⭐ THE MAIN ACTION (Pratik's decision). Deactivating keeps every assignment,
+ * ⭐ THE MAIN ACTION (the maintainer's decision). Deactivating keeps every assignment,
  * every ticket and every audit trail intact and simply takes the person off
  * the board; deleting is the secondary path below and usually refused.
  */
@@ -397,8 +404,8 @@ export async function deleteOperator(id: string): Promise<void> {
 export interface CreateSkillInput {
   orgId: string;
   name: string;
-  /** `null` = company-wide, which is what Pratik chose for skills by default. */
-  siteNodeId: string | null;
+  /** `null` = company-wide, which is what the maintainer chose for skills by default. */
+  siteNodeId: string;
 }
 
 /**

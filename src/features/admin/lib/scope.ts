@@ -3,7 +3,7 @@
  * and therefore where it is offered. Migration 0025 / D103.
  *
  * ---------------------------------------------------------------------------
- * PRATIK, Aug 27:
+ * THE MAINTAINER, Aug 27:
  *   "The products/operators/shifts could belong to a particular hierarchy
  *    within the plant and not necessarily to the whole plant... how do we
  *    assign them to a specific hierarchy level so the lower levels inherit
@@ -13,12 +13,19 @@
  * EDIT it" and "it decides WHERE it is offered" — and chose the second.
  *
  * ---------------------------------------------------------------------------
- * ⭐⭐ THE RULE, AND IT IS ONE LINE: available at X when the scope is NULL, or
- * when X is AT OR BELOW the scope node.
+ * ⭐⭐ THE RULE, AND IT IS ONE LINE: available at X when X is AT OR BELOW the
+ * scope node. There is no second clause.
  *
- *   scope NULL          -> everywhere (company-wide, the fallback)
  *   scope = Line 1      -> Line 1 itself, and every cell under it
  *   scope = Assembly    -> Assembly, both its lines, and all their cells
+ *
+ * ⭐ MIGRATION 0028 / D108 REMOVED THE FALLBACK. `scope NULL -> everywhere` was
+ * the company-wide default and it is gone from the database: `site_node_id` is
+ * NOT NULL on all four tables. The maintainer, Aug 28: *"remove company-wide as an
+ * option for products and operators... a person under no circumstances should
+ * be able to see data for other plants unless they are system admin, period."*
+ * The `null` branches below went with it rather than being left unreachable —
+ * a picker that can still emit `null` is a form that fails on submit.
  *
  * ⚠️ "AT OR BELOW" INCLUDES THE NODE ITSELF, and that is load-bearing rather
  * than pedantic. Postgres' `<@` is reflexive and `52_scope_and_colour_test.sql`
@@ -32,7 +39,8 @@
  * one. A node OFFERS MANY products, so every scope that covers it applies: the
  * line's product, the department's, and the company-wide one, all three. Case
  * S10 exists because reusing the `ORDER BY nlevel(...) DESC LIMIT 1` shape here
- * would silently offer one product out of three and look completely reasonable.
+ * would silently offer one product out of two and look completely reasonable.
+ * (Three before 0028, when the company-wide row was the third.)
  *
  * ---------------------------------------------------------------------------
  * ⭐ WHY THE PATH AND NOT THE PARENT CHAIN. `BoardNode.path` is the node's
@@ -87,24 +95,23 @@ export function isAtOrBelow(targetPath: string, ancestorPath: string): boolean {
 /**
  * Is a thing scoped to `scopeNodeId` offered at the node `targetPath`?
  *
- * @param scopeNodeId `null` means company-wide — offered everywhere.
+ * @param scopeNodeId the node the thing belongs to. NOT nullable since 0028.
  * @param nodesById   every node this client can read, keyed by id.
  *
  * FAILS OPEN on an unreadable scope node — see the file header.
  */
 export function offeredAt(
-  scopeNodeId: string | null,
+  scopeNodeId: string,
   targetPath: string,
   nodesById: ReadonlyMap<string, ScopeNode>,
 ): boolean {
-  if (scopeNodeId === null) return true;
   const scope = nodesById.get(scopeNodeId);
   if (scope === undefined) return true; // cannot tell -> offer it, let the server decide
   return isAtOrBelow(targetPath, scope.path);
 }
 
 /** Everything in `items` that is offered at `targetPath`. Order is preserved. */
-export function offeredHere<T extends { siteNodeId: string | null }>(
+export function offeredHere<T extends { siteNodeId: string }>(
   items: readonly T[],
   targetPath: string,
   nodesById: ReadonlyMap<string, ScopeNode>,
@@ -117,15 +124,13 @@ export function offeredHere<T extends { siteNodeId: string | null }>(
  * ======================================================================== */
 
 export interface ScopeOption {
-  /** `null` for the company-wide entry, which is always first. */
-  value: string | null;
+  /** A node id. Never `null` since 0028 — there is no company-wide entry. */
+  value: string;
   /** The node's own name — the label is built from this plus `depth`. */
   name: string;
   /** 0 for a root; used to indent. */
   depth: number;
 }
-
-const COMPANY_WIDE: ScopeOption = { value: null, name: "Everywhere (company-wide)", depth: 0 };
 
 /**
  * The "Belongs to" list, in tree order, depth-indented.
@@ -152,15 +157,14 @@ export function scopeOptions(
 ): ScopeOption[] {
   const usable = canEdit === undefined ? nodes : nodes.filter((n) => canEdit.has(n.id));
   const sorted = [...usable].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return [
-    COMPANY_WIDE,
-    ...sorted.map((n) => ({ value: n.id, name: n.name, depth: n.path.split(".").length - 1 })),
-  ];
+  // ⭐ 0028: the list used to open with an "Everywhere (company-wide)" entry.
+  // It is not filtered out here, it is not built — a picker that can emit a
+  // value the database refuses is D106's defect with a different label on it.
+  return sorted.map((n) => ({ value: n.id, name: n.name, depth: n.path.split(".").length - 1 }));
 }
 
 /** `"— — Line 1"` — the indent an option element cannot express with CSS. */
 export function indentedLabel(option: ScopeOption): string {
-  if (option.value === null) return option.name;
   // A non-breaking figure space, doubled per level. Leading ordinary spaces are
   // collapsed by every browser's <option> rendering; this survives.
   return `${"  ".repeat(option.depth)}${option.name}`;
@@ -169,16 +173,19 @@ export function indentedLabel(option: ScopeOption): string {
 /**
  * The sentence a row shows for where it belongs.
  *
- * ⚠️ AN UNREADABLE SCOPE READS AS "Somewhere else", NEVER AS "Company-wide".
- * Those are the two answers a reader must never confuse: one means everyone can
- * use it, the other means this person cannot see where it lives. 0023's
- * `ownerLabel` made exactly this distinction for sites and it survives here.
+ * ⚠️ AN UNREADABLE SCOPE READS AS "Somewhere else". Before 0028 the warning
+ * here was that it must never read as "Company-wide" — two answers a reader
+ * must not confuse, one meaning everyone can use it and the other meaning this
+ * person cannot see where it lives. Only the second survives, and under 0028
+ * it should now be unreachable in practice: a row you can read is owned by a
+ * node on one of your own branches. It is kept, because "unreachable" is a
+ * claim about the server and this function is what the user sees if it stops
+ * being true.
  */
 export function scopeLabel(
-  scopeNodeId: string | null,
+  scopeNodeId: string,
   nodesById: ReadonlyMap<string, ScopeNode>,
 ): string {
-  if (scopeNodeId === null) return "Company-wide";
   const node = nodesById.get(scopeNodeId);
   return node === undefined ? "Somewhere else" : node.name;
 }
@@ -191,10 +198,9 @@ export function scopeLabel(
  * needed, and truncates rather than looping.
  */
 export function scopePathLabel(
-  scopeNodeId: string | null,
+  scopeNodeId: string,
   nodesById: ReadonlyMap<string, ScopeNode>,
 ): string {
-  if (scopeNodeId === null) return "Company-wide";
   const names: string[] = [];
   const seen = new Set<string>();
   let cur = nodesById.get(scopeNodeId);

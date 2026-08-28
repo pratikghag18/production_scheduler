@@ -86,15 +86,28 @@ export interface OperatorLike {
   displayName: string;
   employeeRef: string | null;
   active: boolean;
-  /** `null` = company-wide (migration 0023). Otherwise the ROOT node that owns them. */
-  siteNodeId: string | null;
+  /**
+   * The node this person belongs to. NOT NULL since migration 0028 / D108 —
+   * there is no company-wide operator, and it need not be a root (D109).
+   */
+  siteNodeId: string;
 }
 
-/** A skill. Names are unique per ORG (`unique (org_id, name)`), not per site. */
+/**
+ * A training. Names are unique per ORG (`unique (org_id, name)`), not per site
+ * — which is why `describeSkillNameClash` exists at all.
+ *
+ * ⚠️ THE NAME IS COMPANY-UNIQUE AND THE ROW IS NOT COMPANY-WIDE, AND AFTER
+ * 0028 THOSE TWO FACTS PULL AGAINST EACH OTHER. Plant 2 can no longer see
+ * Plant 1's "Forklift" and can no longer create one, so the clash message can
+ * now name a row the reader cannot open. That is recorded rather than fixed
+ * here; the fix is a per-owner uniqueness rule and it belongs with D111's
+ * starter library, where "copy this into my plant" is the answer.
+ */
 export interface SkillLike {
   id: string;
   name: string;
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 /** A ticket: this person holds this skill. `expiresAt === null` means no expiry. */
@@ -422,7 +435,7 @@ export interface OperatorRow {
   displayName: string;
   employeeRef: string | null;
   active: boolean;
-  siteNodeId: string | null;
+  siteNodeId: string;
   /** How many tickets this person holds. Not eligibility — just the count. */
   ticketCount: number;
 }
@@ -564,7 +577,7 @@ export function ticketsFor(
 /* ===========================================================================
  * findExistingSkillByName — the clash that is not an error.
  *
- * ⭐ PRATIK'S DECISION: SKILL NAMES STAY COMPANY-WIDE (`unique (org_id,
+ * ⭐ THE MAINTAINER'S DECISION: SKILL NAMES STAY COMPANY-WIDE (`unique (org_id,
  * name)`, migration 0002:53). The consequence on a screen is the whole point
  * of this function: when someone types a name that already exists, they have
  * not made a mistake — they have found the ticket they were about to create.
@@ -612,7 +625,12 @@ export function describeSkillNameClash(clash: SkillNameClash): string {
   // Welding" — ungrammatical, and it told the person nothing they did not
   // already know from the fact that we are refusing their name. WHOSE ticket it
   // is, is the part that decides whether they can reach it. Measured 27 Aug.
-  const scope = clash.skill.siteNodeId === null ? "company-wide" : "site-owned";
+  // ⚠️ 0028 COLLAPSED THIS TO ONE ARM. It used to read "company-wide" or
+  // "site-owned"; there is no company-wide row now, so the word that carried
+  // the information is gone and every clash is site-owned. Left as a named
+  // constant rather than inlined, because the sentence is about to need the
+  // owner's NAME instead — see the SkillLike header.
+  const scope = "site-owned";
   return clash.exact
     ? `There is already a ${scope} ${clash.skill.name} — use that one.`
     : `There is already a ${scope} ${clash.skill.name}. Attach that one unless this is a different ticket.`;
@@ -621,7 +639,7 @@ export function describeSkillNameClash(clash: SkillNameClash): string {
 /* ===========================================================================
  * Deleting a person.
  *
- * ⭐ PRATIK'S DECISION: DEACTIVATE IS THE MAIN ACTION. Delete is secondary and
+ * ⭐ THE MAINTAINER'S DECISION: DEACTIVATE IS THE MAIN ACTION. Delete is secondary and
  * only when nothing is in the way, and the refusal must say WHAT is in the
  * way. `operator_skills` and `assignments` both reference `operators` with no
  * `ON DELETE` clause, so a delete that hits either fails with SQLSTATE 23503

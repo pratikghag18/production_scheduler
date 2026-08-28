@@ -100,7 +100,13 @@ export function productColorVar(token: string | null | undefined): string {
 }
 
 /* ===========================================================================
- * §2. Owners — `site_node_id`, where `null` is a value and not an absence.
+ * §2. Owners — `site_node_id`, which since migration 0028 is NOT NULL.
+ *
+ * ⭐ 0028 / D108. `null` used to be a value here, not an absence: it meant the
+ * whole company owned the row. The maintainer removed the state on 28 Aug -- "remove
+ * company-wide as an option for products and operators... a person under no
+ * circumstances should be able to see data for other plants unless they are
+ * system admin, period." Every `null` branch in this section went with it.
  * ======================================================================== */
 
 /** One site a product can belong to: a ROOT node of the org (0023 §2's trigger). */
@@ -109,30 +115,22 @@ export interface ProductSite {
   name: string;
 }
 
-/**
- * What a company-wide product is called on screen.
- *
- * `site_node_id IS NULL` means the whole company owns it (0023's own column
- * comment). Rendering that as an empty cell was the first draft and it read as
- * missing data; it is a deliberate, meaningful state and it says so.
- */
-export const COMPANY_WIDE_LABEL = "Company-wide";
-
 /** What an owner id that is not in the sites list is called. See `productRows`. */
 export const UNKNOWN_SITE_LABEL = "Another site";
 
 /**
- * ⚠️ AN UNRESOLVED OWNER IS NOT AN ERROR. Reads on `products` are org-wide but
- * `nodes_select` is not: a site admin can see every product in the company and
- * only the nodes inside their own site, so a product owned by Plant 2 arrives
- * with an owner id they cannot name. "Another site" is the truthful answer;
- * inventing a name or showing a raw uuid are both worse.
+ * ⚠️ AN UNRESOLVED OWNER IS NOT AN ERROR, though under 0028 it should be rare.
+ * Reads on `products` used to be org-wide while `nodes_select` was not, so a
+ * product owned by Plant 2 arrived with an owner id the reader could not name.
+ * 0028 makes that combination unreachable -- a row you can read is owned by a
+ * node on one of your own branches -- but the label stays, because
+ * "unreachable" is a claim about the server and this is what the user sees the
+ * day it stops holding. Inventing a name or showing a raw uuid are both worse.
  */
 export function ownerLabel(
-  siteNodeId: string | null,
+  siteNodeId: string,
   sites: readonly ProductSite[] | null,
 ): string {
-  if (siteNodeId === null) return COMPANY_WIDE_LABEL;
   // `null` means the structure read did not land, so we cannot NAME the owner
   // and must not pretend the row belongs elsewhere either.
   if (sites === null) return UNKNOWN_SITE_LABEL;
@@ -195,7 +193,7 @@ export function productRows(
       continue;
     }
     // ⭐⭐ A PRODUCT OWNED BY A SITE YOU CANNOT SEE IS NOT PART OF YOUR
-    // CATALOGUE (Pratik, Aug 28). 0026 narrowed the READ to "company-wide, or
+    // CATALOGUE (the maintainer, Aug 28). 0026 narrowed the READ to "company-wide, or
     // the same branch as one of your grants" — and then admitted one more
     // thing on purpose: a row that is already on a run you can see, so the
     // board can NAME its own history instead of drawing "(unknown product)".
@@ -234,7 +232,7 @@ export function productRows(
  * The catalogue split the way the screen shows it: what is being made, and
  * what has been retired.
  *
- * Deactivate is the MAIN action here (Pratik's call), so "inactive" is a
+ * Deactivate is the MAIN action here (the maintainer's call), so "inactive" is a
  * populated, ordinary part of this screen rather than an edge case — a
  * deactivated product is still on every run it has ever been on.
  */
@@ -279,12 +277,11 @@ export function matchesProductQuery(row: ProductRow, query: string): boolean {
  * re-asks, and `requireWritten` catches the silent half of its answer.
  */
 export function canOwnProduct(
-  siteNodeId: string | null,
+  siteNodeId: string,
   isCompanyAdmin: boolean,
   adminSiteIds: readonly string[],
 ): boolean {
   if (isCompanyAdmin) return true;
-  if (siteNodeId === null) return false;
   return adminSiteIds.includes(siteNodeId);
 }
 
@@ -327,10 +324,9 @@ export function canEditProduct(
   adminAnywhere = false,
 ): boolean {
   if (canOwnProduct(row.siteNodeId, isCompanyAdmin, adminSiteIds)) return true;
-  // Company-wide rows stay company-admin-only: that one IS knowable from the
-  // profile role alone, with no grant lookup, so there is nothing to fail open
-  // about.
-  if (row.siteNodeId === null) return false;
+  // 0028 removed the company-wide branch that used to sit here and return
+  // false outright. There is no owner a company admin alone can hold now, so
+  // the fail-open answer is the only one left.
   return adminAnywhere;
 }
 
@@ -344,38 +340,29 @@ export function editRefusalNote(
   if (canEditProduct(row, isCompanyAdmin, adminSiteIds, adminAnywhere)) return null;
   // With `canEditProduct` failing open for anyone who administers somewhere,
   // the only note left is the one that needs no grant read to be sure of.
-  return row.siteNodeId === null
-    ? "Company-wide — only a company admin can change this."
-    : "You don't administer anywhere, so this is read-only.";
+  // (0028 deleted the second note, "Company-wide - only a company admin can
+  // change this", along with the state it described.)
+  return "You don't administer anywhere, so this is read-only.";
 }
 
-/**
- * The owners this person may create a product under, in the order the picker
- * offers them.
+/* ⭐ `ownerOptions` WAS DELETED BY 0028, NOT NARROWED.
  *
- * A company admin gets company-wide plus every site; a site admin gets only
- * the sites they administer, and NOT company-wide — the insert policy refuses
- * that, and offering it would be a form that fails on submit.
+ * It offered a flat list of SITE ROOTS with a "Company-wide" entry at the top
+ * for company admins. Both halves are now wrong: there is no company-wide
+ * entry (D108), and ownership is a scope at ANY level, not a root (D109) --
+ * a product can belong to Line 1. The screen has used `scopeOptions` from
+ * `scope.ts` since 0025, which walks the whole tree, so this function had no
+ * production caller and only its tests kept it alive.
+ *
+ * It is deleted rather than left unused for the reason `55_`'s N13 gives about
+ * `app_product_on_visible_schedule`: a helper that still knows how to emit a
+ * company-wide owner is a loaded gun for whoever "restores" it next.
  */
-export function ownerOptions(
-  sites: readonly ProductSite[],
-  isCompanyAdmin: boolean,
-  adminSiteIds: readonly string[],
-): ReadonlyArray<{ value: string | null; label: string }> {
-  const options: Array<{ value: string | null; label: string }> = [];
-  if (isCompanyAdmin) options.push({ value: null, label: COMPANY_WIDE_LABEL });
-  for (const site of sites) {
-    if (isCompanyAdmin || adminSiteIds.includes(site.id)) {
-      options.push({ value: site.id, label: site.name });
-    }
-  }
-  return options;
-}
 
 /* ===========================================================================
  * §4b. COLOUR, WHEN IT IS NOT A PALETTE TOKEN (0025 §2, D102 amended).
  *
- * Pratik, Aug 27: *"The color should show a colour picker and an ability to
+ * The maintainer, Aug 27: *"The color should show a colour picker and an ability to
  * enter hex code."*
  *
  * ⚠️ THE DATABASE ACCEPTS TWO SHAPES AND THIS CLIENT MUST DISTINGUISH THEM,
@@ -444,19 +431,18 @@ export function colorInputValue(token: string, computedHex: string | null): stri
 export interface ProductDraft {
   sku: string;
   name: string;
-  /** `null` = company-wide. */
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 export interface ProductDraftValues {
   sku: string;
   name: string;
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 export type ProductDraftResult =
   | { ok: true; value: ProductDraftValues }
-  | { ok: false; skuError: string | null; nameError: string | null };
+  | { ok: false; skuError: string | null; nameError: string | null; ownerError: string | null };
 
 /**
  * `products.sku` and `products.name` are both plain `text NOT NULL` with no
@@ -507,8 +493,20 @@ export function validateProductDraft(draft: ProductDraft): ProductDraftResult {
     nameError = `A name can be at most ${NAME_MAX_LENGTH} characters.`;
   }
 
-  if (skuError !== null || nameError !== null) {
-    return { ok: false, skuError, nameError };
+  // ⭐ 0028 / D108 MADE THIS A REQUIRED CHOICE, AND IT NEEDS ITS OWN MESSAGE.
+  // The picker used to open on "Everywhere (company-wide)", so an untouched
+  // form was already valid and there was nothing to refuse. There is no such
+  // default now, so the form can be submitted with nothing chosen -- and a
+  // form that fails with the error attached to the wrong field, or to no field
+  // at all, is the same defect as a control named after less than it does
+  // (D106). The owner gets its own error, beside its own control.
+  let ownerError: string | null = null;
+  if (draft.siteNodeId === "") {
+    ownerError = "Choose where this product belongs.";
+  }
+
+  if (skuError !== null || nameError !== null || ownerError !== null) {
+    return { ok: false, skuError, nameError, ownerError };
   }
   return { ok: true, value: { sku, name, siteNodeId: draft.siteNodeId } };
 }

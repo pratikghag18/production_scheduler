@@ -16,7 +16,7 @@ BEGIN;
 DO $$
 DECLARE v_tmpl uuid := gen_random_uuid();
 BEGIN
-  INSERT INTO shift_templates (id, org_id, name) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 16a');
+  INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 16a', '30000000-0000-0000-0000-000000000001');
   INSERT INTO shifts (org_id, template_id, name, start_min, end_min)
   VALUES ('10000000-0000-0000-0000-000000000001', v_tmpl, 'Overnight', 1320, 1800);
 END $$;
@@ -27,7 +27,7 @@ DECLARE
   v_tmpl uuid := gen_random_uuid();
   v_caught boolean := false;
 BEGIN
-  INSERT INTO shift_templates (id, org_id, name) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 16b');
+  INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 16b', '30000000-0000-0000-0000-000000000001');
   BEGIN
     INSERT INTO shifts (org_id, template_id, name, start_min, end_min)
     VALUES ('10000000-0000-0000-0000-000000000001', v_tmpl, 'Inverted', 840, 360);
@@ -45,7 +45,7 @@ DECLARE
   v_tmpl uuid := gen_random_uuid();
   v_caught boolean := false;
 BEGIN
-  INSERT INTO shift_templates (id, org_id, name) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 16c');
+  INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 16c', '30000000-0000-0000-0000-000000000001');
   BEGIN
     INSERT INTO shifts (org_id, template_id, name, start_min, end_min)
     VALUES ('10000000-0000-0000-0000-000000000001', v_tmpl, '25 Hours', 0, 1500);
@@ -63,7 +63,7 @@ DECLARE
   v_tmpl uuid := gen_random_uuid();
   v_caught boolean := false;
 BEGIN
-  INSERT INTO shift_templates (id, org_id, name) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 17a');
+  INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES (v_tmpl, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 17a', '30000000-0000-0000-0000-000000000001');
   INSERT INTO shifts (org_id, template_id, name, start_min, end_min)
   VALUES ('10000000-0000-0000-0000-000000000001', v_tmpl, 'Shift A', 360, 840);
   BEGIN
@@ -83,8 +83,8 @@ DECLARE
   v_tmpl_a uuid := gen_random_uuid();
   v_tmpl_b uuid := gen_random_uuid();
 BEGIN
-  INSERT INTO shift_templates (id, org_id, name) VALUES (v_tmpl_a, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 17b-A');
-  INSERT INTO shift_templates (id, org_id, name) VALUES (v_tmpl_b, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 17b-B');
+  INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES (v_tmpl_a, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 17b-A', '30000000-0000-0000-0000-000000000001');
+  INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES (v_tmpl_b, '10000000-0000-0000-0000-000000000001', 'Test Tmpl 17b-B', '30000000-0000-0000-0000-000000000001');
   INSERT INTO shifts (org_id, template_id, name, start_min, end_min)
   VALUES ('10000000-0000-0000-0000-000000000001', v_tmpl_a, 'Shift A', 360, 840);
   -- identical times, different template -- must succeed

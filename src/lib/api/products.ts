@@ -33,14 +33,15 @@ import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
 /**
  * One `products` row as the admin screen needs it.
  *
- * `siteNodeId` is the ROOT node whose site owns this product; **`null` means
- * company-wide** (0023 §1's own column comment), which is a real value and not
- * a missing one — a site admin may edit their own site's products and may not
- * touch a company-wide one, so the null is load-bearing for permissions.
+ * `siteNodeId` is the node this product belongs to. **NOT NULLABLE since
+ * migration 0028 / D108** -- there is no company-wide product, and it is not
+ * restricted to roots either (D109): a product can belong to Line 1 and be
+ * offered on Line 1 and nowhere else.
  *
- * `colorToken` is a palette token like `product-3`, NEVER a hex: the board
- * resolves it through `tokens.css` (0023 §3). It is chosen by a BEFORE INSERT
- * trigger and deliberately never re-picked, not even when the owner changes.
+ * ⚠️ A ROW THAT ARRIVES WITH A NULL OWNER IS REJECTED BY THE PARSER BELOW,
+ * not coerced. The column is NOT NULL, so a null here means the read did not
+ * come from a database this client understands; it is counted as skipped and
+ * said out loud rather than rendered as though it belonged somewhere.
  */
 export interface AdminProduct {
   id: string;
@@ -51,7 +52,7 @@ export interface AdminProduct {
   source: string;
   externalId: string | null;
   /** `null` = company-wide. See the interface comment. */
-  siteNodeId: string | null;
+  siteNodeId: string;
   colorToken: string;
 }
 
@@ -81,7 +82,7 @@ export function parseAdminProduct(row: unknown): AdminProduct | null {
     typeof active !== "boolean" ||
     typeof source !== "string" ||
     !(external_id === null || typeof external_id === "string") ||
-    !(site_node_id === null || typeof site_node_id === "string") ||
+    typeof site_node_id !== "string" ||
     typeof color_token !== "string"
   ) {
     return null;
@@ -129,7 +130,7 @@ export interface CreateProductInput {
   sku: string;
   name: string;
   /** `null` = company-wide, which the insert policy allows only to a company admin. */
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 /**
@@ -176,7 +177,7 @@ export interface UpdateProductInput {
   sku: string;
   name: string;
   /** Where it belongs. Omit to leave alone; `null` moves it company-wide. */
-  siteNodeId?: string | null;
+  siteNodeId?: string;
 }
 
 /**
@@ -194,22 +195,24 @@ export interface UpdateProductInput {
  * colour, which they can. [[decision-record-drift]] rule 6: when you correct a
  * premise, go back and re-examine the decision it was supporting.
  *
- * ⚠️ AND PRATIK ASKED THREE TIMES. Where something belongs is not a property of
+ * ⚠️ AND THE MAINTAINER ASKED THREE TIMES. Where something belongs is not a property of
  * its birth; a line gets reorganised and its products move with it. A create
  * form without a matching edit is the same defect as a break you could only
  * delete and retype (§19.65) — build the edit path at the same time as the
  * create path, every time.
  *
- * `siteNodeId` is OPTIONAL: omit it to leave the scope alone, pass `null` to
- * move the product company-wide. `null` is a real value in this column, so
- * "not supplied" cannot be spelled the same way.
+ * `siteNodeId` is OPTIONAL: omit it to leave where the product belongs alone.
+ * Before 0028 it was `string | null | undefined` and all three meant something
+ * different -- a value moved it, `null` made it company-wide, `undefined` left
+ * it -- which is why "not supplied" could not be spelled as `null`. D108
+ * removed the middle case and the type says so: `string | undefined`.
  */
 export async function updateProduct(input: UpdateProductInput): Promise<AdminProduct> {
-  const patch: { sku: string; name: string; site_node_id?: string | null } = {
+  const patch: { sku: string; name: string; site_node_id?: string } = {
     sku: input.sku,
     name: input.name,
   };
-  if ("siteNodeId" in input) patch.site_node_id = input.siteNodeId ?? null;
+  if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;
 
   const { data, error } = await supabase
     .from("products")
@@ -229,7 +232,7 @@ export interface SetProductColorInput {
 /**
  * Sets a product's colour by hand.
  *
- * ⭐ THE AUTOMATIC PICK STAYS THE DEFAULT (Pratik, Aug 27). 0023 §3 chooses the
+ * ⭐ THE AUTOMATIC PICK STAYS THE DEFAULT (the maintainer, Aug 27). 0023 §3 chooses the
  * least-used token in the owner's palette at INSERT and D102's whole point was
  * that a product's colour does not move under you — so nothing here re-picks,
  * and nothing here fires on a rename or a re-assignment. This is a person
@@ -269,7 +272,7 @@ export interface SetProductActiveInput {
 }
 
 /**
- * Deactivate / reactivate — the MAIN action on this screen (Pratik's call).
+ * Deactivate / reactivate — the MAIN action on this screen (the maintainer's call).
  * A deactivated product keeps every run and assignment it has ever been on and
  * simply stops being offered for new work, which is what "we don't make that
  * any more" actually means. Delete is the secondary action below.

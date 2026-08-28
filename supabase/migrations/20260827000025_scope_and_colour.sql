@@ -1,7 +1,7 @@
 -- =============================================================================
 -- 0025 — "BELONGS TO" BECOMES A SCOPE (D103), AND A COLOUR MAY BE A COLOUR
 --
--- Pratik, Aug 27: *"The products/operators/shifts could belong to a particular
+-- The maintainer, Aug 27: *"The products/operators/shifts could belong to a particular
 -- hierarchy within the plant and not necessarily to the whole plant... how do
 -- we assign them to a specific hierarchy level so the lower levels inherit
 -- them?"* — and, shown the two things that sentence could mean side by side, he
@@ -29,7 +29,7 @@
 --      job, because one `board_window` call spans many nodes and there is no
 --      single node to filter by. This file only makes the scope VISIBLE in that
 --      read; §3 is the whole of it.
---   3. **Nothing about the operators' AREA RULE.** Pratik has since asked for
+--   3. **Nothing about the operators' AREA RULE.** the maintainer has since asked for
 --      an out-of-area assignment to be refused with a supervisor override, and
 --      that is a change to `check_eligibility` and `assign_operator` with its
 --      own cases. Widening `operators.site_node_id` here is what it builds on.
@@ -80,14 +80,14 @@ comment on column products.site_node_id is
 comment on column operators.site_node_id is
   'The node this person BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: in 0025 this filters the roster and nothing else. Whether an assignment OUTSIDE it is refused is a separate migration; see this file header.';
 comment on column skills.site_node_id is
-  'The node this training BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: training NAMES remain unique per ORG (Pratik, Aug 27) -- the scope says where it is offered, never that two sites may hold the same name.';
+  'The node this training BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: training NAMES remain unique per ORG (the maintainer, Aug 27) -- the scope says where it is offered, never that two sites may hold the same name.';
 comment on column shift_templates.site_node_id is
   'The node this pattern BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: distinct from ATTACHMENT -- node_shift_templates says which node RUNS a pattern and needs app_is_admin_for(node_id); this says who owns it and where it is offered.';
 
 -- -----------------------------------------------------------------------------
 -- §2. A COLOUR MAY NOW BE A COLOUR.
 --
--- Pratik, Aug 27: *"The color should show a colour picker and an ability to
+-- The maintainer, Aug 27: *"The color should show a colour picker and an ability to
 -- enter hex code."*
 --
 -- ⭐ D102's PALETTE ARGUMENT SURVIVES AND IS NOT WEAKENED. The column holds a

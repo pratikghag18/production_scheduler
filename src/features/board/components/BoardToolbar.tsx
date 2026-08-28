@@ -190,7 +190,7 @@ export function BoardToolbar({
         ))}
       </div>
 
-      {/* DENSITY CONTROL REMOVED (Pratik, Aug 25). Fit is automatic and the
+      {/* DENSITY CONTROL REMOVED (the maintainer, Aug 25). Fit is automatic and the
           three manual densities earned their toolbar space back: Fit already
           shrinks toward Compact when there are many rows and grows toward
           Comfortable when there are few, so the override only mattered for

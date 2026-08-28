@@ -330,7 +330,7 @@ Access method: heap
  name         | text                     |           | not null |                   | extended |             |              | 
  created_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this training BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: training NAMES remain unique per ORG (Pratik, Aug 27) -- the scope says where it is offered, never that two sites may hold the same name.
+ site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this training BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: training NAMES remain unique per ORG (the maintainer, Aug 27) -- the scope says where it is offered, never that two sites may hold the same name.
 Indexes:
     "skills_pkey" PRIMARY KEY, btree (id)
     "skills_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)

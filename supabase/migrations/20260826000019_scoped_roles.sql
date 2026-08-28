@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 0019 — the (role, scope) permission model. SUBSTRATE ONLY.
 --
--- WHAT PRATIK ASKED FOR, in his words:
+-- WHAT THE MAINTAINER ASKED FOR, in his words:
 --   "there should be a system admin (who has all the powers to affect anything
 --    at any site), a site admin (allowed to make changes only to a particular
 --    site they belong), user/supervisor (allowed to only do assignments, does

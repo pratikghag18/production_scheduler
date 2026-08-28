@@ -27,7 +27,7 @@ DECLARE
   v_op uuid := gen_random_uuid();
   v_caught boolean := false;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 8');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 8', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 1.000);
@@ -47,7 +47,7 @@ END $$;
 DO $$
 DECLARE v_op uuid := gen_random_uuid();
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 9');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 9', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 0.500);
@@ -62,7 +62,7 @@ DECLARE
   v_op uuid := gen_random_uuid();
   v_caught boolean := false;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 10');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 10', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 1.000);
@@ -82,7 +82,7 @@ END $$;
 DO $$
 DECLARE v_op uuid := gen_random_uuid();
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 11');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 11', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 1.000);
@@ -95,7 +95,7 @@ END $$;
 DO $$
 DECLARE v_op uuid := gen_random_uuid();
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 12');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 12', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 0.600);
@@ -115,7 +115,7 @@ DECLARE
   v_caught boolean := false;
   v_msg text;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 13');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 13', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 0.600);
@@ -157,7 +157,7 @@ BEGIN
   -- is reported as a discrepancy rather than silently changed; see the
   -- verify-db.sh summary and the brief report for detail. It is surfaced as
   -- a WARNING (non-fatal) rather than aborting the whole suite.
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op_literal, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 14 literal');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op_literal, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 14 literal', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op_literal,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 1.000);
@@ -177,7 +177,7 @@ BEGIN
   -- 14b (supplementary, added to actually satisfy "prove the cap is
   -- configurable"): the case-13 pattern (peak 1.1) was rejected at the
   -- default cap 1.0; the same pattern at cap 1.2 must now be accepted.
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op_demo, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 14 demo');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op_demo, '10000000-0000-0000-0000-000000000001', 'Cap Test Op 14 demo', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op_demo,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-02-01 08:00+00', '2099-02-01 10:00+00'), 0.600);

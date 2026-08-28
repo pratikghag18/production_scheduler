@@ -232,7 +232,7 @@ export function dropRailIndex(targetDepth: number): number {
 /* ===========================================================================
  * P1-5l — DROP ZONES: reorder as well as re-parent (design plan §19.34, D94).
  *
- * ⭐ WHY THIS EXISTS. The first gesture Pratik tried was the one P1-5g
+ * ⭐ WHY THIS EXISTS. The first gesture the maintainer tried was the one P1-5g
  * excluded: *"I tried moving cell 3 between cell 1 and cell 2, but it turned
  * red."* Cells 1/2/3 are siblings, so that is a REORDER — and P1-5g only ever
  * offered re-parenting, so the pointer landed on a Work Cell row and

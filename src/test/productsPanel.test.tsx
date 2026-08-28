@@ -7,7 +7,7 @@ import { ProductsPanel } from "@/features/admin/components/ProductsPanel";
  * exists is a finding, not a preference (§19.67 / D106).
  *
  * `scaleAudit`'s group J was written to make "you can SET it at creation and
- * never CHANGE it" impossible to ship. It passed every day Pratik was blocked,
+ * never CHANGE it" impossible to ship. It passed every day the maintainer was blocked,
  * because of what it reads: `scopeParityOffences` opens three files under
  * `src/lib/api/`, slices the text around `.from("products")`, and asks whether
  * the substring `site_node_id` survives inside a window that also contains
@@ -60,8 +60,9 @@ const h = vi.hoisted(() => {
         defaultCreateMode: "run",
         adminAnywhere: true,
       },
-      // Faithful to `supabase/seed.sql`, which names no `site_node_id` on any
-      // product row: every product in the demo data is company-wide.
+      // ⭐ Faithful to `supabase/seed.sql`, which since migration 0028 names a
+      // `site_node_id` on every product row — the column is NOT NULL and there
+      // is no company-wide product. Both rows belong to Plant 1.
       products: [
         {
           id: "p1",
@@ -70,7 +71,7 @@ const h = vi.hoisted(() => {
           active: true,
           source: "manual",
           externalId: null,
-          siteNodeId: null as string | null,
+          siteNodeId: P1,
           colorToken: "product-1",
         },
         {
@@ -80,7 +81,7 @@ const h = vi.hoisted(() => {
           active: true,
           source: "manual",
           externalId: null,
-          siteNodeId: null as string | null,
+          siteNodeId: P1,
           colorToken: "product-2",
         },
       ],
@@ -132,9 +133,26 @@ vi.mock("@/features/admin/hooks/useProducts", () => ({
 function asCompanyAdmin() {
   h.state.profile = { ...h.state.profile, role: "admin", adminAnywhere: true };
 }
-function asSiteAdmin() {
-  // Dana in `dev_demo.sql`: org-wide role `viewer`, an admin grant on Plant 1.
-  h.state.profile = { ...h.state.profile, role: "viewer", adminAnywhere: true };
+/**
+ * Somebody who administers NOWHERE: org-wide role `viewer`, no admin grant.
+ *
+ * ⭐ RENAMED AND CHANGED BY 0028, AND THE CHANGE IS THE CASE. This used to be
+ * `asSiteAdmin` with `adminAnywhere: true` — Dana, an admin of Plant 1 — and
+ * it produced a refusal because the ROW was company-wide. D108 deleted that
+ * row type. `canEditProduct` fails open for anyone who administers anywhere
+ * (see its header), so Dana would now correctly get a live Edit button and
+ * this case would be asserting nothing. The one certain refusal left needs a
+ * person with no grants at all.
+ */
+function asAdminOfNowhere() {
+  h.state.profile = { ...h.state.profile, role: "viewer", adminAnywhere: false };
+  // ⚠️ AND NO EDITABLE STRUCTURE. Without this the fixture's `editableShapeIds`
+  // still resolves to Plant 1, which is exactly who owns both rows now, so
+  // `canOwnProduct` returns TRUE and the Edit buttons stay live — the case
+  // would assert nothing and read as a pass. Before 0028 the rows were
+  // company-wide and nothing this person held could reach them, so the profile
+  // change alone was enough.
+  h.state.tree = { ...h.state.tree, editableShapeIds: [] };
 }
 /** The open editor for one row, found the way its own label reads. */
 function editingRow(sku: string): HTMLElement {
@@ -152,7 +170,7 @@ function belongsTo(row: HTMLElement, sku: string): HTMLSelectElement {
 beforeEach(() => {
   h.updateMutate.mockClear();
   asCompanyAdmin();
-  h.state.products = h.state.products.map((p) => ({ ...p, siteNodeId: null }));
+  h.state.products = h.state.products.map((p) => ({ ...p, siteNodeId: PLANT1 }));
 });
 
 describe("ProductsPanel — the row's editor is reachable (D106)", () => {
@@ -173,18 +191,25 @@ describe("ProductsPanel — the row's editor is reachable (D106)", () => {
   });
 
   it("T3: the picker opens on the row's CURRENT scope, not on a default", () => {
-    h.state.products = h.state.products.map((p, i) => (i === 0 ? { ...p, siteNodeId: PLANT1 } : p));
+    // ⚠️ ASSEMBLY, not Plant 1. The `beforeEach` now homes every row at Plant 1
+    // (0028: there is no unowned row to start from), so re-homing this row to
+    // Plant 1 would make the case pass against a picker that ignored the row
+    // entirely and opened on its own first option — which is exactly the
+    // defect it exists to catch.
+    h.state.products = h.state.products.map((p, i) => (i === 0 ? { ...p, siteNodeId: "n-asm" } : p));
     render(<ProductsPanel />);
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
-    expect(belongsTo(editingRow("WX"), "WX").value).toBe(PLANT1);
+    expect(belongsTo(editingRow("WX"), "WX").value).toBe("n-asm");
   });
 
-  it("T4: a company admin is offered company-wide and every node, indented", () => {
+  it("T4 ⭐ (rewritten by 0028): the picker offers every node, indented, and NO company-wide entry", () => {
     render(<ProductsPanel />);
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     const labels = [...belongsTo(editingRow("WX"), "WX").options].map((o) => o.text);
-    expect(labels[0]).toBe("Everywhere (company-wide)");
-    expect(labels).toContain("Plant 1");
+    // D108: it used to open with "Everywhere (company-wide)". A picker that can
+    // still emit a value the database refuses is D106 with a different label.
+    expect(labels).not.toContain("Everywhere (company-wide)");
+    expect(labels[0]).toBe("Plant 1");
     // `indentedLabel` pads a child with two U+2007 figure spaces per level.
     expect(labels).toContain("\u2007\u2007Assembly");
   });
@@ -204,28 +229,35 @@ describe("ProductsPanel — the row's editor is reachable (D106)", () => {
     });
   });
 
-  it("T6: saving a row left company-wide sends null, not undefined", () => {
-    // ⚠️ `undefined !== null` in `updateProduct`'s patch: `null` means
-    // company-wide, an ABSENT key means "leave it alone". A save that meant to
-    // clear a scope and sent `undefined` would silently keep the old one.
+  it("T6 ⭐ (rewritten by 0028): saving an untouched row still SENDS its owner, rather than omitting the key", () => {
+    // ⚠️ The original hazard survives D108 with a different shape. In
+    // `updateProduct`'s patch an ABSENT key means "leave it alone" — so a save
+    // that dropped the key would silently keep whatever the server had, and a
+    // re-home that looked applied on screen would not be. The old case pinned
+    // `null` (company-wide) travelling as itself rather than as `undefined`;
+    // this pins the key being present and carrying the row's real owner.
     render(<ProductsPanel />);
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     fireEvent.click(within(editingRow("WX")).getByRole("button", { name: "Save" }));
-    const patch = h.updateMutate.mock.calls[0][0] as { siteNodeId: string | null };
-    expect(patch.siteNodeId).toBeNull();
+    const patch = h.updateMutate.mock.calls[0][0] as { siteNodeId: string };
     expect("siteNodeId" in patch).toBe(true);
+    expect(patch.siteNodeId).toBe(PLANT1);
   });
 
-  it("T7: a site admin gets no Edit control on a company-wide row, and is told why", () => {
-    asSiteAdmin();
+  it("T7 ⭐ (rewritten by 0028): a site admin who administers nowhere gets no Edit control, and is told why", () => {
+    asAdminOfNowhere();
     render(<ProductsPanel />);
-    // Every product in `seed.sql` is company-wide, so today this is the WHOLE
-    // catalogue for Dana and Quinn — see §19.67 finding 2.
+    // ⭐ The refusal this case pins CHANGED CAUSE UNDER 0028 and kept its
+    // shape. It used to be "this row is company-wide, only a company admin may
+    // touch it" — a state D108 deleted. `canEditProduct` now fails OPEN for
+    // anyone who administers anywhere, so the only certain refusal left is for
+    // someone who administers nowhere at all, and `editRefusalNote` has exactly
+    // one sentence to say. `asAdminOfNowhere()` supplies that person.
     for (const b of screen.getAllByRole("button", { name: "Edit" })) {
       expect((b as HTMLButtonElement).disabled).toBe(true);
     }
     expect(
-      screen.getAllByText("Company-wide — only a company admin can change this."),
+      screen.getAllByText("You don't administer anywhere, so this is read-only."),
     ).toHaveLength(2);
   });
 

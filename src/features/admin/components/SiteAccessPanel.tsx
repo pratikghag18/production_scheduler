@@ -76,7 +76,7 @@ export function SiteAccessPanel({
   // Only the grant sitting on the node being shown is editable here, so
   // somebody whose access sits on a department inside the plant is read-only
   // from the plant's view — with a note that used to say "open that place to
-  // change it" and no way to open it. Pratik hit that within minutes of the
+  // change it" and no way to open it. The maintainer hit that within minutes of the
   // screen going up. `site_people` already accepts any node the caller
   // administers, so following the grant is the whole fix.
   //

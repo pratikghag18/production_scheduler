@@ -37,7 +37,7 @@ A green checklist you did not execute is worse than no checklist. A previous bri
 8. **`src/styles/tokens.css`** — the design tokens, already ported from the mockup in P1-1.
 9. **`docs/design-plan.md` §15.3** (operator panel), **§16.2** (board rendering), **§17.4** (why transitions matter — read this one twice).
 
-Files are on the device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler` (`$HOME/mnt/production_scheduler` via `device_bash`). Stage with `device_stage_files` to read them in the container.
+Files are on the device at `<repo root>` (`$HOME/mnt/production_scheduler` via `device_bash`). Stage with `device_stage_files` to read them in the container.
 
 ---
 

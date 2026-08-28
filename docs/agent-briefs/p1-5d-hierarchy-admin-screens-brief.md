@@ -89,9 +89,9 @@ After writing each file, verify with `wc -l` and `md5sum` and report both.
 | `src/features/admin/lib/levelDraft.ts` | new — pure level-draft reducer (§4.1) | **yes, by you, in-container** |
 | `src/features/admin/lib/treeView.ts` | new — pure tree rows + legal parents (§4.2) | **yes, by you** |
 | `src/features/admin/lib/errorText.ts` | new — the six codes as sentences (§4.3) | **yes, by you** |
-| `src/test/levelDraft.test.ts` | new — vitest, §8 group L | authored; Pratik runs |
-| `src/test/treeView.test.ts` | new — vitest, §8 groups T and P | authored; Pratik runs |
-| `src/test/errorText.test.ts` | new — vitest, §8 group E | authored; Pratik runs |
+| `src/test/levelDraft.test.ts` | new — vitest, §8 group L | authored; the maintainer runs |
+| `src/test/treeView.test.ts` | new — vitest, §8 groups T and P | authored; the maintainer runs |
+| `src/test/errorText.test.ts` | new — vitest, §8 group E | authored; the maintainer runs |
 | `src/features/admin/AdminPage.tsx` | **edit** — becomes the sectioned shell (§7.1) | no — author-only |
 | `src/features/admin/AdminPage.module.css` | new | no |
 | `src/features/admin/components/LevelEditor.tsx` + `.module.css` | new (§7.2) | no |
@@ -197,7 +197,7 @@ editors, so every one needs a sentence. Without this, `path_collision` reaches t
   map catches up — still yields something a person can read. Same rule as the `SchedulerError`
   parser.
 - The wording is yours to draft; §8's E-group only requires that all six are present, distinct,
-  non-trivial, and never the raw code. **Pratik will edit the copy; write it so that is a one-line
+  non-trivial, and never the raw code. **the maintainer will edit the copy; write it so that is a one-line
   change per message.**
 - This lives with the screens, not in `src/lib/api/`: that layer owns the error *contract*, this is
   presentation.
@@ -309,7 +309,7 @@ pre-empt it. (If it helps: a shared `src/lib/` home is the obvious third option.
 so since Aug 24. Wrap the `/admin` element in `React.lazy` + `Suspense` with a minimal fallback.
 
 **You cannot measure the result** — no npm. Say so, and state in your report what you expect to
-happen to the bundle so Pratik's build output can confirm or refute it. The current app chunk is
+happen to the bundle so the maintainer's build output can confirm or refute it. The current app chunk is
 100.38 kB raw / 30.20 kB gzipped.
 
 ---
@@ -438,5 +438,5 @@ deliberately and say so in §11 item 6.
 ## 13. Final step
 
 Update `docs/roadmap.md`: mark P1-5d built with your actual numbers and add the new files to the
-artifact index. **Do not** mark the browser acceptance done — that is Pratik's, and it is the only
+artifact index. **Do not** mark the browser acceptance done — that is the maintainer's, and it is the only
 thing that can confirm §7.

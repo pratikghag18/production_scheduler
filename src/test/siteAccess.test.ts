@@ -487,7 +487,7 @@ check("A43 ⭐: a person with no address survives an empty query and no other", 
 check("A44: with no search, the screen is the member list and nothing else", () => {
   // ⭐ REWRITTEN WHEN THE CONTRACT CHANGED (rule 1b-ii, not 1b): the old case
   // asserted that a blank query lists every candidate, which was correct for
-  // the shape that shipped first and is exactly what Pratik pushed back on —
+  // the shape that shipped first and is exactly what the maintainer pushed back on —
   // a standing list of everyone in the company, sitting under the people who
   // actually have access, asserts a relationship that does not exist.
   const { members, candidates } = partitionAccess(VIEW.rows, "");

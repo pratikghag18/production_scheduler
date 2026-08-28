@@ -383,7 +383,7 @@ export function LevelEditor({
                       BLUE — the one colour on the level row that matches
                       nothing else in the product, and immune to the
                       `color: var(--ink-2)` above because an emoji glyph carries
-                      its own. Seen in Pratik's screenshot, not in any render
+                      its own. Seen in the maintainer's screenshot, not in any render
                       here, because the container's font stack has no emoji
                       face to fall through to. */}
                   {"\u2191\uFE0E"}
@@ -428,7 +428,7 @@ export function LevelEditor({
                   immediately before this row's own menu-equivalent (`×`), exactly
                   as the tree puts `⠿` immediately before `⋮`.
 
-                  It shipped at the LEFT edge for one day and Pratik's first
+                  It shipped at the LEFT edge for one day and the maintainer's first
                   reaction was that it looked wrong: *"The drag is also present
                   right next to arrows which seems weird."* He is right twice
                   over. It put two ways of moving the same row side by side, so

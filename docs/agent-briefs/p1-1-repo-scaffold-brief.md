@@ -9,7 +9,7 @@
 2. `docs/design-plan.md` §5 (stack + realtime), §9 (roles), §10 (UI architecture), §11 (cost posture).
 3. `docs/mockups/model-hybrid.html` — **only** for its CSS custom properties in the `:root` block and the product colors. You are not porting the board in this brief.
 
-Those files live on the user's device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler`. Stage them with `device_stage_files` (they land under `/mnt/user-data/uploads/`), or read them on the device with `device_bash` under `$HOME/mnt/production_scheduler`.
+Those files live on the user's device at `<repo root>`. Stage them with `device_stage_files` (they land under `/mnt/user-data/uploads/`), or read them on the device with `device_bash` under `$HOME/mnt/production_scheduler`.
 
 ## 1. What this brief produces
 
@@ -271,7 +271,7 @@ Everything above is built in the container. The user's repo is the real home. De
 1. In the container, from the project root, create a tarball of the tracked tree only:
    `tar --exclude=node_modules --exclude=dist --exclude=.git --exclude=coverage --exclude=playwright-report --exclude=test-results --exclude=docs -czf ~/scaffold.tar.gz .`
    (`docs/` is excluded because it already exists on the device and you must not overwrite it. Handle `docs/conventions.md` and the roadmap edit separately, in step 4.)
-2. `SendUserFile` on `~/scaffold.tar.gz` to get a `file_uuid`, then `device_commit_files` with `devicePath` = `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler\_delivery\scaffold.tar.gz`.
+2. `SendUserFile` on `~/scaffold.tar.gz` to get a `file_uuid`, then `device_commit_files` with `devicePath` = `<repo root>\_delivery\scaffold.tar.gz`.
 3. `device_bash`: `cd "$HOME/mnt/production_scheduler" && tar -xzf _delivery/scaffold.tar.gz && ls -la`. Verify the tree landed by listing it.
 4. Write `docs/conventions.md` and the roadmap edit (§8) directly with `device_bash` heredocs, so `docs/` is only ever added to, never replaced.
 5. `device_bash`: `cd "$HOME/mnt/production_scheduler" && git status --short` and include the output in your report.

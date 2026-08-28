@@ -22,7 +22,7 @@ Your deliverable is source code plus a §9 self-review you *can* perform by read
 6. **`docs/design-plan.md` §5** (optimistic edit flow, 409 handling), **§14.1** (hybrid rules), **§15.1** (split coverage).
 7. **`docs/mockups/model-hybrid.html`** — the "Viewing as" profile switcher, for the dev sign-in UI in §7. You are not building the board.
 
-Files are on the device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler` (`$HOME/mnt/production_scheduler` via `device_bash`). Stage with `device_stage_files` to read in the container.
+Files are on the device at `<repo root>` (`$HOME/mnt/production_scheduler` via `device_bash`). Stage with `device_stage_files` to read in the container.
 
 ## 2. What the generated types actually say — read this before designing anything
 

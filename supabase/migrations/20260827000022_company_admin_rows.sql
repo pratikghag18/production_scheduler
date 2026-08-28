@@ -3,7 +3,7 @@
 --
 -- ⭐ A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.
 --
--- FOUND BY PRATIK ON THE RUNNING SCREEN, signed in as a site admin: the
+-- FOUND BY THE MAINTAINER ON THE RUNNING SCREEN, signed in as a site admin: the
 -- company admin's row offered a role control and a Remove button, and the
 -- server allowed both.
 --

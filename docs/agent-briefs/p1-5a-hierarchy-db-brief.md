@@ -392,7 +392,7 @@ exist because of them).
 1. `bash scripts/verify-db.sh` end to end; capture the full summary block
 2. tar the changed files: `tar -czf _delivery/hierarchy-db.tar.gz <the 5 files in §3>`
 3. `SendUserFile` the tarball, then `device_commit_files` it to
-   `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler\_delivery\hierarchy-db.tar.gz`
+   `<repo root>\_delivery\hierarchy-db.tar.gz`
 4. extract it into the repo with `device_bash`
 
 **Two extraction hazards on this OneDrive-backed mount, both hit for real before:**
@@ -404,7 +404,7 @@ exist because of them).
 - Extracted files land read-only; `chmod u+w` before editing one in place.
 
 `device_bash` **cannot delete files** (`unlink` is not permitted). If you create a stray, say so in
-your report with its full path so Pratik can remove it from PowerShell — including
+your report with its full path so the maintainer can remove it from PowerShell — including
 `.git/index.lock` if you run any git command, which blocks every later git command until removed.
 **Do not commit or push.**
 

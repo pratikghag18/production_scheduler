@@ -13,6 +13,11 @@ export default tseslint.config(
       "playwright-report",
       "test-results",
       "supabase/.temp",
+      // ⭐ The design session's scratch area. It is gitignored, but eslint does
+      // not read .gitignore, so a throwaway probe file could — and did, on 28
+      // Aug — fail `npm run lint` on a repo whose source was clean. Scratch
+      // that can break the build is not scratch.
+      "_delivery",
     ],
   },
   {

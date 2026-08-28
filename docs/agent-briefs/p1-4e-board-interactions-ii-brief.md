@@ -34,7 +34,7 @@ Reporting §10 or §11 as NOT RUN makes the delivery incomplete.
 7. **`docs/mockups/model-hybrid.html`** — `startBandDrag`'s cross-cell branch, `startStaffDrag`'s `targetBand` logic, `startPanelDrag`, `openSplitPop`, `markEligibility`/`clearHints`, and the `.drop-hint` / `.ineligible` / `.split-row` CSS.
 8. **`docs/design-plan.md` §15.1** (the capacity model and the split-coverage UX), **§15.2** (run mobility), **§6** (eligibility policy), **§18.7** (the CSS specificity trap), **§18.9–§18.12** (what the last three builds corrected).
 
-Files are on the device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler`. Stage with `device_stage_files`.
+Files are on the device at `<repo root>`. Stage with `device_stage_files`.
 
 ---
 

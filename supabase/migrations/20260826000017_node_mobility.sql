@@ -24,7 +24,7 @@
 -- ----------------------------------------------------------------------------
 -- place_node — D94. Put a node at a position among its parent's children.
 --
--- Reordering siblings is what Pratik reached for in his first minute with the
+-- Reordering siblings is what the maintainer reached for in his first minute with the
 -- tree drag, and P1-5g had excluded it (§19.34). `move_node` has been able to
 -- reorder since 0010 (`sort_order = coalesce(p_sort_order, sort_order)`), but a
 -- single call cannot express "between these two": seed.sql sets no sort_order
@@ -331,7 +331,7 @@ begin
   -- damage through PostgREST (a client can only call the functions we wrote,
   -- and none of them set it), so this was never exploitable -- but "the level
   -- invariant can be switched off by anyone signed in" is not a property to
-  -- leave standing, and Pratik asked for it closed.
+  -- leave standing, and the maintainer asked for it closed.
   --
   -- Locking it costs nothing precisely BECAUSE nothing uses it any more:
   -- app_relevel_subtree (this same migration) does its bulk re-level top-down

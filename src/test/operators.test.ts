@@ -109,21 +109,24 @@ const REQUIREMENTS: readonly RequirementLike[] = [
   { nodeId: LINE_B, skillId: PHANTOM },
 ];
 
+// ⭐ 0028 / D108: these were all `siteNodeId: null` — company-wide trainings.
+// There is no such row now, so they belong to the plant. `describeSkillNameClash`
+// lost the branch that told the two apart; see its comment.
 const SKILLS: readonly SkillLike[] = [
-  { id: SAFETY, name: "Safety Induction", siteNodeId: null },
-  { id: FORKLIFT, name: "Forklift", siteNodeId: null },
-  { id: WELDING, name: "Welding", siteNodeId: null },
-  { id: FIRST_AID, name: "First Aid", siteNodeId: null },
+  { id: SAFETY, name: "Safety Induction", siteNodeId: PLANT },
+  { id: FORKLIFT, name: "Forklift", siteNodeId: PLANT },
+  { id: WELDING, name: "Welding", siteNodeId: PLANT },
+  { id: FIRST_AID, name: "First Aid", siteNodeId: PLANT },
 ];
 
 const ana: OperatorLike = {
-  id: ANA, displayName: "Ana Silva", employeeRef: "E-1001", active: true, siteNodeId: null,
+  id: ANA, displayName: "Ana Silva", employeeRef: "E-1001", active: true, siteNodeId: PLANT,
 };
 const bob: OperatorLike = {
   id: BOB, displayName: "bob jones", employeeRef: null, active: true, siteNodeId: PLANT,
 };
 const cara: OperatorLike = {
-  id: CARA, displayName: "Cara Lin", employeeRef: "E-1003", active: false, siteNodeId: null,
+  id: CARA, displayName: "Cara Lin", employeeRef: "E-1003", active: false, siteNodeId: LINE_A,
 };
 
 const ANA_TICKETS: readonly OperatorSkillLike[] = [
@@ -504,8 +507,10 @@ it("N4: an empty name is not treated as a clash with anything", () => {
 
 it("N5: the exact clash reads as an offer to reuse, never as an error", () => {
   const clash = findExistingSkillByName(SKILLS, "Forklift");
+  // ⭐ "site-owned", not "company-wide": 0028/D108 removed the state and the
+  // word. `describeSkillNameClash` has one arm now — see its comment.
   expect(clash === null ? "" : describeSkillNameClash(clash)).toBe(
-    "There is already a company-wide Forklift — use that one.",
+    "There is already a site-owned Forklift — use that one.",
   );
 });
 
@@ -584,11 +589,13 @@ it("V2: a ticket that has LAPSED and whose skill row is unreadable is counted, n
   expect(place(places, CELL_3).unnamed).toBeGreaterThan(0);
 });
 
-it("V3: a clash with a SITE-owned ticket does not claim the ticket is company-wide", () => {
-  // Every skill in the fixture had `siteNodeId: null`, so the other arm of the
-  // scope ternary had never once been evaluated. Telling someone a ticket is
-  // company-wide when it belongs to one site is the difference between "use
-  // that one" and a ticket they may not be able to reach.
+it("V3 ⭐: a clash names the ticket as site-owned — the word that survived 0028", () => {
+  // Written when every skill in the fixture had `siteNodeId: null` and the
+  // other arm of the scope ternary had never once been evaluated. D108 then
+  // deleted the arm this case was added to reach, which leaves the message with
+  // no information in it — the real fix is to name the OWNER, and that is
+  // recorded on `SkillLike` rather than done here, because a training's name is
+  // still unique per ORG and that is the thing actually pulling wrong.
   const owned = { id: WELDING, name: "Welding", siteNodeId: PLANT };
   expect(describeSkillNameClash({ skill: owned, exact: true })).toBe(
     "There is already a site-owned Welding — use that one.",

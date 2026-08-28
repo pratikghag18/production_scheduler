@@ -598,9 +598,12 @@ export interface ShiftView extends Span {
 export interface PatternView {
   id: string;
   name: string;
-  /** `null` = company-wide (0023). Owning site decides who may EDIT this. */
-  siteNodeId: string | null;
-  /** `"Company-wide"` or the owning site's name. Never a raw uuid. */
+  /**
+   * The node this pattern belongs to. NOT NULL since 0028 / D108. Who owns it
+   * decides who may EDIT it and, since 0028, who may READ it.
+   */
+  siteNodeId: string;
+  /** The owning node's name, or "Another site". Never a raw uuid. */
   ownerLabel: string;
   shifts: readonly ShiftView[];
   /** Pairs already sitting in the database that the constraint would now refuse. */
@@ -752,16 +755,17 @@ export function patternRows(payload: ShiftPatternsPayload | null | undefined): P
           problems: breakProblems(s, breaks),
         };
       });
-      const owner = t.siteNodeId === null ? null : nodesById.get(t.siteNodeId);
+      const owner = nodesById.get(t.siteNodeId);
       const attached = attachedByTemplate.get(t.id) ?? [];
       return {
         id: t.id,
         name: t.name,
         siteNodeId: t.siteNodeId,
-        ownerLabel:
-          t.siteNodeId === null
-            ? "Company-wide"
-            : (owner?.name ?? "Another site"),
+        // ⭐ 0028 removed the "Company-wide" arm with the state it named. The
+        // "Another site" fallback stays: it should be unreachable now (a
+        // pattern you can read is owned on one of your own branches) and it is
+        // what the screen says the day that stops being true.
+        ownerLabel: owner?.name ?? "Another site",
         shifts,
         overlaps: overlappingShifts(shifts),
         attachedNodeIds: attached,

@@ -10,7 +10,7 @@
 2. `docs/roadmap.md` — Phase 1 item 3 is this task.
 3. `docs/mockups/model-hybrid.html` — lines ~385–560 hold the seed constants (`PRODUCTS`, `OPERATORS`, `TREE`, `SHIFT_TEMPLATES`, `nodeShiftTemplates`, `PROFILES`, `runs`, `assignments`). The seed you write in §6 mirrors these exactly.
 
-Files live on the user's device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler` (mounted for `device_bash` at `$HOME/mnt/production_scheduler`). Stage them with `device_stage_files` to read them in the container.
+Files live on the user's device at `<repo root>` (mounted for `device_bash` at `$HOME/mnt/production_scheduler`). Stage them with `device_stage_files` to read them in the container.
 
 **Important:** the design plan is a *narrative* record — it shows the schema evolving (a `no_double_booking` constraint that §15.1 later drops, `ALTER TABLE`s in §14.2 that add columns). Your migrations implement the **final shape only**. Do not replay history: no dropped constraint, no add-column-later. Migration 0001 is a fresh database, not a replay of design sessions.
 

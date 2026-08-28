@@ -35,7 +35,7 @@ Reporting §11 or §12 as NOT RUN makes the delivery incomplete. Part A exists p
 6. **`docs/design-plan.md` §14.1** (hybrid rules), **§15.1** (capacity), **§17.4** (why transitions matter), **§18–§18.4** (the board's decisions and what P1-4a acceptance corrected).
 7. **`docs/conventions.md`**.
 
-Files are on the device at `C:\Users\prati\OneDrive\Documents\GitHub\production_scheduler`. Stage with `device_stage_files` to read them here.
+Files are on the device at `<repo root>`. Stage with `device_stage_files` to read them here.
 
 ---
 

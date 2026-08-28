@@ -209,7 +209,7 @@ END $$;
 DO $$
 DECLARE v_op uuid := gen_random_uuid(); v_res jsonb;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Probe Test Op 8');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Probe Test Op 8', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-05-01 08:00+00','2099-05-01 10:00+00'), 0.600);
@@ -254,7 +254,7 @@ DECLARE
 BEGIN
   -- (a) the trigger: the same 100%+50% overlap that 20_capacity_test.sql
   -- case 8 exercises must now be silently ACCEPTED (mutation defeats it).
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Mutation Test Op 9');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Mutation Test Op 9', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-05-02 08:00+00','2099-05-02 10:00+00'), 1.000);
@@ -593,7 +593,7 @@ SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-0000000000a1';
 DO $$
 DECLARE v_op uuid := gen_random_uuid(); v_a1 uuid; v_res jsonb; v_peak numeric;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 19');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 19', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (id, org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES (gen_random_uuid(), '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-03-01 08:00+00','2099-03-01 12:00+00'), 1.000)
@@ -616,7 +616,7 @@ END $$;
 DO $$
 DECLARE v_op uuid := gen_random_uuid(); v_a1 uuid; v_caught boolean := false;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 20');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 20', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (id, org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES (gen_random_uuid(), '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-03-02 08:00+00','2099-03-02 12:00+00'), 1.000)
@@ -640,7 +640,7 @@ END $$;
 DO $$
 DECLARE v_op uuid := gen_random_uuid(); v_a1 uuid; v_caught boolean := false; v_detail jsonb;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 21');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 21', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (id, org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES (gen_random_uuid(), '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-03-03 08:00+00','2099-03-03 12:00+00'), 1.000)
@@ -660,7 +660,7 @@ END $$;
 DO $$
 DECLARE v_op uuid := gen_random_uuid(); v_a1 uuid; v_res jsonb;
 BEGIN
-  INSERT INTO operators (id, org_id, display_name) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 22');
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES (v_op, '10000000-0000-0000-0000-000000000001', 'Split Test Op 22', '30000000-0000-0000-0000-000000000001');
   INSERT INTO assignments (id, org_id, node_id, operator_id, product_id, timerange, efficiency)
   VALUES (gen_random_uuid(), '10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000007', v_op,
           '60000000-0000-0000-0000-000000000001', tstzrange('2099-03-04 08:00+00','2099-03-04 12:00+00'), 1.000)

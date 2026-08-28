@@ -75,7 +75,7 @@ Three mount hazards:
 - **`device_bash` cannot delete or move files.** Keep every scratch file in `/tmp` inside your own
   container, never under the repo. If you strand one anyway, report its full path.
 - **Do not run `git` at all.** Every git command through `device_bash` leaves a `.git/index.lock`
-  you cannot remove, which then warns on all of Pratik's git commands. Do not commit or push.
+  you cannot remove, which then warns on all of the maintainer's git commands. Do not commit or push.
 - Files may land read-only; `chmod u+w <path>` before overwriting one in place.
 
 After writing each file, verify it with `wc -l` and `md5sum` and report both.
@@ -89,9 +89,9 @@ After writing each file, verify it with `wc -l` and `md5sum` and report both.
 | `src/features/board/lib/placement.ts` | new — pure popover placement (§4.1) | **yes, by you, in-container** |
 | `src/features/auth/session.ts` | new — pure session-update decision (§4.2) | **yes, by you, in-container** |
 | `src/test/scaleAudit.ts` | new — the `--ui-scale` file audit (§4.3) | **yes, by you, in-container** |
-| `src/test/placement.test.ts` | new — vitest, §8 group P | authored; Pratik runs |
-| `src/test/session.test.ts` | new — vitest, §8 group S | authored; Pratik runs |
-| `src/test/scaleAudit.test.ts` | new — vitest, §8 group A | authored; Pratik runs |
+| `src/test/placement.test.ts` | new — vitest, §8 group P | authored; the maintainer runs |
+| `src/test/session.test.ts` | new — vitest, §8 group S | authored; the maintainer runs |
+| `src/test/scaleAudit.test.ts` | new — vitest, §8 group A | authored; the maintainer runs |
 | `src/features/board/components/BoardPopover.tsx` | edit — §7.1 | no — author-only |
 | `src/features/board/components/BoardPopover.module.css` | edit — §7.2 | no |
 | `AssignmentPopover.tsx`, `ConfirmPopover.tsx`, `CreatePopover.tsx`, `RunPopover.tsx`, `SplitCoveragePopover.tsx` | edit — drop `width={272}` (§7.3) | no |
@@ -435,5 +435,5 @@ a previous brief's fence contradicted its own headline feature and the agent was
 ## 13. Final step
 
 Update `docs/roadmap.md`: mark P1-5c built with your actual numbers, and add the new files to the
-artifact index. **Do not** mark the browser acceptance done — that is Pratik's, and it is the only
+artifact index. **Do not** mark the browser acceptance done — that is the maintainer's, and it is the only
 thing that can confirm §7.

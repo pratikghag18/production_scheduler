@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0020 — "each site is its own instance." Pratik's frame, made real.
+-- 0020 — "each site is its own instance." the maintainer's frame, made real.
 --
 -- HIS WORDS:
 --   "the system-admin or company-admin has access to all sites across the
@@ -659,7 +659,7 @@ $function$;
 -- PART 2 (§8–§12): THE DOORS. 0019 built the substrate and left every RPC and
 -- every non-node policy opening with `app_is_admin()`; a site admin was
 -- admitted by the model and stopped by the doors. This part opens them, one
--- object at a time, against the single test Pratik's frame gives:
+-- object at a time, against the single test the maintainer's frame gives:
 --
 --     CAN A SITE ADMIN DO THIS WITHOUT TOUCHING ANOTHER SITE?
 --
@@ -860,7 +860,7 @@ begin
     -- ------------------------------------------------------------------
     -- 0020 §10. A NEW SITE GETS ITS OWN COPY OF THE STRUCTURE.
     --
-    -- Pratik, asked and answered: a new site is set up by choosing an
+    -- The maintainer, asked and answered: a new site is set up by choosing an
     -- existing shape, and it gets a COPY of it, not a reference to it.
     -- p_template_id therefore stops meaning "the structure this root uses"
     -- and starts meaning "the structure to copy from".
@@ -1734,7 +1734,7 @@ $$;
 -- ----------------------------------------------------------------------------
 -- §9. Who may hand out access.
 --
--- Pratik, correcting me, and the correction is the whole section:
+-- The maintainer, correcting me, and the correction is the whole section:
 --
 --   "Site admins can't create people" was the wrong conclusion from a right
 --   worry. There are THREE separate things and only one of them is an
@@ -1827,7 +1827,7 @@ create policy profile_grants_delete on profile_grants for delete
 -- `pg_has_role(current_user, <owner of public.nodes>, 'USAGE')`. Inside a
 -- SECURITY DEFINER function `current_user` IS the owner, so that test becomes
 -- true for every caller and the hatch swings open for anyone signed in. The
--- change Pratik asked for in D97 would have been undone by a line written to
+-- change the maintainer asked for in D97 would have been undone by a line written to
 -- fix something else. `session_user` is not a repair either: under PostgREST it
 -- is `authenticator`, and in this project's own harness it is the superuser, so
 -- the test would disagree with production in the direction that hides the hole.

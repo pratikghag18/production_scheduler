@@ -506,7 +506,13 @@ function payload(over: Partial<ShiftPatternsPayload> = {}): ShiftPatternsPayload
 const PLANT = { id: "n-plant", name: "Plant 1", parentId: null, path: "plant1" };
 const LINE = { id: "n-line", name: "Line A", parentId: "n-plant", path: "plant1.linea" };
 const OWNED = { id: "t-owned", name: "Plant 1 nights", siteNodeId: "n-plant" };
-const SHARED = { id: "t-shared", name: "Company standard", siteNodeId: null };
+// ⭐ 0028 / D108: this was `siteNodeId: null` — the company-wide pattern. There
+// is no such row now. It keeps its name and its role in this file (the pattern
+// whose OWNER the fixture deliberately does not supply a node for, so
+// `ownerLabel` has to fall back) but the owner is a real node id the fixture
+// omits from `nodes`, which is the state that still exists: a row you can read
+// whose owning node you cannot name.
+const SHARED = { id: "t-shared", name: "Company standard", siteNodeId: "n-elsewhere" };
 
 /** The seed's night shift, on the site-owned pattern. */
 const NIGHT_ROW = {
@@ -522,9 +528,13 @@ describe("shiftDraft: assembling what the panel draws", () => {
     expect(patternRows(undefined)).toEqual({ patterns: [], nodes: [], skipped: 0 });
   });
 
-  it("labels a pattern no site owns as company-wide", () => {
+  it("⭐ (rewritten by 0028) labels a pattern whose owner it cannot name as another site, never as everyone's", () => {
+    // Was: "labels a pattern no site owns as company-wide". D108 deleted the
+    // state and the label with it. What survives is the distinction that
+    // mattered — "I cannot see where this lives" must never render as "anyone
+    // may use this".
     const view = patternRows(payload({ templates: [SHARED] }));
-    expect(view.patterns[0].ownerLabel).toBe("Company-wide");
+    expect(view.patterns[0].ownerLabel).toBe("Another site");
   });
 
   it("labels an owned pattern with its site's name, never a uuid", () => {

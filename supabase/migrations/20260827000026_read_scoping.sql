@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 0026 — D107: OWNERSHIP DECIDES WHO MAY READ, NOT ONLY WHO MAY EDIT
 --
--- Pratik, Aug 27, signed in as the Plant 2 site admin and looking at the
+-- The maintainer, Aug 27, signed in as the Plant 2 site admin and looking at the
 -- Products catalogue:
 --
 --   "why am I seeing product which is assigned to Plant 1? No member from one

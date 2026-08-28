@@ -1433,7 +1433,7 @@ ROLLBACK TO SAVEPOINT sp_N13;
 --
 -- N14 used to assert that a plain `authenticated` caller could set
 -- app.hierarchy_migration and skip the level check. That was true, it was
--- never reachable through PostgREST, and Pratik asked for it closed -- so the
+-- never reachable through PostgREST, and the maintainer asked for it closed -- so the
 -- case now asserts the REFUSAL. N14b rescues the coverage N14 was legitimately
 -- providing (the hatch works, and the path cascade still runs underneath it),
 -- moved to the caller the hatch is now reserved for: the table's OWNER. Same

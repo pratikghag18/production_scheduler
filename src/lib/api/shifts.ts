@@ -90,7 +90,7 @@ function isMin(v: unknown): v is number {
 export interface ShiftTemplateRow {
   id: string;
   name: string;
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 /** `shifts`. `endMin` may exceed 1440 — that is what a night shift IS. */
@@ -132,7 +132,11 @@ export interface ShiftNodeRow {
 export function parseShiftTemplateRow(v: unknown): ShiftTemplateRow | null {
   if (!isRecord(v)) return null;
   const { id, name, site_node_id } = v;
-  if (!isStr(id) || !isStr(name) || !isStrOrNull(site_node_id)) return null;
+  // ⭐ `isStr`, not `isStrOrNull`, since 0028: the column is NOT NULL, so a
+  // null here means the row did not come from a database this client
+  // understands. Reject it rather than coerce it — the panel already counts
+  // and reports what it skipped.
+  if (!isStr(id) || !isStr(name) || !isStr(site_node_id)) return null;
   return { id, name, siteNodeId: site_node_id };
 }
 
@@ -277,7 +281,7 @@ export interface CreatePatternInput {
    * that only company admins can ever edit. It is a real choice; the panel
    * makes the caller make it.
    */
-  siteNodeId: string | null;
+  siteNodeId: string;
 }
 
 /**
@@ -308,17 +312,18 @@ export async function renamePattern(
   /**
    * Where the pattern belongs. **Omit to leave it alone**; `null` moves it
    * company-wide. `null` is a real value in this column, so "not supplied"
-   * cannot be spelled the same way as "make it company-wide".
+   * cannot be spelled the same way as "make it company-wide". ⭐ 0028/D108
+   * deleted the company-wide half; an ABSENT key still means "leave it alone".
    *
-   * ⭐ IT TAKES A SCOPE BECAUSE THE CREATE FORM DOES. Pratik had to ask three
+   * ⭐ IT TAKES A SCOPE BECAUSE THE CREATE FORM DOES. The maintainer had to ask three
    * times for the equivalent on products and operators, and the shape of the
    * mistake was the same every time: a picker on the create form and nothing
    * on the edit, so the value was frozen at birth. Adding it here before he
    * finds it is the cheap half of that lesson.
    */
-  siteNodeId?: string | null,
+  siteNodeId?: string,
 ): Promise<ShiftTemplateRow> {
-  const patch: { name: string; site_node_id?: string | null } =
+  const patch: { name: string; site_node_id?: string } =
     siteNodeId === undefined ? { name } : { name, site_node_id: siteNodeId };
 
   const { data, error } = await supabase
@@ -331,7 +336,7 @@ export async function renamePattern(
 }
 
 /**
- * ⚠️ THIS IS THE ONLY REMOVAL THERE IS. Pratik's standing decision is that
+ * ⚠️ THIS IS THE ONLY REMOVAL THERE IS. The maintainer's standing decision is that
  * deactivating is the main action wherever a thing has an on/off flag —
  * `shift_templates` has none, so there is nothing to deactivate and delete is
  * the whole of it.

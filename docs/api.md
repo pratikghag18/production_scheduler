@@ -57,6 +57,8 @@ one helper (`api_raise`) so this shape cannot drift:
 | `level_in_use` *(brief P1-5a)* | `PT409` | `save_hierarchy_levels` would remove a hierarchy level that still has nodes | `level_ids` |
 | `node_in_use` *(brief P1-5a)* | `PT409` | `delete_node(p_mode := 'delete')` on a node that still has children, runs, or assignments | `children`, `runs`, `assignments` |
 | `schedulable_level_locked` *(brief P1-5a)* | `PT409` | `save_hierarchy_levels` would move the schedulable flag off a level that still has runs **or** direct assignments on it | `blocking_rows`, `level_id` |
+| `not_offered_here` *(migration 0028, D109)* | `PT409` | a run, assignment, training requirement, shift-pattern attachment, operator home cell or held training names a row whose owning node does not contain the node in question | `kind`, `id`, `owner_node_id`, `node_id` |
+| `owner_change_blocked` *(migration 0028 §5)* | `PT409` | re-homing a product, operator, training or shift pattern that is already used outside the site it is being moved to | `kind`, `id`, `new_owner_node_id`, `stranded` |
 
 **The `23P01` exception:** the `runs_no_overlap_on_node` exclusion
 constraint (a database-level invariant, migration `0003`) raises a bare
