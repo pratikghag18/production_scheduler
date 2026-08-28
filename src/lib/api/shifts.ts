@@ -214,10 +214,7 @@ export interface ShiftPatternsPayload {
 export async function fetchShiftPatterns(): Promise<ShiftPatternsPayload> {
   const [templatesRes, shiftsRes, breaksRes, attachmentsRes, nodesRes] = await Promise.all([
     supabase.from("shift_templates").select("id, name, site_node_id").order("name"),
-    supabase
-      .from("shifts")
-      .select("id, template_id, name, start_min, end_min")
-      .order("start_min"),
+    supabase.from("shifts").select("id, template_id, name, start_min, end_min").order("start_min"),
     supabase
       .from("shift_breaks")
       .select("id, shift_id, name, start_min, end_min")
@@ -249,11 +246,7 @@ export async function fetchShiftPatterns(): Promise<ShiftPatternsPayload> {
  * `.select()`, `requireWritten` for the silently-filtered refusal, then the
  * same runtime guard the read uses.
  */
-function writtenRow<T>(
-  rows: unknown[] | null,
-  parse: (v: unknown) => T | null,
-  where: string,
-): T {
+function writtenRow<T>(rows: unknown[] | null, parse: (v: unknown) => T | null, where: string): T {
   const written = requireWritten(rows);
   const parsed = parse(written[0]);
   if (parsed === null) throw shapeMismatch(where, "expected the row just written");

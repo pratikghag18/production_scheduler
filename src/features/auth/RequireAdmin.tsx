@@ -33,8 +33,8 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
       <>
         <h1>Not available</h1>
         <p>
-          Admin settings are only available to administrators. If you need a change made to
-          your site structure, ask an administrator.
+          Admin settings are only available to administrators. If you need a change made to your
+          site structure, ask an administrator.
         </p>
         <p>
           <Link to="/">Back to Board</Link>

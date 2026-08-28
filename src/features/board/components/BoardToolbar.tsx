@@ -160,10 +160,7 @@ export function BoardToolbar({
             import from, rather than matching three copies. */}
         {products.map((p) => (
           <span key={p.id} className={styles.key}>
-            <span
-              className={styles.swatch}
-              style={{ background: productColorCss(p.colorToken) }}
-            />
+            <span className={styles.swatch} style={{ background: productColorCss(p.colorToken) }} />
             {p.name}
           </span>
         ))}

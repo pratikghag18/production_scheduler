@@ -12,7 +12,11 @@ import { describe, expect, it } from "vitest";
 import type { LevelRow, NodeRow } from "../features/admin/lib/hierarchy.ts";
 import { canDropOn } from "../features/admin/lib/hierarchy.ts";
 import type { HierarchyTemplateRef } from "../features/admin/lib/shapePicker.ts";
-import { buildTreeRows, groupRowsByShape, legalParentsFor } from "../features/admin/lib/treeView.ts";
+import {
+  buildTreeRows,
+  groupRowsByShape,
+  legalParentsFor,
+} from "../features/admin/lib/treeView.ts";
 import {
   describeDrop,
   dropRailIndex,
@@ -463,9 +467,10 @@ describe("treeDrag.ts: rowDropZones", () => {
 
   it("R16: the widest row offers exactly two", () => {
     let widest = 0;
-    for (const d of NODES) for (const r of NODES) {
-      widest = Math.max(widest, zones(d.id, r.id).length);
-    }
+    for (const d of NODES)
+      for (const r of NODES) {
+        widest = Math.max(widest, zones(d.id, r.id).length);
+      }
     expect(widest).toBe(2);
   });
 

@@ -248,7 +248,10 @@ export function OperatorsPanel() {
       setNotice("Your profile hasn't loaded yet — try again in a moment.");
       return;
     }
-    const draft = validateOperatorDraft({ displayName: draftName, employeeRef: draftRef }, operators);
+    const draft = validateOperatorDraft(
+      { displayName: draftName, employeeRef: draftRef },
+      operators,
+    );
     if (!draft.ok) {
       setNotice(draft.message);
       return;
@@ -599,9 +602,7 @@ export function OperatorsPanel() {
         {/* ---------------- where they can work ---------------- */}
         <section className={styles.detail}>
           {selected === null ? (
-            <p className={styles.status}>
-              Pick someone on the left to see where they can work.
-            </p>
+            <p className={styles.status}>Pick someone on the left to see where they can work.</p>
           ) : (
             <>
               <header className={styles.head}>
@@ -635,10 +636,19 @@ export function OperatorsPanel() {
                         </option>
                       ))}
                     </select>
-                    <button type="button" className={styles.small} disabled={busy} onClick={saveRename}>
+                    <button
+                      type="button"
+                      className={styles.small}
+                      disabled={busy}
+                      onClick={saveRename}
+                    >
                       Save
                     </button>
-                    <button type="button" className={styles.small} onClick={() => setRenaming(false)}>
+                    <button
+                      type="button"
+                      className={styles.small}
+                      onClick={() => setRenaming(false)}
+                    >
                       Cancel
                     </button>
                   </div>
@@ -703,7 +713,9 @@ export function OperatorsPanel() {
                         className={styles.small}
                         onClick={() => {
                           setNotice(
-                            deleteCheck !== null && !deleteCheck.allowed ? deleteCheck.blockedBy : null,
+                            deleteCheck !== null && !deleteCheck.allowed
+                              ? deleteCheck.blockedBy
+                              : null,
                           );
                           setConfirmDelete(true);
                         }}
@@ -727,8 +739,7 @@ export function OperatorsPanel() {
                   />
                 </label>
                 <p className={styles.summary}>
-                  {summary.eligible} of {summary.total}{" "}
-                  {summary.total === 1 ? "place" : "places"}
+                  {summary.eligible} of {summary.total} {summary.total === 1 ? "place" : "places"}
                   {summary.unresolved > 0 &&
                     ` · ${summary.unresolved} couldn’t be answered in full`}
                 </p>
@@ -737,8 +748,8 @@ export function OperatorsPanel() {
                   `check_eligibility` against the real shift window when the
                   assignment is actually made. See `../lib/operators`. */}
               <p className={styles.footnote}>
-                The scheduler checks this again when work is assigned; this is what
-                today&rsquo;s tickets and requirements imply.
+                The scheduler checks this again when work is assigned; this is what today&rsquo;s
+                tickets and requirements imply.
               </p>
               <ul className={styles.places}>
                 {visiblePlaces.map((p) => (
@@ -760,8 +771,8 @@ export function OperatorsPanel() {
 
               <h3 className={styles.h3}>Tickets</h3>
               <p className={styles.footnote}>
-                A ticket is what changes the answer above. Adding one can turn several
-                crosses green at once — requirements sit on places and inherit downward.
+                A ticket is what changes the answer above. Adding one can turn several crosses green
+                at once — requirements sit on places and inherit downward.
               </p>
               <ul className={styles.tickets}>
                 {tickets.map((t) => (
@@ -809,9 +820,7 @@ export function OperatorsPanel() {
                     </button>
                   </li>
                 ))}
-                {tickets.length === 0 && (
-                  <li className={styles.status}>No tickets yet.</li>
-                )}
+                {tickets.length === 0 && <li className={styles.status}>No tickets yet.</li>}
               </ul>
 
               <h3 className={styles.h3}>Add a ticket</h3>

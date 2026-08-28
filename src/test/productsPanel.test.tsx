@@ -196,7 +196,9 @@ describe("ProductsPanel — the row's editor is reachable (D106)", () => {
     // Plant 1 would make the case pass against a picker that ignored the row
     // entirely and opened on its own first option — which is exactly the
     // defect it exists to catch.
-    h.state.products = h.state.products.map((p, i) => (i === 0 ? { ...p, siteNodeId: "n-asm" } : p));
+    h.state.products = h.state.products.map((p, i) =>
+      i === 0 ? { ...p, siteNodeId: "n-asm" } : p,
+    );
     render(<ProductsPanel />);
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     expect(belongsTo(editingRow("WX"), "WX").value).toBe("n-asm");

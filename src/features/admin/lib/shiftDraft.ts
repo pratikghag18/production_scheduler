@@ -297,10 +297,7 @@ export interface BreakProblem {
  * `600..660` is not. Doing this on `%1440` clock values gets both backwards,
  * which is exactly the bug this module was written to make impossible.
  */
-export function breakProblems(
-  shift: Span,
-  breaks: readonly BreakSpan[],
-): BreakProblem[] {
+export function breakProblems(shift: Span, breaks: readonly BreakSpan[]): BreakProblem[] {
   const out: BreakProblem[] = [];
   const shiftLabel = describeSpan(shift);
 
@@ -381,11 +378,7 @@ export interface PatternDraft {
 }
 
 export type DraftProblemField =
-  | "pattern-name"
-  | "shift-name"
-  | "shift-time"
-  | "shift-overlap"
-  | "break-time";
+  "pattern-name" | "shift-name" | "shift-time" | "shift-overlap" | "break-time";
 
 export interface DraftProblem {
   field: DraftProblemField;
@@ -728,7 +721,9 @@ export function patternRows(payload: ShiftPatternsPayload | null | undefined): P
 
   const patterns: PatternView[] = templates
     .map((t) => {
-      const rows = (shiftsByTemplate.get(t.id) ?? []).slice().sort((a, b) => a.startMin - b.startMin);
+      const rows = (shiftsByTemplate.get(t.id) ?? [])
+        .slice()
+        .sort((a, b) => a.startMin - b.startMin);
       const shifts: ShiftView[] = rows.map((s) => {
         const breaks = (breaksByShift.get(s.id) ?? [])
           .slice()

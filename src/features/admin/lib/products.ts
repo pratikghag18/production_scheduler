@@ -127,10 +127,7 @@ export const UNKNOWN_SITE_LABEL = "Another site";
  * "unreachable" is a claim about the server and this is what the user sees the
  * day it stops holding. Inventing a name or showing a raw uuid are both worse.
  */
-export function ownerLabel(
-  siteNodeId: string,
-  sites: readonly ProductSite[] | null,
-): string {
+export function ownerLabel(siteNodeId: string, sites: readonly ProductSite[] | null): string {
   // `null` means the structure read did not land, so we cannot NAME the owner
   // and must not pretend the row belongs elsewhere either.
   if (sites === null) return UNKNOWN_SITE_LABEL;

@@ -78,9 +78,28 @@ function product(over: Partial<AdminProduct> = {}): AdminProduct {
 }
 
 const WX = product();
-const WY = product({ id: "p-wy", sku: "WY", name: "Widget Y", siteNodeId: PLANT_1, colorToken: "product-2" });
-const GZ = product({ id: "p-gz", sku: "GZ", name: "Gadget Z", siteNodeId: PLANT_2, colorToken: "product-3", active: false });
-const RW = product({ id: "p-rw", sku: "RW", name: "Rework", siteNodeId: PLANT_1, colorToken: "product-9" });
+const WY = product({
+  id: "p-wy",
+  sku: "WY",
+  name: "Widget Y",
+  siteNodeId: PLANT_1,
+  colorToken: "product-2",
+});
+const GZ = product({
+  id: "p-gz",
+  sku: "GZ",
+  name: "Gadget Z",
+  siteNodeId: PLANT_2,
+  colorToken: "product-3",
+  active: false,
+});
+const RW = product({
+  id: "p-rw",
+  sku: "RW",
+  name: "Rework",
+  siteNodeId: PLANT_1,
+  colorToken: "product-9",
+});
 
 const ALL = [WX, WY, GZ, RW];
 
@@ -251,9 +270,10 @@ describe("productRows", () => {
   // the label is decided and O3/O4 already test it directly; what belongs here
   // is the LIST's behaviour, which is to drop the row and count it.
   it("L10: a row whose owner is outside the sites list is dropped from the list and counted", () => {
-    const view = productRows([product({ sku: "ZZ", siteNodeId: PLANT_2 })], [
-      { id: PLANT_1, name: "Plant 1" },
-    ]);
+    const view = productRows(
+      [product({ sku: "ZZ", siteNodeId: PLANT_2 })],
+      [{ id: PLANT_1, name: "Plant 1" }],
+    );
     expect([view.rows.length, view.elsewhere]).toEqual([0, 1]);
   });
 
@@ -374,7 +394,11 @@ describe("matchesProductQuery", () => {
   it("L29: counts EVERY foreign row, not just the first", () => {
     // L5 already establishes this shape for `skipped`. Without it, `elsewhere`
     // assigned rather than incremented passes every other case in this group.
-    const OTHER = product({ id: "p-fy", sku: "FY", siteNodeId: "30000000-0000-0000-0000-0000000000fe" });
+    const OTHER = product({
+      id: "p-fy",
+      sku: "FY",
+      siteNodeId: "30000000-0000-0000-0000-0000000000fe",
+    });
     expect(productRows([FOREIGN, WX, OTHER], SITES).elsewhere).toBe(2);
   });
 });
@@ -474,7 +498,6 @@ describe("editRefusalNote", () => {
     expect(editRefusalNote(GZ, false, [PLANT_1], true)).toBe(null);
     expect(canEditProduct(GZ, false, [PLANT_1], true)).toBe(true);
   });
-
 });
 
 describe("colour: a token or a hex (0025 §2)", () => {
@@ -546,7 +569,10 @@ describe("colour: a token or a hex (0025 §2)", () => {
     // it just helped somebody choose. Nothing asserted the flag for a hex row,
     // so reverting it to `!isPaletteToken(...)` alone was invisible.
     const view = productRows(
-      [{ ...WY, colorToken: "#1baf7a" }, { ...WX, colorToken: "product-5" }],
+      [
+        { ...WY, colorToken: "#1baf7a" },
+        { ...WX, colorToken: "product-5" },
+      ],
       SITES,
     );
     expect(view.rows.map((r) => r.colorUnknown)).toEqual([false, true]);
@@ -756,7 +782,10 @@ describe("describeWriteRefusal", () => {
   // R12 — the only CHECK on this table is on a column this client never
   // sends, so a 23514 here is a schema change nobody taught the screen about.
   it("R12: flags a CHECK violation as something to report", () => {
-    const invalid: SchedulerError = { kind: "InvalidValue", constraint: "products_color_token_shape" };
+    const invalid: SchedulerError = {
+      kind: "InvalidValue",
+      constraint: "products_color_token_shape",
+    };
     expect(describeWriteRefusal(invalid, "That value isn't allowed here.")).toContain("report");
   });
 });

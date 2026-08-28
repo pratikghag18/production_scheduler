@@ -217,9 +217,7 @@ export interface LevelOrderNode {
 }
 
 export type LevelOrderProblemKind =
-  | "level_removed_with_nodes"
-  | "root_below_first_level"
-  | "child_not_directly_below_parent";
+  "level_removed_with_nodes" | "root_below_first_level" | "child_not_directly_below_parent";
 
 export interface LevelOrderProblem {
   kind: LevelOrderProblemKind;

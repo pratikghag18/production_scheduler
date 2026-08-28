@@ -120,13 +120,25 @@ const SKILLS: readonly SkillLike[] = [
 ];
 
 const ana: OperatorLike = {
-  id: ANA, displayName: "Ana Silva", employeeRef: "E-1001", active: true, siteNodeId: PLANT,
+  id: ANA,
+  displayName: "Ana Silva",
+  employeeRef: "E-1001",
+  active: true,
+  siteNodeId: PLANT,
 };
 const bob: OperatorLike = {
-  id: BOB, displayName: "bob jones", employeeRef: null, active: true, siteNodeId: PLANT,
+  id: BOB,
+  displayName: "bob jones",
+  employeeRef: null,
+  active: true,
+  siteNodeId: PLANT,
 };
 const cara: OperatorLike = {
-  id: CARA, displayName: "Cara Lin", employeeRef: "E-1003", active: false, siteNodeId: LINE_A,
+  id: CARA,
+  displayName: "Cara Lin",
+  employeeRef: "E-1003",
+  active: false,
+  siteNodeId: LINE_A,
 };
 
 const ANA_TICKETS: readonly OperatorSkillLike[] = [
@@ -157,8 +169,15 @@ function place(places: readonly WorkPlace[], nodeId: string): WorkPlace {
   return (
     found ?? {
       nodeId: `NOT-IN-RESULT:${nodeId}`,
-      label: "", name: "", active: false, eligible: false,
-      missing: [], expiring: [], unnamed: 0, complete: false, reasons: [],
+      label: "",
+      name: "",
+      active: false,
+      eligible: false,
+      missing: [],
+      expiring: [],
+      unnamed: 0,
+      complete: false,
+      reasons: [],
     }
   );
 }
@@ -286,8 +305,10 @@ it("W10: a ticket lapsing ON the last day of the window is NOT expiring (`<`, no
 });
 
 it("W11: an ALREADY-expired ticket is reported as expiring, never as missing", () => {
-  const lapsed = [{ operatorId: ANA, skillId: SAFETY, expiresAt: null },
-                  { operatorId: ANA, skillId: FORKLIFT, expiresAt: "2026-01-01" }];
+  const lapsed = [
+    { operatorId: ANA, skillId: SAFETY, expiresAt: null },
+    { operatorId: ANA, skillId: FORKLIFT, expiresAt: "2026-01-01" },
+  ];
   const p = place(workPlacesFor(ana, input({ operatorSkills: lapsed }), TODAY), CELL_2);
   expect(names(p.missing)).toEqual([]);
   expect(names(p.expiring)).toEqual(["Forklift"]);
@@ -328,9 +349,7 @@ it("W16: a broken ancestor chain is a CROSS, never a tick", () => {
 
 it("W17: and the cross for a broken chain says why", () => {
   const p = place(workPlacesFor(ana, input(), TODAY), ORPHAN);
-  expect(p.reasons[0]).toBe(
-    "the places above this one could not be read, so this is not a yes",
-  );
+  expect(p.reasons[0]).toBe("the places above this one could not be read, so this is not a yes");
 });
 
 it("W18: an ancestor cycle is a cross, not a hang and not a tick", () => {
@@ -339,8 +358,10 @@ it("W18: an ancestor cycle is a cross, not a hang and not a tick", () => {
 });
 
 it("W19: an expiry that is not a readable day is a cross, not a pass", () => {
-  const junk = [{ operatorId: ANA, skillId: SAFETY, expiresAt: null },
-                { operatorId: ANA, skillId: FORKLIFT, expiresAt: "not-a-date" }];
+  const junk = [
+    { operatorId: ANA, skillId: SAFETY, expiresAt: null },
+    { operatorId: ANA, skillId: FORKLIFT, expiresAt: "not-a-date" },
+  ];
   const p = place(workPlacesFor(ana, input({ operatorSkills: junk }), TODAY), CELL_2);
   expect(p.eligible).toBe(false);
   expect(p.unnamed).toBe(1);
@@ -358,9 +379,7 @@ it("W21: one operator's tickets never count for another", () => {
 });
 
 it("W22: the label is the root-to-leaf path", () => {
-  expect(place(workPlacesFor(ana, input(), TODAY), CELL_1).label).toBe(
-    "Plant 1 › Line A › Cell 1",
-  );
+  expect(place(workPlacesFor(ana, input(), TODAY), CELL_1).label).toBe("Plant 1 › Line A › Cell 1");
 });
 
 it("W23: a label whose chain broke is marked, not silently shortened", () => {
@@ -377,7 +396,9 @@ it("W25: granting the one missing ticket turns SEVERAL crosses green at once", (
   const before = workPlacesFor(bob, input(), TODAY);
   const after = workPlacesFor(
     bob,
-    input({ operatorSkills: [...ANA_TICKETS, { operatorId: BOB, skillId: FORKLIFT, expiresAt: null }] }),
+    input({
+      operatorSkills: [...ANA_TICKETS, { operatorId: BOB, skillId: FORKLIFT, expiresAt: null }],
+    }),
     TODAY,
   );
   expect(place(before, CELL_2).eligible).toBe(false);
@@ -421,7 +442,9 @@ it("O1: deactivated people are hidden by default — deactivate is the main acti
 });
 
 it("O2: and shown when asked for", () => {
-  const ids = operatorRows([ana, bob, cara], ANA_TICKETS, { includeInactive: true }).map((r) => r.id);
+  const ids = operatorRows([ana, bob, cara], ANA_TICKETS, { includeInactive: true }).map(
+    (r) => r.id,
+  );
   expect(ids).toContain(CARA);
 });
 
@@ -516,7 +539,9 @@ it("N5: the exact clash reads as an offer to reuse, never as an error", () => {
 
 it("N6: the loose clash leaves creating available, because it may be a different ticket", () => {
   const clash = findExistingSkillByName(SKILLS, "FORKLIFT");
-  expect(clash === null ? "" : describeSkillNameClash(clash)).toContain("unless this is a different ticket");
+  expect(clash === null ? "" : describeSkillNameClash(clash)).toContain(
+    "unless this is a different ticket",
+  );
 });
 
 /* ===========================================================================
@@ -581,10 +606,7 @@ it("V2: a ticket that has LAPSED and whose skill row is unreadable is counted, n
   // failed: W14 covers unnamed-and-MISSING only. A ticket we cannot name and
   // cannot vouch for must still make the place unresolved, or an unreadable
   // row silently becomes a tick.
-  const held = [
-    ...ANA_TICKETS,
-    { operatorId: ANA, skillId: PHANTOM, expiresAt: "2026-08-01" },
-  ];
+  const held = [...ANA_TICKETS, { operatorId: ANA, skillId: PHANTOM, expiresAt: "2026-08-01" }];
   const places = workPlacesFor(ana, input({ operatorSkills: held }), TODAY);
   expect(place(places, CELL_3).unnamed).toBeGreaterThan(0);
 });

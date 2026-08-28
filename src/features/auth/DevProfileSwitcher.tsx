@@ -22,23 +22,29 @@ import styles from "./DevProfileSwitcher.module.css";
  * later brief; this is the minimum that makes RLS-gated data visible while
  * developing.
  */
+// ⭐ EVERY ONE OF THESE LIVES IN `supabase/dev_demo.sql`, NOT IN `seed.sql`,
+// AND THE WHOLE DEMO WORLD DOES TOO (D112). The seed is the TEST FIXTURE — one
+// plant, one structure — because about eighteen cases across eight files rest
+// on org 1 holding exactly one structure. `dev_demo.sql` clears that and builds
+// Plant A, Plant B and Plant C over the top, which is what the app shows.
+// Picking somebody here before that file has run fails to sign in, which is the
+// honest outcome rather than a hidden option.
+//
+// ⭐⭐ THE ORDER IS DELIBERATE: WIDEST REACH FIRST, NARROWEST LAST. Reading
+// down the list is reading the permission model from the outside in, and the
+// last two are the ones worth signing in as. A site admin runs one plant and is
+// refused on the other two. **Ana is granted a LINE, not a plant** — so she is
+// the person who shows that D107's read rule runs in BOTH directions: she still
+// sees Plant A's plant-wide parts, because their owner is ABOVE her grant, and
+// she does NOT see the part owned by Area 2, because that branch and hers never
+// meet. Nothing else in the cast can tell those two answers apart.
 const DEV_PROFILES = [
-  { label: "Admin (company)", email: "admin@example.test" },
-  { label: "Ana (supervisor)", email: "ana@example.test" },
-  { label: "Marco (supervisor)", email: "marco@example.test" },
-  // ⭐ THE TWO SITE ADMINS, AND THEY ONLY EXIST AFTER `supabase/dev_demo.sql`
-  // HAS BEEN RUN — see that file's header for why they are not in `seed.sql`
-  // (measured: a second plant in the seed turns 8 test files red, and several
-  // of those cases exist BECAUSE org 1 holds exactly one structure).
-  //
-  // They are what makes migrations 0019-0021 visible at all: every seeded
-  // person is either the company admin, for whom no rule applies, or a
-  // supervisor, who cannot open the admin screen. Signing in as one of these
-  // is the only way to see a site admin run one plant and be refused on the
-  // other. Picking one before running the script fails to sign in, which is
-  // the honest outcome rather than a hidden option.
-  { label: "Dana (site admin, Plant 1)", email: "dana@example.test" },
-  { label: "Quinn (site admin, Plant 2)", email: "quinn@example.test" },
+  { label: "Admin (company — all three plants)", email: "admin@example.test" },
+  { label: "Dana (site admin, Plant A)", email: "dana@example.test" },
+  { label: "Quinn (site admin, Plant B)", email: "quinn@example.test" },
+  { label: "Rosa (site admin, Plant C)", email: "rosa@example.test" },
+  { label: "Marco (supervisor, Plant B / Area 1)", email: "marco@example.test" },
+  { label: "Ana (supervisor, Plant A / Line 1 only)", email: "ana@example.test" },
 ] as const;
 
 const DEV_PASSWORD = "devpassword";

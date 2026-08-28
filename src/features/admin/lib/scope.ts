@@ -182,10 +182,7 @@ export function indentedLabel(option: ScopeOption): string {
  * claim about the server and this function is what the user sees if it stops
  * being true.
  */
-export function scopeLabel(
-  scopeNodeId: string,
-  nodesById: ReadonlyMap<string, ScopeNode>,
-): string {
+export function scopeLabel(scopeNodeId: string, nodesById: ReadonlyMap<string, ScopeNode>): string {
   const node = nodesById.get(scopeNodeId);
   return node === undefined ? "Somewhere else" : node.name;
 }

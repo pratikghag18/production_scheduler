@@ -122,8 +122,7 @@ export function SiteAccessPanel({
       {
         onError: (err: SchedulerError) =>
           setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
-        onSettled: () =>
-          setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
+        onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
       },
     );
   }
@@ -135,12 +134,10 @@ export function SiteAccessPanel({
     removeMemberMutation.mutate(
       { nodeId: activeNodeId, profileId: row.profileId },
       {
-        onSuccess: () =>
-          setConfirmingProfileId((cur) => (cur === row.profileId ? null : cur)),
+        onSuccess: () => setConfirmingProfileId((cur) => (cur === row.profileId ? null : cur)),
         onError: (err: SchedulerError) =>
           setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
-        onSettled: () =>
-          setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
+        onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
       },
     );
   }
@@ -154,9 +151,7 @@ export function SiteAccessPanel({
     // no structure (a structure is owned by a ROOT, migration 0020 §1), so
     // this is the honest sentence, not a spinner that never resolves.
     return (
-      <p className={styles.status}>
-        There&apos;s no plant here for you to manage access for.
-      </p>
+      <p className={styles.status}>There&apos;s no plant here for you to manage access for.</p>
     );
   }
 
@@ -210,11 +205,7 @@ export function SiteAccessPanel({
       )}
 
       {activeFocus !== null && (
-        <button
-          type="button"
-          className={styles.backBtn}
-          onClick={() => setFocus(null)}
-        >
+        <button type="button" className={styles.backBtn} onClick={() => setFocus(null)}>
           ← Back to {activeFocus.rootName}
         </button>
       )}
@@ -383,15 +374,9 @@ export function SiteAccessPanel({
           Search above by email address to give someone access to {view.nodeName}.
         </p>
       ) : candidates.length === 0 ? (
-        <p className={styles.skippedLine}>
-          Nobody else in the company matches “{query.trim()}”.
-        </p>
+        <p className={styles.skippedLine}>Nobody else in the company matches “{query.trim()}”.</p>
       ) : null}
-      <div
-        className={styles.head}
-        aria-hidden="true"
-        hidden={candidates.length === 0}
-      >
+      <div className={styles.head} aria-hidden="true" hidden={candidates.length === 0}>
         <span>Person</span>
         <span>Access here</span>
         <span>Role to give</span>

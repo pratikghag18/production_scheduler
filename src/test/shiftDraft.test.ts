@@ -491,7 +491,9 @@ describe("shiftDraft: validating a pattern before it is written", () => {
         }),
       ],
     });
-    expect(validatePatternDraft(draft).problems.filter((p) => p.field === "break-time")).toEqual([]);
+    expect(validatePatternDraft(draft).problems.filter((p) => p.field === "break-time")).toEqual(
+      [],
+    );
   });
 });
 
@@ -749,17 +751,17 @@ describe("shiftDraft: the boundaries the first pass left unpinned", () => {
     // 06:00 -> 06:00 +1d. `end_min - start_min <= 1440` allows it. Turning the
     // module's `>` into `>=` refused every one of these and was NOT CAUGHT --
     // the nearest case only ever fed 1441.
-    expect(messages(patternDraft({ shifts: [shiftDraft({ startMin: 360, endMin: 1800 })] }))).toEqual(
-      [],
-    );
+    expect(
+      messages(patternDraft({ shifts: [shiftDraft({ startMin: 360, endMin: 1800 })] })),
+    ).toEqual([]);
   });
 
   it("V3: refuses a shift that ends on the very minute it starts", () => {
     // 06:00 -> 06:00 with no +1d is zero-length. Turning `<=` into `<` let it
     // through to a raw 23514 from the CHECK, and was NOT CAUGHT.
-    expect(messages(patternDraft({ shifts: [shiftDraft({ startMin: 360, endMin: 360 })] }))).toEqual([
-      "This shift ends before it starts. For a night shift, mark the end as +1 day.",
-    ]);
+    expect(
+      messages(patternDraft({ shifts: [shiftDraft({ startMin: 360, endMin: 360 })] })),
+    ).toEqual(["This shift ends before it starts. For a night shift, mark the end as +1 day."]);
   });
 
   it("V4: a break with an unreadable bound is reported once, and pairs with nothing", () => {

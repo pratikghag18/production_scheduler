@@ -157,6 +157,28 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
     expect(unscaledPxLengths(".a { box-shadow: 0 10px 40px #000; }")).toEqual([]);
   });
 
+  // R5b — THE SAME DECLARATION, WRAPPED. Prettier splits a multi-value
+  // box-shadow across lines once it is long enough, and on 28 Aug a repo-wide
+  // `prettier --write` did exactly that to ProductsPanel.module.css. R5 kept
+  // passing (its literal is one line) while R1 failed on CSS whose meaning had
+  // not changed. The two forms are the same declaration and must audit the
+  // same, so this case asserts BOTH halves — the wrapped form is exempt, and it
+  // agrees with the single-line form.
+  it("R5b: a box-shadow WRAPPED across lines is exempt too", () => {
+    const oneLine = ".a { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink); }";
+    const wrapped =
+      ".a {\n  box-shadow:\n    0 0 0 2px var(--surface),\n    0 0 0 3px var(--ink);\n}";
+    expect(unscaledPxLengths(wrapped)).toEqual([]);
+    expect(unscaledPxLengths(wrapped)).toEqual(unscaledPxLengths(oneLine));
+  });
+
+  // And the guard on the guard: R5b would pass against a matcher that had
+  // simply stopped looking. A wrapped declaration that is NOT exempt must
+  // still be caught, or "wrapping makes it exempt" becomes the new bug.
+  it("R5c: a wrapped NON-exempt declaration is still flagged", () => {
+    expect(unscaledPxLengths(".a {\n  padding:\n    12px\n    8px;\n}").length).toBe(2);
+  });
+
   // A breakpoint is about the DEVICE. In `rem` it would resolve against the
   // scaled root and move with the scale — a real bug in the first conversion.
   it("R6: a @media prelude is exempt", () => {
@@ -342,7 +364,9 @@ describe("scaleAudit.ts: the drag audit (D100)", () => {
     // G4 greener rather than redder. A list that drives a test is itself
     // untested unless something asserts the list.
     const shared = read(DRAG_SHARED_SURFACE);
-    const absent = SHARED_DRAG_DECLARATIONS.filter((n) => unsharedDragRules(shared, [n]).length === 0);
+    const absent = SHARED_DRAG_DECLARATIONS.filter(
+      (n) => unsharedDragRules(shared, [n]).length === 0,
+    );
     expect(absent).toEqual([]);
   });
 
@@ -353,9 +377,9 @@ describe("scaleAudit.ts: the drag audit (D100)", () => {
   it("G7: a shared rule quoted inside a comment is not a re-declaration", () => {
     // Instrument 37's family: these files explain themselves in prose that
     // quotes the very declarations being looked for.
-    expect(unsharedDragRules(`/* the shared file sets cursor: grab here */\n.row{gap:1rem}`)).toEqual(
-      [],
-    );
+    expect(
+      unsharedDragRules(`/* the shared file sets cursor: grab here */\n.row{gap:1rem}`),
+    ).toEqual([]);
   });
 
   it("G8: no drag surface reaches past its tokens to a raw semantic colour", () => {
@@ -488,7 +512,6 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
   });
 });
 
-
 /* ---------------------------------------------------------------------------
    GROUP J — D105, CREATE/EDIT PARITY.
 
@@ -591,7 +614,7 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
     const src = [
       "export async function updateThing(input) {",
       "  const patch = { name: input.name };",
-      '  if (x) patch.site_node_id = input.s;',
+      "  if (x) patch.site_node_id = input.s;",
       "  const { data, error } = await supabase",
       '    .from("products")',
       "    .update(patch)",
@@ -608,7 +631,9 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
 
   it("J7: a module that never touches the table is reported, not skipped", () => {
     const empty = new Map([["src/lib/api/products.ts", "export const nothing = 1;"]]);
-    expect(scopeParityOffences(empty, [{ file: "src/lib/api/products.ts", table: "products" }])).toEqual([
+    expect(
+      scopeParityOffences(empty, [{ file: "src/lib/api/products.ts", table: "products" }]),
+    ).toEqual([
       "src/lib/api/products.ts: no insert into products",
       "src/lib/api/products.ts: no update of products",
       "src/lib/api/products.ts: nothing sets products.site_node_id at creation",

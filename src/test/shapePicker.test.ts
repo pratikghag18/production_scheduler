@@ -187,8 +187,10 @@ check("B1: fixture is well-formed — no duplicate ids in any of the three lists
 
 check("B2: every template appears in the summaries, none invented", () => {
   return (
-    sameSet(SUMMARIES.map((s) => s.id), TEMPLATES.map((t) => t.id)) ||
-    `got ids ${JSON.stringify(SUMMARIES.map((s) => s.id))}`
+    sameSet(
+      SUMMARIES.map((s) => s.id),
+      TEMPLATES.map((t) => t.id),
+    ) || `got ids ${JSON.stringify(SUMMARIES.map((s) => s.id))}`
   );
 });
 
@@ -415,7 +417,6 @@ check("V8: 'shape a' vs 'Shape A' -> not a duplicate (case-sensitive)", () => {
   return r.ok === true || `got ${JSON.stringify(r)}`;
 });
 
-
 // ---------------------------------------------------------------------------
 // F — filterEditableShapes (0021 §2). The shape picker's filter.
 //
@@ -479,7 +480,10 @@ check("F7: a string is NOT treated as a list of its characters", () => {
 });
 
 check("F8: the surviving shapes keep buildShapeSummaries' order", () => {
-  const out = filterEditableShapes(SUMMARIES, SUMMARIES.map((x) => x.id));
+  const out = filterEditableShapes(
+    SUMMARIES,
+    SUMMARIES.map((x) => x.id),
+  );
   const before = SUMMARIES.map((x) => x.id).join(",");
   const after = out.map((x) => x.id).join(",");
   return before === after || `${before} -> ${after}`;
@@ -490,7 +494,8 @@ check("F9: neither input is mutated", () => {
   const beforeSummaries = SUMMARIES.map((x) => x.id).join(",");
   filterEditableShapes(SUMMARIES, ids);
   return (
-    (ids.length === 1 && ids[0] === TPL_A &&
+    (ids.length === 1 &&
+      ids[0] === TPL_A &&
       SUMMARIES.map((x) => x.id).join(",") === beforeSummaries) ||
     "an input was mutated"
   );

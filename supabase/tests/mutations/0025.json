@@ -1,77 +1,77 @@
 [
- [
-  "S1 the trigger goes back to requiring a root",
-  "    from nodes where id = new.site_node_id and org_id = new.org_id;",
-  "    from nodes where id = new.site_node_id and org_id = new.org_id and parent_id is null;"
- ],
- [
-  "S2 the trigger loses its ORG scope (the only refusal branch left)",
-  "    from nodes where id = new.site_node_id and org_id = new.org_id;",
-  "    from nodes where id = new.site_node_id;"
- ],
- [
-  "S3 the trigger stops refusing anything at all",
-  "  if v_found is not true then\n    perform api_raise('invalid_argument', 'the node this belongs to was not found in this org',\n      jsonb_build_object('field', 'site_node_id', 'reason', 'not found'));\n  end if;",
-  ""
- ],
- [
-  "S4 the trigger goes back to SECURITY INVOKER",
-  "create or replace function app_check_site_owner() returns trigger\nlanguage plpgsql security definer set search_path = public, pg_temp as $$",
-  "create or replace function app_check_site_owner() returns trigger\nlanguage plpgsql as $$"
- ],
- [
-  "S5 the NULL short-circuit goes (company-wide stops being expressible)",
-  "  if new.site_node_id is null then\n    return new;\n  end if;",
-  ""
- ],
- [
-  "S6 the colour CHECK is widened to accept anything (the 'simplification')",
-  "  check (color_token is null\n      or color_token ~ '^product-[1-9][0-9]*$'\n      or color_token ~ '^#[0-9a-f]{6}$');",
-  "  check (color_token is null or color_token is not null);"
- ],
- [
-  "S7 the hex arm admits upper case as well",
-  "      or color_token ~ '^#[0-9a-f]{6}$');",
-  "      or color_token ~* '^#[0-9a-f]{6}$');"
- ],
- [
-  "S8 the hex arm is unanchored, so any string containing a hex passes",
-  "      or color_token ~ '^#[0-9a-f]{6}$');",
-  "      or color_token ~ '#[0-9a-f]{6}');"
- ],
- [
-  "S9 the hex arm admits a 3-digit form too",
-  "      or color_token ~ '^#[0-9a-f]{6}$');",
-  "      or color_token ~ '^#([0-9a-f]{3}|[0-9a-f]{6})$');"
- ],
- [
-  "S10 the token arm is dropped (the palette stops being storable)",
-  "      or color_token ~ '^product-[1-9][0-9]*$'\n",
-  ""
- ],
- [
-  "S11 board_window stops reporting where a product belongs",
-  "               'color_token', p.color_token, 'site_node_id', p.site_node_id) ORDER BY p.sku)",
-  "               'color_token', p.color_token) ORDER BY p.sku)"
- ],
- [
-  "S12 board_window stops reporting where a person belongs",
-  "               'site_node_id', op.site_node_id,\n",
-  ""
- ],
- [
-  "S13 board_window stops reporting where a training belongs",
-  "'id', s.id, 'name', s.name, 'site_node_id', s.site_node_id) ORDER BY s.name)",
-  "'id', s.id, 'name', s.name) ORDER BY s.name)"
- ],
- [
-  "S14 board_window reports the scope as a constant NULL (the shape a ? test cannot see)",
-  "'id', s.id, 'name', s.name, 'site_node_id', s.site_node_id) ORDER BY s.name)",
-  "'id', s.id, 'name', s.name, 'site_node_id', NULL) ORDER BY s.name)"
- ],
- [
-  "S15 board_window filters products to the window's own subtree (the tempting 'improvement')",
-  "      FROM products p WHERE p.org_id = v_org_id",
-  "      FROM products p LEFT JOIN nodes sn ON sn.id = p.site_node_id\n       WHERE p.org_id = v_org_id AND (p.site_node_id IS NULL OR sn.path <@ p_root_path::ltree)"
- ]
+  [
+    "S1 the trigger goes back to requiring a root",
+    "    from nodes where id = new.site_node_id and org_id = new.org_id;",
+    "    from nodes where id = new.site_node_id and org_id = new.org_id and parent_id is null;"
+  ],
+  [
+    "S2 the trigger loses its ORG scope (the only refusal branch left)",
+    "    from nodes where id = new.site_node_id and org_id = new.org_id;",
+    "    from nodes where id = new.site_node_id;"
+  ],
+  [
+    "S3 the trigger stops refusing anything at all",
+    "  if v_found is not true then\n    perform api_raise('invalid_argument', 'the node this belongs to was not found in this org',\n      jsonb_build_object('field', 'site_node_id', 'reason', 'not found'));\n  end if;",
+    ""
+  ],
+  [
+    "S4 the trigger goes back to SECURITY INVOKER",
+    "create or replace function app_check_site_owner() returns trigger\nlanguage plpgsql security definer set search_path = public, pg_temp as $$",
+    "create or replace function app_check_site_owner() returns trigger\nlanguage plpgsql as $$"
+  ],
+  [
+    "S5 the NULL short-circuit goes (company-wide stops being expressible)",
+    "  if new.site_node_id is null then\n    return new;\n  end if;",
+    ""
+  ],
+  [
+    "S6 the colour CHECK is widened to accept anything (the 'simplification')",
+    "  check (color_token is null\n      or color_token ~ '^product-[1-9][0-9]*$'\n      or color_token ~ '^#[0-9a-f]{6}$');",
+    "  check (color_token is null or color_token is not null);"
+  ],
+  [
+    "S7 the hex arm admits upper case as well",
+    "      or color_token ~ '^#[0-9a-f]{6}$');",
+    "      or color_token ~* '^#[0-9a-f]{6}$');"
+  ],
+  [
+    "S8 the hex arm is unanchored, so any string containing a hex passes",
+    "      or color_token ~ '^#[0-9a-f]{6}$');",
+    "      or color_token ~ '#[0-9a-f]{6}');"
+  ],
+  [
+    "S9 the hex arm admits a 3-digit form too",
+    "      or color_token ~ '^#[0-9a-f]{6}$');",
+    "      or color_token ~ '^#([0-9a-f]{3}|[0-9a-f]{6})$');"
+  ],
+  [
+    "S10 the token arm is dropped (the palette stops being storable)",
+    "      or color_token ~ '^product-[1-9][0-9]*$'\n",
+    ""
+  ],
+  [
+    "S11 board_window stops reporting where a product belongs",
+    "               'color_token', p.color_token, 'site_node_id', p.site_node_id) ORDER BY p.sku)",
+    "               'color_token', p.color_token) ORDER BY p.sku)"
+  ],
+  [
+    "S12 board_window stops reporting where a person belongs",
+    "               'site_node_id', op.site_node_id,\n",
+    ""
+  ],
+  [
+    "S13 board_window stops reporting where a training belongs",
+    "'id', s.id, 'name', s.name, 'site_node_id', s.site_node_id) ORDER BY s.name)",
+    "'id', s.id, 'name', s.name) ORDER BY s.name)"
+  ],
+  [
+    "S14 board_window reports the scope as a constant NULL (the shape a ? test cannot see)",
+    "'id', s.id, 'name', s.name, 'site_node_id', s.site_node_id) ORDER BY s.name)",
+    "'id', s.id, 'name', s.name, 'site_node_id', NULL) ORDER BY s.name)"
+  ],
+  [
+    "S15 board_window filters products to the window's own subtree (the tempting 'improvement')",
+    "      FROM products p WHERE p.org_id = v_org_id",
+    "      FROM products p LEFT JOIN nodes sn ON sn.id = p.site_node_id\n       WHERE p.org_id = v_org_id AND (p.site_node_id IS NULL OR sn.path <@ p_root_path::ltree)"
+  ]
 ]

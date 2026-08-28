@@ -26,12 +26,37 @@ import {
 } from "@/features/admin/lib/scope";
 
 const PLANT: ScopeNode = { id: "n-plant", name: "Plant 1", parentId: null, path: "plant1" };
-const ASSY: ScopeNode = { id: "n-assy", name: "Assembly", parentId: "n-plant", path: "plant1.assembly" };
-const LINE1: ScopeNode = { id: "n-l1", name: "Line 1", parentId: "n-assy", path: "plant1.assembly.line1" };
+const ASSY: ScopeNode = {
+  id: "n-assy",
+  name: "Assembly",
+  parentId: "n-plant",
+  path: "plant1.assembly",
+};
+const LINE1: ScopeNode = {
+  id: "n-l1",
+  name: "Line 1",
+  parentId: "n-assy",
+  path: "plant1.assembly.line1",
+};
 /** ⚠️ The trap. `plant1.assembly.line1` is a STRING prefix of this. */
-const LINE10: ScopeNode = { id: "n-l10", name: "Line 10", parentId: "n-assy", path: "plant1.assembly.line10" };
-const CELL1: ScopeNode = { id: "n-c1", name: "Cell 1", parentId: "n-l1", path: "plant1.assembly.line1.cell1" };
-const CELL10: ScopeNode = { id: "n-c10", name: "Cell 10", parentId: "n-l10", path: "plant1.assembly.line10.cell10" };
+const LINE10: ScopeNode = {
+  id: "n-l10",
+  name: "Line 10",
+  parentId: "n-assy",
+  path: "plant1.assembly.line10",
+};
+const CELL1: ScopeNode = {
+  id: "n-c1",
+  name: "Cell 1",
+  parentId: "n-l1",
+  path: "plant1.assembly.line1.cell1",
+};
+const CELL10: ScopeNode = {
+  id: "n-c10",
+  name: "Cell 10",
+  parentId: "n-l10",
+  path: "plant1.assembly.line10.cell10",
+};
 /** A second site, so "outside the scope" is not the same fixture as "another tenant". */
 const PLANT2: ScopeNode = { id: "n-p2", name: "Plant 2", parentId: null, path: "plant2" };
 
@@ -151,7 +176,9 @@ describe("scope: the picker", () => {
 
   it("X15: depth comes from the path, so the indent is right without a tree walk", () => {
     const byName = new Map(scopeOptions(NODES).map((o) => [o.name, o.depth]));
-    expect([byName.get("Plant 1"), byName.get("Assembly"), byName.get("Cell 1")]).toEqual([0, 1, 3]);
+    expect([byName.get("Plant 1"), byName.get("Assembly"), byName.get("Cell 1")]).toEqual([
+      0, 1, 3,
+    ]);
   });
 
   it("X16: with an edit set, only nodes in it are offered — and nothing else at all", () => {
@@ -186,7 +213,7 @@ describe("scope: the picker", () => {
 });
 
 describe("scope: what a row says about where it belongs", () => {
-  it("X20 ⭐ (rewritten by 0028): a scope this client cannot read says so — and never says \"Company-wide\"", () => {
+  it('X20 ⭐ (rewritten by 0028): a scope this client cannot read says so — and never says "Company-wide"', () => {
     // `scopeLabel(null, ...)` returned "Company-wide" until D108 removed the
     // state. The remaining answer is the one that mattered: an unreadable
     // owner must read as somewhere else, never as everyone's.

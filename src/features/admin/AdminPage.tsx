@@ -8,11 +8,7 @@ import { fetchHierarchyTree } from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "./hooks/useHierarchyMutations";
-import {
-  buildShapeSummaries,
-  filterEditableShapes,
-  resolveSelectedShape,
-} from "./lib/shapePicker";
+import { buildShapeSummaries, filterEditableShapes, resolveSelectedShape } from "./lib/shapePicker";
 import { LevelEditor } from "./components/LevelEditor";
 import { NodeTreeEditor } from "./components/NodeTreeEditor";
 import { ShapePicker } from "./components/ShapePicker";
@@ -61,7 +57,6 @@ const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
 ];
 
-
 /**
  * §6.3 debt 1, CONFIRMED: keys under `hierarchyKeys.all` exactly as that
  * file's own comment proposed (`[...hierarchyKeys.all, "tree"]`) for the
@@ -104,9 +99,7 @@ export default function AdminPage() {
   // filter runs BEFORE `resolveSelectedShape`, so the selection can never
   // land on a structure the list no longer shows — the same reason that
   // function exists at all (D87).
-  const allSummaries = data
-    ? buildShapeSummaries(data.templates, data.levels, data.nodes)
-    : [];
+  const allSummaries = data ? buildShapeSummaries(data.templates, data.levels, data.nodes) : [];
   const summaries = filterEditableShapes(allSummaries, data?.editableShapeIds ?? null);
   const resolvedShapeId = resolveSelectedShape(summaries, selectedShapeId);
 

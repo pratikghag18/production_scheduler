@@ -265,16 +265,18 @@ describe("levelDraft.ts: findLevelOrderProblems", () => {
   });
 
   it("S2: swapping the top two levels strands the roots and two generations of children", () => {
-    expect(findLevelOrderProblems(draftOf("t1", "t0", "t2", "t3", "t4"), LEVELS, NODES, T)).toEqual([
-      { kind: "root_below_first_level", levelId: "t0", levelName: "Site", nodeCount: 2 },
-      {
-        kind: "child_not_directly_below_parent",
-        levelId: "t1",
-        levelName: "Department",
-        nodeCount: 1,
-      },
-      { kind: "child_not_directly_below_parent", levelId: "t2", levelName: "Line", nodeCount: 1 },
-    ]);
+    expect(findLevelOrderProblems(draftOf("t1", "t0", "t2", "t3", "t4"), LEVELS, NODES, T)).toEqual(
+      [
+        { kind: "root_below_first_level", levelId: "t0", levelName: "Site", nodeCount: 2 },
+        {
+          kind: "child_not_directly_below_parent",
+          levelId: "t1",
+          levelName: "Department",
+          nodeCount: 1,
+        },
+        { kind: "child_not_directly_below_parent", levelId: "t2", levelName: "Line", nodeCount: 1 },
+      ],
+    );
   });
 
   // S3 is the half a parent join cannot see (0016's case T34): a structure with
@@ -298,21 +300,23 @@ describe("levelDraft.ts: findLevelOrderProblems", () => {
   // "Line, Department, Work Cell" is neither the fixture's order nor
   // alphabetical, so a sort by name or by input position fails here.
   it("S4: swapping two middle levels leaves the roots alone and strands three children", () => {
-    expect(findLevelOrderProblems(draftOf("t0", "t2", "t1", "t3", "t4"), LEVELS, NODES, T)).toEqual([
-      { kind: "child_not_directly_below_parent", levelId: "t2", levelName: "Line", nodeCount: 1 },
-      {
-        kind: "child_not_directly_below_parent",
-        levelId: "t1",
-        levelName: "Department",
-        nodeCount: 1,
-      },
-      {
-        kind: "child_not_directly_below_parent",
-        levelId: "t3",
-        levelName: "Work Cell",
-        nodeCount: 1,
-      },
-    ]);
+    expect(findLevelOrderProblems(draftOf("t0", "t2", "t1", "t3", "t4"), LEVELS, NODES, T)).toEqual(
+      [
+        { kind: "child_not_directly_below_parent", levelId: "t2", levelName: "Line", nodeCount: 1 },
+        {
+          kind: "child_not_directly_below_parent",
+          levelId: "t1",
+          levelName: "Department",
+          nodeCount: 1,
+        },
+        {
+          kind: "child_not_directly_below_parent",
+          levelId: "t3",
+          levelName: "Work Cell",
+          nodeCount: 1,
+        },
+      ],
+    );
   });
 
   // ⭐ S5 IS THE CASE THIS WHOLE DESIGN EXISTS FOR — the client twin of the
@@ -392,9 +396,9 @@ describe("levelDraft.ts: findLevelOrderProblems", () => {
   });
 
   it("S12: a null templateId has no problems to report", () => {
-    expect(findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3", "t4"), LEVELS, NODES, null)).toEqual(
-      [],
-    );
+    expect(
+      findLevelOrderProblems(draftOf("t0", "t1", "t2", "t3", "t4"), LEVELS, NODES, null),
+    ).toEqual([]);
   });
 
   // The admin has to be able to connect the message to a row on screen, so a
@@ -432,8 +436,12 @@ describe("levelDraft.ts: findLevelOrderProblems", () => {
   it("S15: a non-array draft, levels or nodes returns [] rather than throwing", () => {
     const bad = null as unknown as LevelDraft[];
     expect(findLevelOrderProblems(bad, LEVELS, NODES, T)).toEqual([]);
-    expect(findLevelOrderProblems(draftOf("t0"), bad as unknown as LevelOrderLevel[], NODES, T)).toEqual([]);
-    expect(findLevelOrderProblems(draftOf("t0"), LEVELS, bad as unknown as LevelOrderNode[], T)).toEqual([]);
+    expect(
+      findLevelOrderProblems(draftOf("t0"), bad as unknown as LevelOrderLevel[], NODES, T),
+    ).toEqual([]);
+    expect(
+      findLevelOrderProblems(draftOf("t0"), LEVELS, bad as unknown as LevelOrderNode[], T),
+    ).toEqual([]);
   });
 
   it("S16: null, undefined and wrong-typed entries inside the arrays do not throw", () => {
@@ -469,11 +477,7 @@ describe("levelDraft.ts: findLevelOrderProblems", () => {
   // one rung under a parent that has since moved. Here "Mid" holds a stranded
   // ROOT and a stranded CHILD at the same time, and both have to be said.
   it("S18: one level can carry both a stranded root and a stranded child", () => {
-    const levels = [
-      lvl("b0", "B", 0, "Top"),
-      lvl("b1", "B", 1, "Mid"),
-      lvl("b2", "B", 2, "Deep"),
-    ];
+    const levels = [lvl("b0", "B", 0, "Top"), lvl("b1", "B", 1, "Mid"), lvl("b2", "B", 2, "Deep")];
     const nodes = [
       nd("x1", null, "b1"),
       nd("x2", null, "b0"),
@@ -760,7 +764,10 @@ describe("levelDraft.ts: levelDropTarget", () => {
         for (const above of [true, false]) {
           const t = levelDropTarget(from, over, above, 4);
           if (t === null) continue;
-          if (order(applyLevelAction(ROWS, { kind: "moveTo", from, to: t.landAt })) === NAMES.join(","))
+          if (
+            order(applyLevelAction(ROWS, { kind: "moveTo", from, to: t.landAt })) ===
+            NAMES.join(",")
+          )
             inert.push(`${from}/${over}/${above}`);
         }
       }
@@ -806,9 +813,10 @@ describe("levelDraft.ts: levelDropTarget", () => {
   });
 
   it("P24: a two-row list can still swap, both ways", () => {
-    expect([levelDropTarget(0, 1, true, 2)?.landAt, levelDropTarget(1, 0, false, 2)?.landAt]).toEqual(
-      [1, 0],
-    );
+    expect([
+      levelDropTarget(0, 1, true, 2)?.landAt,
+      levelDropTarget(1, 0, false, 2)?.landAt,
+    ]).toEqual([1, 0]);
   });
 
   // ⭐ P25 pins why mutation W5 is INERT. The splice shift is `from < caretAt`;

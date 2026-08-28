@@ -78,8 +78,7 @@ export interface DemoteTarget {
 }
 
 export type DemoteVerdict =
-  | { ok: true; targets: DemoteTarget[] }
-  | { ok: false; block: DemoteBlock };
+  { ok: true; targets: DemoteTarget[] } | { ok: false; block: DemoteBlock };
 
 // ---------------------------------------------------------------------------
 // Shared helpers. One implementation of "what is in this subtree", used by

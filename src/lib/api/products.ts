@@ -116,10 +116,7 @@ export function parseAdminProduct(row: unknown): AdminProduct | null {
  * split for the same reason).
  */
 export async function fetchAdminProducts(): Promise<ReadonlyArray<AdminProduct | null>> {
-  const { data, error } = await supabase
-    .from("products")
-    .select(PRODUCT_COLUMNS)
-    .order("sku");
+  const { data, error } = await supabase.from("products").select(PRODUCT_COLUMNS).order("sku");
   if (error) throw toSchedulerError(error);
   return (data ?? []).map((row) => parseAdminProduct(row));
 }
@@ -300,11 +297,7 @@ export async function setProductActive(input: SetProductActiveInput): Promise<Ad
  * DELETE the policy refuses removes zero rows and reports no error at all.
  */
 export async function deleteProduct(id: string): Promise<void> {
-  const { data, error } = await supabase
-    .from("products")
-    .delete()
-    .eq("id", id)
-    .select("id");
+  const { data, error } = await supabase.from("products").delete().eq("id", id).select("id");
   if (error) throw toSchedulerError(error);
   requireWritten(data);
 }

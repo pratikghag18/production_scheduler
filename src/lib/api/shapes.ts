@@ -88,7 +88,13 @@ export interface HierarchyLevel {
 function parseLevel(v: Json): HierarchyLevel | null {
   if (!isJsonObject(v)) return null;
   const { id, template_id, position, name, is_schedulable } = v;
-  if (!isStr(id) || !isStr(template_id) || !isNum(position) || !isStr(name) || !isBool(is_schedulable))
+  if (
+    !isStr(id) ||
+    !isStr(template_id) ||
+    !isNum(position) ||
+    !isStr(name) ||
+    !isBool(is_schedulable)
+  )
     return null;
   return { id, templateId: template_id, position, name, isSchedulable: is_schedulable };
 }

@@ -52,12 +52,7 @@ import {
   useSetProductColor,
   useUpdateProduct,
 } from "../hooks/useProducts";
-import {
-  indentedLabel,
-  scopeIndex,
-  scopeOptions,
-  scopePathLabel,
-} from "../lib/scope";
+import { indentedLabel, scopeIndex, scopeOptions, scopePathLabel } from "../lib/scope";
 import styles from "./ProductsPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
@@ -85,9 +80,11 @@ export function ProductsPanel() {
 
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<{ sku: string; name: string; siteNodeId: string }>(
-    { sku: "", name: "", siteNodeId: "" },
-  );
+  const [editDraft, setEditDraft] = useState<{ sku: string; name: string; siteNodeId: string }>({
+    sku: "",
+    name: "",
+    siteNodeId: "",
+  });
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [recolouringId, setRecolouringId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
@@ -140,8 +137,7 @@ export function ProductsPanel() {
   // to a site admin whose writes the server would have accepted, with every row
   // simultaneously labelled "Another site" and every button dead. The honest
   // message is the one for a read we could not make, whichever read failed.
-  const previewUnavailable =
-    !isCompanyAdmin && (treeQuery.isError || editableShapeIds === null);
+  const previewUnavailable = !isCompanyAdmin && (treeQuery.isError || editableShapeIds === null);
 
   // ⭐ THE PICKER FAILS OPEN AND THE SERVER DECIDES. `ownerOptions` narrowed the
   // list to `adminSiteIds`, which is derived from STRUCTURE ownership and is
@@ -217,7 +213,10 @@ export function ProductsPanel() {
       {
         onSuccess: () => setEditingId((cur) => (cur === row.id ? null : cur)),
         onError: (err: SchedulerError) =>
-          setRowError({ id: row.id, message: describeWriteRefusal(err, describeSchedulerError(err)) }),
+          setRowError({
+            id: row.id,
+            message: describeWriteRefusal(err, describeSchedulerError(err)),
+          }),
       },
     );
   }
@@ -228,7 +227,10 @@ export function ProductsPanel() {
       { id: row.id, active: !row.active },
       {
         onError: (err: SchedulerError) =>
-          setRowError({ id: row.id, message: describeWriteRefusal(err, describeSchedulerError(err)) }),
+          setRowError({
+            id: row.id,
+            message: describeWriteRefusal(err, describeSchedulerError(err)),
+          }),
       },
     );
   }
@@ -241,7 +243,10 @@ export function ProductsPanel() {
         setConfirmingId((cur) => (cur === row.id ? null : cur));
         // `describeSchedulerError` already names the referencing table for a
         // 23503; `describeDeleteRefusal` adds the way out.
-        setRowError({ id: row.id, message: describeDeleteRefusal(err, describeSchedulerError(err)) });
+        setRowError({
+          id: row.id,
+          message: describeDeleteRefusal(err, describeSchedulerError(err)),
+        });
       },
     });
   }
@@ -385,11 +390,7 @@ export function ProductsPanel() {
               <button type="button" className={styles.primary} onClick={() => saveEdit(row)}>
                 Save
               </button>
-              <button
-                type="button"
-                className={styles.quiet}
-                onClick={() => setEditingId(null)}
-              >
+              <button type="button" className={styles.quiet} onClick={() => setEditingId(null)}>
                 Cancel
               </button>
             </>
@@ -426,11 +427,7 @@ export function ProductsPanel() {
                 Edit
               </button>
               {isConfirming ? (
-                <button
-                  type="button"
-                  className={styles.danger}
-                  onClick={() => confirmDelete(row)}
-                >
+                <button type="button" className={styles.danger} onClick={() => confirmDelete(row)}>
                   Delete for good?
                 </button>
               ) : (
@@ -618,9 +615,7 @@ export function ProductsPanel() {
                   </option>
                 ))}
               </select>
-              {newErrors.owner !== null && (
-                <span className={styles.error}>{newErrors.owner}</span>
-              )}
+              {newErrors.owner !== null && <span className={styles.error}>{newErrors.owner}</span>}
             </label>
             <button type="button" className={styles.primary} onClick={submitNew}>
               Add
@@ -634,8 +629,8 @@ export function ProductsPanel() {
             control they are looking at does not exist. */}
         <p className={styles.hint}>
           A product&rsquo;s colour is chosen for it when it&rsquo;s created — the least-used one in
-          its owner&rsquo;s palette — and never changes on its own afterwards. Click a swatch
-          in the list to set it by hand.
+          its owner&rsquo;s palette — and never changes on its own afterwards. Click a swatch in the
+          list to set it by hand.
         </p>
       </section>
 

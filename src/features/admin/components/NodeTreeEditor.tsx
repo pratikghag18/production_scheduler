@@ -473,7 +473,9 @@ export function NodeTreeEditor({
           )}
           <button
             type="submit"
-            disabled={createMutation.isPending || (requiresShapeChoice && addRootTemplateId === null)}
+            disabled={
+              createMutation.isPending || (requiresShapeChoice && addRootTemplateId === null)
+            }
           >
             Add
           </button>
@@ -508,34 +510,36 @@ export function NodeTreeEditor({
           live !== null &&
           groupDropState(drag.draggedId, group.templateId, nodes, levels) === "foreign";
         return (
-        <div
-          key={group.templateId ?? "__unresolved__"}
-          className={isForeignGroup ? `${styles.group} ${styles.groupForeign}` : styles.group}
-        >
-          {showShapeHeadings && (
-            <div className={styles.shapeHead}>
-              <b className={styles.shapeName}>{group.templateName ?? "Unknown structure"}</b>
-              {group.levelPath.length > 0 && (
-                <span className={styles.shapePath}>{group.levelPath.join(" › ")}</span>
-              )}
-              {isForeignGroup && (
-                <span className={styles.foreignNote}>different structure — not a destination</span>
-              )}
-            </div>
-          )}
-          <ul className={styles.tree}>
-            {group.rows.map((row) => (
-              <li
-                key={row.node.id}
-                data-node-id={row.node.id}
-                className={rowClassName(row.node.id)}
-                style={rowStyle(row)}
-                onPointerDown={(e) => handleRowPointerDown(row.node.id, e)}
-                onPointerMove={handleRowPointerMove}
-                onPointerUp={handleRowPointerUp}
-                onPointerCancel={handleRowPointerCancel}
-              >
-                {/*
+          <div
+            key={group.templateId ?? "__unresolved__"}
+            className={isForeignGroup ? `${styles.group} ${styles.groupForeign}` : styles.group}
+          >
+            {showShapeHeadings && (
+              <div className={styles.shapeHead}>
+                <b className={styles.shapeName}>{group.templateName ?? "Unknown structure"}</b>
+                {group.levelPath.length > 0 && (
+                  <span className={styles.shapePath}>{group.levelPath.join(" › ")}</span>
+                )}
+                {isForeignGroup && (
+                  <span className={styles.foreignNote}>
+                    different structure — not a destination
+                  </span>
+                )}
+              </div>
+            )}
+            <ul className={styles.tree}>
+              {group.rows.map((row) => (
+                <li
+                  key={row.node.id}
+                  data-node-id={row.node.id}
+                  className={rowClassName(row.node.id)}
+                  style={rowStyle(row)}
+                  onPointerDown={(e) => handleRowPointerDown(row.node.id, e)}
+                  onPointerMove={handleRowPointerMove}
+                  onPointerUp={handleRowPointerUp}
+                  onPointerCancel={handleRowPointerCancel}
+                >
+                  {/*
                   Tree guides, drawn from `row.guides` (D90). One fixed-width
                   rail per ancestor depth: it carries a vertical line when that
                   ancestor still has siblings below, and nothing when it does
@@ -548,43 +552,43 @@ export function NodeTreeEditor({
                   silently did not scale and nothing could have caught it — the
                   D89 blind spot, one component over.
                 */}
-                {row.depth > 0 && (
-                  // One flex container for the whole rail block, with NO gap
-                  // inside it, so each level is exactly one rail wide. The
-                  // row's own `gap` would otherwise widen every indent step
-                  // and make the arithmetic depend on a spacing token.
-                  <span className={styles.guides} aria-hidden="true">
-                    {row.guides.map((continues, i) => (
-                      <span key={i} className={continues ? styles.guideOn : styles.guideOff} />
-                    ))}
-                    <span className={row.isLastSibling ? styles.elbowLast : styles.elbow} />
+                  {row.depth > 0 && (
+                    // One flex container for the whole rail block, with NO gap
+                    // inside it, so each level is exactly one rail wide. The
+                    // row's own `gap` would otherwise widen every indent step
+                    // and make the arithmetic depend on a spacing token.
+                    <span className={styles.guides} aria-hidden="true">
+                      {row.guides.map((continues, i) => (
+                        <span key={i} className={continues ? styles.guideOn : styles.guideOff} />
+                      ))}
+                      <span className={row.isLastSibling ? styles.elbowLast : styles.elbow} />
+                    </span>
+                  )}
+
+                  {row.hasChildren ? (
+                    <button
+                      type="button"
+                      className={styles.disclosure}
+                      aria-label={
+                        row.collapsed ? `Expand ${row.node.name}` : `Collapse ${row.node.name}`
+                      }
+                      onClick={() => toggleCollapsed(row.node.id)}
+                    >
+                      {row.collapsed ? "▸" : "▾"}
+                    </button>
+                  ) : (
+                    <span className={styles.disclosureSpacer} />
+                  )}
+
+                  <span className={row.node.active ? styles.name : styles.nameInactive}>
+                    {row.node.name}
                   </span>
-                )}
 
-                {row.hasChildren ? (
-                  <button
-                    type="button"
-                    className={styles.disclosure}
-                    aria-label={
-                      row.collapsed ? `Expand ${row.node.name}` : `Collapse ${row.node.name}`
-                    }
-                    onClick={() => toggleCollapsed(row.node.id)}
-                  >
-                    {row.collapsed ? "▸" : "▾"}
-                  </button>
-                ) : (
-                  <span className={styles.disclosureSpacer} />
-                )}
+                  {row.levelName !== null && (
+                    <span className={styles.levelChip}>{row.levelName}</span>
+                  )}
 
-                <span className={row.node.active ? styles.name : styles.nameInactive}>
-                  {row.node.name}
-                </span>
-
-                {row.levelName !== null && (
-                  <span className={styles.levelChip}>{row.levelName}</span>
-                )}
-
-                {/*
+                  {/*
                   The handle keeps its own `onPointerDown` and NOTHING ELSE. It
                   captures on the ROW, so every later pointer event targets the
                   row and is handled exactly once by the row's own handlers --
@@ -592,27 +596,27 @@ export function NodeTreeEditor({
                   handle-started drag, since those events bubble from the handle
                   up through the row.
                 */}
-                <button
-                  type="button"
-                  className={styles.dragHandle}
-                  aria-label={`Drag ${row.node.name}`}
-                  onPointerDown={(e) => handleHandlePointerDown(row.node.id, e)}
-                >
-                  ⠿
-                </button>
+                  <button
+                    type="button"
+                    className={styles.dragHandle}
+                    aria-label={`Drag ${row.node.name}`}
+                    onPointerDown={(e) => handleHandlePointerDown(row.node.id, e)}
+                  >
+                    ⠿
+                  </button>
 
-                <button
-                  type="button"
-                  className={styles.menuBtn}
-                  aria-label={`Actions for ${row.node.name}`}
-                  onClick={(e) => openMenu(row.node.id, e)}
-                >
-                  ⋮
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+                  <button
+                    type="button"
+                    className={styles.menuBtn}
+                    aria-label={`Actions for ${row.node.name}`}
+                    onClick={(e) => openMenu(row.node.id, e)}
+                  >
+                    ⋮
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         );
       })}
 

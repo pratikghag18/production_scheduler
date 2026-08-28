@@ -100,10 +100,7 @@ export function useCreatePattern() {
 }
 
 export function useRenamePattern() {
-  return useShiftWrite<
-    ShiftTemplateRow,
-    { templateId: string; name: string; siteNodeId?: string }
-  >(
+  return useShiftWrite<ShiftTemplateRow, { templateId: string; name: string; siteNodeId?: string }>(
     // ⚠️ `"siteNodeId" in v` and not `v.siteNodeId ?? undefined` — `null` is a
     // real value here (company-wide), so collapsing the two would make a rename
     // that did not mean to touch the scope silently move the pattern.
@@ -131,10 +128,7 @@ export function useUpdateShift() {
 }
 
 export function useDeleteShift() {
-  return useShiftWrite<{ id: string }, { shiftId: string }>(
-    (v) => deleteShift(v.shiftId),
-    true,
-  );
+  return useShiftWrite<{ id: string }, { shiftId: string }>((v) => deleteShift(v.shiftId), true);
 }
 
 /* --- breaks: `app_is_admin_for_shift`, and display-only in v1 --- */
@@ -148,10 +142,7 @@ export function useUpdateBreak() {
 }
 
 export function useDeleteBreak() {
-  return useShiftWrite<{ id: string }, { breakId: string }>(
-    (v) => deleteBreak(v.breakId),
-    true,
-  );
+  return useShiftWrite<{ id: string }, { breakId: string }>((v) => deleteBreak(v.breakId), true);
 }
 
 /* --- attachment: a DIFFERENT permission, `app_is_admin_for(node_id)` --- */

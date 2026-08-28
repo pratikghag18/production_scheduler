@@ -198,7 +198,8 @@ export const badColourToken = {
 
 /** The OTHER exclusion constraint — same SQLSTATE as a lost race. */
 export const shiftsOverlap = {
-  message: 'conflicting key value violates exclusion constraint "shifts_no_overlap_within_template"',
+  message:
+    'conflicting key value violates exclusion constraint "shifts_no_overlap_within_template"',
   details: "Key conflicts with existing key.",
   hint: null,
   code: "23P01",

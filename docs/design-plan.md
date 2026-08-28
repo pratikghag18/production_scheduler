@@ -7595,3 +7595,78 @@ a red case.
 
 **Final state: 408 database checks, 1105 app tests in 26 files, `tsc` 0 against the regenerated
 types, and 65 probe assertions across five probes run against the real modules.**
+
+---
+
+## §19.73 — D112, the demo world: the fixture and the app stop being the same thing
+
+> *"Done, I thought we were going remake the database, why am I still seeing the previous plants and user data?"*
+
+Fair question, and the answer was that 0028 changed the **rules** and nothing had changed the
+**data**. `npm run db:reset` runs two files and neither had been touched.
+
+### The split, and why it is the only arrangement in which both files are right
+
+`seed.sql` is the **test fixture**: one plant, one structure, nine operators, four products, the
+Aisha 50/50 pair. `scripts/verify-db.sh` runs migrations + seed and nothing else, and **about
+eighteen cases across eight files rest on org 1 holding exactly one structure** —
+`90_hierarchy_template_test.sql`'s T32 exists precisely to assert that an omitted
+`p_template_id` resolves when there is only one candidate, and that path stops being reachable
+the moment a second plant exists. Measured, when a second plant was first tried in the seed: 8
+files and ~18 named cases red.
+
+So `dev_demo.sql` **clears org 1's seeded content and builds the demo world over the top.** The
+suite never runs it. The fixture keeps the shape the suite needs; the app stops showing a
+one-plant world that cannot demonstrate a single rule D107–D109 added. Org 2 (Contoso) is
+untouched — `80_cross_org_test.sql` depends on it.
+
+### The world
+
+Three plants of identical shape, so any difference on screen is about the **rules** and never
+about the data: `Plant A/B/C` → `Area 1` (Line 1 → Cells 1–2, Line 2 → Cells 3–4) and
+`Area 2` (Line 3 → Cells 5–6). Twelve nodes per plant, built with `create_node` rather than by
+INSERT — **a direct insert would skip the copy-on-root-create (0020 §10) and all three plants
+would share one structure**, so renaming a level in Plant A would silently rename it in B and C.
+
+**⭐ And not everything is owned by a whole plant.** D109 says ownership is a scope at *any*
+level, and a world where every row is owned by a root cannot show it. Each plant has one part
+owned by a single **line**, one by a single **area**, one person owned by a line, and a training
+owned by a line. Those are the rows that make "offered on Line 1 and nowhere else" visible.
+
+### The cast, and the one worth signing in as
+
+| Sign-in | Sees |
+|---|---|
+| `admin@example.test` | all 12 parts, 18 people, 36 runs; the board offers a choice of three plants |
+| `dana@example.test` | Plant A only — 4 parts, 6 people, 1 pattern; board opens on Plant A |
+| `quinn@example.test` | Plant B only |
+| `rosa@example.test` | Plant C only |
+| `marco@example.test` | supervisor, Plant B / Area 1 |
+| **`ana@example.test`** | **supervisor granted LINE 1 ONLY** |
+
+**⭐⭐ Ana is the case worth having.** Measured on a real database: she sees `PN-1001` and
+`PN-1002` (owned by Plant A — the owner is **above** her grant), and `PN-1003` (owned by her own
+Line 1). She does **not** see `PN-1004`, which is owned by Area 2, because that branch and hers
+never meet. Her board opens on **Line 1**, not on Plant A — which is 0027's rule working: the
+board shows the highest node you can see whose parent you cannot. **Nothing else in the cast can
+tell those two answers apart**, and "the owner is above your grant" is the half of D107 that a
+fixture of plant admins alone will never exercise.
+
+### Two things the build itself taught
+
+- **The temp table is not readable by `authenticated`, and the refusal reads like RLS.** The
+  first draft accumulated node ids into a `TEMP` table while the role was switched for
+  `create_node`, and got *"permission denied for table d_fix"* — indistinguishable at a glance
+  from the permission model refusing something. This is instrument failure 34, recorded from
+  `53_read_scoping_test.sql`, arriving again. The ids are now accumulated in **arrays** and
+  written after `RESET ROLE`.
+- **The file's own assertion caught my arithmetic**: it expected 33 nodes and got 36, because a
+  plant is 12 nodes and not 11. A demo file that half-runs is worse than one that fails — the
+  screen looks plausible and the thing you were about to check is missing — so it ends with ten
+  assertions covering the counts, that **nothing is company-wide** (D108), that at least six
+  rows are owned **below** a root (D109), that no run uses a product owned outside it, and that
+  all six accounts have a password.
+
+⚠️ **The original `Standard Plant` structure is deliberately kept**, emptied of nodes. It is what
+`create_node` copies when a new root is created, so deleting it would make "add a plant" fail
+from the app. It will appear in a company admin's structure list as an empty one.

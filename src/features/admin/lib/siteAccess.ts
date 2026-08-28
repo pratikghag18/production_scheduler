@@ -235,10 +235,7 @@ export function canSetRole(row: AccessRow, viewerIsCompanyAdmin: boolean): boole
  * fact, an admin here; the honest rendering is a control showing `admin` with
  * no other option.
  */
-export function allowedRoles(
-  row: AccessRow,
-  viewerIsCompanyAdmin: boolean,
-): readonly GrantRole[] {
+export function allowedRoles(row: AccessRow, viewerIsCompanyAdmin: boolean): readonly GrantRole[] {
   return selfLocked(row, viewerIsCompanyAdmin) ? (["admin"] as const) : GRANT_ROLES;
 }
 

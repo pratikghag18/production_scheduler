@@ -132,9 +132,12 @@ function toShiftDraft(s: ShiftView): ShiftDraft {
     name: s.name,
     startMin: s.startMin,
     endMin: s.endMin,
-    breaks: s.breaks.map(
-      (b): BreakDraft => ({ id: b.id, name: b.name, startMin: b.startMin, endMin: b.endMin }),
-    ),
+    breaks: s.breaks.map((b): BreakDraft => ({
+      id: b.id,
+      name: b.name,
+      startMin: b.startMin,
+      endMin: b.endMin,
+    })),
   };
 }
 
@@ -147,7 +150,9 @@ function toPatternDraft(p: PatternView, shifts: readonly ShiftDraft[]): PatternD
    reach it. Group W pins it. */
 
 function errorText(e: unknown): string {
-  return isSchedulerError(e) ? describeSchedulerError(e) : "Something went wrong. Please try again.";
+  return isSchedulerError(e)
+    ? describeSchedulerError(e)
+    : "Something went wrong. Please try again.";
 }
 
 /**
@@ -260,9 +265,10 @@ export function ShiftsPanel() {
     if (orgId === null) return;
     clear("new");
     const draft: PatternDraft = { id: null, name: newName, shifts: [] };
-    const named = validatePatternDraft(draft, view.patterns.map((p) => p.name)).problems.filter(
-      (p) => p.field === "pattern-name",
-    );
+    const named = validatePatternDraft(
+      draft,
+      view.patterns.map((p) => p.name),
+    ).problems.filter((p) => p.field === "pattern-name");
     if (named.length > 0) {
       setRowError({ key: "new", message: named[0].message });
       return;
@@ -342,10 +348,7 @@ export function ShiftsPanel() {
       s.id === shift.id
         ? {
             ...s,
-            breaks: [
-              ...s.breaks,
-              { id: null, name: breakFor.form.name, startMin, endMin },
-            ],
+            breaks: [...s.breaks, { id: null, name: breakFor.form.name, startMin, endMin }],
           }
         : s,
     );
@@ -392,9 +395,7 @@ export function ShiftsPanel() {
         ? {
             ...sh,
             breaks: sh.breaks.map((b) =>
-              b.id === brk.id
-                ? { id: b.id, name: breakEdit.form.name, startMin, endMin }
-                : b,
+              b.id === brk.id ? { id: b.id, name: breakEdit.form.name, startMin, endMin } : b,
             ),
           }
         : sh,
@@ -469,9 +470,7 @@ export function ShiftsPanel() {
           <button
             type="button"
             className={styles.btn}
-            onClick={() =>
-              setBreakFor(adding ? null : { shiftId: shift.id, form: BLANK_BREAK })
-            }
+            onClick={() => setBreakFor(adding ? null : { shiftId: shift.id, form: BLANK_BREAK })}
           >
             {adding ? "Cancel break" : "Add break"}
           </button>
@@ -508,7 +507,9 @@ export function ShiftsPanel() {
               label="Starts"
               value={shiftEdit.form.start}
               allowNextDay={false}
-              onChange={(start) => setShiftEdit({ id: shift.id, form: { ...shiftEdit.form, start } })}
+              onChange={(start) =>
+                setShiftEdit({ id: shift.id, form: { ...shiftEdit.form, start } })
+              }
             />
             <TimeField
               label="Ends"
@@ -662,7 +663,10 @@ export function ShiftsPanel() {
                 aria-label="Break name"
                 value={breakFor.form.name}
                 onChange={(e) =>
-                  setBreakFor({ shiftId: shift.id, form: { ...breakFor.form, name: e.target.value } })
+                  setBreakFor({
+                    shiftId: shift.id,
+                    form: { ...breakFor.form, name: e.target.value },
+                  })
                 }
               />
             </div>
@@ -670,13 +674,17 @@ export function ShiftsPanel() {
               label="Starts"
               value={breakFor.form.start}
               allowNextDay={shift.crossesMidnight}
-              onChange={(start) => setBreakFor({ shiftId: shift.id, form: { ...breakFor.form, start } })}
+              onChange={(start) =>
+                setBreakFor({ shiftId: shift.id, form: { ...breakFor.form, start } })
+              }
             />
             <TimeField
               label="Ends"
               value={breakFor.form.end}
               allowNextDay={shift.crossesMidnight}
-              onChange={(end) => setBreakFor({ shiftId: shift.id, form: { ...breakFor.form, end } })}
+              onChange={(end) =>
+                setBreakFor({ shiftId: shift.id, form: { ...breakFor.form, end } })
+              }
             />
             <button
               type="button"
@@ -700,7 +708,10 @@ export function ShiftsPanel() {
     const renaming = renameDraft !== null && renameDraft.id === pattern.id;
     const confirming = confirmId === pattern.id;
     return (
-      <li className={open ? `${styles.patternRow} ${styles.patternRowOpen}` : styles.patternRow} key={pattern.id}>
+      <li
+        className={open ? `${styles.patternRow} ${styles.patternRowOpen}` : styles.patternRow}
+        key={pattern.id}
+      >
         {/* ⚠️ IT HAS TO LOOK LIKE IT OPENS. This was a bare <button> styled with
             `border:0; background:none`, i.e. indistinguishable from the text in
             the column beside it — and the whole shift list of a pattern sits
@@ -865,7 +876,11 @@ export function ShiftsPanel() {
           </div>
         ) : (
           <div className={styles.confirm}>
-            <button type="button" className={styles.linkBtn} onClick={() => setConfirmId(pattern.id)}>
+            <button
+              type="button"
+              className={styles.linkBtn}
+              onClick={() => setConfirmId(pattern.id)}
+            >
               Delete this pattern
             </button>
           </div>
@@ -941,14 +956,12 @@ export function ShiftsPanel() {
       <section className={styles.card}>
         <h2 className={styles.h2}>Shift patterns</h2>
         <p className={styles.hint}>
-          A pattern is the set of shifts a place runs. Everything here is a clock time; a shift
-          that runs past midnight shows its end marked +1d, so 22:00–06:00 +1d is a night shift.
+          A pattern is the set of shifts a place runs. Everything here is a clock time; a shift that
+          runs past midnight shows its end marked +1d, so 22:00–06:00 +1d is a night shift.
         </p>
 
         {pending && <p className={styles.status}>Loading shift patterns…</p>}
-        {!pending && query.isError && (
-          <p className={styles.errorLine}>{errorText(query.error)}</p>
-        )}
+        {!pending && query.isError && <p className={styles.errorLine}>{errorText(query.error)}</p>}
 
         {!pending && !query.isError && (
           <>
@@ -1051,10 +1064,7 @@ export function ShiftsPanel() {
               const changed = chosen !== (n.templateId ?? "");
               return (
                 <li className={styles.nodeRow} key={n.nodeId}>
-                  <span
-                    className={styles.nodeName}
-                    style={{ paddingLeft: `${n.depth * 0.75}rem` }}
-                  >
+                  <span className={styles.nodeName} style={{ paddingLeft: `${n.depth * 0.75}rem` }}>
                     {n.nodeName}
                   </span>
                   <select

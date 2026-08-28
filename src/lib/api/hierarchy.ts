@@ -101,13 +101,9 @@ export async function createHierarchyTemplate(
   });
   if (error) throw toSchedulerError(error);
   const parsed = parseHierarchyTemplateSummary(data);
-  const levelsOk =
-    isJsonObject(data) && Array.isArray(data.levels) && data.levels.length === 0;
+  const levelsOk = isJsonObject(data) && Array.isArray(data.levels) && data.levels.length === 0;
   if (parsed === null || !levelsOk) {
-    throw shapeMismatch(
-      "create_hierarchy_template",
-      "expected { id, name, levels: [] }",
-    );
+    throw shapeMismatch("create_hierarchy_template", "expected { id, name, levels: [] }");
   }
   return { id: parsed.id, name: parsed.name, levels: [] };
 }
@@ -168,7 +164,13 @@ export interface HierarchyLevelDraftInput {
 function parseHierarchyLevel(v: Json): HierarchyLevel | null {
   if (!isJsonObject(v)) return null;
   const { id, template_id, position, name, is_schedulable } = v;
-  if (!isStr(id) || !isStr(template_id) || !isNum(position) || !isStr(name) || !isBool(is_schedulable))
+  if (
+    !isStr(id) ||
+    !isStr(template_id) ||
+    !isNum(position) ||
+    !isStr(name) ||
+    !isBool(is_schedulable)
+  )
     return null;
   return { id, templateId: template_id, position, name, isSchedulable: is_schedulable };
 }
@@ -430,7 +432,13 @@ function parsePlaceNodeResult(v: Json): PlacedSibling[] | null {
   for (const entry of v) {
     if (!isJsonObject(entry)) return null;
     const { id, name, path, parent_id, sort_order } = entry;
-    if (!isStr(id) || !isStr(name) || !isStr(path) || !isStrOrNull(parent_id) || !isNum(sort_order)) {
+    if (
+      !isStr(id) ||
+      !isStr(name) ||
+      !isStr(path) ||
+      !isStrOrNull(parent_id) ||
+      !isNum(sort_order)
+    ) {
       return null;
     }
     out.push({ id, name, path, parentId: parent_id, sortOrder: sort_order });
@@ -452,10 +460,7 @@ export async function placeNode(input: PlaceNodeInput): Promise<PlacedSibling[]>
   if (error) throw toSchedulerError(error);
   const parsed = parsePlaceNodeResult(data);
   if (parsed === null) {
-    throw shapeMismatch(
-      "place_node",
-      "expected [{ id, name, path, parent_id, sort_order }, ...]",
-    );
+    throw shapeMismatch("place_node", "expected [{ id, name, path, parent_id, sort_order }, ...]");
   }
   return parsed;
 }
@@ -695,9 +700,7 @@ export async function fetchHierarchyTree(): Promise<{
   const editableShapeIds: string[] | null =
     editableRes.error || !Array.isArray(editableRes.data)
       ? null
-      : (editableRes.data as unknown[]).filter(
-          (v): v is string => typeof v === "string",
-        );
+      : (editableRes.data as unknown[]).filter((v): v is string => typeof v === "string");
 
   const siteNodeIds: Record<string, string | null> = {};
   for (const r of templatesRes.data ?? []) {

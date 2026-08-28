@@ -199,7 +199,9 @@
 
 .swatchBtn:hover:not(:disabled),
 .swatchBtn:focus-visible {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink-2);
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 3px var(--ink-2);
 }
 
 .swatchBtn:disabled {
@@ -229,13 +231,17 @@
 
 .paletteChip:hover:not(:disabled),
 .paletteChip:focus-visible {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink-2);
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 3px var(--ink-2);
 }
 
 /* The one it already is. A ring rather than a tick: the chip IS the colour, and
    a glyph drawn on top of an arbitrary background has no contrast guarantee. */
 .paletteChipOn {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink);
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 3px var(--ink);
 }
 
 .paletteChip:disabled {

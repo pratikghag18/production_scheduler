@@ -184,9 +184,7 @@ export function validateShapeName(
   if (trimmed === "") {
     return { ok: false, reason: "blank_name" };
   }
-  const isDuplicate = summaries.some(
-    (s) => s.id !== currentId && s.name.trim() === trimmed,
-  );
+  const isDuplicate = summaries.some((s) => s.id !== currentId && s.name.trim() === trimmed);
   if (isDuplicate) {
     return { ok: false, reason: "duplicate_name" };
   }

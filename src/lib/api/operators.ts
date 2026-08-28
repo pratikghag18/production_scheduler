@@ -153,7 +153,10 @@ export function parseNodeSkillRequirementRecord(v: unknown): NodeSkillRequiremen
   return { nodeId, skillId };
 }
 
-function parseList<T>(rows: unknown, parse: (v: unknown) => T | null): { ok: T[]; skipped: number } {
+function parseList<T>(
+  rows: unknown,
+  parse: (v: unknown) => T | null,
+): { ok: T[]; skipped: number } {
   if (!Array.isArray(rows)) return { ok: [], skipped: 0 };
   const ok: T[] = [];
   let skipped = 0;
@@ -270,8 +273,7 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
     requirements: requirements.ok,
     nodes,
     levels,
-    skipped:
-      operators.skipped + skills.skipped + operatorSkills.skipped + requirements.skipped,
+    skipped: operators.skipped + skills.skipped + operatorSkills.skipped + requirements.skipped,
   };
 }
 
@@ -302,7 +304,8 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
  *                                         without `requireWritten`.
  * =========================================================================== */
 
-const OPERATOR_COLUMNS = "id, display_name, employee_ref, active, site_node_id, source, external_id";
+const OPERATOR_COLUMNS =
+  "id, display_name, employee_ref, active, site_node_id, source, external_id";
 const SKILL_COLUMNS = "id, name, site_node_id";
 const OPERATOR_SKILL_COLUMNS = "operator_id, skill_id, expires_at";
 
@@ -491,10 +494,7 @@ export async function updateSkillExpiry(input: {
   return firstOrThrow(data, parseOperatorSkillRecord, "updateSkillExpiry");
 }
 
-export async function revokeSkill(input: {
-  operatorId: string;
-  skillId: string;
-}): Promise<void> {
+export async function revokeSkill(input: { operatorId: string; skillId: string }): Promise<void> {
   const { data, error } = await supabase
     .from("operator_skills")
     .delete()

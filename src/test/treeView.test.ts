@@ -502,7 +502,9 @@ describe("D90: groupRowsByShape", () => {
   });
 
   it("G10: a template id with no matching template row keeps the group, name null", () => {
-    const g = groupRowsByShape(TWO_SHAPE_ROWS, TWO_SHAPE_LEVELS, [{ id: TPL, name: "Standard Plant" }]);
+    const g = groupRowsByShape(TWO_SHAPE_ROWS, TWO_SHAPE_LEVELS, [
+      { id: TPL, name: "Standard Plant" },
+    ]);
     const orphan = g.find((x) => x.templateId === TPL_B);
     expect(orphan?.templateName).toBe(null);
     expect(orphan?.rows.length).toBe(2);
@@ -625,10 +627,7 @@ describe("D90: root guides are re-seated per group", () => {
   });
 
   it("K6: with TWO roots in one group, the earlier one keeps its rail", () => {
-    const extra = [
-      ...TWO_SHAPE_NODES,
-      node("n_plant3", "Plant 3", "plant_3", null, "L0", 2),
-    ];
+    const extra = [...TWO_SHAPE_NODES, node("n_plant3", "Plant 3", "plant_3", null, "L0", 2)];
     const g = groupRowsByShape(
       buildTreeRows(extra, TWO_SHAPE_LEVELS, NONE_COLLAPSED),
       TWO_SHAPE_LEVELS,

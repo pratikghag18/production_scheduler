@@ -94,10 +94,7 @@ describe("relevel — subtreeIds", () => {
 
   it("K5: a cyclic array terminates instead of hanging", () => {
     // Impossible through the server (`nodes_before_cycle`), representable here.
-    const cyclic: NodeRow[] = [
-      node("x", "X", "x", "y", "a1"),
-      node("y", "Y", "y", "x", "a1"),
-    ];
+    const cyclic: NodeRow[] = [node("x", "X", "x", "y", "a1"), node("y", "Y", "y", "x", "a1")];
     expect([...subtreeIds("x", cyclic)].sort()).toEqual(["x", "y"]);
   });
 });
@@ -232,20 +229,14 @@ describe("relevel — demoteTargets", () => {
     // `ln2` ("Line 1" under Machining) demoted under `ln1` would collide with
     // nothing; demoted under `clash` -- which has no children -- likewise. So
     // the fixture gets a child of `ln1` named "Line 1" to make one target dirty.
-    const nodes = [
-      ...NODES,
-      node("twin", "Line 1", "plant_1.assembly.line_1.line_1", "ln1", "a3"),
-    ];
+    const nodes = [...NODES, node("twin", "Line 1", "plant_1.assembly.line_1.line_1", "ln1", "a3")];
     const v = demoteTargets("clash", nodes, LEVELS);
     const dirty = v.ok ? v.targets.find((t) => t.id === "ln1") : undefined;
     expect(dirty?.blocked).toBe("name-taken");
   });
 
   it("K23: a clean target in the same list is not blocked", () => {
-    const nodes = [
-      ...NODES,
-      node("twin", "Line 1", "plant_1.assembly.line_1.line_1", "ln1", "a3"),
-    ];
+    const nodes = [...NODES, node("twin", "Line 1", "plant_1.assembly.line_1.line_1", "ln1", "a3")];
     const v = demoteTargets("clash", nodes, LEVELS);
     const clean = v.ok ? v.targets.find((t) => t.id === "ln2") : undefined;
     expect(clean?.blocked).toBe(null);
@@ -280,7 +271,11 @@ describe("relevel — demoteTargets", () => {
   });
 
   it("K28: a node whose level is absent from `levels` reports no targets", () => {
-    const v = demoteTargets("c1", NODES, LEVELS.filter((l) => l.id !== "a3"));
+    const v = demoteTargets(
+      "c1",
+      NODES,
+      LEVELS.filter((l) => l.id !== "a3"),
+    );
     expect(v.ok === false && v.block.kind).toBe("no-targets");
   });
 

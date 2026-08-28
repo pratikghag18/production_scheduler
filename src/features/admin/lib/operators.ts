@@ -224,8 +224,18 @@ export function effectiveRequirements(
  * =========================================================================== */
 
 const MONTHS: readonly string[] = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
 /** `"2026-09-03"` -> `"3 Sep 2026"`. Returns the input unchanged if it is not a day. */
@@ -394,9 +404,7 @@ export function workPlacesFor(
 
     const reasons: string[] = [];
     if (!complete) {
-      reasons.push(
-        "the places above this one could not be read, so this is not a yes",
-      );
+      reasons.push("the places above this one could not be read, so this is not a yes");
     }
     for (const m of missing) reasons.push(`missing ${m.name}`);
     for (const e of expiring) reasons.push(`${e.name} expires ${formatDay(e.expiresAt)}`);
@@ -566,8 +574,7 @@ export function ticketsFor(
       // holds; it is shown, unnamed, rather than silently dropped.
       name: name.get(os.skillId) ?? "(a ticket you can't see)",
       expiresAt,
-      lapsed:
-        expiresAt !== null && isDay(expiresAt) && isDay(asOf) ? expiresAt < asOf : false,
+      lapsed: expiresAt !== null && isDay(expiresAt) && isDay(asOf) ? expiresAt < asOf : false,
     });
   }
   out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));

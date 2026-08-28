@@ -1,42 +1,42 @@
 [
- [
-  "Z1 the guard goes from set_site_member",
-  "  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF p_role IS NULL",
-  "  IF p_role IS NULL"
- ],
- [
-  "Z2 the guard goes from remove_site_member",
-  "  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule",
-  "  -- §4's rule"
- ],
- [
-  "Z3 the guard fires on a COMPANY admin too (peers stop being peers)",
-  "  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF p_role IS NULL",
-  "  IF app_profile_is_company_admin(p_profile_id) THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF p_role IS NULL"
- ],
- [
-  "Z4 the guard fires on EVERYBODY (the whole feature breaks)",
-  "  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule",
-  "  IF NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule"
- ],
- [
-  "Z5 the helper loses its org scope (another tenant's admin counts)",
-  "     WHERE up.id = p_profile_id\n       AND up.org_id = app_current_org()\n       AND up.role = 'admin'",
-  "     WHERE up.id = p_profile_id\n       AND up.role = 'admin'"
- ],
- [
-  "Z6 the helper stops asking about the role (everyone is a company admin)",
-  "     WHERE up.id = p_profile_id\n       AND up.org_id = app_current_org()\n       AND up.role = 'admin'",
-  "     WHERE up.id = p_profile_id\n       AND up.org_id = app_current_org()"
- ],
- [
-  "Z7 the guard runs BEFORE 'nothing here to remove'",
-  "  IF v_before IS NULL THEN\n    PERFORM api_raise('invalid_argument', 'that person has no access here to remove',\n                      jsonb_build_object('node_id', p_node_id, 'profile_id', p_profile_id,\n                                         'reason', 'not found'));\n  END IF;\n\n  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule",
-  "  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF v_before IS NULL THEN\n    PERFORM api_raise('invalid_argument', 'that person has no access here to remove',\n                      jsonb_build_object('node_id', p_node_id, 'profile_id', p_profile_id,\n                                         'reason', 'not found'));\n  END IF;\n\n  -- §4's rule"
- ],
- [
-  "Z8 the PUBLIC revoke on the helper is forgotten",
-  "revoke execute on function app_profile_is_company_admin(uuid) from public;",
-  ""
- ]
+  [
+    "Z1 the guard goes from set_site_member",
+    "  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF p_role IS NULL",
+    "  IF p_role IS NULL"
+  ],
+  [
+    "Z2 the guard goes from remove_site_member",
+    "  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule",
+    "  -- §4's rule"
+  ],
+  [
+    "Z3 the guard fires on a COMPANY admin too (peers stop being peers)",
+    "  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF p_role IS NULL",
+    "  IF app_profile_is_company_admin(p_profile_id) THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF p_role IS NULL"
+  ],
+  [
+    "Z4 the guard fires on EVERYBODY (the whole feature breaks)",
+    "  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule",
+    "  IF NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule"
+  ],
+  [
+    "Z5 the helper loses its org scope (another tenant's admin counts)",
+    "     WHERE up.id = p_profile_id\n       AND up.org_id = app_current_org()\n       AND up.role = 'admin'",
+    "     WHERE up.id = p_profile_id\n       AND up.role = 'admin'"
+  ],
+  [
+    "Z6 the helper stops asking about the role (everyone is a company admin)",
+    "     WHERE up.id = p_profile_id\n       AND up.org_id = app_current_org()\n       AND up.role = 'admin'",
+    "     WHERE up.id = p_profile_id\n       AND up.org_id = app_current_org()"
+  ],
+  [
+    "Z7 the guard runs BEFORE 'nothing here to remove'",
+    "  IF v_before IS NULL THEN\n    PERFORM api_raise('invalid_argument', 'that person has no access here to remove',\n                      jsonb_build_object('node_id', p_node_id, 'profile_id', p_profile_id,\n                                         'reason', 'not found'));\n  END IF;\n\n  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  -- §4's rule",
+    "  -- ⭐ 0022: A COMPANY ADMIN'S ROW IS NOT A SITE ADMIN'S TO EDIT.\n  IF app_profile_is_company_admin(p_profile_id) AND NOT app_is_admin() THEN\n    PERFORM api_raise('not_permitted', 'company admins are not managed from a site',\n                      jsonb_build_object('profile_id', p_profile_id,\n                                         'reason', 'company_admin'));\n  END IF;\n\n  IF v_before IS NULL THEN\n    PERFORM api_raise('invalid_argument', 'that person has no access here to remove',\n                      jsonb_build_object('node_id', p_node_id, 'profile_id', p_profile_id,\n                                         'reason', 'not found'));\n  END IF;\n\n  -- §4's rule"
+  ],
+  [
+    "Z8 the PUBLIC revoke on the helper is forgotten",
+    "revoke execute on function app_profile_is_company_admin(uuid) from public;",
+    ""
+  ]
 ]

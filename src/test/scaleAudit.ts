@@ -211,12 +211,7 @@ export function missingRemSurfaces(
  * Returns the control selectors that are NOT covered by a `font: inherit`
  * block; empty means the reset is intact.
  */
-export const RESET_CONTROLS: readonly string[] = [
-  "input",
-  "button",
-  "select",
-  "textarea",
-];
+export const RESET_CONTROLS: readonly string[] = ["input", "button", "select", "textarea"];
 
 export function missingControlFontReset(globalCss: string): string[] {
   const withoutComments = globalCss.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -252,12 +247,21 @@ export function missingControlFontReset(globalCss: string): string[] {
 export function unscaledPxLengths(css: string): string[] {
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const out: string[] = [];
-  // Split on `;` and braces as well as newlines, so the matcher does not depend
-  // on Prettier's formatting at all. A line-oriented version reports ZERO
-  // offenders the moment a selector and a declaration share a line — and zero
-  // offenders reads exactly like a pass. A guard must not be able to fail
-  // silently, so it is split down to individual declarations.
-  for (const rawLine of withoutComments.split(/[\n;{}]/)) {
+  // Split on `;` and braces ONLY — the boundaries of a CSS declaration. Not on
+  // newlines: a declaration's VALUE may span lines, and Prettier wraps a
+  // multi-value one as soon as it is long enough.
+  //
+  // Both halves of that were learned the hard way. An earlier LINE-oriented
+  // version reported ZERO offenders the moment a selector and a declaration
+  // shared a line, and zero offenders reads exactly like a pass. Splitting on
+  // `;{}` fixes that. But this function then kept `\n` in the split as well,
+  // which claimed in a comment to make the matcher independent of Prettier and
+  // did the opposite: on 28 Aug a repo-wide `prettier --write` wrapped three
+  // `box-shadow` values in ProductsPanel.module.css onto three lines each, the
+  // continuation lines no longer carried the `box-shadow:` property that
+  // exempts them, and R1 failed on CSS whose meaning had not changed.
+  // R5b pins it. A declaration ends at `;` or a brace — never at a newline.
+  for (const rawLine of withoutComments.split(/[;{}]/)) {
     const line = rawLine.trim();
     if (line.startsWith("@media")) continue;
     const prop = line.split(":")[0].trim().toLowerCase();
@@ -286,7 +290,6 @@ export function auditRemSurfaces(
     offenders: unscaledPxLengths(fs.readFileSync(`${root}/${f}`, "utf8")),
   }));
 }
-
 
 /* ---------------------------------------------------------------------------
    D100 — THE DRAG AUDIT. "MATCH THE COLOURS" MADE INTO A PROPERTY OF THE FILES.
@@ -409,7 +412,6 @@ export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]
   return [...used].filter((t) => !defined.has(t)).sort();
 }
 
-
 /* ===========================================================================
  * D105 — CREATE/EDIT PARITY. A FIELD YOU CAN SET ONCE AND NEVER CHANGE.
  *
@@ -480,7 +482,9 @@ export function writeChains(source: string, table: string): WriteChain[] {
     const start = before.length === 0 ? 0 : before[before.length - 1];
     const nextFrom = clean.indexOf(".from(", m.index + 1);
     const body = clean.slice(start, nextFrom === -1 ? clean.length : nextFrom);
-    const op = /\.(insert|upsert|update)\s*\(/.exec(clean.slice(m.index, nextFrom === -1 ? clean.length : nextFrom));
+    const op = /\.(insert|upsert|update)\s*\(/.exec(
+      clean.slice(m.index, nextFrom === -1 ? clean.length : nextFrom),
+    );
     if (op !== null) out.push({ op: op[1] as WriteChain["op"], body });
   }
   return out;

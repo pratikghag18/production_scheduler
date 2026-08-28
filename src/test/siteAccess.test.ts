@@ -64,23 +64,47 @@ const PAYLOAD = {
   nodeId: PLANT,
   nodeName: "Plant 1",
   people: [
-    { profileId: P_BOSS, email: "boss@example.test", orgRole: "admin", companyAdmin: true, grants: [] },
     {
-      profileId: P_DANA, email: "dana@example.test", orgRole: "viewer", companyAdmin: false,
+      profileId: P_BOSS,
+      email: "boss@example.test",
+      orgRole: "admin",
+      companyAdmin: true,
+      grants: [],
+    },
+    {
+      profileId: P_DANA,
+      email: "dana@example.test",
+      orgRole: "viewer",
+      companyAdmin: false,
       grants: [grant(PLANT, "Plant 1", "admin")],
     },
     { profileId: P_GHOST, email: null, orgRole: "viewer", companyAdmin: false, grants: [] },
     {
-      profileId: P_MIX, email: "mixed@example.test", orgRole: "viewer", companyAdmin: false,
+      profileId: P_MIX,
+      email: "mixed@example.test",
+      orgRole: "viewer",
+      companyAdmin: false,
       grants: [grant(PLANT, "Plant 1", "admin"), grant(DEPT, "Assembly", "viewer")],
     },
-    { profileId: P_NONE, email: "nobody@example.test", orgRole: "viewer", companyAdmin: false, grants: [] },
     {
-      profileId: P_RAJ, email: "raj@example.test", orgRole: "viewer", companyAdmin: false,
+      profileId: P_NONE,
+      email: "nobody@example.test",
+      orgRole: "viewer",
+      companyAdmin: false,
+      grants: [],
+    },
+    {
+      profileId: P_RAJ,
+      email: "raj@example.test",
+      orgRole: "viewer",
+      companyAdmin: false,
       grants: [grant(DEPT, "Assembly", "admin")],
     },
     {
-      profileId: P_SAM, email: "sam@example.test", orgRole: "viewer", companyAdmin: false,
+      profileId: P_SAM,
+      email: "sam@example.test",
+      orgRole: "viewer",
+      companyAdmin: false,
       grants: [grant(PLANT, "Plant 1", "supervisor")],
     },
   ],
@@ -109,13 +133,24 @@ const byId = (id: string): AccessRow =>
     // A distinguishable SENTINEL, never `.find(...)!` — instrument 17 was a
     // fixture accessor that THREW on a mutated build and scored CRASHED where
     // a named failure belonged.
-    profileId: "(missing)", email: null, companyAdmin: false, directRole: null,
-    inheritedGrants: [], hasAccess: false, isSelf: false,
+    profileId: "(missing)",
+    email: null,
+    companyAdmin: false,
+    directRole: null,
+    inheritedGrants: [],
+    hasAccess: false,
+    isSelf: false,
   };
 
 const stranger = (over: Partial<AccessRow> = {}): AccessRow => ({
-  profileId: "x", email: "x@example.test", companyAdmin: false, directRole: null,
-  inheritedGrants: [], hasAccess: false, isSelf: false, ...over,
+  profileId: "x",
+  email: "x@example.test",
+  companyAdmin: false,
+  directRole: null,
+  inheritedGrants: [],
+  hasAccess: false,
+  isSelf: false,
+  ...over,
 });
 
 // ---------------------------------------------------------------------------
@@ -127,8 +162,10 @@ check("A1: fixture is well-formed — every person parsed, nothing skipped", () 
   // here is indistinguishable from the behaviour under test, because every
   // lookup below can honestly return nothing.
   return (
-    (VIEW.rows.length === PAYLOAD.people.length && VIEW.skipped === 0 &&
-      VIEW.nodeId === PLANT && VIEW.nodeName === "Plant 1" &&
+    (VIEW.rows.length === PAYLOAD.people.length &&
+      VIEW.skipped === 0 &&
+      VIEW.nodeId === PLANT &&
+      VIEW.nodeName === "Plant 1" &&
       byId(P_DANA).profileId === P_DANA) ||
     `rows=${VIEW.rows.length} skipped=${VIEW.skipped} node=${VIEW.nodeId}`
   );
@@ -142,8 +179,10 @@ check("A2: rows keep the order the server sent", () => {
 
 check("A3: a grant ON this node is the direct role", () => {
   const r = byId(P_SAM);
-  return (r.directRole === "supervisor" && r.inheritedGrants.length === 0) ||
-    `direct=${r.directRole} inherited=${r.inheritedGrants.length}`;
+  return (
+    (r.directRole === "supervisor" && r.inheritedGrants.length === 0) ||
+    `direct=${r.directRole} inherited=${r.inheritedGrants.length}`
+  );
 });
 
 check("A4: a grant BELOW this node is inherited, never direct", () => {
@@ -151,24 +190,34 @@ check("A4: a grant BELOW this node is inherited, never direct", () => {
   // it is NOT editable here — `set_site_member(p_node_id)` would write a
   // second grant on Plant 1 rather than change the one raj has.
   const r = byId(P_RAJ);
-  return (r.directRole === null && r.inheritedGrants.length === 1 &&
-    r.inheritedGrants[0].nodeName === "Assembly" && r.hasAccess) ||
-    `direct=${r.directRole} inherited=${JSON.stringify(r.inheritedGrants)}`;
+  return (
+    (r.directRole === null &&
+      r.inheritedGrants.length === 1 &&
+      r.inheritedGrants[0].nodeName === "Assembly" &&
+      r.hasAccess) ||
+    `direct=${r.directRole} inherited=${JSON.stringify(r.inheritedGrants)}`
+  );
 });
 
 check("A5 ⭐: both at once — direct is the one on this node, inherited holds only the rest", () => {
   // THE CASE THAT CATCHES A COLLAPSE. A module that takes `grants[0]`, or the
   // strongest grant, or any grant at all, passes A3 and A4 and fails here.
   const r = byId(P_MIX);
-  return (r.directRole === "admin" && r.inheritedGrants.length === 1 &&
-    r.inheritedGrants[0].nodeId === DEPT && r.inheritedGrants[0].role === "viewer") ||
-    `direct=${r.directRole} inherited=${JSON.stringify(r.inheritedGrants)}`;
+  return (
+    (r.directRole === "admin" &&
+      r.inheritedGrants.length === 1 &&
+      r.inheritedGrants[0].nodeId === DEPT &&
+      r.inheritedGrants[0].role === "viewer") ||
+    `direct=${r.directRole} inherited=${JSON.stringify(r.inheritedGrants)}`
+  );
 });
 
 check("A6: a company admin has no grant and still has access", () => {
   const r = byId(P_BOSS);
-  return (r.companyAdmin && r.hasAccess && r.directRole === null &&
-    r.inheritedGrants.length === 0) || JSON.stringify(r);
+  return (
+    (r.companyAdmin && r.hasAccess && r.directRole === null && r.inheritedGrants.length === 0) ||
+    JSON.stringify(r)
+  );
 });
 
 check("A7: no grants and no flag is no access", () => {
@@ -192,24 +241,44 @@ check("A10 ⭐: an unknown role drops that grant rather than coercing it", () =>
   // misreporting. Dropped means the person shows as having no access here,
   // which is wrong in the safe direction and visible.
   const v = buildAccessRows(
-    { nodeId: PLANT, nodeName: "Plant 1", people: [
-      { profileId: "z", email: "z@example.test", companyAdmin: false,
-        grants: [{ nodeId: PLANT, nodeName: "Plant 1", role: "owner" }] },
-    ] },
+    {
+      nodeId: PLANT,
+      nodeName: "Plant 1",
+      people: [
+        {
+          profileId: "z",
+          email: "z@example.test",
+          companyAdmin: false,
+          grants: [{ nodeId: PLANT, nodeName: "Plant 1", role: "owner" }],
+        },
+      ],
+    },
     null,
   );
   const r = v.rows[0];
-  return (v.rows.length === 1 && r.directRole === null && r.inheritedGrants.length === 0 &&
-    !r.hasAccess) || JSON.stringify(v);
+  return (
+    (v.rows.length === 1 &&
+      r.directRole === null &&
+      r.inheritedGrants.length === 0 &&
+      !r.hasAccess) ||
+    JSON.stringify(v)
+  );
 });
 
 check("A11: a malformed person is skipped AND counted", () => {
   // Counted, not swallowed: a silently shortened list is indistinguishable
   // from a company with fewer people in it.
   const v = buildAccessRows(
-    { nodeId: PLANT, nodeName: "P", people: [
-      null, { profileId: "a", email: "a@x", companyAdmin: false, grants: [] }, 7, { email: "no-id@x" },
-    ] },
+    {
+      nodeId: PLANT,
+      nodeName: "P",
+      people: [
+        null,
+        { profileId: "a", email: "a@x", companyAdmin: false, grants: [] },
+        7,
+        { email: "no-id@x" },
+      ],
+    },
     null,
   );
   return (v.rows.length === 1 && v.skipped === 3) || `rows=${v.rows.length} skipped=${v.skipped}`;
@@ -225,7 +294,9 @@ check("A12: a payload that is not an object gives an empty view", () => {
 
 check("A13: people missing or not an array keeps the node, drops the list", () => {
   const v = buildAccessRows({ nodeId: PLANT, nodeName: "Plant 1" }, null);
-  return (v.nodeId === PLANT && v.nodeName === "Plant 1" && v.rows.length === 0) || JSON.stringify(v);
+  return (
+    (v.nodeId === PLANT && v.nodeName === "Plant 1" && v.rows.length === 0) || JSON.stringify(v)
+  );
 });
 
 check("A14: a person with no grants key is read as having none", () => {
@@ -244,14 +315,20 @@ check("A49 ⭐: a non-string address is dropped, never stringified", () => {
   // number arriving here would render as the text "12345" beside a person's
   // row — an address the screen invented, which is worse than a blank.
   const v = buildAccessRows(
-    { nodeId: PLANT, nodeName: "Plant 1", people: [
-      { profileId: "n", email: 12345, companyAdmin: false, grants: [] },
-      { profileId: "o", email: { at: "x" }, companyAdmin: false, grants: [] },
-    ] },
+    {
+      nodeId: PLANT,
+      nodeName: "Plant 1",
+      people: [
+        { profileId: "n", email: 12345, companyAdmin: false, grants: [] },
+        { profileId: "o", email: { at: "x" }, companyAdmin: false, grants: [] },
+      ],
+    },
     null,
   );
-  return (v.rows.length === 2 && v.rows.every((r) => r.email === null)) ||
-    JSON.stringify(v.rows.map((r) => r.email));
+  return (
+    (v.rows.length === 2 && v.rows.every((r) => r.email === null)) ||
+    JSON.stringify(v.rows.map((r) => r.email))
+  );
 });
 
 check("A16 ⭐: with no node in the payload, NOTHING is a direct grant", () => {
@@ -267,8 +344,10 @@ check("A17: a malformed sweep never throws", () => {
   for (const a of bits) {
     for (const b of bits) {
       for (const c of bits) {
-        buildAccessRows({ nodeId: a, nodeName: b, people: [c, { profileId: "p", grants: c }] },
-          typeof a === "string" ? a : null);
+        buildAccessRows(
+          { nodeId: a, nodeName: b, people: [c, { profileId: "p", grants: c }] },
+          typeof a === "string" ? a : null,
+        );
       }
     }
   }
@@ -310,16 +389,22 @@ check("A22 ⭐: adding YOURSELF where you hold no direct grant is not locked", (
 });
 
 check("A23: no grant on this node, nothing to remove", () => {
-  return canRemoveAccess(stranger({ inheritedGrants: [grant(DEPT, "Assembly", "admin")] }), false) === false ||
-    "offered a Remove for a grant that is not here";
+  return (
+    canRemoveAccess(stranger({ inheritedGrants: [grant(DEPT, "Assembly", "admin")] }), false) ===
+      false || "offered a Remove for a grant that is not here"
+  );
 });
 
 check("A24: you cannot remove your own admin access here", () => {
-  return canRemoveAccess(stranger({ isSelf: true, directRole: "admin" }), false) === false || "offered";
+  return (
+    canRemoveAccess(stranger({ isSelf: true, directRole: "admin" }), false) === false || "offered"
+  );
 });
 
 check("A25 ⭐: but you CAN drop a non-admin grant of your own", () => {
-  return canRemoveAccess(stranger({ isSelf: true, directRole: "viewer" }), false) === true || "hidden";
+  return (
+    canRemoveAccess(stranger({ isSelf: true, directRole: "viewer" }), false) === true || "hidden"
+  );
 });
 
 check("A26 ⭐: and a COMPANY admin can remove their own admin grant", () => {
@@ -327,7 +412,9 @@ check("A26 ⭐: and a COMPANY admin can remove their own admin grant", () => {
   // something the server ALLOWS is not a safety bug, it is a feature nobody
   // can reach, and it looks exactly like a broken screen. 48's X36 is the
   // server-side twin of this case.
-  return canRemoveAccess(stranger({ isSelf: true, directRole: "admin" }), true) === true || "hidden";
+  return (
+    canRemoveAccess(stranger({ isSelf: true, directRole: "admin" }), true) === true || "hidden"
+  );
 });
 
 check("A27: somebody else's grant on this node is removable", () => {
@@ -341,9 +428,11 @@ check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {
   // viewer — so the mutant would have been green. A21/A22/A25 walk the
   // narrowing, A20/A26 walk the exemption, and nothing walked "not me".
   const other = stranger({ isSelf: false, directRole: "admin" });
-  return (allowedRoles(other, false).join(",") === "admin,supervisor,viewer" &&
-    canRemoveAccess(other, false) === true) ||
-    `roles=${allowedRoles(other, false).join(",")} remove=${canRemoveAccess(other, false)}`;
+  return (
+    (allowedRoles(other, false).join(",") === "admin,supervisor,viewer" &&
+      canRemoveAccess(other, false) === true) ||
+    `roles=${allowedRoles(other, false).join(",")} remove=${canRemoveAccess(other, false)}`
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -354,8 +443,10 @@ check("A28: a company admin with no grant here reads as a company admin", () => 
   // The most powerful route in wins, because that is the one deciding what
   // the person can do.
   const r = stranger({ companyAdmin: true });
-  return describeAccess(r, "Plant 1") === "Company admin — reaches every plant" ||
-    describeAccess(r, "Plant 1");
+  return (
+    describeAccess(r, "Plant 1") === "Company admin — reaches every plant" ||
+    describeAccess(r, "Plant 1")
+  );
 });
 
 check("A50 ⭐: ...but a company admin who ALSO holds a grant here must say both", () => {
@@ -370,8 +461,11 @@ check("A50 ⭐: ...but a company admin who ALSO holds a grant here must say both
   // that the row now names what the control is editing.
   const r = stranger({ companyAdmin: true, directRole: "admin" });
   const s = describeAccess(r, "Plant 1");
-  return (s === "Company admin — and admin of Plant 1" &&
-    s !== describeAccess(stranger({ companyAdmin: true }), "Plant 1")) || s;
+  return (
+    (s === "Company admin — and admin of Plant 1" &&
+      s !== describeAccess(stranger({ companyAdmin: true }), "Plant 1")) ||
+    s
+  );
 });
 
 check("A51: and it names the role the control is actually showing", () => {
@@ -382,8 +476,10 @@ check("A51: and it names the role the control is actually showing", () => {
 });
 
 check("A29: a direct admin names the place", () => {
-  return describeAccess(stranger({ directRole: "admin" }), "Plant 1") === "Admin of Plant 1" ||
-    describeAccess(stranger({ directRole: "admin" }), "Plant 1");
+  return (
+    describeAccess(stranger({ directRole: "admin" }), "Plant 1") === "Admin of Plant 1" ||
+    describeAccess(stranger({ directRole: "admin" }), "Plant 1")
+  );
 });
 
 check("A30: supervisor and viewer read differently", () => {
@@ -406,12 +502,16 @@ check("A32: several inherited grants are counted, not listed", () => {
     inheritedGrants: [grant(DEPT, "Assembly", "admin"), grant("n3", "Machining", "viewer")],
     hasAccess: true,
   });
-  return describeAccess(r, "Plant 1") === "Access to 2 places inside Plant 1" ||
-    describeAccess(r, "Plant 1");
+  return (
+    describeAccess(r, "Plant 1") === "Access to 2 places inside Plant 1" ||
+    describeAccess(r, "Plant 1")
+  );
 });
 
 check("A33: no access says so", () => {
-  return describeAccess(stranger(), "Plant 1") === "No access" || describeAccess(stranger(), "Plant 1");
+  return (
+    describeAccess(stranger(), "Plant 1") === "No access" || describeAccess(stranger(), "Plant 1")
+  );
 });
 
 check("A34: an unknown place name falls back rather than printing null", () => {
@@ -426,8 +526,10 @@ check("A34: an unknown place name falls back rather than printing null", () => {
 check("A35 ⭐: a removable row has NO note", () => {
   // The null is the signal. A caller rendering this unconditionally would
   // print an explanation next to a live button.
-  return removalNote(stranger({ directRole: "supervisor" }), false) === null ||
-    String(removalNote(stranger({ directRole: "supervisor" }), false));
+  return (
+    removalNote(stranger({ directRole: "supervisor" }), false) === null ||
+    String(removalNote(stranger({ directRole: "supervisor" }), false))
+  );
 });
 
 check("A36: your own admin access explains itself", () => {
@@ -449,13 +551,17 @@ check("A37: a company admin's note explains the missing button, and nothing else
 
 check("A38: access from below points at the place it sits on", () => {
   const n = removalNote(
-    stranger({ inheritedGrants: [grant(DEPT, "Assembly", "admin")], hasAccess: true }), false);
+    stranger({ inheritedGrants: [grant(DEPT, "Assembly", "admin")], hasAccess: true }),
+    false,
+  );
   return (n !== null && n.includes("further down the tree")) || String(n);
 });
 
 check("A39: and a stranger with nothing gets the plain sentence", () => {
-  return removalNote(stranger(), false) === "No access here to take away." ||
-    String(removalNote(stranger(), false));
+  return (
+    removalNote(stranger(), false) === "No access here to take away." ||
+    String(removalNote(stranger(), false))
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -475,8 +581,9 @@ check("A41 ⭐: a whitespace-only query matches everyone", () => {
 
 check("A42: matching is case-insensitive and matches inside the address", () => {
   const r = byId(P_SAM);
-  return (matchesQuery(r, "SAM") && matchesQuery(r, "am@ex") && !matchesQuery(r, "zzz")) ||
-    "wrong match";
+  return (
+    (matchesQuery(r, "SAM") && matchesQuery(r, "am@ex") && !matchesQuery(r, "zzz")) || "wrong match"
+  );
 });
 
 check("A43 ⭐: a person with no address survives an empty query and no other", () => {
@@ -491,10 +598,15 @@ check("A44: with no search, the screen is the member list and nothing else", () 
   // a standing list of everyone in the company, sitting under the people who
   // actually have access, asserts a relationship that does not exist.
   const { members, candidates } = partitionAccess(VIEW.rows, "");
-  const m = members.map((r) => r.profileId).sort().join(",");
+  const m = members
+    .map((r) => r.profileId)
+    .sort()
+    .join(",");
   const wantM = [P_BOSS, P_DANA, P_MIX, P_RAJ, P_SAM].sort().join(",");
-  return (m === wantM && candidates.length === 0) ||
-    `members=${m} candidates=${candidates.length} (want 0)`;
+  return (
+    (m === wantM && candidates.length === 0) ||
+    `members=${m} candidates=${candidates.length} (want 0)`
+  );
 });
 
 check("A44b ⭐: a search is what produces candidates", () => {
@@ -502,8 +614,10 @@ check("A44b ⭐: a search is what produces candidates", () => {
   // break the only reason this screen exists — 0020 §9's named gap was that a
   // site admin could grant access to somebody they could not find.
   const { candidates } = partitionAccess(VIEW.rows, "nobody");
-  return (candidates.length === 1 && candidates[0].profileId === P_NONE) ||
-    JSON.stringify(candidates.map((r) => r.email));
+  return (
+    (candidates.length === 1 && candidates[0].profileId === P_NONE) ||
+    JSON.stringify(candidates.map((r) => r.email))
+  );
 });
 
 check("A44c: a whitespace-only search is still no search", () => {
@@ -511,8 +625,10 @@ check("A44c: a whitespace-only search is still no search", () => {
   // this a search at all", so the two can never disagree about a box the user
   // has cleared to spaces.
   const { members, candidates } = partitionAccess(VIEW.rows, "   \t ");
-  return (members.length === 5 && candidates.length === 0) ||
-    `members=${members.length} candidates=${candidates.length}`;
+  return (
+    (members.length === 5 && candidates.length === 0) ||
+    `members=${members.length} candidates=${candidates.length}`
+  );
 });
 
 check("A45 ⭐: neither list is re-sorted — the server's order survives", () => {
@@ -520,16 +636,21 @@ check("A45 ⭐: neither list is re-sorted — the server's order survives", () =
   // sort here by a different rule is how the picker and the member list end
   // up disagreeing about where somebody is.
   const { members } = partitionAccess(VIEW.rows, "");
-  const serverOrder = VIEW.rows.filter((r) => r.hasAccess).map((r) => r.profileId).join(",");
+  const serverOrder = VIEW.rows
+    .filter((r) => r.hasAccess)
+    .map((r) => r.profileId)
+    .join(",");
   return members.map((r) => r.profileId).join(",") === serverOrder || "the list was re-sorted";
 });
 
 check("A46: the query applies to both lists at once", () => {
   const { members, candidates } = partitionAccess(VIEW.rows, "o");
   // boss@ and nobody@ both contain "o"; dana@, raj@, sam@, mixed@ do not.
-  return (members.map((r) => r.profileId).join(",") === P_BOSS &&
-    candidates.map((r) => r.profileId).join(",") === P_NONE) ||
-    `members=${members.map((r) => r.email)} candidates=${candidates.map((r) => r.email)}`;
+  return (
+    (members.map((r) => r.profileId).join(",") === P_BOSS &&
+      candidates.map((r) => r.profileId).join(",") === P_NONE) ||
+    `members=${members.map((r) => r.email)} candidates=${candidates.map((r) => r.email)}`
+  );
 });
 
 check("A47: a query that is not a string does not throw and hides nobody", () => {
@@ -755,8 +876,10 @@ const companyAdminHere = (over: Partial<AccessRow> = {}) =>
   stranger({ companyAdmin: true, directRole: "admin", hasAccess: true, ...over });
 
 check("G1 ⭐: a site admin is offered no Remove on a company admin's row", () => {
-  return canRemoveAccess(companyAdminHere(), false) === false ||
-    "the screen offered to remove a company admin";
+  return (
+    canRemoveAccess(companyAdminHere(), false) === false ||
+    "the screen offered to remove a company admin"
+  );
 });
 
 check("G2 ⭐: ...and no role control either", () => {
@@ -770,16 +893,20 @@ check("G3 ⭐: two company admins are peers — the flag is HALF the test", () =
   // server-side twin, and 48's X36 catches the same mutation from the
   // self-rule side.
   const row = companyAdminHere();
-  return (canRemoveAccess(row, true) === true && canSetRole(row, true) === true) ||
-    `remove=${canRemoveAccess(row, true)} setRole=${canSetRole(row, true)}`;
+  return (
+    (canRemoveAccess(row, true) === true && canSetRole(row, true) === true) ||
+    `remove=${canRemoveAccess(row, true)} setRole=${canSetRole(row, true)}`
+  );
 });
 
 check("G4: an ordinary person is still fully editable by a site admin", () => {
   // The other half: a guard that fired on everybody would pass G1 and G2 and
   // break the entire feature. 49's X43.
   const row = stranger({ directRole: "supervisor", hasAccess: true });
-  return (canSetRole(row, false) === true && canRemoveAccess(row, false) === true) ||
-    `remove=${canRemoveAccess(row, false)} setRole=${canSetRole(row, false)}`;
+  return (
+    (canSetRole(row, false) === true && canRemoveAccess(row, false) === true) ||
+    `remove=${canRemoveAccess(row, false)} setRole=${canSetRole(row, false)}`
+  );
 });
 
 check("G5 ⭐: the two company-admin rows do NOT get the same sentence", () => {
@@ -795,9 +922,11 @@ check("G5 ⭐: the two company-admin rows do NOT get the same sentence", () => {
   // it costs a red build rather than buying coverage. Rule 0, twice.
   const withGrant = removalNote(companyAdminHere(), false);
   const without = removalNote(stranger({ companyAdmin: true, hasAccess: true }), false);
-  return (withGrant === "Company admins aren't managed from a site." &&
-    without === "Nothing to take away here.") ||
-    `${String(withGrant)} / ${String(without)}`;
+  return (
+    (withGrant === "Company admins aren't managed from a site." &&
+      without === "Nothing to take away here.") ||
+    `${String(withGrant)} / ${String(without)}`
+  );
 });
 
 check("G6: the reason behind both is company-admin", () => {
