@@ -5,6 +5,12 @@ schedulable units (work cells, in the default vocabulary) as rows, time as colum
 across a row to assign an operator to that unit for a time window, working on a product. Multiple
 supervisors can edit the same schedule simultaneously and see each other's changes live.
 
+> **Status: in development, not production-ready.** The scheduling board, the site
+> hierarchy and the admin screens work against a local Supabase stack, and the
+> permission model is covered by 400+ database checks. There is no sign-in screen of
+> its own yet, and parts of the model are still being built out — see
+> [`docs/roadmap.md`](docs/roadmap.md) for exactly what is and isn't done.
+
 ## Prerequisites
 
 - Node 20 (see `.nvmrc`)
@@ -57,3 +63,15 @@ npm run dev
   architecture, roles, UI architecture, cost posture.
 - [`docs/roadmap.md`](docs/roadmap.md) — current state: what's built, what's next, the phase
   plan.
+
+## Contributing
+
+Issues and pull requests are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+checks a change has to pass and the rules around database and permission work.
+
+Found a security problem? Please don't open a public issue; see
+[`SECURITY.md`](SECURITY.md).
+
+## License
+
+Copyright 2026 Pratik Ghag. Licensed under the [Apache License 2.0](LICENSE).

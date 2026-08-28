@@ -12,6 +12,11 @@ test-results
 # supabase local state
 .supabase/
 
+# Supabase CLI scratch. `start-secrets/` holds the local stack's service_role
+# key and JWT secret. They are the CLI's standard localhost values and unlock
+# nothing remote, but they trip secret scanners and have no business in a repo.
+supabase/.temp/
+
 # delivery staging (see docs/agent-briefs)
 _delivery/
 
@@ -19,7 +24,7 @@ _delivery/
 # checks.txt is the Windows acceptance log (UTF-16, changes on every run);
 # tsconfig.tsbuildinfo is TypeScript's incremental cache. Both were tracked
 # until Aug 25 and both guarantee spurious diffs and merge conflicts.
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 checks.txt
 
 # Supabase Studio writes a copy of anything pasted into its SQL editor here
