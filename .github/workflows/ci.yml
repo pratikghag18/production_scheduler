@@ -2,6 +2,11 @@ name: CI
 
 on:
   push:
+    # Must name the branch that is actually pushed. This read `[main]` for the
+    # repository's whole first 43 commits while the default branch was called
+    # `Development`, so the only live trigger was `pull_request` and not one
+    # check ever ran. A trigger naming a branch nobody pushes is
+    # indistinguishable from having no CI at all.
     branches: [main]
   pull_request:
 
