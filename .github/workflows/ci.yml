@@ -2,12 +2,16 @@ name: CI
 
 on:
   push:
-    # Must name the branch that is actually pushed. This read `[main]` for the
-    # repository's whole first 43 commits while the default branch was called
-    # `Development`, so the only live trigger was `pull_request` and not one
-    # check ever ran. A trigger naming a branch nobody pushes is
-    # indistinguishable from having no CI at all.
-    branches: [main]
+    # BOTH long-lived branches. `main` is protected and only ever receives merges
+    # from a pull request; `Development` is where work lands, and listing it here
+    # is what gives that work a check before the PR is opened.
+    #
+    # Keep this list in step with the branches that actually exist. It read
+    # `[main]` for the repository's whole first 43 commits while the default
+    # branch was called `Development`, so the only live trigger was
+    # `pull_request` and not one check ever ran. A trigger naming a branch
+    # nobody pushes is indistinguishable from having no CI at all.
+    branches: [main, Development]
   pull_request:
 
 # Dummy Supabase values so the build and e2e smoke test run without secrets.
