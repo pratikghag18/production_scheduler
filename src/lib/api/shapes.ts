@@ -128,11 +128,34 @@ function parseNode(v: Json): BoardNode | null {
 }
 
 /** `runs` row shape, as returned by `to_jsonb(r)` (raw table row). */
+/**
+ * ⚠️ `productId` AND `operatorId` BELOW BECAME NULLABLE IN MIGRATION 0029 AND
+ * THIS FILE DID NOT FOLLOW, WHICH WOULD HAVE BROKEN THE WHOLE BOARD.
+ *
+ * D110 keeps a started run after its product is deleted, releasing `product_id`
+ * to NULL and copying the sku, name and colour onto the run itself. The guard
+ * here still demanded a string, so such a row parsed as `null` — and
+ * `parseArrayOf` returns null for the WHOLE ARRAY on the first item that fails,
+ * so `parseBoardWindow` would return null and `fetchBoardWindow` would throw
+ * `shapeMismatch`. **One deleted product with history and the board stops
+ * loading at all, for everyone, with an error about a shape rather than about
+ * a product.** Found by reading the parser while adding a different field.
+ *
+ * The lesson for next time: a migration that makes a column NULLABLE is a
+ * client change too, and `tsc` cannot see it — the generated types describe the
+ * database, but a hand-written runtime guard is where the assumption actually
+ * lives.
+ */
 export interface Run {
   id: string;
   orgId: string;
   nodeId: string;
-  productId: string;
+  /** NULL once the product has been deleted; `productSku` then names it. */
+  productId: string | null;
+  /** D110 snapshot, set at the moment the product was deleted. */
+  productSku: string | null;
+  productName: string | null;
+  productColorToken: string | null;
   timerange: string;
   plannedHeadcount: number | null;
   notes: string | null;
@@ -153,6 +176,9 @@ export function parseRun(v: Json): Run | null {
     org_id,
     node_id,
     product_id,
+    product_sku,
+    product_name,
+    product_color_token,
     timerange,
     planned_headcount,
     notes,
@@ -165,7 +191,10 @@ export function parseRun(v: Json): Run | null {
     !isStr(id) ||
     !isStr(org_id) ||
     !isStr(node_id) ||
-    !isStr(product_id) ||
+    !isStrOrNull(product_id) ||
+    !isStrOrNull(product_sku) ||
+    !isStrOrNull(product_name) ||
+    !isStrOrNull(product_color_token) ||
     !isStr(timerange) ||
     !isNumOrNull(planned_headcount) ||
     !isStrOrNull(notes) ||
@@ -181,6 +210,9 @@ export function parseRun(v: Json): Run | null {
     orgId: org_id,
     nodeId: node_id,
     productId: product_id,
+    productSku: product_sku,
+    productName: product_name,
+    productColorToken: product_color_token,
     timerange,
     plannedHeadcount: planned_headcount,
     notes,
@@ -196,13 +228,34 @@ export interface Assignment {
   id: string;
   orgId: string;
   nodeId: string;
-  operatorId: string;
+  /** NULL once the person has been deleted; `operatorDisplayName` then names them. */
+  operatorId: string | null;
+  /** D110 snapshot, set at the moment the person was deleted. */
+  operatorDisplayName: string | null;
   runId: string | null;
   productId: string | null;
+  /** D110 snapshot for a DIRECT assignment whose product has been deleted. */
+  productSku: string | null;
+  productName: string | null;
+  productColorToken: string | null;
   timerange: string;
   efficiency: number;
   eligibilityOverride: boolean;
   overrideReason: string | null;
+  /**
+   * D113 / migration 0030: this assignment deliberately places somebody
+   * outside the part of the structure they belong to.
+   *
+   * ⚠️ NOT THE SAME FIELD AS `eligibilityOverride`, and the board must never
+   * render them with the same words. That one means "no Welding ticket, waved
+   * through"; this one means "not from this line, placed here anyway". A
+   * supervisor waving the first must not be shown as having waved the second.
+   *
+   * The database NORMALISES this off when the row did not actually need it, so
+   * `true` always means an override really happened — see 0030 §2.
+   */
+  areaOverride: boolean;
+  areaOverrideReason: string | null;
   targetQty: number | null;
   targetUnit: string | null;
   status: string;
@@ -220,12 +273,18 @@ export function parseAssignment(v: Json): Assignment | null {
     org_id,
     node_id,
     operator_id,
+    operator_display_name,
     run_id,
     product_id,
+    product_sku,
+    product_name,
+    product_color_token,
     timerange,
     efficiency,
     eligibility_override,
     override_reason,
+    area_override,
+    area_override_reason,
     target_qty,
     target_unit,
     status,
@@ -237,13 +296,19 @@ export function parseAssignment(v: Json): Assignment | null {
     !isStr(id) ||
     !isStr(org_id) ||
     !isStr(node_id) ||
-    !isStr(operator_id) ||
+    !isStrOrNull(operator_id) ||
+    !isStrOrNull(operator_display_name) ||
     !isStrOrNull(run_id) ||
     !isStrOrNull(product_id) ||
+    !isStrOrNull(product_sku) ||
+    !isStrOrNull(product_name) ||
+    !isStrOrNull(product_color_token) ||
     !isStr(timerange) ||
     !isNum(efficiency) ||
     !isBool(eligibility_override) ||
     !isStrOrNull(override_reason) ||
+    !isBool(area_override) ||
+    !isStrOrNull(area_override_reason) ||
     !isNumOrNull(target_qty) ||
     !isStrOrNull(target_unit) ||
     !isStr(status) ||
@@ -258,12 +323,22 @@ export function parseAssignment(v: Json): Assignment | null {
     orgId: org_id,
     nodeId: node_id,
     operatorId: operator_id,
+    operatorDisplayName: operator_display_name,
     runId: run_id,
     productId: product_id,
+    productSku: product_sku,
+    productName: product_name,
+    productColorToken: product_color_token,
     timerange,
     efficiency,
     eligibilityOverride: eligibility_override,
     overrideReason: override_reason,
+    // `area_override` is NOT NULL with a default, so a row without it is a
+    // payload from a database older than 0030 rather than a legal shape; the
+    // guard below rejects rather than coercing, like every other required
+    // field here.
+    areaOverride: area_override,
+    areaOverrideReason: area_override_reason,
     targetQty: target_qty,
     targetUnit: target_unit,
     status,
@@ -279,18 +354,32 @@ export interface BoardOperator {
   displayName: string;
   employeeRef: string | null;
   active: boolean;
+  /**
+   * D109 / migration 0028: the part of the structure this person belongs to.
+   * `board_window` has sent it since 0025 and this parser dropped it, so the
+   * board could not tell whether a person belonged at the cell being scheduled
+   * — which is the question D113's override is about. Same gap `Product` had.
+   *
+   * ⚠️ `""` for a SYNTHESISED row only (a departed person drawn from D110's
+   * snapshot, `history.ts`). It must never reach `offeredAt`, which fails OPEN
+   * on an owner it cannot resolve.
+   */
+  siteNodeId: string;
   skillIds: string[];
 }
 
 function parseOperator(v: Json): BoardOperator | null {
   if (!isJsonObject(v)) return null;
-  const { id, home_node_id, display_name, employee_ref, active, skill_ids } = v;
+  const { id, home_node_id, display_name, employee_ref, active, site_node_id, skill_ids } = v;
   if (
     !isStr(id) ||
     !isStrOrNull(home_node_id) ||
     !isStr(display_name) ||
     !isStrOrNull(employee_ref) ||
-    !isBool(active)
+    !isBool(active) ||
+    // NOT NULL since 0028, so a row without it is a payload from a database
+    // this client does not understand — rejected, not coerced.
+    !isStr(site_node_id)
   ) {
     return null;
   }
@@ -302,6 +391,7 @@ function parseOperator(v: Json): BoardOperator | null {
     displayName: display_name,
     employeeRef: employee_ref,
     active,
+    siteNodeId: site_node_id,
     skillIds,
   };
 }
@@ -311,6 +401,18 @@ export interface Product {
   sku: string;
   name: string;
   active: boolean;
+  /**
+   * The node this product BELONGS TO — `products.site_node_id`, NOT NULL
+   * since 0028 — and therefore the node at or below which it may be run
+   * (`scope.ts`'s one-line rule). `board_window` has emitted it since 0025.
+   *
+   * ⭐ This is not decoration: `app_guard_run_scope` / `app_guard_assignment_scope`
+   * REFUSE a run or assignment whose product is not owned by an ancestor-or-self
+   * of the target cell (`not_offered_here`), and there is no override for
+   * products. A picker that does not read this field offers work the server is
+   * guaranteed to reject.
+   */
+  siteNodeId: string;
   /**
    * The palette token this product renders in — `product-1` .. `product-4`
    * (0023 §3, D102). A TOKEN NAME, NEVER A HEX: the board resolves it through
@@ -338,6 +440,16 @@ export interface Product {
  * board. Blanking an entire plant's schedule because one product's swatch is
  * missing is not a trade anyone would make.
  *
+ * ⭐ `site_node_id` is the counter-example, and it goes the other way for the
+ * same reason: it is where the product BELONGS, which is identity, and there
+ * is no safe degraded value. Coercing an absent one to `""` would not fail
+ * loudly — `offeredAt` fails OPEN on a scope node it cannot read, so an empty
+ * owner reads as "cannot tell" and the product is offered at EVERY cell, where
+ * the server then refuses every create with `not_offered_here` and no override.
+ * The field is NOT NULL server-side since 0028, so a row arriving without a
+ * readable string owner is a payload this client does not understand, and
+ * rejecting the row is the honest answer.
+ *
  * So an absent or null `color_token` becomes `""`, and the two board call
  * sites fall back to the first palette token for anything that is not a token
  * `tokens.css` defines. That fallback is what makes this safe, and it is the
@@ -348,9 +460,25 @@ export interface Product {
  */
 function parseProduct(v: Json): Product | null {
   if (!isJsonObject(v)) return null;
-  const { id, sku, name, active, color_token } = v;
-  if (!isStr(id) || !isStr(sku) || !isStr(name) || !isBool(active)) return null;
-  return { id, sku, name, active, colorToken: isStr(color_token) ? color_token : "" };
+  const { id, sku, name, active, color_token, site_node_id } = v;
+  if (
+    !isStr(id) ||
+    !isStr(sku) ||
+    !isStr(name) ||
+    !isBool(active) ||
+    // Required, like `id`/`sku`/`name` and unlike `color_token` — see above.
+    !isStr(site_node_id)
+  ) {
+    return null;
+  }
+  return {
+    id,
+    sku,
+    name,
+    active,
+    siteNodeId: site_node_id,
+    colorToken: isStr(color_token) ? color_token : "",
+  };
 }
 
 export interface Skill {
@@ -678,4 +806,93 @@ export function parseDeleteRunResult(json: Json): DeleteRunResult | null {
   const ids = parseArrayOf(detached_assignment_ids, (item) => (isStr(item) ? item : null));
   if (ids === null) return null;
   return { deletedRunId: deleted_run_id, detachedAssignmentIds: ids };
+}
+
+// ---------------------------------------------------------------------------
+// D110 / migration 0029 — `deletion_preview` and `delete_owned_row`.
+//
+// ⭐ THE `what` VALUES ARE TABLE NAMES AND THEY STAY THAT WAY. This file's
+// header says snake_case stops here, and it means COLUMN names: `node_id`
+// becomes `nodeId` because it is a field of this shape. A `what` is a VALUE
+// the database chose from a closed set (`runs`, `assignments`,
+// `operator_skills`, …), and camel-casing a value would make the client and
+// `56_delete_keeps_the_past_test.sql` disagree about the same string. Turning
+// it into English is `features/admin/lib/deletion.ts`'s job.
+// ---------------------------------------------------------------------------
+
+/**
+ * The four things a site owns and can therefore delete. Deliberately the same
+ * four words migration 0028's `not_offered_here` payload uses for its `kind`,
+ * so one vocabulary covers "you may not put that here" and "you are deleting
+ * that".
+ */
+export type DeletableKind = "product" | "operator" | "skill" | "shift_template";
+
+const DELETABLE_KINDS: readonly string[] = ["product", "operator", "skill", "shift_template"];
+
+/** One line of the dialog: a table name and how many of its rows. */
+export interface DeletionCount {
+  what: string;
+  count: number;
+}
+
+/**
+ * What deleting this row would do — or, from `delete_owned_row`, what it did.
+ *
+ * `removes` and `keeps` are both about rows the deletion TOUCHES, which is what
+ * makes the two numbers comparable on screen: "1 of the 3 jobs that use this
+ * goes, 2 stay". A `keeps` of `[]` is a real answer and means there is no past
+ * to keep at all — trainings and shift patterns are configuration, and nothing
+ * records which one a finished run used.
+ */
+export interface DeletionPreview {
+  kind: DeletableKind;
+  id: string;
+  name: string;
+  /** A product's sku, a person's employee ref. `null` for trainings and patterns. */
+  code: string | null;
+  active: boolean;
+  removes: DeletionCount[];
+  keeps: DeletionCount[];
+  /** Only ever `true`, and only on the answer from `delete_owned_row`. */
+  deleted: boolean;
+}
+
+function parseDeletionCounts(json: Json | undefined): DeletionCount[] | null {
+  if (!isArr(json)) return null;
+  const out: DeletionCount[] = [];
+  for (const row of json) {
+    if (!isJsonObject(row)) return null;
+    const { what, count } = row;
+    // ⚠️ NOT COERCED AND NOT SKIPPED. A line this client cannot read is a line
+    // whose count would silently become zero — and zero is the number that
+    // makes somebody press Delete.
+    if (!isStr(what) || !isNum(count) || !Number.isInteger(count)) return null;
+    out.push({ what, count });
+  }
+  return out;
+}
+
+export function parseDeletionPreview(json: Json): DeletionPreview | null {
+  if (!isJsonObject(json)) return null;
+  const { kind, id, name, code, active, removes, keeps, deleted } = json;
+  if (!isStr(kind) || !DELETABLE_KINDS.includes(kind)) return null;
+  if (!isStr(id) || !isStr(name) || !isBool(active)) return null;
+  if (!(code === null || isStr(code))) return null;
+  const parsedRemoves = parseDeletionCounts(removes);
+  const parsedKeeps = parseDeletionCounts(keeps);
+  if (parsedRemoves === null || parsedKeeps === null) return null;
+  return {
+    kind: kind as DeletableKind,
+    id,
+    name,
+    code,
+    active,
+    removes: parsedRemoves,
+    keeps: parsedKeeps,
+    // Absent means false. `delete_owned_row` is the only caller that sets it,
+    // so a preview must not come back with it undefined and read as truthy
+    // anywhere downstream.
+    deleted: deleted === true,
+  };
 }

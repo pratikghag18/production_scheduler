@@ -21,6 +21,14 @@ const run: Json = {
   org_id: "10000000-0000-0000-0000-000000000001",
   node_id: "30000000-0000-0000-0000-000000000007",
   product_id: "60000000-0000-0000-0000-000000000001",
+  // D110/0029: the snapshot a run keeps once its product is deleted. NULL here
+  // because this product still exists — but the keys must be PRESENT, because
+  // `isStrOrNull` rejects `undefined` and `board_window` sends every column.
+  // ⚠️ `tsc` cannot see a JSON fixture, so nothing but a run would have caught
+  // a missing key here.
+  product_sku: null,
+  product_name: null,
+  product_color_token: null,
   timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
   planned_headcount: 3,
   notes: null,
@@ -35,12 +43,20 @@ const assignment: Json = {
   org_id: "10000000-0000-0000-0000-000000000001",
   node_id: "30000000-0000-0000-0000-000000000007",
   operator_id: "50000000-0000-0000-0000-000000000004",
+  operator_display_name: null,
   run_id: "80000000-0000-0000-0000-000000000001",
   product_id: null,
+  product_sku: null,
+  product_name: null,
+  product_color_token: null,
   timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
   efficiency: 1.0,
   eligibility_override: false,
   override_reason: null,
+  // D113/0030. `isBool` rejects `undefined`, so a missing key here would fail
+  // every case in this file at runtime and none of them at compile time.
+  area_override: false,
+  area_override_reason: null,
   target_qty: null,
   target_unit: null,
   status: "planned",
@@ -79,6 +95,11 @@ const boardWindowJson: Json = {
       display_name: "Maria",
       employee_ref: "EMP-001",
       active: true,
+      // D109/0028, and D113 is what made the client read it: the part of the
+      // structure this person belongs to. `board_window` has emitted it since
+      // 0025 and `parseOperator` dropped it, so the board could not tell
+      // whether somebody belonged at the cell being scheduled. REQUIRED now.
+      site_node_id: "30000000-0000-0000-0000-000000000001",
       skill_ids: ["40000000-0000-0000-0000-000000000001"],
     },
   ],
@@ -92,6 +113,11 @@ const boardWindowJson: Json = {
       // now. The fixture carries it so the happy path matches the real payload
       // rather than the subset the parser happens to tolerate.
       color_token: "product-2",
+      // D108/0028: `products.site_node_id` is NOT NULL and `board_window` has
+      // emitted it since 0025 — the node this product BELONGS TO. REQUIRED by
+      // `parseProduct`; the last describe in this file pins that. It names the
+      // node in `nodes` above, as the real payload's foreign key does.
+      site_node_id: "30000000-0000-0000-0000-000000000001",
     },
   ],
   skills: [{ id: "40000000-0000-0000-0000-000000000001", name: "CNC" }],
@@ -412,5 +438,135 @@ describe("parseProduct — the colour is presentation, not identity", () => {
     const win = parseBoardWindow(raw as unknown as Json);
     expect(win).not.toBe(null);
     expect(win?.products[0]?.colorToken).toBe("");
+  });
+});
+
+/*
+ * D108 / migration 0028 — the OWNER, and why it is the opposite trade from the
+ * colour directly above.
+ *
+ * `products.site_node_id` is NOT NULL and says where the product belongs;
+ * `app_guard_run_scope` / `app_guard_assignment_scope` refuse a run or
+ * assignment whose product is not owned by an ancestor-or-self of the target
+ * cell (`not_offered_here`), and there is NO override for products. So it is
+ * identity, like `sku`, not presentation like `color_token`.
+ *
+ * ⚠️ And a coerced `""` would not be the cautious choice it looks like:
+ * `offeredAt` FAILS OPEN on an owner it cannot resolve, so an empty owner
+ * reads as "cannot tell" and the product would be offered at EVERY cell and
+ * refused at all of them. Rejecting the row is the honest answer to a payload
+ * this client does not understand.
+ */
+describe("parseProduct — the owner is identity, and has no degraded value", () => {
+  it("keeps the owner the server actually sends", () => {
+    const win = parseBoardWindow(boardWindowJson);
+    expect(win?.products[0]?.siteNodeId).toBe("30000000-0000-0000-0000-000000000001");
+  });
+
+  it("rejects a product with no site_node_id rather than coercing it to empty", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_id?: string | null }[];
+    };
+    delete raw.products[0].site_node_id;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+
+  it("rejects a product whose site_node_id is null — 0028 removed that option", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_id?: string | null }[];
+    };
+    raw.products[0].site_node_id = null;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+/* ===========================================================================
+ * D110 (migration 0029) and D113 (0030) — the nullable columns, and the case
+ * that would have taken the whole board down.
+ *
+ * ⚠️ NONE OF THIS IS VISIBLE TO `tsc`. The fixtures above are `Json`, so a
+ * missing key is `undefined` at runtime and nothing at compile time — the same
+ * shape as §19.72a's "a compiler cannot see a string expectation", one costume
+ * along. The three keys added to `run` and the five added to `assignment` were
+ * put there because these cases demanded them, not because anything complained.
+ * =========================================================================== */
+
+describe("a run whose product has been deleted", () => {
+  function withRun(over: Record<string, unknown>): Json {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as { runs: Record<string, unknown>[] };
+    raw.runs[0] = { ...raw.runs[0], ...over };
+    return raw as unknown as Json;
+  }
+
+  it("⭐⭐ parses AT ALL — one row that does not is the whole board gone", () => {
+    // `parseArrayOf` returns null for the WHOLE ARRAY on the first item that
+    // fails, so `parseBoardWindow` would return null and `fetchBoardWindow`
+    // would throw `shapeMismatch`. Before this change `productId` was typed
+    // `string` and guarded with `isStr`, so the first deleted product with
+    // history stopped the board loading for everyone, with an error about a
+    // shape rather than about a product.
+    expect(
+      parseBoardWindow(withRun({ product_id: null, product_sku: "WX", product_name: "Widget X" })),
+    ).not.toBeNull();
+  });
+
+  it("keeps the remembered sku and releases the id", () => {
+    const win = parseBoardWindow(
+      withRun({ product_id: null, product_sku: "WX", product_name: "Widget X" }),
+    );
+    expect(win?.runs[0]?.productId).toBeNull();
+    expect(win?.runs[0]?.productSku).toBe("WX");
+  });
+
+  it("rejects a payload with the snapshot keys ABSENT rather than null", () => {
+    // `isStrOrNull` rejects `undefined`, and `board_window` emits every column
+    // via `to_jsonb(r)` — so an absent key means a database older than 0029,
+    // not a legal shape.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      runs: Record<string, unknown>[];
+    };
+    delete raw.runs[0].product_sku;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+describe("an assignment whose operator has been deleted", () => {
+  it("⭐ parses, and keeps the name remembered at the moment they went", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      assignments: Record<string, unknown>[];
+    };
+    raw.assignments[0].operator_id = null;
+    raw.assignments[0].operator_display_name = "Dana Departing";
+    const win = parseBoardWindow(raw as unknown as Json);
+    expect(win?.assignments[0]?.operatorId).toBeNull();
+    expect(win?.assignments[0]?.operatorDisplayName).toBe("Dana Departing");
+  });
+
+  it("D113: carries the area override, and rejects a payload without it", () => {
+    expect(parseBoardWindow(boardWindowJson)?.assignments[0]?.areaOverride).toBe(false);
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      assignments: Record<string, unknown>[];
+    };
+    delete raw.assignments[0].area_override;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+describe("an operator carries the part of the structure they belong to", () => {
+  it("D109/D113: parseOperator keeps site_node_id — it was sent and dropped", () => {
+    expect(parseBoardWindow(boardWindowJson)?.operators[0]?.siteNodeId).toBe(
+      "30000000-0000-0000-0000-000000000001",
+    );
+  });
+
+  it("and rejects a row without one, rather than coercing it to empty", () => {
+    // `""` would be worse than rejecting: `offeredAt` FAILS OPEN on an owner it
+    // cannot resolve, so an empty owner reads as "belongs everywhere" and the
+    // popover would annotate nobody.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      operators: Record<string, unknown>[];
+    };
+    delete raw.operators[0].site_node_id;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
   });
 });

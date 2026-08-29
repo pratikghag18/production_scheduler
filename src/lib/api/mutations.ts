@@ -102,6 +102,22 @@ export interface CreateAssignmentInput {
   targetUnit?: string;
   eligibilityOverride?: boolean;
   overrideReason?: string;
+  /**
+   * D113 / migration 0030: place this person outside the part of the structure
+   * they belong to, on purpose.
+   *
+   * ⚠️ A DIFFERENT DECISION FROM `eligibilityOverride`, AND THE SEPARATION IS
+   * THE WHOLE POINT. That one waves through a missing training; this one waves
+   * through "not from this line". A supervisor doing the first must not be
+   * recorded as having done the second — the weaker permission would grant the
+   * stronger one — so they are two flags, two reasons and two decisions.
+   *
+   * The server refuses `true` with no reason (`invalid_argument` naming
+   * `p_area_override_reason`), and turns the flag back off if the row did not
+   * actually need it, so sending it optimistically is safe but never a lie.
+   */
+  areaOverride?: boolean;
+  areaOverrideReason?: string;
 }
 
 /**
@@ -135,6 +151,8 @@ export async function createAssignment(
     p_target_unit: input.targetUnit,
     p_eligibility_override: input.eligibilityOverride,
     p_override_reason: input.overrideReason,
+    p_area_override: input.areaOverride,
+    p_area_override_reason: input.areaOverrideReason,
   });
   if (error) throw toSchedulerError(error);
   const parsed = parseCreateAssignmentResult(data);
@@ -152,6 +170,15 @@ export interface MoveRunInput {
   nodeId: string;
   start: Date;
   end: Date;
+  /**
+   * D113: move the run even though some of its crew do not belong at the target
+   * cell. ⚠️ ONE REASON COVERS THE WHOLE MOVE, unlike `createAssignment` where
+   * one reason covers one person — the supervisor is deciding about a move, not
+   * about five people individually, and `move_run` refuses up front NAMING
+   * everyone affected so the screen can ask about them together.
+   */
+  areaOverride?: boolean;
+  areaOverrideReason?: string;
 }
 
 /**
@@ -167,6 +194,8 @@ export async function moveRun(input: MoveRunInput): Promise<MoveRunResult> {
     p_run_id: input.runId,
     p_node_id: input.nodeId,
     p_timerange: toTstzRange(input.start, input.end),
+    p_area_override: input.areaOverride,
+    p_area_override_reason: input.areaOverrideReason,
   });
   if (error) throw toSchedulerError(error);
   const parsed = parseMoveRunResult(data);
@@ -217,6 +246,12 @@ export async function applySplitCoverage(input: SplitCoverageInput): Promise<Spl
       target_unit: na.targetUnit,
       eligibility_override: na.eligibilityOverride,
       override_reason: na.overrideReason,
+      // D113: the middle of three layers, and the one a plumbing change
+      // forgets — this envelope is unpacked by `apply_split_coverage` and
+      // handed to `create_assignment`, so an override that stops here is an
+      // override that works everywhere except in a split.
+      area_override: na.areaOverride,
+      area_override_reason: na.areaOverrideReason,
     } as unknown as Json;
   }
 

@@ -51,6 +51,11 @@ export function useCreateRun(rootPath: string, from: Date, to: Date) {
           orgId: previous.org.id,
           nodeId: input.nodeId,
           productId: input.productId,
+          // D110: a new run names its product by id; the remembered fields are
+          // written only when that product is deleted.
+          productSku: null,
+          productName: null,
+          productColorToken: null,
           timerange: toTstzRange(input.start, input.end),
           plannedHeadcount: input.plannedHeadcount ?? null,
           notes: input.notes ?? null,

@@ -4,6 +4,8 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
+import { offeredHere } from "@/features/admin/lib/scope";
+import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useRootPath } from "./hooks/useRootPath";
 import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
@@ -255,6 +257,68 @@ export default function BoardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // D108/0028: the products the create popover may offer AT THE CELL IT IS
+  // OPEN ON. Two filters, both of which the server already enforces or the
+  // schema already states:
+  //
+  //  1. SCOPE. `app_guard_run_scope`/`app_guard_assignment_scope` refuse a
+  //     product not owned by an ancestor-or-self of the target node with
+  //     `not_offered_here`, and — unlike eligibility — there is NO override.
+  //     Offering one is offering something that cannot work.
+  //  2. `active`. 0029 §1 leaves the flag ADVISORY on purpose — "nothing in
+  //     the database refuses a run of a deactivated product today, and this
+  //     migration does not start refusing one" — while the column comments it
+  //     ships read "False = retired: not offered when …". Advisory plus "not
+  //     offered" leaves the client as the only thing that can make the second
+  //     half true, and nothing on the board did. `OperatorPanel` already
+  //     filters operators exactly this way (`operators.filter((o) => o.active)`).
+  //     This is a PICKER filter, not a hide: runs of a retired product that
+  //     already exist keep rendering, and only new work stops being offered.
+  //
+  // Resolved HERE, from `index` + the popover's node, and passed down as a
+  // list — the same shape as `requiredSkills={index?.skillsForNode.get(...)}`
+  // below (D64/D65). The popover takes a list, never a rule.
+  const popover = dragApi.popover;
+  const createNodeId = popover?.kind === "create" ? popover.nodeId : null;
+  const offeredProducts = useMemo(() => {
+    if (!boardQuery.data || createNodeId === null) return [];
+    const active = boardQuery.data.products.filter((p) => p.active);
+    // FAILS OPEN on a node this client cannot resolve a path for, matching
+    // `offeredAt`'s own default (scope.ts's header): "I cannot tell" offers
+    // and lets the server decide, because hiding is silent and permanent
+    // while a refusal is loud and lands on the write-error contract.
+    if (index === null) return active;
+    const path = index.nodeById.get(createNodeId)?.path;
+    if (path === undefined) return active;
+    return offeredHere(active, path, index.nodeById);
+  }, [boardQuery.data, index, createNodeId]);
+
+  /**
+   * D113: the people who do NOT belong at this cell.
+   *
+   * ⚠️ THE OPPOSITE TREATMENT FROM `offeredProducts` ABOVE, AND DELIBERATELY.
+   * A product outside its scope is refused by the database with no way through
+   * (0030 leaves the product half absolute, because migration 0029's proof
+   * depends on it), so it is filtered OUT of the picker. A person outside
+   * theirs can be placed anyway by anyone who may schedule here, with a reason
+   * — so they stay in the list and are ANNOTATED. Filtering them would delete
+   * the feature; offering the product would offer a guaranteed refusal.
+   *
+   * Fails open on an unresolvable node for the same reason `offeredHere` does:
+   * an empty set annotates nobody, and the server still decides.
+   */
+  const outsideAreaOperatorIds = useMemo(() => {
+    const out = new Set<string>();
+    if (!boardQuery.data || createNodeId === null || index === null) return out;
+    const path = index.nodeById.get(createNodeId)?.path;
+    if (path === undefined) return out;
+    const belongs = new Set(
+      offeredHere(boardQuery.data.operators, path, index.nodeById).map((o) => o.id),
+    );
+    for (const o of boardQuery.data.operators) if (!belongs.has(o.id)) out.add(o.id);
+    return out;
+  }, [boardQuery.data, index, createNodeId]);
+
   if (sessionLoading) {
     return <p>Loading session…</p>;
   }
@@ -282,8 +346,6 @@ export default function BoardPage() {
       </div>
     );
   }
-
-  const popover = dragApi.popover;
 
   return (
     <div
@@ -416,10 +478,11 @@ export default function BoardPage() {
           initialRange={popover.range}
           shiftChips={popover.shiftChips}
           defaultCreateMode={defaultCreateMode}
-          products={boardQuery.data?.products ?? []}
+          products={offeredProducts}
           operators={boardQuery.data?.operators ?? []}
           windowStart={index?.windowStart ?? from}
           requiredSkills={index?.skillsForNode.get(popover.nodeId) ?? []}
+          outsideAreaOperatorIds={outsideAreaOperatorIds}
           eligibilityPolicy={index?.eligibilityPolicy ?? "warn"}
           presetOperatorId={popover.presetOperatorId}
           onCancel={dragApi.closePopover}
@@ -496,7 +559,9 @@ export default function BoardPage() {
         <AssignmentPopover
           assignment={popover.assignment}
           homeRun={popover.homeRun}
-          operator={index?.operatorById.get(popover.assignment.operatorId)}
+          operator={
+            index === null ? undefined : operatorViewFor(popover.assignment, index.operatorById)
+          }
           products={boardQuery.data?.products ?? []}
           anchor={popover.anchor}
           windowStart={index?.windowStart ?? from}

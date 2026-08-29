@@ -1,0 +1,77 @@
+[
+  [
+    "P1 the door is nailed shut again — the override stops being consulted",
+    "      if not new.area_override then\n        perform api_raise('not_offered_here',",
+    "      if true then\n        perform api_raise('not_offered_here',"
+  ],
+  [
+    "P2 the door is left open — the operator half stops refusing anything at all",
+    "      if not new.area_override then\n        perform api_raise('not_offered_here',\n          'That person does not belong to this part of the structure.',\n          jsonb_build_object('kind', 'operator', 'id', new.operator_id,\n                             'owner_node_id', v_owner, 'node_id', new.node_id));\n      end if;",
+    ""
+  ],
+  [
+    "P3 the flag stops being normalised, so \"overridden\" comes to mean \"a flag was sent\"",
+    "  -- The flag means \"this really did override something\", or it means nothing.\n  if not v_needed then\n    new.area_override := false;\n    new.area_override_reason := null;\n  end if;\n  return new;",
+    "  return new;"
+  ],
+  [
+    "P4 ⭐⭐ the PRODUCT half is given a door too — this is the one that breaks migration 0029's proof",
+    "    if not app_owner_covers_in_org(new.org_id, v_owner, new.node_id) then\n      perform api_raise('not_offered_here',\n        'That product does not belong to this part of the structure.',",
+    "    if not app_owner_covers_in_org(new.org_id, v_owner, new.node_id) and not new.area_override then\n      perform api_raise('not_offered_here',\n        'That product does not belong to this part of the structure.',"
+  ],
+  [
+    "P5 create_assignment stops insisting on a reason",
+    "  IF p_area_override AND coalesce(btrim(p_area_override_reason), '') = '' THEN\n    PERFORM api_raise('invalid_argument', 'an area override must say why',\n      jsonb_build_object('field', 'p_area_override_reason', 'reason', 'required when p_area_override is true'));\n  END IF;\n\n  IF NOT app_can_edit_node(p_node_id) THEN",
+    "\n  IF NOT app_can_edit_node(p_node_id) THEN"
+  ],
+  [
+    "P6 whitespace becomes a reason — the trim is dropped",
+    "  IF p_area_override AND coalesce(btrim(p_area_override_reason), '') = '' THEN\n    PERFORM api_raise('invalid_argument', 'an area override must say why',\n      jsonb_build_object('field', 'p_area_override_reason', 'reason', 'required when p_area_override is true'));\n  END IF;\n\n  IF NOT app_can_edit_node(p_node_id) THEN",
+    "  IF p_area_override AND p_area_override_reason IS NULL THEN\n    PERFORM api_raise('invalid_argument', 'an area override must say why',\n      jsonb_build_object('field', 'p_area_override_reason', 'reason', 'required when p_area_override is true'));\n  END IF;\n\n  IF NOT app_can_edit_node(p_node_id) THEN"
+  ],
+  [
+    "P7 the CHECK is weakened from an equivalence to an implication — a reason with no flag becomes storable",
+    "  check (area_override = (area_override_reason is not null));",
+    "  check (not area_override or area_override_reason is not null);"
+  ],
+  [
+    "P8 move_run stops naming the crew — the trigger is left to raise about one row",
+    "    IF jsonb_array_length(v_outside) > 0 THEN\n      PERFORM api_raise('not_offered_here',\n        'Some of this crew do not belong to that part of the structure.',\n        jsonb_build_object('kind', 'operator', 'node_id', p_node_id, 'operators', v_outside));\n    END IF;",
+    ""
+  ],
+  [
+    "P9 move_run's ELIGIBLE path forgets the override, so a legal move half-refuses",
+    "      UPDATE assignments\n        SET node_id = p_node_id, timerange = v_new_range,\n            area_override = p_area_override,\n            area_override_reason = CASE WHEN p_area_override THEN v_reason ELSE NULL END\n        WHERE id = rec.id;",
+    "      UPDATE assignments SET node_id = p_node_id, timerange = v_new_range WHERE id = rec.id;"
+  ],
+  [
+    "P10 apply_split_coverage drops the two arguments again — the middle layer",
+    "      COALESCE((p_new_assignment->>'area_override')::boolean, false),\n      p_new_assignment->>'area_override_reason'\n    );",
+    "      false,\n      NULL\n    );"
+  ],
+  [
+    "P11 the regrant block is deleted — DROP FUNCTION already took the grants",
+    "    execute 'grant execute on function create_assignment(uuid,uuid,uuid,uuid,tstzrange,numeric,numeric,text,boolean,text,boolean,text) to authenticated';\n    execute 'grant execute on function move_run(uuid,uuid,tstzrange,boolean,text) to authenticated';",
+    ""
+  ],
+  [
+    "P12 the old create_assignment signature is left in place beside the new one",
+    "drop function if exists create_assignment(uuid, uuid, uuid, uuid, tstzrange, numeric, numeric, text, boolean, text);",
+    ""
+  ],
+  [
+    "P13 the REVOKE goes, leaving the PUBLIC default grant standing",
+    "revoke execute on function create_assignment(uuid,uuid,uuid,uuid,tstzrange,numeric,numeric,text,boolean,text,boolean,text) from public;",
+    ""
+  ],
+  [
+    "P14 the normalisation on the foreign-product early return is dropped — EXECUTED AND INERT, and the kind is 'a value no case can reach': that branch is taken only when product_id names a row in ANOTHER org, and the composite FK (org_id, product_id) refuses every such row a moment later, so no row that took it is ever stored for anything to observe. Kept because it costs nothing and stops the branch becoming a hole if the FK is ever relaxed. Expected NOT CAUGHT.",
+    "      if not v_needed then\n        new.area_override := false; new.area_override_reason := null;\n      end if;\n      return new;",
+    "      return new;"
+  ],
+  [
+    "P15 INERT CONTROL — two characters of a comment. Must come back NOT CAUGHT.",
+    "-- §1. The flag and the reason.",
+    "-- §1. The flag and the reason!!"
+  ]
+]

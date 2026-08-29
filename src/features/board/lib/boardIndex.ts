@@ -218,9 +218,15 @@ export function buildBoardIndex(
         rl.push(ia);
         assignmentsByRun.set(ia.runId, rl);
       }
-      const ol = assignmentsByOperator.get(ia.operatorId) ?? [];
-      ol.push(ia);
-      assignmentsByOperator.set(ia.operatorId, ol);
+      // D110: a row whose person has been deleted has no operator to index by.
+      // It is still drawn — `operatorViewFor` names them from the snapshot —
+      // but it belongs in nobody's roster, and an `""` key would collect every
+      // departed person into one imaginary operator.
+      if (ia.operatorId !== null) {
+        const ol = assignmentsByOperator.get(ia.operatorId) ?? [];
+        ol.push(ia);
+        assignmentsByOperator.set(ia.operatorId, ol);
+      }
     }
   }
 

@@ -43,8 +43,18 @@ export function useCreateAssignment(rootPath: string, from: Date, to: Date) {
           orgId: previous.org.id,
           nodeId: input.nodeId,
           operatorId: input.operatorId,
+          // D110/D113: an optimistic row is brand new, so nothing is
+          // remembered and nothing has been overridden yet. The server's
+          // answer replaces this row on settle; these are not guesses at what
+          // it will say, they are the only values a new row can have.
+          operatorDisplayName: null,
           runId: input.target.kind === "run" ? input.target.runId : null,
           productId: input.target.kind === "direct" ? input.target.productId : null,
+          productSku: null,
+          productName: null,
+          productColorToken: null,
+          areaOverride: false,
+          areaOverrideReason: null,
           timerange: toTstzRange(input.start, input.end),
           efficiency:
             input.efficiencyPercent === undefined ? 1 : toEfficiency(input.efficiencyPercent),
@@ -96,8 +106,14 @@ export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
             orgId: previous.org.id,
             nodeId: na.nodeId,
             operatorId: na.operatorId,
+            operatorDisplayName: null,
             runId: na.target.kind === "run" ? na.target.runId : null,
             productId: na.target.kind === "direct" ? na.target.productId : null,
+            productSku: null,
+            productName: null,
+            productColorToken: null,
+            areaOverride: false,
+            areaOverrideReason: null,
             timerange: toTstzRange(na.start, na.end),
             efficiency: na.efficiencyPercent === undefined ? 1 : toEfficiency(na.efficiencyPercent),
             eligibilityOverride: na.eligibilityOverride ?? false,

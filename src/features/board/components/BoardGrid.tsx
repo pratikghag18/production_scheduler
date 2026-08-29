@@ -184,18 +184,20 @@ export function BoardGrid({
   // function for the admin screen. It is NOT imported here: a feature may not
   // import from another feature (docs/conventions.md), and the shared thing is
   // the DATABASE column, not this three-line lookup.
-  const productColorVar = useCallback(
-    (productId: string | null) => {
-      if (!productId) return "var(--muted)";
-      const token = productById.get(productId)?.colorToken;
-      // ⭐ ONE RULE, ONE FILE. This branch was written out here, in
-      // `BoardToolbar.tsx` and in the admin lib, with a comment claiming the
-      // three were kept in step by hand — and 0025 §2 then added a hex arm,
-      // which is the edit that makes hand-kept copies disagree. D100, again.
-      return productColorCss(token);
-    },
-    [productById],
-  );
+  // ⚠️ TAKES THE RESOLVED PRODUCT, NOT AN ID, SINCE D110. A deleted product has
+  // no id to look up and its colour lives on the run itself — passing an id
+  // here meant every snapshotted run redrew in `--muted` grey, which is the
+  // "unknown product" look the snapshot exists to prevent. The caller resolves
+  // once with `productViewFor` and passes the same object to both props.
+  const productColorVar = useCallback((product: Product | undefined) => {
+    const token = product?.colorToken;
+    if (!token) return "var(--muted)";
+    // ⭐ ONE RULE, ONE FILE. This branch was written out here, in
+    // `BoardToolbar.tsx` and in the admin lib, with a comment claiming the
+    // three were kept in step by hand — and 0025 §2 then added a hex arm,
+    // which is the edit that makes hand-kept copies disagree. D100, again.
+    return productColorCss(token);
+  }, []);
 
   // --- collapse filtering: a row is hidden if any ancestor node id is
   // collapsed. One pass over the ordered rows array (§9). ------------------
