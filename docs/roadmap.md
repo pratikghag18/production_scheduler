@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-28, session 16 — **HE REPLACED THE MODEL RATHER THAN THE CODE, AND HE WAS RIGHT (§19.72, migration 0028).** After §19.71 he said: *"remove company-wide as an option for products and operators. Each site (or the highest hierarchy level) has its own set of products and operators. **No product or operator can be assigned where it does not belong.** … a person under no circumstances should be able to see data for other plants unless they are system admin, period."* ⭐⭐ **D108 there is no company-wide row; D109 ownership is a scope at ANY level and it BINDS SCHEDULING.** A run's product, an assignment's operator, a cell's training requirement and a cell's shift pattern must each be owned by an ancestor-or-self of that node — so a foreign row can no longer BE on your board, **the read exception that caused his bug became unreachable, and 0028 deleted it instead of patching it a third time.** There is a written proof in the migration; `55_`'s N12 measures the invariant over every row in the database and N13 asserts the two deleted functions have not come back. **Also closed on the way:** an owner can no longer be moved out from under its own history (`owner_change_blocked`); `node_skill_requirements` and `node_shift_templates` were still readable ORG-WIDE and nobody had looked; and a person can no longer hold another plant's training. ⚠️ **The migration shipped with `min(uuid)`, which does not exist in PostgreSQL — the backfill loop has no iterations on a fresh database, so all 403 checks passed and it would have died on the first real tenant. The upgrade test found it.** **Database checks 384 → 408, exit 0, run here. Ten mutations: nine caught, one NOT CAUGHT and that one is the inert control.** Client half done for products, operators and shift patterns: every `null` owner branch removed, the picker's company-wide entry **not built rather than filtered out**, `ownerOptions` deleted, choosing an owner now a required field with its own error, and `not_offered_here` / `owner_change_blocked` added to the client's error contract with the payload shapes probed by key. `tsc` 0. **App tests 1112 → 1107 predicted in 26 files — a PREDICTION; his run.** ✅ **AND THE DEMO WORLD IS NOW BUILT (D112, §19.73).** `seed.sql` stays the one-plant TEST FIXTURE the suite needs; `dev_demo.sql` clears org 1 and builds **Plant A / B / C**, each with two areas, three lines and six cells, its own parts, people, trainings and pattern — **and each with rows owned BELOW a root**, because a world where everything is owned by a plant cannot show D109 at all. ⭐ **Ana is granted LINE 1 ONLY and is the case worth signing in as**: measured, she sees Plant A's plant-wide parts (owner ABOVE her grant) and her line's part, and NOT the one owned by Area 2 — D107's both-directions rule on one screen — and her board opens on Line 1, which is 0027 working. 🔴 **STILL NOT BUILT: 0029 (deactivate + a delete that keeps the past), 0030 (the starter library), and wiring `offeredHere` to the board.** Stage 21 stays open until they land.
+**Last updated:** 2026-08-28, session 17 — **0029 (D110), 0030 (D113) AND `offeredHere` ON THE BOARD (§19.74, §19.76).** ⭐⭐ **And a defect 0029 shipped, found on the way and worse than either feature: `shapes.ts` did not follow 0029's nullable columns**, so a run whose product had been deleted parsed as `null` — and `parseArrayOf` nulls the WHOLE ARRAY on the first failure, so **one deleted product with history would have stopped the board loading for everyone, with an error about a shape rather than about a product.** `tsc` was clean (the generated types describe the database; the runtime guard is hand-written), the SQL suite was green (it parses nothing), and the demo world has never had a delete run against it. ⭐ **The rule that comes out of it: a migration that makes a column NULLABLE is a client change, and it is the one kind `db:types` does not surface — after any `DROP NOT NULL`, grep the client and read every guard that mentions the column.** Fixed with `src/features/board/lib/history.ts`, which draws a deleted product or person from D110's snapshot instead of "(unknown product)" in grey. **0030/D113: the area rule gets a door** — `assignments.area_override` + a required reason, **a COLUMN and not an RPC argument**, because the refusal is a trigger that also fires on a plain `PATCH` passing through no function at all; an override plumbed through `create_assignment` alone would work from one screen and refuse from the next. All three write paths carry it (`create_assignment`, `move_run`, and `apply_split_coverage` through its nested call — *three layers, and that is the middle one*), and **`move_run` pre-checks and NAMES every affected person** instead of letting the trigger raise about whichever row it reached first. ⚠️ **The product half stays absolute and must**: §19.74's proof that `delete_owned_row` needs no escalation depends on it. **On screen the two halves are treated OPPOSITELY, deliberately** — a product outside its scope is *filtered out* of the picker (refused with no way through), a person outside theirs is *left in and annotated* with a checkbox and a reason. **Two flags, two reasons: waving through "no Welding ticket" must not silently also place somebody in a plant they are not cleared for.** **30 migrations. 468 database checks (445 → 468), exit 0, run here. 15 mutations: 13 caught; the two others are the inert control and one branch the composite FK makes unreachable, both written down.** **App tests 1149 in 28 files — PREDICTED.** ⚠️ **Instrument failure 43: a `sed`-derived mutation runner pointed at files that do not exist and reported the two expected-inert mutations as CAUGHT — a CAUGHT verdict can be as false as a NOT CAUGHT one.**
 ---
 
 ## Phase 0 — Design & mockups
@@ -89,20 +89,44 @@
 
 **Then open the Claude session in this project folder** and paste:
 
-> Continue the production scheduler. Read project memory first, then **this file top to bottom** —
-> the `Last updated` line, the **Phase 1 brief queue** and the **State as of Aug 27** section were all
-> corrected on Aug 27 and the corrections are the point. Then `docs/design-plan.md` **§19.50 – §19.55**.
-> The local Supabase stack is already running.
+> Continue the production scheduler. **Read project memory first — `MEMORY.md`, then
+> `session_state_aug27.md`, which is the only resume point** — then this file's `Last updated` line and
+> the **NEXT, IN ORDER** list below. Then `docs/design-plan.md` **§19.72, §19.72a and §19.73**, which
+> are the three sections describing the model as it now stands. The local Supabase stack is running.
 >
-> **STATE.** **Verify the tip from `.git/refs/heads/Development`, never from this paragraph** — it said
-> `fc3367b` once and was already two commits stale the next time it was read. P1-6e is committed as
-> `261ad5d`, D100 as `74bd689`, migration 0023 as `0cbe023`, **0024 + P1-5k's client half as
-> `d37569c`**, the pre-seat as `b2e975d` and the write-error contract as `683197e`.
-> **The three build lanes follow those.**
-> **25 migrations. 356 database checks. Acceptance is 1089 tests in 24 files** — 775 in 20 files plus 101 products,
-> 69 operators, 109 shiftDraft, 26 scope and 2 in `shapes.test.ts`. If your count differs, a test file did not
-> load, which is how a broken suite once looked green. **No `db:types` is owed; `npm run db:reset`
-> still is** — 0024 replaces `app_relevel_subtree` and is applied nowhere.
+> **STATE (Aug 28, end of session 16).** **Verify the tip from `.git/refs/heads/Development`, never
+> from this paragraph** — it said `fc3367b` once and was already two commits stale the next time it was
+> read.
+>
+> **30 migrations. 468 database checks** — run on a real PG16 in the session container, exit 0.
+> **App tests: 1149 in 28 files, PREDICTED** (1118 measured + 21 in `history.test.ts` + 10 in
+> `shapes.test.ts`). ⚠️ **The previous entry here said
+> 1105 and that was wrong** — his 0029 run puts the pre-0029 baseline at **1107**, and a baseline
+> off by two makes every later prediction look like a test file failing to load. Take 1118 as the
+> number and re-derive from it.
+>
+> ⚠️ **`tsc` is 0 only AFTER `npm run db:types`.** `database.types.ts` is generated and does not
+> know a new RPC until then; over the device bridge a typecheck is INCONCLUSIVE, not clean.
+>
+> **0029 (D110) landed in session 17: a delete that keeps the past.** Anything **not yet started**
+> (`lower(timerange) > now()`, NOT `status`) is removed; anything already begun keeps the row with
+> the deleted thing's sku/name/colour or display name copied onto it. `deletion_preview` and
+> `delete_owned_row` are `SECURITY INVOKER` and need no escalation — that is D109 paying for
+> itself, and there is a proof in the migration. Trainings and shift patterns keep nothing and
+> cascade instead. **`skills.active` and `shift_templates.active` exist with NO control on any
+> screen — deliberate, and owed.**
+>
+> **The model changed on 28 Aug and most of what you remember about "company-wide" is wrong.** D108:
+> there is no company-wide row; `site_node_id` is `NOT NULL` on products, operators, skills and shift
+> templates. D109: ownership is a scope at **any** level and it **binds scheduling** — a run's product,
+> an assignment's operator, a cell's training requirement and its shift pattern must each be owned by an
+> ancestor-or-self of that node. The read rule is one sentence with no *except*, and the exception 0026
+> carried was **deleted** because D109 made it unreachable (there is a proof in migration 0028).
+>
+> **⚠️ `seed.sql` and `dev_demo.sql` now describe TWO DIFFERENT WORLDS, on purpose.** `seed.sql` is the
+> one-plant TEST FIXTURE and `verify-db.sh` runs migrations + seed and nothing else; about eighteen cases
+> across eight files rest on org 1 holding exactly one structure. **Do not add a plant to the seed.**
+> `dev_demo.sql` clears org 1 and builds Plant A/B/C — that is what the running app shows.
 >
 > **HOW WE WORK — these are not preferences, each one was bought with a defect:**
 >
@@ -132,68 +156,98 @@
 >   over a failure four times; the most recent was 28 of 28 mutations reported NOT CAUGHT against a
 >   green suite because the runner matched `"FAIL "` at column zero and the shim indents by two spaces.
 >   **When many mutations go NOT CAUGHT at once, suspect the instrument.**
+> - **⚠️ `tsc` over the bridge is INCONCLUSIVE after a migration changes a column.**
+>   `src/lib/database.types.ts` is generated by `npm run db:types`, which needs the local Supabase
+>   stack — the maintainer's machine only. "tsc clean" was reported once against a stale copy and two real
+>   errors appeared the moment it was regenerated. Say so rather than claiming clean.
+> - **⚠️ `tsc` cannot see a string expectation either.** After deleting a concept, **grep the tests for
+>   its words**. Six cases asserting a removed UI literal compiled perfectly and failed at runtime.
+> - **⚠️ A test that breaks a source by string match must assert the match happened.** `scaleAudit`'s J3
+>   silently stopped mutating anything when the line it targets was reworded.
+> - **⚠️ Nothing committed to the repo names the maintainer or their machine** — they share it. The
+>   convention is "the maintainer" and `<repo root>`. This was swept from 44 files on 28 Aug.
 > - **Explain in plain language in the chat, not jargon — draw it if that is clearer.** Keep the
 >   gameplan artifact updated; do not stop until you need me to do something or want my opinion.
 >
-> **NEXT, IN ORDER (revised Aug 27 session 14 — he has committed, and one thing he asked for four times still does not work):**
+> **NEXT, IN ORDER (revised Aug 28, session 17 — 0029 landed; two of stage 21's three remain):**
 >
-> 0. ✅ **DONE (session 15) — HE CAN EDIT A PRODUCT.** The row's editor was reachable only through a button labelled **`Rename`**, with no
->    control named `Edit` on the row at all; the picker, the code field and the name field were all behind it and all worked. Both `ProductsPanel`
->    and `ShiftsPanel` now say **Edit** with a title naming the fields (**D106**: a control may not be named after less than it does). Of the four
->    candidates listed here, **(i) was the one** — a *different* label, not a different form. (ii) (iii) (iv) were all checked and all clean: the
->    button is not disabled for a company admin, `database.types.ts` carries `site_node_id` in Row/Insert/Update, and the save reaches
->    `updateProduct` with `{id, sku, name, siteNodeId}` — key present, `null` for company-wide. ⭐ **And the audit finding stands on its own:**
->    group J reads three files under `src/lib/api/` and would pass with `ProductsPanel.tsx` deleted. `src/test/productsPanel.test.tsx` is the
->    repo's first component test. See **§19.67 / D106**. ⚠️ **That test file shipped BROKEN in the first pass** (5 of 8 cases died in one helper —
->    the probe matched by attribute, `vitest` matches by accessible name, and the Add card's field carries the same name); fixed by naming the row's
->    controls for their row, plus **T8** to pin it, and the probe now bundles the real `@testing-library/dom`. **Item 1 is the top of the queue now.**
-> 1. **🟡 D107: PRODUCTS DONE, PEOPLE AND SHIFT PATTERNS NOT (§19.71).** The history exception (`…_on_visible_schedule`) leaks any
->    foreign-owned row that is scheduled at your site into your ADMIN LIST. Fixed for products in `productRows`. 🔴 **`operatorRows`
->    takes no node list at all**, so a foreign operator assigned to your cell shows with no indication — needs a visibility input,
->    its own cases and a mutation table. 🔴 `shiftDraft.ts:764` has the same "Another site" fallback. **Do all three the same way.**
->    Previously recorded as done: ✅ D107 server + board (0026 §19.69 + 0027 §19.70). Server reads scoped, `check_eligibility` gated, board root from the session
->    with a picker, and a real screen for someone with nowhere to open. 🔴 **Still unbuilt: `offeredHere`/`offeredAt` have zero call
->    sites**, so a product is still OFFERED on every cell in the company — 0026 shrank that to "only what you can read", but D103's
->    actual rule needs `siteNodeId` on the board's `Product` shape. **Original entry below.**
->    ✅ (a) `check_eligibility` is DEFINER + gated — and that closed a live fail-open safety defect. ✅ (b) migration 0026, seven policies.
->    ✅ (c) rows already on a visible schedule stay readable, so history renders. 🔴 **(d) `useRootPath()` still returns `"plant_1"` for
->    every user** — needs the root from the session plus a picker when someone can see more than one. 🔴 And `offeredHere`/`offeredAt`
->    still have zero call sites. **Original report below.**
->    **A PLANT 2 ADMIN CAN READ PLANT 1'S LISTS — AND SO CAN EVERYONE (§19.68 / D107).** the maintainer, Aug 27, looking at the
->    Products catalogue as the Plant 2 site admin: *"why am I seeing product which is assigned to Plant 1? No member from one
->    plant should see info for other plants… irrespective of whether I'm in products or operators or shifts or anything."*
->    **Every `_select` on the shared lists is `org_id = app_current_org()` and has been since 0008** — products, operators,
->    skills, operator_skills, shift_templates, shifts, shift_breaks, hierarchy_levels, hierarchy_templates. `nodes_select` is
->    NOT, which is the entire screenshot: the row arrives, the owner's NAME does not, and it prints "Another site".
->    ⭐ **`runs_select`/`assignments_select` already do exactly what he is asking, via `app_can_read_node`** — the board obeys
->    the site boundary and the lists it is made of do not. **D107 replaces 0023's "reads stay org-wide".** Four parts, in order:
->    **(a)** `check_eligibility` becomes SECURITY DEFINER with `app_can_read_node(p_node_id)` as its own gate — it is
->    SECURITY INVOKER today and reads `skills`/`operator_skills` AS THE CALLER, so narrowing the reads first would turn into a
->    **silent `create_assignment` refusal** (this is the hazard 0023 measured and stopped at; it is the first thing to fix, not
->    a reason to refuse). **(b)** migration 0026 rewrites the `_select` policies to "company-wide, or the owner and one of your
->    grants are on the same branch, either direction". **(c)** `board_window` returns products/operators visible by scope **OR
->    referenced by a run or assignment in the window** — case S18 stays true, and without it every historical band renders
->    `(unknown product)` in one fallback colour. **(d)** ⚠️ **`useRootPath()` returns the constant `"plant_1"` for EVERY user**
->    (`useRootPath.ts:14`) — Quinn's board asks for Plant 1's window. `runs_select` stops it leaking, so it renders mostly
->    empty; **the main screen of the app is pointed at the wrong plant for everyone outside Plant 1** and no policy work fixes
->    it. ⚠️ **Q11 and S18 are tripwires written to fail if anyone did this** — Q11's polarity flips (rule 1b-ii, and it should
->    be rewritten to assert `check_eligibility` still answers for a caller who cannot list the skill), S18 stays. About six
->    client cases go red too (`products.test.ts` L1/L8/O3/O4, `shiftDraft`'s "Another site", not X11). ⚠️ And **nothing
->    crashes when rows vanish — it degrades silently in nine places**, including raw uuids leaking into `RunPopover`'s title.
->    ⭐ Also found: **`offeredHere`/`offeredAt` have ZERO production call sites** — D103's "belongs to decides where it is
->    OFFERED" was never built, and the board's `Product` shape carries no `siteNodeId` to build it with.
-> 1b. **✅ `db:reset` NO LONGER WIPES DANA AND QUINN.** They live only in `supabase/dev_demo.sql`, which the reset did not run —
->    so after every reset the only signable-in identities were the company admin and two supervisors, and the site-instance model
->    could not be seen in the running app at all. **Fixed with `[db.seed] sql_paths = ["./seed.sql", "./dev_demo.sql"]`.**
->    ⛔ It still cannot go in `seed.sql` (a second plant there turns 8 test files red), and **listing it here is safe precisely
->    because `verify-db.sh` does not use `db reset`** — it builds its own scratch database from `migrations/*.sql` + `seed.sql`
->    alone, so the SQL suite never sees Plant 2. ⚠️ `seed.sql` must stay listed: Supabase runs it by default only while
->    `sql_paths` is absent. ⚠️ **UNVALIDATED FROM THIS SESSION** — `sql_paths` needs a reasonably recent CLI; if `db:reset`
->    complains about an unknown field, deleting the `[db.seed]` block restores the old behaviour exactly.
->    ⭐ **The docker route was abandoned and should not be revived**: Docker Desktop is often not running (`docker ps` from
->    PowerShell fails on the named pipe) and **`docker` does not exist in his WSL distro at all** — integration is off.
->    ⭐ Still pair this with item 7's Plant-2-owned rows: with the seed as it is, every shared row is company-wide, so even with
->    the cast restored D107 shows nothing until something is owned.
+> 1. **🔴 Wire `offeredHere`/`offeredAt` to the board.** Still zero call sites, so a product is
+>    offered on every cell you can read. The server refuses the write either way — this is not a
+>    safety hole, it is a picker offering something guaranteed to fail, which is D106's shape.
+>    The board's `Product` shape in `shapes.ts` carries no `siteNodeId` though `board_window`
+>    already returns it. The demo world has line-owned and area-owned parts specifically so this
+>    is visible when it lands.
+> 2. **🔴 Migration 0030 (D111), the starter library** a company admin curates and a site admin
+>    copies into their own plant — patterns and trainings. It carries a known problem: **training
+>    names are unique per ORG while the row is no longer company-wide**, so one plant can neither
+>    see nor create another's "Forklift". Per-owner uniqueness belongs here.
+> 4. ✅ **DONE (session 17) — stage 20's override, D113, §19.75/§19.76.** Was: The maintainer, 28 Aug:
+>    **"anyone who can schedule there"** — a supervisor with edit rights on the cell may place
+>    someone outside their area, recording a reason; the area rule becomes a strong warning rather
+>    than a wall. ⚠️ **Its own flag, NOT `eligibility_override`** (the weaker permission must not
+>    grant the stronger one), and ⚠️ **the gate cannot live in `create_assignment` alone** — the
+>    refusal is a trigger, so a plain `PATCH` of `assignments.node_id` and `apply_split_coverage`
+>    hit it too. **And it does NOT loosen the product half**, which §19.74's proof depends on.
+>    Background: ⭐⭐ **D109 already
+>    built the refusal half**: `app_guard_assignment_scope` refuses an assignment whose operator is
+>    not owned by an ancestor-or-self of the cell, which IS *"certain people can only work in
+>    certain areas"*. Nobody built it as stage 20; it fell out of the ownership rule. **But what
+>    shipped is STRICTER than what was asked for** — the request was a refusal *a supervisor can
+>    override while recording a reason*, and there is no override. Measured on a real database:
+>    the COMPANY ADMIN, passing `p_eligibility_override := true` with a reason, on a cell in their
+>    own org, gets `PT409 / not_offered_here`. `eligibility_override` has only ever governed the
+>    TRAINING check and does not reach this rule at all. ⚠️ **This is a design decision, not an
+>    edit**: the refusal is a BEFORE ROW trigger that fires ahead of everything, so giving it a
+>    door means deciding who holds the key — and it must be its OWN override, because a supervisor
+>    waving through "no Welding ticket" must not also place someone in a plant they are not
+>    cleared for.
+> 5. **🔴 A control for `skills.active` and `shift_templates.active`.** 0029 added the columns and
+>    deliberately no UI (see the Last-updated line). Needs the column in each read shape, a retired
+>    partition in each list, and a toggle — and adding a required field to `SkillRecord` breaks
+>    every fixture that builds one.
+> 6. ✅ **DONE (session 17) — migration 0029, D110.** Below, kept for its findings.
+>
+> **PREVIOUS LIST (session 16 — the model changed, and stage 21 is the only thing open in it):**
+>
+> 0. ✅ **DONE (sessions 15–16) — THE PRODUCT-EDIT DEFECT, D107 READ SCOPING, AND THEN THE MODEL ITSELF.**
+>    The editor was reachable only through a button labelled `Rename` (**D106**); 0026/0027 scoped reads by
+>    ownership and gave the board the place YOU can see; §19.71 then found the read exception leaking into the
+>    products catalogue. **0028 replaced the model rather than patching it a third time (§19.72): D108 there is
+>    no company-wide row, D109 ownership is a scope at ANY level and it BINDS SCHEDULING.** A run's product, an
+>    assignment's operator, a cell's training requirement and its shift pattern must each be owned by an
+>    ancestor-or-self of that node — so a foreign row can no longer BE on your board, **the exception became
+>    unreachable and was deleted**, and the same door closed for people and shift patterns at once. There is a
+>    written proof in the migration; `55_`'s N12 measures the invariant over every row in the database and N13
+>    asserts the deleted functions have not come back. **Also closed:** an owner can no longer be moved out from
+>    under its own history; `node_skill_requirements` and `node_shift_templates` were still readable ORG-WIDE;
+>    a person could hold another plant's training. **And ✅ D112 (§19.73): the demo world is rebuilt** — `seed.sql`
+>    stays the one-plant TEST FIXTURE the suite needs, `dev_demo.sql` clears org 1 and builds Plant A/B/C with
+>    rows owned BELOW their roots, plus `rosa@` for Plant C. **408 database checks; 1105 app tests confirmed.**
+>
+> 1. **🔴 STAGE 21'S REMAINDER, IN THIS ORDER — nothing else starts until these three land.**
+>    **(a) Migration 0029, D110: deactivate, and a delete that keeps the past.** *"When it is deleted, we give a
+>    warning to the user that all the corresponding data will be deleted and encourage them deactivate to retain
+>    the data instead. This will be handled by site admin so it their call in the end."* His answer on scope:
+>    **the row disappears from the list and from anything not yet started; completed runs keep their record of
+>    it.** So: `products.active` and `operators.active` already exist, `skills` and `shift_templates` have none;
+>    snapshot columns on `runs`/`assignments` so history keeps the code, name and colour; a preview RPC returning
+>    the counts the dialog names; **Deactivate as the primary action in that dialog.**
+>    **(b) Wire `offeredHere`/`offeredAt` to the board — still ZERO call sites.** A product is offered on every
+>    cell you can read. The server refuses the write (0028 §4), so this is not a safety hole; it is a picker that
+>    offers something guaranteed to fail, which is D106's shape. ⚠️ The board's `Product` (`shapes.ts`) carries no
+>    `siteNodeId`, though `board_window` already returns it. **The demo world now has line-owned and area-owned
+>    parts specifically so this is visible the moment it lands.**
+>    **(c) Migration 0030, D111: the starter library a COMPANY ADMIN curates**, that a site admin copies into
+>    their own plant — patterns and trainings included. A copy is an ordinary owned row with no link back.
+>    ⚠️ **And it carries a known problem with it:** training names are unique per ORG while the row is no longer
+>    company-wide, so Plant B can neither see nor create Plant A's "Forklift" and the clash message names a row
+>    the reader cannot open. The fix is per-owner uniqueness and it belongs here.
+>
+> 1b. ⚠️ **Two consequences of D108 to carry forward, both recorded in §19.72a and pinned by tests.**
+>    `canOwnProduct` tests flat membership, not ancestry — a product owned by a LINE inside a plant you
+>    administer is not matched, so the preview answers from the fail-open path rather than from the rule (the
+>    server is right; the client is coarse; **W4 pins both halves**). And **D108 widened `canEditProduct`'s
+>    fail-open**, because the one certain refusal it retained — "this row is company-wide" — no longer exists.
 > 2. **⚠️ THE 1000-ROW CEILING — AND THE APPROACH IS DECIDED, NOT OPEN.** Page every read to exhaustion;
 >    where a screen COMPUTES rather than lists (Operators), refuse to show an answer built on a read
 >    known to be short. ⚠️ **Do not put this back to him as a choice** — both options were "how",
@@ -218,7 +272,7 @@
 >    precedent), add **trained on** and **signed off by** to `operator_skills`, and give trainings their own
 >    section so a supervisor manages the catalogue and sees who holds what. **After the area rule**, since both
 >    touch the same table and screen and doing the rename first means renaming twice.
-> 5. **The board still offers every product on every cell.** 0025 makes each scope VISIBLE in `board_window`;
+> 5. **The board still offers every product on every cell. ⬆ PROMOTED — this is now NEXT item 1(b).** 0025 makes each scope VISIBLE in `board_window`;
 >    the popovers have to start asking "which cell am I on?" — using `offeredHere` from `lib/scope.ts`.
 >    ⚠️ **A run already carrying an out-of-scope product must keep rendering it.** SQL case S18 fails the day
 >    somebody moves the filter into the server instead.
@@ -227,10 +281,11 @@
 >    state; `asOf` defaulting to today so every ✓ is a promise about today only; and `adminSiteIds`
 >    derived from STRUCTURE ownership rather than node grants, which locks a site admin out of products
 >    the server would let them write.
-> 7. **A couple of Plant-2-owned rows in `dev_demo.sql`. ⬆ WORTH MORE THAN IT LOOKED (§19.67 §5).** 0023's whole point is
->    invisible without them — and it is not only invisible: **rendered on Aug 27, the whole Products screen is DEAD for Dana and
->    Quinn**, four rows with every control greyed, because no product in `seed.sql` names a `site_node_id` and a company-wide row is
->    company-admin-only by both the client predicate and the RLS policy. A site admin signing in today sees a screen that looks broken.
+> 7. ✅ **DONE (Aug 28, D112 / §19.73) — the demo data.** This item asked for "a couple of Plant-2-owned rows"; it turned into a
+>    rebuild. The complaint behind it was real and worse than stated: **rendered on Aug 27, the whole Products screen was DEAD for
+>    both site admins**, every control greyed, because no product in `seed.sql` named a `site_node_id` and a company-wide row was
+>    company-admin-only by both the client predicate and the RLS policy. `dev_demo.sql` now clears org 1 and builds three plants
+>    where **everything is owned and some of it is owned below a root**, so both halves of D107 and D109 are visible by signing in.
 > 8. **P1-5h CSV import. ⚠️ TWO missing premises.** `nodes` has no `external_id` column, and
 >    `products.external_id` exists with **no unique constraint**, so neither half can upsert. Also:
 >    `create_node` has cloned the hierarchy shape on every root create since 0020, so a multi-site

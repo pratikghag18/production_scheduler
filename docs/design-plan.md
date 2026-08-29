@@ -7670,3 +7670,352 @@ fixture of plant admins alone will never exercise.
 ⚠️ **The original `Standard Plant` structure is deliberately kept**, emptied of nodes. It is what
 `create_node` copies when a new root is created, so deleting it would make "add a plant" fail
 from the app. It will appear in a company admin's structure list as an empty one.
+
+## §19.74 — D110: a delete that keeps the past (migration 0029)
+
+> *"When it is deleted, we give a warning to the user that all the corresponding data will be
+> deleted and encourage them deactivate to retain the data instead. This will be handled by
+> site admin so it their call in the end."* — the maintainer, 28 August
+>
+> *"the row disappears from the list and from anything not yet started; completed runs keep
+> their record of it."* — the maintainer, settling the line, 28 August
+
+### The line is the CLOCK, and `status` would have destroyed history
+
+`runs.status` exists and nothing in the product advances it: every run this system has ever
+created is still `'planned'`, including the ones that finished last month. A delete that
+trusted it would have deleted the past — the exact opposite of what D110 is for. So:
+
+> **NOT YET STARTED == `lower(timerange) > now()`.** Everything else is kept.
+
+⭐ **And note the direction of the NULL.** An unbounded lower bound makes `lower()` NULL, the
+comparison NULL, and the row falls to the **kept** side. A row whose start we cannot name is not
+a row we delete. `56_`'s D17 is that case, and nobody would have thought to write it from the
+sentence alone.
+
+### ⭐⭐ Why this can be `SECURITY INVOKER`, and why that is D109 paying for itself
+
+Deleting a product deletes runs on cells the deleter never named. **Before D109 that was a
+genuine privilege question** — a company-wide product could sit on any plant's board, so
+reaching those runs would have needed `SECURITY DEFINER` and a bespoke permission story. D109
+removes the precondition:
+
+> **Claim.** If the caller may delete owned row X, the caller may edit every run and every
+> assignment that references X.
+>
+> **Proof.** `<table>_delete` (0028 §8) admits `app_is_admin()` — then `app_can_edit_node` is
+> true everywhere in the org by its own first branch — or `app_is_admin_for(o)` for the owning
+> node `o`, i.e. a grant path `g` with `o.path <@ g`. Let `r` be the node of any run carrying X.
+> `app_guard_run_scope` admitted that run only if `o.path @> r.path`, so `r.path <@ o.path <@ g`,
+> so `app_is_admin_on_path(r.path)` and `app_can_edit_node(r)` hold. ∎
+
+So RLS stays switched on underneath the RPC as the second gate. ⚠️ **The proof is not left as an
+argument.** A refused `DELETE` removes zero rows and reports no error at all (§19.63), so every
+destructive statement counts what it means to touch and compares `ROW_COUNT` afterwards, raising
+`not_permitted` on any difference. **Mutation N15 removes that comparison and comes back NOT
+CAUGHT — correctly: it is defence in depth against a proof the fixture cannot falsify.** That
+is written down here rather than left as a number, because a NOT CAUGHT that is not explained
+is indistinguishable from a missing case.
+
+### Two mechanisms, and the line between them
+
+- **Products and people APPEAR IN HISTORY.** A finished run says which part it made; a finished
+  assignment says who worked it. So their identity is **copied onto the history that survives**
+  (`runs.product_sku/product_name/product_color_token`, `assignments.operator_display_name`) and
+  the reference is released. The copy is taken **at delete time**, so fixing a typo in a name
+  still fixes it in the past — which is what people expect a rename to do.
+- **Trainings and shift patterns are PRESENT-TENSE CONFIGURATION.** Nothing records which
+  pattern a cell ran in March, so there is no past to keep, and their join rows go by ordinary
+  `ON DELETE CASCADE`.
+
+⭐⭐ **And the cascade is not a shortcut — it is what makes the operation possible at all.**
+`app_guard_operator_skill_scope` (0028 §4) is **comparability**, not containment, so a
+plant-wide person may legitimately hold a Line 1 training. The Line 1 admin who owns that
+training is **not** admin for that person, so `operator_skills_delete` would refuse the row and
+"delete this training" would be a dead end nobody in the org could complete. `56_`'s D25 asserts
+both halves: that the line admin genuinely cannot touch the holder, and that the delete still
+finishes.
+
+### The three things a NOT NULL column being nulled broke
+
+1. **`check_operator_capacity` refused to let a person be deleted.** `operator_peak_load(NULL, …)`
+   matches no assignment, so `peak` becomes the row's own efficiency alone — and any assignment
+   above the org cap would refuse to be snapshotted. Deleting anyone who ever worked a full shift
+   would have failed, and it would have read as "delete is broken", not as a cap problem. D22.
+2. **0028's assignment guard short-circuited.** It reads the operator's owner and does
+   `if not found then return new` — right for a foreign tenant (that is the FK's refusal, not the
+   trigger's) and a RETURN that also skips the **product** half below it. With a NULL operator now
+   reachable, a direct assignment's product scope went unchecked. The two halves are separated;
+   the "not in this org" short-circuit inside the operator half is kept exactly as it was. D23.
+3. **`assignments_check` had to grow a third arm.** `num_nonnulls(run_id, product_id) = 1` becomes
+   `num_nonnulls(run_id, product_id, product_sku) = 1` — a remembered sku is simply a third way of
+   naming the one thing an assignment is for, so the rule keeps its shape.
+
+### What the client stopped saying
+
+⭐ **`describeDeleteRefusal` was DELETED, not fixed.** Both of its branches had stopped being
+true: `StillInUse` explained a refusal D110 no longer produces, and `WriteRefused` said
+*"Company-wide products can only be changed by a company admin"* — **wrong since D108, compiled
+fine, and covered by a green test (R4) that asserted the wrong sentence.** §19.72a lesson 2, one
+day later, found by grep and not by `tsc`.
+
+⭐⭐ **`deletePrecheck` was deleted for a sharper reason.** It refused to delete anybody still
+holding a ticket — *"Remove it first, or deactivate them instead"* — because the FK had no
+`ON DELETE`. 0029's cascade makes that refusal a rule **the client enforces and the database does
+not**, and the way out it names is work that no longer needs doing. A stale permission check fails
+loudly the first time somebody tries; **a stale REFUSAL never fails at all — it quietly stops
+people doing something they are allowed to do.**
+
+Also removed: two `siteNodeId === null ? "company-wide"` renderings in `OperatorsPanel`, and
+ShiftsPanel's *"detach it below before deleting it"*, which the cascade made false.
+
+### The dialog, and the one decision in it
+
+`DeleteDialog` asks `deletion_preview` **before** it asks the person, and both destructive
+buttons stay disabled until the answer arrives — a confirmation that can be clicked through
+before it knows what it is confirming is worse than none, because it looks like one.
+
+⭐⭐ **Deactivate is the primary action only when something is actually at risk.** There are
+**three** stakes, not two: `nothing` (deleting destroys nothing), `history-only` (nothing on the
+schedule changes, but finished work names it), and `destructive` (something not yet started
+goes). Pushing "Deactivate instead" every time is how a warning becomes something people learn
+to click past — and then the one that matters gets clicked past too. K8 in `deletion.test.ts` is
+that case.
+
+⭐ **D106 again: the confirm button NAMES what it destroys** — *"Delete, and remove 1 job on the
+schedule and 2 shifts for people"*. The screen this replaces said "Delete for good?" whether the
+answer was "nothing happens" or "eleven jobs disappear", because before 0029 the client had no
+way to find out which.
+
+⚠️ **An unknown `what` key is RENDERED, never dropped** (K5). Skipping a key with no phrase would
+turn "and 40 other rows go too" into a blank line in a confirmation dialog.
+
+### Numbers, and what is owed
+
+**29 migrations. 445 database checks** (408 + 31 in `56_` + 6 in `upgrade_0029_`), exit 0, run on
+a real PG16. **App tests 1118 in 27 files, from his run** — see below for why the predicted 1116
+was short. **16 deliberate breakages: 15 caught, 1 NOT CAUGHT and it is the inert control** —
+plus N15 above, which was written expecting NOT CAUGHT and says so in its own name. **N7 came back
+NOT CAUGHT on the first run and was a REAL GAP**: removing the RPC's up-front permission check left
+every case passing, because RLS refuses the final `DELETE` anyway and the `ROW_COUNT` guard turns
+that into the same `PT403`. The sqlstate could not tell "refused before anything was attempted"
+from "refused after the runs were deleted and rolled back", and the two are different products —
+one says you may not administer this site, the other says "the product itself could not be
+deleted", which is a sentence nobody can act on. D27 now asserts the **message**.
+
+### ⭐⭐ What his run found, and it is two things
+
+**1. An audit's list is a file you have edited, and the audit is what said so.** `npm run test`
+went red twice, both in `scaleAudit`'s D89 block: `DeleteDialog.module.css` is a new stylesheet
+under `src/features/admin` and was not in `REM_SURFACES`. That is exactly what D89 exists for —
+`ShapePicker.module.css` shipped unaudited once and the walker was written so it could not happen
+again — and it worked. **The rule to carry: adding a file to a directory an audit WALKS means
+editing the audit's list, in both of its places** (`scaleAudit.ts` and R10's independent copy).
+Nothing in `tsc`, `eslint` or the SQL suite can see it, and the session that adds the file cannot
+run `vitest` at all. ⚠️ **What I could have done and did not: grep for `REM_SURFACES` when adding
+the file.** The list names its own directory in a comment.
+- Measured afterwards on his machine, in place, under `--experimental-strip-types`:
+  `missingRemSurfaces` returns `[]`; removing the new entry makes it name that file again, so the
+  entry is not inert; and `unscaledPxLengths` flags nothing in the new stylesheet, which is what
+  putting it under the audit was for.
+
+**2. ⚠️ THE BASELINE COUNT IN THE ROADMAP AND IN MEMORY WAS WRONG BY TWO, AND THAT IS WORSE THAN
+IT SOUNDS.** Both recorded session 16's confirmed suite as **1105**. His 0029 run reports **1118**
+total, and the arithmetic is exact in the other direction: 1118 − 21 (`deletion.test.ts`) + 7
+(`describeDeleteRefusal`'s R1–R7) + 3 (`deletePrecheck`'s D1–D3) = **1107**. §19.72a records that
+the first 0028 handoff predicted 1107 and eight cases went red; those eight were *fixed*, not
+deleted, so the count never moved and 1105 was a transcription error at the moment of writing it
+down.
+- **The whole convention rests on the number being exact** — "if your count differs, a test file
+  did not load" only works if the baseline is right. A baseline off by two makes every future
+  prediction land two short and read as a broken suite.
+- **So: when a run confirms a count, copy the runner's own total line, not a number reasoned to.**
+  And when a prediction misses by a small amount with no red cases to explain it, **suspect the
+  baseline before suspecting the loader.**
+
+🔴 **OWED, and named rather than half-built: `skills.active` and `shift_templates.active` have no
+control.** The columns exist so all four owned lists mean the same thing (and 0030 will need
+them), but no screen reads or writes them, so `DeleteDialog` deliberately offers no "Deactivate
+instead" for those two kinds. Wiring them needs the column in each read shape, a retired
+partition in each list, and a toggle — and adding a required field to `SkillRecord` breaks every
+fixture that builds one, which is not a change to make blind.
+
+## §19.75 — D113: stage 20's area rule already ships, and it ships stricter than asked
+
+**Status finding, 28 August, from the maintainer's question — *"why is stage 20 and 21 not complete, I
+thought that was completed in the last session?"***
+
+He was half right, and the half he was right about is the interesting one.
+
+### ⭐⭐ The refusal is LIVE, and nobody built it as stage 20
+
+Stage 20 is *"certain people can only work in certain areas"*. D109's guard
+(`app_guard_assignment_scope`, migration 0028 §4) refuses any assignment whose operator is not
+owned by an ancestor-or-self of the cell — **which is that rule, exactly.** It arrived as a
+consequence of *"no product or operator can be assigned where it does not belong"* and nothing
+marked stage 20 as affected. **A stage can be delivered by a change made for another reason, and
+nothing in this project notices.**
+
+### ⭐⭐ And what shipped is STRICTER than what was asked for
+
+The request was a refusal **a supervisor can override while recording a reason**. There is no
+override, and there is no way to reach one. Measured on a real database rather than reasoned:
+
+```
+as the COMPANY ADMIN -- the one account no permission check refuses --
+create_assignment(cell in own org, operator owned by another plant,
+                  p_eligibility_override := true,
+                  p_override_reason := 'supervisor says it is fine')
+  -->  REFUSED   PT409   not_offered_here
+       "That person does not belong to this part of the structure."
+```
+
+`eligibility_override` has only ever governed the **training** check inside `create_assignment`
+(0009 §5). The scope guard is a BEFORE ROW trigger that fires ahead of it and reads nothing about
+overrides at all.
+
+⚠️ **This is the shape [[when-not-to-ask]] calls a defect rather than a question**: a stated
+requirement that the code does not meet. It went unnoticed because 0028 was reasoned about as a
+*read*-scoping and ownership change, and its scheduling half quietly answered a different stage's
+requirement in the strictest possible way.
+
+### D113 — who may override (the maintainer, 28 August)
+
+> **Anyone who can schedule there.** A supervisor with edit rights on the cell may place someone
+> outside their area, recording a reason. The area rule becomes a strong warning rather than a
+> wall, and the audit log carries who waved it through.
+
+Three things that follow, and the second is the one that can go wrong quietly:
+
+1. **It needs its OWN override, not `eligibility_override`.** A supervisor waving through *"no
+   Welding ticket"* must not silently also place someone in a plant they are not cleared for —
+   **the weaker permission would grant the stronger one.** A second flag and a second reason, or
+   one reason with a typed cause; either way two decisions, never one.
+2. ⚠️ **The gate cannot live in `create_assignment` alone.** The refusal is a trigger, so it fires
+   for a plain PostgREST `PATCH` on `assignments.node_id` too — which is how a run is moved
+   between cells (§15.2) and how `apply_split_coverage` writes. **Every path that can put an
+   assignment on a new node has to carry the override, or the feature works from one screen and
+   refuses from another.** That is D110's own lesson about a door built on one screen.
+3. **"Anyone who can schedule there" is `app_can_edit_node(node_id)`**, which is already the
+   `assignments_insert`/`assignments_update` policy — so the override adds no new permission
+   concept. It only decides whether this particular guard defers to it.
+
+⚠️ **It does NOT loosen D109 for products.** A run's product must still be owned by an
+ancestor-or-self of its node, with no override — the proof that `delete_owned_row` needs no
+escalation (§19.74) depends on exactly that, and widening the operator half leaves it intact
+because the two are separate guards. **Re-read §19.74's proof before touching the product half.**
+
+## §19.76 — D113 built (migration 0030), `offeredHere` wired, and a defect 0029 shipped
+
+Two things asked for together, and a third that had to come first.
+
+### ⭐⭐ THE THIRD ONE: 0029 WOULD HAVE STOPPED THE BOARD LOADING
+
+D110 keeps a started run after its product is deleted — `product_id` released to NULL, the sku,
+name and colour copied onto the run. **`shapes.ts` did not follow.** `Run.productId` was typed
+`string` and guarded with `isStr`, so a snapshotted run parsed as `null` — and `parseArrayOf`
+returns null for the **whole array** on the first item that fails, so `parseBoardWindow` returns
+null and `fetchBoardWindow` throws `shapeMismatch`.
+
+> **One deleted product with history and the board stops loading, for everyone, with an error
+> about a shape rather than about a product.** The same for a deleted person via
+> `assignments.operator_id`.
+
+Nothing caught it: `tsc` was clean because the generated types describe the *database*, and the
+runtime guard is hand-written; the SQL suite was green because it never parses anything; and the
+demo world has never had a delete run against it. **It was found by reading the parser while
+adding an unrelated field.**
+
+⭐ **The general rule, and it is new: A MIGRATION THAT MAKES A COLUMN NULLABLE IS A CLIENT CHANGE,
+AND IT IS THE ONE KIND `db:types` DOES NOT SURFACE.** Regenerating the types fixes what the
+compiler checks; a hand-written `isStr` guard is an assumption the compiler never sees. After any
+`DROP NOT NULL`, grep the client for the column and read every guard that mentions it.
+
+Fixed by making both columns nullable in the shapes, carrying the four snapshot fields, and adding
+`src/features/board/lib/history.ts` — `productViewFor` / `assignmentProductView` /
+`operatorViewFor`, which resolve the live row while it exists and synthesise one from the snapshot
+afterwards. ⚠️ The synthesised rows carry an **empty `id` and an empty `siteNodeId`**, and H19
+pins the reason: `offeredAt` FAILS OPEN on an owner it cannot resolve, so a synthesised row handed
+to it would read as belonging at every cell. It cannot happen by construction and the case is
+there so it stays that way.
+
+### `offeredHere` on the board — filtered, not annotated
+
+The picker now offers only what belongs at the cell being scheduled, and only what is `active`.
+Both filters live in `BoardPage`, resolved from the index and the node exactly as `requiredSkills`
+already is — the popover takes a list and holds no rule.
+
+⭐ **And the seed had to change with it.** `useState(products[0]?.id ?? "")` runs once, on mount,
+so it answered neither "the list is empty" nor "the popover stayed mounted while its node
+changed"; it would have left the popover **pre-selected on a product it was no longer offering**,
+and Create would have sent it. What is stored is now the user's *choice*, and the effective id is
+derived every render. An empty list says so in a sentence and disables Create rather than
+rendering a dead `<select>`.
+
+### D113 — the area override, and why it is a COLUMN
+
+⭐⭐ **`assignments.area_override` + `area_override_reason`, not an RPC argument.** The refusal is a
+trigger: it fires on INSERT and on UPDATE OF `node_id`, `operator_id`, `product_id`, for every
+writer — including a plain PostgREST `PATCH` that passes through no function at all, and including
+`service_role`. **An override expressed as a parameter is reachable only from the paths somebody
+remembered to plumb.** A17 in `57_` is a raw `PATCH` walking through the door; A7 is a raw INSERT.
+
+The survey that preceded this found **six** write paths to `assignments` and three that can set a
+guarded column: `create_assignment`, `move_run`, and `apply_split_coverage` through its nested
+`create_assignment` call — *"three layers, and this is the middle one"*. All three are plumbed and
+each has its own case.
+
+⭐ **`move_run` pre-checks and names every affected person**, rather than letting the trigger raise
+about whichever row it reached first: a five-person crew with three outside their area would
+otherwise refuse three times, one name per attempt. ⚠️ The pre-check calls **`app_owner_covers`**,
+not `app_owner_covers_in_org` — the trigger-side twin takes the tenant as a free parameter and 0028
+granted it to nobody, so calling it from a `SECURITY INVOKER` function is `permission denied`,
+which is what `60_api_test.sql` reported on this migration's first run. The session-scoped twin is
+provably equivalent there because `app_can_edit_node` above it already refused any caller whose
+`app_current_org()` differs from the target node's org.
+
+⭐ **The trigger NORMALISES the flag off when the row did not need it**, so "overridden" cannot come
+to mean "the client sent a flag". Without it the board badges ordinary assignments as overridden
+and the audit trail fills with reasons for things nobody overrode — and **every other case in the
+file still passes** (P3).
+
+### The two halves are treated OPPOSITELY on screen, and that is the design
+
+- A **product** outside its scope is refused with no way through, so it is **filtered out** of the
+  picker.
+- A **person** outside theirs can be placed anyway by whoever may schedule there, so they are
+  **left in the list and annotated** — *"— not from this area (override)"* — with a checkbox and a
+  required reason, mirroring the training override immediately below it.
+
+⚠️ **Two flags, two reasons, two decisions.** A supervisor waving through "no Welding ticket" must
+not silently also place somebody in a plant they are not cleared for: **the weaker permission would
+grant the stronger one.** The board already renders the old flag as "· certification override", so
+reusing it would have relabelled every area override as a certification one.
+
+⚠️ **And the product half stays absolute on purpose.** §19.74's proof that `delete_owned_row` needs
+no escalation depends on a product never sitting outside its owner; an overridable product scope
+would falsify it and the delete would start refusing for a reason nobody could see. A6 and mutation
+P4 are that boundary.
+
+### What the client had to learn on the way
+
+`BoardOperator` gained `siteNodeId` — `board_window` has sent it since 0025 and `parseOperator`
+dropped it, the same gap `Product` had, and without it the board could not tell whether a person
+belonged at the cell being scheduled.
+
+### Numbers
+
+**30 migrations. 468 database checks** (445 + 17 in `57_` + 6 in `upgrade_0030_`), exit 0, run on
+a real PG16. **15 mutations: 13 caught, and both exceptions are written down** — the inert control,
+and P14, whose kind is *"a value no case can reach"* because the composite FK refuses every row
+that takes the branch it guards. **App tests 1149 in 28 files, PREDICTED.** `tsc` 0 and eslint 0 on
+his machine's own binaries; 24 probe assertions executed in place against the real modules
+(`history.ts` ×14, `shapes.ts` ×10) plus the agent's own run on the board filter.
+
+⚠️ **Instrument failure 43, and it produced FALSE POSITIVES rather than false negatives.** The
+0030 mutation runner was `sed`-derived from 0029's, and two substitutions landed on text an earlier
+substitution had already rewritten — so it pointed at files that do not exist. The first run
+reported every mutation as an INSTRUMENT FAILURE (the "assert the match happened" rule working),
+and the second reported the two expected-inert ones as **CAUGHT**, because a missing upgrade file
+produces zero PASS lines and the runner counts PASS lines. **A CAUGHT verdict can be as false as a
+NOT CAUGHT one, and `sed` over an already-substituted string is a live way to produce it.**

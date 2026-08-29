@@ -686,6 +686,169 @@ two wrappers. It carries its own admin, org-scope and destination checks for
 that reason; case N16 in `76_relevel_contract_test.sql` calls it directly with a
 destination in another org.
 
+### 3.8 Deletion that keeps the past (migration `0029`, D110)
+
+Two RPCs, one over four kinds. `p_kind` is a closed set — `product`,
+`operator`, `skill`, `shift_template` — deliberately the same four words
+`not_offered_here` uses for its own `kind`, so one vocabulary covers "you may
+not put that here" and "you are deleting that". Any other value is
+`invalid_argument` naming `p_kind`.
+
+**The rule, in one sentence:** anything that has **not yet started** is removed;
+anything that has **already begun** keeps the row, with the deleted thing's
+identity copied onto it.
+
+> **"Not yet started" is `lower(timerange) > now()`, not `status`.** Nothing in
+> the product advances `runs.status`, so every run ever created is still
+> `'planned'` including last month's. An unbounded lower bound makes the
+> comparison NULL and the row falls to the **kept** side: a row whose start
+> cannot be named is not one that gets deleted.
+
+#### `deletion_preview(p_kind text, p_id uuid) RETURNS jsonb`
+
+What deleting it would do. A read; `STABLE`, `SECURITY INVOKER`, so the counts
+are the caller's own visible world.
+
+```json
+{"kind": "product", "id": "60000000-…0001", "name": "Widget X", "code": "WX",
+ "active": true,
+ "removes": [{"what": "runs", "count": 1}, {"what": "assignments", "count": 2}],
+ "keeps":   [{"what": "runs", "count": 2}, {"what": "assignments", "count": 2}]}
+```
+
+`removes` and `keeps` are both about rows the deletion **touches**, which is
+what makes the two numbers comparable ("1 of the 3 jobs that use this goes").
+Every `what` relevant to the kind is present even at count `0`, so a client
+renders one list and never has to ask whether a missing key means zero or means
+the contract changed.
+
+⚠️ **`what` values are TABLE NAMES, not English** — `runs`, `assignments`,
+`operator_skills`, `node_skill_requirements`, `shifts`, `shift_breaks`,
+`node_shift_templates`. Phrasing them is the client's job
+(`src/features/admin/lib/deletion.ts`). A `keeps` of `[]` is a real answer, and
+it is the answer for `skill` and `shift_template`: nothing records which
+training or pattern a finished run used, so there is no past to keep.
+
+**Raises:** `invalid_argument` (unrecognised `p_kind`; row not found).
+
+⭐ **A row in another tenant is "not found", not "forbidden"** — the lookup is
+RLS-filtered, so it gets the same answer an invented id gets. A refusal that
+confirmed the row existed would itself be a leak.
+
+#### `delete_owned_row(p_kind text, p_id uuid) RETURNS jsonb`
+
+Does it. Returns `deletion_preview`'s shape plus `"deleted": true`, with the
+counts being **what actually happened** — report from this, never from the
+preview that preceded it, because between the two calls somebody may have
+scheduled a job.
+
+For `product` and `operator` the survivors keep an identity: `runs` and
+`assignments` gain `product_sku` / `product_name` / `product_color_token`, and
+`assignments` gains `operator_display_name`, each written **at delete time**
+(so a rename before then still reaches the past) as the corresponding id is
+released to `NULL`. `runs_product_identified`, `assignments_work_identified`
+and `assignments_operator_identified` keep "exactly one way of naming it" true
+throughout.
+
+For `skill` and `shift_template` there is nothing to keep: the join rows go by
+`ON DELETE CASCADE` (0029 §5). ⭐ The cascade is not a shortcut — it is what
+makes the operation completable at all. `app_guard_operator_skill_scope` (0028)
+is *comparability*, so a plant-wide person may legitimately hold a line-owned
+training, and the line admin who owns that training is not admin for that
+person; without the cascade, `operator_skills_delete` would refuse and nobody
+in the org could finish the delete.
+
+**Raises:** `invalid_argument` (unrecognised `p_kind`; row not found),
+`not_permitted` (no admin grant over an ancestor-or-self of the owning node).
+
+⭐ **`SECURITY INVOKER`, and that is only possible because of D109.** Deleting a
+product deletes runs on cells the caller never named. D109 guarantees every
+such run sits under the product's owner, so admin-over-the-owner implies
+edit-over-every-affected-node and RLS stays switched on underneath as the
+second gate — there is a written proof in migration 0029's header. Because a
+refused `DELETE` removes zero rows *and reports no error*, every destructive
+statement counts what it means to touch and compares `ROW_COUNT` afterwards,
+raising `not_permitted` on any difference: if the proof is ever falsified the
+call fails loudly instead of half-deleting a schedule.
+
+⚠️ **`active` is still advisory.** 0029 adds `active` to `skills` and
+`shift_templates` so all four owned tables mean the same thing, but nothing in
+the database refuses a run of a deactivated product and this migration does not
+start refusing one.
+
+### 3.9 The area override (migration `0030`, D113)
+
+Stage 20's rule — *"certain people can only work in certain areas"* — is enforced by D109's
+`app_guard_assignment_scope` and was **absolute** until 0030: even a company admin passing
+`p_eligibility_override := true` with a reason got `PT409 / not_offered_here`. D113 cuts a door,
+and the maintainer set who holds the key: **anyone who can schedule there.**
+
+#### The two new columns
+
+`assignments.area_override boolean NOT NULL DEFAULT false` and
+`assignments.area_override_reason text`, with
+`CHECK (area_override = (area_override_reason IS NOT NULL))` — an **equivalence**, so a flag with
+no reason and a reason with no flag are both inadmissible.
+
+⚠️ **NOT the same field as `eligibility_override`**, which governs `check_eligibility` — the
+*training* question — and nothing else. Two flags, two reasons, two decisions: a supervisor waving
+through "no Welding ticket" must not silently also place somebody in a plant they are not cleared
+for. The board renders the old one as "· certification override"; do not reuse it.
+
+⭐ **A COLUMN, NOT AN RPC ARGUMENT, AND THAT IS THE DESIGN.** The refusal is a trigger firing on
+INSERT and on UPDATE OF `node_id`, `operator_id`, `product_id` — so it also fires on a plain
+PostgREST `PATCH` (§4) that passes through no function at all. An override expressed as a
+parameter would work from the paths somebody remembered to plumb and refuse from the rest.
+
+⭐ **The trigger NORMALISES the flag off when the row did not need it**, so `true` always means an
+override really happened. A client may send it optimistically without making the row claim
+something nobody decided.
+
+#### Changed signatures
+
+```
+create_assignment(..., p_eligibility_override boolean DEFAULT false,
+                       p_override_reason text DEFAULT NULL,
+                       p_area_override boolean DEFAULT false,
+                       p_area_override_reason text DEFAULT NULL) RETURNS jsonb
+move_run(p_run_id uuid, p_node_id uuid, p_timerange tstzrange,
+         p_area_override boolean DEFAULT false,
+         p_area_override_reason text DEFAULT NULL) RETURNS jsonb
+```
+
+⚠️ **Both were DROPPED and re-created, so both lost and regained their grants** (gotcha 2), and the
+old signatures no longer exist — two overloads differing only in trailing defaults are one call
+site away from resolving to the one without the door.
+
+`apply_split_coverage` keeps its signature; its `p_new_assignment` envelope now carries
+`area_override` / `area_override_reason` and passes them to `create_assignment`.
+
+**Raises (both):** `invalid_argument` naming `p_area_override_reason` when the override is asked
+for with no reason, or with only whitespace — refused in the RPC so the client gets a named field
+rather than a bare `23514`.
+
+#### `move_run` refuses by NAME, and all at once
+
+Without the override it pre-checks the whole crew and raises
+`not_offered_here` with **every** affected person, rather than letting the trigger raise about
+whichever row it reached first:
+
+```json
+{"error": "not_offered_here", "kind": "operator", "node_id": "…",
+ "operators": [{"id": "…", "name": "Line-1 Lena", "owner_node_id": "…"}]}
+```
+
+⚠️ **One reason covers the whole move**, unlike `create_assignment` where one reason covers one
+person — the supervisor is deciding about a move, not about five people individually.
+
+#### ⚠️ The product half has NO door and must not get one
+
+`app_guard_assignment_scope`'s product branch does not consult `area_override`, and
+`app_guard_run_scope` has no override at all. §3.8's proof that `delete_owned_row` needs no
+escalation depends on a product never sitting outside its owner: an overridable product scope
+would falsify it and the orchestrated delete would begin refusing for a reason nobody could see.
+Cases A6 and mutation P4 in `57_area_override_test.sql` are that boundary.
+
 ## 4. RPC vs. plain PostgREST table writes
 
 Simple field edits — a run's `notes` or `planned_headcount`; an
@@ -700,11 +863,20 @@ amended the triggers themselves (§1 above) — a capacity-busting `PATCH` on
 `DETAIL`, exactly like a `create_assignment` call would.
 
 An RPC exists only where the operation needs to touch **more than one row
-atomically** (`move_run`, `apply_split_coverage`, `delete_run`), needs a
+atomically** (`move_run`, `apply_split_coverage`, `delete_run`,
+`delete_owned_row`), needs a
 **pre-write permission or overlap check** ahead of RLS/the trigger to avoid
 a silent zero-row result (`create_run`, `create_assignment`), or is a
 **pure read aggregation** (`board_window`, `capacity_probe`,
 `check_eligibility`).
+
+⚠️ **THIS SECTION IS OLDER THAN TWO THINGS IT DESCRIBES, AND BOTH MATTER.** The PATCHable field
+list above omits `run_id` and `product_id`, which D66 added to `AssignmentFieldEdit` later; and it
+names only `assignments_capacity` and `assignments_check_run_consistency` as the guarding triggers,
+predating `assignments_scope_guard` (0028) entirely. **The authority for what a plain PATCH can set
+is `AssignmentFieldEdit` in `src/lib/api/mutations.ts`, not this paragraph** — measured there, not
+inferred here. `node_id` and `operator_id` are NOT in it, so no client code PATCHes them today;
+the database permits it, which is exactly why D113's override is a column (§3.9).
 
 ## 5. Internal helpers (not part of the client contract)
 
