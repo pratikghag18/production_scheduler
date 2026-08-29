@@ -1,0 +1,82 @@
+[
+  [
+    "N1 the delete stops looking at the clock and takes every run with it",
+    "    DELETE FROM runs r WHERE r.product_id = p_id AND lower(r.timerange) > v_now;",
+    "    DELETE FROM runs r WHERE r.product_id = p_id;"
+  ],
+  [
+    "N2 the clock comparison is inverted — the past goes and the future stays",
+    "    DELETE FROM runs r WHERE r.product_id = p_id AND lower(r.timerange) > v_now;",
+    "    DELETE FROM runs r WHERE r.product_id = p_id AND lower(r.timerange) < v_now;"
+  ],
+  [
+    "N3 the preview's KEPT side forgets that an unbounded start is not a future start",
+    "      WHERE r.product_id = p_id AND (lower(r.timerange) <= v_now OR lower(r.timerange) IS NULL);\n    SELECT count(*) INTO v_b FROM assignments a",
+    "      WHERE r.product_id = p_id AND lower(r.timerange) <= v_now;\n    SELECT count(*) INTO v_b FROM assignments a"
+  ],
+  [
+    "N4 the capacity trigger loses its early return and a departed person's own history refuses to let them go",
+    "  -- D110: the operator has been deleted and this row is history now.\n  IF NEW.operator_id IS NULL THEN RETURN NEW; END IF;\n",
+    ""
+  ],
+  [
+    "N5 the assignment guard goes back to 0028's shape, where a NULL operator short-circuits the product half",
+    "  if new.operator_id is not null then\n    -- See app_guard_run_scope: a row that is not in this org at all is the\n    -- foreign key's business, not this trigger's.\n    select o.site_node_id into v_owner from operators o\n     where o.id = new.operator_id and o.org_id = new.org_id;\n    if not found then return new; end if;\n    if not app_owner_covers_in_org(new.org_id, v_owner, new.node_id) then",
+    "  if true then\n    select o.site_node_id into v_owner from operators o\n     where o.id = new.operator_id and o.org_id = new.org_id;\n    if not found then return new; end if;\n    if not app_owner_covers_in_org(new.org_id, v_owner, new.node_id) then"
+  ],
+  [
+    "N6 a training's holdings stop cascading, so a line admin cannot complete the delete at all",
+    "alter table operator_skills add constraint operator_skills_org_id_skill_id_fkey\n  foreign key (org_id, skill_id) references skills (org_id, id) on delete cascade;",
+    "alter table operator_skills add constraint operator_skills_org_id_skill_id_fkey\n  foreign key (org_id, skill_id) references skills (org_id, id);"
+  ],
+  [
+    "N7 the RPC stops asking whether the caller may administer the owner",
+    "  IF NOT (app_is_admin() OR app_is_admin_for(v_owner)) THEN\n    PERFORM api_raise('not_permitted', 'no admin rights over the site this row belongs to',\n      jsonb_build_object('node_id', v_owner));\n  END IF;",
+    ""
+  ],
+  [
+    "N8 the RPC becomes SECURITY DEFINER, so RLS stops being the second gate and a foreign row becomes nameable",
+    "RETURNS jsonb\nLANGUAGE plpgsql VOLATILE SECURITY INVOKER\nSET search_path = public, pg_temp",
+    "RETURNS jsonb\nLANGUAGE plpgsql VOLATILE SECURITY DEFINER\nSET search_path = public, pg_temp"
+  ],
+  [
+    "N9 assignments_work_identified is loosened to 'at most one', so a row can name no work at all",
+    "  check (num_nonnulls(run_id, product_id, product_sku) = 1);",
+    "  check (num_nonnulls(run_id, product_id, product_sku) <= 1);"
+  ],
+  [
+    "N10 runs_product_identified is loosened the same way",
+    "  check (num_nonnulls(product_id, product_sku) = 1);",
+    "  check (num_nonnulls(product_id, product_sku) <= 1);"
+  ],
+  [
+    "N11 the snapshot forgets the colour, so last week's run redraws in a different palette",
+    "    UPDATE runs r SET product_id = NULL, product_sku = v_code,\n                      product_name = v_name, product_color_token = v_colour",
+    "    UPDATE runs r SET product_id = NULL, product_sku = v_code,\n                      product_name = v_name, product_color_token = NULL"
+  ],
+  [
+    "N12 the person's name is not remembered, so their finished work loses who did it",
+    "    UPDATE assignments a SET operator_id = NULL, operator_display_name = v_name\n      WHERE a.operator_id = p_id;",
+    "    UPDATE assignments a SET operator_id = NULL, operator_display_name = 'unknown'\n      WHERE a.operator_id = p_id;"
+  ],
+  [
+    "N13 the two new active columns default to false, retiring everything an upgrade touches",
+    "alter table skills          add column active boolean not null default true;",
+    "alter table skills          add column active boolean not null default false;"
+  ],
+  [
+    "N14 the catalogue stops being audited, so a deleted product leaves no record of itself",
+    "create trigger products_audit\n  after insert or update or delete on products\n  for each row execute function write_audit_log();",
+    ""
+  ],
+  [
+    "N15 the ROW_COUNT guard on the run delete is dropped — DEFENCE IN DEPTH, expected NOT CAUGHT",
+    "    GET DIAGNOSTICS v_got = ROW_COUNT;\n    IF v_got <> v_rm_runs THEN\n      PERFORM api_raise('not_permitted', 'cannot remove every run this would delete',\n        jsonb_build_object('node_id', v_owner));\n    END IF;",
+    ""
+  ],
+  [
+    "N16 INERT CONTROL — two characters of a comment. Must come back NOT CAUGHT.",
+    "-- §1. `active` on the two tables that never had it.",
+    "-- §1. `active` on the two tables that never had it!!"
+  ]
+]

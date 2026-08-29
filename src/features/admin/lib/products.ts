@@ -512,32 +512,25 @@ export function validateProductDraft(draft: ProductDraft): ProductDraftResult {
  * §6. Saying what is in the way.
  * ======================================================================== */
 
-/**
- * What the panel says when a DELETE is refused.
+/* ⚠️ `describeDeleteRefusal` LIVED HERE AND 0029 DELETED IT, rather than
+ * fixing it. It turned a delete refusal into a sentence with a way out, and
+ * both of its branches stopped being true:
  *
- * `described` is `describeSchedulerError(err)` — passed IN rather than
- * imported, because that function lives in `@/lib/api` and this module has no
- * runtime imports at all. It already names the referencing table for a
- * `StillInUse` ("It's still used by runs, so it can't be deleted."), lifted
- * from the `23503` detail line, so this function's whole job is to add the way
- * out rather than to re-describe the problem.
+ *   - `StillInUse` said "Deactivate it instead — it stays on the work it's
+ *     already on". That was the whole shape of delete before D110: anything
+ *     ever scheduled could NEVER be deleted. `delete_owned_row` now removes
+ *     what has not started and keeps what has, so the refusal it explained
+ *     does not arrive any more.
+ *   - `WriteRefused` said "Company-wide products can only be changed by a
+ *     company admin." There has been no company-wide product since D108
+ *     (0028). It compiled, it was tested, and it had been wrong for a day —
+ *     which is §19.72a lesson 2 exactly: a compiler cannot see a sentence.
  *
- * ⭐ AND THE WAY OUT IS THE POINT. `runs` and `assignments` reference
- * `(org_id, product_id)` with NO `ON DELETE`, so any product that has ever
- * been scheduled can never be deleted — which is correct, and is exactly why
- * deactivate is the main action and delete is the secondary one. Telling
- * somebody only that it failed leaves them clicking it again.
+ * Narrowing it would have left a helper that still knows how to say
+ * "company-wide", which is the argument 0028 used for deleting `ownerOptions`
+ * rather than filtering it. `DeleteDialog` asks the server what is at stake
+ * and says that instead.
  */
-export function describeDeleteRefusal(err: SchedulerError, described: string): string {
-  switch (err.kind) {
-    case "StillInUse":
-      return `${described} Deactivate it instead — it stays on the work it's already on, and stops being offered for new.`;
-    case "WriteRefused":
-      return `${described} Company-wide products can only be changed by a company admin.`;
-    default:
-      return described;
-  }
-}
 
 /**
  * The same, for a create or an edit. A duplicate sku is the one refusal a

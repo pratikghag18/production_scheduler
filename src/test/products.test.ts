@@ -39,7 +39,6 @@ import {
   UNKNOWN_SITE_LABEL,
   canEditProduct,
   canOwnProduct,
-  describeDeleteRefusal,
   describeWriteRefusal,
   editRefusalNote,
   isHexColor,
@@ -714,8 +713,6 @@ describe("validateProductDraft", () => {
  * halves cannot drift into repeating each other.
  * ======================================================================== */
 
-const STILL_IN_USE: SchedulerError = { kind: "StillInUse", usedBy: "runs" };
-const STILL_IN_USE_TEXT = "It's still used by runs, so it can't be deleted.";
 const REFUSED: SchedulerError = { kind: "WriteRefused" };
 const REFUSED_TEXT = "You don't have permission to change that.";
 const DUPLICATE: SchedulerError = { kind: "DuplicateValue", constraint: "products_org_id_sku_key" };
@@ -723,43 +720,15 @@ const DUPLICATE_TEXT = "Something here already uses that name or code.";
 const UNKNOWN: SchedulerError = { kind: "Unknown", raw: new Error("boom") };
 const UNKNOWN_TEXT = "Something went wrong. Please try again.";
 
-describe("describeDeleteRefusal", () => {
-  // R1 — the referencing TABLE, already lifted from the 23503 detail line, is
-  // what makes this different from "something went wrong".
-  it("R1: keeps the table that is in the way", () => {
-    expect(describeDeleteRefusal(STILL_IN_USE, STILL_IN_USE_TEXT)).toContain("runs");
-  });
-
-  // R2 — `runs`/`assignments` reference (org_id, product_id) with NO ON
-  // DELETE, so a scheduled product can NEVER be deleted. Saying only that it
-  // failed leaves somebody clicking it again.
-  it("R2: offers deactivate as the way out", () => {
-    expect(describeDeleteRefusal(STILL_IN_USE, STILL_IN_USE_TEXT)).toContain("Deactivate");
-  });
-
-  it("R3: says the work already done is kept", () => {
-    expect(describeDeleteRefusal(STILL_IN_USE, STILL_IN_USE_TEXT)).toContain("already on");
-  });
-
-  it("R4: explains a refused delete as an ownership question", () => {
-    expect(describeDeleteRefusal(REFUSED, REFUSED_TEXT)).toContain("company admin");
-  });
-
-  it("R5: keeps the underlying sentence for a refusal", () => {
-    expect(describeDeleteRefusal(REFUSED, REFUSED_TEXT)).toContain(REFUSED_TEXT);
-  });
-
-  it("R6: passes an unrecognised failure through unchanged", () => {
-    expect(describeDeleteRefusal(UNKNOWN, UNKNOWN_TEXT)).toBe(UNKNOWN_TEXT);
-  });
-
-  it("R7: never invents a table when the error names none", () => {
-    const bare: SchedulerError = { kind: "StillInUse" };
-    const text = "Something else still uses this, so it can't be deleted.";
-    expect(describeDeleteRefusal(bare, text)).toContain(text);
-  });
-});
-
+/* Group R's first block — `describeDeleteRefusal`, cases R1-R7 — was deleted
+ * with the function in 0029. See the note where it used to live in
+ * `features/admin/lib/products.ts`: one branch explained a refusal D110 stopped
+ * producing, and the other had been saying "company-wide" since the day D108
+ * removed company-wide rows. R4 asserted that wrong sentence and passed. The
+ * replacement is not another phrasing helper but `deletion_preview` — the
+ * server answering what is actually at stake — covered by `deletion.test.ts`
+ * and by `56_delete_keeps_the_past_test.sql`.
+ */
 describe("describeWriteRefusal", () => {
   // R8 — the generic sentence does not say WHICH field, and the sku is the one
   // a supervisor can fix themselves.

@@ -126,8 +126,34 @@ vi.mock("@/features/admin/hooks/useProducts", () => ({
   useCreateProduct: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateProduct: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetProductActive: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteProduct: () => ({ mutate: vi.fn(), isPending: false }),
   useSetProductColor: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+/**
+ * ⚠️ 0029: MOCKING THIS IS NOT OPTIONAL, AND THE REASON IS WORTH KNOWING.
+ *
+ * `ProductsPanel` now imports `DeleteDialog`, which imports `useDeletion`,
+ * which imports `useMutation`/`useQueryClient` from `@tanstack/react-query`
+ * and `previewDeletion`/`deleteOwnedRow` from `@/lib/api`. Both of those
+ * modules are mocked ABOVE with factories that list only what this file needed
+ * before — and a vi.mock factory is a CLOSED object: importing a name it does
+ * not define throws while the module graph is being built, so the whole file
+ * would fail to load rather than any case failing.
+ *
+ * Mocking `useDeletion` itself cuts the chain at its head: the real module is
+ * never evaluated, so neither factory has to grow a list of names that has
+ * nothing to do with what this file tests. `useDeleteProduct` is gone from the
+ * mock above for the same reason it is gone from the panel — 0029 replaced the
+ * table delete with `delete_owned_row`.
+ */
+vi.mock("@/features/admin/hooks/useDeletion", () => ({
+  useDeletionPreview: () => ({
+    data: undefined,
+    isPending: true,
+    isError: false,
+    error: null,
+  }),
+  useDeleteOwnedRow: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 function asCompanyAdmin() {

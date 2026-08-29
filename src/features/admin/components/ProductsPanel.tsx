@@ -29,7 +29,6 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import {
   canEditProduct,
-  describeDeleteRefusal,
   describeWriteRefusal,
   editRefusalNote,
   matchesProductQuery,
@@ -47,11 +46,11 @@ import {
 import {
   useAdminProducts,
   useCreateProduct,
-  useDeleteProduct,
   useSetProductActive,
   useSetProductColor,
   useUpdateProduct,
 } from "../hooks/useProducts";
+import { DeleteDialog } from "./DeleteDialog";
 import { indentedLabel, scopeIndex, scopeOptions, scopePathLabel } from "../lib/scope";
 import styles from "./ProductsPanel.module.css";
 
@@ -75,7 +74,6 @@ export function ProductsPanel() {
   const createMutation = useCreateProduct();
   const updateMutation = useUpdateProduct();
   const activeMutation = useSetProductActive();
-  const deleteMutation = useDeleteProduct();
   const colorMutation = useSetProductColor();
 
   const [query, setQuery] = useState("");
@@ -88,6 +86,10 @@ export function ProductsPanel() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [recolouringId, setRecolouringId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  // ⭐ SEPARATE FROM `rowError`, AND THE SEPARATION IS THE POINT. A delete that
+  // succeeds still has something to say — what went and what stayed — and
+  // saying it in the row's error slot would style an outcome as a failure.
+  const [rowNotice, setRowNotice] = useState<{ id: string; message: string } | null>(null);
   const [newDraft, setNewDraft] = useState({ sku: "", name: "", siteNodeId: "" });
   const [newErrors, setNewErrors] = useState<{
     sku: string | null;
@@ -235,22 +237,6 @@ export function ProductsPanel() {
     );
   }
 
-  function confirmDelete(row: ProductRow) {
-    clearRowError(row.id);
-    deleteMutation.mutate(row.id, {
-      onSuccess: () => setConfirmingId((cur) => (cur === row.id ? null : cur)),
-      onError: (err: SchedulerError) => {
-        setConfirmingId((cur) => (cur === row.id ? null : cur));
-        // `describeSchedulerError` already names the referencing table for a
-        // 23503; `describeDeleteRefusal` adds the way out.
-        setRowError({
-          id: row.id,
-          message: describeDeleteRefusal(err, describeSchedulerError(err)),
-        });
-      },
-    });
-  }
-
   function submitNew() {
     if (profile === null) return;
     const siteNodeId = ownerValue;
@@ -291,6 +277,7 @@ export function ProductsPanel() {
     const isEditing = editingId === row.id;
     const isConfirming = confirmingId === row.id;
     const error = rowError !== null && rowError.id === row.id ? rowError.message : null;
+    const notice = rowNotice !== null && rowNotice.id === row.id ? rowNotice.message : null;
 
     return (
       <li key={row.id} className={row.active ? styles.row : `${styles.row} ${styles.retired}`}>
@@ -426,20 +413,23 @@ export function ProductsPanel() {
               >
                 Edit
               </button>
-              {isConfirming ? (
-                <button type="button" className={styles.danger} onClick={() => confirmDelete(row)}>
-                  Delete for good?
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={styles.quiet}
-                  disabled={!editable}
-                  onClick={() => setConfirmingId(row.id)}
-                >
-                  Delete
-                </button>
-              )}
+              {/* ⭐ ONE CONTROL NOW, NOT TWO. This used to flip in place to
+                  "Delete for good?" — a confirmation that asked the same
+                  question whether the answer was "nothing happens" or "eleven
+                  jobs disappear", because before 0029 the client had no way to
+                  find out which. `DeleteDialog` asks the server first. */}
+              <button
+                type="button"
+                className={styles.quiet}
+                disabled={!editable || isConfirming}
+                onClick={() => {
+                  clearRowError(row.id);
+                  setRowNotice(null);
+                  setConfirmingId(row.id);
+                }}
+              >
+                Delete
+              </button>
             </>
           )}
         </span>
@@ -543,6 +533,32 @@ export function ProductsPanel() {
           </span>
         )}
         {error !== null && <span className={styles.error}>{error}</span>}
+        {notice !== null && <span className={styles.note}>{notice}</span>}
+        {isConfirming && (
+          <DeleteDialog
+            kind="product"
+            id={row.id}
+            name={row.name}
+            alreadyInactive={!row.active}
+            onDeactivate={() => {
+              setConfirmingId(null);
+              toggleActive(row);
+            }}
+            onCancel={() => setConfirmingId(null)}
+            onDeleted={(message) => {
+              setConfirmingId(null);
+              // The row itself is about to vanish from the refetched list, so
+              // the sentence is keyed to it and simply stops being rendered —
+              // which is the honest lifetime for "here is what just happened
+              // to a thing that no longer exists".
+              setRowNotice({ id: row.id, message });
+            }}
+            onFailed={(message) => {
+              setConfirmingId(null);
+              setRowError({ id: row.id, message });
+            }}
+          />
+        )}
       </li>
     );
   }

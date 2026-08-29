@@ -184,6 +184,8 @@ UPGRADE_CHECKS="
 20260827000023_shared_list_owners.sql|upgrade_0023_product_colour.sql|6
 20260827000025_scope_and_colour.sql|upgrade_0025_scope_widening.sql|5
 20260828000028_ownership_is_a_scope.sql|upgrade_0028_ownership_backfill.sql|5
+20260828000029_delete_keeps_the_past.sql|upgrade_0029_delete_keeps_the_past.sql|6
+20260828000030_area_override.sql|upgrade_0030_area_override.sql|6
 "
 
 run_upgrade_check() {
@@ -306,6 +308,18 @@ if [ ! -f "$TESTS_DIR/51_shared_list_owners_test.sql" ]; then
 fi
 if [ ! -f "$TESTS_DIR/76_relevel_contract_test.sql" ]; then
   note_fail "76_relevel_contract_test.sql not found in $TESTS_DIR (0024 requires it)"
+  exit 1
+fi
+# 0029: same idiom, same reason -- step 7 phrases its result from the PASS
+# count it happens to see, so a 56_ that goes missing is 31 cases vanishing
+# under a green run. This is the harness's standing defect and the fifth place
+# it has had to be closed by hand.
+if [ ! -f "$TESTS_DIR/56_delete_keeps_the_past_test.sql" ]; then
+  note_fail "56_delete_keeps_the_past_test.sql not found in $TESTS_DIR (0029/D110 requires it)"
+  exit 1
+fi
+if [ ! -f "$TESTS_DIR/57_area_override_test.sql" ]; then
+  note_fail "57_area_override_test.sql not found in $TESTS_DIR (0030/D113 requires it)"
   exit 1
 fi
 if [ ! -f "$TESTS_DIR/90_hierarchy_template_test.sql" ]; then

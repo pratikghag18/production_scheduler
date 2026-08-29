@@ -77,13 +77,13 @@ import {
   useCreateShift,
   useDeleteBreak,
   useUpdateBreak,
-  useDeletePattern,
   useDeleteShift,
   useDetachPattern,
   useRenamePattern,
   useShiftPatterns,
   useUpdateShift,
 } from "../hooks/useShifts";
+import { DeleteDialog } from "./DeleteDialog";
 import styles from "./ShiftsPanel.module.css";
 
 /** Flipped in the same commit that gave this panel a real body (§19.62). */
@@ -208,7 +208,6 @@ export function ShiftsPanel() {
 
   const createPattern = useCreatePattern();
   const renamePattern = useRenamePattern();
-  const deletePattern = useDeletePattern();
   const createShift = useCreateShift();
   const updateShift = useUpdateShift();
   const deleteShift = useDeleteShift();
@@ -819,67 +818,50 @@ export function ShiftsPanel() {
           <p className={styles.rowError}>{errorFor(`rename-${pattern.id}`)}</p>
         )}
 
-        {/* ⚠️ DELETE IS THE ONLY REMOVAL THERE IS. The maintainer's standing decision is
-            that deactivating is the main action wherever a thing has an on/off
-            flag — `shift_templates` has none, so there is nothing to deactivate
-            here and this is the whole of it.
+        {/* ⚠️ 0029 MADE THE SENTENCE THAT USED TO BE HERE FALSE. It read
+            "detach it below before deleting it", because `node_shift_templates`'
+            FK carried no `ON DELETE` and a pattern in use raised 23503.
+            Migration 0029 gives that FK `ON DELETE CASCADE`: deleting a pattern
+            now takes its attachments with it, and telling somebody to do work
+            the database no longer needs is worse than saying nothing. The
+            COUNT stays — it is this panel's own read of
+            `node_shift_templates` and it is useful before the dialog opens —
+            and the confirmation names the same number from the server.
 
-            ⭐ IT IS STILL OFFERED WHEN THE PATTERN IS ATTACHED, and the note
-            below is a warning rather than a locked door. The server is the one
-            that decides: `node_shift_templates`' FK carries no `ON DELETE`, so
-            Postgres raises 23503 → `{kind:"StillInUse"}`. Hiding the button
-            would mean this screen was guessing, and a guess that says "you
-            can't" when the server would have said yes is a feature nobody can
-            reach. The COUNT comes from this panel's own read of
-            `node_shift_templates`, which is what lets the refusal say how many
-            places are in the way instead of only that something is. */}
+            ⚠️ AND THERE IS STILL NO DEACTIVATE HERE. 0029 gives
+            `shift_templates` an `active` column so all four owned lists mean
+            the same thing, but nothing reads or writes it yet: the column is
+            in the schema and the control is owed. Offering a Deactivate button
+            that changed a flag no screen renders would be worse than the gap.
+            See docs/roadmap.md. */}
         {pattern.attachedCount > 0 && (
           <p className={styles.rowNote}>
             {`Attached to ${pattern.attachedCount} ${
               pattern.attachedCount === 1 ? "place" : "places"
-            } — detach it below before deleting it.`}
+            }.`}
           </p>
         )}
         {confirming ? (
-          <div className={styles.confirm}>
-            <span>{`Delete "${pattern.name}" and its shifts?`}</span>
-            <button
-              type="button"
-              className={styles.dangerBtn}
-              disabled={deletePattern.isPending}
-              onClick={() => {
-                const key = `delete-${pattern.id}`;
-                clear(key);
-                deletePattern.mutate(
-                  { templateId: pattern.id },
-                  {
-                    onSuccess: () => setConfirmId(null),
-                    onError: (e) =>
-                      setRowError({
-                        key,
-                        message:
-                          isSchedulerError(e) && e.kind === "StillInUse"
-                            ? `${pattern.attachedCount} ${
-                                pattern.attachedCount === 1 ? "place uses" : "places use"
-                              } this pattern, so it can't be deleted. Detach it below first.`
-                            : errorText(e),
-                      }),
-                  },
-                );
-              }}
-            >
-              Delete
-            </button>
-            <button type="button" className={styles.btn} onClick={() => setConfirmId(null)}>
-              Keep
-            </button>
-          </div>
+          <DeleteDialog
+            kind="shift_template"
+            id={pattern.id}
+            name={pattern.name}
+            onCancel={() => setConfirmId(null)}
+            onDeleted={(message) => {
+              setConfirmId(null);
+              setRowError({ key: `delete-${pattern.id}`, message });
+            }}
+            onFailed={(message) => setRowError({ key: `delete-${pattern.id}`, message })}
+          />
         ) : (
           <div className={styles.confirm}>
             <button
               type="button"
               className={styles.linkBtn}
-              onClick={() => setConfirmId(pattern.id)}
+              onClick={() => {
+                clear(`delete-${pattern.id}`);
+                setConfirmId(pattern.id);
+              }}
             >
               Delete this pattern
             </button>

@@ -644,43 +644,23 @@ export function describeSkillNameClash(clash: SkillNameClash): string {
 }
 
 /* ===========================================================================
- * Deleting a person.
+ * ⚠️ `DeletePrecheck` / `deletePrecheck` LIVED HERE AND 0029 DELETED THEM.
  *
- * ⭐ THE MAINTAINER'S DECISION: DEACTIVATE IS THE MAIN ACTION. Delete is secondary and
- * only when nothing is in the way, and the refusal must say WHAT is in the
- * way. `operator_skills` and `assignments` both reference `operators` with no
- * `ON DELETE` clause, so a delete that hits either fails with SQLSTATE 23503
- * -> `{kind:"StillInUse"}`, whose `usedBy` names the referencing table.
+ * They refused to delete anybody still holding a ticket — "Remove it first, or
+ * deactivate them instead" — because `operator_skills`' foreign key to
+ * `operators` carried no `ON DELETE` and the delete would have failed with
+ * 23503 anyway. Migration 0029 gives that key `ON DELETE CASCADE`: a person's
+ * tickets now go with them, and `deletion_preview` COUNTS them so the dialog
+ * can say how many.
  *
- * This precheck answers only for the half this screen can SEE — the tickets,
- * which it already has in memory. Assignments are not read here, so a person
- * with no tickets can still be refused; the panel maps that refusal through
- * `describeSchedulerError`, which says "It's still used by assignments".
- * Reporting `allowed: true` therefore means "nothing I can see is blocking
- * this", never "this will succeed", and the button copy says so.
+ * ⭐ THE REASON THIS HAD TO GO RATHER THAN BE RELAXED. A precheck that refuses
+ * what the server would allow is the worst kind of client rule: the way out it
+ * names ("remove them first") is work that no longer needs doing, and nobody
+ * reading this screen has any way to find that out. A stale permission check
+ * fails loudly the first time somebody tries; a stale REFUSAL never fails at
+ * all, it just quietly stops people doing something they are allowed to do.
  * =========================================================================== */
 
-export interface DeletePrecheck {
-  allowed: boolean;
-  /** What is in the way, as a sentence, or `null` when nothing visible is. */
-  blockedBy: string | null;
-}
-
-export function deletePrecheck(
-  operator: OperatorLike,
-  operatorSkills: readonly OperatorSkillLike[],
-): DeletePrecheck {
-  let tickets = 0;
-  for (const os of operatorSkills) if (os.operatorId === operator.id) tickets += 1;
-  if (tickets === 0) return { allowed: true, blockedBy: null };
-  return {
-    allowed: false,
-    blockedBy:
-      tickets === 1
-        ? "1 ticket is still attached to this person. Remove it first, or deactivate them instead."
-        : `${tickets} tickets are still attached to this person. Remove them first, or deactivate them instead.`,
-  };
-}
 
 /* ===========================================================================
  * A one-line summary of the whole answer, for the operator list.

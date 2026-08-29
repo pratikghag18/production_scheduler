@@ -22,7 +22,6 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { useSession } from "@/features/auth/useSession";
 import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 import {
-  deletePrecheck,
   describeSkillNameClash,
   findExistingSkillByName,
   formatDay,
@@ -38,8 +37,6 @@ import { indentedLabel, scopeOptions } from "../lib/scope";
 import {
   useCreateOperator,
   useCreateSkill,
-  useDeleteOperator,
-  useDeleteSkill,
   useGrantSkill,
   useOperatorsAdmin,
   useRenameSkill,
@@ -48,6 +45,7 @@ import {
   useUpdateOperator,
   useUpdateSkillExpiry,
 } from "../hooks/useOperators";
+import { DeleteDialog } from "./DeleteDialog";
 import styles from "./OperatorsPanel.module.css";
 
 /**
@@ -155,16 +153,15 @@ export function OperatorsPanel() {
   const [grantExpiry, setGrantExpiry] = useState("");
   const [newSkill, setNewSkill] = useState("");
   const [skillEditId, setSkillEditId] = useState<string | null>(null);
+  const [skillDeleteId, setSkillDeleteId] = useState<string | null>(null);
   const [skillEditName, setSkillEditName] = useState("");
   const [showSkillAdmin, setShowSkillAdmin] = useState(false);
 
   const createOperator = useCreateOperator();
   const updateOperator = useUpdateOperator();
   const setActive = useSetOperatorActive();
-  const deleteOperator = useDeleteOperator();
   const createSkill = useCreateSkill();
   const renameSkill = useRenameSkill();
-  const deleteSkill = useDeleteSkill();
   const grantSkill = useGrantSkill();
   const updateExpiry = useUpdateSkillExpiry();
   const revokeSkill = useRevokeSkill();
@@ -225,15 +222,12 @@ export function OperatorsPanel() {
   const scopeChoices = scopeOptions(scopeNodes);
 
   const clash = findExistingSkillByName(skills, newSkill);
-  const deleteCheck = selected === null ? null : deletePrecheck(selected, operatorSkills);
   const busy =
     createOperator.isPending ||
     updateOperator.isPending ||
     setActive.isPending ||
-    deleteOperator.isPending ||
     createSkill.isPending ||
     renameSkill.isPending ||
-    deleteSkill.isPending ||
     grantSkill.isPending ||
     updateExpiry.isPending ||
     revokeSkill.isPending;
@@ -316,31 +310,6 @@ export function OperatorsPanel() {
         siteNodeId: editSite,
       },
       { onSuccess: () => setRenaming(false), onError: onErr },
-    );
-  }
-
-  function removeOperator() {
-    if (selected === null || deleteCheck === null) return;
-    setNotice(null);
-    if (!deleteCheck.allowed) {
-      setNotice(deleteCheck.blockedBy);
-      return;
-    }
-    deleteOperator.mutate(
-      { id: selected.id },
-      {
-        onSuccess: () => {
-          setConfirmDelete(false);
-          setSelectedId(null);
-        },
-        // `{kind:"StillInUse", usedBy}` arrives here for anybody who has ever
-        // been scheduled — `assignments` is not read by this screen, so the
-        // precheck above could not have known. The message names the table.
-        onError: (err) => {
-          setConfirmDelete(false);
-          onErr(err);
-        },
-      },
     );
   }
 
@@ -568,7 +537,6 @@ export function OperatorsPanel() {
                   ) : (
                     <>
                       <span className={styles.ticketTypeName}>{s.name}</span>
-                      {s.siteNodeId === null && <span className={styles.badge}>company-wide</span>}
                       <button
                         type="button"
                         className={styles.small}
@@ -579,18 +547,40 @@ export function OperatorsPanel() {
                       >
                         Rename
                       </button>
+                      {/* ⚠️ THIS BUTTON HAD NO CONFIRMATION AT ALL. One click
+                          deleted a ticket type outright — and under 0029 that
+                          now also un-qualifies everyone holding it and drops it
+                          from every cell that requires it, by cascade. The
+                          screen that most needed the dialog was the one
+                          without even a "are you sure". */}
                       <button
                         type="button"
                         className={styles.small}
-                        disabled={busy}
+                        disabled={busy || skillDeleteId === s.id}
                         onClick={() => {
                           setNotice(null);
-                          deleteSkill.mutate({ id: s.id }, { onError: onErr });
+                          setSkillDeleteId(s.id);
                         }}
                       >
                         Delete
                       </button>
                     </>
+                  )}
+                  {skillDeleteId === s.id && (
+                    <DeleteDialog
+                      kind="skill"
+                      id={s.id}
+                      name={s.name}
+                      onCancel={() => setSkillDeleteId(null)}
+                      onDeleted={(message) => {
+                        setSkillDeleteId(null);
+                        setNotice(message);
+                      }}
+                      onFailed={(message) => {
+                        setSkillDeleteId(null);
+                        setNotice(message);
+                      }}
+                    />
                   )}
                 </li>
               ))}
@@ -656,8 +646,7 @@ export function OperatorsPanel() {
                   <div className={styles.renameRow}>
                     <h2 className={styles.h2}>{selected.displayName}</h2>
                     <span className={styles.headMeta}>
-                      {selected.employeeRef ?? "no reference"} ·{" "}
-                      {selected.siteNodeId === null ? "company-wide" : "owned by a site"}
+                      {selected.employeeRef ?? "no reference"}
                       {!selected.active && <span className={styles.badge}>deactivated</span>}
                     </span>
                     <button
@@ -689,43 +678,56 @@ export function OperatorsPanel() {
                     >
                       {selected.active ? "Deactivate" : "Reactivate"}
                     </button>
-                    {confirmDelete ? (
-                      <>
-                        <button
-                          type="button"
-                          className={styles.danger}
-                          disabled={busy}
-                          onClick={removeOperator}
-                        >
-                          Delete for good
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.small}
-                          onClick={() => setConfirmDelete(false)}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className={styles.small}
-                        onClick={() => {
-                          setNotice(
-                            deleteCheck !== null && !deleteCheck.allowed
-                              ? deleteCheck.blockedBy
-                              : null,
-                          );
-                          setConfirmDelete(true);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    )}
+                    {/* ⭐ 0029 REPLACED A CLIENT-SIDE PRECHECK WITH THE
+                        SERVER'S OWN ANSWER. This used to run `deletePrecheck`
+                        and REFUSE to delete anybody still holding a ticket
+                        ("remove them first"). Migration 0029 makes
+                        `operator_skills` cascade from `operators`, so that
+                        refusal became a rule the client enforced and the
+                        database did not — the worst kind, because the way out
+                        it names is work that no longer needs doing. The dialog
+                        asks `deletion_preview` and NAMES the tickets instead. */}
+                    <button
+                      type="button"
+                      className={styles.small}
+                      disabled={confirmDelete}
+                      onClick={() => {
+                        setNotice(null);
+                        setConfirmDelete(true);
+                      }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 )}
               </header>
+
+              {confirmDelete && (
+                <DeleteDialog
+                  kind="operator"
+                  id={selected.id}
+                  name={selected.displayName}
+                  alreadyInactive={!selected.active}
+                  onDeactivate={() => {
+                    setConfirmDelete(false);
+                    setNotice(null);
+                    setActive.mutate({ id: selected.id, active: false }, { onError: onErr });
+                  }}
+                  onCancel={() => setConfirmDelete(false)}
+                  onDeleted={(message) => {
+                    setConfirmDelete(false);
+                    // The detail pane is about to be about nobody, so the
+                    // selection is cleared and the sentence moves to the panel
+                    // notice — the one place on this screen that outlives a row.
+                    setSelectedId(null);
+                    setNotice(message);
+                  }}
+                  onFailed={(message) => {
+                    setConfirmDelete(false);
+                    setNotice(message);
+                  }}
+                />
+              )}
 
               <h3 className={styles.h3}>Where {selected.displayName} can work</h3>
               <div className={styles.asOfRow}>

@@ -100,6 +100,15 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/OperatorsPanel.module.css",
   "src/features/admin/components/ProductsPanel.module.css",
   "src/features/admin/components/ImportPanel.module.css",
+  // 0029 / D110. ⚠️ NOT PRE-SEATED, AND THAT IS HOW IT WAS MISSED: the
+  // pre-seat above covered the four sections §19.62 knew were coming, and
+  // `DeleteDialog` is a shared surface none of them predicted. The audit
+  // caught it on the maintainer's run — `missingRemSurfaces` walks the
+  // directory, so an admin stylesheet that exists and is not listed here is a
+  // test failure and not something spotted on a 4K monitor later. **Adding a
+  // file under src/features/admin means editing this list and R10's copy in
+  // the same commit.**
+  "src/features/admin/components/DeleteDialog.module.css",
 ];
 
 /**

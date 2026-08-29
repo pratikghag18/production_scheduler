@@ -40,7 +40,6 @@
  */
 import { expect, it } from "vitest";
 import {
-  deletePrecheck,
   describeSkillNameClash,
   effectiveRequirements,
   findExistingSkillByName,
@@ -545,23 +544,15 @@ it("N6: the loose clash leaves creating available, because it may be a different
 });
 
 /* ===========================================================================
- * deletePrecheck, ticketsFor, formatDay
+ * ticketsFor, formatDay
  * =========================================================================== */
 
-it("D1: someone holding tickets cannot be deleted, and the refusal says what is in the way", () => {
-  const r = deletePrecheck(ana, ANA_TICKETS);
-  expect(r.allowed).toBe(false);
-  expect(r.blockedBy).toContain("3 tickets");
-});
-
-it("D2: one ticket is reported in the singular", () => {
-  expect(deletePrecheck(bob, ANA_TICKETS).blockedBy).toContain("1 ticket is");
-});
-
-it("D3: with nothing visible in the way, delete is offered — assignments are still the server's call", () => {
-  expect(deletePrecheck(cara, ANA_TICKETS)).toEqual({ allowed: true, blockedBy: null });
-});
-
+/* Cases D1-D3 tested `deletePrecheck` and were deleted with it in 0029: the
+ * cascade it existed to anticipate now removes the tickets, so the rule it
+ * enforced refused something the database allows. `56_`'s D19 measures the new
+ * behaviour end to end, and `deletion.test.ts`'s K9/K10 cover the counting the
+ * dialog does in its place.
+ */
 it("T1: a ticket whose skill row cannot be read is shown unnamed, never dropped", () => {
   const held = [{ operatorId: ANA, skillId: PHANTOM, expiresAt: null }];
   const tickets = ticketsFor(ana, SKILLS, held, TODAY);
