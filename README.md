@@ -1,6 +1,6 @@
 # Production Scheduler
 
-<img width="3828" height="1927" alt="image" src="https://github.com/user-attachments/assets/a2cbcee3-9aec-4a32-87ad-304a5ac070ee" />
+<img width="3787" height="1890" alt="image" src="https://github.com/user-attachments/assets/cd5b1616-8638-44b1-8eec-883ab5f00066" />
 
 A multi-tenant, real-time production staffing scheduler. Supervisors see a timeline board —
 schedulable units (work cells, in the default vocabulary) as rows, time as columns — and drag
