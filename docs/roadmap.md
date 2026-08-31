@@ -235,8 +235,9 @@
 >    already offers every node (`scopeOptions` is called with no `canEdit` set), so a filter that
 >    only trims lists leaves a form that can still name a plant the reader has filtered away.
 >    ⚠️ **And (c) is a live defect in its own right, independent of this item:** `scopeOptions`
->    takes a `canEdit` set precisely so a picker cannot offer a node the server will refuse, and
->    `OperatorsPanel` passes none.
+>    takes a `canEdit` set precisely so a picker cannot offer a node the server will refuse,
+>    and **all THREE callers pass none** — `OperatorsPanel:291`, `ProductsPanel:156` and
+>    `ShiftsPanel:249`. Grepped, not assumed.
 >
 > 2. **🔴 Migration 0031 (D111), the starter library** a company admin curates and a site admin
 >    copies into their own plant — patterns and trainings. It carries a known problem: **training

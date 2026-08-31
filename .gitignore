@@ -32,3 +32,11 @@ checks.txt
 # already live in supabase/ -- committing one means two copies of the same
 # script drifting apart, and the copy is the one nobody edits.
 supabase/snippets/
+
+# The per-machine Claude Code resume file. It says "personal -- gitignored, not
+# shared" in its own first line, and it is written for whoever is sitting at
+# this checkout: it names local paths, what is running on the machine, and how
+# the maintainer wants a session driven. It was committed once by a `git add`
+# that swept the working tree; `git rm --cached CLAUDE.local.md` takes it back
+# out without deleting it from disk.
+CLAUDE.local.md
