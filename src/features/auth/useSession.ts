@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
@@ -41,6 +41,53 @@ export interface UseSessionResult {
   loading: boolean;
 }
 
+/**
+ * ⭐⭐ WHO IS SIGNED IN, HELD ONCE FOR THE WHOLE APP RATHER THAN PER HOOK
+ * INSTANCE — AND THIS IS A FIX, NOT A TIDY-UP.
+ *
+ * It was a `useRef` inside the hook, initialised to `null`. `useSession` is
+ * called in five components (`AppShell`, `AdminPage`, `BoardPage`,
+ * `RequireAdmin`, `DevProfileSwitcher`) and now a sixth on every admin panel,
+ * so **each one started life believing nobody was signed in**. Its first
+ * `applyStep` then compared `null` against the real user id, concluded the
+ * identity had changed, and fired `queryClient.resetQueries()` — emptying the
+ * cache for everybody.
+ *
+ * ⚠⚠ THE VISIBLE SYMPTOM WAS ON THE ADMIN SCREEN AND IT TOOK A MEASUREMENT TO
+ * FIND. Switching tabs mounts a panel, which mounts a `useSession`, which reset
+ * the cache; `AdminPage`'s hierarchy read went briefly `undefined`, so
+ * `readablePlants` saw no roots, so the plant filter row unmounted and came
+ * back. Driven in a real browser and sampled per animation frame: the row's
+ * height went **42 → 0 → 42 across one or two frames on every tab switch**, and
+ * everything under it jumped up and back down.
+ *
+ * ⭐ IT ONLY SHOWED FOR SOMEBODY WITH MORE THAN ONE PLANT, which is why it read
+ * as a quirk of the filter: a reader with one readable root has no row at all
+ * (§19.79's decision 2), so there was nothing to flicker. The cache was being
+ * thrown away for them too — silently, and paid for in refetches.
+ *
+ * ⚠️ THE RESET ITSELF IS RIGHT AND STAYS. Query keys deliberately carry no user
+ * id, so a real identity change must drop the previous person's rows. What was
+ * wrong was WHO gets to declare an identity change: mounting a component is not
+ * one. At module scope the answer is shared, so a genuine sign-in still resets
+ * exactly once — the first instance to see it moves the value, and the rest
+ * compare equal and do nothing. That also settles the "resets fire five times"
+ * half of P1-6b's recorded debt.
+ *
+ * ⚠️ Module scope is deliberate and NOT a step away from the `SessionProvider`
+ * that debt asks for. It is the same value that provider would own, parked
+ * where every instance can already see it; the provider is still worth doing
+ * for the five duplicated `getSession()` round trips, which this does not
+ * touch. `__resetSessionIdentityForTests` exists so a suite can put it back.
+ */
+let lastUserId: string | null = null;
+
+/** Test-only: module state outlives a test file, and a stale identity would
+ *  make the next suite's first mount skip a reset it genuinely needs. */
+export function __resetSessionIdentityForTests(): void {
+  lastUserId = null;
+}
+
 export function useSession(): UseSessionResult {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<SessionProfile | null>(null);
@@ -49,7 +96,9 @@ export function useSession(): UseSessionResult {
   // Last identity we saw. Every cached query was fetched AS that user and is
   // meaningless -- worse, misleading -- for anyone else, because RLS scopes
   // every result to the caller. Tracked in a ref so a re-render never resets it.
-  const lastUserId = useRef<string | null>(null);
+  // ⚠️ `lastUserId` USED TO LIVE HERE AS A `useRef`. See `lastUserId` at module
+  // scope above — the identity is a fact about the APP, and a per-instance copy
+  // made every newly mounted component believe the user had just signed in.
 
   useEffect(() => {
     let cancelled = false;
@@ -81,8 +130,8 @@ export function useSession(): UseSessionResult {
      */
     function applyStep(nextSession: Session | null, kind: AuthEventKind) {
       const nextUserId = nextSession?.user.id ?? null;
-      const step = decideSessionUpdate(lastUserId.current, { kind, nextUserId });
-      lastUserId.current = step.nextLastUserId;
+      const step = decideSessionUpdate(lastUserId, { kind, nextUserId });
+      lastUserId = step.nextLastUserId;
 
       if (step.decision.resetCache) void queryClient.resetQueries();
       if (step.decision.setLoading) setLoading(true);
