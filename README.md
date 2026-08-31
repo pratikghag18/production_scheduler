@@ -1,5 +1,7 @@
 # Production Scheduler
 
+<img width="3828" height="1927" alt="image" src="https://github.com/user-attachments/assets/a2cbcee3-9aec-4a32-87ad-304a5ac070ee" />
+
 A multi-tenant, real-time production staffing scheduler. Supervisors see a timeline board —
 schedulable units (work cells, in the default vocabulary) as rows, time as columns — and drag
 across a row to assign an operator to that unit for a time window, working on a product. Multiple
