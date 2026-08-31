@@ -26,6 +26,7 @@ import {
   findExistingSkillByName,
   formatDay,
   operatorRows,
+  placeVerdict,
   summarisePlaces,
   ticketsFor,
   validateOperatorDraft,
@@ -60,6 +61,23 @@ import styles from "./OperatorsPanel.module.css";
  * section, not the first, because they are how you CHANGE that answer rather
  * than the vocabulary the screen speaks — granting one turns several crosses
  * green at once, and nobody has to touch a cell to do it.
+ *
+ * ⭐⭐ THREE MARKS, NOT TWO, AND THE THIRD ONE IS WHY THIS LIST IS HONEST.
+ * There are two server rules behind this answer, not one: the trainings
+ * (`check_eligibility`) and the AREA a person belongs to
+ * (`app_guard_assignment_scope`, 0028 / D109). Until this was fixed the list
+ * asked only about trainings, so it ticked cells in plants the person cannot
+ * be booked into at all — a stale PERMISSION, the screen saying yes where the
+ * server says no. `../lib/operators` carries the full account.
+ *
+ * ⚠️ The other plants are NOT hidden, deliberately. D113 lets whoever may
+ * schedule at a cell place somebody from outside its area there by recording a
+ * reason, so hiding them would delete a feature the board already offers. They
+ * are listed with an amber ⚠ and the sentence that says what it would take —
+ * the same treatment `CreatePopover` gives them ("not from this area
+ * (override)"), and the opposite of what happens to a PRODUCT outside its
+ * scope, which is filtered out because the database refuses it with no way
+ * through (§19.76).
  *
  * ⚠️ EVERY TICK IS AN INDICATION, NOT A PROMISE. `check_eligibility` on the
  * server is the authority and is re-asked at assignment time against the real
@@ -102,18 +120,39 @@ function todayIso(): string {
   return `${now.getFullYear()}-${mm}-${dd}`;
 }
 
+/**
+ * One place, with the mark its verdict earns.
+ *
+ * ⚠️ THE VERDICT IS NOT DERIVED HERE. `placeVerdict` is in `../lib/operators`
+ * beside the rule it reads, so this component and `operators.test.ts` cannot
+ * drift apart — which is exactly how the screen came to disagree with the
+ * server in the first place.
+ *
+ * ⚠️ The mark is `aria-hidden` and carries no meaning on its own: a tick's
+ * meaning is spoken by the visually-hidden hint, and the other two are spoken
+ * by the reason sentence, which every non-tick row has. Colour is never the
+ * only signal (D100).
+ */
 function PlaceRow({ place }: { place: WorkPlace }) {
+  const verdict = placeVerdict(place);
+  const rowClass =
+    verdict === "can-work"
+      ? styles.placeYes
+      : verdict === "outside-area"
+        ? styles.placeWarn
+        : styles.placeNo;
+  const mark = verdict === "can-work" ? "✓" : verdict === "outside-area" ? "⚠" : "✕";
   return (
-    <li className={place.eligible ? styles.placeYes : styles.placeNo}>
+    <li className={rowClass}>
       <span className={styles.mark} aria-hidden="true">
-        {place.eligible ? "✓" : "✕"}
+        {mark}
       </span>
       <span className={styles.placeLabel}>
         {place.label}
         {!place.active && <span className={styles.badge}>inactive place</span>}
       </span>
       <span className={styles.placeWhy}>
-        {place.eligible ? (
+        {verdict === "can-work" ? (
           <span className={styles.srHint}>can work here</span>
         ) : (
           place.reasons.join(" · ")
@@ -212,12 +251,14 @@ export function OperatorsPanel() {
   // 0025 `operators_check_site` refused anything but a root, so this filtered
   // to `parentId === null`.
   //
-  // ⚠️ IN THIS RELEASE THE AREA IS PRESENTATION ONLY — it says where a person
-  // belongs and filters the roster; it does NOT refuse an assignment. Refusing
-  // one, with a supervisor override that records a reason, is his call of the
-  // same day and is a change to `check_eligibility` and `assign_operator` in
-  // its own migration. Until that lands, nothing here may imply the server is
-  // enforcing it.
+  // ⚠️ THIS COMMENT USED TO SAY THE AREA WAS "PRESENTATION ONLY" AND THAT THE
+  // SERVER DID NOT REFUSE AN ASSIGNMENT OUTSIDE IT. That was true when it was
+  // written and has been false since migration 0028 / D109, whose
+  // `app_guard_assignment_scope` refuses exactly that — and migration 0030 /
+  // D113 then gave it the supervisor override, `assignments.area_override`
+  // plus a required reason. So the field is LOAD-BEARING: it decides where
+  // this person can be booked, and the list above says so in three states.
+  // [[decision-record-drift]] rule 10 — a conclusion outliving its premise.
   const scopeNodes = data?.nodes ?? [];
   const scopeChoices = scopeOptions(scopeNodes);
 
@@ -611,9 +652,10 @@ export function OperatorsPanel() {
                       aria-label="Employee reference"
                     />
                     {/* ⭐ WHERE THEY BELONG, EDITABLE. See `saveRename`.
-                        ⚠️ It filters the roster and nothing else in this
-                        release — the server does not yet refuse an assignment
-                        outside it, and no label here may imply that it does. */}
+                        ⚠️ CHANGING THIS CHANGES WHERE THEY CAN BE BOOKED. Since
+                        0028 / D109 the server refuses an assignment outside it,
+                        and since 0030 / D113 a supervisor may override that by
+                        recording a reason. The list above is what moves. */}
                     <select
                       className={styles.input}
                       aria-label="Belongs to"
@@ -740,8 +782,17 @@ export function OperatorsPanel() {
                     onChange={(e) => setAsOf(e.target.value)}
                   />
                 </label>
+                {/* ⭐ THE LINE NAMES WHAT IT COUNTS. It used to read "12 of 18
+                    places" for somebody whose own line holds two, because the
+                    denominator was every schedulable cell in the company and
+                    the numerator counted trainings alone. The denominator is
+                    now their OWN AREA, and everywhere else is counted
+                    separately rather than folded in. */}
                 <p className={styles.summary}>
-                  {summary.eligible} of {summary.total} {summary.total === 1 ? "place" : "places"}
+                  {summary.eligible} of {summary.ownArea}{" "}
+                  {summary.ownArea === 1 ? "place" : "places"} in their own area
+                  {summary.outsideArea > 0 &&
+                    ` · ${summary.outsideArea} elsewhere, only with a recorded reason`}
                   {summary.unresolved > 0 &&
                     ` · ${summary.unresolved} couldn’t be answered in full`}
                 </p>
@@ -751,7 +802,9 @@ export function OperatorsPanel() {
                   assignment is actually made. See `../lib/operators`. */}
               <p className={styles.footnote}>
                 The scheduler checks this again when work is assigned; this is what today&rsquo;s
-                tickets and requirements imply.
+                tickets, requirements and areas imply. A place marked &ldquo;⚠&rdquo; is outside the
+                area this person belongs to — whoever schedules there can still put them on it, but
+                has to record a reason for it.
               </p>
               <ul className={styles.places}>
                 {visiblePlaces.map((p) => (

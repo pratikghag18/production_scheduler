@@ -34,8 +34,51 @@
  * allowed — is a worse screen but not a false promise, so every case where a
  * fact cannot be resolved from the arrays given (a parent node missing, an
  * ancestor cycle, a required skill row the caller cannot see) resolves to a
- * CROSS carrying an honest reason, never to a tick. `NodeRequirements.complete`
- * and `WorkPlace.unnamed` are the two places that honesty is recorded.
+ * CROSS carrying an honest reason, never to a tick. `NodeRequirements.complete`,
+ * `WorkPlace.unnamed` and `AreaStanding`'s `"unknown"` are the three places
+ * that honesty is recorded.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐⭐ THERE ARE TWO SERVER RULES HERE, NOT ONE, AND THIS MODULE ONCE
+ * MIRRORED ONLY THE FIRST.
+ *
+ *  1. TRAINING — `check_eligibility`: does this person hold every ticket this
+ *     place requires? A capability question, and the whole of what this file
+ *     used to answer.
+ *  2. AREA — `app_guard_assignment_scope` (migration 0028 §4 / D109): an
+ *     assignment is refused unless the operator's owning node is an
+ *     ancestor-or-self of the cell. It is a BEFORE ROW trigger, so it fires
+ *     ahead of the training check, for every writer, including a plain
+ *     PostgREST `PATCH` that passes through no function at all.
+ *
+ * ⚠️⚠️ `OperatorLike.siteNodeId` HAS BEEN DECLARED HERE SINCE D108 MADE IT
+ * NOT NULL, WITH A COMMENT CITING D109 — AND `workPlacesFor` DID NOT READ IT.
+ * The screen therefore ticked every cell in every plant that a person's
+ * TICKETS covered: 12 of 18 on the maintainer's own screen, for somebody whose
+ * line holds 2, and all twelve of those ticks were cells the database refuses.
+ * The fact was present and unread; this was never missing information.
+ *
+ * ⭐⭐ AND IT IS THE DANGEROUS DIRECTION OF §19.74'S DEFECT FAMILY.
+ * `describeDeleteRefusal` and `deletePrecheck` were stale REFUSALS — they stop
+ * people doing what they may, which is quiet and annoying. This was a stale
+ * PERMISSION: the client showing what the server will not allow. That is the
+ * one that produces a screen which looks like it works, right up to the moment
+ * somebody tries to book the week they planned from it and is refused with an
+ * error that says nothing about why the screen said yes.
+ *
+ * ⚠️ THE FIX IS NOT TO HIDE THE OTHER PLACES. Migration 0030 / D113 gives the
+ * area rule a door: anyone who may schedule at a cell may place somebody from
+ * outside its area there, recording a reason (`assignments.area_override` +
+ * `area_override_reason`). So the honest answer has THREE states and not two
+ * — `PlaceVerdict` below — and it mirrors the board's own deliberate asymmetry
+ * (§19.76): a PRODUCT outside its scope is filtered out of the picker, because
+ * the database refuses it with no way through; a PERSON outside their area is
+ * left in and ANNOTATED, because a supervisor can still say yes. Filtering the
+ * person would delete the feature.
+ *
+ * ⚠️ NOTHING HERE MAY BE COPIED ONTO THE PRODUCT HALF, which stays absolute:
+ * §19.74's proof that `delete_owned_row` needs no escalation depends on a
+ * product never sitting outside its owner.
  *
  * The mirror is written against the SQL clause by clause; each is quoted at
  * its counterpart below. Three details are easy to get wrong and all three
@@ -253,6 +296,70 @@ export function isDay(day: string): boolean {
 }
 
 /* ===========================================================================
+ * The area rule — `app_guard_assignment_scope` (migration 0028 §4 / D109).
+ *
+ * The clause this mirrors, the operator half of that trigger:
+ *
+ *     if not exists (
+ *       select 1 from nodes owner
+ *       where owner.id = op.site_node_id
+ *         and target.path <@ owner.path
+ *     ) then raise ... 'not_offered_here';
+ *
+ * ⭐ `<@` IS REFLEXIVE, so a person owned by the very cell being scheduled is
+ * inside it. `scope.ts`'s `isAtOrBelow` records the same fact and case S9 pins
+ * it on the server. An implementation that tested strict descent would agree
+ * everywhere except on the one node the user actually picked — which is the
+ * hardest disagreement of all to notice.
+ *
+ * ⭐ WALKED THROUGH `parentId`, NOT THROUGH `path`, for exactly the reason
+ * `effectiveRequirements` gives above: `nodes.path` is a Postgres `ltree` this
+ * module is never handed (`NodeLike` has no `path`), and re-deriving `<@` from
+ * a string is where `plant1.line1` becomes an ancestor of `plant1.line10`.
+ *
+ * ⚠️ THREE ANSWERS, NOT TWO. A walk that reaches a root without meeting the
+ * owner is a confident `"outside"`. A walk that runs into a missing parent or
+ * a cycle is `"unknown"` — and `"unknown"` must never be read as `"inside"`,
+ * because that is precisely the tick the server would refuse.
+ *
+ * ⭐ AND `"unknown"` IMPLIES `NodeRequirements.complete === false`, ALWAYS. It
+ * is the same walk over the same map, and the only two ways it can end early
+ * are the two that also stop `effectiveRequirements` reaching a root. That is
+ * why an unknown area adds no reason sentence of its own: *"the places above
+ * this one could not be read"* is already in the list, saying it once.
+ * ⚠️ The converse does NOT hold — an owner found BELOW a break higher up is a
+ * confident `"inside"` on an incomplete chain, and that is right.
+ * =========================================================================== */
+
+/** Where a place sits relative to the person's own area. */
+export type AreaStanding = "inside" | "outside" | "unknown";
+
+/**
+ * Is `node` at or below `ownerId`, walking the parent chain?
+ *
+ * @param ownerId `operators.site_node_id` — NOT NULL since 0028 / D108, and
+ *   not necessarily a root (D109).
+ */
+export function areaStandingFor(
+  node: NodeLike,
+  ownerId: string,
+  byId: ReadonlyMap<string, NodeLike>,
+): AreaStanding {
+  const seen = new Set<string>();
+  let cur: NodeLike | undefined = node;
+  while (cur !== undefined) {
+    // Reflexive, and tested FIRST: the owner may be this very node, and a
+    // cycle that contains the owner should still answer "inside".
+    if (cur.id === ownerId) return "inside";
+    if (seen.has(cur.id)) return "unknown"; // a cycle, and no root was reached
+    seen.add(cur.id);
+    if (cur.parentId === null) return "outside"; // a whole chain, owner not on it
+    cur = byId.get(cur.parentId);
+  }
+  return "unknown"; // a parent id with no node beside it
+}
+
+/* ===========================================================================
  * workPlacesFor — the answer this screen exists to give.
  *
  * One entry per SCHEDULABLE node: a tick, or a cross with the reason for it.
@@ -287,6 +394,28 @@ export interface WorkPlace {
   name: string;
   /** `nodes.active`. Requirements still inherit through an inactive ancestor. */
   active: boolean;
+  /**
+   * Where this place sits relative to the person's own area (D109). `"outside"`
+   * is not a refusal on this screen — D113 lets whoever may schedule here place
+   * them anyway, recording a reason — but it is never a tick.
+   */
+  area: AreaStanding;
+  /**
+   * TRAININGS ALONE: every required ticket held, none of them lapsed inside the
+   * window, and every one of them readable. This is exactly what `eligible`
+   * meant before the area rule was mirrored, and it is kept as its own field
+   * because a place OUTSIDE somebody's area still has a training answer worth
+   * showing beside it — waving through "not from this area" must not silently
+   * also wave through "no Welding ticket".
+   */
+  qualified: boolean;
+  /**
+   * The whole answer, and the only thing that draws a tick: `qualified` AND
+   * inside their area.
+   *
+   * ⚠️ DO NOT LET A CALLER GO BACK TO READING `qualified` HERE. A tick on
+   * trainings alone is the defect this field was split to fix.
+   */
   eligible: boolean;
   missing: readonly MissingTicket[];
   expiring: readonly ExpiringTicket[];
@@ -402,7 +531,17 @@ export function workPlacesFor(
       }
     }
 
+    const qualified = complete && missing.length === 0 && expiring.length === 0 && unnamed === 0;
+    const area = areaStandingFor(node, operator.siteNodeId, byId);
+
     const reasons: string[] = [];
+    // The headline fact first — it is what decides the mark on the row, and the
+    // training sentences under it are a second, separate decision.
+    // ⚠️ Only `"outside"` speaks here. `"unknown"` is covered by the sentence
+    // below it, which is the same walk breaking; see `areaStandingFor`.
+    if (area === "outside") {
+      reasons.push("not from this area — needs a recorded reason");
+    }
     if (!complete) {
       reasons.push("the places above this one could not be read, so this is not a yes");
     }
@@ -421,7 +560,9 @@ export function workPlacesFor(
       label: labelFor(node, byId),
       name: node.name,
       active: node.active,
-      eligible: complete && missing.length === 0 && expiring.length === 0 && unnamed === 0,
+      area,
+      qualified,
+      eligible: qualified && area === "inside",
       missing,
       expiring,
       unnamed,
@@ -432,6 +573,29 @@ export function workPlacesFor(
 
   places.sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
   return places;
+}
+
+/* ===========================================================================
+ * placeVerdict — the three states, in ONE place, so the screen cannot invent a
+ * fourth and every case can be pinned.
+ *
+ *   ✓ can-work         in their area AND holds the trainings
+ *   ✗ missing-training  in their area, not capable — a capability answer
+ *   ⚠ outside-area      allowed only with a recorded reason (D113)
+ *
+ * ⚠️ THE AREA IS TESTED FIRST, and an UNRESOLVED area lands on `outside-area`
+ * with it. Somebody outside their area who also lacks the ticket reads as
+ * `outside-area`, because the area is the fact that decides whether there is a
+ * way through at all — the missing ticket is still named in `reasons`, since
+ * they are two decisions and a supervisor waving one through has not waved
+ * through the other.
+ * =========================================================================== */
+
+export type PlaceVerdict = "can-work" | "missing-training" | "outside-area";
+
+export function placeVerdict(place: WorkPlace): PlaceVerdict {
+  if (place.area !== "inside") return "outside-area";
+  return place.qualified ? "can-work" : "missing-training";
 }
 
 /* ===========================================================================
@@ -661,24 +825,48 @@ export function describeSkillNameClash(clash: SkillNameClash): string {
  * all, it just quietly stops people doing something they are allowed to do.
  * =========================================================================== */
 
-
 /* ===========================================================================
  * A one-line summary of the whole answer, for the operator list.
  * =========================================================================== */
 
 export interface PlacesSummary {
+  /** Every place in the list. `ownArea + outsideArea === total`. */
   total: number;
+  /**
+   * Places inside this person's own area — the DENOMINATOR of the count line.
+   *
+   * ⭐ A COUNT LINE HAS TO NAME WHAT IT COUNTS. *"0 of 2 places in their own
+   * area"* is a true sentence about the same person this screen used to
+   * describe as *"12 of 18 places"*, where the eighteen were every cell in
+   * three plants and all twelve ticks were refusals.
+   */
+  ownArea: number;
+  /** Places they can simply work: inside their area AND qualified. */
   eligible: number;
+  /**
+   * Places outside their area — still reachable, but only by recording a
+   * reason (D113), which is why they are counted rather than hidden.
+   *
+   * ⚠️ An area this module could NOT resolve is counted here, not in
+   * `ownArea`. Same call as `placeVerdict`, same reason: an unproven "inside"
+   * is the one answer that puts a number in front of a reader which the server
+   * will not honour.
+   */
+  outsideArea: number;
   /** How many crosses this module could not fully explain. */
   unresolved: number;
 }
 
 export function summarisePlaces(places: readonly WorkPlace[]): PlacesSummary {
+  let ownArea = 0;
   let eligible = 0;
+  let outsideArea = 0;
   let unresolved = 0;
   for (const p of places) {
+    if (p.area === "inside") ownArea += 1;
+    else outsideArea += 1;
     if (p.eligible) eligible += 1;
     if (!p.complete || p.unnamed > 0) unresolved += 1;
   }
-  return { total: places.length, eligible, unresolved };
+  return { total: places.length, ownArea, eligible, outsideArea, unresolved };
 }

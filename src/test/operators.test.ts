@@ -37,14 +37,32 @@
  *
  * Ana holds Safety Induction (no expiry), Forklift (expires 3 Sep 2026) and
  * Welding (expires 31 Dec 2026). Bob holds nothing. Cara is deactivated.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐ WHO BELONGS WHERE, WHICH IS NOW HALF THE ANSWER. Ana and Bob belong to
+ * PLANT 1, so every cell under it is their own area — which is why the whole
+ * W block above kept its answers when the area rule was mirrored.
+ *
+ * ⭐⭐ CARA BELONGS TO LINE A, AND SHE IS THE DEFECT, REPRODUCED. Two places
+ * in her own area (Cell 1 and Cell 2), Cell 3 outside it under Line B, and no
+ * tickets at all: *"0 of 2 places in their own area"*. That is the same shape
+ * as the screen the maintainer measured, which said **"12 of 18 places"** and
+ * ticked twelve cells the database refuses. A3 and S3 are that case.
+ *
+ * ⚠️ A FIXTURE WHERE EVERY OPERATOR BELONGS TO THE ROOT CANNOT TELL "reads
+ * the owner" FROM "ignores the owner" — rule 3g. Cara is what keeps the A
+ * block from being uniformly `inside`, exactly as `history.test.ts` holds a
+ * live product AND a deleted one on purpose.
  */
 import { expect, it } from "vitest";
 import {
+  areaStandingFor,
   describeSkillNameClash,
   effectiveRequirements,
   findExistingSkillByName,
   formatDay,
   operatorRows,
+  placeVerdict,
   summarisePlaces,
   ticketsFor,
   validateOperatorDraft,
@@ -171,6 +189,10 @@ function place(places: readonly WorkPlace[], nodeId: string): WorkPlace {
       label: "",
       name: "",
       active: false,
+      // The sentinel answers "no" to everything and "cannot tell" about the
+      // area — a missing place must never read as a tick or as `inside`.
+      area: "unknown" as const,
+      qualified: false,
       eligible: false,
       missing: [],
       expiring: [],
@@ -412,6 +434,156 @@ it("W26: places come back in label order", () => {
 });
 
 /* ===========================================================================
+ * The AREA rule — `app_guard_assignment_scope` (0028 / D109), mirrored.
+ *
+ * ⭐⭐ THIS BLOCK EXISTS BECAUSE THE MODULE ANSWERED "where can this person
+ * work" ON TRAININGS ALONE. `OperatorLike.siteNodeId` was declared, carried a
+ * comment citing D109, and was never read — so the screen ticked every cell in
+ * every plant a person's tickets covered. A stale PERMISSION: the client
+ * showing what the server refuses, which is the direction that produces a
+ * screen looking like it works. Every case below is one the old code passed
+ * with a green tick it had not earned.
+ * =========================================================================== */
+
+it("A1: a person owned by their line can work in the cells under it", () => {
+  const p = place(workPlacesFor(cara, input(), TODAY), CELL_1);
+  expect(p.area).toBe("inside");
+});
+
+it("A2: and the same person is OUTSIDE a cell under the sibling line", () => {
+  const p = place(workPlacesFor(cara, input(), TODAY), CELL_3);
+  expect(p.area).toBe("outside");
+});
+
+it("A3 ⭐: the defect — a place outside their area is NEVER a tick, however complete the tickets", () => {
+  // Ana holds every ticket Cell 3 could ask for; the only requirement there is
+  // PHANTOM, so make it readable and held so that TRAININGS alone say yes.
+  const ana3 = { ...ana, siteNodeId: LINE_A };
+  const held = [...ANA_TICKETS, { operatorId: ANA, skillId: PHANTOM, expiresAt: null }];
+  const p = place(
+    workPlacesFor(
+      ana3,
+      input({
+        operatorSkills: held,
+        skills: [...SKILLS, { id: PHANTOM, name: "Phantom", siteNodeId: PLANT }],
+      }),
+      TODAY,
+    ),
+    CELL_3,
+  );
+  expect(p.qualified).toBe(true); // the trainings say yes — this is the old answer
+  expect(p.area).toBe("outside"); // and the server says no
+  expect(p.eligible).toBe(false); // so the screen must not tick it
+});
+
+it("A4: the training answer is kept beside the area one, not swallowed by it", () => {
+  // Cell 3 requires PHANTOM, which Cara does not hold: outside AND unqualified.
+  const p = place(workPlacesFor(cara, input(), TODAY), CELL_3);
+  expect(p.area).toBe("outside");
+  expect(p.qualified).toBe(false);
+  expect(p.unnamed).toBe(1);
+});
+
+it("A5: the owner node itself is inside — `<@` is reflexive (scope.ts, case S9)", () => {
+  const owned = { ...ana, siteNodeId: CELL_2 };
+  expect(place(workPlacesFor(owned, input(), TODAY), CELL_2).area).toBe("inside");
+});
+
+it("A6: a person owned by the root is inside every cell beneath it", () => {
+  const places = workPlacesFor(ana, input(), TODAY);
+  expect(place(places, CELL_1).area).toBe("inside");
+  expect(place(places, CELL_2).area).toBe("inside");
+  expect(place(places, CELL_3).area).toBe("inside");
+});
+
+it("A7: the outside place says what it would take, rather than sitting there unexplained", () => {
+  const p = place(workPlacesFor(cara, input(), TODAY), CELL_3);
+  expect(p.reasons).toContain("not from this area — needs a recorded reason");
+});
+
+it("A8: and the area sentence comes FIRST — it is what decides the mark on the row", () => {
+  const p = place(workPlacesFor(cara, input(), TODAY), CELL_3);
+  expect(p.reasons[0]).toBe("not from this area — needs a recorded reason");
+});
+
+it("A9: a broken ancestor chain is UNKNOWN, never inside", () => {
+  expect(place(workPlacesFor(ana, input(), TODAY), ORPHAN).area).toBe("unknown");
+});
+
+it("A10: an ancestor cycle is unknown too, not a hang and not an inside", () => {
+  expect(place(workPlacesFor(ana, input(), TODAY), LOOP_A).area).toBe("unknown");
+});
+
+it("A11: an unknown area says nothing extra — the broken-chain sentence already said it", () => {
+  const p = place(workPlacesFor(ana, input(), TODAY), ORPHAN);
+  expect(p.reasons).not.toContain("not from this area — needs a recorded reason");
+  expect(p.reasons[0]).toBe("the places above this one could not be read, so this is not a yes");
+});
+
+it("A12: unknown IMPLIES an incomplete requirement chain — it is the same walk", () => {
+  // The invariant `areaStandingFor` is written against: the only two ways the
+  // area walk ends early are the two that stop `effectiveRequirements`
+  // reaching a root. If this ever fails, an unknown area has lost its sentence.
+  for (const p of workPlacesFor(ana, input(), TODAY)) {
+    if (p.area === "unknown") expect(p.complete).toBe(false);
+  }
+  expect(workPlacesFor(ana, input(), TODAY).some((p) => p.area === "unknown")).toBe(true);
+});
+
+it("A13: and the converse does NOT hold — an owner below a break is a confident inside", () => {
+  // Orphan Cell's parent is not in the array, so its chain is incomplete; a
+  // person owned BY Orphan Cell is still definitely inside it.
+  const p = place(workPlacesFor({ ...ana, siteNodeId: ORPHAN }, input(), TODAY), ORPHAN);
+  expect(p.complete).toBe(false);
+  expect(p.area).toBe("inside");
+});
+
+it("A14: areaStandingFor walks the parent chain, not the string — a sibling is not an ancestor", () => {
+  const byId = new Map(NODES.map((n) => [n.id, n]));
+  const cell3 = NODES.find((n) => n.id === CELL_3) as NodeLike;
+  expect(areaStandingFor(cell3, LINE_B, byId)).toBe("inside");
+  expect(areaStandingFor(cell3, LINE_A, byId)).toBe("outside");
+  expect(areaStandingFor(cell3, PLANT, byId)).toBe("inside");
+});
+
+it("A15: an owner this reader cannot see at all is outside, never inside", () => {
+  // `NOWHERE` is not in `nodes`. The walk reaches the root without meeting it,
+  // which is a confident "outside" — and never a tick.
+  const stranger = { ...ana, siteNodeId: NOWHERE };
+  const p = place(workPlacesFor(stranger, input(), TODAY), CELL_1);
+  expect(p.area).toBe("outside");
+  expect(p.eligible).toBe(false);
+});
+
+/* ===========================================================================
+ * placeVerdict — the three states the screen draws.
+ * =========================================================================== */
+
+it("Q1: inside their area and qualified reads as 'can work here'", () => {
+  expect(placeVerdict(place(workPlacesFor(ana, input(), TODAY), CELL_1))).toBe("can-work");
+});
+
+it("Q2: inside their area without the ticket is a capability answer, not an area one", () => {
+  expect(placeVerdict(place(workPlacesFor(bob, input(), TODAY), CELL_2))).toBe("missing-training");
+});
+
+it("Q3: outside their area is the area answer even when the trainings say yes", () => {
+  const p = place(workPlacesFor({ ...ana, siteNodeId: LINE_A }, input(), TODAY), CELL_3);
+  expect(placeVerdict(p)).toBe("outside-area");
+});
+
+it("Q4: an area that could not be resolved reads as outside, never as can-work", () => {
+  expect(placeVerdict(place(workPlacesFor(ana, input(), TODAY), ORPHAN))).toBe("outside-area");
+});
+
+it("Q5: outside AND untrained is one mark and two sentences — two decisions, not one", () => {
+  const p = place(workPlacesFor(cara, input(), TODAY), CELL_3);
+  expect(placeVerdict(p)).toBe("outside-area");
+  expect(p.reasons).toContain("not from this area — needs a recorded reason");
+  expect(p.reasons).toContain("1 required ticket could not be read");
+});
+
+/* ===========================================================================
  * summarisePlaces
  * =========================================================================== */
 
@@ -429,6 +601,30 @@ it("S2: a fully readable, fully qualified answer reports nothing unresolved", ()
     nodes: NODES.filter((n) => n.id === PLANT || n.id === LINE_A || n.id === CELL_2),
   });
   expect(summarisePlaces(workPlacesFor(ana, clean, TODAY)).unresolved).toBe(0);
+});
+
+it("S3 ⭐: the count line's denominator is their OWN AREA — Cara is '0 of 2', not '0 of 6'", () => {
+  // The maintainer's screen said "12 of 18 places" for somebody whose own line
+  // held two, both of them refusals. This is that sentence, made true.
+  const s = summarisePlaces(workPlacesFor(cara, input(), TODAY));
+  expect(s.ownArea).toBe(2); // Cell 1 and Cell 2, under Line A
+  expect(s.eligible).toBe(0); // she holds no tickets at all
+  expect(s.total).toBe(6); // and the other four are still listed below
+});
+
+it("S4: everywhere else is counted, not hidden — D113 means it is reachable", () => {
+  const s = summarisePlaces(workPlacesFor(cara, input(), TODAY));
+  expect(s.outsideArea).toBe(4); // Cell 3, Orphan Cell, and both halves of the loop
+  expect(s.ownArea + s.outsideArea).toBe(s.total);
+});
+
+it("S5: an area that could not be resolved counts as outside, never towards their own", () => {
+  // Orphan Cell and the two loop halves are `unknown`. Counting an unproven
+  // "inside" would put a denominator in front of a reader that the server
+  // will not honour.
+  const s = summarisePlaces(workPlacesFor(ana, input(), TODAY));
+  expect(s.ownArea).toBe(3); // Cell 1, Cell 2, Cell 3 — Ana belongs to the plant
+  expect(s.outsideArea).toBe(3);
 });
 
 /* ===========================================================================

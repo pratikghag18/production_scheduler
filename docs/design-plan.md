@@ -6323,12 +6323,25 @@ the larger one**: ownership decides **where a thing is offered**, not only who
 may edit it. A product scoped to Line 1 is offered on every cell at or below
 Line 1 and nowhere else; company-wide stays the everywhere fallback.
 
-**⭐ AND OPERATORS ARE DELIBERATELY NOT PART OF THAT RULE (his call).** Where a
-person may work is already answered by tickets and requirements. A second
-mechanism that can disagree with `check_eligibility` would mean two systems
-saying no for different reasons with nothing on screen able to reconcile them.
-**An operator's scope filters the roster and nothing else** — who you see and
-who you administer, never who may be assigned where.
+**⭐ AND OPERATORS ARE DELIBERATELY NOT PART OF THAT RULE (the maintainer's
+call).** Where a person may work is already answered by tickets and
+requirements. A second mechanism that can disagree with `check_eligibility`
+would mean two systems saying no for different reasons with nothing on screen
+able to reconcile them. **An operator's scope filters the roster and nothing
+else** — who you see and who you administer, never who may be assigned where.
+
+> ⚠️⚠️ **SUPERSEDED — THIS PARAGRAPH IS NO LONGER TRUE, AND IT IS THE CLEAREST
+> case of [[decision-record-drift]] rule 6 in the project: a CONCLUSION
+> outliving its premise.** Migration 0028 / **D109** made ownership decide who
+> may be assigned where after all — `app_guard_assignment_scope` refuses an
+> assignment whose operator is not owned by an ancestor-or-self of the cell —
+> and it arrived as a consequence of a different requirement, so nothing marked
+> D103 as affected (§19.75). Migration 0030 / **D113** then gave that refusal a
+> supervisor override with a recorded reason. **The two systems D103 feared are
+> exactly what shipped, and §19.77 is the screen that had to learn to say so:**
+> two rules, three states, one list. This paragraph was quoted verbatim in two
+> comments in `OperatorsPanel.tsx` and both were still there, and still false,
+> a year of decisions later.
 
 **The shape, and why it is cheaper than it looks:**
 
@@ -8019,3 +8032,118 @@ reported every mutation as an INSTRUMENT FAILURE (the "assert the match happened
 and the second reported the two expected-inert ones as **CAUGHT**, because a missing upgrade file
 produces zero PASS lines and the runner counts PASS lines. **A CAUGHT verdict can be as false as a
 NOT CAUGHT one, and `sed` over an already-substituted string is a live way to produce it.**
+
+## §19.77 — the Operators screen answers "where can this person work" on trainings alone
+
+**Found by the maintainer, 29 August, by opening the screen** — which is now how six of the last
+seven defects have been found. He picked somebody who belongs to one line in Plant A, and the
+panel *"Where Operator A1 can work"* listed **every schedulable cell in all three plants** and
+ticked twelve of them. His words: *"I can see him across everything, is that by design? It paints
+the wrong picture."*
+
+**Measured on his screenshot:** the person belongs to *Plant A › Area 1 › Line 1*, whose subtree
+holds Cell 1 and Cell 2, and both of those are crosses (missing A-Welding). **The true answer is
+0 places. The screen said "12 of 18 places", and all twelve ticks were cells the server refuses.**
+
+### ⭐⭐ A STALE PERMISSION, WHICH IS THE DANGEROUS DIRECTION OF §19.74'S FAMILY
+
+`workPlacesFor` (`src/features/admin/lib/operators.ts`) loops
+`for (const node of input.nodes)`, skips the ones that are not schedulable, and asks **only** about
+trainings. **It never reads `operator.siteNodeId`.**
+
+⚠️ **The field was declared on `OperatorLike` thirty lines above the loop, with a comment citing
+D108 and D109 — *"it need not be a root (D109)"* — and the loop ignored it.** The fact was present
+and unread. This is not a case of missing information, and no amount of extra documentation would
+have prevented it.
+
+§19.74 deleted two client rules in this same family, and the difference between them is the whole
+point:
+
+| | what it does | how it fails |
+| --- | --- | --- |
+| `describeDeleteRefusal`, `deletePrecheck` | stale **REFUSAL** — the client refuses what the server allows | quietly stops people doing what they may. Annoying, invisible, never throws |
+| `workPlacesFor`'s missing area check | stale **PERMISSION** — the client shows what the server refuses | **produces a screen that looks like it works.** A supervisor plans a week from it and is refused at the moment of booking, with an error that says nothing about why the screen said yes |
+
+[[verification-standard]] rule 8c states the invariant one way round: **anything the client SHOWS,
+the server must ALLOW.** The module's own header already said so at length — *"this must never
+show a tick where the server would refuse"* — while mirroring only one of the two server rules
+that decide the answer.
+
+### ⚠️ THE FIX IS NOT TO HIDE THE OTHER PLANTS
+
+D113 means a supervisor **may** place someone outside their area with a reason. Hiding them would
+delete a feature the board already offers. So the honest answer has **three** states, not two, and
+it mirrors §19.76's deliberate asymmetry exactly — a PRODUCT outside its scope is filtered out of
+the picker because the database refuses it with no way through; a PERSON outside their area is
+left in and annotated because somebody can still say yes:
+
+| state | mark | meaning |
+| --- | --- | --- |
+| can work here | ✓ `--signal-ok` | in their area **and** holds the trainings |
+| missing the training | ✕ `--crit` | in their area, not capable — a capability answer |
+| outside their area | ⚠ `--signal-warn` | allowed only with a recorded reason (D113) |
+
+`--signal-warn` is the board's own **override** colour, and the amber row means there what it means
+here. A red ✕ would say "no" about something the server will accept.
+
+### The shape it took in the code
+
+- **`eligible` was SPLIT, not widened.** `qualified` is what `eligible` used to mean — trainings
+  alone — and `eligible` is now `qualified && area === "inside"`. ⭐ **Keeping the training answer
+  as its own field is the same "two flags, two reasons" rule §19.76 wrote for the board:** waving
+  through *"not from this area"* must not silently also wave through *"no Welding ticket"*, so an
+  outside place still carries its training verdict and still names the missing ticket.
+- **`areaStandingFor` walks `parentId`, not `path`.** `NodeLike` has no `path` — the admin read
+  does not select the ltree — and re-deriving `<@` from a string is where `plant1.line1` becomes an
+  ancestor of `plant1.line10`. ⭐ It is **reflexive**, matching `<@` and `scope.ts`'s `isAtOrBelow`:
+  a person owned by the very cell being scheduled is inside it (case S9 pins that on the server),
+  and a strict-descent implementation would agree everywhere except on the one node the user picked.
+- **Three answers, not two.** A walk that reaches a root without meeting the owner is a confident
+  `"outside"`. A walk that hits a missing parent or a cycle is `"unknown"`, and `"unknown"` is
+  never read as `"inside"` — that is precisely the tick the server would refuse. `"unknown"` is
+  counted with `outside`, because an unproven "inside" is the one answer that puts a number in
+  front of a reader that the server will not honour.
+- ⭐ **`"unknown"` implies `NodeRequirements.complete === false`, always** — same walk, same map,
+  and the only two ways it can end early are the two that stop `effectiveRequirements` reaching a
+  root. That is why an unknown area adds **no reason sentence of its own**: *"the places above this
+  one could not be read"* is already in the list, saying it once. A12 pins the invariant, so the
+  day it stops holding is the day an unknown area loses its explanation. ⚠️ The converse does not
+  hold — an owner found *below* a break higher up is a confident `"inside"` on an incomplete
+  chain, and that is right (A13).
+
+### ⭐ AND THE COUNT LINE HAD TO NAME WHAT IT COUNTS
+
+`summarisePlaces` returned `{total, eligible, unresolved}`, so the headline read **"12 of 18
+places"** with no way for a reader to know that the 18 was every cell in three plants and the 12
+was an answer to a different question. It now returns `ownArea` and `outsideArea` as well, and the
+line reads:
+
+> **0 of 2 places in their own area · 4 elsewhere, only with a recorded reason**
+
+with everything else still listed below it. `ownArea + outsideArea === total`, always.
+
+### The two comments, and why they are half the finding
+
+`OperatorsPanel.tsx` carried the D103 paragraph above almost verbatim, in **two** places: one over
+the `scopeChoices` memo and one three lines above the "Belongs to" `<select>`, saying *"It filters
+the roster and nothing else in this release — the server does not yet refuse an assignment outside
+it, and no label here may imply that it does."* **True when written, false since 0028, and
+committed again in `f7bf456` an hour before the defect was found.** Both are rewritten, and D103
+itself now carries a supersession block — [[decision-record-drift]] rule 10, and the reason a
+code-comment decision needs the same treatment a migration header gets.
+
+### Numbers
+
+**Client-only — no migration, so 30 migrations and 468 database checks stand.** **App tests 1172
+in 28 files**, copied from the runner's own total line: the 1149 baseline confirmed at the start of
+the session (the first time that prediction has ever been measured) plus 23 new cases — A1–A15 for
+the area rule, Q1–Q5 for the three states, S3–S5 for the count line. **Four deliberate breakages,
+four caught**: `eligible` ignoring the area again (A3, A15), an unresolvable area reading as inside
+(A9, Q4, S3–S5), a non-reflexive walk (A5, A13), and the summary counting an unresolved area
+towards their own (S3–S5). `tsc` 0, `eslint` 0, prettier applied to all four files.
+
+⚠️ **What is NOT covered: there is no test that mounts `OperatorsPanel`.** `productsPanel.test.tsx`
+exists as the precedent for one, and §19.67 / D106 is the record of what a screen-level gap costs.
+Every rule above is pinned in the pure module; the mapping from `placeVerdict` to a mark and a
+class is pinned by nothing, which is why `placeVerdict` lives beside the rule rather than inside
+the component — the smallest thing the component can be trusted to do.

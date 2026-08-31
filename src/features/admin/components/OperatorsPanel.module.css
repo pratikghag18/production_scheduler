@@ -191,11 +191,18 @@
    of independently-sized flex rows reads as ragged text rather than as data,
    and this list is read by scanning DOWN the mark column.
 
-   `--signal-ok` and `--crit` are the board's own yes/no pair, reused rather
-   than reinvented (D100). The mark is not colour ALONE — ✓/✕ carry the meaning
-   for anyone who cannot separate the two hues.
+   `--signal-ok`, `--signal-warn` and `--crit` are the board's own three-way
+   signal set, reused rather than reinvented (D100). The mark is not colour
+   ALONE — ✓/⚠/✕ carry the meaning for anyone who cannot separate the hues,
+   and every non-tick row states its reason in words beside it.
+
+   ⭐ THE AMBER ROW IS NOT A THIRD KIND OF FAILURE. `--signal-warn` is the
+   board's "override" colour (tokens.css names it that), and this row means the
+   same thing it means there: allowed, by somebody who records a reason. A red
+   ✕ would say "no" about something the server will accept.
    --------------------------------------------------------------------------- */
 .placeYes,
+.placeWarn,
 .placeNo {
   display: grid;
   grid-template-columns: 1.25rem minmax(8rem, 1fr) minmax(0, 1.4fr);
@@ -208,6 +215,7 @@
 
 @media (max-width: 42rem) {
   .placeYes,
+  .placeWarn,
   .placeNo {
     grid-template-columns: 1.25rem minmax(0, 1fr);
   }
@@ -217,6 +225,7 @@
   background: var(--page);
 }
 
+.placeWarn,
 .placeNo {
   background: var(--break-hatch-bg);
 }
@@ -228,6 +237,10 @@
 
 .placeYes .mark {
   color: var(--signal-ok);
+}
+
+.placeWarn .mark {
+  color: var(--signal-warn);
 }
 
 .placeNo .mark {
