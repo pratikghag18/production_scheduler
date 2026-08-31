@@ -431,6 +431,7 @@ export type Database = {
           expires_at: string | null
           operator_id: string
           org_id: string
+          signed_off_by: string | null
           skill_id: string
           updated_at: string
         }
@@ -440,6 +441,7 @@ export type Database = {
           expires_at?: string | null
           operator_id: string
           org_id: string
+          signed_off_by?: string | null
           skill_id: string
           updated_at?: string
         }
@@ -449,6 +451,7 @@ export type Database = {
           expires_at?: string | null
           operator_id?: string
           org_id?: string
+          signed_off_by?: string | null
           skill_id?: string
           updated_at?: string
         }
@@ -880,28 +883,34 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
+          external_id: string | null
           id: string
           name: string
           org_id: string
           site_node_id: string
+          source: string
           updated_at: string
         }
         Insert: {
           active?: boolean
           created_at?: string
+          external_id?: string | null
           id?: string
           name: string
           org_id: string
           site_node_id: string
+          source?: string
           updated_at?: string
         }
         Update: {
           active?: boolean
           created_at?: string
+          external_id?: string | null
           id?: string
           name?: string
           org_id?: string
           site_node_id?: string
+          source?: string
           updated_at?: string
         }
         Relationships: [
@@ -969,6 +978,10 @@ export type Database = {
         Returns: undefined
       }
       app_can_edit_node: { Args: { p_node: string }; Returns: boolean }
+      app_can_edit_operator: {
+        Args: { p_operator_id: string }
+        Returns: boolean
+      }
       app_can_read_node: { Args: { p_node: string }; Returns: boolean }
       app_can_read_operator: { Args: { p_operator: string }; Returns: boolean }
       app_can_read_owned: { Args: { p_site_node: string }; Returns: boolean }

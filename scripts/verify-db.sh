@@ -187,6 +187,7 @@ UPGRADE_CHECKS="
 20260828000029_delete_keeps_the_past.sql|upgrade_0029_delete_keeps_the_past.sql|6
 20260828000030_area_override.sql|upgrade_0030_area_override.sql|6
 20260831000031_trainings_per_owner.sql|upgrade_0031_trainings_per_owner.sql|7
+20260831000032_training_record_and_supervisors.sql|upgrade_0032_training_record.sql|6
 "
 
 run_upgrade_check() {
