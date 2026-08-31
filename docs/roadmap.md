@@ -3,7 +3,7 @@
 > **The living status file.** `design-plan.md` records *decisions*; this file records *state*.
 > **Convention:** every working session — human, Fable, or Sonnet/Opus agent — updates this file when it completes or starts anything below. Agent briefs include this as a required final step.
 
-**Last updated:** 2026-08-28, session 17 — **0029 (D110), 0030 (D113) AND `offeredHere` ON THE BOARD (§19.74, §19.76).** ⭐⭐ **And a defect 0029 shipped, found on the way and worse than either feature: `shapes.ts` did not follow 0029's nullable columns**, so a run whose product had been deleted parsed as `null` — and `parseArrayOf` nulls the WHOLE ARRAY on the first failure, so **one deleted product with history would have stopped the board loading for everyone, with an error about a shape rather than about a product.** `tsc` was clean (the generated types describe the database; the runtime guard is hand-written), the SQL suite was green (it parses nothing), and the demo world has never had a delete run against it. ⭐ **The rule that comes out of it: a migration that makes a column NULLABLE is a client change, and it is the one kind `db:types` does not surface — after any `DROP NOT NULL`, grep the client and read every guard that mentions the column.** Fixed with `src/features/board/lib/history.ts`, which draws a deleted product or person from D110's snapshot instead of "(unknown product)" in grey. **0030/D113: the area rule gets a door** — `assignments.area_override` + a required reason, **a COLUMN and not an RPC argument**, because the refusal is a trigger that also fires on a plain `PATCH` passing through no function at all; an override plumbed through `create_assignment` alone would work from one screen and refuse from the next. All three write paths carry it (`create_assignment`, `move_run`, and `apply_split_coverage` through its nested call — *three layers, and that is the middle one*), and **`move_run` pre-checks and NAMES every affected person** instead of letting the trigger raise about whichever row it reached first. ⚠️ **The product half stays absolute and must**: §19.74's proof that `delete_owned_row` needs no escalation depends on it. **On screen the two halves are treated OPPOSITELY, deliberately** — a product outside its scope is *filtered out* of the picker (refused with no way through), a person outside theirs is *left in and annotated* with a checkbox and a reason. **Two flags, two reasons: waving through "no Welding ticket" must not silently also place somebody in a plant they are not cleared for.** **30 migrations. 468 database checks (445 → 468), exit 0, run here. 15 mutations: 13 caught; the two others are the inert control and one branch the composite FK makes unreachable, both written down.** **App tests 1149 in 28 files — PREDICTED.** ⚠️ **Instrument failure 43: a `sed`-derived mutation runner pointed at files that do not exist and reported the two expected-inert mutations as CAUGHT — a CAUGHT verdict can be as false as a NOT CAUGHT one.**
+**Last updated:** 2026-08-29, session 17 — **0029 (D110), 0030 (D113) AND `offeredHere` ON THE BOARD (§19.74, §19.76). COMMITTED: `442b2cc` ci, `6016b3c` 0029, `f7bf456` 0030+board, `660a32b` docs — tree clean, NOT PUSHED.** ⭐⭐ **AND ONE MORE FOUND BY THE MAINTAINER AFTER THE COMMITS, BY OPENING THE OPERATORS SCREEN: `workPlacesFor` answers "where can this person work" on TRAININGS ALONE and never reads their owner** — it listed 12 of 18 cells as available for a person whose own line contains 2, both of them refusals. **A stale PERMISSION, not a stale refusal: the screen says yes where the server says no** (rule 8c's direction). See NEXT item 1(b); client-only, and it is the next thing to build. **0029 (D110), 0030 (D113) AND `offeredHere` ON THE BOARD (§19.74, §19.76).** ⭐⭐ **And a defect 0029 shipped, found on the way and worse than either feature: `shapes.ts` did not follow 0029's nullable columns**, so a run whose product had been deleted parsed as `null` — and `parseArrayOf` nulls the WHOLE ARRAY on the first failure, so **one deleted product with history would have stopped the board loading for everyone, with an error about a shape rather than about a product.** `tsc` was clean (the generated types describe the database; the runtime guard is hand-written), the SQL suite was green (it parses nothing), and the demo world has never had a delete run against it. ⭐ **The rule that comes out of it: a migration that makes a column NULLABLE is a client change, and it is the one kind `db:types` does not surface — after any `DROP NOT NULL`, grep the client and read every guard that mentions the column.** Fixed with `src/features/board/lib/history.ts`, which draws a deleted product or person from D110's snapshot instead of "(unknown product)" in grey. **0030/D113: the area rule gets a door** — `assignments.area_override` + a required reason, **a COLUMN and not an RPC argument**, because the refusal is a trigger that also fires on a plain `PATCH` passing through no function at all; an override plumbed through `create_assignment` alone would work from one screen and refuse from the next. All three write paths carry it (`create_assignment`, `move_run`, and `apply_split_coverage` through its nested call — *three layers, and that is the middle one*), and **`move_run` pre-checks and NAMES every affected person** instead of letting the trigger raise about whichever row it reached first. ⚠️ **The product half stays absolute and must**: §19.74's proof that `delete_owned_row` needs no escalation depends on it. **On screen the two halves are treated OPPOSITELY, deliberately** — a product outside its scope is *filtered out* of the picker (refused with no way through), a person outside theirs is *left in and annotated* with a checkbox and a reason. **Two flags, two reasons: waving through "no Welding ticket" must not silently also place somebody in a plant they are not cleared for.** **30 migrations. 468 database checks (445 → 468), exit 0, run here. 15 mutations: 13 caught; the two others are the inert control and one branch the composite FK makes unreachable, both written down.** **App tests 1149 in 28 files — PREDICTED.** ⚠️ **Instrument failure 43: a `sed`-derived mutation runner pointed at files that do not exist and reported the two expected-inert mutations as CAUGHT — a CAUGHT verdict can be as false as a NOT CAUGHT one.**
 ---
 
 ## Phase 0 — Design & mockups
@@ -169,18 +169,40 @@
 > - **Explain in plain language in the chat, not jargon — draw it if that is clearer.** Keep the
 >   gameplan artifact updated; do not stop until you need me to do something or want my opinion.
 >
-> **NEXT, IN ORDER (revised Aug 28, session 17 — 0029 landed; two of stage 21's three remain):**
+> **NEXT, IN ORDER (revised Aug 28, session 17 — 0029 AND 0030 landed, `offeredHere` wired; one of stage 21's three remains, and the Operators screen turns out to have the same hole the board just had):**
 >
-> 1. **🔴 Wire `offeredHere`/`offeredAt` to the board.** Still zero call sites, so a product is
->    offered on every cell you can read. The server refuses the write either way — this is not a
->    safety hole, it is a picker offering something guaranteed to fail, which is D106's shape.
->    The board's `Product` shape in `shapes.ts` carries no `siteNodeId` though `board_window`
->    already returns it. The demo world has line-owned and area-owned parts specifically so this
->    is visible when it lands.
-> 2. **🔴 Migration 0030 (D111), the starter library** a company admin curates and a site admin
+> 1. ✅ **DONE (session 17) — `offeredHere`/`offeredAt` wired to the board.** Products outside
+>    their scope are filtered out of the picker; people outside theirs are kept and annotated,
+>    which is the opposite treatment and deliberate (§19.76). `Product` and `BoardOperator` in
+>    `shapes.ts` now carry `siteNodeId`.
+>
+> 1(b). **🔴🔴 THE OPERATORS ADMIN SCREEN HAS THE SAME HOLE, AND IT IS THE WORSE DIRECTION.
+>    Found by the maintainer, 29 Aug, by opening the screen — which is how five of the last six
+>    were found.** *"Where Operator A1 can work"* lists **every schedulable cell in every plant**
+>    and answers each one on trainings alone. `workPlacesFor` (`features/admin/lib/operators.ts`)
+>    loops `for (const node of input.nodes)` and never consults `operator.siteNodeId` — **the
+>    field is declared on `OperatorLike` with a comment citing D108/D109 and the loop below it
+>    ignores it.** For a person who belongs to *Plant A › Area 1 › Line 1*, the only cells the
+>    server will accept are the two under Line 1; the screen said **"12 of 18 places"**, and
+>    **every one of those twelve green ticks is a cell the database refuses.**
+>    ⚠️ **This is rule 8c's direction — anything the client SHOWS, the server must ALLOW — and it
+>    is the direction that produces a screen that looks like it works.** `describeDeleteRefusal`
+>    and `deletePrecheck` were stale *refusals*, which merely stop people doing what they may;
+>    this is a stale *permission*, which sends a supervisor to plan work that will be rejected at
+>    the moment they try to book it.
+>    ⚠️ **The fix is NOT to hide the other plants.** D113 means a supervisor *may* place someone
+>    outside their area with a reason, so the honest screen has **three** states, not two:
+>    ✓ can work here · ✗ missing the training · ⚠ outside their area, allowed only with a reason.
+>    And the count line must say what it counts — *"0 of 2 places in their own area"*, with the
+>    rest listed below it. Client-only; no migration.
+>    ⚠️ **And a comment in `OperatorsPanel.tsx`, three lines above the "Belongs to" dropdown,
+>    still says *"the server does not yet refuse an assignment outside it"*.** True when written,
+>    false since 0028, and committed again an hour ago. [[decision-record-drift]] rule 10.
+> 2. **🔴 Migration 0031 (D111), the starter library** a company admin curates and a site admin
 >    copies into their own plant — patterns and trainings. It carries a known problem: **training
 >    names are unique per ORG while the row is no longer company-wide**, so one plant can neither
->    see nor create another's "Forklift". Per-owner uniqueness belongs here.
+>    see nor create another's "Forklift". Per-owner uniqueness belongs here. **Renumbered from
+>    0030 — the area override took that number.**
 > 4. ✅ **DONE (session 17) — stage 20's override, D113, §19.75/§19.76.** Was: The maintainer, 28 Aug:
 >    **"anyone who can schedule there"** — a supervisor with edit rights on the cell may place
 >    someone outside their area, recording a reason; the area rule becomes a strong warning rather
