@@ -37,7 +37,12 @@ import {
   type OperatorLike,
   type WorkPlace,
 } from "../lib/operators";
-import { indentedLabel, scopeOptions } from "../lib/scope";
+// ⚠️ THE SCOPE HELPERS ARE IMPORTED HERE AND NOT INTO `../lib/operators`. That
+// module is dependency-free by design — its header says so, and that is what
+// lets `operators.test.ts` run it under `node --experimental-strip-types`. An
+// id becomes a node NAME on this side of the line, in the one place that
+// already owns `nodesById`.
+import { indentedLabel, scopeLabel, scopeOptions, scopePathLabel } from "../lib/scope";
 import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import {
@@ -409,12 +414,29 @@ export function OperatorsPanel() {
   // than pointing at a node it will not save.
   const editSiteValue = scopeChoices.some((o) => o.value === editSite) ? editSite : "";
 
-  // ⚠️ THE CLASH CHECK IS NOT FILTERED, AND MUST NOT BE. Skill names are unique
-  // per ORG (`unique (org_id, name)`), so the question "does this name already
-  // exist" is company-wide whatever the reader is looking at. Asking it of
-  // `skillsInPlant` would let the screen offer to create a name the database
-  // then refuses — a view choice deciding a uniqueness rule.
-  const clash = findExistingSkillByName(skills, newSkill);
+  // ⚠️ STILL `skills`, NOT `skillsInPlant`, AND FOR A REASON THAT OUTLIVED THE
+  // ONE ORIGINALLY WRITTEN HERE. It used to say the question was company-wide
+  // because the names were (`unique (org_id, name)`). Since 0031 they are
+  // unique PER OWNER, and the narrowing that matters is the OWNER — passed as
+  // the third argument — not the plant the reader happens to be looking at.
+  // Asking `skillsInPlant` would still be wrong, and now more sharply: the
+  // plant filter is a reversible VIEW CHOICE, so it would let a widened filter
+  // silently change which names the screen believes are free.
+  //
+  // ⭐ THE OWNER IS WHERE THE SELECTED PERSON BELONGS, because that is the only
+  // place `createAndAttach` can put a new training (see it below). `null` when
+  // nobody is picked: no owner, no insert, nothing to clash with — and the
+  // create is refused separately, with a sentence.
+  // ⚠️ `nodesById` IS HANDED IN SO THE PLANT-WIDE PASS CAN RUN AT ALL. Without
+  // it the finder answers about this owner only and says nothing about the rest
+  // of the plant — which is silence, not a clean bill of health, and would
+  // leave 0031's *"the screen warns per plant"* promise unkept.
+  const clash = findExistingSkillByName(skills, newSkill, selected?.siteNodeId ?? null, nodesById);
+  // ⭐⭐ ONLY A CLASH UNDER THIS OWNER BLOCKS. A `"this-plant"` one is legal
+  // — 0031's constraint is per owner — so refusing it here would be the client
+  // enforcing a rule the database does not have, which is §19.74's stale-refusal
+  // defect: the quiet kind that never fails and just stops people working.
+  const clashBlocks = clash !== null && clash.exact && clash.where === "here";
   const busy =
     createOperator.isPending ||
     updateOperator.isPending ||
@@ -555,11 +577,19 @@ export function OperatorsPanel() {
     }
     const name = newSkill.trim();
     if (name === "") return;
-    // ⭐ THE CLASH IS NOT AN ERROR (the maintainer's decision: skill names stay
-    // company-wide). An exact clash never reaches the database at all — the
-    // screen offers the existing ticket instead, one click away, above.
-    if (clash !== null && clash.exact) {
-      setNotice(describeSkillNameClash(clash));
+    // ⭐ THE CLASH IS NOT AN ERROR, AND SINCE 0031 IT IS ALSO REACHABLE. Names
+    // are unique per OWNER, and `clash` is asked about this person's own owner
+    // — the same node the create below writes — so an exact clash is a row on
+    // the reader's own branch, which they can see and attach in one click. It
+    // never reaches the database at all.
+    //
+    // ⚠️ THAT PRE-CHECK WAS UNRELIABLE BETWEEN 0026 AND 0031 and this comment
+    // did not say so: read-scoping meant the org-wide row that would refuse the
+    // insert was often one the client had never loaded, so the "clash" arrived
+    // as a duplicate-key error instead. `createSkill`'s doc in
+    // `src/lib/api/operators.ts` carries the full account.
+    if (clashBlocks && clash !== null) {
+      setNotice(describeSkillNameClash(clash, scopeLabel(clash.skill.siteNodeId, nodesById)));
       return;
     }
     // ⭐⭐ 0028 CHANGED WHO OWNS A TRAINING MADE HERE, AND THERE IS ONLY ONE
@@ -762,6 +792,41 @@ export function OperatorsPanel() {
                   ) : (
                     <>
                       <span className={styles.ticketTypeName}>{s.name}</span>
+                      {/* ⭐⭐ WHOSE TRAINING THIS IS, AND IT IS LOAD-BEARING
+                          SINCE 0031. Names are unique per OWNER now
+                          (`unique (org_id, site_node_id, name)`), so this list
+                          can legitimately hold two rows both called "Welding"
+                          — and a Rename and a cascading Delete sit beside each
+                          of them. Without the owner they are indistinguishable
+                          and the reader is picking blind.
+
+                          ⭐ THIS IS THE WHOLE OF THE MAINTAINER'S "easily
+                          identify" REQUIREMENT, AND IT IS WHY THE NAME ITSELF
+                          STAYS CLEAN. The demo seed used to spell the plant
+                          into the text (`A-Welding`); read from the column
+                          instead, it follows a node rename for free and 0031
+                          drops the prefix.
+
+                          ⚠️ A SEPARATE ELEMENT, NEVER APPENDED TO THE NAME
+                          SPAN. Concatenating would put the owner inside the
+                          text a reader searches and a test queries — the same
+                          mistake as `A-Welding`, one layer up.
+
+                          The full path is the tooltip because `scopeLabel`
+                          gives the leaf's own name, and two plants can each
+                          have a "Line A". `scopePathLabel` disambiguates on
+                          hover without making every row three names wide.
+
+                          ⚠️ `styles.ticketWhen` is BORROWED — the muted
+                          secondary text this list already has. This lane does
+                          not own `OperatorsPanel.module.css`, so no class was
+                          added for it. */}
+                      <span
+                        className={styles.ticketWhen}
+                        title={scopePathLabel(s.siteNodeId, nodesById)}
+                      >
+                        {scopeLabel(s.siteNodeId, nodesById)}
+                      </span>
                       <button
                         type="button"
                         className={styles.small}
@@ -1157,21 +1222,26 @@ export function OperatorsPanel() {
                 <button
                   type="button"
                   className={styles.primary}
-                  disabled={busy || newSkill.trim() === "" || (clash !== null && clash.exact)}
+                  disabled={busy || newSkill.trim() === "" || clashBlocks}
                   onClick={createAndAttach}
                 >
                   Create &amp; attach
                 </button>
               </div>
-              {/* ⭐ THE CLASH THAT IS NOT AN ERROR. Skill names are company-wide
-                  (`unique (org_id, name)`), and the maintainer's decision is that they
-                  stay that way — so typing a name that already exists is not a
-                  mistake, it is finding the ticket you were about to make. The
+              {/* ⭐ THE CLASH THAT IS NOT AN ERROR. Since 0031 a training's
+                  name is unique PER OWNER (`unique (org_id, site_node_id,
+                  name)`), so typing a name THIS PLACE already holds is not a
+                  mistake — it is finding the ticket you were about to make. The
                   screen says so and attaches it in one click; a raw
-                  duplicate-key error reaching the user would be a defect. */}
+                  duplicate-key error reaching the user would be a defect.
+
+                  ⚠️ AND A NAME ANOTHER PLANT HOLDS IS NOT A CLASH, so nothing
+                  is said about it. The old check refused that too, citing a row
+                  the reader could not open — which read as "you may not have
+                  this name" and was in fact "somebody you cannot see has it". */}
               {clash !== null && (
                 <p className={styles.reuse}>
-                  {describeSkillNameClash(clash)}{" "}
+                  {describeSkillNameClash(clash, scopeLabel(clash.skill.siteNodeId, nodesById))}{" "}
                   {heldIds.has(clash.skill.id) ? (
                     <span>They already hold it.</span>
                   ) : (

@@ -264,11 +264,20 @@ BEGIN
            (SELECT v FROM d_fix WHERE k = v_letter || ':cell' || i)
       FROM generate_series(1, 6) AS i;
 
-    -- Trainings. Names are unique per ORG, so they carry the plant letter.
+    -- ⭐⭐ TRAININGS, AND THE PLANT LETTER IS GONE FROM THE NAMES (0031 / D111a).
+    -- This comment used to read "Names are unique per ORG, so they carry the
+    -- plant letter" — a workaround for a rule that made a real screen unusable:
+    -- a site admin could not name a training anything another plant had used,
+    -- and could not see the row that refused them. `A-Welding` was this file
+    -- doing by hand what every admin would otherwise have had to do by hand.
+    --
+    -- The names are unique PER OWNER now, so all three plants say `Welding` and
+    -- mean their own. **That the demo needs no prefix is the point of 0031**, and
+    -- three identical names sitting in one table is the proof it works.
     INSERT INTO skills (org_id, name, site_node_id) VALUES
-      (v_org, v_letter || '-Welding',  v_plant),
-      (v_org, v_letter || '-Forklift', v_plant),
-      (v_org, v_letter || '-Line 1 Cert', v_line1);
+      (v_org, 'Welding',     v_plant),
+      (v_org, 'Forklift',    v_plant),
+      (v_org, 'Line 1 Cert', v_line1);
   END LOOP;
 END $$;
 
@@ -287,14 +296,22 @@ BEGIN
        AND o.display_name IN ('Operator ' || v_letter || '2',
                               'Operator ' || v_letter || '3',
                               'Operator ' || v_letter || '4')
-       AND s.name = v_letter || '-Welding';
+       -- ⚠⚠ THE OWNER IS PART OF THE LOOKUP NOW, AND HAS TO BE. All three
+       -- plants hold a training called `Welding`, so `s.name = 'Welding'`
+       -- alone matches three rows and would hand every plant's people every
+       -- plant's ticket — which `app_guard_operator_skill_scope` (0028 §4)
+       -- would then refuse, one row at a time, from a seed file. **A name is
+       -- no longer an identifier; a name plus an owner is.**
+       AND s.name = 'Welding'
+       AND s.site_node_id = (SELECT v FROM d_fix WHERE k = v_letter || ':plant');
 
     INSERT INTO operator_skills (org_id, operator_id, skill_id)
     SELECT v_org, o.id, s.id
       FROM operators o, skills s
      WHERE o.org_id = v_org AND s.org_id = v_org
        AND o.display_name = 'Operator ' || v_letter || '1'
-       AND s.name = v_letter || '-Line 1 Cert';
+       AND s.name = 'Line 1 Cert'
+       AND s.site_node_id = (SELECT v FROM d_fix WHERE k = v_letter || ':line1');
   END LOOP;
 END $$;
 
@@ -305,7 +322,9 @@ BEGIN
   FOREACH v_letter IN ARRAY ARRAY['A','B','C'] LOOP
     INSERT INTO node_skill_requirements (org_id, node_id, skill_id)
     SELECT v_org, (SELECT v FROM d_fix WHERE k = v_letter || ':line1'), s.id
-      FROM skills s WHERE s.org_id = v_org AND s.name = v_letter || '-Welding';
+      FROM skills s
+     WHERE s.org_id = v_org AND s.name = 'Welding'
+       AND s.site_node_id = (SELECT v FROM d_fix WHERE k = v_letter || ':plant');
   END LOOP;
 END $$;
 

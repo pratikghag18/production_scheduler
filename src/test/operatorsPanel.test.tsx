@@ -268,6 +268,31 @@ function placeRow(label: string): HTMLElement {
 }
 
 /**
+ * One row of the ticket-types list, found by the training's own name.
+ *
+ * ⚠️ BY THE NAME, WHICH SINCE 0031 NEED NOT BE UNIQUE — so `getAllByText` is
+ * what O19 uses and this single-row helper is only for the cases where one row
+ * is expected. The owner is asserted from INSIDE the row, never by matching a
+ * combined string: the point of the change is that the plant is a separate
+ * element and not part of the name.
+ */
+function ticketTypeRow(name: string): HTMLElement {
+  const li = within(aside()).getByText(name).closest("li");
+  if (li === null) throw new Error(`no ticket type row named ${name}`);
+  return li;
+}
+
+/** Open the ticket-types list — it is collapsed until somebody asks for it. */
+function showTicketTypes() {
+  fireEvent.click(screen.getByRole("button", { name: "Ticket types" }));
+}
+
+/** The detail pane's "make a new training" box. */
+function newTicketBox(): HTMLElement {
+  return screen.getByRole("textbox", { name: "…or a new one" });
+}
+
+/**
  * The count line above the places, whitespace-normalised.
  *
  * ⚠️ READ AS ONE SENTENCE, not as three assertions about three numbers. The
@@ -649,5 +674,147 @@ describe("OperatorsPanel — the filter de-stales what it narrowed past (§19.79
     // a database error.
     expect(h.updateMutate).not.toHaveBeenCalled();
     expect(screen.getByRole("status").textContent).toBe("Choose where this person belongs.");
+  });
+});
+
+/* ===========================================================================
+ * D111a / migration 0031 — a training's name is unique PER OWNER, so the
+ * screen has to show the owner and stop refusing other people's names.
+ *
+ * ⭐⭐ THE TWO HALVES ARE ONE CHANGE AND ARE PINNED TOGETHER HERE. Making the
+ * name legal in two plants (O20) is only safe because the list says whose is
+ * whose (O18/O19); shipping the constraint without the owner column would leave
+ * a Rename and a CASCADING Delete sitting beside two rows a reader cannot tell
+ * apart. `operators.test.ts`'s N7–N11 pin the rule; these pin that a person
+ * sees it.
+ *
+ * ⚠️ THE OWNER IS ASSERTED AS ITS OWN ELEMENT, never as part of the name. The
+ * workaround 0031 removes was `A-Welding` — the plant spelled into the text —
+ * and a case that matched "Forklift Plant 1" as one string would pass on a
+ * screen that had put it straight back.
+ * =========================================================================== */
+
+describe("OperatorsPanel — a training's name is unique per owner (D111a / 0031)", () => {
+  it("O18 ⭐ every ticket type names its owner, with the full path on hover", () => {
+    render(<OperatorsPanel />);
+    showTicketTypes();
+    // The leaf's own name is what the row shows: short enough to sit beside a
+    // training without wrapping the list.
+    expect(within(ticketTypeRow("Forklift")).getByText("Plant 1")).toBeTruthy();
+    expect(within(ticketTypeRow("Crane")).getByText("Plant 2")).toBeTruthy();
+    // ⚠️ AND THE TOOLTIP IS THE WHOLE CHAIN, because a leaf name is not unique
+    // either — two plants can each have a "Line A", which is the confusion the
+    // owner column exists to end rather than to move one level down.
+    expect(within(ticketTypeRow("Crane")).getByTitle("Plant 2")).toBeTruthy();
+  });
+
+  it("O19 ⭐⭐ two trainings that now share a name are told apart by their owners", () => {
+    // ⚠️ THIS ROW IS ILLEGAL BEFORE 0031 AND ORDINARY AFTER IT. `unique (org_id,
+    // site_node_id, name)` lets Line A hold a "Forklift" while Plant 1 already
+    // has one — and this list carries a Delete that cascades through every
+    // holder and every requirement. Two identical rows beside that button is
+    // the failure the owner column is here to prevent.
+    h.state.data.skills = [
+      ...h.baseData().skills,
+      { id: "sk-fork-la", name: "Forklift", siteNodeId: id.LA },
+    ];
+    render(<OperatorsPanel />);
+    showTicketTypes();
+    const forkRows = within(aside())
+      .getAllByText("Forklift")
+      .map((el) => el.closest("li") as HTMLElement);
+    expect(forkRows).toHaveLength(2);
+    expect(within(forkRows[0]).getByText("Plant 1")).toBeTruthy();
+    expect(within(forkRows[1]).getByText("Line A")).toBeTruthy();
+    expect(within(forkRows[1]).getByTitle("Plant 1 › Line A")).toBeTruthy();
+  });
+
+  it("O20 ⭐⭐ a name another plant already holds is not flagged, and creating stays available", () => {
+    // ⚠️⚠️ THE DEFECT 0031 FIXES, AT THE SCREEN. Zoe belongs to Line Z in Plant
+    // 2; Plant 1 owns "Forklift". The old check scanned every readable training
+    // and refused her the name — citing a row that read-scoping meant she could
+    // not see, open, edit or reuse. The database now accepts it, so the screen
+    // must say nothing at all and leave the button live.
+    render(<OperatorsPanel />);
+    pick("Zoe Zhang");
+    fireEvent.change(newTicketBox(), { target: { value: "Forklift" } });
+    expect(screen.queryByText(/already has a Forklift/)).toBeNull();
+    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(false);
+  });
+
+  it("O21 ⭐ a name this person's own place already holds is offered for reuse, and creating is refused", () => {
+    // The other side of O20, and the reason the check is kept at all. Ann
+    // belongs to Line A, so a training owned by Line A is the one thing that
+    // WILL be refused with a 23505 — `createAndAttach` writes
+    // `siteNodeId: selected.siteNodeId`, which is exactly the owner the clash
+    // was asked about.
+    h.state.data.skills = [
+      ...h.baseData().skills,
+      { id: "sk-fork-la", name: "Forklift", siteNodeId: id.LA },
+    ];
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fireEvent.change(newTicketBox(), { target: { value: "Forklift" } });
+    expect(screen.getByText(/This place already has a Forklift — use that one\./)).toBeTruthy();
+    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    // ⭐ AND THE OFFER IS THE POINT, not the refusal: the clash is a row on her
+    // own branch, so it is one click from being attached.
+    expect(screen.getByRole("button", { name: "Attach Forklift" })).toBeTruthy();
+  });
+
+  it("O23 ⭐⭐ a name ELSEWHERE IN HER OWN PLANT warns but does not block — 0031's promise, kept", () => {
+    // ⚠⚠ THIS CASE EXISTS BECAUSE THE MIGRATION AND THE SCREEN DISAGREED.
+    // 0031 allows two places inside one plant to hold the same name, and its
+    // header justifies that loosening by promising *"the database refuses per
+    // owner; the screen warns per plant"* — honest only because a plant admin
+    // reads their whole plant. The first implementation warned per OWNER, so
+    // this exact situation said nothing at all: Ann belongs to Line A, the
+    // training belongs to Plant 1, and she would have silently created a second
+    // Forklift one level down from the one already there.
+    //
+    // ⭐ It is the MIDDLE of three answers and the only one that is neither:
+    //   O20  another plant   → silence, and creating is free
+    //   O23  her own plant   → warned, and creating is still free
+    //   O21  her own place   → refused, and the existing row is offered
+    h.state.data.skills = [
+      ...h.baseData().skills,
+      { id: "sk-fork-p1", name: "Forklift", siteNodeId: id.P1 },
+    ];
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fireEvent.change(newTicketBox(), { target: { value: "Forklift" } });
+
+    // Named, so she does not have to go hunting for which place holds it.
+    expect(
+      screen.getByText(
+        /already has a Forklift\. Create this one only if it is a different ticket\./,
+      ),
+    ).toBeTruthy();
+
+    // ⭐⭐ AND CREATING STAYS LIVE. Blocking here would be the client enforcing
+    // a rule the database does not have — §19.74's stale refusal, the kind that
+    // never fails loudly and just stops people working.
+    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(false);
+  });
+
+  it("O22: a case-only match in their own place warns but still lets them create", () => {
+    // ⭐ THE CONSTRAINT IS CASE-SENSITIVE (0031's own header says so), so
+    // "forklift" beside "Forklift" under one owner is two storable rows. The
+    // screen warns — two Forklifts in one place is a genuine mess — but must
+    // not refuse what the database accepts, which is the stale-refusal
+    // direction §19.74 is about.
+    h.state.data.skills = [
+      ...h.baseData().skills,
+      { id: "sk-fork-la", name: "Forklift", siteNodeId: id.LA },
+    ];
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fireEvent.change(newTicketBox(), { target: { value: "forklift" } });
+    expect(screen.getByText(/unless this is a different ticket/)).toBeTruthy();
+    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(false);
   });
 });

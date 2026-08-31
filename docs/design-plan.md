@@ -8396,3 +8396,171 @@ the two. It needs each panel to derive who may administer what, and it belongs i
 panel-level suite and it now drives the real store, hook and lib rather than mocking them — which
 is what caught two of the four defects above. The other two panels have no equivalent, so their
 trims, footnotes and de-stalings are pinned only at the library level.
+
+## §19.80 — D111a: a training's name belongs to its plant (migration 0031)
+
+> *"Just making sure, trainings can be added by individual site admins as well, but only to their
+> own sites."* — the maintainer, 31 August, stating it as a fact he expected to already hold
+
+**He was right about the permission and wrong about the outcome, and the gap between those two is
+the whole finding.** `skills_insert` has admitted `app_is_admin_for(site_node_id)` since 0028, so a
+site admin has been allowed to create a training in their own plant all along. What made it
+unusable was a rule from a different migration entirely.
+
+### ⭐⭐ TWO RULES FROM DIFFERENT MIGRATIONS, NEITHER WRONG ALONE
+
+| | rule | from |
+| --- | --- | --- |
+| naming | `unique (org_id, name)` — **company-wide** | 0002 |
+| reading | `app_can_read_owned(site_node_id)` — **your branch only** | 0026 |
+
+Plant A creates "Forklift". Plant B's admin is refused `23505` — **and cannot see, open, edit or
+reuse the row that refused them.** The refusal names something they have no way to reach.
+
+⚠️ **And the client made it worse rather than better.** The panel previews clashes with
+`findExistingSkillByName`, which searches only what the reader can SEE. Plant A's Forklift is not
+among them, so the preview reported no clash, the form looked fine, Create was enabled — and the
+insert came back as *"Something here already uses that name or code."* Nothing "here" did. **A
+screen saying yes where the server says no**, arriving through a uniqueness constraint instead of
+a scope check — §19.77's family, third instance.
+
+⭐ **THE DEMO DATA HAD BEEN WORKING AROUND IT BY HAND SINCE THE DAY IT WAS WRITTEN**, and its own
+comment said so: *"Trainings. Names are unique per ORG, so they carry the plant letter."* Every
+seeded training was `A-Welding`, `B-Welding`, `C-Welding`. A fixture prefixing its way around a
+product rule is the loudest possible signal, sitting in the repository unread.
+
+### The maintainer's proposal, and why the storage half was declined
+
+> *"It needs to be based on plant name I believe, to easily identify… if they do share the same
+> document number, a concatenation with plant name should still be good enough."*
+
+**The requirement — tell them apart easily — is right and is delivered.** The concatenation was
+declined for three reasons, and the first is one this project has already paid for:
+
+1. **It stores a derived value.** Rename Plant A and every training name is silently wrong.
+   §19.79 had just recorded the same shape: a structure is named after its node, and *"the two
+   names coincide only at the moment of creation, and renaming either one does not touch the
+   other."*
+2. **The prefix is noise exactly where it is read most.** A Plant A admin sees "Plant A —" on every
+   row of their own list. It carries information only when comparing across plants, which since
+   read-scoping only a company admin can do.
+3. **It leaves the company-wide index in place**, so every future writer — the starter library's
+   copy step, CSV import, a rename — must remember to re-apply the prefix. A rule the database
+   does not enforce and every caller must remember is the shape this project keeps deleting.
+
+**The plant is already stored, in `site_node_id`.** So it is READ, not written: the constraint
+moves to the owner and the screen shows the owner beside the name.
+
+### What shipped
+
+```sql
+alter table skills drop constraint skills_org_id_name_key;
+alter table skills add  constraint skills_owner_name_unique unique (org_id, site_node_id, name);
+```
+
+**No backfill.** The new constraint admits a strict superset of the old one, so nothing legal
+becomes illegal and no existing INSERT, RPC or screen can start failing on data it used to accept.
+`upgrade_0031_` proves it against real pre-0031 rows anyway, because rule 5b says the argument is
+not the evidence.
+
+⚠️ **IT DEPENDS ON `site_node_id` STAYING NOT NULL, and that is not paranoia.** A unique
+constraint skips any row with a NULL in it. The day the column becomes nullable again, two
+company-wide trainings could both be called "Forklift" and neither would collide — the rule would
+still exist, still read correctly in `pg_constraint`, and guard nothing. **U31-6 is that case.**
+
+⚠️ **AND IT DELIBERATELY DOES NOT ENFORCE PER-PLANT.** `site_node_id` is any node, so Line 1 and
+Line 2 inside one plant may now each hold a "TRN-4471" — a real loosening, weighed and taken:
+per-plant needs a stored root column kept by a trigger that goes stale the day a node is moved,
+while **the client can warn instead, honestly, because a plant admin reads their whole plant.**
+`findExistingSkillByName` is exactly that warning and is reliable at plant scope in a way it never
+was across plants. **Database refuses per owner; screen warns per plant.** T5 asserts the
+loosening so it stays a decision on the record rather than a surprise.
+
+### ⭐ The demo drops its prefixes, and that is the acceptance test
+
+All three plants now hold a training simply called `Welding`. ⚠️ **And three lookups in
+`dev_demo.sql` had to learn the owner** — they identified a training by name alone, which matched
+one row when names were company-unique and matches three now. **A name is no longer an identifier;
+a name plus an owner is.** Measured on the rebuilt demo: three `Welding` rows, three holders each,
+and **zero cross-plant tickets**.
+
+### Numbers
+
+**31 migrations.** **`upgrade_0031_`: 7 checks. `58_trainings_per_owner_test.sql`: 8 checks**, every
+one running as `authenticated` through RLS as a named site admin — because `upgrade_0031_` runs as
+the table owner and **a constraint that is correct behind a policy that lets nobody near it
+produces exactly the same screen as before.** All 15 pass on a real PG17 in the container, with the
+demo world rebuilt on top.
+
+**5 deliberate breakages, 4 caught, 1 inert and explained:**
+
+| # | the break | caught by |
+| --- | --- | --- |
+| 1 | the old company-wide rule never dropped | T3, T5, T7 |
+| 2 | the new rule forgets the owner | T3, T5, T7 |
+| 3 | the old rule dropped, no new rule added | T4 |
+| 4 | the new rule forgets the TENANT (`site_node_id, name`) | **NOT CAUGHT — inert** |
+| 5 | the composite FK simplified to `nodes(id)` | T8 |
+
+⚠⚠ **#4's kind is "equivalent because of a neighbouring rule"**, not "unreachable": `site_node_id`
+is a uuid primary key belonging to one org, and `skills_org_id_site_node_id_fkey` pins a skill's
+org to its owner's. **An unexplained NOT CAUGHT is a hole; an explained one is a finished result
+only if the rule it leans on is itself pinned** — so T8 pins that FK, and #5 proves T8 bites. The
+same treatment stage 12's inert breakage got.
+
+⭐ **T8 also cost a wrong assumption worth recording.** It first asserted `foreign_key_violation`
+and went red: `app_check_site_owner()` is a BEFORE trigger that gets there first and raises
+`invalid_argument` through `api_raise`, so the friendly message reaches the user and the FK never
+fires. **Two layers, and the outer one was a surprise.** The case now asserts the FK's definition
+and the refusal separately, so improving the friendlier layer cannot break it.
+
+⚠️ **And a documented gotcha was walked into anyway: there is no `min(uuid)` in Postgres.**
+U31-1 used it, died, and is fixed — `postgres_gotchas` had recorded that exact fact already.
+
+### ⭐⭐ AND THE MIGRATION'S OWN PROMISE WAS NOT KEPT UNTIL IT WAS CHECKED
+
+0031's header justifies the per-plant loosening with a sentence: *"the database refuses per owner;
+the screen warns per plant."* **The screen, as first built, warned per OWNER.** The client half was
+specified as *"any match, different owner → not a clash"*, which is right for the REFUSAL and wrong
+for the warning — and the two had been collapsed into one function with one answer.
+
+Concretely: Ann belongs to Line A; the plant's trainings belong to Plant 1. Typing "Forklift" said
+nothing at all, and she would have silently created a second Forklift one level below the one
+already there — precisely the confusion the loosening was allowed to risk *because* this warning
+was promised.
+
+⚠️ **A migration header describing behaviour the code does not have is the same drift as a stale
+comment**, and it was caught only because the work was split and the half that read the spec
+noticed it disagreed with the half that read the migration. Nothing else would have.
+
+**`findExistingSkillByName` now answers in three, not two**, and the middle one is the new part:
+
+| the row is | answer | Create |
+| --- | --- | --- |
+| under **this owner** | the database WILL refuse it — offer the existing row | disabled |
+| elsewhere in **this plant** | legal, and confusing — name the other place | **stays live** |
+| in **another plant** | nothing at all | live |
+
+⚠⚠ **The middle answer MUST NOT BLOCK.** Blocking a name the database accepts is §19.74's
+stale-refusal defect — the quiet kind that never fails and just stops people working — so the
+sentence says *"already has"*, never *"cannot"*. `where` is a separate field from `exact` for
+exactly this reason: a screen reading only `exact` would refuse a legal name.
+
+⭐ And it **names the other place** (`Line B already has a First Aid`), which is the maintainer's
+*"easily identify"* arriving as a sentence instead of as a prefix baked into the data — the same
+argument that declined the concatenation, applied one layer up.
+
+⚠️ **Without a node map there is no plant pass, and that is silence rather than a clean bill of
+health** — N14 pins it, so the day a call site drops the argument the loss shows as a behaviour
+change rather than as a warning that quietly stopped appearing.
+
+**7 more client cases (N12–N18) and O23 on the panel; 4 more breakages, 4 caught** — the pass
+deleted (N12, N17, N18), a warning reported as a refusal (N12, N18), an unresolvable root compared
+anyway (N16), and the owner scoping lost entirely (13 cases).
+
+### Still owed
+
+**The starter library itself (D111b) — the company-curated set a plant copies into its own — is
+NOT in this migration.** 0031 is its precondition and nothing more: a shared set whose whole
+purpose is "every plant copies Forklift into their own" cannot work while the second copy is
+refused. That is now possible; the curating and copying is the next piece.

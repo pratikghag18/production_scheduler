@@ -56,7 +56,16 @@ export interface OperatorRecord {
   displayName: string;
   employeeRef: string | null;
   active: boolean;
-  /** `null` = company-wide (0023). Otherwise the ROOT node that owns this person. */
+  /**
+   * The node this person belongs to.
+   *
+   * ⚠️ SAME DRIFT AS `CreateSkillInput.siteNodeId` BELOW, FOUND WHILE FIXING
+   * IT: this read `"null = company-wide (0023). Otherwise the ROOT node…"` on a
+   * field typed `string`, and BOTH halves had expired. D108 made the column NOT
+   * NULL (`parseOperatorRecord` rejects a null here and says so), and 0025 /
+   * D103 stopped `app_check_site_owner` requiring a root — somebody can belong
+   * to a line, which is the fact `workPlacesFor`'s whole area rule turns on.
+   */
   siteNodeId: string;
   /** `'manual'` by default; an imported person carries their source here. */
   source: string;
@@ -290,11 +299,14 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
  * be a second query whose answer could disagree with the session's.
  *
  * The errors these raise, mapped by `toSchedulerError`:
- *   23505 -> `{kind:"DuplicateValue"}`  — `unique (org_id, name)` on skills
- *                                         (ORG-WIDE), `unique (org_id,
- *                                         external_id)` on operators, and the
- *                                         `(operator_id, skill_id)` primary
- *                                         key on a re-grant.
+ *   23505 -> `{kind:"DuplicateValue"}`  — `skills_owner_name_unique`,
+ *                                         `unique (org_id, site_node_id,
+ *                                         name)` on skills since 0031 (PER
+ *                                         OWNER; it was org-wide up to 0002's
+ *                                         `unique (org_id, name)`), `unique
+ *                                         (org_id, external_id)` on operators,
+ *                                         and the `(operator_id, skill_id)`
+ *                                         primary key on a re-grant.
  *   23503 -> `{kind:"StillInUse"}`      — deleting someone `operator_skills`
  *                                         or `assignments` still references;
  *                                         neither FK has an ON DELETE clause.
@@ -314,10 +326,14 @@ export interface CreateOperatorInput {
   displayName: string;
   employeeRef: string | null;
   /**
-   * The ROOT node that owns this person, or `null` for company-wide.
-   * A site admin MUST supply their own site: `operators_insert` refuses a
-   * `null` here for anyone who is not a company admin (0023), and the trigger
-   * `operators_check_site` refuses a node that is not a root.
+   * The node that owns this person — ANY node, at any level.
+   *
+   * ⚠️ THIS SAID "the ROOT node… or `null` for company-wide" AND BOTH CLAUSES
+   * ARE FALSE. `operators_check_site` fires `app_check_site_owner`, and 0025 /
+   * D103 deleted its not-a-root branch outright ("there are facilities where
+   * certain people can only work in certain areas"); D108 then removed
+   * company-wide and made the column NOT NULL, so there is no `null` to send.
+   * What survives is the org check: the node must exist in this org.
    */
   siteNodeId: string;
 }
@@ -407,16 +423,49 @@ export async function deleteOperator(id: string): Promise<void> {
 export interface CreateSkillInput {
   orgId: string;
   name: string;
-  /** `null` = company-wide, which is what the maintainer chose for skills by default. */
+  /**
+   * The node this training belongs to.
+   *
+   * ⚠️ THIS COMMENT SAID "`null` = company-wide, which is what the maintainer
+   * chose for skills by default" WHILE SITTING ON A FIELD TYPED `string`. D108
+   * removed company-wide from all four owned tables and made the column NOT
+   * NULL; the type was corrected and the sentence above it was not. A doc line
+   * that contradicts the type beside it is [[decision-record-drift]] rule 10 in
+   * its cheapest form — nothing fails, and the next reader believes the prose.
+   *
+   * ⭐ AND SINCE 0031 IT IS HALF OF THE UNIQUE KEY: `unique (org_id,
+   * site_node_id, name)`. Two plants may each hold a "Forklift"; one plant may
+   * not hold it twice. So this field decides whether the name below is legal,
+   * which is a much larger job than the one it used to have.
+   */
   siteNodeId: string;
 }
 
 /**
- * ⚠️ `unique (org_id, name)` IS ORG-WIDE, and a 23505 from here is NOT
- * something to show the user. The screen checks
- * `findExistingSkillByName` first and offers the existing ticket in one
- * click; `{kind:"DuplicateValue"}` covers only the race where somebody else
- * created it in between.
+ * ⭐ `unique (org_id, site_node_id, name)` IS PER OWNER SINCE 0031, and a 23505
+ * from here really is the exception again — but not for the reason this comment
+ * used to give.
+ *
+ * ⚠️ IT SAID a 23505 "is NOT something to show the user", because "the screen
+ * checks `findExistingSkillByName` first… `DuplicateValue` covers only the race
+ * where somebody else created it in between". **That was true when it was
+ * written and false from the day reads were scoped (0026).** Once a caller
+ * could only read trainings on their own branch, the pre-check could no longer
+ * SEE the row that would refuse the insert — so the org-wide clash stopped
+ * being a race and became the ordinary way this call failed, with the error
+ * arriving as the first news of it.
+ *
+ * ⭐ 0031 MAKES THE OLD SENTENCE TRUE AGAIN, ON A DIFFERENT FOOTING. The only
+ * clash left is one under the SAME owner: same branch, therefore readable,
+ * therefore genuinely caught by `findExistingSkillByName` first. The pre-check
+ * is no longer asking a question it cannot see the answer to.
+ *
+ * ⭐ WHICH IS ALSO WHAT MAKES THE SHARED ERROR STRING HONEST HERE.
+ * `describeSchedulerError`'s `DuplicateValue` reads *"Something here already
+ * uses that name or code."* — it is shared with several tables and is not this
+ * file's to edit. Under 0031 its "here" is exactly right for skills: the row it
+ * refers to is in the reader's own place. Before 0031 that word named a plant
+ * they had never seen.
  */
 export async function createSkill(input: CreateSkillInput): Promise<SkillRecord> {
   const { data, error } = await supabase

@@ -186,6 +186,7 @@ UPGRADE_CHECKS="
 20260828000028_ownership_is_a_scope.sql|upgrade_0028_ownership_backfill.sql|5
 20260828000029_delete_keeps_the_past.sql|upgrade_0029_delete_keeps_the_past.sql|6
 20260828000030_area_override.sql|upgrade_0030_area_override.sql|6
+20260831000031_trainings_per_owner.sql|upgrade_0031_trainings_per_owner.sql|7
 "
 
 run_upgrade_check() {

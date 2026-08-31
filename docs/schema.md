@@ -13,7 +13,7 @@
 | `nodes` | Every unit at every level, self-referencing tree. `path` (ltree) is trigger-maintained from `parent_id`/`name` — never supplied by callers. |
 | `operators` | The roster. `site_node_id` = the owning site (NULL = company-wide, 0023). ⚠️ NOT the same as `home_node_id`, which is an unenforced roster-filter default that may point at any node and is read by nothing. |
 | `products` | The catalog. `site_node_id` = the owning site (NULL = company-wide, 0023). `color_token` = the palette token this product renders in, e.g. `product-3` — NOT NULL, filled on insert, never a hex. |
-| `skills` | Named certifications. |
+| `skills` | Named certifications — what the screen calls trainings. **A name is unique per OWNER, not per org (0031 / D111a):** two plants may each hold “Forklift”, one plant may not hold it twice. |
 | `operator_skills` | Who holds which skill, with optional expiry. |
 | `node_skill_requirements` | A skill required at a node; inherits down the subtree (ancestor union query). |
 | `runs` | "This cell produces this product during this window." No two active runs may overlap on the same node (`runs_no_overlap_on_node`). |
@@ -340,8 +340,8 @@ Access method: heap
 Indexes:
     "skills_pkey" PRIMARY KEY, btree (id)
     "skills_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
-    "skills_org_id_name_key" UNIQUE CONSTRAINT, btree (org_id, name)
     "skills_org_site_idx" btree (org_id, site_node_id)
+    "skills_owner_name_unique" UNIQUE CONSTRAINT, btree (org_id, site_node_id, name)
 Foreign-key constraints:
     "skills_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "skills_org_id_site_node_id_fkey" FOREIGN KEY (org_id, site_node_id) REFERENCES nodes(org_id, id)

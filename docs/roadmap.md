@@ -301,7 +301,21 @@
 >    the suite reports coverage it never had.** The other two panels have no equivalent at all,
 >    so their trims, footnotes and selection de-stalings are pinned only at library level.
 >
-> 2. **🔴 Migration 0031 (D111), the starter library** a company admin curates and a site admin
+> 2a. ✅ **DONE (session 18, 31 Aug) — migration 0031, D111a, §19.80: a training's name is
+>    unique PER OWNER.** The precondition for the starter library, and a live bug on its own: a
+>    site admin was *allowed* to create a training in their own plant (`skills_insert`, 0028) and
+>    *unable* to name it anything another plant had used (`unique (org_id, name)`, 0002) — with
+>    the blocking row unreadable to them (0026). **The demo data had been prefixing every training
+>    with its plant letter to get around it since the day it was written, and said so in a
+>    comment.** Now `unique (org_id, site_node_id, name)`; no backfill (a strict widening); the
+>    demo drops its prefixes and three of its lookups learned the owner, because **a name is no
+>    longer an identifier — a name plus an owner is.** ⚠️ Depends on `site_node_id` staying NOT
+>    NULL (a unique skips NULLs; U31-6 pins it) and ⚠️ deliberately does NOT enforce per-PLANT —
+>    the database refuses per owner and the screen warns per plant, which it can do honestly.
+>    **15 checks on a real database (7 upgrade + 8 acceptance through RLS as real site admins);
+>    5 breakages, 4 caught, 1 inert with its kind named and the rule it leans on pinned by T8.**
+>
+> 2b. **🔴 Migration 0032 (D111b), the starter library ITSELF** a company admin curates and a site admin
 >    copies into their own plant — patterns and trainings. It carries a known problem: **training
 >    names are unique per ORG while the row is no longer company-wide**, so one plant can neither
 >    see nor create another's "Forklift". Per-owner uniqueness belongs here. **Renumbered from

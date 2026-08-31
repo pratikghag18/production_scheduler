@@ -75,6 +75,7 @@ import {
   type OperatorSkillLike,
   type RequirementLike,
   type SkillLike,
+  type SkillNameClash,
   type WorkPlace,
   type WorkPlaceInput,
 } from "../features/admin/lib/operators.ts";
@@ -130,8 +131,12 @@ const REQUIREMENTS: readonly RequirementLike[] = [
 ];
 
 // ⭐ 0028 / D108: these were all `siteNodeId: null` — company-wide trainings.
-// There is no such row now, so they belong to the plant. `describeSkillNameClash`
-// lost the branch that told the two apart; see its comment.
+// There is no such row now, so they belong to the plant.
+//
+// ⚠️ EVERY ONE OF THEM SHARES AN OWNER, WHICH IS FINE FOR THE W/A/S BLOCKS AND
+// BLIND FOR THE N BLOCK: an owner-scoped name search and an unscoped one cannot
+// disagree on a single-owner fixture. `OTHER_PLANT_SKILLS`, down beside the N
+// cases, is the second owner — the same job Cara does for the area rule.
 const SKILLS: readonly SkillLike[] = [
   { id: SAFETY, name: "Safety Induction", siteNodeId: PLANT },
   { id: FORKLIFT, name: "Forklift", siteNodeId: PLANT },
@@ -861,43 +866,234 @@ it("V6: editing someone does not report them as a duplicate of themselves", () =
 });
 
 /* ===========================================================================
- * findExistingSkillByName — the clash that is not an error.
+ * findExistingSkillByName — the clash that is not an error, and is now LOCAL.
+ *
+ * ⭐⭐ MIGRATION 0031 / D111a: a training's name is unique PER OWNER
+ * (`skills_owner_name_unique`, `unique (org_id, site_node_id, name)`), not per
+ * org. N1–N6 were written against the org-wide rule; they are re-aimed here
+ * rather than relaxed — every one of them still asserts a refusal or a warning,
+ * and the owner is now supplied where the org used to be implied.
+ *
+ * ⚠️ THE FIXTURE ABOVE CANNOT TELL THE NEW RULE FROM THE OLD ONE ON ITS OWN.
+ * Every skill in `SKILLS` belongs to `PLANT`, so an owner-scoped search and an
+ * unscoped one return the same answer for all four rows — rule 3g, the same
+ * blind spot Cara was added to fix for the area rule. `OTHER_PLANT_SKILLS`
+ * below is the second owner that makes the difference observable, and N7–N10
+ * are the cases that could not have existed before 0031.
  * =========================================================================== */
 
-it("N1: a name that is byte-equal after trimming is an EXACT clash — the insert would be refused", () => {
-  const clash = findExistingSkillByName(SKILLS, "  Forklift  ");
+/**
+ * A second plant, with its own "Forklift" — the row 0031 makes legal and the
+ * demo seed used to spell `B-Forklift` to avoid.
+ *
+ * ⚠️ IT SHARES A NAME WITH `SKILLS`'s FORKLIFT ON PURPOSE, and the ids differ,
+ * so any case that reports the wrong row names the wrong id rather than merely
+ * the wrong count.
+ *
+ * The owner is the R block's `PLANT_2`, reused rather than redeclared: one
+ * second root in this file, so "a different owner" and "a different root" are
+ * the same node and cannot drift apart.
+ */
+const FORKLIFT_P2 = "30000000-0000-0000-0000-0000000000a1";
+const OTHER_PLANT_SKILLS: readonly SkillLike[] = [
+  ...SKILLS,
+  { id: FORKLIFT_P2, name: "Forklift", siteNodeId: PLANT_2 },
+];
+
+it("N1: a name byte-equal after trimming, under this owner, is an EXACT clash — the insert would be refused", () => {
+  const clash = findExistingSkillByName(SKILLS, "  Forklift  ", PLANT);
   expect(clash?.exact).toBe(true);
   expect(clash?.skill.id).toBe(FORKLIFT);
 });
 
-it("N2: a case-only difference is a LOOSE clash — Postgres would allow both rows", () => {
-  const clash = findExistingSkillByName(SKILLS, "forklift");
+it("N2: a case-only difference under this owner is a LOOSE clash — the constraint is case-sensitive, so Postgres would allow both rows", () => {
+  const clash = findExistingSkillByName(SKILLS, "forklift", PLANT);
   expect(clash?.exact).toBe(false);
   expect(clash?.skill.id).toBe(FORKLIFT);
 });
 
 it("N3: a genuinely new name clashes with nothing", () => {
-  expect(findExistingSkillByName(SKILLS, "Crane")).toBe(null);
+  expect(findExistingSkillByName(SKILLS, "Crane", PLANT)).toBe(null);
 });
 
 it("N4: an empty name is not treated as a clash with anything", () => {
-  expect(findExistingSkillByName(SKILLS, "   ")).toBe(null);
+  expect(findExistingSkillByName(SKILLS, "   ", PLANT)).toBe(null);
 });
 
 it("N5: the exact clash reads as an offer to reuse, never as an error", () => {
-  const clash = findExistingSkillByName(SKILLS, "Forklift");
-  // ⭐ "site-owned", not "company-wide": 0028/D108 removed the state and the
-  // word. `describeSkillNameClash` has one arm now — see its comment.
+  const clash = findExistingSkillByName(SKILLS, "Forklift", PLANT);
+  // ⭐ "This place", not "site-owned". Since D108 every training is site-owned,
+  // so that word separated nothing; under 0031 the question is whether the
+  // place being created in already holds one, because that is the only way a
+  // name can collide now. See `describeSkillNameClash`.
   expect(clash === null ? "" : describeSkillNameClash(clash)).toBe(
-    "There is already a site-owned Forklift — use that one.",
+    "This place already has a Forklift — use that one.",
   );
 });
 
 it("N6: the loose clash leaves creating available, because it may be a different ticket", () => {
-  const clash = findExistingSkillByName(SKILLS, "FORKLIFT");
-  expect(clash === null ? "" : describeSkillNameClash(clash)).toContain(
-    "unless this is a different ticket",
+  const clash = findExistingSkillByName(SKILLS, "FORKLIFT", PLANT);
+  // ⭐ `exact: false` IS WHAT LEAVES THE BUTTON LIVE — the panel disables
+  // "Create & attach" on `clash.exact` alone — so it is asserted beside the
+  // sentence rather than left implied by the wording.
+  expect(clash?.exact).toBe(false);
+  // ⚠️ THE WHOLE SENTENCE, NOT A SUBSTRING OF ITS TAIL. This read
+  // `toContain("unless this is a different ticket")`, which is the half of the
+  // line that 0031 did NOT change — so reverting the opening clause to "There
+  // is already a site-owned…" went through it green. Measured, not guessed: the
+  // deliberate break was not caught until this became an equality. N5 pins the
+  // exact arm the same way; the two arms are separate strings and need separate
+  // anchors.
+  expect(clash === null ? "" : describeSkillNameClash(clash)).toBe(
+    "This place already has a Forklift. Attach that one unless this is a different ticket.",
   );
+});
+
+it("N7 ⭐⭐: the same name under a DIFFERENT owner is not a clash at all — this is the defect 0031 fixes", () => {
+  // The whole of D111a in one case. Plant 2's admin types "Forklift"; Plant 1
+  // already has one. Before 0031 that was a 23505 citing a row Plant 2 could
+  // not see, open, edit or reuse — a refusal naming something unreachable — and
+  // the demo seed dodged it by calling everything `A-Forklift` / `B-Forklift`.
+  // `unique (org_id, site_node_id, name)` makes it legal, so the screen must
+  // say nothing at all.
+  expect(findExistingSkillByName(SKILLS, "Forklift", PLANT_2)).toBe(null);
+});
+
+it("N8 ⭐: a case-only match under a different owner is not even a WARNING", () => {
+  // ⚠️ THE OWNER TEST HAS TO GUARD BOTH ARMS. Letting the loose arm see other
+  // owners would keep the old sentence alive in a quieter register: a warning
+  // about a row that is legal, invisible to the reader, and none of their
+  // business. This is the case that fails if the owner check is put after the
+  // exact comparison instead of before both.
+  expect(findExistingSkillByName(SKILLS, "forklift", PLANT_2)).toBe(null);
+});
+
+it("N9 ⭐⭐: with two owners holding the same name, the clash is the one under the owner asked about", () => {
+  // ⚠️ NOT MERELY "a clash is found". A function that returned the FIRST name
+  // match would pass N1 and N7 and still be wrong here — it would offer Plant
+  // 1's Forklift to somebody in Plant 2, and "Attach Forklift" would grant a
+  // training from a plant they do not work in. The id is what pins it.
+  const inP1 = findExistingSkillByName(OTHER_PLANT_SKILLS, "Forklift", PLANT);
+  expect(inP1?.skill.id).toBe(FORKLIFT);
+  const inP2 = findExistingSkillByName(OTHER_PLANT_SKILLS, "Forklift", PLANT_2);
+  expect(inP2?.skill.id).toBe(FORKLIFT_P2);
+  // Both are exact: each really would be refused, in its own place.
+  expect(inP1?.exact).toBe(true);
+  expect(inP2?.exact).toBe(true);
+});
+
+it("N10: with no owner there is nothing to clash with — and that is not 'checked and clear'", () => {
+  // The panel's state before anybody is picked. There is no owner, so there is
+  // no insert to refuse; `createAndAttach` refuses separately, with a sentence,
+  // rather than reading this `null` as permission.
+  //
+  // ⚠️ THIS CASE PINS THE ANSWER AND NOT THE GUARD, AND THAT WAS MEASURED:
+  // deleting `owner === null` from the function leaves this green, because the
+  // owner comparison rejects every row against `null` on its own while
+  // `site_node_id` is NOT NULL. The guard's own comment says so rather than
+  // letting it read as load-bearing — a line nothing can break is a line the
+  // next reader will trust for the wrong reason (`scope.ts`'s dead `canEdit`).
+  expect(findExistingSkillByName(SKILLS, "Forklift", null)).toBe(null);
+});
+
+it("N11: the REFUSAL is matched on the owner exactly, never by ancestry — N12 is the warning that is not", () => {
+  // ⚠️ THE SERVER COMPARES `site_node_id` AS A VALUE, NOT AS AN LTREE
+  // ANCESTOR: `unique (org_id, site_node_id, name)` is an equality over the
+  // column. 0031's own header records the loosening this leaves behind — Line A
+  // and Line B inside one plant may each hold a "TRN-4471" — and it is
+  // deliberate. A mirror that tested "at or below" here would refuse a row the
+  // database accepts, which is the stale-refusal direction.
+  const onTheLine: readonly SkillLike[] = [
+    { id: FIRST_AID, name: "First Aid", siteNodeId: LINE_A },
+  ];
+  //
+  // ⚠️ AND NOTE WHAT IS NOT PASSED: no node map, so the plant-wide pass does
+  // not run here at all. That pass WARNS about exactly this row (N12); this
+  // case is about the answer that refuses.
+  expect(findExistingSkillByName(onTheLine, "First Aid", PLANT)).toBe(null);
+  expect(findExistingSkillByName(onTheLine, "First Aid", LINE_A)?.skill.id).toBe(FIRST_AID);
+});
+
+/* ---------------------------------------------------------------------------
+ * The plant-wide WARNING — what pays for 0031's loosening.
+ *
+ * ⭐⭐ THE MIGRATION MAKES A PROMISE AND THIS BLOCK IS WHERE IT IS KEPT.
+ * `unique (org_id, site_node_id, name)` knowingly lets Line A and Line B inside
+ * one plant each hold a "Forklift", and 0031's header justifies that by saying
+ * *"the database refuses per owner; the screen warns per plant"* — honest only
+ * because a plant admin can READ their whole plant, which was never true across
+ * plants. Without these cases that sentence is a doc describing code that does
+ * not exist, which is the drift this project keeps finding.
+ * ------------------------------------------------------------------------- */
+
+const PLANT_SKILLS: readonly SkillLike[] = [
+  { id: FIRST_AID, name: "First Aid", siteNodeId: LINE_B },
+];
+
+it("N12 ⭐⭐: another place in the SAME plant is a WARNING, not a refusal", () => {
+  const clash = findExistingSkillByName(PLANT_SKILLS, "First Aid", LINE_A, byIdOf(TWO_PLANTS));
+  expect(clash?.where).toBe("this-plant");
+  expect(clash?.exact).toBe(true);
+  // ⚠️ `where` is the field the screen reads to decide whether to DISABLE
+  // Create. A case that only checked `exact` would pass against a client that
+  // blocked a name the database accepts — §19.74's stale refusal, the quiet kind.
+  expect(clash?.skill.id).toBe(FIRST_AID);
+});
+
+it("N13: a clash under THIS owner wins over one merely in the same plant", () => {
+  // Both exist. The one the database will actually refuse has to be the one
+  // reported, or the screen offers a warning where a refusal was owed and the
+  // create goes through to a 23505 nobody predicted.
+  const both: readonly SkillLike[] = [
+    { id: FIRST_AID, name: "First Aid", siteNodeId: LINE_B },
+    { id: WELDING, name: "First Aid", siteNodeId: LINE_A },
+  ];
+  const clash = findExistingSkillByName(both, "First Aid", LINE_A, byIdOf(TWO_PLANTS));
+  expect(clash?.where).toBe("here");
+  expect(clash?.skill.id).toBe(WELDING);
+});
+
+it("N14 ⚠️: with no tree there is no plant pass — and that is silence, not a clean bill of health", () => {
+  // The same rows that produce a warning in N12 produce nothing here, because
+  // the caller could not say where anything sits. Pinned so the day somebody
+  // drops the argument at a call site, the loss is visible as a behaviour
+  // change rather than as a warning that quietly stopped appearing.
+  expect(findExistingSkillByName(PLANT_SKILLS, "First Aid", LINE_A)).toBe(null);
+});
+
+it("N15: a name in a DIFFERENT plant is still nothing at all", () => {
+  // The original defect, and the reason 0031 exists: this must not warn, must
+  // not refuse, and must not send anybody looking for a row they cannot read.
+  const elsewhere: readonly SkillLike[] = [
+    { id: FIRST_AID, name: "First Aid", siteNodeId: PLANT_2 },
+  ];
+  expect(findExistingSkillByName(elsewhere, "First Aid", LINE_A, byIdOf(TWO_PLANTS))).toBe(null);
+});
+
+it("N16: an unresolvable root says nothing, rather than matching everything equally unresolvable", () => {
+  // ⚠️ Two rows whose roots both come back `null` are not "in the same plant".
+  // Comparing `null === null` would make every unreadable owner clash with
+  // every other one — an invented warning, in the direction that costs trust.
+  const orphaned: readonly SkillLike[] = [{ id: FIRST_AID, name: "First Aid", siteNodeId: LOOP_B }];
+  expect(findExistingSkillByName(orphaned, "First Aid", ORPHAN, byIdOf(TWO_PLANTS))).toBe(null);
+});
+
+it("N17: a case-only match elsewhere in the plant warns too, and says it is spelled differently", () => {
+  const clash = findExistingSkillByName(PLANT_SKILLS, "first aid", LINE_A, byIdOf(TWO_PLANTS));
+  expect(clash?.where).toBe("this-plant");
+  expect(clash?.exact).toBe(false);
+});
+
+it("N18 ⭐: the warning NAMES the other place, and does not read as a refusal", () => {
+  const clash = findExistingSkillByName(PLANT_SKILLS, "First Aid", LINE_A, byIdOf(TWO_PLANTS));
+  // ⭐ "already has", never "cannot" — the Create button is live underneath this
+  // sentence, and a warning that sounds like a refusal in front of a working
+  // button is how people learn to ignore the ones that are.
+  expect(describeSkillNameClash(clash as SkillNameClash, "Line B")).toBe(
+    "Line B already has a First Aid. Create this one only if it is a different ticket.",
+  );
+  // Without a label it still says something true rather than naming nothing.
+  expect(describeSkillNameClash(clash as SkillNameClash)).toContain("Another place in this plant");
 });
 
 /* ===========================================================================
@@ -959,15 +1155,22 @@ it("V2: a ticket that has LAPSED and whose skill row is unreadable is counted, n
   expect(place(places, CELL_3).unnamed).toBeGreaterThan(0);
 });
 
-it("V3 ⭐: a clash names the ticket as site-owned — the word that survived 0028", () => {
-  // Written when every skill in the fixture had `siteNodeId: null` and the
-  // other arm of the scope ternary had never once been evaluated. D108 then
-  // deleted the arm this case was added to reach, which leaves the message with
-  // no information in it — the real fix is to name the OWNER, and that is
-  // recorded on `SkillLike` rather than done here, because a training's name is
-  // still unique per ORG and that is the thing actually pulling wrong.
+it("V3 ⭐: the clash sentence asks about THIS PLACE — the axis 0031 moved it to", () => {
+  // ⭐ THIS CASE HAS NOW BEEN RE-AIMED TWICE AND ITS HISTORY IS THE POINT.
+  // Written when every skill in the fixture had `siteNodeId: null`, to reach a
+  // "site-owned" arm of a ternary that had never once been evaluated. D108 then
+  // deleted the OTHER arm, which left the word describing every training
+  // equally and therefore describing none of them — the case went on passing
+  // while asserting a sentence with no information in it. 0031 supplies the
+  // information the word was standing in for: the clash is LOCAL, and "this
+  // place" is the fact that decides whether the reader can reach the row.
+  //
+  // ⚠️ The owner's NAME is still not in this sentence, and that is deliberate,
+  // not unfinished: `operators.ts` is dependency-free and holds ids. The name
+  // is rendered beside the training by `OperatorsPanel` via `scopeLabel`, and
+  // `operatorsPanel.test.tsx`'s O18/O19 are what pin it.
   const owned = { id: WELDING, name: "Welding", siteNodeId: PLANT };
-  expect(describeSkillNameClash({ skill: owned, exact: true })).toBe(
-    "There is already a site-owned Welding — use that one.",
+  expect(describeSkillNameClash({ skill: owned, exact: true, where: "here" })).toBe(
+    "This place already has a Welding — use that one.",
   );
 });

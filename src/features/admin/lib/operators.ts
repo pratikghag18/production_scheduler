@@ -165,15 +165,26 @@ export interface OperatorLike {
 }
 
 /**
- * A training. Names are unique per ORG (`unique (org_id, name)`), not per site
- * — which is why `describeSkillNameClash` exists at all.
+ * A training. Names are unique PER OWNER since migration 0031 / D111a
+ * (`skills_owner_name_unique`, `unique (org_id, site_node_id, name)`) — which
+ * is why `findExistingSkillByName` takes an owner and why
+ * `describeSkillNameClash` asks about THIS PLACE rather than about the company.
  *
- * ⚠️ THE NAME IS COMPANY-UNIQUE AND THE ROW IS NOT COMPANY-WIDE, AND AFTER
- * 0028 THOSE TWO FACTS PULL AGAINST EACH OTHER. Plant 2 can no longer see
- * Plant 1's "Forklift" and can no longer create one, so the clash message can
- * now name a row the reader cannot open. That is recorded rather than fixed
- * here; the fix is a per-owner uniqueness rule and it belongs with D111's
- * starter library, where "copy this into my plant" is the answer.
+ * ⭐ 0031 RESOLVED A CONTRADICTION THIS COMMENT USED TO RECORD AS UNFIXED, and
+ * it was two rules from different migrations disagreeing rather than either one
+ * being wrong: `unique (org_id, name)` (0002, company-wide) against
+ * `app_can_read_owned(site_node_id)` (0026, your branch only). Plant A created
+ * "Forklift"; Plant B's admin was refused with a 23505 naming a row they could
+ * not see, open, edit or reuse. The demo seed worked around it by hand,
+ * prefixing every training with its plant letter — `A-Welding`, `B-Welding` —
+ * and 0031 drops that prefix in the same change.
+ *
+ * ⚠️ SO TWO TRAININGS MAY NOW SHARE A NAME, AND THE SCREEN HAS TO SAY WHOSE IS
+ * WHOSE. `siteNodeId` is the fact that tells them apart, and it already sits on
+ * every row: the panel renders it beside the name with `scope.ts`'s
+ * `scopeLabel` / `scopePathLabel`. ⚠️ The plant belongs in the OWNER COLUMN and
+ * never back in the text — a name that carries its own plant letter goes stale
+ * the day the node is renamed, which is the workaround, not the fix.
  */
 export interface SkillLike {
   id: string;
@@ -869,65 +880,171 @@ export function ticketsFor(
 }
 
 /* ===========================================================================
- * findExistingSkillByName — the clash that is not an error.
+ * findExistingSkillByName — the clash that is not an error, and is now LOCAL.
  *
- * ⭐ THE MAINTAINER'S DECISION: SKILL NAMES STAY COMPANY-WIDE (`unique (org_id,
- * name)`, migration 0002:53). The consequence on a screen is the whole point
- * of this function: when someone types a name that already exists, they have
+ * ⭐⭐ MIGRATION 0031 / D111a MADE A TRAINING'S NAME UNIQUE PER OWNER —
+ * `unique (org_id, site_node_id, name)`, replacing 0002's `unique (org_id,
+ * name)`. So this function is asked about ONE OWNER and answers about that
+ * owner only. A same-named training under a DIFFERENT owner is not a clash at
+ * all: the insert succeeds, the database is content, and since read-scoping
+ * (0026) the reader usually cannot see the other row anyway.
+ *
+ * ⚠️ REPORTING IT WAS THE WORST OF BOTH, AND THAT IS WHY THE PARAMETER EXISTS.
+ * The old scan went over every readable training and refused on any name match,
+ * which meant a refusal citing a row the reader could not open, edit or reuse —
+ * and after 0031 it would also refuse a name the database would have accepted.
+ * A stale REFUSAL: it never fails loudly, it just quietly stops people doing
+ * something they are allowed to do (the §19.74 family, `deletePrecheck`'s
+ * shape).
+ *
+ * The consequence on a screen is unchanged, and it is still the point of this
+ * function: when someone types a name their own place already holds, they have
  * not made a mistake — they have found the ticket they were about to create.
- * The screen must say *"there is already a company-wide Forklift — use that
- * one"* and offer to attach it in one click. A raw duplicate-key error
- * reaching the user is a defect; `{kind:"DuplicateValue"}` is the fallback
- * for the race where somebody else creates it between the check and the
- * insert, not the normal path.
+ * The screen says so and attaches it in one click.
  *
- * `exact` distinguishes the two cases that behave differently in Postgres:
- *  - EXACT (byte-equal to the stored name, after trimming the input): the
- *    insert WILL fail with 23505. Offer the existing skill instead; do not
- *    offer to create.
- *  - CASE-INSENSITIVE only ("forklift" vs "Forklift"): the unique index is
- *    over plain `text`, so the insert WOULD succeed and leave the company
- *    with two Forklifts. Still say so, but the user may genuinely mean a
- *    different ticket, so creating stays available.
+ * ⭐ THE EXACT / LOOSE SPLIT SURVIVES 0031, AND THE REASON IS THAT THE
+ * CONSTRAINT IS CASE-SENSITIVE. It is a plain `text` unique, not `citext` and
+ * not over `lower(name)`, so under ONE owner "forklift" and "Forklift" are two
+ * storable rows. The three answers:
+ *
+ *  - EXACT (byte-equal to the stored name, after trimming the input), SAME
+ *    OWNER: the insert WILL be refused with 23505. Offer the existing one; do
+ *    not offer to create.
+ *  - CASE-ONLY, SAME OWNER: legal, and leaves this one place with two
+ *    Forklifts. Warn, but the user may genuinely mean a different ticket, so
+ *    creating stays available.
+ *  - EITHER, DIFFERENT OWNER: not a clash. `null`.
  * =========================================================================== */
 
 export interface SkillNameClash {
   skill: SkillLike;
-  /** `true` when the insert would actually be refused by `unique (org_id, name)`. */
+  /**
+   * `true` when the insert would actually be refused — byte-equal, under the
+   * SAME owner, which is the whole of what `unique (org_id, site_node_id,
+   * name)` forbids.
+   */
   exact: boolean;
+  /**
+   * How close the clash is, and it decides whether the screen REFUSES or merely
+   * WARNS — they are different answers and must not be collapsed.
+   *
+   * `"here"`       same owner. `skills_owner_name_unique` WILL refuse this
+   *                insert, so the screen refuses first and offers the row.
+   * `"this-plant"` same root, different owner. **Perfectly legal** — 0031's
+   *                constraint is per owner, so Line A and Line B inside one
+   *                plant may each hold a "Forklift". Confusing, though, so it
+   *                is said out loud and the create stays available.
+   *
+   * ⚠⚠ A `"this-plant"` clash MUST NOT BLOCK. Blocking it would be a client
+   * enforcing a rule the database does not have — §19.74's stale-refusal defect,
+   * which is the quiet kind that never fails and just stops people working.
+   */
+  where: "here" | "this-plant";
 }
 
+/**
+ * @param owner The `site_node_id` the new training would be created under. On
+ *   this screen that is where the person being ticketed belongs, because
+ *   `createAndAttach` has no other place to put it.
+ *
+ *   ⚠️ `null` MEANS "NOTHING TO CLASH WITH", NEVER "CHECKED AND CLEAR". With
+ *   nobody selected there is no owner, so there is no insert to refuse and
+ *   nothing to warn about; the panel refuses the create separately, with a
+ *   sentence, rather than leaning on this `null`.
+ */
 export function findExistingSkillByName(
   skills: readonly SkillLike[],
   name: string,
+  owner: string | null,
+  nodesById?: ReadonlyMap<string, NodeLike>,
 ): SkillNameClash | null {
   const trimmed = name.trim();
-  if (trimmed === "") return null;
+  // ⚠️ `owner === null` HERE IS A CONTRACT MARKER, NOT A DECISION, AND NO CASE
+  // CAN TELL IT FROM ITS ABSENCE — deleting it was tried and every case stayed
+  // green. It is redundant TODAY because `SkillLike.siteNodeId` is a `string`
+  // (NOT NULL since D108), so the comparison below rejects every row against a
+  // `null` owner anyway. It is kept for the case 0031's own header flags: **if a
+  // later migration ever makes `site_node_id` nullable again**, `null !== null`
+  // is false and a company-wide row would start matching a caller who has no
+  // owner at all — silently, and in the direction that invents a clash.
+  // Recorded as unpinned rather than left looking load-bearing.
+  if (trimmed === "" || owner === null) return null;
   const lowered = trimmed.toLowerCase();
-  let loose: SkillLike | null = null;
+
+  // ⭐⭐ TWO PASSES, AND THE ORDER IS THE POINT. A clash under THIS owner is
+  // what the database will refuse, so it always wins over one merely in the
+  // same plant — reporting the softer one first would offer a warning where a
+  // refusal was owed and let the create go through to a 23505.
+  let looseHere: SkillLike | null = null;
   for (const s of skills) {
-    if (s.name === trimmed) return { skill: s, exact: true };
-    if (loose === null && s.name.trim().toLowerCase() === lowered) loose = s;
+    if (s.siteNodeId !== owner) continue;
+    if (s.name === trimmed) return { skill: s, exact: true, where: "here" };
+    if (looseHere === null && s.name.trim().toLowerCase() === lowered) looseHere = s;
   }
-  return loose === null ? null : { skill: loose, exact: false };
+  if (looseHere !== null) return { skill: looseHere, exact: false, where: "here" };
+
+  // ⭐⭐ THE PLANT-WIDE WARNING, AND IT IS WHAT PAYS FOR 0031's LOOSENING.
+  // The constraint is per OWNER, so the migration knowingly allows Line A and
+  // Line B in one plant to each hold a "TRN-4471". Its header justifies that by
+  // promising this warning — *"the database refuses per owner; the screen warns
+  // per plant"* — and the promise is only honest because a plant admin can READ
+  // their whole plant, which is exactly what was never true across plants.
+  //
+  // ⚠️ WITHOUT `nodesById` THERE IS NO PLANT PASS AT ALL, and that is silence
+  // rather than a clean bill of health. A caller that cannot resolve the tree
+  // gets the owner answer only; it must not report "nothing found" as if the
+  // wider question had been asked and answered.
+  if (nodesById === undefined) return null;
+  const ownerRoot = rootIdFor(owner, nodesById);
+  // ⚠️ An unresolvable root means "cannot tell", and the honest response is to
+  // say nothing rather than to compare against `null` and match every other
+  // row whose root is equally unresolvable.
+  if (ownerRoot === null) return null;
+
+  let loosePlant: SkillLike | null = null;
+  for (const s of skills) {
+    if (s.siteNodeId === owner) continue; // already answered above
+    if (rootIdFor(s.siteNodeId, nodesById) !== ownerRoot) continue;
+    if (s.name === trimmed) return { skill: s, exact: true, where: "this-plant" };
+    if (loosePlant === null && s.name.trim().toLowerCase() === lowered) loosePlant = s;
+  }
+  return loosePlant === null ? null : { skill: loosePlant, exact: false, where: "this-plant" };
 }
 
 /** The sentence the screen shows for a clash. Here so it is testable, not in JSX. */
-export function describeSkillNameClash(clash: SkillNameClash): string {
-  // "site-owned", not "existing". Nothing in this fixture was ever site-owned,
-  // so this arm shipped unevaluated and read "There is already a existing
-  // Welding" — ungrammatical, and it told the person nothing they did not
-  // already know from the fact that we are refusing their name. WHOSE ticket it
-  // is, is the part that decides whether they can reach it. Measured 27 Aug.
-  // ⚠️ 0028 COLLAPSED THIS TO ONE ARM. It used to read "company-wide" or
-  // "site-owned"; there is no company-wide row now, so the word that carried
-  // the information is gone and every clash is site-owned. Left as a named
-  // constant rather than inlined, because the sentence is about to need the
-  // owner's NAME instead — see the SkillLike header.
-  const scope = "site-owned";
+export function describeSkillNameClash(clash: SkillNameClash, ownerLabel?: string): string {
+  // ⭐ "THIS PLACE", NOT "SITE-OWNED", AND THE CHANGE IS AN AXIS AND NOT A
+  // WORDING PREFERENCE. "Site-owned" was the word that survived 0028: it once
+  // told a company-wide row from a site's own, and once D108 deleted
+  // company-wide it described every training equally and so described none of
+  // them. Under 0031 the question the reader is actually asking is not what
+  // KIND of row this is — it is whether the place they are creating in already
+  // holds one, because that is now the only way a name can collide.
+  //
+  // ⚠️ THE OWNER IS NOT RESOLVED HERE, ON PURPOSE. This module is
+  // dependency-free and holds node IDS, not node names, so a caller that wants
+  // the other place NAMED passes `ownerLabel` in — the panel gets it from
+  // `scope.ts`'s `scopeLabel`, which stays the one place an id becomes a name.
+  if (clash.where === "this-plant") {
+    // ⭐⭐ A WARNING, AND ITS WORDS HAVE TO SAY SO. This one is not a refusal:
+    // 0031 allows two places in one plant to hold the same name, and the create
+    // stays live underneath this sentence. So it reports a fact and hands the
+    // decision back — "already has", not "cannot" — because a sentence that
+    // sounds like a refusal in front of a working button is how people learn to
+    // ignore the ones that are.
+    //
+    // ⭐ And it NAMES THE OTHER PLACE when it can. "Somewhere else in this
+    // plant" sends a reader hunting through a list; "Line B already has one"
+    // ends the question. That is the maintainer's *"easily identify"* arriving
+    // as a sentence rather than as a prefix baked into the name.
+    const who = ownerLabel === undefined ? "Another place in this plant" : ownerLabel;
+    return clash.exact
+      ? `${who} already has a ${clash.skill.name}. Create this one only if it is a different ticket.`
+      : `${who} has a ${clash.skill.name}, spelled differently. Create this one only if it is a different ticket.`;
+  }
   return clash.exact
-    ? `There is already a ${scope} ${clash.skill.name} — use that one.`
-    : `There is already a ${scope} ${clash.skill.name}. Attach that one unless this is a different ticket.`;
+    ? `This place already has a ${clash.skill.name} — use that one.`
+    : `This place already has a ${clash.skill.name}. Attach that one unless this is a different ticket.`;
 }
 
 /* ===========================================================================
