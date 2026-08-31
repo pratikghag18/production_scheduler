@@ -152,15 +152,23 @@ export default function AdminPage() {
   // function exists at all (D87).
   const allSummaries = data ? buildShapeSummaries(data.templates, data.levels, data.nodes) : [];
   const summaries = filterEditableShapes(allSummaries, data?.editableShapeIds ?? null);
-  const resolvedShapeId = resolveSelectedShape(summaries, selectedShapeId);
 
   // Brief P1-6a §6: written out rather than
   // `data?.siteNodeIds[resolvedShapeId] ?? null`, because `resolvedShapeId`
   // is `string | null` and `data` is `undefined` until the query resolves --
   // indexing a `Record<string, ...>` with `string | null` does not compile.
   // The places the Access panel may be about: one per structure this person
-  // may edit, named by the SITE that owns it rather than by the structure —
-  // "Plant 2" is what an admin is looking for, not "Standard Plant (copy)".
+  // may edit, named by the SITE that owns it rather than by the structure.
+  //
+  // ⚠️ THE REASON THIS COMMENT USED TO GIVE WAS FALSE, and it mattered: it
+  // said the structure would otherwise read "Standard Plant (copy)". Migration
+  // 0020 §10 names a copied structure after the NODE
+  // (`v_copy_name := v_name`, where `v_name` is `p_name`), so a plant's
+  // structure is already called "Plant 2" — which is exactly why the Hierarchy
+  // tab ended up showing a structure picker that read like a plant picker.
+  // The rule here is still right, for a better reason: the two names coincide
+  // only at the moment of creation, and renaming either one leaves the other
+  // alone. Reading the SITE is what keeps this list true after a rename.
   //
   // ⚠️ Derived from `summaries` (already filtered to what they may edit) and
   // NOT from the Hierarchy tab's current selection. The panel used to follow
@@ -189,6 +197,48 @@ export default function AdminPage() {
    * above applies to itself.
    */
   const visibleAccessPlaces = accessPlaces.filter((p) => plantNodeIds.has(p.nodeId));
+
+  /* ---------------------------------------------------------------------
+   * ⭐⭐ THE STRUCTURE PICKER IS NARROWED BY THE PLANT FILTER TOO, AND
+   * WITHOUT THIS THE HIERARCHY TAB CARRIES TWO CONTROLS THAT DO THE SAME JOB.
+   *
+   * `create_node` COPIES the structure whenever a root is created (0020 §10),
+   * precisely so renaming a level in one plant does not rename it in the
+   * others — `dev_demo.sql` puts it as *"one copied structure per plant, plus
+   * the original the copies came from"*. So in practice a structure IS a
+   * plant, and the picker was a plant picker wearing structure names. The
+   * ⚠️ And the copy is named after the NODE (`v_copy_name := v_name`), so the
+   * picker was literally listing "Plant A / Plant B / Plant C" underneath a
+   * header reading "Showing: Plant A". Two controls, near-identical labels.
+   *
+   * ⚠️ A STRUCTURE OWNED BY NOBODY IS KEPT AT EVERY PLANT. `site_node_id` is
+   * still nullable on `hierarchy_templates` — D108 removed company-wide for
+   * products, operators, trainings and shift patterns, and deliberately not
+   * for structures, because the unowned one is the seed corn every new root
+   * copies from. Dropping it under a filter would hide the only structure a
+   * brand-new plant can be built out of. This is `offeredAt`'s pre-0028 shape
+   * and the one place it survives.
+   *
+   * ⚠️ THE TREE STILL GETS THE COMPLETE LIST (`summaries`, below).
+   * `groupRowsByShape` buckets rows by each node's LEVEL and uses this list
+   * only for the NAME, so handing it the narrowed one would leave a group
+   * rendered and merely unnamed — the failure that made row-filtering the
+   * right seam in the first place.
+   * ------------------------------------------------------------------- */
+  const plantSummaries =
+    plantFilter.choice === null
+      ? summaries
+      : summaries.filter((s) => {
+          const site = data?.siteNodeIds[s.id] ?? null;
+          return site === null || plantNodeIds.has(site);
+        });
+  const hiddenShapes = summaries.length - plantSummaries.length;
+
+  // Resolved against what the picker actually OFFERS, never against every
+  // editable structure: the selection must not outlive the list it was made
+  // from. Same reason `resolveSelectedShape` exists at all (D87), now with a
+  // second way for the list to shrink.
+  const resolvedShapeId = resolveSelectedShape(plantSummaries, selectedShapeId);
 
   return (
     <div className={styles.page}>
@@ -272,7 +322,7 @@ export default function AdminPage() {
                     parent and child, and nothing on screen said so. */}
                 <div style={{ gridColumn: 1, gridRow: 1 }}>
                   <ShapePicker
-                    summaries={summaries}
+                    summaries={plantSummaries}
                     selectedId={resolvedShapeId}
                     onSelect={setSelectedShapeId}
                   >
@@ -293,6 +343,18 @@ export default function AdminPage() {
                       templateId={resolvedShapeId}
                     />
                   </ShapePicker>
+                  {/* ⚠️ COUNTED, LIKE EVERY OTHER TRIM ON THESE SCREENS. A
+                      structure list that quietly shrank looks exactly like a
+                      company with fewer structures than it has — and this one
+                      is the list somebody goes to when they cannot find the
+                      structure they meant to edit. */}
+                  {hiddenShapes > 0 && (
+                    <p className={styles.plantNote}>
+                      {hiddenShapes === 1
+                        ? `1 structure outside ${plantFilter.label} is not shown.`
+                        : `${hiddenShapes} structures outside ${plantFilter.label} are not shown.`}
+                    </p>
+                  )}
                 </div>
                 <div style={{ gridColumn: 2, gridRow: 1 }}>
                   {/* `levels` here is the COMPLETE array, never filtered by

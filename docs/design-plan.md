@@ -8293,6 +8293,47 @@ they just saw. That stays true of a filtered list and stops being true one layer
 `groupRowsByShape` buckets rows by each node's LEVEL's `templateId` and uses the summaries list
 only for the NAME, so a narrowed list leaves every group still rendered and merely unnamed.
 
+### ⭐⭐ AND THE HIERARCHY TAB THEN HAD TWO CONTROLS DOING ONE JOB
+
+Reported by the maintainer as soon as it shipped: *"the Hierarchy tab still has 2 filters, what
+are we doing about it?"* It was an inconsistency in this change rather than a new question — every
+other picker on every other tab was narrowed by the filter and this one was not.
+
+⚠️ **AND IT WAS WORSE THAN A DUPLICATE, BECAUSE THE TWO LISTS READ THE SAME.** `create_node`
+copies the structure whenever a root is created (0020 §10) so that renaming a level in one plant
+does not rename it in the others — `dev_demo.sql` puts it as *"one copied structure per plant,
+plus the original the copies came from"* — and **the copy is named after the NODE**
+(`v_copy_name := v_name`, where `v_name` is `p_name`). So the Site Structure picker was listing
+literally **"Plant A / Plant B / Plant C"** underneath a header reading **"Showing: Plant A"**.
+In practice a structure IS a plant, and the picker was a plant picker wearing structure names.
+
+The fix is the rule already applied everywhere else: **the filter narrows the structure picker
+too**, and `resolveSelectedShape` now resolves against what the picker actually offers rather than
+against every editable structure — a selection must not outlive the list it was made from, which
+is the reason that function exists (D87), now with a second way for the list to shrink.
+
+⚠️ **A STRUCTURE OWNED BY NOBODY IS KEPT AT EVERY PLANT.** `site_node_id` is still nullable on
+`hierarchy_templates`: D108 removed company-wide for products, operators, trainings and shift
+patterns and deliberately **not** for structures, because the unowned one is the seed corn every
+new root copies from. Dropping it under a filter would hide the only structure a brand-new plant
+can be built out of. This is `offeredAt`'s pre-0028 shape, and this is the one place it survives.
+
+⚠️ **The TREE still gets the complete list.** `groupRowsByShape` buckets rows by each node's
+LEVEL and uses the summaries only for the NAME, so handing it the narrowed list would leave a
+group rendered and merely unnamed.
+
+⭐ **And the default lands correctly with no extra rule.** Narrowed to Plant A the list is
+`["Plant A", "Standard Plant"]`, `buildShapeSummaries` sorts by name, and `"Plant A"` sorts first —
+so the picker opens on the plant's own structure rather than on the seed. Checked rather than
+assumed, because a first-entry fallback landing on the empty seed structure would have left
+somebody editing the levels of a structure with no nodes in it.
+
+⚠️ **One stale comment fell out of it.** `AdminPage` justified naming the access places by site
+with *"'Plant 2' is what an admin is looking for, not 'Standard Plant (copy)'"* — false since 0020
+names the copy after the node. **The rule it defends is still right for a better reason:** the two
+names coincide only at the moment of creation, and renaming either leaves the other alone, so
+reading the SITE is what keeps the list true after a rename. Corrected in place.
+
 ⭐ **The one form the filter cannot narrow says so.** Adding a ROOT creates a new plant by
 construction, so it cannot be offered "inside" the one on screen. Left working and annotated
 rather than disabled — a disabled control reads as a permission the reader does not have, and

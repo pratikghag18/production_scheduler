@@ -219,7 +219,13 @@
 >    `AdminPage`; `lib/plantFilter.ts` + `hooks/usePlantFilter.ts` + `store/adminView.ts`; every
 >    section trims its lists AND its pickers, and **counts what it trimmed** in a footnote named
 >    after the filter's own label. Hierarchy is filtered on its rows only (the complete-array
->    invariant). Access keeps its own selection within the narrowed list. 42 new cases;
+>    invariant), and ⭐ **the Site Structure picker is narrowed too** — reported by the
+>    maintainer the moment it shipped (*"the Hierarchy tab still has 2 filters"*), because
+>    `create_node` names a copied structure after the NODE (0020 §10), so the picker was listing
+>    "Plant A / Plant B / Plant C" under a header reading "Showing: Plant A". An unowned structure
+>    is kept at every plant — it is the seed corn new roots copy from, and the one place
+>    `offeredAt`'s pre-0028 company-wide shape survives.
+>    Access keeps its own selection within the narrowed list. 42 new cases;
 >    **1224 tests in 29 files**, 12 mutations, 12 caught. ⚠️ `canEdit` is still owed. Was:
 >    **🔴 A PLANT FILTER ON THE ADMIN SCREENS, FOR WHOEVER CAN SEE MORE THAN ONE.**
 >    The maintainer, 31 Aug, immediately after 1(b) landed: *"for the system admin, may be we need

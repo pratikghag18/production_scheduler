@@ -138,3 +138,11 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* What the plant filter trimmed from the structure list. Same weight as the
+   tree's own note — both say "this list is shorter than the data behind it". */
+.plantNote {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
