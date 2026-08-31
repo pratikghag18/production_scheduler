@@ -45,7 +45,7 @@
  *
  * ⭐⭐ CARA BELONGS TO LINE A, AND SHE IS THE DEFECT, REPRODUCED. Two places
  * in her own area (Cell 1 and Cell 2), Cell 3 outside it under Line B, and no
- * tickets at all: *"0 of 2 places in their own area"*. That is the same shape
+ * trainings at all: *"0 of 2 places in their own area"*. That is the same shape
  * as the screen the maintainer measured, which said **"12 of 18 places"** and
  * ticked twelve cells the database refuses. A3 and S3 are that case.
  *
@@ -294,11 +294,11 @@ it("W2: with no requirements at all, every place is a tick", () => {
   expect(places.filter((p) => p.complete).every((p) => p.eligible)).toBe(true);
 });
 
-it("W3: holding every required ticket is a tick", () => {
+it("W3: holding every required training is a tick", () => {
   expect(place(workPlacesFor(ana, input(), TODAY), CELL_1).eligible).toBe(true);
 });
 
-it("W4: an INHERITED requirement that is not held is a cross naming the ticket", () => {
+it("W4: an INHERITED requirement that is not held is a cross naming the training", () => {
   const p = place(workPlacesFor(bob, input(), TODAY), CELL_2);
   expect(p.eligible).toBe(false);
   expect(names(p.missing)).toEqual(["Forklift"]);
@@ -309,17 +309,17 @@ it("W5: a requirement on the CELL ITSELF that is not held is a cross too", () =>
   expect(names(p.missing)).toEqual(["Forklift", "Welding"]);
 });
 
-it("W6: the cross reads 'missing <ticket>'", () => {
+it("W6: the cross reads 'missing <training>'", () => {
   const p = place(workPlacesFor(bob, input(), TODAY), CELL_2);
   expect(p.reasons).toContain("missing Forklift");
 });
 
-it("W7: a ticket expiring AFTER the window's upper bound is still a tick", () => {
+it("W7: a training expiring AFTER the window's upper bound is still a tick", () => {
   // Forklift lapses 3 Sep; the window asked about ends 27 Aug.
   expect(place(workPlacesFor(ana, input(), TODAY), CELL_2).eligible).toBe(true);
 });
 
-it("W8: a ticket expiring BEFORE the window's upper bound is a cross", () => {
+it("W8: a training expiring BEFORE the window's upper bound is a cross", () => {
   const p = place(workPlacesFor(ana, input(), "2026-09-04"), CELL_2);
   expect(p.eligible).toBe(false);
   expect(names(p.expiring)).toEqual(["Forklift"]);
@@ -330,12 +330,12 @@ it("W9: the expiry cross names the day, as 'Forklift expires 3 Sep 2026'", () =>
   expect(p.reasons).toContain("Forklift expires 3 Sep 2026");
 });
 
-it("W10: a ticket lapsing ON the last day of the window is NOT expiring (`<`, not `<=`)", () => {
+it("W10: a training lapsing ON the last day of the window is NOT expiring (`<`, not `<=`)", () => {
   // The server's clause is `expires_at < upper(p_timerange)::date`.
   expect(place(workPlacesFor(ana, input(), "2026-09-03"), CELL_2).eligible).toBe(true);
 });
 
-it("W11: an ALREADY-expired ticket is reported as expiring, never as missing", () => {
+it("W11: an ALREADY-expired training is reported as expiring, never as missing", () => {
   const lapsed = [
     { operatorId: ANA, skillId: SAFETY, expiresAt: null },
     { operatorId: ANA, skillId: FORKLIFT, expiresAt: "2026-01-01" },
@@ -345,13 +345,13 @@ it("W11: an ALREADY-expired ticket is reported as expiring, never as missing", (
   expect(names(p.expiring)).toEqual(["Forklift"]);
 });
 
-it("W12: a ticket with no expiry never lapses, however far the window runs", () => {
+it("W12: a training with no expiry never lapses, however far the window runs", () => {
   const p = place(workPlacesFor(ana, input(), "2099-01-01"), CELL_2);
   expect(names(p.expiring)).toEqual(["Forklift"]);
   expect(p.expiring.some((e) => e.skillId === SAFETY)).toBe(false);
 });
 
-it("W13: a ticket nobody requires changes nothing", () => {
+it("W13: a training nobody requires changes nothing", () => {
   const extra = [...ANA_TICKETS, { operatorId: ANA, skillId: FIRST_AID, expiresAt: "2020-01-01" }];
   const p = place(workPlacesFor(ana, input({ operatorSkills: extra }), TODAY), CELL_2);
   expect(p.eligible).toBe(true);
@@ -369,7 +369,7 @@ it("W14: a required skill whose row cannot be read COUNTS but is not named", () 
 
 it("W15: and it says so, rather than leaving the cross unexplained", () => {
   const p = place(workPlacesFor(ana, input(), TODAY), CELL_3);
-  expect(p.reasons).toContain("1 required ticket could not be read");
+  expect(p.reasons).toContain("1 required training could not be read");
 });
 
 it("W16: a broken ancestor chain is a CROSS, never a tick", () => {
@@ -398,12 +398,12 @@ it("W19: an expiry that is not a readable day is a cross, not a pass", () => {
   expect(p.unnamed).toBe(1);
 });
 
-it("W20: an unreadable `asOf` makes every dated ticket a cross rather than a pass", () => {
+it("W20: an unreadable `asOf` makes every dated training a cross rather than a pass", () => {
   const p = place(workPlacesFor(ana, input(), "whenever"), CELL_2);
   expect(p.eligible).toBe(false);
 });
 
-it("W21: one operator's tickets never count for another", () => {
+it("W21: one operator's trainings never count for another", () => {
   // Bob holds only Safety Induction; Ana's rows sit in the same array.
   const p = place(workPlacesFor(bob, input(), TODAY), CELL_2);
   expect(names(p.missing)).toEqual(["Forklift"]);
@@ -423,7 +423,7 @@ it("W24: an inactive place is still listed, carrying its own active flag", () =>
   expect(p.active).toBe(false);
 });
 
-it("W25: granting the one missing ticket turns SEVERAL crosses green at once", () => {
+it("W25: granting the one missing training turns SEVERAL crosses green at once", () => {
   const before = workPlacesFor(bob, input(), TODAY);
   const after = workPlacesFor(
     bob,
@@ -449,7 +449,7 @@ it("W26: places come back in label order", () => {
  * ⭐⭐ THIS BLOCK EXISTS BECAUSE THE MODULE ANSWERED "where can this person
  * work" ON TRAININGS ALONE. `OperatorLike.siteNodeId` was declared, carried a
  * comment citing D109, and was never read — so the screen ticked every cell in
- * every plant a person's tickets covered. A stale PERMISSION: the client
+ * every plant a person's trainings covered. A stale PERMISSION: the client
  * showing what the server refuses, which is the direction that produces a
  * screen looking like it works. Every case below is one the old code passed
  * with a green tick it had not earned.
@@ -465,8 +465,8 @@ it("A2: and the same person is OUTSIDE a cell under the sibling line", () => {
   expect(p.area).toBe("outside");
 });
 
-it("A3 ⭐: the defect — a place outside their area is NEVER a tick, however complete the tickets", () => {
-  // Ana holds every ticket Cell 3 could ask for; the only requirement there is
+it("A3 ⭐: the defect — a place outside their area is NEVER a tick, however complete the trainings", () => {
+  // Ana holds every training Cell 3 could ask for; the only requirement there is
   // PHANTOM, so make it readable and held so that TRAININGS alone say yes.
   const ana3 = { ...ana, siteNodeId: LINE_A };
   const held = [...ANA_TICKETS, { operatorId: ANA, skillId: PHANTOM, expiresAt: null }];
@@ -573,7 +573,7 @@ it("Q1: inside their area and qualified reads as 'can work here'", () => {
   expect(placeVerdict(place(workPlacesFor(ana, input(), TODAY), CELL_1))).toBe("can-work");
 });
 
-it("Q2: inside their area without the ticket is a capability answer, not an area one", () => {
+it("Q2: inside their area without the training is a capability answer, not an area one", () => {
   expect(placeVerdict(place(workPlacesFor(bob, input(), TODAY), CELL_2))).toBe("missing-training");
 });
 
@@ -590,7 +590,7 @@ it("Q5: outside AND untrained is one mark and two sentences — two decisions, n
   const p = place(workPlacesFor(cara, input(), TODAY), CELL_3);
   expect(placeVerdict(p)).toBe("outside-area");
   expect(p.reasons).toContain("not from this area — needs a recorded reason");
-  expect(p.reasons).toContain("1 required ticket could not be read");
+  expect(p.reasons).toContain("1 required training could not be read");
 });
 
 /* ===========================================================================
@@ -737,7 +737,7 @@ it("S3 ⭐: the count line's denominator is their OWN AREA — Cara is '0 of 2',
   // held two, both of them refusals. This is that sentence, made true.
   const s = summarisePlaces(workPlacesFor(cara, input(), TODAY));
   expect(s.ownArea).toBe(2); // Cell 1 and Cell 2, under Line A
-  expect(s.eligible).toBe(0); // she holds no tickets at all
+  expect(s.eligible).toBe(0); // she holds no trainings at all
   expect(s.total).toBe(6); // and the other four are still listed below
 });
 
@@ -781,7 +781,7 @@ it("R13 ⭐: it falls back to NOBODY, not to the first row", () => {
   // The one place this differs from `resolveSelectedShape` / `resolvePlace`.
   // "Pick someone on the left" is this screen's real opening state, so a
   // first-row fallback would open a person nobody asked for on every visit —
-  // and their name, area and tickets are the entire right-hand column.
+  // and their name, area and trainings are the entire right-hand column.
   expect(resolveSelectedOperator([ana, bob], "no-such-person")).toBe(null);
 });
 
@@ -809,7 +809,7 @@ it("O2: and shown when asked for", () => {
   expect(ids).toContain(CARA);
 });
 
-it("O3: each row carries how many tickets that person holds", () => {
+it("O3: each row carries how many trainings that person holds", () => {
   const rows = operatorRows([ana, bob], ANA_TICKETS);
   expect(rows.find((r) => r.id === ANA)?.ticketCount).toBe(3);
   expect(rows.find((r) => r.id === BOB)?.ticketCount).toBe(1);
@@ -931,21 +931,21 @@ it("N5: the exact clash reads as an offer to reuse, never as an error", () => {
   );
 });
 
-it("N6: the loose clash leaves creating available, because it may be a different ticket", () => {
+it("N6: the loose clash leaves creating available, because it may be a different training", () => {
   const clash = findExistingSkillByName(SKILLS, "FORKLIFT", PLANT);
   // ⭐ `exact: false` IS WHAT LEAVES THE BUTTON LIVE — the panel disables
   // "Create & attach" on `clash.exact` alone — so it is asserted beside the
   // sentence rather than left implied by the wording.
   expect(clash?.exact).toBe(false);
   // ⚠️ THE WHOLE SENTENCE, NOT A SUBSTRING OF ITS TAIL. This read
-  // `toContain("unless this is a different ticket")`, which is the half of the
+  // `toContain("unless this is a different training")`, which is the half of the
   // line that 0031 did NOT change — so reverting the opening clause to "There
   // is already a site-owned…" went through it green. Measured, not guessed: the
   // deliberate break was not caught until this became an equality. N5 pins the
   // exact arm the same way; the two arms are separate strings and need separate
   // anchors.
   expect(clash === null ? "" : describeSkillNameClash(clash)).toBe(
-    "This place already has a Forklift. Attach that one unless this is a different ticket.",
+    "This place already has a Forklift. Use that one unless this is a different training.",
   );
 });
 
@@ -1090,7 +1090,7 @@ it("N18 ⭐: the warning NAMES the other place, and does not read as a refusal",
   // sentence, and a warning that sounds like a refusal in front of a working
   // button is how people learn to ignore the ones that are.
   expect(describeSkillNameClash(clash as SkillNameClash, "Line B")).toBe(
-    "Line B already has a First Aid. Create this one only if it is a different ticket.",
+    "Line B already has a First Aid. Create this one only if it is a different training.",
   );
   // Without a label it still says something true rather than naming nothing.
   expect(describeSkillNameClash(clash as SkillNameClash)).toContain("Another place in this plant");
@@ -1101,25 +1101,25 @@ it("N18 ⭐: the warning NAMES the other place, and does not read as a refusal",
  * =========================================================================== */
 
 /* Cases D1-D3 tested `deletePrecheck` and were deleted with it in 0029: the
- * cascade it existed to anticipate now removes the tickets, so the rule it
+ * cascade it existed to anticipate now removes the trainings, so the rule it
  * enforced refused something the database allows. `56_`'s D19 measures the new
  * behaviour end to end, and `deletion.test.ts`'s K9/K10 cover the counting the
  * dialog does in its place.
  */
-it("T1: a ticket whose skill row cannot be read is shown unnamed, never dropped", () => {
+it("T1: a training whose skill row cannot be read is shown unnamed, never dropped", () => {
   const held = [{ operatorId: ANA, skillId: PHANTOM, expiresAt: null }];
-  const tickets = ticketsFor(ana, SKILLS, held, TODAY);
-  expect(tickets).toHaveLength(1);
-  expect(tickets[0]?.name).toBe("(a ticket you can't see)");
+  const trainings = ticketsFor(ana, SKILLS, held, TODAY);
+  expect(trainings).toHaveLength(1);
+  expect(trainings[0]?.name).toBe("(a training you can't see)");
 });
 
-it("T2: a ticket already lapsed on the day asked about is marked lapsed", () => {
-  const tickets = ticketsFor(ana, SKILLS, ANA_TICKETS, "2026-09-04");
-  expect(tickets.find((t) => t.skillId === FORKLIFT)?.lapsed).toBe(true);
-  expect(tickets.find((t) => t.skillId === SAFETY)?.lapsed).toBe(false);
+it("T2: a training already lapsed on the day asked about is marked lapsed", () => {
+  const trainings = ticketsFor(ana, SKILLS, ANA_TICKETS, "2026-09-04");
+  expect(trainings.find((t) => t.skillId === FORKLIFT)?.lapsed).toBe(true);
+  expect(trainings.find((t) => t.skillId === SAFETY)?.lapsed).toBe(false);
 });
 
-it("T3: tickets are listed for this person only", () => {
+it("T3: trainings are listed for this person only", () => {
   expect(ticketsFor(bob, SKILLS, ANA_TICKETS, TODAY).map((t) => t.skillId)).toEqual([SAFETY]);
 });
 
@@ -1145,9 +1145,9 @@ it("V1: a place whose parent chain loops is labelled as truncated, not as a root
   expect(place(places, LOOP_A).label.startsWith("… › ")).toBe(true);
 });
 
-it("V2: a ticket that has LAPSED and whose skill row is unreadable is counted, not lost", () => {
+it("V2: a training that has LAPSED and whose skill row is unreadable is counted, not lost", () => {
   // The `unnamed` bump inside the EXPIRING branch could be deleted and nothing
-  // failed: W14 covers unnamed-and-MISSING only. A ticket we cannot name and
+  // failed: W14 covers unnamed-and-MISSING only. A training we cannot name and
   // cannot vouch for must still make the place unresolved, or an unreadable
   // row silently becomes a tick.
   const held = [...ANA_TICKETS, { operatorId: ANA, skillId: PHANTOM, expiresAt: "2026-08-01" }];
@@ -1167,10 +1167,119 @@ it("V3 ⭐: the clash sentence asks about THIS PLACE — the axis 0031 moved it 
   //
   // ⚠️ The owner's NAME is still not in this sentence, and that is deliberate,
   // not unfinished: `operators.ts` is dependency-free and holds ids. The name
-  // is rendered beside the training by `OperatorsPanel` via `scopeLabel`, and
-  // `operatorsPanel.test.tsx`'s O18/O19 are what pin it.
+  // is rendered beside the training by whichever panel shows the clash — since
+  // stage 22 that is the Trainings tab, via `scope.ts`'s `scopeLabel`, and its
+  // own suite is what pins that half.
   const owned = { id: WELDING, name: "Welding", siteNodeId: PLANT };
   expect(describeSkillNameClash({ skill: owned, exact: true, where: "here" })).toBe(
     "This place already has a Welding — use that one.",
   );
+});
+
+/* ---------------------------------------------------------------------------
+   GROUP X — THE WORD A READER SEES (roadmap stage 22).
+
+   The maintainer: *"we're still calling them tickets."* The database says
+   `skills`, this module's own types say `Ticket`, and neither of those is a
+   word anybody outside the code has agreed to. **What a user reads says
+   TRAINING.**
+
+   ⚠️⚠️ `tsc` CANNOT SEE A STRING EXPECTATION, WHICH IS WHY THIS GROUP EXISTS
+   RATHER THAN A COMMENT SAYING "renamed". A sentence reverted to "ticket"
+   compiles, lints, and passes every case that asserts on a NUMBER or a
+   BOOLEAN; this project has been through that twice. X1 sweeps every sentence
+   the module can produce, so the guard does not depend on somebody remembering
+   to write a case for the next one they add.
+
+   ⚠️ AND IT ASSERTS ON THE SENTENCES, NOT ON THE SOURCE FILE. A grep over
+   `operators.ts` would go red on `MissingTicket`, which is an identifier and is
+   deliberately unchanged — the line is what a user READS, not what the code
+   calls itself.
+   --------------------------------------------------------------------------- */
+
+/** Every sentence this module can hand to a screen, from one deliberate world. */
+function everySentence(): string[] {
+  const PHANTOM_2 = "30000000-0000-0000-0000-0000000000f2";
+  // Cell 3 is outside Cara's area, inherits two unreadable requirements from
+  // Line B, and Ana's Forklift lapses inside the window asked about — between
+  // them the four reason branches and both arms of the unnamed count.
+  const out = workPlacesFor(
+    cara,
+    input({
+      requirements: [...REQUIREMENTS, { nodeId: LINE_B, skillId: PHANTOM_2 }],
+      operatorSkills: [{ operatorId: CARA, skillId: WELDING, expiresAt: "2026-08-01" }],
+    }),
+    "2026-09-30",
+  ).flatMap((p) => [...p.reasons]);
+  // ⚠️ AND THE SAME WORLD WITHOUT THE SECOND PHANTOM, because the unnamed count
+  // is TWO sentences and the world above only ever reaches the plural one. A
+  // sweep that cannot see the singular arm leaves it free to say "ticket"
+  // again — measured, not assumed: reverting that arm alone went through an
+  // earlier version of this helper green.
+  const one = workPlacesFor(cara, input(), "2026-09-30").flatMap((p) => [...p.reasons]);
+  const clashes: SkillNameClash[] = [
+    { skill: { id: FORKLIFT, name: "Forklift", siteNodeId: PLANT }, exact: true, where: "here" },
+    { skill: { id: FORKLIFT, name: "Forklift", siteNodeId: PLANT }, exact: false, where: "here" },
+    {
+      skill: { id: FORKLIFT, name: "Forklift", siteNodeId: LINE_B },
+      exact: true,
+      where: "this-plant",
+    },
+    {
+      skill: { id: FORKLIFT, name: "Forklift", siteNodeId: LINE_B },
+      exact: false,
+      where: "this-plant",
+    },
+  ];
+  return [
+    ...out,
+    ...one,
+    ...clashes.flatMap((c) => [describeSkillNameClash(c), describeSkillNameClash(c, "Line B")]),
+    ...ticketsFor(ana, [], ANA_TICKETS, TODAY).map((t) => t.name),
+    // The one sentence `validateOperatorDraft` can refuse with.
+    (validateOperatorDraft({ displayName: "  ", employeeRef: "" }) as { message: string }).message,
+  ];
+}
+
+it("X1 ⭐⭐: no sentence this module puts on a screen says 'ticket' or 'skill'", () => {
+  const sentences = everySentence();
+  // A guard that swept an empty list would pass for ever and say nothing —
+  // the failure `productsPanel.test.tsx` shipped, one layer down.
+  expect(sentences.length).toBeGreaterThan(10);
+  expect(sentences.filter((s) => /ticket|skill/i.test(s))).toEqual([]);
+});
+
+it("X2: the sentences it sweeps really are the ones a reader gets", () => {
+  // ⚠️ THE OTHER HALF OF X1, AND WITHOUT IT X1 IS A SIEVE. "Contains no
+  // forbidden word" is satisfied by a module that returns nothing at all, or by
+  // a sweep aimed at the wrong function — so the words that SHOULD be there are
+  // named here, one per branch X1 relies on reaching.
+  const sentences = everySentence();
+  expect(sentences).toContain("not from this area — needs a recorded reason");
+  expect(sentences).toContain("missing Forklift");
+  expect(sentences).toContain("Welding expires 1 Aug 2026");
+  expect(sentences).toContain("2 required trainings could not be read");
+  expect(sentences).toContain("1 required training could not be read");
+  expect(sentences).toContain("(a training you can't see)");
+  expect(sentences).toContain(
+    "This place already has a Forklift. Use that one unless this is a different training.",
+  );
+});
+
+it("X3: the unnamed count is a SENTENCE PER NUMBER — singular and plural both pinned", () => {
+  // ⚠️ THE PLURAL ARM HAD NO CASE AT ALL. W15 asserts the singular, so
+  // `${unnamed} required tickets could not be read` could be reverted, or
+  // pluralised wrongly, with the whole suite green — and it is the arm a real
+  // company hits, where more than one training row is unreadable.
+  const PHANTOM_2 = "30000000-0000-0000-0000-0000000000f2";
+  const p = place(
+    workPlacesFor(
+      ana,
+      input({ requirements: [...REQUIREMENTS, { nodeId: LINE_B, skillId: PHANTOM_2 }] }),
+      TODAY,
+    ),
+    CELL_3,
+  );
+  expect(p.unnamed).toBe(2);
+  expect(p.reasons).toContain("2 required trainings could not be read");
 });

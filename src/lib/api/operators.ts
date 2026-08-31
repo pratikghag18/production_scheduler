@@ -76,6 +76,23 @@ export interface SkillRecord {
   id: string;
   name: string;
   siteNodeId: string;
+  /**
+   * `false` = retired: still held by whoever holds it, still on every record it
+   * has ever been part of, and no longer offered for new work.
+   *
+   * ⭐ THE COLUMN SHIPPED IN 0029 WITH DELIBERATELY NO UI, and §19.74 named
+   * that as owed rather than half-building it: *"no screen reads or writes
+   * them, so `DeleteDialog` offers no 'Deactivate instead' for those two
+   * kinds."* The Trainings screen is where it finally gets read, which is what
+   * makes retiring the primary action there and deleting the secondary one —
+   * the same shape Products already has.
+   *
+   * ⚠️ ADVISORY, exactly as on products and operators: the database does not
+   * refuse a person who already holds a retired training, and 0029 does not
+   * start refusing one. Retiring answers "stop offering this", never "revoke
+   * what people have".
+   */
+  active: boolean;
 }
 
 export interface OperatorSkillRecord {
@@ -141,8 +158,16 @@ export function parseSkillRecord(v: unknown): SkillRecord | null {
   const id = str(v.id);
   const name = str(v.name);
   const siteNodeId = str(v.site_node_id);
-  if (id === null || name === null || siteNodeId === null) return null;
-  return { id, name, siteNodeId };
+  // ⚠️ A MISSING OR NON-BOOLEAN `active` REJECTS THE ROW rather than defaulting
+  // to `true`. The column is NOT NULL with a default, so absent here means the
+  // select forgot to ask for it — and a silent `true` would render every
+  // retired training as live, on the one screen whose job is to tell them
+  // apart. §19.76's lesson: a hand-written guard is the only thing between a
+  // shape change and a screen that quietly says the wrong thing.
+  if (id === null || name === null || siteNodeId === null || typeof v.active !== "boolean") {
+    return null;
+  }
+  return { id, name, siteNodeId, active: v.active };
 }
 
 export function parseOperatorSkillRecord(v: unknown): OperatorSkillRecord | null {
@@ -224,7 +249,15 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
         .from("operators")
         .select("id, display_name, employee_ref, active, site_node_id, source, external_id")
         .order("display_name"),
-      supabase.from("skills").select("id, name, site_node_id").order("name"),
+      // ⚠⚠ `SKILL_COLUMNS`, NEVER A SECOND COPY OF THE SAME LIST. This read
+      // spelled the columns out inline, so when `active` was added to the
+      // constant and `parseSkillRecord` began REQUIRING it, this call kept
+      // asking for three columns and every row it returned was rejected —
+      // silently, into `skipped`, leaving the Trainings screen empty and the
+      // Operators screen with nothing to grant. §19.76's rule with the
+      // arrow reversed: there, a nullable COLUMN broke a hand-written guard;
+      // here, a stricter GUARD broke a hand-written column list.
+      supabase.from("skills").select(SKILL_COLUMNS).order("name"),
       supabase.from("operator_skills").select("operator_id, skill_id, expires_at"),
       supabase.from("node_skill_requirements").select("node_id, skill_id"),
       supabase
@@ -318,7 +351,16 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
 
 const OPERATOR_COLUMNS =
   "id, display_name, employee_ref, active, site_node_id, source, external_id";
-const SKILL_COLUMNS = "id, name, site_node_id";
+/**
+ * ⚠⚠ EXPORTED SO A TEST CAN HOLD IT AND `parseSkillRecord` TO EACH OTHER.
+ * They are two halves of one contract — what we ask the database for, and what
+ * we refuse to accept back — and they lived in two places that could drift.
+ * They did: `active` was added here and required by the parser while a second,
+ * inline copy of the column list three hundred lines up kept asking for three
+ * columns, so every training silently failed to parse. `apiSkillShape.test.ts`
+ * is what makes that a red case instead of an empty screen.
+ */
+export const SKILL_COLUMNS = "id, name, site_node_id, active";
 const OPERATOR_SKILL_COLUMNS = "operator_id, skill_id, expires_at";
 
 export interface CreateOperatorInput {
@@ -474,6 +516,33 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillRecord>
     .select(SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstOrThrow(data, parseSkillRecord, "createSkill");
+}
+
+export interface SetSkillActiveInput {
+  id: string;
+  active: boolean;
+}
+
+/**
+ * Retire / bring back a training — the MAIN action on the Trainings screen,
+ * mirroring `setProductActive` deliberately rather than inventing a second
+ * shape for the same idea.
+ *
+ * ⭐ RETIRING IS NOT DELETING AND THE DIFFERENCE IS THE WHOLE POINT. Deleting
+ * a training cascades it off everyone who holds it (0029 gave
+ * `operator_skills → skills` `ON DELETE CASCADE`, which is what made "delete
+ * this training" completable at all). Retiring changes nothing anybody holds;
+ * it stops the training being offered for new work. "We do not run that course
+ * any more" is the second thing, and it was unreachable until this screen.
+ */
+export async function setSkillActive(input: SetSkillActiveInput): Promise<SkillRecord> {
+  const { data, error } = await supabase
+    .from("skills")
+    .update({ active: input.active })
+    .eq("id", input.id)
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "setSkillActive");
 }
 
 export async function renameSkill(input: { id: string; name: string }): Promise<SkillRecord> {

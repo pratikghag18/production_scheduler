@@ -35,6 +35,8 @@ import {
   fetchOperatorsAdmin,
   grantSkill,
   renameSkill,
+  setSkillActive,
+  type SetSkillActiveInput,
   revokeSkill,
   setOperatorActive,
   updateOperator,
@@ -123,6 +125,23 @@ export function useRenameSkill() {
   const invalidate = useInvalidateOperators();
   return useMutation<SkillRecord, SchedulerError, { id: string; name: string }>({
     mutationFn: (input) => renameSkill(input),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Retire / bring back — the main action on the Trainings screen.
+ *
+ * ⭐ It invalidates the same key everything else here does, and that matters
+ * more than usual: retiring a training changes the OPERATORS screen too (a
+ * retired one stops being offered to grant), so a mutation that only refreshed
+ * its own list would leave the other screen offering something the first had
+ * just withdrawn.
+ */
+export function useSetSkillActive() {
+  const invalidate = useInvalidateOperators();
+  return useMutation<SkillRecord, SchedulerError, SetSkillActiveInput>({
+    mutationFn: (input) => setSkillActive(input),
     onSuccess: invalidate,
   });
 }

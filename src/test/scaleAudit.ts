@@ -98,6 +98,7 @@ export const REM_SURFACES: readonly string[] = [
   // pre-seat exists to spend once instead of four times.
   "src/features/admin/components/ShiftsPanel.module.css",
   "src/features/admin/components/OperatorsPanel.module.css",
+  "src/features/admin/components/TrainingsPanel.module.css",
   "src/features/admin/components/ProductsPanel.module.css",
   "src/features/admin/components/ImportPanel.module.css",
   // 0029 / D110. ⚠️ NOT PRE-SEATED, AND THAT IS HOW IT WAS MISSED: the

@@ -21,6 +21,7 @@ import { SiteAccessPanel } from "./components/SiteAccessPanel";
 // OWN file and never this one. See any of the four for why.
 import { ShiftsPanel, SHIFTS_PANEL_READY } from "./components/ShiftsPanel";
 import { OperatorsPanel, OPERATORS_PANEL_READY } from "./components/OperatorsPanel";
+import { TrainingsPanel, TRAININGS_PANEL_READY } from "./components/TrainingsPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import styles from "./AdminPage.module.css";
@@ -41,7 +42,8 @@ import styles from "./AdminPage.module.css";
  * itself has no use for `nodes`.
  */
 
-type SectionId = "hierarchy" | "access" | "shifts" | "operators" | "products" | "import";
+type SectionId =
+  "hierarchy" | "access" | "shifts" | "operators" | "trainings" | "products" | "import";
 
 /*
  * ⭐ §19.62 — `enabled` IS NOT A LITERAL FOR THE QUEUED SECTIONS, AND THAT IS
@@ -56,6 +58,17 @@ const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }
   { id: "access", label: "Access", enabled: true },
   { id: "shifts", label: "Shifts", enabled: SHIFTS_PANEL_READY },
   { id: "operators", label: "Operators", enabled: OPERATORS_PANEL_READY },
+  // ⭐⭐ TRAININGS IS ITS OWN SECTION, AND IT SITS BESIDE OPERATORS BECAUSE
+  // THAT IS WHERE IT USED TO LIVE. It was a "Ticket types" toggle INSIDE the
+  // Operators panel, reachable only after picking a person — so managing the
+  // catalogue meant choosing somebody arbitrary first. The maintainer, 31 Aug:
+  // *"I thought we were going to create a trainings tab like
+  // operator/shifts/products."*
+  //
+  // ⚠️ THE SPLIT IS THE TYPE VS THE HOLDING, and it is worth stating because
+  // the two look alike: creating, renaming and retiring a TRAINING happens
+  // here; GRANTING one to a person stays on Operators, where the person is.
+  { id: "trainings", label: "Trainings", enabled: TRAININGS_PANEL_READY },
   { id: "products", label: "Products", enabled: PRODUCTS_PANEL_READY },
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
 ];
@@ -407,6 +420,13 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Operators</h1>
             <OperatorsPanel />
+          </>
+        )}
+
+        {section === "trainings" && (
+          <>
+            <h1 className={styles.h1}>Trainings</h1>
+            <TrainingsPanel />
           </>
         )}
 

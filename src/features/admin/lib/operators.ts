@@ -13,10 +13,24 @@
  *      a simple yes/no."
  *
  * So the vocabulary of this module is WHERE A PERSON CAN WORK, not a
- * catalogue of skills. `workPlacesFor` is the primary function here; tickets
+ * catalogue of skills. `workPlacesFor` is the primary function here; trainings
  * (a held skill, with or without an expiry) exist only because granting one
- * is how you CHANGE the answer. One ticket turns several crosses green at
+ * is how you CHANGE the answer. One training turns several crosses green at
  * once, and the person granting it never touches a cell.
+ *
+ * ---------------------------------------------------------------------------
+ * ⚠️ THREE WORDS FOR ONE THING, AND ONLY ONE OF THEM REACHES A READER. The
+ * database calls these rows `skills` and `operator_skills`; this module and
+ * the screen above it called them "tickets" for most of their life; **the
+ * maintainer calls them TRAININGS, and that is the word that wins.** Every
+ * sentence this file returns says training, because every one of them is
+ * rendered verbatim. The type and function names below (`Ticket`,
+ * `ticketsFor`, `MissingTicket`, `ticketCount`) still say ticket, and the
+ * ones that mirror the api (`SkillLike`, `skillId`, `findExistingSkillByName`)
+ * still say skill: what a user READS changed, what the code calls itself did
+ * not, because renaming the api's vocabulary is a much larger change than
+ * this one. So a `grep` for "ticket" here should find identifiers and nothing
+ * a person can see — that difference is the whole rule.
  *
  * ---------------------------------------------------------------------------
  * ⚠️⚠️ THIS IS A MIRROR. THE SERVER IS THE AUTHORITY. ⚠️⚠️
@@ -27,7 +41,7 @@
  * assignment time against the real shift window. Everything computed here is
  * an INDICATION: what the arrays this module was handed imply, on the date it
  * was handed. It exists so an admin can see the consequence of granting a
- * ticket without dragging a chip onto a board to find out.
+ * training without dragging a chip onto a board to find out.
  *
  * The invariant runs ONE WAY: **this must never show a tick where the server
  * would refuse.** The converse — a cross here that the server would have
@@ -42,7 +56,7 @@
  * ⭐⭐ THERE ARE TWO SERVER RULES HERE, NOT ONE, AND THIS MODULE ONCE
  * MIRRORED ONLY THE FIRST.
  *
- *  1. TRAINING — `check_eligibility`: does this person hold every ticket this
+ *  1. TRAINING — `check_eligibility`: does this person hold every training this
  *     place requires? A capability question, and the whole of what this file
  *     used to answer.
  *  2. AREA — `app_guard_assignment_scope` (migration 0028 §4 / D109): an
@@ -54,7 +68,7 @@
  * ⚠️⚠️ `OperatorLike.siteNodeId` HAS BEEN DECLARED HERE SINCE D108 MADE IT
  * NOT NULL, WITH A COMMENT CITING D109 — AND `workPlacesFor` DID NOT READ IT.
  * The screen therefore ticked every cell in every plant that a person's
- * TICKETS covered: 12 of 18 on the maintainer's own screen, for somebody whose
+ * TRAININGS covered: 12 of 18 on the maintainer's own screen, for somebody whose
  * line holds 2, and all twelve of those ticks were cells the database refuses.
  * The fact was present and unread; this was never missing information.
  *
@@ -116,7 +130,7 @@
  *     ltree includes the target itself. A requirement on a Line applies to
  *     every cell under it AND a requirement on the cell applies to the cell.
  *  2. `missing` is computed against `held` WITHOUT regard to expiry. An
- *     expired-but-held ticket is EXPIRING, not MISSING — it must never be
+ *     expired-but-held training is EXPIRING, not MISSING — it must never be
  *     reported twice, and `expiring` is what makes it a cross.
  *  3. `missing_skills` / `expiring_skills` join `skills` for a NAME, so a
  *     required skill whose row the caller cannot read DROPS OUT OF THE LIST
@@ -125,10 +139,10 @@
  *
  * ---------------------------------------------------------------------------
  * THE WINDOW. The server compares `expires_at < upper(p_timerange)::date`,
- * and treats an unbounded window as expiring ANY dated ticket. This screen
+ * and treats an unbounded window as expiring ANY dated training. This screen
  * has no shift to ask about, so `asOf` IS that upper bound: "can this person
  * work here, for work booked up to this date". Default it to today and it
- * answers "right now"; move it forward and tickets that lapse before then
+ * answers "right now"; move it forward and trainings that lapse before then
  * turn to crosses, which is precisely what the server will do to them.
  *
  * ---------------------------------------------------------------------------
@@ -192,7 +206,7 @@ export interface SkillLike {
   siteNodeId: string;
 }
 
-/** A ticket: this person holds this skill. `expiresAt === null` means no expiry. */
+/** A training: this person holds this skill. `expiresAt === null` means no expiry. */
 export interface OperatorSkillLike {
   operatorId: string;
   skillId: string;
@@ -462,13 +476,13 @@ export function placesUnderSameRoot(
  *     eligible := count(missing) = 0 AND count(expiring) = 0
  * =========================================================================== */
 
-/** A required ticket this person does not hold. */
+/** A required training this person does not hold. */
 export interface MissingTicket {
   skillId: string;
   name: string;
 }
 
-/** A required ticket this person holds, but which lapses inside the window. */
+/** A required training this person holds, but which lapses inside the window. */
 export interface ExpiringTicket {
   skillId: string;
   name: string;
@@ -500,12 +514,12 @@ export interface WorkPlace {
    */
   area: AreaStanding;
   /**
-   * TRAININGS ALONE: every required ticket held, none of them lapsed inside the
+   * TRAININGS ALONE: every required training held, none of them lapsed inside the
    * window, and every one of them readable. This is exactly what `eligible`
    * meant before the area rule was mirrored, and it is kept as its own field
    * because a place OUTSIDE somebody's area still has a training answer worth
    * showing beside it — waving through "not from this area" must not silently
-   * also wave through "no Welding ticket".
+   * also wave through "no Welding training".
    */
   qualified: boolean;
   /**
@@ -519,8 +533,8 @@ export interface WorkPlace {
   missing: readonly MissingTicket[];
   expiring: readonly ExpiringTicket[];
   /**
-   * How many required tickets counted against this place but could NOT be
-   * named — the skill row is not readable, or a held ticket's `expires_at` is
+   * How many required trainings counted against this place but could NOT be
+   * named — the skill row is not readable, or a held training's `expires_at` is
    * not a day this module can compare. The server behaves the same way
    * (see the file header, point 3): they count, they cannot be listed.
    */
@@ -565,7 +579,7 @@ function labelFor(node: NodeLike, byId: ReadonlyMap<string, NodeLike>): string {
 
 /**
  * @param asOf The window's UPPER BOUND, `YYYY-MM-DD` — see the file header.
- *   A ticket expiring strictly before this day is a cross, exactly as
+ *   A training expiring strictly before this day is a cross, exactly as
  *   `expires_at < upper(p_timerange)::date` makes it one.
  */
 export function workPlacesFor(
@@ -583,7 +597,7 @@ export function workPlacesFor(
   for (const s of input.skills) skillName.set(s.id, s.name);
 
   // `held` — the operator's own rows and nothing else. Expiry is NOT a filter
-  // here: an expired ticket is still HELD, which is what keeps it out of
+  // here: an expired training is still HELD, which is what keeps it out of
   // `missing` and puts it in `expiring` instead (file header, point 2).
   const held = new Map<string, string | null>();
   for (const os of input.operatorSkills) {
@@ -649,8 +663,8 @@ export function workPlacesFor(
     if (unnamed > 0) {
       reasons.push(
         unnamed === 1
-          ? "1 required ticket could not be read"
-          : `${unnamed} required tickets could not be read`,
+          ? "1 required training could not be read"
+          : `${unnamed} required trainings could not be read`,
       );
     }
 
@@ -684,9 +698,9 @@ export function workPlacesFor(
  *   ⚠ outside-area      allowed only with a recorded reason (D113)
  *
  * ⚠️ THE AREA IS TESTED FIRST, and an UNRESOLVED area lands on `outside-area`
- * with it. Somebody outside their area who also lacks the ticket reads as
+ * with it. Somebody outside their area who also lacks the training reads as
  * `outside-area`, because the area is the fact that decides whether there is a
- * way through at all — the missing ticket is still named in `reasons`, since
+ * way through at all — the missing training is still named in `reasons`, since
  * they are two decisions and a supervisor waving one through has not waved
  * through the other.
  * =========================================================================== */
@@ -722,7 +736,7 @@ export function placeVerdict(place: WorkPlace): PlaceVerdict {
  * it differs from those two. "Pick someone on the left" is this screen's real
  * opening state rather than a failure of one, so a first-row fallback would
  * open a person nobody asked for on every visit — and on this screen that
- * person's name, area and tickets are the entire right-hand column.
+ * person's name, area and trainings are the entire right-hand column.
  */
 export function resolveSelectedOperator(
   people: readonly OperatorLike[],
@@ -742,7 +756,7 @@ export interface OperatorRow {
   employeeRef: string | null;
   active: boolean;
   siteNodeId: string;
-  /** How many tickets this person holds. Not eligibility — just the count. */
+  /** How many trainings this person holds. Not eligibility — just the count. */
   ticketCount: number;
 }
 
@@ -843,7 +857,7 @@ export function validateOperatorDraft(
 }
 
 /* ===========================================================================
- * Tickets: what this person holds today.
+ * Trainings: what this person holds today.
  * =========================================================================== */
 
 export interface Ticket {
@@ -868,9 +882,9 @@ export function ticketsFor(
     const expiresAt = os.expiresAt;
     out.push({
       skillId: os.skillId,
-      // A ticket for a skill row we cannot read is still a ticket the person
+      // A training for a skill row we cannot read is still a training the person
       // holds; it is shown, unnamed, rather than silently dropped.
-      name: name.get(os.skillId) ?? "(a ticket you can't see)",
+      name: name.get(os.skillId) ?? "(a training you can't see)",
       expiresAt,
       lapsed: expiresAt !== null && isDay(expiresAt) && isDay(asOf) ? expiresAt < asOf : false,
     });
@@ -899,7 +913,7 @@ export function ticketsFor(
  *
  * The consequence on a screen is unchanged, and it is still the point of this
  * function: when someone types a name their own place already holds, they have
- * not made a mistake — they have found the ticket they were about to create.
+ * not made a mistake — they have found the training they were about to create.
  * The screen says so and attaches it in one click.
  *
  * ⭐ THE EXACT / LOOSE SPLIT SURVIVES 0031, AND THE REASON IS THAT THE
@@ -911,7 +925,7 @@ export function ticketsFor(
  *    OWNER: the insert WILL be refused with 23505. Offer the existing one; do
  *    not offer to create.
  *  - CASE-ONLY, SAME OWNER: legal, and leaves this one place with two
- *    Forklifts. Warn, but the user may genuinely mean a different ticket, so
+ *    Forklifts. Warn, but the user may genuinely mean a different training, so
  *    creating stays available.
  *  - EITHER, DIFFERENT OWNER: not a clash. `null`.
  * =========================================================================== */
@@ -944,7 +958,7 @@ export interface SkillNameClash {
 
 /**
  * @param owner The `site_node_id` the new training would be created under. On
- *   this screen that is where the person being ticketed belongs, because
+ *   this screen that is where the person being granted it belongs, because
  *   `createAndAttach` has no other place to put it.
  *
  *   ⚠️ `null` MEANS "NOTHING TO CLASH WITH", NEVER "CHECKED AND CLEAR". With
@@ -1039,22 +1053,28 @@ export function describeSkillNameClash(clash: SkillNameClash, ownerLabel?: strin
     // as a sentence rather than as a prefix baked into the name.
     const who = ownerLabel === undefined ? "Another place in this plant" : ownerLabel;
     return clash.exact
-      ? `${who} already has a ${clash.skill.name}. Create this one only if it is a different ticket.`
-      : `${who} has a ${clash.skill.name}, spelled differently. Create this one only if it is a different ticket.`;
+      ? `${who} already has a ${clash.skill.name}. Create this one only if it is a different training.`
+      : `${who} has a ${clash.skill.name}, spelled differently. Create this one only if it is a different training.`;
   }
+  // ⚠️ "USE", NOT "ATTACH". This sentence used to say *"Attach that one"*,
+  // which was true while the only caller was the Operators screen — a person
+  // was selected there and attaching was one click. Stage 22 moved training
+  // management to its own tab, where nobody is selected and there is nothing
+  // to attach to. **A sentence naming an action the screen does not offer is
+  // D106 in prose**, so it names the one it does.
   return clash.exact
     ? `This place already has a ${clash.skill.name} — use that one.`
-    : `This place already has a ${clash.skill.name}. Attach that one unless this is a different ticket.`;
+    : `This place already has a ${clash.skill.name}. Use that one unless this is a different training.`;
 }
 
 /* ===========================================================================
  * ⚠️ `DeletePrecheck` / `deletePrecheck` LIVED HERE AND 0029 DELETED THEM.
  *
- * They refused to delete anybody still holding a ticket — "Remove it first, or
+ * They refused to delete anybody still holding a training — "Remove it first, or
  * deactivate them instead" — because `operator_skills`' foreign key to
  * `operators` carried no `ON DELETE` and the delete would have failed with
  * 23503 anyway. Migration 0029 gives that key `ON DELETE CASCADE`: a person's
- * tickets now go with them, and `deletion_preview` COUNTS them so the dialog
+ * trainings now go with them, and `deletion_preview` COUNTS them so the dialog
  * can say how many.
  *
  * ⭐ THE REASON THIS HAD TO GO RATHER THAN BE RELAXED. A precheck that refuses

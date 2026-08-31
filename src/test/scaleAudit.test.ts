@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the twelve admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the thirteen admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -241,6 +241,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // update one place of the two.
         "src/features/admin/components/ShiftsPanel.module.css",
         "src/features/admin/components/OperatorsPanel.module.css",
+        "src/features/admin/components/TrainingsPanel.module.css",
         "src/features/admin/components/ProductsPanel.module.css",
         "src/features/admin/components/ImportPanel.module.css",
         // 0029: the delete confirmation, shared by all four admin lists. The
@@ -452,16 +453,22 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
     expect(auditAdminSections(repoRoot)).toEqual([]);
   });
 
-  it("H2: the six ids are exactly these, in rail order", () => {
+  it("H2: the seven ids are exactly these, in rail order", () => {
     // The list that drives H1 is itself untested unless something asserts it —
     // deleting an entry from SECTIONS makes H1 *greener*, which is the shape
     // R10 and G12 both exist to close.
+    //
+    // ⭐ `trainings` joined in stage 22 and this case is what noticed. Trainings
+    // were a "Ticket types" toggle INSIDE the Operators panel, so managing the
+    // catalogue meant picking an arbitrary person first; they are their own
+    // section now, beside Operators because that is where they came from.
     const tsx = readFileSync(`${repoRoot}/${ADMIN_PAGE}`, "utf8");
     expect(parseSectionIds(tsx)).toEqual([
       "hierarchy",
       "access",
       "shifts",
       "operators",
+      "trainings",
       "products",
       "import",
     ]);

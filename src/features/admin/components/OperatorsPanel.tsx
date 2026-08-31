@@ -22,8 +22,6 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { useSession } from "@/features/auth/useSession";
 import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 import {
-  describeSkillNameClash,
-  findExistingSkillByName,
   formatDay,
   operatorRows,
   placeVerdict,
@@ -42,15 +40,13 @@ import {
 // lets `operators.test.ts` run it under `node --experimental-strip-types`. An
 // id becomes a node NAME on this side of the line, in the one place that
 // already owns `nodesById`.
-import { indentedLabel, scopeLabel, scopeOptions, scopePathLabel } from "../lib/scope";
+import { indentedLabel, scopeOptions } from "../lib/scope";
 import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import {
   useCreateOperator,
-  useCreateSkill,
   useGrantSkill,
   useOperatorsAdmin,
-  useRenameSkill,
   useRevokeSkill,
   useSetOperatorActive,
   useUpdateOperator,
@@ -67,10 +63,25 @@ import styles from "./OperatorsPanel.module.css";
  *
  * So this panel LEADS WITH WHERE A PERSON CAN WORK. Pick somebody; see the
  * schedulable places, each with a tick, or a cross and the reason for it
- * ("missing Forklift", "Welding expires 3 Sep 2026"). Tickets are the second
+ * ("missing Forklift", "Welding expires 3 Sep 2026"). Trainings are the second
  * section, not the first, because they are how you CHANGE that answer rather
  * than the vocabulary the screen speaks — granting one turns several crosses
  * green at once, and nobody has to touch a cell to do it.
+ *
+ * ⭐⭐ THE TRAINING CATALOGUE IS NOT MANAGED HERE ANY MORE — roadmap stage 22.
+ * Creating, renaming and deleting a training TYPE moved to `TrainingsPanel`,
+ * its own admin tab beside Operators, Shifts and Products. What stayed is
+ * GIVING one to the person on screen: the list of what they hold, its expiry,
+ * Attach and Remove. The distinction is the whole of the split — a type is a
+ * thing the company owns and a grant is a fact about a person, and only the
+ * second one belongs on a screen headed with somebody's name.
+ *
+ * ⚠️ THE MAINTAINER'S WORD IS "TRAINING", AND IT WINS OVER BOTH OF THE OTHERS.
+ * The database calls these rows `skills` / `operator_skills` and this screen
+ * used to call them "tickets". What a user READS says training, everywhere;
+ * what the code calls itself still mirrors the api (`useGrantSkill`,
+ * `skillId`, `SkillLike`), because renaming the database's vocabulary is a
+ * different and much larger change.
  *
  * ⭐⭐ THREE MARKS, NOT TWO, AND THE THIRD ONE IS WHY THIS LIST IS HONEST.
  * There are two server rules behind this answer, not one: the trainings
@@ -101,9 +112,9 @@ import styles from "./OperatorsPanel.module.css";
  * roadmap 1(c). The maintainer, 31 Aug: *"for the system admin, may be we need
  * a filter for plants in all the sub tabs."* `AdminPage` owns the one control
  * and names the chosen plant in its header; this panel only READS the choice
- * (`usePlantFilter`) and applies it to the people list, the ticket types and
- * both "Belongs to" pickers. It renders no control of its own — six per-panel
- * filters would be six controls that drift apart.
+ * (`usePlantFilter`) and applies it to the people list, the trainings on offer
+ * and both "Belongs to" pickers. It renders no control of its own — six
+ * per-panel filters would be six controls that drift apart.
  *
  * ⚠️⚠️ IT DOES NOT REPLACE `placesUnderSameRoot` AND THE TWO MUST NOT BE
  * MERGED. They answer different questions: the filter is a CHOICE THE READER
@@ -230,17 +241,10 @@ export function OperatorsPanel() {
 
   const [grantId, setGrantId] = useState("");
   const [grantExpiry, setGrantExpiry] = useState("");
-  const [newSkill, setNewSkill] = useState("");
-  const [skillEditId, setSkillEditId] = useState<string | null>(null);
-  const [skillDeleteId, setSkillDeleteId] = useState<string | null>(null);
-  const [skillEditName, setSkillEditName] = useState("");
-  const [showSkillAdmin, setShowSkillAdmin] = useState(false);
 
   const createOperator = useCreateOperator();
   const updateOperator = useUpdateOperator();
   const setActive = useSetOperatorActive();
-  const createSkill = useCreateSkill();
-  const renameSkill = useRenameSkill();
   const grantSkill = useGrantSkill();
   const updateExpiry = useUpdateSkillExpiry();
   const revokeSkill = useRevokeSkill();
@@ -345,20 +349,24 @@ export function OperatorsPanel() {
   const summary = summarisePlaces(visiblePlaces);
   const hiddenPlaces = sitePlaces.length - visiblePlaces.length;
 
-  // ⭐ THE TICKET TYPES ARE NARROWED LIKE THE PEOPLE ARE — decision 3: what you
-  // see is what you can grant. `skills` itself stays whole for the two other
-  // questions this screen asks of it, because neither of them is "what is on
-  // offer here" — see `tickets` just below and `clash` further down.
+  // ⭐ WHAT CAN BE GRANTED IS NARROWED LIKE THE PEOPLE ARE — decision 3: what
+  // you see is what you can grant. `skills` itself stays whole for the other
+  // question this screen asks of it, because that one is not "what is on offer
+  // here" — see `tickets` just below.
   const skillsInPlant = useMemo(
     () => rowsInPlant(skills, plant.choice, plant.plants, nodesById),
     [skills, plant.choice, plant.plants, nodesById],
   );
-  const hiddenSkills = skills.length - skillsInPlant.length;
 
-  // ⚠️ `skills`, NOT `skillsInPlant`. These are the tickets this person ACTUALLY
-  // HOLDS — rows in `operator_skills`, not a list of what is on offer. Filtering
-  // them would hide a real grant from the only screen that can revoke it: the
-  // plant filter reaching past a view and into the record.
+  // ⚠️ `skills`, NOT `skillsInPlant`. These are the trainings this person
+  // ACTUALLY HOLDS — rows in `operator_skills`, not a list of what is on offer.
+  // Filtering them would hide a real grant from the only screen that can revoke
+  // it: the plant filter reaching past a view and into the record.
+  //
+  // ⚠️ THE NAME `tickets` IS THE CODE'S, NOT THE READER'S — see the header. The
+  // screen says "Trainings" everywhere a person can see it; `ticketsFor` and
+  // this local keep the word the module already used, because renaming the
+  // module's own vocabulary is a separate change from renaming the screen's.
   const tickets = selected === null ? [] : ticketsFor(selected, skills, operatorSkills, asOf);
   const heldIds = new Set(tickets.map((t) => t.skillId));
   const grantable = skillsInPlant.filter((s) => !heldIds.has(s.id));
@@ -414,35 +422,10 @@ export function OperatorsPanel() {
   // than pointing at a node it will not save.
   const editSiteValue = scopeChoices.some((o) => o.value === editSite) ? editSite : "";
 
-  // ⚠️ STILL `skills`, NOT `skillsInPlant`, AND FOR A REASON THAT OUTLIVED THE
-  // ONE ORIGINALLY WRITTEN HERE. It used to say the question was company-wide
-  // because the names were (`unique (org_id, name)`). Since 0031 they are
-  // unique PER OWNER, and the narrowing that matters is the OWNER — passed as
-  // the third argument — not the plant the reader happens to be looking at.
-  // Asking `skillsInPlant` would still be wrong, and now more sharply: the
-  // plant filter is a reversible VIEW CHOICE, so it would let a widened filter
-  // silently change which names the screen believes are free.
-  //
-  // ⭐ THE OWNER IS WHERE THE SELECTED PERSON BELONGS, because that is the only
-  // place `createAndAttach` can put a new training (see it below). `null` when
-  // nobody is picked: no owner, no insert, nothing to clash with — and the
-  // create is refused separately, with a sentence.
-  // ⚠️ `nodesById` IS HANDED IN SO THE PLANT-WIDE PASS CAN RUN AT ALL. Without
-  // it the finder answers about this owner only and says nothing about the rest
-  // of the plant — which is silence, not a clean bill of health, and would
-  // leave 0031's *"the screen warns per plant"* promise unkept.
-  const clash = findExistingSkillByName(skills, newSkill, selected?.siteNodeId ?? null, nodesById);
-  // ⭐⭐ ONLY A CLASH UNDER THIS OWNER BLOCKS. A `"this-plant"` one is legal
-  // — 0031's constraint is per owner — so refusing it here would be the client
-  // enforcing a rule the database does not have, which is §19.74's stale-refusal
-  // defect: the quiet kind that never fails and just stops people working.
-  const clashBlocks = clash !== null && clash.exact && clash.where === "here";
   const busy =
     createOperator.isPending ||
     updateOperator.isPending ||
     setActive.isPending ||
-    createSkill.isPending ||
-    renameSkill.isPending ||
     grantSkill.isPending ||
     updateExpiry.isPending ||
     revokeSkill.isPending;
@@ -556,62 +539,8 @@ export function OperatorsPanel() {
         onSuccess: () => {
           setGrantId("");
           setGrantExpiry("");
-          setNewSkill("");
         },
         onError: onErr,
-      },
-    );
-  }
-
-  function createAndAttach() {
-    setNotice(null);
-    if (orgId === null) {
-      setNotice("Your profile hasn't loaded yet — try again in a moment.");
-      return;
-    }
-    // Needed since 0028: the new training is owned by whoever is being
-    // ticketed, so there is no training to make without a person selected.
-    if (selected === null) {
-      setNotice("Pick a person first — a new training belongs where they do.");
-      return;
-    }
-    const name = newSkill.trim();
-    if (name === "") return;
-    // ⭐ THE CLASH IS NOT AN ERROR, AND SINCE 0031 IT IS ALSO REACHABLE. Names
-    // are unique per OWNER, and `clash` is asked about this person's own owner
-    // — the same node the create below writes — so an exact clash is a row on
-    // the reader's own branch, which they can see and attach in one click. It
-    // never reaches the database at all.
-    //
-    // ⚠️ THAT PRE-CHECK WAS UNRELIABLE BETWEEN 0026 AND 0031 and this comment
-    // did not say so: read-scoping meant the org-wide row that would refuse the
-    // insert was often one the client had never loaded, so the "clash" arrived
-    // as a duplicate-key error instead. `createSkill`'s doc in
-    // `src/lib/api/operators.ts` carries the full account.
-    if (clashBlocks && clash !== null) {
-      setNotice(describeSkillNameClash(clash, scopeLabel(clash.skill.siteNodeId, nodesById)));
-      return;
-    }
-    // ⭐⭐ 0028 CHANGED WHO OWNS A TRAINING MADE HERE, AND THERE IS ONLY ONE
-    // ANSWER LEFT. It used to be created company-wide (`site_node_id: null`),
-    // which a site admin was then refused by `skills_insert` — honest, but it
-    // meant a supervisor could never make a ticket from this screen at all.
-    // D108 removed company-wide, and D109 says the training must be owned at or
-    // above wherever it is used. The person being ticketed is the only place
-    // this screen knows about, so the training belongs where THEY belong: the
-    // `operator_skills` guard added in 0028 requires the two to be on one
-    // branch, and this is the choice that satisfies it by construction.
-    createSkill.mutate(
-      { orgId, name, siteNodeId: selected.siteNodeId },
-      {
-        onSuccess: (skill) => attachSkill(skill.id, grantExpiry === "" ? null : grantExpiry),
-        // The race: somebody else created it between the check and the insert.
-        onError: (err) =>
-          setNotice(
-            err.kind === "DuplicateValue"
-              ? `Somebody just created ${name}. Reopen this person to attach it.`
-              : describeSchedulerError(err),
-          ),
       },
     );
   }
@@ -686,7 +615,7 @@ export function OperatorsPanel() {
                   <span className={styles.personName}>{row.displayName}</span>
                   <span className={styles.personMeta}>
                     {row.employeeRef ?? "no reference"} ·{" "}
-                    {row.ticketCount === 1 ? "1 ticket" : `${row.ticketCount} tickets`}
+                    {row.ticketCount === 1 ? "1 training" : `${row.ticketCount} trainings`}
                     {!row.active && <span className={styles.badge}>deactivated</span>}
                   </span>
                 </button>
@@ -747,149 +676,13 @@ export function OperatorsPanel() {
             Add
           </button>
 
-          <button
-            type="button"
-            className={styles.link}
-            onClick={() => setShowSkillAdmin((on) => !on)}
-          >
-            {showSkillAdmin ? "Hide ticket types" : "Ticket types"}
-          </button>
-          {showSkillAdmin && (
-            <ul className={styles.ticketTypes}>
-              {skillsInPlant.map((s) => (
-                <li key={s.id} className={styles.ticketType}>
-                  {skillEditId === s.id ? (
-                    <>
-                      <input
-                        className={styles.input}
-                        value={skillEditName}
-                        onChange={(e) => setSkillEditName(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className={styles.small}
-                        disabled={busy}
-                        onClick={() => {
-                          const name = skillEditName.trim();
-                          if (name === "") return;
-                          setNotice(null);
-                          renameSkill.mutate(
-                            { id: s.id, name },
-                            { onSuccess: () => setSkillEditId(null), onError: onErr },
-                          );
-                        }}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.small}
-                        onClick={() => setSkillEditId(null)}
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className={styles.ticketTypeName}>{s.name}</span>
-                      {/* ⭐⭐ WHOSE TRAINING THIS IS, AND IT IS LOAD-BEARING
-                          SINCE 0031. Names are unique per OWNER now
-                          (`unique (org_id, site_node_id, name)`), so this list
-                          can legitimately hold two rows both called "Welding"
-                          — and a Rename and a cascading Delete sit beside each
-                          of them. Without the owner they are indistinguishable
-                          and the reader is picking blind.
-
-                          ⭐ THIS IS THE WHOLE OF THE MAINTAINER'S "easily
-                          identify" REQUIREMENT, AND IT IS WHY THE NAME ITSELF
-                          STAYS CLEAN. The demo seed used to spell the plant
-                          into the text (`A-Welding`); read from the column
-                          instead, it follows a node rename for free and 0031
-                          drops the prefix.
-
-                          ⚠️ A SEPARATE ELEMENT, NEVER APPENDED TO THE NAME
-                          SPAN. Concatenating would put the owner inside the
-                          text a reader searches and a test queries — the same
-                          mistake as `A-Welding`, one layer up.
-
-                          The full path is the tooltip because `scopeLabel`
-                          gives the leaf's own name, and two plants can each
-                          have a "Line A". `scopePathLabel` disambiguates on
-                          hover without making every row three names wide.
-
-                          ⚠️ `styles.ticketWhen` is BORROWED — the muted
-                          secondary text this list already has. This lane does
-                          not own `OperatorsPanel.module.css`, so no class was
-                          added for it. */}
-                      <span
-                        className={styles.ticketWhen}
-                        title={scopePathLabel(s.siteNodeId, nodesById)}
-                      >
-                        {scopeLabel(s.siteNodeId, nodesById)}
-                      </span>
-                      <button
-                        type="button"
-                        className={styles.small}
-                        onClick={() => {
-                          setSkillEditId(s.id);
-                          setSkillEditName(s.name);
-                        }}
-                      >
-                        Rename
-                      </button>
-                      {/* ⚠️ THIS BUTTON HAD NO CONFIRMATION AT ALL. One click
-                          deleted a ticket type outright — and under 0029 that
-                          now also un-qualifies everyone holding it and drops it
-                          from every cell that requires it, by cascade. The
-                          screen that most needed the dialog was the one
-                          without even a "are you sure". */}
-                      <button
-                        type="button"
-                        className={styles.small}
-                        disabled={busy || skillDeleteId === s.id}
-                        onClick={() => {
-                          setNotice(null);
-                          setSkillDeleteId(s.id);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                  {skillDeleteId === s.id && (
-                    <DeleteDialog
-                      kind="skill"
-                      id={s.id}
-                      name={s.name}
-                      onCancel={() => setSkillDeleteId(null)}
-                      onDeleted={(message) => {
-                        setSkillDeleteId(null);
-                        setNotice(message);
-                      }}
-                      onFailed={(message) => {
-                        setSkillDeleteId(null);
-                        setNotice(message);
-                      }}
-                    />
-                  )}
-                </li>
-              ))}
-              {skillsInPlant.length === 0 && (
-                <li className={styles.status}>No ticket types yet.</li>
-              )}
-              {/* ⚠️ COUNTED, like every other trim on this screen. This list
-                  carries a Delete that cascades (0029), so "it isn't there" and
-                  "you can't see it from here" are answers a reader must not be
-                  left to confuse. */}
-              {hiddenSkills > 0 && (
-                <li className={styles.footnote}>
-                  {hiddenSkills === 1
-                    ? `1 ticket type outside ${plant.label} is not shown.`
-                    : `${hiddenSkills} ticket types outside ${plant.label} are not shown.`}
-                </li>
-              )}
-            </ul>
-          )}
+          {/* ⭐⭐ THE TRAINING CATALOGUE USED TO SIT HERE AND IS NOW ITS OWN
+              TAB — roadmap stage 22. A "Ticket types" toggle opened a list
+              that CREATED, RENAMED and DELETED training types, from inside a
+              screen headed with one person's name. Managing the type is a
+              company-level job and `TrainingsPanel` does it beside Operators,
+              Shifts and Products; GIVING a training to the person on screen
+              stays, in the detail pane on the right. */}
         </aside>
 
         {/* ---------------- where they can work ---------------- */}
@@ -989,7 +782,7 @@ export function OperatorsPanel() {
                       Edit
                     </button>
                     {/* ⭐ DEACTIVATE IS THE MAIN ACTION (the maintainer's decision):
-                        it keeps every assignment, ticket and audit row intact
+                        it keeps every assignment, training and audit row intact
                         and simply takes the person off the board. */}
                     <button
                       type="button"
@@ -1007,13 +800,13 @@ export function OperatorsPanel() {
                     </button>
                     {/* ⭐ 0029 REPLACED A CLIENT-SIDE PRECHECK WITH THE
                         SERVER'S OWN ANSWER. This used to run `deletePrecheck`
-                        and REFUSE to delete anybody still holding a ticket
+                        and REFUSE to delete anybody still holding a training
                         ("remove them first"). Migration 0029 makes
                         `operator_skills` cascade from `operators`, so that
                         refusal became a rule the client enforced and the
                         database did not — the worst kind, because the way out
                         it names is work that no longer needs doing. The dialog
-                        asks `deletion_preview` and NAMES the tickets instead. */}
+                        asks `deletion_preview` and NAMES the trainings instead. */}
                     <button
                       type="button"
                       className={styles.small}
@@ -1087,9 +880,9 @@ export function OperatorsPanel() {
                   assignment is actually made. See `../lib/operators`. */}
               <p className={styles.footnote}>
                 The scheduler checks this again when work is assigned; this is what today&rsquo;s
-                tickets, requirements and areas imply. A place marked &ldquo;⚠&rdquo; is outside the
-                area this person belongs to — whoever schedules there can still put them on it, but
-                has to record a reason for it.
+                trainings, requirements and areas imply. A place marked &ldquo;⚠&rdquo; is outside
+                the area this person belongs to — whoever schedules there can still put them on it,
+                but has to record a reason for it.
               </p>
               <ul className={styles.places}>
                 {visiblePlaces.map((p) => (
@@ -1119,10 +912,15 @@ export function OperatorsPanel() {
                 </p>
               )}
 
-              <h3 className={styles.h3}>Tickets</h3>
+              {/* ⭐⭐ WHAT THEY HOLD, AND THIS HALF STAYED WHEN THE CATALOGUE
+                  LEFT. A grant is a fact about THIS PERSON — it belongs under
+                  their name, beside the list of places it just turned green.
+                  Creating, renaming and deleting the training TYPE is a
+                  company-level job and lives on the Trainings tab. */}
+              <h3 className={styles.h3}>Trainings</h3>
               <p className={styles.footnote}>
-                A ticket is what changes the answer above. Adding one can turn several crosses green
-                at once — requirements sit on places and inherit downward.
+                A training is what changes the answer above. Adding one can turn several crosses
+                green at once — requirements sit on places and inherit downward.
               </p>
               <ul className={styles.tickets}>
                 {tickets.map((t) => (
@@ -1170,13 +968,13 @@ export function OperatorsPanel() {
                     </button>
                   </li>
                 ))}
-                {tickets.length === 0 && <li className={styles.status}>No tickets yet.</li>}
+                {tickets.length === 0 && <li className={styles.status}>No trainings yet.</li>}
               </ul>
 
-              <h3 className={styles.h3}>Add a ticket</h3>
+              <h3 className={styles.h3}>Add a training</h3>
               <div className={styles.grantRow}>
                 <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Existing ticket</span>
+                  <span className={styles.fieldLabel}>Existing training</span>
                   <select
                     className={styles.input}
                     value={grantId}
@@ -1208,54 +1006,15 @@ export function OperatorsPanel() {
                   Attach
                 </button>
               </div>
-
-              <div className={styles.grantRow}>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>…or a new one</span>
-                  <input
-                    className={styles.input}
-                    value={newSkill}
-                    onChange={(e) => setNewSkill(e.target.value)}
-                    placeholder="Forklift"
-                  />
-                </label>
-                <button
-                  type="button"
-                  className={styles.primary}
-                  disabled={busy || newSkill.trim() === "" || clashBlocks}
-                  onClick={createAndAttach}
-                >
-                  Create &amp; attach
-                </button>
-              </div>
-              {/* ⭐ THE CLASH THAT IS NOT AN ERROR. Since 0031 a training's
-                  name is unique PER OWNER (`unique (org_id, site_node_id,
-                  name)`), so typing a name THIS PLACE already holds is not a
-                  mistake — it is finding the ticket you were about to make. The
-                  screen says so and attaches it in one click; a raw
-                  duplicate-key error reaching the user would be a defect.
-
-                  ⚠️ AND A NAME ANOTHER PLANT HOLDS IS NOT A CLASH, so nothing
-                  is said about it. The old check refused that too, citing a row
-                  the reader could not open — which read as "you may not have
-                  this name" and was in fact "somebody you cannot see has it". */}
-              {clash !== null && (
-                <p className={styles.reuse}>
-                  {describeSkillNameClash(clash, scopeLabel(clash.skill.siteNodeId, nodesById))}{" "}
-                  {heldIds.has(clash.skill.id) ? (
-                    <span>They already hold it.</span>
-                  ) : (
-                    <button
-                      type="button"
-                      className={styles.link}
-                      disabled={busy}
-                      onClick={() =>
-                        attachSkill(clash.skill.id, grantExpiry === "" ? null : grantExpiry)
-                      }
-                    >
-                      Attach {clash.skill.name}
-                    </button>
-                  )}
+              {/* ⚠️ A DEAD END HAS TO SAY WHERE THE ROAD IS. This box used to
+                  carry a "…or a new one" field that created the training on the
+                  spot, so an empty picker was never the end of the story; with
+                  the catalogue on its own tab it is, and a picker offering
+                  nothing with no sentence under it reads as a broken screen
+                  rather than as an empty company. */}
+              {grantable.length === 0 && (
+                <p className={styles.footnote}>
+                  Nothing left to attach. New trainings are created on the Trainings tab.
                 </p>
               )}
             </>

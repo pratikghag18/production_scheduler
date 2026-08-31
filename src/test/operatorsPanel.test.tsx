@@ -23,8 +23,8 @@ import { useAdminViewStore } from "@/features/admin/store/adminView";
  *           area rather than every schedulable cell in the company.
  *
  *   §19.79  A shared plant filter the reader chooses once for the whole admin
- *           screen. It trims the people list, the ticket types and both
- *           "Belongs to" pickers — each counted — and de-stales `selectedId`,
+ *           screen. It trims the people list, the trainings on offer and
+ *           both "Belongs to" pickers — each counted — and de-stales `selectedId`,
  *           `draftSite` and `editSite`.
  *
  * ⚠️⚠️ THE CAUTIONARY TALE THIS FILE IS WRITTEN AGAINST is `productsPanel.test.tsx`,
@@ -102,7 +102,7 @@ const h = vi.hoisted(() => {
    *   Cell B1  same PLANT, different line, requires Forklift      → ⚠
    *   Cell Z1  another plant entirely, requires nothing           → trimmed
    *
-   * ⚠️ CELL B1 REQUIRES A TICKET SHE HOLDS, DELIBERATELY. A ⚠ row whose
+   * ⚠️ CELL B1 REQUIRES A TRAINING SHE HOLDS, DELIBERATELY. A ⚠ row whose
    * trainings were also missing would be indistinguishable from a ✕ that had
    * simply been recoloured — and "we ticked it because the trainings were fine"
    * is the §19.77 defect verbatim.
@@ -130,7 +130,7 @@ const h = vi.hoisted(() => {
   ];
 
   // Owned per 0028: every training belongs somewhere, and Crane belongs to the
-  // other plant — which is what the ticket-types footnote counts.
+  // other plant — which is what the plant filter cuts out of the grant picker.
   const baseSkills = () => [
     { id: id.FORK, name: "Forklift", siteNodeId: id.P1 },
     { id: id.WELD, name: "Welding", siteNodeId: id.P1 },
@@ -223,8 +223,6 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
   useCreateOperator: () => ({ mutate: h.createMutate, isPending: false }),
   useUpdateOperator: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetOperatorActive: () => ({ mutate: vi.fn(), isPending: false }),
-  useCreateSkill: () => ({ mutate: vi.fn(), isPending: false }),
-  useRenameSkill: () => ({ mutate: vi.fn(), isPending: false }),
   useGrantSkill: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateSkillExpiry: () => ({ mutate: vi.fn(), isPending: false }),
   useRevokeSkill: () => ({ mutate: vi.fn(), isPending: false }),
@@ -249,7 +247,7 @@ vi.mock("@/features/admin/hooks/useDeletion", () => ({
  * Finding things the way a reader finds them.
  * =========================================================================== */
 
-/** The left-hand column: the people list, the Add card and the ticket types. */
+/** The left-hand column: the people list and the Add card. */
 function aside(): HTMLElement {
   return screen.getByRole("complementary");
 }
@@ -268,28 +266,14 @@ function placeRow(label: string): HTMLElement {
 }
 
 /**
- * One row of the ticket-types list, found by the training's own name.
+ * The detail pane's "give this person a training" picker.
  *
- * ⚠️ BY THE NAME, WHICH SINCE 0031 NEED NOT BE UNIQUE — so `getAllByText` is
- * what O19 uses and this single-row helper is only for the cases where one row
- * is expected. The owner is asserted from INSIDE the row, never by matching a
- * combined string: the point of the change is that the plant is a separate
- * element and not part of the name.
+ * ⭐ IT IS THE ONLY LIST OF TRAININGS THIS SCREEN STILL SHOWS, since stage 22
+ * moved creating, renaming and deleting the TYPE to the Trainings tab. What is
+ * on offer to grant is what the plant filter still cuts here.
  */
-function ticketTypeRow(name: string): HTMLElement {
-  const li = within(aside()).getByText(name).closest("li");
-  if (li === null) throw new Error(`no ticket type row named ${name}`);
-  return li;
-}
-
-/** Open the ticket-types list — it is collapsed until somebody asks for it. */
-function showTicketTypes() {
-  fireEvent.click(screen.getByRole("button", { name: "Ticket types" }));
-}
-
-/** The detail pane's "make a new training" box. */
-function newTicketBox(): HTMLElement {
-  return screen.getByRole("textbox", { name: "…or a new one" });
+function grantPicker(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "Existing training" }) as HTMLSelectElement;
 }
 
 /**
@@ -379,7 +363,7 @@ beforeEach(() => {
   h.createMutate.mockClear();
   h.updateMutate.mockClear();
   // ⚠️ FACTORIES, NOT A SHARED LITERAL. Several cases below mutate the fixture
-  // in place — revoking Ann's ticket, adding an orphaned person — and a shared
+  // in place — revoking Ann's training, adding an orphaned person — and a shared
   // object would leave every later case running against a world shaped by its
   // predecessors, which is the failure `productsPanel.test.tsx` had to fix once
   // its own fixtures grew a second plant.
@@ -413,12 +397,12 @@ describe("OperatorsPanel — where somebody can work has THREE answers (§19.77)
     expect(within(row).getByText("✕")).toBeTruthy();
     // Named, not merely refused. "Not eligible" is a fact the reader can do
     // nothing with; "missing Welding" is one click from being fixed, and the
-    // Tickets section below is where that click lives.
+    // Trainings section below is where that click lives.
     expect(within(row).getByText("missing Welding")).toBeTruthy();
     expect(within(row).queryByText("can work here")).toBeNull();
   });
 
-  it("O3 ⭐⭐ a place outside their area reads ⚠ and asks for a reason — even holding every ticket", () => {
+  it("O3 ⭐⭐ a place outside their area reads ⚠ and asks for a reason — even holding every training", () => {
     // ⚠️ THIS IS THE §19.77 DEFECT ITSELF. Cell B1 requires Forklift and Ann
     // holds Forklift, so on trainings alone this row is a clean yes — and the
     // old screen ticked it. The server does not: `app_guard_assignment_scope`
@@ -475,7 +459,7 @@ describe("OperatorsPanel — the count line names what it counts (§19.77)", () 
   it("O6 ⭐⭐ the maintainer's own case: two cells, both refusals, reads '0 of 2'", () => {
     // *"12 of 18 places"* for somebody whose own line holds two, where the
     // eighteen were three plants' worth of cells and all twelve ticks were
-    // refusals. Revoking Ann's only ticket reproduces it in miniature: both
+    // refusals. Revoking Ann's only training reproduces it in miniature: both
     // cells in her line now refuse, and the honest sentence is "0 of 2".
     h.state.data.operatorSkills = [];
     render(<OperatorsPanel />);
@@ -483,7 +467,7 @@ describe("OperatorsPanel — the count line names what it counts (§19.77)", () 
     expect(countLine()).toBe(
       "0 of 2 places in their own area · 1 elsewhere, only with a recorded reason",
     );
-    // The old shape would have read "1 of 4" — Cell Z1 needs no ticket at all.
+    // The old shape would have read "1 of 4" — Cell Z1 needs no training at all.
     expect(countLine()).not.toContain(" of 4");
     // And the denominator is a real claim about two visible rows, not a number
     // the reader has no way to reconcile with the list under it.
@@ -514,18 +498,18 @@ describe("OperatorsPanel — the plant filter (§19.79 / roadmap 1(c))", () => {
     expect(screen.getByText("1 person outside Plant 1 is not shown.")).toBeTruthy();
   });
 
-  it("O8: the ticket types are cut the same way, and counted", () => {
+  it("O8: what can be ATTACHED is cut the same way — the grant picker, not a catalogue", () => {
+    // ⭐ THE LIST THIS CASE USED TO WATCH WAS THE TICKET-TYPES ADMIN BLOCK, and
+    // stage 22 moved that whole job to the Trainings tab. The cut it was
+    // pinning is still here, on the only list of trainings this screen still
+    // shows on offer: what you can give somebody, narrowed to the plant you
+    // chose — decision 3, what you see is what you can grant.
     render(<OperatorsPanel />);
-    fireEvent.click(screen.getByRole("button", { name: "Ticket types" }));
-    expect(within(aside()).queryByText("Crane")).not.toBeNull();
-    showPlant(id.P1);
-    expect(within(aside()).queryByText("Crane")).toBeNull();
-    expect(within(aside()).queryByText("Forklift")).not.toBeNull();
-    // ⚠️ This list carries a Delete that CASCADES under 0029 — it un-qualifies
-    // everyone holding the ticket and drops it from every cell requiring it. "It
-    // isn't there" and "you can't see it from here" are answers a reader must
-    // not be left to confuse on a list like that.
-    expect(screen.getByText("1 ticket type outside Plant 1 is not shown.")).toBeTruthy();
+    pick("Zoe Zhang");
+    expect(optionLabels(grantPicker())).toContain("Crane");
+    showPlant(id.P2);
+    expect(optionLabels(grantPicker())).toContain("Crane");
+    expect(optionLabels(grantPicker())).not.toContain("Forklift");
   });
 
   it("O9: the Add card's 'Belongs to' offers only the chosen plant's subtree", () => {
@@ -557,10 +541,12 @@ describe("OperatorsPanel — the plant filter (§19.79 / roadmap 1(c))", () => {
 
   it("O11: 'All plants' hides nothing, and says nothing", () => {
     render(<OperatorsPanel />);
-    fireEvent.click(screen.getByRole("button", { name: "Ticket types" }));
+    pick("Ann Adams");
     expect(within(aside()).queryByRole("button", { name: /Ann Adams/ })).not.toBeNull();
     expect(within(aside()).queryByRole("button", { name: /Zoe Zhang/ })).not.toBeNull();
-    expect(within(aside()).queryByText("Crane")).not.toBeNull();
+    // Crane belongs to the other plant, and on "All plants" it is still on
+    // offer — the picker is cut by the filter and by nothing else.
+    expect(optionLabels(grantPicker())).toContain("Crane");
     expect(optionLabels(belongsToInAdd())).toHaveLength(9);
     // ⚠️ AND NO FOOTNOTE. A count of nothing is not a harmless zero: it tells a
     // reader on "All plants" that something is being kept from them.
@@ -678,143 +664,89 @@ describe("OperatorsPanel — the filter de-stales what it narrowed past (§19.79
 });
 
 /* ===========================================================================
- * D111a / migration 0031 — a training's name is unique PER OWNER, so the
- * screen has to show the owner and stop refusing other people's names.
+ * ROADMAP STAGE 22 — THE TRAINING CATALOGUE LEFT THIS SCREEN, AND THE WORD
+ * "TICKET" LEFT WITH IT.
  *
- * ⭐⭐ THE TWO HALVES ARE ONE CHANGE AND ARE PINNED TOGETHER HERE. Making the
- * name legal in two plants (O20) is only safe because the list says whose is
- * whose (O18/O19); shipping the constraint without the owner column would leave
- * a Rename and a CASCADING Delete sitting beside two rows a reader cannot tell
- * apart. `operators.test.ts`'s N7–N11 pin the rule; these pin that a person
- * sees it.
+ * The maintainer: *"I thought we were going to create a trainings tab like
+ * operator/shifts/products. These should be editable and we're still calling
+ * them tickets."*
  *
- * ⚠️ THE OWNER IS ASSERTED AS ITS OWN ELEMENT, never as part of the name. The
- * workaround 0031 removes was `A-Welding` — the plant spelled into the text —
- * and a case that matched "Forklift Plant 1" as one string would pass on a
- * screen that had put it straight back.
+ * ⭐⭐ TWO CHANGES, AND THE LINE BETWEEN THEM IS THE POINT. Managing a
+ * training TYPE — create, rename, delete — moved to `TrainingsPanel`, its own
+ * tab. GIVING one to the person on screen stayed here, because a grant is a
+ * fact about a person and this screen is headed with a person's name.
+ *
+ * ⚠️ CASES O18-O23 USED TO SIT IN THIS BLOCK and pinned D111a AT THE SCREEN:
+ * the owner column beside every training type, and the three answers to a name
+ * clash (another plant → silence, own plant → warned, own place → refused and
+ * offered). They asserted on the ticket-types list and the "…or a new one"
+ * create box, both of which are now on the Trainings tab, so they moved with
+ * the UI they describe rather than being deleted. `operators.test.ts`'s N7-N18
+ * still pin the RULE either way — it never lived in the component.
  * =========================================================================== */
 
-describe("OperatorsPanel — a training's name is unique per owner (D111a / 0031)", () => {
-  it("O18 ⭐ every ticket type names its owner, with the full path on hover", () => {
-    render(<OperatorsPanel />);
-    showTicketTypes();
-    // The leaf's own name is what the row shows: short enough to sit beside a
-    // training without wrapping the list.
-    expect(within(ticketTypeRow("Forklift")).getByText("Plant 1")).toBeTruthy();
-    expect(within(ticketTypeRow("Crane")).getByText("Plant 2")).toBeTruthy();
-    // ⚠️ AND THE TOOLTIP IS THE WHOLE CHAIN, because a leaf name is not unique
-    // either — two plants can each have a "Line A", which is the confusion the
-    // owner column exists to end rather than to move one level down.
-    expect(within(ticketTypeRow("Crane")).getByTitle("Plant 2")).toBeTruthy();
-  });
-
-  it("O19 ⭐⭐ two trainings that now share a name are told apart by their owners", () => {
-    // ⚠️ THIS ROW IS ILLEGAL BEFORE 0031 AND ORDINARY AFTER IT. `unique (org_id,
-    // site_node_id, name)` lets Line A hold a "Forklift" while Plant 1 already
-    // has one — and this list carries a Delete that cascades through every
-    // holder and every requirement. Two identical rows beside that button is
-    // the failure the owner column is here to prevent.
-    h.state.data.skills = [
-      ...h.baseData().skills,
-      { id: "sk-fork-la", name: "Forklift", siteNodeId: id.LA },
-    ];
-    render(<OperatorsPanel />);
-    showTicketTypes();
-    const forkRows = within(aside())
-      .getAllByText("Forklift")
-      .map((el) => el.closest("li") as HTMLElement);
-    expect(forkRows).toHaveLength(2);
-    expect(within(forkRows[0]).getByText("Plant 1")).toBeTruthy();
-    expect(within(forkRows[1]).getByText("Line A")).toBeTruthy();
-    expect(within(forkRows[1]).getByTitle("Plant 1 › Line A")).toBeTruthy();
-  });
-
-  it("O20 ⭐⭐ a name another plant already holds is not flagged, and creating stays available", () => {
-    // ⚠️⚠️ THE DEFECT 0031 FIXES, AT THE SCREEN. Zoe belongs to Line Z in Plant
-    // 2; Plant 1 owns "Forklift". The old check scanned every readable training
-    // and refused her the name — citing a row that read-scoping meant she could
-    // not see, open, edit or reuse. The database now accepts it, so the screen
-    // must say nothing at all and leave the button live.
-    render(<OperatorsPanel />);
-    pick("Zoe Zhang");
-    fireEvent.change(newTicketBox(), { target: { value: "Forklift" } });
-    expect(screen.queryByText(/already has a Forklift/)).toBeNull();
-    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
-    expect(create.disabled).toBe(false);
-  });
-
-  it("O21 ⭐ a name this person's own place already holds is offered for reuse, and creating is refused", () => {
-    // The other side of O20, and the reason the check is kept at all. Ann
-    // belongs to Line A, so a training owned by Line A is the one thing that
-    // WILL be refused with a 23505 — `createAndAttach` writes
-    // `siteNodeId: selected.siteNodeId`, which is exactly the owner the clash
-    // was asked about.
-    h.state.data.skills = [
-      ...h.baseData().skills,
-      { id: "sk-fork-la", name: "Forklift", siteNodeId: id.LA },
-    ];
+describe("OperatorsPanel — the training catalogue is not managed here (stage 22)", () => {
+  it("O18 ⭐⭐ nothing on this screen creates, renames or deletes a training TYPE", () => {
+    // ⚠️ ASSERTED AS AN ABSENCE OF CONTROLS, not of a CSS class or a state
+    // flag. The block that left was reachable only through a toggle, so a
+    // half-done removal — the toggle gone, the list still rendered by some
+    // other path — is exactly the shape this has to catch.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    fireEvent.change(newTicketBox(), { target: { value: "Forklift" } });
-    expect(screen.getByText(/This place already has a Forklift — use that one\./)).toBeTruthy();
-    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
-    expect(create.disabled).toBe(true);
-    // ⭐ AND THE OFFER IS THE POINT, not the refusal: the clash is a row on her
-    // own branch, so it is one click from being attached.
-    expect(screen.getByRole("button", { name: "Attach Forklift" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Ticket types/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /training types/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Create & attach/ })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "…or a new one" })).toBeNull();
+    // The training NAMES are still on screen — in the picker and in what she
+    // holds — so an assertion that simply found no "Forklift" anywhere would
+    // pass on a panel that had lost the half which stayed.
+    expect(within(aside()).queryByRole("button", { name: /Ann Adams/ })).not.toBeNull();
   });
 
-  it("O23 ⭐⭐ a name ELSEWHERE IN HER OWN PLANT warns but does not block — 0031's promise, kept", () => {
-    // ⚠⚠ THIS CASE EXISTS BECAUSE THE MIGRATION AND THE SCREEN DISAGREED.
-    // 0031 allows two places inside one plant to hold the same name, and its
-    // header justifies that loosening by promising *"the database refuses per
-    // owner; the screen warns per plant"* — honest only because a plant admin
-    // reads their whole plant. The first implementation warned per OWNER, so
-    // this exact situation said nothing at all: Ann belongs to Line A, the
-    // training belongs to Plant 1, and she would have silently created a second
-    // Forklift one level down from the one already there.
-    //
-    // ⭐ It is the MIDDLE of three answers and the only one that is neither:
-    //   O20  another plant   → silence, and creating is free
-    //   O23  her own plant   → warned, and creating is still free
-    //   O21  her own place   → refused, and the existing row is offered
-    h.state.data.skills = [
-      ...h.baseData().skills,
-      { id: "sk-fork-p1", name: "Forklift", siteNodeId: id.P1 },
-    ];
+  it("O19 ⭐ giving somebody a training stayed, whole: attach, expiry and remove", () => {
+    // ⭐ THE HALF THAT BELONGS ON A PERSON. Ann holds Forklift; the row carries
+    // its expiry and a Remove, and Welding is on offer to attach. Deleting the
+    // catalogue must not have taken any of that with it.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    fireEvent.change(newTicketBox(), { target: { value: "Forklift" } });
+    const held = screen.getByText("Forklift").closest("li") as HTMLElement;
+    expect(within(held).getByRole("button", { name: "Remove" })).toBeTruthy();
+    expect(within(held).getByText("never expires")).toBeTruthy();
+    expect(optionLabels(grantPicker())).toContain("Welding");
+    expect(screen.getByRole("button", { name: "Attach" })).toBeTruthy();
+  });
 
-    // Named, so she does not have to go hunting for which place holds it.
+  it("O20: with nothing left to attach, the screen says where trainings come from", () => {
+    // ⚠️ A DEAD END HAS TO SAY WHERE THE ROAD IS. The create box used to mean an
+    // empty picker was never the end of the story; now it is, and a picker
+    // offering nothing under a silent heading reads as a broken screen rather
+    // than as an empty company.
+    h.state.data.skills = [];
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
     expect(
-      screen.getByText(
-        /already has a Forklift\. Create this one only if it is a different ticket\./,
-      ),
+      screen.getByText("Nothing left to attach. New trainings are created on the Trainings tab."),
     ).toBeTruthy();
-
-    // ⭐⭐ AND CREATING STAYS LIVE. Blocking here would be the client enforcing
-    // a rule the database does not have — §19.74's stale refusal, the kind that
-    // never fails loudly and just stops people working.
-    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
-    expect(create.disabled).toBe(false);
   });
 
-  it("O22: a case-only match in their own place warns but still lets them create", () => {
-    // ⭐ THE CONSTRAINT IS CASE-SENSITIVE (0031's own header says so), so
-    // "forklift" beside "Forklift" under one owner is two storable rows. The
-    // screen warns — two Forklifts in one place is a genuine mess — but must
-    // not refuse what the database accepts, which is the stale-refusal
-    // direction §19.74 is about.
-    h.state.data.skills = [
-      ...h.baseData().skills,
-      { id: "sk-fork-la", name: "Forklift", siteNodeId: id.LA },
-    ];
+  it("O21 ⭐⭐ the word a reader sees is TRAINING — nowhere on this screen says ticket", () => {
+    // ⚠️⚠️ THE CASE THIS WHOLE RENAME NEEDED, AND `tsc` CANNOT BE IT. A heading
+    // reverted to "Tickets", a footnote back to "1 ticket", a placeholder — all
+    // compile, all lint, and every other case in this file goes on passing
+    // because none of them reads that text. So this one reads the rendered
+    // screen itself, with a person picked so the detail pane is on it too.
+    //
+    // ⚠️ THE RENDERED TEXT, NOT THE SOURCE. `styles.ticketWhen` and
+    // `ticketsFor` are identifiers and stay — the line is what a user READS.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    fireEvent.change(newTicketBox(), { target: { value: "forklift" } });
-    expect(screen.getByText(/unless this is a different ticket/)).toBeTruthy();
-    const create = screen.getByRole("button", { name: "Create & attach" }) as HTMLButtonElement;
-    expect(create.disabled).toBe(false);
+    expect(document.body.textContent ?? "").not.toMatch(/ticket/i);
+    expect(document.body.textContent ?? "").not.toMatch(/\bskills?\b/i);
+    // And the words that replaced them really are on screen, so this cannot
+    // pass on a panel that renders nothing at all.
+    expect(screen.getByRole("heading", { name: "Trainings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Add a training" })).toBeTruthy();
+    expect(within(aside()).getByRole("button", { name: /1 training\b/ })).toBeTruthy();
   });
 });
