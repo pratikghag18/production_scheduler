@@ -57,10 +57,13 @@
 import { expect, it } from "vitest";
 import {
   areaStandingFor,
+  describeCertifiedAt,
+  describeSignedOffBy,
   describeSkillNameClash,
   effectiveRequirements,
   findExistingSkillByName,
   formatDay,
+  normaliseSignedOffBy,
   operatorRows,
   placeVerdict,
   placesUnderSameRoot,
@@ -72,7 +75,7 @@ import {
   workPlacesFor,
   type NodeLike,
   type OperatorLike,
-  type OperatorSkillLike,
+  type OperatorTrainingLike,
   type RequirementLike,
   type SkillLike,
   type SkillNameClash,
@@ -166,12 +169,44 @@ const cara: OperatorLike = {
   siteNodeId: LINE_A,
 };
 
-const ANA_TICKETS: readonly OperatorSkillLike[] = [
-  { operatorId: ANA, skillId: SAFETY, expiresAt: null },
-  { operatorId: ANA, skillId: FORKLIFT, expiresAt: "2026-09-03" },
-  { operatorId: ANA, skillId: WELDING, expiresAt: "2026-12-31" },
+/**
+ * ⭐ TYPED AS THE WIDER `OperatorTrainingLike`, WHICH IS THE ROW AS THE API
+ * RETURNS IT — so this one fixture serves `workPlacesFor` (which asks for the
+ * narrow shape and cannot see either new field) AND `ticketsFor` (which asks
+ * for both and renders them).
+ *
+ * ⚠️ AND THE THREE ROWS ARE DELIBERATELY HALF-KNOWN IN THREE DIFFERENT WAYS.
+ * 0032 has no CHECK tying `certified_at` to `signed_off_by`, so a record with
+ * one filled in and not the other is legal and ordinary — a fixture where every
+ * row carried both could not tell "reads the field" from "reads the row".
+ */
+const ANA_TICKETS: readonly OperatorTrainingLike[] = [
+  // Both known: the complete record an audit is looking for.
+  {
+    operatorId: ANA,
+    skillId: SAFETY,
+    expiresAt: null,
+    certifiedAt: "2026-03-14",
+    signedOffBy: "R. Okonkwo (external assessor)",
+  },
+  // A date and no signer — the spreadsheet-arrived case 0032's header names.
+  {
+    operatorId: ANA,
+    skillId: FORKLIFT,
+    expiresAt: "2026-09-03",
+    certifiedAt: "2025-11-02",
+    signedOffBy: null,
+  },
+  // A signer and no date — the other half of the same case.
+  {
+    operatorId: ANA,
+    skillId: WELDING,
+    expiresAt: "2026-12-31",
+    certifiedAt: null,
+    signedOffBy: "Vendor trainer",
+  },
   // Bob's, sitting in the same array — nothing may leak across operators.
-  { operatorId: BOB, skillId: SAFETY, expiresAt: null },
+  { operatorId: BOB, skillId: SAFETY, expiresAt: null, certifiedAt: null, signedOffBy: null },
 ];
 
 const TODAY = "2026-08-27";
@@ -1107,7 +1142,9 @@ it("N18 ⭐: the warning NAMES the other place, and does not read as a refusal",
  * dialog does in its place.
  */
 it("T1: a training whose skill row cannot be read is shown unnamed, never dropped", () => {
-  const held = [{ operatorId: ANA, skillId: PHANTOM, expiresAt: null }];
+  const held = [
+    { operatorId: ANA, skillId: PHANTOM, expiresAt: null, certifiedAt: null, signedOffBy: null },
+  ];
   const trainings = ticketsFor(ana, SKILLS, held, TODAY);
   expect(trainings).toHaveLength(1);
   expect(trainings[0]?.name).toBe("(a training you can't see)");
@@ -1121,6 +1158,113 @@ it("T2: a training already lapsed on the day asked about is marked lapsed", () =
 
 it("T3: trainings are listed for this person only", () => {
   expect(ticketsFor(bob, SKILLS, ANA_TICKETS, TODAY).map((t) => t.skillId)).toEqual([SAFETY]);
+});
+
+/* ---------------------------------------------------------------------------
+   GROUP R — THE RECORD: WHO SIGNED THIS PERSON OFF, AND WHEN (0032 / D114).
+
+   The maintainer raised roadmap stage 22 for exactly this: *"the question an
+   audit actually asks — who signed this person off, and when — has no answer."*
+
+   ⚠️⚠️ THE TWO FIELDS ARE INDEPENDENT, AND THE CASES BELOW EXIST MOSTLY TO
+   KEEP THEM THAT WAY. 0032 deliberately writes no CHECK tying them together
+   ("the half-known record is the ordinary case when a spreadsheet arrives with
+   one column filled in"), so the client is the only place a rule joining them
+   could appear — and it would appear as a convenience: clearing the date when
+   the signer goes, or refusing a signer without one. R3 and R4 are what make
+   either of those go red.
+   --------------------------------------------------------------------------- */
+
+it("R1: a held training carries the date it was done and the signer, as recorded", () => {
+  const trainings = ticketsFor(ana, SKILLS, ANA_TICKETS, TODAY);
+  const safety = trainings.find((t) => t.skillId === SAFETY);
+  expect(safety?.certifiedAt).toBe("2026-03-14");
+  expect(safety?.signedOffBy).toBe("R. Okonkwo (external assessor)");
+});
+
+it("R2 ⭐: what is NOT recorded reads as a sentence, never as a blank", () => {
+  // ⚠️ THE DEFECT THIS PINS IS A SCREEN, NOT A VALUE. An empty date box with no
+  // words beside it is indistinguishable from one that failed to render, and
+  // both of these fields are optional, so empty is the state a reader meets
+  // most often. `null` must reach them as words.
+  expect(describeCertifiedAt(null)).toBe("not recorded");
+  expect(describeSignedOffBy(null)).toBe("not recorded");
+  // ⭐ THE SAME WORDS FOR BOTH, ON PURPOSE. They sit side by side on every row,
+  // and two phrasings for one fact read as two different facts.
+  expect(describeCertifiedAt(null)).toBe(describeSignedOffBy(null));
+  // And a recorded value is shown, so this cannot pass on a pair of functions
+  // that answer "not recorded" to everything.
+  expect(describeCertifiedAt("2026-03-14")).toBe("14 Mar 2026");
+  expect(describeSignedOffBy("Vendor trainer")).toBe("Vendor trainer");
+});
+
+it("R3 ⭐⭐ a date with no signer is a whole record, and stays one", () => {
+  // The ordinary case 0032's header describes: a spreadsheet arrives with a
+  // column filled in and the other one empty. Nothing may fold the pair into a
+  // single "recorded / not recorded" answer.
+  const forklift = ticketsFor(ana, SKILLS, ANA_TICKETS, TODAY).find((t) => t.skillId === FORKLIFT);
+  expect(forklift?.certifiedAt).toBe("2025-11-02");
+  expect(forklift?.signedOffBy).toBeNull();
+  expect(describeCertifiedAt(forklift?.certifiedAt ?? null)).toBe("2 Nov 2025");
+  expect(describeSignedOffBy(forklift?.signedOffBy ?? null)).toBe("not recorded");
+});
+
+it("R4 ⭐⭐ a signer with no date is a whole record too — the other half of R3", () => {
+  // ⚠️ WITHOUT THIS CASE, R3 ALONE PERMITS A ONE-WAY RULE. "A signer needs a
+  // date" is the convenience a client invents, and it would leave R3 green
+  // while refusing exactly the row a supervisor enters when they know who
+  // signed and have to go and look up when.
+  const welding = ticketsFor(ana, SKILLS, ANA_TICKETS, TODAY).find((t) => t.skillId === WELDING);
+  expect(welding?.signedOffBy).toBe("Vendor trainer");
+  expect(welding?.certifiedAt).toBeNull();
+  expect(describeSignedOffBy(welding?.signedOffBy ?? null)).toBe("Vendor trainer");
+  expect(describeCertifiedAt(welding?.certifiedAt ?? null)).toBe("not recorded");
+});
+
+it("R5: a signer that is only whitespace is not a signer", () => {
+  // ⚠️ REACHABLE, AND NOT FROM THIS SCREEN. `normaliseSignedOffBy` keeps the
+  // form from ever writing one, but `signed_off_by` is a plain `text` column
+  // with no trim trigger and no CHECK (verified against 0032), and D114 exists
+  // because a CSV writes straight at it. An invisible value passing for an
+  // answer is the one failure an audit line cannot afford.
+  expect(describeSignedOffBy("   ")).toBe("not recorded");
+  expect(describeSignedOffBy("")).toBe("not recorded");
+  // A real name that merely has spaces around it is still that name.
+  expect(describeSignedOffBy("  R. Okonkwo  ")).toBe("  R. Okonkwo  ");
+});
+
+it("R6 ⭐ what the form sends is trimmed, and an emptied box sends null rather than ''", () => {
+  // 0032: *"NULL means nobody recorded one, never 'unsigned'."* An empty string
+  // is a recorded answer that happens to be invisible; clearing the box means
+  // the fact is gone, and only one of those is what the reader just did.
+  expect(normaliseSignedOffBy("  R. Okonkwo  ")).toBe("R. Okonkwo");
+  expect(normaliseSignedOffBy("")).toBeNull();
+  expect(normaliseSignedOffBy("   ")).toBeNull();
+  expect(normaliseSignedOffBy("Vendor trainer")).toBe("Vendor trainer");
+});
+
+it("R7: the record is not the answer to 'can they work here' and must not become one", () => {
+  // ⚠️ THE ONE-WAY INVARIANT IN THIS FILE'S HEADER, APPLIED TO D114. A training
+  // held is held whether or not anybody wrote down who signed it —
+  // `check_eligibility` reads neither column, so a client that let an
+  // unrecorded sign-off dim a tick would be refusing what the server allows,
+  // and one that let a recorded one earn a tick would be the dangerous
+  // direction. Ana's Welding has no `certified_at` at all and Cell 1 requires
+  // it; the answer must not move.
+  const withRecord = place(workPlacesFor(ana, input(), TODAY), CELL_1);
+  const stripped = place(
+    workPlacesFor(
+      ana,
+      input({
+        operatorSkills: ANA_TICKETS.map((os) => ({ ...os, certifiedAt: null, signedOffBy: null })),
+      }),
+      TODAY,
+    ),
+    CELL_1,
+  );
+  expect(withRecord.eligible).toBe(true);
+  expect(stripped.eligible).toBe(withRecord.eligible);
+  expect(stripped.reasons).toEqual(withRecord.reasons);
 });
 
 it("F1: a day is rendered the way the reason sentence needs it", () => {
@@ -1236,6 +1380,15 @@ function everySentence(): string[] {
     ...one,
     ...clashes.flatMap((c) => [describeSkillNameClash(c), describeSkillNameClash(c, "Line B")]),
     ...ticketsFor(ana, [], ANA_TICKETS, TODAY).map((t) => t.name),
+    // ⚠️ D114's TWO SENTENCES, SWEPT LIKE EVERY OTHER. "No training on record"
+    // or "no skill sign-off" would compile, lint and pass every case in group R,
+    // which asserts on the words it expects and never on the words it forbids.
+    // Both arms of each, because the recorded arm is the one that echoes a
+    // caller's string and the unrecorded arm is the one this module wrote.
+    describeCertifiedAt(null),
+    describeCertifiedAt("2026-03-14"),
+    describeSignedOffBy(null),
+    describeSignedOffBy("R. Okonkwo"),
     // The one sentence `validateOperatorDraft` can refuse with.
     (validateOperatorDraft({ displayName: "  ", employeeRef: "" }) as { message: string }).message,
   ];
@@ -1261,6 +1414,7 @@ it("X2: the sentences it sweeps really are the ones a reader gets", () => {
   expect(sentences).toContain("2 required trainings could not be read");
   expect(sentences).toContain("1 required training could not be read");
   expect(sentences).toContain("(a training you can't see)");
+  expect(sentences).toContain("not recorded");
   expect(sentences).toContain(
     "This place already has a Forklift. Use that one unless this is a different training.",
   );

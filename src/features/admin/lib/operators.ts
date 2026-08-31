@@ -214,6 +214,42 @@ export interface OperatorSkillLike {
   expiresAt: string | null;
 }
 
+/**
+ * The same row, plus the two facts an AUDIT asks for (migration 0032 / D114).
+ *
+ * ⭐⭐ A SEPARATE TYPE, AND THE SPLIT IS THE POINT. `workPlacesFor` decides
+ * where somebody can work, and neither of these fields can change that answer —
+ * a training held is held whether or not anybody wrote down who signed it. So
+ * the eligibility half goes on asking for `OperatorSkillLike` and its fixtures
+ * stay small, while `ticketsFor` — the one function that renders the RECORD —
+ * asks for both fields and asks for them REQUIRED.
+ *
+ * ⚠️ REQUIRED RATHER THAN OPTIONAL ON PURPOSE. Optional would let a caller drop
+ * a column it forgot to select and get "not recorded" on screen for a value the
+ * database is holding — silent, plausible, and indistinguishable from the truth.
+ * That is the `SKILL_COLUMNS` drift (`src/lib/api/operators.ts`) with the arrow
+ * pointing at a person's audit trail instead of at an empty list. `tsc` catches
+ * it here; nothing catches it there.
+ */
+export interface OperatorTrainingLike extends OperatorSkillLike {
+  /**
+   * When the training was DONE, `YYYY-MM-DD`, or `null` if nobody recorded one.
+   *
+   * ⚠️ NOT `created_at`. The row may have been entered today for a course sat
+   * last March, which is the whole reason the column exists separately.
+   */
+  certifiedAt: string | null;
+  /**
+   * Who signed this person off, as recorded, or `null` if nobody wrote one down.
+   *
+   * ⚠️ FREE TEXT, DELIBERATELY (0032's header). The signer is routinely an
+   * external assessor or a vendor's trainer with no login here, and a CSV row
+   * cannot carry a user id. **This is the CLAIM; who typed it in is the audit
+   * log's answer** — two facts, and one column cannot hold both.
+   */
+  signedOffBy: string | null;
+}
+
 /** A requirement sitting on a node. Inherits DOWNWARD to every descendant. */
 export interface RequirementLike {
   nodeId: string;
@@ -857,7 +893,18 @@ export function validateOperatorDraft(
 }
 
 /* ===========================================================================
- * Trainings: what this person holds today.
+ * Trainings: what this person holds today, and what is RECORDED about it.
+ *
+ * ⭐⭐ THE QUESTION AN AUDIT ACTUALLY ASKS (the maintainer, raising stage 22):
+ * *"who signed this person off, and when — has no answer."* Migration 0032 /
+ * D114 settled the database half; these two fields are the screen's.
+ *
+ * ⚠️⚠️ THE TWO FACTS ARE INDEPENDENT AND EITHER MAY BE KNOWN ALONE. 0032
+ * deliberately carries NO CHECK tying them together, and its header says why: a
+ * spreadsheet arrives with a date and no signer, or a supervisor knows who
+ * signed and has to look up when. **Nothing here may invent the rule the
+ * migration refused to write** — one is never required to enable the other, and
+ * emptying one never clears the other.
  * =========================================================================== */
 
 export interface Ticket {
@@ -866,12 +913,16 @@ export interface Ticket {
   expiresAt: string | null;
   /** `expiresAt` lapses strictly before `asOf` — the same test `workPlacesFor` uses. */
   lapsed: boolean;
+  /** When it was done, `YYYY-MM-DD`, or `null`. Carried RAW; `describeCertifiedAt` reads it. */
+  certifiedAt: string | null;
+  /** Who signed it off, as recorded, or `null`. Carried RAW — see `describeSignedOffBy`. */
+  signedOffBy: string | null;
 }
 
 export function ticketsFor(
   operator: OperatorLike,
   skills: readonly SkillLike[],
-  operatorSkills: readonly OperatorSkillLike[],
+  operatorSkills: readonly OperatorTrainingLike[],
   asOf: string,
 ): Ticket[] {
   const name = new Map<string, string>();
@@ -887,10 +938,76 @@ export function ticketsFor(
       name: name.get(os.skillId) ?? "(a training you can't see)",
       expiresAt,
       lapsed: expiresAt !== null && isDay(expiresAt) && isDay(asOf) ? expiresAt < asOf : false,
+      // ⚠️ PASSED THROUGH UNTOUCHED, both of them. The screen binds an editable
+      // control to each, so a value normalised on the way out would be a value
+      // the edit box disagrees with — the reader typing into a field showing
+      // something the database is not holding.
+      certifiedAt: os.certifiedAt,
+      signedOffBy: os.signedOffBy,
     });
   }
   out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return out;
+}
+
+/* ---------------------------------------------------------------------------
+ * ⭐⭐ AN UNRECORDED VALUE IS A SENTENCE, NEVER A BLANK.
+ *
+ * A date box with nothing in it and no words beside it reads as a screen that
+ * failed to load something — the reader cannot tell "nobody wrote this down"
+ * from "this did not render". Both halves of the record are OPTIONAL and a
+ * half-known row is the ORDINARY case here, so the empty state is the one the
+ * screen shows most often and it has to say what it means.
+ *
+ * ⚠️ THE SAME WORDS FOR BOTH, DELIBERATELY. Two phrasings for one fact ("not
+ * recorded" / "unknown") would read as two different facts, and this pair sits
+ * side by side on every row.
+ * ------------------------------------------------------------------------- */
+
+/** What the screen says where a fact was never written down. ONE string, used twice. */
+export const NOT_RECORDED = "not recorded";
+
+/** `"2026-03-14"` -> `"14 Mar 2026"`; `null` -> `"not recorded"`. */
+export function describeCertifiedAt(certifiedAt: string | null): string {
+  return certifiedAt === null ? NOT_RECORDED : formatDay(certifiedAt);
+}
+
+/**
+ * The signer, as recorded, or `"not recorded"`.
+ *
+ * ⚠️ BLANK-AFTER-TRIM COUNTS AS UNRECORDED, and that arm is reachable. This
+ * screen never writes `""` (`normaliseSignedOffBy` folds it to `null`), but
+ * `signed_off_by` is a plain `text` column with no trim trigger and no CHECK —
+ * verified against 0032, not assumed — and D114 exists because a CSV writes
+ * straight at it. Rendering `"   "` raw would put an invisible value on an audit
+ * line, which is the one place a blank must not pass for an answer.
+ *
+ * ⚠️ Plain `.trim()`, matching `app_trim_ws` code-point for code-point. No `\s`
+ * regex and no character class — both have been tried in this project and both
+ * were wrong (see this file's header).
+ */
+export function describeSignedOffBy(signedOffBy: string | null): string {
+  if (signedOffBy === null || signedOffBy.trim() === "") return NOT_RECORDED;
+  return signedOffBy;
+}
+
+/**
+ * What a typed signer becomes on the way to the database: trimmed, and `null`
+ * when there is nothing left.
+ *
+ * ⭐ `null`, NOT `""`, AND THE DIFFERENCE IS THE WHOLE COLUMN'S MEANING. 0032:
+ * *"NULL means nobody recorded one, never 'unsigned'."* An empty string is a
+ * recorded answer that happens to be invisible; clearing a box means the fact is
+ * gone, and only one of those two is what the person at the screen just did.
+ *
+ * ⚠️ AND `null` HERE IS "CLEAR IT", WHICH IS A REAL WRITE. The api's absent-key
+ * rule ("leave it alone") is the OTHER answer, and the caller decides between
+ * them by whether the reader touched this box at all — never by what came out
+ * of this function.
+ */
+export function normaliseSignedOffBy(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 /* ===========================================================================

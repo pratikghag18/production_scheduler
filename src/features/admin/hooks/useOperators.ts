@@ -163,12 +163,29 @@ export function useGrantSkill() {
   });
 }
 
+/**
+ * Change what is recorded about a training somebody holds.
+ *
+ * ⚠️⚠️ THE VARIABLES TYPE IS THE API'S, WITH EVERY FIELD OPTIONAL, AND IT WAS
+ * NARROWER THAN THE CALL IT WRAPS. `updateSkillRecord` distinguishes an ABSENT
+ * key ("leave it alone") from `null` ("clear it") — that is the whole reason it
+ * exists — and this generic pinned `expiresAt` as required while forbidding the
+ * two fields 0032 / D114 added. A hook that cannot express "change the date and
+ * touch nothing else" forces its caller to send all three every time, which is
+ * exactly how an edit to one field silently wipes another.
+ */
 export function useUpdateSkillRecord() {
   const invalidate = useInvalidateOperators();
   return useMutation<
     OperatorSkillRecord,
     SchedulerError,
-    { operatorId: string; skillId: string; expiresAt: string | null }
+    {
+      operatorId: string;
+      skillId: string;
+      expiresAt?: string | null;
+      certifiedAt?: string | null;
+      signedOffBy?: string | null;
+    }
   >({
     mutationFn: (input) => updateSkillRecord(input),
     onSuccess: invalidate,

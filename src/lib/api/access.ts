@@ -131,3 +131,66 @@ export async function removeSiteMember(input: RemoveSiteMemberInput): Promise<vo
   });
   if (error) throw toSchedulerError(error);
 }
+
+/* ===========================================================================
+ * Which places may this caller WRITE to — the two halves of
+ * `app_can_edit_node`, fetched so a screen can stop offering controls the
+ * server will refuse (D114).
+ *
+ * ⭐⭐ IT LIVES HERE BECAUSE IT IS A READ, and `src/lib/api/` is the only
+ * place allowed to know `supabase` exists. It was written inside
+ * `features/admin/hooks/useEditRights.ts` first, with a comment saying it
+ * should move the moment a second screen needed it — Operators is that second
+ * screen, so it moved. **A deviation that names its own expiry condition is
+ * worth honouring when the condition arrives**, rather than becoming the
+ * second copy of a thing.
+ *
+ * ⚠⚠ THIS THROWS WHERE `fetchAdminAnywhere` SWALLOWS, and the difference is
+ * deliberate. That one answers *should this screen exist*, whose honest
+ * fallback is "no", so it fails closed to `false`. This one decides whether to
+ * OFFER a control, and its honest fallback is "offer it and let the server
+ * refuse" (`scope.ts`'s rule: hiding is invisible and permanent). **Returning
+ * empty arrays on failure would be indistinguishable from a real answer of
+ * "you hold no grants"** — the one result that must never be guessed, because
+ * it silently removes every button on the screen.
+ * ======================================================================== */
+
+export interface GrantPaths {
+  /** Paths covered by an ADMIN grant — arm (2) of `app_can_edit_node`. */
+  adminPaths: string[];
+  /** Paths covered by an admin OR supervisor grant — arm (3)'s second half. */
+  writablePaths: string[];
+}
+
+/**
+ * ltree over PostgREST, narrowed at the boundary.
+ *
+ * ⭐ MEASURED, NOT ASSUMED: called against the running stack as `ana` and
+ * `marco`, `setof ltree` comes back as a plain JSON array of strings
+ * (`["plant_a.area_1.line_1"]`). The generated types say `Returns: unknown[]`,
+ * so the compiler cannot narrow it and something has to.
+ *
+ * ⚠️ A NON-STRING ENTRY IS SKIPPED, NOT THROWN ON. One malformed path must
+ * not cost the reader every button on the screen — that is `parseArrayOf`'s
+ * whole-array failure (§19.76) in a place where the blast radius is a screen
+ * full of dead controls rather than a visible error.
+ */
+export function parseGrantPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((p): p is string => typeof p === "string" && p !== "");
+}
+
+export async function fetchGrantPaths(): Promise<GrantPaths> {
+  // Both are already executable by `authenticated` (0019), so D114 needed no
+  // migration to answer this question on the client.
+  const [admin, writable] = await Promise.all([
+    supabase.rpc("app_grant_paths_for", { p_roles: ["admin"] }),
+    supabase.rpc("app_grant_paths", { require_edit: true }),
+  ]);
+  if (admin.error) throw toSchedulerError(admin.error);
+  if (writable.error) throw toSchedulerError(writable.error);
+  return {
+    adminPaths: parseGrantPaths(admin.data),
+    writablePaths: parseGrantPaths(writable.data),
+  };
+}

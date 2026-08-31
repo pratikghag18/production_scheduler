@@ -36,7 +36,15 @@
    this file renders says "ticket" or "skill". See `../lib/trainings.ts`'s
    header, and the one known leak recorded against `describeSkillNameClash`
    below.
-   --------------------------------------------------------------------------- */
+
+   ⭐⭐ AND SINCE 0032 IT SHOWS ROWS IT CANNOT WRITE, which is why
+   `../lib/editRights.ts` exists. Reading is scoped UPWARD (`app_can_read_owned`
+   — rows owned at or above your grant) and writing DOWNWARD (`app_can_edit_node`
+   — your grant and below), so a line supervisor's list legitimately includes the
+   plant's trainings and the server refuses every Rename and Retire on them.
+   Case V14 in `supabase/tests/59_training_record_test.sql` pins it and calls the
+   missing preview a known debt. ⚠️ The preview FAILS OPEN and authorises
+   nothing — see that module's header. --------------------------------------- */
 import { useEffect, useMemo, useState } from "react";
 import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
@@ -47,7 +55,9 @@ import {
   useRenameSkill,
   useSetSkillActive,
 } from "../hooks/useOperators";
+import { useEditRights } from "../hooks/useEditRights";
 import { describeSkillNameClash, findExistingSkillByName } from "../lib/operators";
+import { notManagedNote } from "../lib/editRights";
 import {
   describeTrainingWriteRefusal,
   hiddenByPlantNote,
@@ -79,6 +89,15 @@ export function TrainingsPanel() {
   // leaves `isLoading` FALSE, so gating on it alone renders "no trainings yet"
   // as though it were the answer to a question nobody asked.
   const loading = !canQuery || isLoading;
+
+  // ⭐⭐ WHICH ROWS THIS READER MAY ACTUALLY CHANGE (V14). A SEPARATE READ from
+  // the list, deliberately: `fetchOperatorsAdmin` is the Operators section's
+  // query too and belongs to `src/lib/api`, which this lane does not own —
+  // folding two grant paths into it would have been an edit to a shared read for
+  // one screen's preview. ⚠️ It is NOT gated on the list having landed: a slow
+  // grant read must never hold up the list, because the fail-open answer while
+  // it is in flight is exactly today's behaviour.
+  const { canEdit } = useEditRights(canQuery, profile?.role ?? null);
 
   const createMutation = useCreateSkill();
   const renameMutation = useRenameSkill();
@@ -320,8 +339,20 @@ export function TrainingsPanel() {
     // rather than accidental. The visible label stays the plain verb, so the
     // accessible name still contains it.
     const handle = trainingHandle(row.name, owner);
-    const isRenaming = renamingId === row.id;
-    const isConfirming = confirmingId === row.id;
+    // ⭐⭐ THE PREVIEW, AND IT IS ASKED WITH THE OWNER'S **PATH**, never its id.
+    // `app_can_edit_node` compares `n.path <@ gp`, and the path is the same
+    // value the server compares — walking parents to rebuild it would be a
+    // second implementation of ancestry that can disagree with the first
+    // (`scope.ts`'s call). ⚠️ `?? null` IS THE FAIL-OPEN DOOR: an owner this
+    // client cannot resolve means "I cannot tell", and `canEditNode` answers
+    // yes so the server gets to refuse out loud.
+    const editable = canEdit(nodesById.get(row.siteNodeId)?.path ?? null);
+    // ⚠️ `editable` OVERRIDES BOTH OPEN STATES rather than sitting beside them.
+    // The grant read lands AFTER the list, so a rename box or a delete dialog
+    // can already be open on a row that turns out to be read-only; leaving them
+    // up would be a Save button on a row whose Rename has just been withdrawn.
+    const isRenaming = editable && renamingId === row.id;
+    const isConfirming = editable && confirmingId === row.id;
     const err = rowError !== null && rowError.id === row.id ? rowError.message : null;
     const notice = rowNotice !== null && rowNotice.id === row.id ? rowNotice.message : null;
 
@@ -349,45 +380,56 @@ export function TrainingsPanel() {
           {owner}
         </span>
 
-        <span className={styles.actions}>
-          {isRenaming ? (
-            <>
-              <button
-                type="button"
-                className={styles.primary}
-                aria-label={`Save the name of ${handle}`}
-                onClick={() => saveRename(row)}
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                className={styles.quiet}
-                aria-label={`Stop renaming ${handle}`}
-                onClick={() => setRenamingId(null)}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              {/* ⭐ RETIRE FIRST AND DELETE SECOND, and the order on screen is
+        {/* ⭐⭐ NO CONTROLS AT ALL ON A ROW THE SERVER WILL REFUSE, AND THE
+            REASON IN THEIR PLACE. D106 forbids a control named after more than
+            it does, and a disabled "Rename" is exactly that — plus it is
+            unreachable by keyboard, so whatever explanation hangs off it is
+            never announced. ⚠️ DELETE GOES WITH THEM even though V14 names only
+            Rename and Retire: `skills_delete` is the same `app_can_edit_node`
+            policy, so keeping it would leave one live button on a row that has
+            just said it cannot be changed. */}
+        {!editable && <span className={styles.readOnly}>{notManagedNote(owner)}</span>}
+
+        {editable && (
+          <span className={styles.actions}>
+            {isRenaming ? (
+              <>
+                <button
+                  type="button"
+                  className={styles.primary}
+                  aria-label={`Save the name of ${handle}`}
+                  onClick={() => saveRename(row)}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  aria-label={`Stop renaming ${handle}`}
+                  onClick={() => setRenamingId(null)}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                {/* ⭐ RETIRE FIRST AND DELETE SECOND, and the order on screen is
                   the decision. Retiring keeps everyone's qualification;
                   deleting cascades the training off every one of them (0029). */}
-              <button
-                type="button"
-                className={styles.primary}
-                aria-label={`${retireActionLabel(row.active)} ${handle}`}
-                title={
-                  row.active
-                    ? "Stop offering it for new work. Everyone who holds it keeps it."
-                    : "Offer it for new work again."
-                }
-                onClick={() => toggleActive(row)}
-              >
-                {retireActionLabel(row.active)}
-              </button>
-              {/* ⚠️ "RENAME" IS THE HONEST NAME FOR WHAT THIS OPENS, and it is
+                <button
+                  type="button"
+                  className={styles.primary}
+                  aria-label={`${retireActionLabel(row.active)} ${handle}`}
+                  title={
+                    row.active
+                      ? "Stop offering it for new work. Everyone who holds it keeps it."
+                      : "Offer it for new work again."
+                  }
+                  onClick={() => toggleActive(row)}
+                >
+                  {retireActionLabel(row.active)}
+                </button>
+                {/* ⚠️ "RENAME" IS THE HONEST NAME FOR WHAT THIS OPENS, and it is
                   narrower than `ProductsPanel`'s "Edit" on purpose: the form
                   behind it changes the name and NOTHING ELSE, because the api
                   layer has no write that moves a training to another owner.
@@ -395,40 +437,41 @@ export function TrainingsPanel() {
                   it "Edit" would be the opposite error, and the missing write
                   is recorded in the hint under the list rather than hidden
                   behind a button that cannot deliver it. */}
-              <button
-                type="button"
-                className={styles.quiet}
-                aria-label={`Rename ${handle}`}
-                onClick={() => {
-                  clearRowError(row.id);
-                  setConfirmingId(null);
-                  setRenamingId(row.id);
-                  setRenameDraft(row.name);
-                }}
-              >
-                Rename
-              </button>
-              {/* ⭐ ONE CONTROL, AND IT OPENS A DIALOG THAT ASKS THE SERVER
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  aria-label={`Rename ${handle}`}
+                  onClick={() => {
+                    clearRowError(row.id);
+                    setConfirmingId(null);
+                    setRenamingId(row.id);
+                    setRenameDraft(row.name);
+                  }}
+                >
+                  Rename
+                </button>
+                {/* ⭐ ONE CONTROL, AND IT OPENS A DIALOG THAT ASKS THE SERVER
                   FIRST. The screen this replaces deleted a training outright on
                   one click — with no confirmation at all — and under 0029 that
                   also un-qualifies everyone holding it and drops it from every
                   cell that requires it, by cascade. */}
-              <button
-                type="button"
-                className={styles.quiet}
-                disabled={isConfirming}
-                aria-label={`Delete ${handle}`}
-                onClick={() => {
-                  clearRowError(row.id);
-                  setRowNotice(null);
-                  setConfirmingId(row.id);
-                }}
-              >
-                Delete
-              </button>
-            </>
-          )}
-        </span>
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  disabled={isConfirming}
+                  aria-label={`Delete ${handle}`}
+                  onClick={() => {
+                    clearRowError(row.id);
+                    setRowNotice(null);
+                    setConfirmingId(row.id);
+                  }}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </span>
+        )}
 
         {!row.active && <span className={styles.tag}>Retired</span>}
         {err !== null && <span className={styles.error}>{err}</span>}
@@ -488,6 +531,13 @@ export function TrainingsPanel() {
       ? null
       : describeSkillNameClash(clash, scopeLabel(clash.skill.siteNodeId, nodesById));
   const retiredNote = clashRow === null ? null : retiredClashNote(clashRow.active);
+  // ⚠️ THE SECOND PLACE `active` IS FLIPPED, and it needs the same preview as
+  // the first. The row this note points at can easily be one the reader cannot
+  // touch — 0031 makes the clash a per-owner question, and the owner it names
+  // may sit above their grant — so an unguarded "Bring back" here would be the
+  // one refused button left on a screen that had removed all the others.
+  const clashRowEditable =
+    clashRow !== null && canEdit(nodesById.get(clashRow.siteNodeId)?.path ?? null);
 
   return (
     <div className={styles.panel}>
@@ -518,7 +568,16 @@ export function TrainingsPanel() {
                   narrowing this to a client-derived permission set left a site
                   admin with no options at all, and that offering a node the
                   server then refuses costs one clear sentence under §19.63's
-                  write-error contract. */}
+                  write-error contract.
+                  ⚠️⚠️ AND IT IS DELIBERATELY **NOT** NARROWED BY `canEdit`,
+                  even though the grant paths are now in hand and `skills_insert`
+                  asks the same `app_can_edit_node` this preview mirrors. The
+                  ROW preview removes controls whose only outcome is an error;
+                  narrowing this picker would remove the only way to say where a
+                  new training goes, and `scopeOptions`' header records what that
+                  cost the last time it was tried. A refused create already lands
+                  as a sentence under the form. Recorded as the next question to
+                  ask the maintainer rather than half-built. */}
               <select
                 className={styles.input}
                 value={ownerValue}
@@ -556,7 +615,16 @@ export function TrainingsPanel() {
             found is RETIRED. "Use that one" is advice a reader cannot follow
             for a retired training, so the way out is offered here, as a
             control, rather than described. */}
-        {retiredNote !== null && clashRow !== null && (
+        {retiredNote !== null && clashRow !== null && !clashRowEditable && (
+          /* ⚠️ THE ADVICE STILL GETS SAID, because it is still the reason the
+             name is taken — what changes is that the way out is somebody
+             else's to take, and saying whose is more use than a button that
+             fails. */
+          <p className={styles.hint}>
+            {retiredNote} {notManagedNote(scopeLabel(clashRow.siteNodeId, nodesById))}
+          </p>
+        )}
+        {retiredNote !== null && clashRow !== null && clashRowEditable && (
           <p className={styles.hint}>
             {retiredNote}{" "}
             <button

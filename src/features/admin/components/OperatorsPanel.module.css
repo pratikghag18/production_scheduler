@@ -83,19 +83,19 @@
   letter-spacing: 0.04em;
 }
 
-.field,
-.inlineField {
+.field {
   display: flex;
   flex-direction: column;
   gap: 0.1875rem;
   min-width: 0;
 }
 
-.inlineField {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.375rem;
-}
+/* `.inlineField` — a one-line label-beside-input row — lived here for the
+   single "Expires" box a held training used to carry. D114 gave that row three
+   boxes (trained on, signed off by, expires), which stack as labelled columns
+   inside `.record` and use `.field` like every other form control on this
+   screen. The rule went with its last user rather than sitting here looking
+   available: an unused class in a module is a suggestion nobody wrote down. */
 
 .fieldLabel {
   font-size: 0.75rem;
@@ -310,13 +310,28 @@
   color: var(--ink-2);
 }
 
+/* ---------------------------------------------------------------------------
+   ⭐⭐ ONE HELD TRAINING, AND SINCE D114 IT IS A RECORD RATHER THAN A DATE.
+
+   The maintainer raised stage 22 for one reason: *"the question an audit
+   actually asks — who signed this person off, and when — has no answer."* So
+   the row carries three facts now (trained on, signed off by, expires) where it
+   carried one, and `align-items: flex-start` is what stops the name and the
+   Remove button floating to the middle of a block that is suddenly two lines
+   tall.
+
+   ⚠️ THE THREE SIT IN THEIR OWN WRAPPING GROUP (`.record`) RATHER THAN LOOSE IN
+   THE ROW. Loose, they wrap one at a time and the name, a box, the button and
+   two more boxes end up on lines that no longer read as one training's record.
+   The group wraps as a unit and keeps the Remove button with the row it removes.
+   --------------------------------------------------------------------------- */
 .ticket {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   border-radius: 0.375rem;
-  padding: 0.25rem 0.375rem;
+  padding: 0.375rem;
   font-size: 0.8125rem;
 }
 
@@ -326,16 +341,46 @@
 
 .ticketName {
   min-width: 8rem;
+  /* The three boxes beside it are two lines tall; the name is one, and reads as
+     the row's heading rather than as a fourth field when it sits on the labels' line. */
+  padding-top: 0.9375rem;
 }
 
+.record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.375rem 0.75rem;
+  flex: 1 1 22rem;
+  min-width: 0;
+}
+
+.record .field {
+  flex: 0 1 9rem;
+}
+
+/* The value under each box, in words. ⚠️ NOT DECORATION: a date control with
+   nothing in it is indistinguishable from one that failed to render, and both
+   of D114's fields are optional, so empty is the state this line is read in
+   most often. `describeCertifiedAt` / `describeSignedOffBy` supply the words. */
 .ticketWhen {
   color: var(--ink-2);
   font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
+/* ⚠️ `100%` OF ITS OWN COLUMN, NOT `auto`. A bare `width: auto` input sizes
+   itself from the `size` attribute's default — about twenty characters — which
+   is wider than the column it now sits in, so the three boxes stopped lining up
+   the moment there were three of them. */
 .ticket .input {
-  width: auto;
+  width: 100%;
   max-width: 10rem;
+}
+
+/* Remove sits on the boxes' own line rather than on their labels'. */
+.ticket .small {
+  margin-top: 0.9375rem;
 }
 
 .grantRow {

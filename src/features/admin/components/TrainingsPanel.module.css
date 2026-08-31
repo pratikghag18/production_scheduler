@@ -220,6 +220,7 @@
    never re-flows the columns above it. */
 .tag,
 .note,
+.readOnly,
 .error {
   grid-column: 1 / -1;
   font-size: 0.75rem;
@@ -234,4 +235,20 @@
 
 .note {
   color: var(--ink-2);
+}
+
+/* The line a row carries in place of its buttons, when the reader may see it
+   and not change it (V14 / `../lib/editRights.ts`).
+
+   ⭐ `--muted`, THE HINT COLOUR, AND NOT `--crit`. Nothing has gone wrong: the
+   row belongs to a place somebody else runs, which is an ordinary fact about a
+   list that reaches upward. Styling it as an error would make a normal screen
+   look broken for every supervisor who has a plant above them.
+
+   ⚠️ IT TAKES A FULL-WIDTH LINE RATHER THAN SITTING IN THE ACTION COLUMN. That
+   track is 15rem and fixed, so a sentence in it would wrap to three lines and
+   make this row twice the height of its neighbours -- and the column is fixed
+   precisely so the right-hand edge does not move from row to row. */
+.readOnly {
+  color: var(--muted);
 }

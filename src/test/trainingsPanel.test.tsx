@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { TrainingsPanel, TRAININGS_PANEL_READY } from "@/features/admin/components/TrainingsPanel";
 import { useAdminViewStore } from "@/features/admin/store/adminView";
+import { notManagedNote } from "@/features/admin/lib/editRights";
 
 /**
  * The Trainings section, asked the questions only a rendered screen can answer
@@ -29,6 +30,13 @@ import { useAdminViewStore } from "@/features/admin/store/adminView";
  *   Forklift   Line A   live      <- two rows, one name, two owners: LEGAL
  *   Forklift   Line B   live
  *   Welding    Line A   RETIRED
+ *
+ * ⭐⭐ AND THE EDIT-RIGHTS CASES DRIVE THE **REAL** PREDICATE. Only the fetch is
+ * mocked out: `h.state.rights` is handed to the real `canEditNode`, so T24-T28
+ * are asking `../lib/editRights.ts` the same question the screen asks it. A mock
+ * that returned a canned boolean would pin that the panel calls something —
+ * which is the shape of assertion §19.77's own audit passed while the screen was
+ * broken.
  */
 
 const PLANT1 = "30000000-0000-0000-0000-000000000001";
@@ -82,6 +90,15 @@ const h = vi.hoisted(() => {
     baseSkills,
     state: {
       sessionLoading: false,
+      // ⭐ A COMPANY ADMIN BY DEFAULT, so arm (1) carries every case above and
+      // none of them has to know this preview exists. Each edit-rights case
+      // narrows it to exactly the person it is about.
+      rights: {
+        role: "admin",
+        adminPaths: [] as readonly string[],
+        writablePaths: [] as readonly string[],
+        known: true,
+      },
       profile: {
         id: "u1",
         orgId: "10000000-0000-0000-0000-000000000001",
@@ -141,6 +158,27 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
  * which is the state T15 asserts on: both destructive buttons stay disabled
  * until the counts land.
  */
+/**
+ * ⭐⭐ THE FETCH IS MOCKED; THE RULE IS NOT. `useEditRights` imports
+ * `@/lib/supabase` and React Query, neither of which belongs in a render test —
+ * but the thing worth asserting is `canEditNode`, so the mock delegates to the
+ * REAL one and only the two RPC calls disappear.
+ *
+ * ⚠️ THE FACTORY IS ASYNC AND IMPORTS INSIDE ITSELF. `vi.mock` is hoisted above
+ * every `import` in this file, so reaching for a top-level binding from the
+ * factory body is a temporal-dead-zone error; `h` is safe because it comes from
+ * `vi.hoisted`.
+ */
+vi.mock("@/features/admin/hooks/useEditRights", async () => {
+  const { canEditNode } = await import("@/features/admin/lib/editRights");
+  return {
+    useEditRights: () => ({
+      rights: h.state.rights,
+      canEdit: (path: string | null) => canEditNode(path, h.state.rights),
+    }),
+  };
+});
+
 vi.mock("@/features/admin/hooks/useDeletion", () => ({
   useDeletionPreview: () => ({ data: undefined, isPending: true, isError: false, error: null }),
   useDeleteOwnedRow: () => ({ mutate: h.deleteMutate, isPending: false }),
@@ -158,6 +196,19 @@ function withTwoPlants() {
       h.node(LINE_9, "Line 9", PLANT2, "plant_2.line_9"),
     ],
     skills: [...h.baseSkills(), h.skill("s4", "Rigging", PLANT2)],
+  };
+}
+
+/**
+ * The V14 world: a training owned by the PLANT, which read-scoping shows to
+ * somebody whose grant is one line and write-scoping refuses them.
+ *
+ * ⚠️ NOT in the base fixture — it would give every case above a fourth row.
+ */
+function withPlantOwnedTraining() {
+  h.state.data = {
+    ...h.state.data,
+    skills: [...h.baseSkills(), h.skill("s5", "Housekeeping", PLANT1)],
   };
 }
 
@@ -202,6 +253,7 @@ beforeEach(() => {
   h.state.sessionLoading = false;
   h.state.isLoading = false;
   h.state.isError = false;
+  h.state.rights = { role: "admin", adminPaths: [], writablePaths: [], known: true };
   h.state.data = {
     operators: [],
     skills: h.baseSkills(),
@@ -525,5 +577,130 @@ describe("TrainingsPanel — the plant filter", () => {
     // Widening the view does not make the name free either — the answer never
     // depended on the filter.
     expect(screen.getByText(/This place already has a Rigging/)).toBeTruthy();
+  });
+});
+
+/* ===========================================================================
+ * What the reader may actually CHANGE (V14, migration 0032).
+ *
+ * ⭐⭐ READING REACHES UP AND WRITING REACHES DOWN, so this list legitimately
+ * holds rows the server will refuse. Case V14 in
+ * `supabase/tests/59_training_record_test.sql` pins the server half; these pin
+ * that the screen agrees with it before anybody clicks.
+ * ======================================================================== */
+
+/** Is there a Rename/Retire/Delete anywhere for this row? */
+function controlsFor(handle: string): string[] {
+  return ["Rename", "Retire", "Bring back", "Delete"].filter(
+    (verb) => screen.queryByRole("button", { name: `${verb} ${handle}` }) !== null,
+  );
+}
+
+describe("TrainingsPanel — the permission preview (V14 / D115)", () => {
+  it("T24 ⭐⭐ a row owned above the reader's grant keeps NO controls, and says whose it is", () => {
+    // The line supervisor of V14: an org-wide supervisor with one grant on
+    // Line A. They can see the plant's "Housekeeping" and the server refuses
+    // every write on it.
+    withPlantOwnedTraining();
+    h.state.rights = {
+      role: "supervisor",
+      adminPaths: [],
+      writablePaths: ["plant_1.line_a"],
+      known: true,
+    };
+    render(<TrainingsPanel />);
+
+    // ⭐ IT IS STILL LISTED. Hiding it would be `scope.ts`'s invisible,
+    // permanent failure, and the row is real — somebody runs that course.
+    expect(screen.getByText("Housekeeping")).toBeTruthy();
+    // ⚠️ NOT ONE OF THE FOUR, AND DELETE IS IN THE LIST DELIBERATELY:
+    // `skills_delete` is the same `app_can_edit_node` policy, so a surviving
+    // Delete would be the one live button on a row that has just said no.
+    expect(controlsFor("Housekeeping at Plant 1")).toEqual([]);
+    expect(screen.getByText(notManagedNote("Plant 1"))).toBeTruthy();
+
+    // ...and their own line is untouched. A preview that took the controls off
+    // everything would be indistinguishable from one that worked.
+    expect(controlsFor("Forklift at Line A")).toEqual(["Rename", "Retire", "Delete"]);
+    // ⚠️ AND THE SIBLING LINE IS NOT THEIRS EITHER — `path <@ gp` is downward
+    // only, so Line B is no more reachable than the plant above.
+    expect(controlsFor("Forklift at Line B")).toEqual([]);
+  });
+
+  it("T25 ⭐⭐ it FAILS OPEN: before the grant read lands, every control is offered", () => {
+    // ⭐⭐ `scope.ts`'s standing argument. Failing closed would strip the whole
+    // screen for the length of a round trip, and for good if the RPC broke —
+    // silently. Offering a refused button costs one sentence under §19.63.
+    withPlantOwnedTraining();
+    h.state.rights = { role: "supervisor", adminPaths: [], writablePaths: [], known: false };
+    render(<TrainingsPanel />);
+    expect(controlsFor("Housekeeping at Plant 1")).toEqual(["Rename", "Retire", "Delete"]);
+    expect(screen.queryByText(notManagedNote("Plant 1"))).toBeNull();
+  });
+
+  it("T26 ⚠️⚠️ a site admin is org-wide 'viewer', and keeps everything", () => {
+    // ⚠️⚠️ THE DEMO'S dana/quinn/rosa. Their org-wide role is 'viewer' and
+    // their standing comes from an ADMIN GRANT, which stands alone in
+    // `app_can_edit_node`. A preview that required `app_can_write()` on every
+    // arm would take this screen away from all three of them.
+    withPlantOwnedTraining();
+    h.state.rights = {
+      role: "viewer",
+      adminPaths: ["plant_1"],
+      writablePaths: ["plant_1"],
+      known: true,
+    };
+    render(<TrainingsPanel />);
+    expect(controlsFor("Housekeeping at Plant 1")).toEqual(["Rename", "Retire", "Delete"]);
+    expect(controlsFor("Forklift at Line B")).toEqual(["Rename", "Retire", "Delete"]);
+  });
+
+  it("T27 ⚠️ a rename box already open on a row that turns out read-only is closed", () => {
+    // ⚠️ THE GRANT READ LANDS AFTER THE LIST, so this ordering is the normal
+    // one and not an edge case. Leaving the editor up would leave a Save button
+    // on a row whose Rename had just been withdrawn.
+    const { rerender } = render(<TrainingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Forklift at Line B" }));
+    expect(screen.getByRole("textbox", { name: "Name for Forklift at Line B" })).toBeTruthy();
+
+    h.state.rights = {
+      role: "supervisor",
+      adminPaths: [],
+      writablePaths: ["plant_1.line_a"],
+      known: true,
+    };
+    rerender(<TrainingsPanel />);
+    expect(screen.queryByRole("textbox", { name: "Name for Forklift at Line B" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Save the name of Forklift at Line B" }),
+    ).toBeNull();
+    expect(screen.getByText(notManagedNote("Line B"))).toBeTruthy();
+  });
+
+  it("T28 ⚠️ the clash note's 'Bring back' is withheld when that row is not theirs either", () => {
+    // The retired row holding the name can easily sit outside the reader's
+    // grant — 0031 makes the clash a per-owner question. An unguarded button
+    // here would be the last refused control on a screen that had removed all
+    // the others, in the one place nobody thinks to look.
+    h.state.rights = {
+      role: "supervisor",
+      adminPaths: [],
+      writablePaths: ["plant_1.line_b"],
+      known: true,
+    };
+    render(<TrainingsPanel />);
+    draft("Welding", LINE_A);
+    // The reason the name is taken is still said — that is the reader's
+    // problem to understand, and it does not depend on who may fix it.
+    expect(screen.getByText(/That one is retired/)).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: "Bring back Welding at Line A instead of creating a second",
+      }),
+    ).toBeNull();
+    // ⚠️ THE PICKER IS NOT NARROWED BY THE PREVIEW, and Line A is still on
+    // offer — `scopeOptions`' header records that a client-derived permission
+    // set left a site admin with nothing to choose at all.
+    expect(ownerPicker().value).toBe(LINE_A);
   });
 });

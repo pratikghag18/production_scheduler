@@ -22,7 +22,10 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { useSession } from "@/features/auth/useSession";
 import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 import {
+  describeCertifiedAt,
+  describeSignedOffBy,
   formatDay,
+  normaliseSignedOffBy,
   operatorRows,
   placeVerdict,
   placesUnderSameRoot,
@@ -242,11 +245,32 @@ export function OperatorsPanel() {
   const [grantId, setGrantId] = useState("");
   const [grantExpiry, setGrantExpiry] = useState("");
 
+  /* ---------------------------------------------------------------------
+   * ⭐⭐ THE ONE DRAFT ON THIS SCREEN, AND IT IS HERE BECAUSE THE SIGN-OFF IS
+   * FREE TEXT (0032 / D114). Every other editable control in this panel is a
+   * `<select>` or a `type="date"`, which commit a WHOLE value in one gesture —
+   * so they write straight through on `onChange` and hold no draft. A text box
+   * does not: `onChange` fires per keystroke, and writing per keystroke would
+   * put "R", "R.", "R. O" into an AUDIT TRAIL as separate rows. So this one is
+   * typed locally and committed on blur.
+   *
+   * ⚠️ KEYED BY OPERATOR **AND** TRAINING, NOT BY TRAINING ALONE. Two people
+   * can hold the same training, and a draft keyed only by `skillId` would
+   * survive a click onto somebody else and show one person's half-typed signer
+   * under another person's name. `null` means nothing is being typed and every
+   * box shows what is stored.
+   * ------------------------------------------------------------------- */
+  const [signerDraft, setSignerDraft] = useState<{
+    operatorId: string;
+    skillId: string;
+    value: string;
+  } | null>(null);
+
   const createOperator = useCreateOperator();
   const updateOperator = useUpdateOperator();
   const setActive = useSetOperatorActive();
   const grantSkill = useGrantSkill();
-  const updateExpiry = useUpdateSkillRecord();
+  const updateRecord = useUpdateSkillRecord();
   const revokeSkill = useRevokeSkill();
 
   // ⚠️ MEMOISED, not inlined `?? []`. A fresh `[]` on every render is a new
@@ -427,7 +451,7 @@ export function OperatorsPanel() {
     updateOperator.isPending ||
     setActive.isPending ||
     grantSkill.isPending ||
-    updateExpiry.isPending ||
+    updateRecord.isPending ||
     revokeSkill.isPending;
 
   function onErr(err: SchedulerError) {
@@ -524,6 +548,44 @@ export function OperatorsPanel() {
       },
       { onSuccess: () => setRenaming(false), onError: onErr },
     );
+  }
+
+  /**
+   * Change ONE recorded fact about a training this person holds.
+   *
+   * ⚠️⚠️ THE PATCH CARRIES ONLY THE KEY THAT MOVED, AND THAT IS THE WHOLE
+   * CONTRACT. `updateSkillRecord` reads an ABSENT key as "leave it alone" and
+   * `null` as "clear it" — so a helper that filled all three in from what is on
+   * screen would look identical on the day the screen is up to date and would
+   * overwrite the other two fields with a stale render the day it is not.
+   * A field the reader did not touch is not a field they emptied.
+   *
+   * ⚠️ AND THE THREE FACTS ARE INDEPENDENT (0032 writes no CHECK tying them).
+   * No caller below may clear one because another went empty, or refuse one for
+   * want of another: a half-known record is the ordinary case here.
+   */
+  function saveRecord(
+    skillId: string,
+    patch: { expiresAt?: string | null; certifiedAt?: string | null; signedOffBy?: string | null },
+  ) {
+    if (selected === null) return;
+    setNotice(null);
+    updateRecord.mutate({ operatorId: selected.id, skillId, ...patch }, { onError: onErr });
+  }
+
+  /**
+   * Commit the signer box, if what it holds differs from what is stored.
+   *
+   * ⚠️ THE "IF" IS NOT AN OPTIMISATION. Blur fires on every tab-through and
+   * every click elsewhere, so an unconditional write would put a row in the
+   * audit log for merely LOOKING at a field — and would rewrite a stored `"  "`
+   * to `null` on a record nobody edited.
+   */
+  function commitSigner(t: { skillId: string; signedOffBy: string | null }, raw: string) {
+    setSignerDraft(null);
+    const next = normaliseSignedOffBy(raw);
+    if (next === t.signedOffBy) return;
+    saveRecord(t.skillId, { signedOffBy: next });
   }
 
   function attachSkill(skillId: string, expiresAt: string | null) {
@@ -920,54 +982,144 @@ export function OperatorsPanel() {
               <h3 className={styles.h3}>Trainings</h3>
               <p className={styles.footnote}>
                 A training is what changes the answer above. Adding one can turn several crosses
-                green at once — requirements sit on places and inherit downward.
+                green at once — requirements sit on places and inherit downward. Who signed somebody
+                off and when are recorded here; both are optional, and either can be filled in on
+                its own.
               </p>
               <ul className={styles.tickets}>
-                {tickets.map((t) => (
-                  <li key={t.skillId} className={styles.ticket}>
-                    <span className={styles.ticketName}>
-                      {t.name}
-                      {t.lapsed && <span className={styles.badge}>lapsed</span>}
-                    </span>
-                    <label className={styles.inlineField}>
-                      <span className={styles.fieldLabel}>Expires</span>
-                      <input
-                        className={styles.input}
-                        type="date"
-                        value={t.expiresAt ?? ""}
+                {tickets.map((t) => {
+                  /* ⚠️⚠️ EVERY CONTROL IN THIS ROW IS NAMED FOR ITS TRAINING, AND
+                     WITHOUT THAT THE LIST IS UNUSABLE. There is one of these rows
+                     per training somebody holds, so a bare "Expires" was already
+                     N boxes sharing one accessible name — the defect the edit form
+                     above had, where "Belongs to" appeared twice and became
+                     `Where Ann Adams belongs`. D114 adds two more boxes per row,
+                     which would have made it N×3. `within(...)` disambiguates for
+                     a sighted reader and for a test and does NOTHING for the
+                     person who needs the name (D106).
+                     ⚠️ The visible label stays short — the qualified name is what
+                     is SPOKEN, not what is drawn, and a column of "Expires for
+                     Forklift" labels would repeat the row's own heading. */
+                  const drafting =
+                    signerDraft !== null &&
+                    signerDraft.operatorId === selected.id &&
+                    signerDraft.skillId === t.skillId;
+                  return (
+                    <li key={t.skillId} className={styles.ticket}>
+                      <span className={styles.ticketName}>
+                        {t.name}
+                        {t.lapsed && <span className={styles.badge}>lapsed</span>}
+                      </span>
+                      <div className={styles.record}>
+                        {/* ⭐ WHEN IT WAS DONE — the half of the audit question
+                            that needed no column at all. `certified_at` has been
+                            on this table since it was created and nothing had
+                            ever read it (0032's header); this is the screen it
+                            was missing.
+                            ⚠️ NOT `created_at`. A row entered today may record a
+                            course sat last March, which is why the date is typed
+                            rather than stamped. */}
+                        <label className={styles.field}>
+                          <span className={styles.fieldLabel}>Trained on</span>
+                          <input
+                            className={styles.input}
+                            type="date"
+                            aria-label={`Trained on for ${t.name}`}
+                            value={t.certifiedAt ?? ""}
+                            disabled={busy}
+                            onChange={(e) =>
+                              // ⚠️ ONLY THIS KEY. Emptying the date does not
+                              // touch the signer beside it — 0032 has no CHECK
+                              // tying the two, and inventing one here would
+                              // erase a fact the reader never asked about.
+                              saveRecord(t.skillId, {
+                                certifiedAt: e.target.value === "" ? null : e.target.value,
+                              })
+                            }
+                          />
+                          <span className={styles.ticketWhen}>
+                            {describeCertifiedAt(t.certifiedAt)}
+                          </span>
+                        </label>
+                        {/* ⭐⭐ WHO SIGNED IT OFF — FREE TEXT, AND THAT IS A
+                            DECISION, NOT A SHORTCUT (0032 / D114). The signer is
+                            routinely an external assessor or a vendor's trainer
+                            with no login here, and a CSV row cannot carry a user
+                            id. **This box holds the CLAIM; who typed it in is the
+                            audit log's answer.** It must not become a picker of
+                            people in this system — that would make the record
+                            either impossible to enter or untrue.
+                            ⚠️ COMMITTED ON BLUR, never per keystroke — see
+                            `signerDraft`. */}
+                        <label className={styles.field}>
+                          <span className={styles.fieldLabel}>Signed off by</span>
+                          <input
+                            className={styles.input}
+                            type="text"
+                            aria-label={`Signed off by for ${t.name}`}
+                            value={drafting ? signerDraft.value : (t.signedOffBy ?? "")}
+                            disabled={busy}
+                            onChange={(e) =>
+                              setSignerDraft({
+                                operatorId: selected.id,
+                                skillId: t.skillId,
+                                value: e.target.value,
+                              })
+                            }
+                            onBlur={(e) => commitSigner(t, e.target.value)}
+                            // Enter is what a person types to mean "done"; it
+                            // commits through the same blur path rather than a
+                            // second one that could drift from it.
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur();
+                            }}
+                          />
+                          <span className={styles.ticketWhen}>
+                            {describeSignedOffBy(t.signedOffBy)}
+                          </span>
+                        </label>
+                        <label className={styles.field}>
+                          <span className={styles.fieldLabel}>Expires</span>
+                          <input
+                            className={styles.input}
+                            type="date"
+                            aria-label={`Expires for ${t.name}`}
+                            value={t.expiresAt ?? ""}
+                            disabled={busy}
+                            onChange={(e) =>
+                              saveRecord(t.skillId, {
+                                expiresAt: e.target.value === "" ? null : e.target.value,
+                              })
+                            }
+                          />
+                          {/* ⚠️ "never expires" IS NOT "not recorded" AND THE
+                              TWO MUST NOT BE COLLAPSED. An empty expiry is a
+                              positive fact — this training does not lapse —
+                              while an empty sign-off is an absence. Same blank
+                              box, opposite meanings. */}
+                          <span className={styles.ticketWhen}>
+                            {t.expiresAt === null ? "never expires" : formatDay(t.expiresAt)}
+                          </span>
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.small}
+                        aria-label={`Remove ${t.name}`}
                         disabled={busy}
-                        onChange={(e) => {
+                        onClick={() => {
                           setNotice(null);
-                          updateExpiry.mutate(
-                            {
-                              operatorId: selected.id,
-                              skillId: t.skillId,
-                              expiresAt: e.target.value === "" ? null : e.target.value,
-                            },
+                          revokeSkill.mutate(
+                            { operatorId: selected.id, skillId: t.skillId },
                             { onError: onErr },
                           );
                         }}
-                      />
-                    </label>
-                    <span className={styles.ticketWhen}>
-                      {t.expiresAt === null ? "never expires" : formatDay(t.expiresAt)}
-                    </span>
-                    <button
-                      type="button"
-                      className={styles.small}
-                      disabled={busy}
-                      onClick={() => {
-                        setNotice(null);
-                        revokeSkill.mutate(
-                          { operatorId: selected.id, skillId: t.skillId },
-                          { onError: onErr },
-                        );
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  );
+                })}
                 {tickets.length === 0 && <li className={styles.status}>No trainings yet.</li>}
               </ul>
 

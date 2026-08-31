@@ -146,8 +146,21 @@ const h = vi.hoisted(() => {
   // ⚠️ NO EXPIRY ANYWHERE. `asOf` defaults to today, so a dated fixture would
   // make this suite's answers depend on the day it is run — and the lapse rules
   // already have their own cases in `operators.test.ts`.
+  //
+  // ⭐ THE RECORD IS HALF-KNOWN (0032 / D114): a date and no signer. That is the
+  // ordinary shape 0032's header describes — a spreadsheet arriving with one
+  // column filled in — and it is the shape that can tell a screen reading each
+  // field from one reading the row. ⚠️ `certified_at` IS SAFE TO DATE where
+  // `expires_at` is not: nothing compares it to today, so it cannot make an
+  // answer depend on the day this suite runs.
   const baseOperatorSkills = () => [
-    { operatorId: id.ANN, skillId: id.FORK, expiresAt: null as string | null },
+    {
+      operatorId: id.ANN,
+      skillId: id.FORK,
+      expiresAt: null as string | null,
+      certifiedAt: "2026-03-14" as string | null,
+      signedOffBy: null as string | null,
+    },
   ];
 
   const baseData = () => ({
@@ -170,6 +183,7 @@ const h = vi.hoisted(() => {
     baseData,
     createMutate: vi.fn(),
     updateMutate: vi.fn(),
+    recordMutate: vi.fn(),
     state: {
       profile: {
         id: "u1",
@@ -224,7 +238,7 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
   useUpdateOperator: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetOperatorActive: () => ({ mutate: vi.fn(), isPending: false }),
   useGrantSkill: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdateSkillRecord: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateSkillRecord: () => ({ mutate: h.recordMutate, isPending: false }),
   useRevokeSkill: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
@@ -362,6 +376,7 @@ function withOnePlant() {
 beforeEach(() => {
   h.createMutate.mockClear();
   h.updateMutate.mockClear();
+  h.recordMutate.mockClear();
   // ⚠️ FACTORIES, NOT A SHARED LITERAL. Several cases below mutate the fixture
   // in place — revoking Ann's training, adding an orphaned person — and a shared
   // object would leave every later case running against a world shaped by its
@@ -711,7 +726,7 @@ describe("OperatorsPanel — the training catalogue is not managed here (stage 2
     render(<OperatorsPanel />);
     pick("Ann Adams");
     const held = screen.getByText("Forklift").closest("li") as HTMLElement;
-    expect(within(held).getByRole("button", { name: "Remove" })).toBeTruthy();
+    expect(within(held).getByRole("button", { name: "Remove Forklift" })).toBeTruthy();
     expect(within(held).getByText("never expires")).toBeTruthy();
     expect(optionLabels(grantPicker())).toContain("Welding");
     expect(screen.getByRole("button", { name: "Attach" })).toBeTruthy();
@@ -748,5 +763,211 @@ describe("OperatorsPanel — the training catalogue is not managed here (stage 2
     expect(screen.getByRole("heading", { name: "Trainings" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Add a training" })).toBeTruthy();
     expect(within(aside()).getByRole("button", { name: /1 training\b/ })).toBeTruthy();
+  });
+});
+
+/* ===========================================================================
+ * ROADMAP STAGE 22 / 0032 / D114 — WHO SIGNED THIS PERSON OFF, AND WHEN.
+ *
+ * The maintainer raised the whole stage for one reason: *"the question an audit
+ * actually asks — who signed this person off, and when — has no answer."*
+ * Migration 0032 landed the database half and the api layer read and wrote both
+ * fields; **nothing showed or edited them.** These cases are the screen.
+ *
+ * ⚠️⚠️ THE PAYLOAD CARRIES MOST OF THIS BLOCK, NOT THE RENDER, and that is the
+ * same lesson O15 records. `updateSkillRecord` reads an ABSENT key as "leave it
+ * alone" and `null` as "clear it" — so a screen that sends all three fields
+ * every time looks *identical* to one that sends only the key that moved, right
+ * up until the render it built the payload from is stale and it wipes a field
+ * nobody touched. Assertions on what is DRAWN cannot see that at all.
+ * =========================================================================== */
+
+/** One held training's row, found by its name the way a reader finds it. */
+function heldRow(name: string): HTMLElement {
+  const li = screen.getByText(name).closest("li");
+  if (li === null) throw new Error(`no held training row for ${name}`);
+  return li;
+}
+
+/** What `useUpdateSkillRecord` was handed, as a plain object. */
+function recordPatch(callIndex = 0): Record<string, unknown> {
+  return h.recordMutate.mock.calls[callIndex][0] as Record<string, unknown>;
+}
+
+/** Give Ann a second training, so the one-row-per-training collisions are reachable. */
+function annHoldsTwo() {
+  h.state.data.operatorSkills = [
+    ...h.state.data.operatorSkills,
+    {
+      operatorId: id.ANN,
+      skillId: id.WELD,
+      expiresAt: null as string | null,
+      certifiedAt: null as string | null,
+      signedOffBy: "R. Okonkwo" as string | null,
+    },
+  ];
+}
+
+describe("OperatorsPanel — the training record: who signed it off, and when (D114)", () => {
+  it("O22: a held training shows what is recorded about it", () => {
+    // Half-known on purpose (0032 writes no CHECK tying the two): Ann's Forklift
+    // carries a date and no signer, which is the shape a spreadsheet arrives in.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    const row = heldRow("Forklift");
+    expect(within(row).getByText("14 Mar 2026")).toBeTruthy();
+    expect((within(row).getByLabelText("Trained on for Forklift") as HTMLInputElement).value).toBe(
+      "2026-03-14",
+    );
+  });
+
+  it("O23 ⭐ an unrecorded value says so — it is never a blank that reads as a bug", () => {
+    // ⚠️ THE EMPTY STATE IS THE ORDINARY ONE HERE, not an edge. Both fields are
+    // optional and a half-known record is the common case, so a bare empty box
+    // with no words beside it is what most rows would look like — and it is
+    // indistinguishable from a screen that failed to load something.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    const row = heldRow("Forklift");
+    expect(within(row).getByText("not recorded")).toBeTruthy();
+    expect(
+      (within(row).getByLabelText("Signed off by for Forklift") as HTMLInputElement).value,
+    ).toBe("");
+    // ⚠️ AND "never expires" IS NOT THE SAME SENTENCE. An empty expiry is a
+    // positive fact — this training does not lapse — while an empty sign-off is
+    // an absence. Same blank box, opposite meanings, and collapsing them would
+    // tell a reader a training never expires because nobody signed it off.
+    expect(within(row).getByText("never expires")).toBeTruthy();
+  });
+
+  it("O24 ⭐⭐ changing the date sends ONLY the date — the absent key is the contract", () => {
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fireEvent.change(screen.getByLabelText("Trained on for Forklift"), {
+      target: { value: "2026-05-01" },
+    });
+    expect(h.recordMutate).toHaveBeenCalledTimes(1);
+    const sent = recordPatch();
+    expect(sent.certifiedAt).toBe("2026-05-01");
+    // ⚠️⚠️ THE ASSERTION THAT CARRIES THIS CASE. `"expiresAt" in patch` is what
+    // `updateSkillRecord` branches on, so a key merely PRESENT with a stale
+    // value is a write — and sending all three from the current render would
+    // pass every assertion above this line while overwriting the other two.
+    expect(Object.keys(sent).sort()).toEqual(["certifiedAt", "operatorId", "skillId"]);
+  });
+
+  it("O25 ⭐⭐ the signer is committed on blur, trimmed, and alone", () => {
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    const box = screen.getByLabelText("Signed off by for Forklift");
+    fireEvent.change(box, { target: { value: "  R. Okonkwo  " } });
+    // ⚠️ NOT ONE WRITE PER KEYSTROKE. This is an audit trail: "R", "R.", "R. O"
+    // as separate rows is the free-text field's own version of a mistake the
+    // date controls cannot make, because a date commits a whole value at once.
+    expect(h.recordMutate).not.toHaveBeenCalled();
+    fireEvent.blur(box, { target: { value: "  R. Okonkwo  " } });
+    expect(h.recordMutate).toHaveBeenCalledTimes(1);
+    const sent = recordPatch();
+    // Trimmed here because `signed_off_by` is a plain `text` column with no trim
+    // trigger and no CHECK (verified against 0032) — the client is the only
+    // thing between a user and a signer called "  ".
+    expect(sent.signedOffBy).toBe("R. Okonkwo");
+    expect(Object.keys(sent).sort()).toEqual(["operatorId", "signedOffBy", "skillId"]);
+  });
+
+  it("O26 ⭐ emptying the signer clears it with null, and leaves the date alone", () => {
+    // 0032: *"NULL means nobody recorded one, never 'unsigned'."* And the two
+    // facts are independent — the migration deliberately writes no CHECK tying
+    // them — so clearing one must not clear the other. A screen that tidied away
+    // the date when the signer went would be enforcing a rule the database
+    // refused to write.
+    annHoldsTwo();
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    const box = screen.getByLabelText("Signed off by for Welding");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box, { target: { value: "" } });
+    expect(h.recordMutate).toHaveBeenCalledTimes(1);
+    const sent = recordPatch();
+    expect(sent.signedOffBy).toBeNull();
+    expect("certifiedAt" in sent).toBe(false);
+    expect("expiresAt" in sent).toBe(false);
+  });
+
+  it("O27: blurring a box nobody edited writes nothing at all", () => {
+    // ⚠️ BLUR FIRES ON EVERY TAB-THROUGH. An unconditional commit would put a
+    // row in the audit log for merely LOOKING at a field, and would rewrite a
+    // stored value that differs from itself only by whitespace.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fireEvent.blur(screen.getByLabelText("Signed off by for Forklift"), { target: { value: "" } });
+    expect(h.recordMutate).not.toHaveBeenCalled();
+  });
+
+  it("O28 ⭐⭐ every control in a row is named for ITS training, so no two share a name", () => {
+    // ⚠️⚠️ THE DEFECT THIS PINS ALREADY HAPPENED ONCE ON THIS SCREEN — two
+    // controls both called "Belongs to", fixed by naming them for the person
+    // (`Where Ann Adams belongs`). There is one of these rows per training, so
+    // D114's two boxes plus the expiry and Remove are FOUR controls per row: on
+    // somebody holding two trainings that is eight, and unqualified names make
+    // the list unusable with a screen reader and unqueryable by name.
+    //
+    // ⚠️ `getByLabelText` THROWS ON MULTIPLE MATCHES, so each line below is the
+    // uniqueness assertion and not merely a lookup.
+    annHoldsTwo();
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    for (const name of ["Forklift", "Welding"]) {
+      expect(screen.getByLabelText(`Trained on for ${name}`)).toBeTruthy();
+      expect(screen.getByLabelText(`Signed off by for ${name}`)).toBeTruthy();
+      expect(screen.getByLabelText(`Expires for ${name}`)).toBeTruthy();
+      expect(screen.getByRole("button", { name: `Remove ${name}` })).toBeTruthy();
+    }
+    // And the bare names are GONE rather than merely duplicated — an unqualified
+    // "Expires" surviving beside the qualified one is the collision unchanged.
+    expect(screen.queryByLabelText("Expires")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("O29 ⭐⭐ the signer is a free-text box, never a picker of people in this system", () => {
+    // ⚠️ THE DECISION 0032's HEADER RECORDS, AND IT WENT AGAINST THE
+    // AUDITABLE-LOOKING ANSWER. A reference to a user profile cannot be carried
+    // by a CSV row, and the signer routinely has no login here at all — an
+    // external assessor, a vendor's trainer. **This box holds the CLAIM; who
+    // typed it in is the audit log's answer.** A `<select>` here would make the
+    // record either impossible to enter or a lie, and it is exactly the
+    // "improvement" a later pass would reach for.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    const box = screen.getByLabelText("Signed off by for Forklift");
+    expect(box.tagName).toBe("INPUT");
+    expect((box as HTMLInputElement).type).toBe("text");
+    expect(screen.queryByRole("combobox", { name: "Signed off by for Forklift" })).toBeNull();
+  });
+
+  it("O30: a half-typed signer does not follow the reader onto somebody else", () => {
+    // ⚠️ THE DRAFT IS KEYED BY OPERATOR **AND** TRAINING, NOT BY TRAINING ALONE.
+    // Two people can hold the same training, and a draft keyed on `skillId`
+    // would show one person's unsaved typing under another person's name — a
+    // selection outliving the row it was made on, which is O13's family.
+    h.state.data.operatorSkills = [
+      ...h.state.data.operatorSkills,
+      {
+        operatorId: id.ZOE,
+        skillId: id.FORK,
+        expiresAt: null as string | null,
+        certifiedAt: null as string | null,
+        signedOffBy: null as string | null,
+      },
+    ];
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fireEvent.change(screen.getByLabelText("Signed off by for Forklift"), {
+      target: { value: "half typ" },
+    });
+    pick("Zoe Zhang");
+    expect((screen.getByLabelText("Signed off by for Forklift") as HTMLInputElement).value).toBe(
+      "",
+    );
   });
 });
