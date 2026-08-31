@@ -27,6 +27,8 @@ import {
   formatDay,
   operatorRows,
   placeVerdict,
+  placesUnderSameRoot,
+  rootIdFor,
   summarisePlaces,
   ticketsFor,
   validateOperatorDraft,
@@ -70,14 +72,26 @@ import styles from "./OperatorsPanel.module.css";
  * be booked into at all — a stale PERMISSION, the screen saying yes where the
  * server says no. `../lib/operators` carries the full account.
  *
- * ⚠️ The other plants are NOT hidden, deliberately. D113 lets whoever may
- * schedule at a cell place somebody from outside its area there by recording a
- * reason, so hiding them would delete a feature the board already offers. They
- * are listed with an amber ⚠ and the sentence that says what it would take —
- * the same treatment `CreatePopover` gives them ("not from this area
- * (override)"), and the opposite of what happens to a PRODUCT outside its
- * scope, which is filtered out because the database refuses it with no way
- * through (§19.76).
+ * ⭐⭐ AND THE LIST STOPS AT THE PERSON'S OWN PLANT — THE MAINTAINER, 31 AUG,
+ * AFTER SEEING THE THREE STATES: *"I see all plants not just Plant A for him,
+ * it does say that he's not from this area for other plants, but those
+ * locations should not be visible at all is my point."* A system admin can
+ * read every node in the org, so this list was every schedulable cell in the
+ * company — eighteen across three plants for somebody who works on one line.
+ * **Annotating them was not enough.** `placesUnderSameRoot` trims to the root
+ * the selected person's own area sits under, and it does so for EVERY
+ * operator, not just the one who found it.
+ *
+ * ⚠️ THE CUT IS THE ROOT, NOT THEIR OWN AREA, AND THAT IS WHY THE ⚠ STATE
+ * SURVIVES. Lending somebody from Line 1 to Line 2 in the same plant is a
+ * thing supervisors do and D113 exists for it, so those places stay, annotated
+ * the same way `CreatePopover` annotates them ("not from this area
+ * (override)"). Cutting at their own area instead would have deleted the third
+ * state from this screen and made D113's door invisible here.
+ *
+ * ⚠️ WHAT IS TRIMMED IS COUNTED, in a footnote under the list. `scope.ts`'s
+ * header records the reason: hiding is invisible and permanent, and a list
+ * that quietly shrank looks exactly like a person with no options.
  *
  * ⚠️ EVERY TICK IS AN INDICATION, NOT A PROMISE. `check_eligibility` on the
  * server is the authority and is re-asked at assignment time against the real
@@ -233,13 +247,27 @@ export function OperatorsPanel() {
     );
   }, [selected, data, asOf]);
 
+  // ⚠️ MEMOISED so the two derivations below have a stable map identity, and
+  // because `scopeChoices` rebuilds from the same array on every render today.
+  const nodesById = useMemo(() => new Map((data?.nodes ?? []).map((n) => [n.id, n])), [data]);
+
+  // ⭐ TWO TRIMS, IN THIS ORDER, AND THE ORDER IS THE POINT. First to the
+  // person's own plant (see the header), then to the places that are active
+  // inside it — so "1 deactivated place is not shown" refers to something in
+  // their own plant, which is the only place a reader can act on it.
+  const sitePlaces =
+    selected === null ? places : placesUnderSameRoot(places, selected.siteNodeId, nodesById);
+  const offSitePlaces = places.length - sitePlaces.length;
+  const ownRootId = selected === null ? null : rootIdFor(selected.siteNodeId, nodesById);
+  const ownRootName = ownRootId === null ? null : (nodesById.get(ownRootId)?.name ?? null);
+
   // The headline counts the places the LIST ACTUALLY SHOWS. Summarising all of
   // `places` put "2 of 6 places" above five rows whenever a place was
   // deactivated — the reader has no way to reconcile the two numbers, and the
-  // hidden ones are already accounted for by the footnote below.
-  const visiblePlaces = places.filter((p) => p.active);
+  // hidden ones are already accounted for by the footnotes below.
+  const visiblePlaces = sitePlaces.filter((p) => p.active);
   const summary = summarisePlaces(visiblePlaces);
-  const hiddenPlaces = places.length - visiblePlaces.length;
+  const hiddenPlaces = sitePlaces.length - visiblePlaces.length;
 
   const tickets = selected === null ? [] : ticketsFor(selected, skills, operatorSkills, asOf);
   const heldIds = new Set(tickets.map((t) => t.skillId));
@@ -816,6 +844,16 @@ export function OperatorsPanel() {
                   </li>
                 )}
               </ul>
+              {/* ⚠️ TRIMMED, NOT SILENT. Named by the root rather than by a level
+                  word: "plant" is this company's name for the top level and
+                  another company's hierarchy may call it anything at all. */}
+              {offSitePlaces > 0 && ownRootName !== null && (
+                <p className={styles.footnote}>
+                  {offSitePlaces === 1
+                    ? `1 place outside ${ownRootName} is not shown.`
+                    : `${offSitePlaces} places outside ${ownRootName} are not shown.`}
+                </p>
+              )}
               {hiddenPlaces > 0 && (
                 <p className={styles.footnote}>
                   {hiddenPlaces === 1

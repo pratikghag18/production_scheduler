@@ -66,15 +66,43 @@
  * somebody tries to book the week they planned from it and is refused with an
  * error that says nothing about why the screen said yes.
  *
- * ⚠️ THE FIX IS NOT TO HIDE THE OTHER PLACES. Migration 0030 / D113 gives the
- * area rule a door: anyone who may schedule at a cell may place somebody from
- * outside its area there, recording a reason (`assignments.area_override` +
- * `area_override_reason`). So the honest answer has THREE states and not two
+ * ⚠️ AND THE ANSWER IS NOT SIMPLY A CROSS EITHER. Migration 0030 / D113 gives
+ * the area rule a door: anyone who may schedule at a cell may place somebody
+ * from outside its area there, recording a reason (`assignments.area_override`
+ * + `area_override_reason`). So the honest answer has THREE states and not two
  * — `PlaceVerdict` below — and it mirrors the board's own deliberate asymmetry
  * (§19.76): a PRODUCT outside its scope is filtered out of the picker, because
  * the database refuses it with no way through; a PERSON outside their area is
- * left in and ANNOTATED, because a supervisor can still say yes. Filtering the
- * person would delete the feature.
+ * annotated rather than refused, because a supervisor can still say yes.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐⭐ HOW FAR THE LIST REACHES IS A SEPARATE QUESTION, AND THE MAINTAINER
+ * ANSWERED IT AFTER SEEING THE THREE STATES:
+ *
+ *     "I see all plants not just Plant A for him, it does say that he's not
+ *      from this area for other plants, but those locations should not be
+ *      visible at all is my point."   — 31 August
+ *
+ * **The list stops at the ROOT the person's own area sits under.** A system
+ * admin can read every node in the org, so before this the list was every
+ * schedulable cell in the company — eighteen of them across three plants for
+ * somebody who works on one line. Annotating them was not enough: they are
+ * noise on a screen whose whole job is "where can this person work".
+ *
+ * ⭐ AND THE CUT IS THE ROOT, NOT THE PERSON'S OWN AREA, WHICH IS THE WHOLE
+ * POINT OF KEEPING THE ⚠ STATE. Lending somebody from Line 1 to Line 2 in the
+ * same plant is a thing supervisors actually do, and D113 exists for it; the
+ * override is realistic inside a site and not across sites. Cutting at the
+ * person's own area instead would have removed the third state from this
+ * screen entirely and made D113's door invisible here.
+ *
+ * ⚠️ THIS IS A PRESENTATION RULE AND NOT A SERVER ONE. Nothing in the database
+ * knows about "the same plant" — D109 is ancestor-or-self of the OWNER, and
+ * roots have no special standing in it. So it lives in `placesUnderSameRoot`,
+ * which the panel applies, rather than inside `workPlacesFor`, which stays the
+ * complete answer about every place it was handed. ⚠️ And it is COUNTED, not
+ * silent: `scope.ts`'s header records why — hiding is invisible and permanent,
+ * and a list that quietly shrank looks exactly like a person with no options.
  *
  * ⚠️ NOTHING HERE MAY BE COPIED ONTO THE PRODUCT HALF, which stays absolute:
  * §19.74's proof that `delete_owned_row` needs no escalation depends on a
@@ -360,6 +388,57 @@ export function areaStandingFor(
 }
 
 /* ===========================================================================
+ * The ROOT a place sits under — what a reader calls its plant or its site.
+ *
+ * ⚠️ "ROOT" IS NOT "SITE" IN THIS CODEBASE'S VOCABULARY, and the two are easy
+ * to confuse here. `operators.site_node_id` is the node a person BELONGS to,
+ * which since D109 need not be a root at all — Operator A1 in the demo world
+ * belongs to a LINE. The root is what that owner ultimately hangs from, and it
+ * is only ever used for presentation (see the header).
+ * =========================================================================== */
+
+/**
+ * The root `nodeId` descends from, or `null` if the chain cannot be walked to
+ * one — a missing parent, or a cycle.
+ *
+ * ⚠️ `null` MEANS "CANNOT TELL" AND NEVER "NO ROOT". Every caller below
+ * treats it as a reason to keep a place rather than to drop one.
+ */
+export function rootIdFor(nodeId: string, byId: ReadonlyMap<string, NodeLike>): string | null {
+  const seen = new Set<string>();
+  let cur: NodeLike | undefined = byId.get(nodeId);
+  while (cur !== undefined) {
+    if (seen.has(cur.id)) return null; // a cycle: nothing above it is a root
+    seen.add(cur.id);
+    if (cur.parentId === null) return cur.id;
+    cur = byId.get(cur.parentId);
+  }
+  return null; // a parent id with no node beside it
+}
+
+/**
+ * The places that sit under the same root as this person — what the screen
+ * actually lists. The rest are counted in a footnote, never dropped silently.
+ *
+ * ⭐ FAILS OPEN, TWICE, and both directions matter:
+ *
+ *  1. A place whose own root cannot be resolved is KEPT. Hiding on uncertainty
+ *     is the failure `scope.ts` warns about — invisible, permanent, and
+ *     indistinguishable from a place nobody created.
+ *  2. A person whose root cannot be resolved filters NOTHING. Showing too much
+ *     is a worse screen; showing an arbitrary subset is a wrong one.
+ */
+export function placesUnderSameRoot(
+  places: readonly WorkPlace[],
+  operatorSiteNodeId: string,
+  byId: ReadonlyMap<string, NodeLike>,
+): WorkPlace[] {
+  const ownRoot = rootIdFor(operatorSiteNodeId, byId);
+  if (ownRoot === null) return [...places];
+  return places.filter((p) => p.rootId === null || p.rootId === ownRoot);
+}
+
+/* ===========================================================================
  * workPlacesFor — the answer this screen exists to give.
  *
  * One entry per SCHEDULABLE node: a tick, or a cross with the reason for it.
@@ -394,6 +473,15 @@ export interface WorkPlace {
   name: string;
   /** `nodes.active`. Requirements still inherit through an inactive ancestor. */
   active: boolean;
+  /**
+   * The root this place descends from — its plant, as a reader would say it.
+   * `null` when the chain could not be walked to one.
+   *
+   * ⚠️ PRESENTATION ONLY, and unlike `area` it mirrors no server rule at all.
+   * It exists so `placesUnderSameRoot` can trim the list to the person's own
+   * site; `workPlacesFor` itself still answers about every place it was given.
+   */
+  rootId: string | null;
   /**
    * Where this place sits relative to the person's own area (D109). `"outside"`
    * is not a refusal on this screen — D113 lets whoever may schedule here place
@@ -560,6 +648,7 @@ export function workPlacesFor(
       label: labelFor(node, byId),
       name: node.name,
       active: node.active,
+      rootId: rootIdFor(node.id, byId),
       area,
       qualified,
       eligible: qualified && area === "inside",

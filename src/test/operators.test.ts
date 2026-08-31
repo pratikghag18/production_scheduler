@@ -63,6 +63,8 @@ import {
   formatDay,
   operatorRows,
   placeVerdict,
+  placesUnderSameRoot,
+  rootIdFor,
   summarisePlaces,
   ticketsFor,
   validateOperatorDraft,
@@ -189,8 +191,10 @@ function place(places: readonly WorkPlace[], nodeId: string): WorkPlace {
       label: "",
       name: "",
       active: false,
-      // The sentinel answers "no" to everything and "cannot tell" about the
-      // area — a missing place must never read as a tick or as `inside`.
+      // The sentinel answers "no" to everything and "cannot tell" about both
+      // the root and the area — a missing place must never read as a tick, as
+      // `inside`, or as belonging to somebody's plant.
+      rootId: null,
       area: "unknown" as const,
       qualified: false,
       eligible: false,
@@ -581,6 +585,125 @@ it("Q5: outside AND untrained is one mark and two sentences — two decisions, n
   expect(placeVerdict(p)).toBe("outside-area");
   expect(p.reasons).toContain("not from this area — needs a recorded reason");
   expect(p.reasons).toContain("1 required ticket could not be read");
+});
+
+/* ===========================================================================
+ * HOW FAR THE LIST REACHES — `rootIdFor` and `placesUnderSameRoot`.
+ *
+ * ⭐⭐ THE MAINTAINER, 31 AUGUST, AFTER SEEING THE THREE STATES: *"I see all
+ * plants not just Plant A for him, it does say that he's not from this area
+ * for other plants, but those locations should not be visible at all is my
+ * point."* A system admin reads every node in the org, so the list was every
+ * schedulable cell in the company. **Annotating them was not enough.**
+ *
+ * ⚠️ THE CUT IS THE ROOT, NOT THE PERSON'S OWN AREA — R5 and R6 are the pair
+ * that pins that, and they are the reason the ⚠ state still appears on this
+ * screen at all.
+ *
+ * A SECOND TREE, local to this block: Plant 2 with one cell, so "a different
+ * root" is a thing the fixture can express. The shared `NODES` deliberately
+ * keeps ONE root, because every case above it reasons about totals.
+ * =========================================================================== */
+
+const PLANT_2 = "20000000-0000-0000-0000-0000000000a1";
+const CELL_9 = "20000000-0000-0000-0000-0000000000a2";
+
+const TWO_PLANTS: readonly NodeLike[] = [
+  ...NODES,
+  { id: PLANT_2, parentId: null, levelId: L_PLANT, name: "Plant 2", active: true },
+  { id: CELL_9, parentId: PLANT_2, levelId: L_CELL, name: "Cell 9", active: true },
+];
+
+const twoPlants = () => input({ nodes: TWO_PLANTS });
+const byIdOf = (nodes: readonly NodeLike[]) => new Map(nodes.map((n) => [n.id, n]));
+
+it("R1: a cell reports the root it descends from, however deep it sits", () => {
+  expect(rootIdFor(CELL_1, byIdOf(TWO_PLANTS))).toBe(PLANT);
+  expect(rootIdFor(CELL_9, byIdOf(TWO_PLANTS))).toBe(PLANT_2);
+});
+
+it("R2: a root is its own root, and a node nobody can see has none", () => {
+  expect(rootIdFor(PLANT, byIdOf(TWO_PLANTS))).toBe(PLANT);
+  expect(rootIdFor(NOWHERE, byIdOf(TWO_PLANTS))).toBe(null);
+});
+
+it("R3: a broken chain and a cycle both report NO root, rather than guessing one", () => {
+  expect(rootIdFor(ORPHAN, byIdOf(TWO_PLANTS))).toBe(null);
+  expect(rootIdFor(LOOP_A, byIdOf(TWO_PLANTS))).toBe(null);
+});
+
+it("R4: workPlacesFor still answers about every place it was handed — the trim is elsewhere", () => {
+  // ⚠️ The reach rule is PRESENTATION and mirrors no server rule, so it must
+  // not be buried inside the function that mirrors the server.
+  const ids = workPlacesFor(ana, twoPlants(), TODAY).map((p) => p.nodeId);
+  expect(ids).toContain(CELL_9);
+  expect(ids).toHaveLength(7);
+});
+
+it("R5 ⭐: a person owned by a PLANT sees that plant and no other", () => {
+  // Ana belongs to Plant 1. This is every operator's case except the one below.
+  const kept = placesUnderSameRoot(
+    workPlacesFor(ana, twoPlants(), TODAY),
+    ana.siteNodeId,
+    byIdOf(TWO_PLANTS),
+  );
+  expect(kept.map((p) => p.nodeId)).not.toContain(CELL_9);
+  expect(kept.map((p) => p.nodeId)).toContain(CELL_1);
+});
+
+it("R6 ⭐: a person owned by a LINE sees their whole PLANT, not just their line", () => {
+  // Cara belongs to Line A. Cell 3 is under Line B — outside her area, inside
+  // her plant — and it MUST survive: that is the ⚠ state, and D113 is why.
+  const kept = placesUnderSameRoot(
+    workPlacesFor(cara, twoPlants(), TODAY),
+    cara.siteNodeId,
+    byIdOf(TWO_PLANTS),
+  );
+  const ids = kept.map((p) => p.nodeId);
+  expect(ids).toContain(CELL_1); // her own area
+  expect(ids).toContain(CELL_3); // her plant, not her area — the ⚠ row
+  expect(ids).not.toContain(CELL_9); // another plant — gone
+  expect(place(kept, CELL_3).area).toBe("outside");
+});
+
+it("R7: a place whose own root cannot be resolved is KEPT — hiding on uncertainty is invisible", () => {
+  const kept = placesUnderSameRoot(
+    workPlacesFor(ana, twoPlants(), TODAY),
+    ana.siteNodeId,
+    byIdOf(TWO_PLANTS),
+  );
+  const ids = kept.map((p) => p.nodeId);
+  expect(ids).toContain(ORPHAN);
+  expect(ids).toContain(LOOP_A);
+});
+
+it("R8: a person whose OWN root cannot be resolved filters nothing at all", () => {
+  const stranger = { ...ana, siteNodeId: NOWHERE };
+  const all = workPlacesFor(stranger, twoPlants(), TODAY);
+  expect(placesUnderSameRoot(all, stranger.siteNodeId, byIdOf(TWO_PLANTS))).toHaveLength(
+    all.length,
+  );
+});
+
+it("R9: the trim leaves the three states alone — it removes rows, it does not change verdicts", () => {
+  const all = workPlacesFor(cara, twoPlants(), TODAY);
+  const kept = placesUnderSameRoot(all, cara.siteNodeId, byIdOf(TWO_PLANTS));
+  for (const p of kept) {
+    expect(placeVerdict(p)).toBe(placeVerdict(place(all, p.nodeId)));
+  }
+});
+
+it("R10: and the count line is computed AFTER the trim — Cara is '0 of 2', with 4 beside it", () => {
+  const kept = placesUnderSameRoot(
+    workPlacesFor(cara, twoPlants(), TODAY),
+    cara.siteNodeId,
+    byIdOf(TWO_PLANTS),
+  );
+  const s = summarisePlaces(kept);
+  expect(s.ownArea).toBe(2); // Cell 1 and Cell 2
+  expect(s.eligible).toBe(0); // she holds nothing
+  expect(s.outsideArea).toBe(4); // Cell 3 and the three unresolvable ones
+  expect(s.total).toBe(6); // Cell 9 is gone; 7 handed in, 6 shown
 });
 
 /* ===========================================================================

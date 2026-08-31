@@ -8069,13 +8069,13 @@ the server must ALLOW.** The module's own header already said so at length — *
 show a tick where the server would refuse"* — while mirroring only one of the two server rules
 that decide the answer.
 
-### ⚠️ THE FIX IS NOT TO HIDE THE OTHER PLANTS
+### The three states, because a cross would be wrong too
 
-D113 means a supervisor **may** place someone outside their area with a reason. Hiding them would
-delete a feature the board already offers. So the honest answer has **three** states, not two, and
-it mirrors §19.76's deliberate asymmetry exactly — a PRODUCT outside its scope is filtered out of
-the picker because the database refuses it with no way through; a PERSON outside their area is
-left in and annotated because somebody can still say yes:
+D113 means a supervisor **may** place someone outside their area with a reason, so a red ✕ would
+say "no" about something the server accepts. The honest answer has **three** states, not two, and
+it mirrors §19.76's deliberate asymmetry — a PRODUCT outside its scope is filtered out of the
+picker because the database refuses it with no way through; a PERSON outside their area is
+annotated rather than refused, because somebody can still say yes:
 
 | state | mark | meaning |
 | --- | --- | --- |
@@ -8085,6 +8085,62 @@ left in and annotated because somebody can still say yes:
 
 `--signal-warn` is the board's own **override** colour, and the amber row means there what it means
 here. A red ✕ would say "no" about something the server will accept.
+
+### ⭐⭐ AND THEN THE MAINTAINER LOOKED AT IT AGAIN, AND THE REACH WAS STILL WRONG
+
+The three states shipped and he opened the screen again the same day:
+
+> *"I see all plants not just Plant A for him, it does say that he's not from this area for other
+> plants, but those locations should not be visible at all is my point."* — 31 August
+
+**Annotating them was not enough, and this is a second finding rather than a correction of the
+first.** The states answer *what* each place is; they say nothing about *which places belong on
+the screen at all*. A system admin can read every node in the org, so the list was every
+schedulable cell in the company — eighteen across three plants for somebody who works on one line.
+Twelve of them were in plants he will never staff from this row, and no amount of amber makes
+those worth scrolling past.
+
+⚠️ **The first draft of this section argued the opposite** — *"the fix is NOT to hide the other
+plants"* — reasoning from D113 by analogy with the board. **That analogy was wrong, and the reason
+is worth keeping:** on the BOARD the popover is anchored at a cell and needs every candidate
+listed, because listing them is how you place one. On the ADMIN screen nothing is being placed;
+the list is informational, and an informational list that shows the whole company to answer a
+question about one person is noise. **The same rule can be right on one screen and wrong on the
+next** — [[decision-record-drift]] rule 9, arriving from the other direction.
+
+**⭐ The cut is the ROOT the person's own area sits under, and NOT their own area.** That
+distinction is the whole reason the ⚠ state still exists on this screen:
+
+| cut at | Operator A1 sees | what it costs |
+| --- | --- | --- |
+| nothing (as first built) | 18 cells across 3 plants | the complaint |
+| **their plant** — chosen | **6**: 2 in his own area, 4 ⚠ elsewhere in Plant A | nothing; 12 counted in a footnote |
+| their own area | 2 | the third state disappears from this screen and D113's door becomes invisible |
+
+Lending somebody from Line 1 to Line 2 in the same plant is a thing supervisors do and is exactly
+what D113 was built for; lending them to another site is not. **The override is realistic inside a
+root and unrealistic across roots**, so that is where the list stops.
+
+⚠️ **AND IT APPLIES TO EVERY OPERATOR, not to the one who found it.** `placesUnderSameRoot` is
+applied to whoever is selected. Operator A1 is simply the only person in the demo world where the
+two candidate cuts give different answers: `dev_demo.sql` gives each plant six people, five owned
+by the plant and `i = 1` owned by **Line 1 only**. For A2–A6 both cuts give the same six cells,
+which is why the defect needed A1 to become visible.
+
+⚠️ **PRESENTATION, AND IT SAYS SO.** Nothing in the database knows about "the same plant" — D109
+is ancestor-or-self of the OWNER and roots have no standing in it. So the trim lives in
+`placesUnderSameRoot`, which the panel applies, and **not** inside `workPlacesFor`, which stays the
+complete answer about every place it was handed (R4 pins that). Mixing a presentation rule into
+the function that mirrors the server is how the two stop being comparable.
+
+⭐ **It fails open in both directions, and both are `scope.ts`'s rule.** A place whose own root
+cannot be resolved is KEPT (R7); a person whose root cannot be resolved filters nothing at all
+(R8). Hiding on uncertainty is invisible and permanent, and a list that quietly shrank looks
+exactly like a person with no options.
+
+⚠️ **What is trimmed is COUNTED**, in a footnote under the list — *"12 places outside Plant A are
+not shown."* Named by the **root's own name**, never by a level word: "plant" is this company's
+name for its top level and the hierarchy is user-defined.
 
 ### The shape it took in the code
 
@@ -8134,15 +8190,29 @@ code-comment decision needs the same treatment a migration header gets.
 
 ### Numbers
 
-**Client-only — no migration, so 30 migrations and 468 database checks stand.** **App tests 1172
+**Client-only — no migration, so 30 migrations and 468 database checks stand.** **App tests 1182
 in 28 files**, copied from the runner's own total line: the 1149 baseline confirmed at the start of
-the session (the first time that prediction has ever been measured) plus 23 new cases — A1–A15 for
-the area rule, Q1–Q5 for the three states, S3–S5 for the count line. **Four deliberate breakages,
-four caught**: `eligible` ignoring the area again (A3, A15), an unresolvable area reading as inside
-(A9, Q4, S3–S5), a non-reflexive walk (A5, A13), and the summary counting an unresolved area
-towards their own (S3–S5). `tsc` 0, `eslint` 0, prettier applied to all four files.
+the session (the first time that prediction has ever been measured) plus 33 new cases — A1–A15 for
+the area rule, Q1–Q5 for the three states, S3–S5 for the count line, and R1–R10 for how far the
+list reaches. **Eight deliberate breakages, eight caught:**
 
-⚠️ **What is NOT covered: there is no test that mounts `OperatorsPanel`.** `productsPanel.test.tsx`
+| # | the break | caught by |
+| --- | --- | --- |
+| 1 | `eligible` ignores the area again — the original defect | A3, A15 |
+| 2 | an unresolvable area reads as `"inside"` | A9, Q4, S3–S5 |
+| 3 | a non-reflexive area walk | A5, A13 |
+| 4 | the summary counts an unresolved area towards their own | S3–S5 |
+| 5 | the trim cuts at the person's own AREA rather than their root | R6–R8, R10 |
+| 6 | an unresolvable root is dropped instead of kept | R7, R10 |
+| 7 | a person with an unresolvable root gets an empty list | R8 |
+| 8 | `rootIdFor` returns the node itself instead of walking up | R1, R3, R5–R7, R10 |
+
+`tsc` 0, `eslint src` 0, prettier applied to every file touched.
+
+⚠️ **What is NOT covered: there is no test that mounts `OperatorsPanel`.** The two trims and
+their footnotes are composed there — `placesUnderSameRoot` then `.filter(active)`, in that order,
+so *"1 deactivated place is not shown"* refers to something in the reader's own plant — and that
+composition is pinned by nothing. `productsPanel.test.tsx`
 exists as the precedent for one, and §19.67 / D106 is the record of what a screen-level gap costs.
 Every rule above is pinned in the pure module; the mapping from `placeVerdict` to a mark and a
 class is pinned by nothing, which is why `placeVerdict` lives beside the rule rather than inside
