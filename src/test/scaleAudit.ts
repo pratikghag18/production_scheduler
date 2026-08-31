@@ -176,7 +176,15 @@ export function parseSectionIds(tsx: string): string[] {
 /** Section ids with no `section === "id"` branch to render them. */
 export function sectionsWithoutPanels(tsx: string): string[] {
   const src = stripTsComments(tsx);
-  return parseSectionIds(tsx).filter((id) => !src.includes(`section === "${id}"`));
+  // ⚠⚠ MATCHES EITHER SPELLING ON PURPOSE. This looked for `section === "x"`
+  // and went blind the moment D114 renamed the render branches to
+  // `activeSection === "x"` (a supervisor cannot see every tab, so the
+  // chosen section has to be resolved against the ones they can). It
+  // reported ALL SEVEN sections as unrendered, which is the honest failure
+  // — but it is also the third time in this project a string-matching audit
+  // has gone quiet on a reword, so it now anchors on the part that carries
+  // the meaning rather than the variable that happens to hold it.
+  return parseSectionIds(tsx).filter((id) => !new RegExp(`ection === "${id}"`).test(src));
 }
 
 /** `sectionsWithoutPanels` against the file on disk. */

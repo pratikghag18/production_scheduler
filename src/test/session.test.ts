@@ -168,8 +168,19 @@ describe("session.ts: adminAccess", () => {
     expect(adminAccess("admin", false, false)).toBe("granted");
   });
 
-  it("A4: a resolved supervisor is denied", () => {
-    expect(adminAccess("supervisor", false, false)).toBe("denied");
+  it("A4 ⭐⭐: a supervisor is GRANTED — this case asserted the opposite until D114", () => {
+    // ⚠️ The rule changed, so the case changed with it rather than being
+    // deleted. 0032 made a supervisor's grant enough to keep the training
+    // record, and the maintainer's reason is the job: *"the supervisor will be
+    // the one who enters or uploads the training information."* Until this,
+    // the database said yes and the screen still turned them away at the door.
+    expect(adminAccess("supervisor", false, false)).toBe("granted");
+  });
+
+  it("A4b: and a viewer is still denied — the widening is one role, not the gate", () => {
+    // ⭐ Without this, A4's flip could have been achieved by deleting the whole
+    // check, and every case above would still pass.
+    expect(adminAccess("viewer", false, false)).toBe("denied");
   });
 
   it("A5: a resolved viewer is denied", () => {

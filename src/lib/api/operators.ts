@@ -100,6 +100,27 @@ export interface OperatorSkillRecord {
   skillId: string;
   /** `YYYY-MM-DD`, or `null` for "no expiry". */
   expiresAt: string | null;
+  /**
+   * When the training was done, `YYYY-MM-DD`, or `null` if nobody recorded one.
+   *
+   * ⭐ THE COLUMN IS OLDER THAN EVERY SCREEN THAT COULD HAVE SHOWN IT. It has
+   * been on `operator_skills` since the table was created, and the comment
+   * three hundred lines down said, correctly, *"`certified_at` is deliberately
+   * not written: nothing in this app reads it."* D114 is what finally gave it
+   * one. ⚠️ Distinct from `created_at`, which is when the ROW was made — a
+   * training entered today may have been done last March.
+   */
+  certifiedAt: string | null;
+  /**
+   * Who signed this person off, as recorded. `null` means nobody wrote one down.
+   *
+   * ⚠⚠ FREE TEXT, AND DELIBERATELY NOT A PERSON IN THIS SYSTEM (D114). The
+   * signer is routinely an external assessor or a vendor's trainer with no
+   * login, and a CSV row cannot carry a profile id. **This is the CLAIM; who
+   * TYPED it is the audit log's answer**, and one column cannot hold both
+   * without making the second one a lie.
+   */
+  signedOffBy: string | null;
 }
 
 export interface NodeSkillRequirementRecord {
@@ -175,8 +196,23 @@ export function parseOperatorSkillRecord(v: unknown): OperatorSkillRecord | null
   const operatorId = str(v.operator_id);
   const skillId = str(v.skill_id);
   const expiresAt = strOrNull(v.expires_at);
-  if (operatorId === null || skillId === null || expiresAt === undefined) return null;
-  return { operatorId, skillId, expiresAt };
+  const certifiedAt = strOrNull(v.certified_at);
+  const signedOffBy = strOrNull(v.signed_off_by);
+  // ⚠️ `strOrNull` returns `undefined` for a key that is absent or the wrong
+  // type, and `null` for a real SQL NULL — the two are different answers and
+  // only the first is a reason to reject the row. Checking `=== undefined`
+  // rather than falsiness is what keeps an unrecorded sign-off (a legitimate
+  // `null`) from being read as a broken read.
+  if (
+    operatorId === null ||
+    skillId === null ||
+    expiresAt === undefined ||
+    certifiedAt === undefined ||
+    signedOffBy === undefined
+  ) {
+    return null;
+  }
+  return { operatorId, skillId, expiresAt, certifiedAt, signedOffBy };
 }
 
 export function parseNodeSkillRequirementRecord(v: unknown): NodeSkillRequirementRecord | null {
@@ -258,7 +294,17 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
       // arrow reversed: there, a nullable COLUMN broke a hand-written guard;
       // here, a stricter GUARD broke a hand-written column list.
       supabase.from("skills").select(SKILL_COLUMNS).order("name"),
-      supabase.from("operator_skills").select("operator_id, skill_id, expires_at"),
+      // ⚠⚠ `OPERATOR_SKILL_COLUMNS`, AND THIS IS THE SAME BUG TWICE IN ONE
+      // FILE. The `skills` read a few lines up spelled its columns out inline
+      // too; when `active` was added to the constant and the parser began
+      // requiring it, that copy kept asking for the old three and **every row
+      // was silently rejected into `skipped`** — an empty screen, no error,
+      // 1276 green tests. Adding the sign-off here would have done it again to
+      // held trainings, and it was caught only by grepping for the pattern
+      // rather than by anything the suite could see.
+      // ⭐ **A column list that appears twice is a bug with a delay on it.**
+      // `apiSkillShape.test.ts` now holds both pairs to each other.
+      supabase.from("operator_skills").select(OPERATOR_SKILL_COLUMNS),
       supabase.from("node_skill_requirements").select("node_id, skill_id"),
       supabase
         .from("nodes")
@@ -361,7 +407,16 @@ const OPERATOR_COLUMNS =
  * is what makes that a red case instead of an empty screen.
  */
 export const SKILL_COLUMNS = "id, name, site_node_id, active";
-const OPERATOR_SKILL_COLUMNS = "operator_id, skill_id, expires_at";
+/**
+ * ⚠⚠ EXPORTED, AND THE PARSER IS HELD AGAINST IT BY A TEST.
+ * `apiSkillShape.test.ts` exists because `SKILL_COLUMNS` and
+ * `parseSkillRecord` drifted apart earlier today — a second, inline copy of a
+ * column list kept asking for the old columns while the guard began requiring
+ * the new one, and every row was silently rejected into `skipped`. The same
+ * pair here is now covered the same way.
+ */
+export const OPERATOR_SKILL_COLUMNS =
+  "operator_id, skill_id, expires_at, certified_at, signed_off_by";
 
 export interface CreateOperatorInput {
   orgId: string;
@@ -566,8 +621,12 @@ export interface GrantSkillInput {
   orgId: string;
   operatorId: string;
   skillId: string;
-  /** `YYYY-MM-DD`, or `null` for a ticket that never expires. */
+  /** `YYYY-MM-DD`, or `null` for a training that never expires. */
   expiresAt: string | null;
+  /** When it was done, `YYYY-MM-DD`. Optional — often not known at entry. */
+  certifiedAt?: string | null;
+  /** Who signed it off, free text (D114). Optional for the same reason. */
+  signedOffBy?: string | null;
 }
 
 /**
@@ -581,7 +640,16 @@ export interface GrantSkillInput {
  * themselves edit or delete. That is the intended asymmetry, not a bug to
  * defend against here.
  *
- * `certified_at` is deliberately not written: nothing in this app reads it.
+ * ⭐ `certified_at` AND `signed_off_by` ARE BOTH WRITTEN NOW. This comment used
+ * to read *"`certified_at` is deliberately not written: nothing in this app
+ * reads it"* — true for months, and the reason D114 needed only ONE new column
+ * rather than two. The Trainings work is what gave it a screen.
+ *
+ * ⚠️ BOTH ARE OPTIONAL AND STAY THAT WAY. A half-known record is the ordinary
+ * case: a spreadsheet arrives with a date and no signer, or a supervisor knows
+ * who signed and has to look up when. 0032 deliberately has no CHECK tying them
+ * together for exactly this reason — refusing the half-known row would send
+ * people to type something untrue into the other box.
  */
 export async function grantSkill(input: GrantSkillInput): Promise<OperatorSkillRecord> {
   const { data, error } = await supabase
@@ -591,25 +659,51 @@ export async function grantSkill(input: GrantSkillInput): Promise<OperatorSkillR
       operator_id: input.operatorId,
       skill_id: input.skillId,
       expires_at: input.expiresAt,
+      certified_at: input.certifiedAt ?? null,
+      signed_off_by: input.signedOffBy ?? null,
     })
     .select(OPERATOR_SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstOrThrow(data, parseOperatorSkillRecord, "grantSkill");
 }
 
-export async function updateSkillExpiry(input: {
+/**
+ * Change what is recorded about a training somebody holds.
+ *
+ * ⚠⚠ EVERY FIELD IS OPTIONAL AND AN ABSENT KEY MEANS "LEAVE IT ALONE", which
+ * is NOT the same as `null` ("clear it"). Collapsing the two would make it
+ * impossible to change a date without also wiping the sign-off beside it — and
+ * a screen that quietly erases a field the user did not touch is the kind of
+ * loss nobody reports, because it looks like it was never entered.
+ */
+export async function updateSkillRecord(input: {
   operatorId: string;
   skillId: string;
-  expiresAt: string | null;
+  expiresAt?: string | null;
+  certifiedAt?: string | null;
+  signedOffBy?: string | null;
 }): Promise<OperatorSkillRecord> {
+  // ⚠️ A TYPED PATCH, not `Record<string, string | null>`. The generated
+  // Update type rejects excess properties, so a loose index signature does
+  // not satisfy it — and that strictness is the point: it is what would
+  // catch a column renamed out from under this call.
+  const patch: {
+    expires_at?: string | null;
+    certified_at?: string | null;
+    signed_off_by?: string | null;
+  } = {};
+  if ("expiresAt" in input) patch.expires_at = input.expiresAt ?? null;
+  if ("certifiedAt" in input) patch.certified_at = input.certifiedAt ?? null;
+  if ("signedOffBy" in input) patch.signed_off_by = input.signedOffBy ?? null;
+
   const { data, error } = await supabase
     .from("operator_skills")
-    .update({ expires_at: input.expiresAt })
+    .update(patch)
     .eq("operator_id", input.operatorId)
     .eq("skill_id", input.skillId)
     .select(OPERATOR_SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
-  return firstOrThrow(data, parseOperatorSkillRecord, "updateSkillExpiry");
+  return firstOrThrow(data, parseOperatorSkillRecord, "updateSkillRecord");
 }
 
 export async function revokeSkill(input: { operatorId: string; skillId: string }): Promise<void> {

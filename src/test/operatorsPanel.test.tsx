@@ -224,7 +224,7 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
   useUpdateOperator: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetOperatorActive: () => ({ mutate: vi.fn(), isPending: false }),
   useGrantSkill: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdateSkillExpiry: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateSkillRecord: () => ({ mutate: vi.fn(), isPending: false }),
   useRevokeSkill: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 

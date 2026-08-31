@@ -50,7 +50,7 @@ import {
   useRevokeSkill,
   useSetOperatorActive,
   useUpdateOperator,
-  useUpdateSkillExpiry,
+  useUpdateSkillRecord,
 } from "../hooks/useOperators";
 import { DeleteDialog } from "./DeleteDialog";
 import styles from "./OperatorsPanel.module.css";
@@ -246,7 +246,7 @@ export function OperatorsPanel() {
   const updateOperator = useUpdateOperator();
   const setActive = useSetOperatorActive();
   const grantSkill = useGrantSkill();
-  const updateExpiry = useUpdateSkillExpiry();
+  const updateExpiry = useUpdateSkillRecord();
   const revokeSkill = useRevokeSkill();
 
   // ⚠️ MEMOISED, not inlined `?? []`. A fresh `[]` on every render is a new

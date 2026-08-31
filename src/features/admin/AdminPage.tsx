@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 // file for it, which is why it landed here; the boundary is the rule.
 import { fetchHierarchyTree } from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
-import { canQueryAsUser } from "@/features/auth/session";
+import { adminSectionsFor, canQueryAsUser, resolveAdminSection } from "@/features/auth/session";
 import { hierarchyKeys } from "./hooks/useHierarchyMutations";
 import { buildShapeSummaries, filterEditableShapes, resolveSelectedShape } from "./lib/shapePicker";
 import { nodesInPlant } from "./lib/plantFilter";
@@ -95,6 +95,28 @@ function useHierarchyTree(enabled: boolean) {
 export default function AdminPage() {
   const [section, setSection] = useState<SectionId>("hierarchy");
   const { session, profile, loading: sessionLoading } = useSession();
+  // ⭐⭐ D114: THE RAIL IS FILTERED, NOT THE PANELS. A supervisor gets the same
+  // Operators and Trainings screens everybody else does — they simply show what
+  // that person's grants reach, which those screens already know how to do.
+  // Building narrowed variants would be two of each to keep in step, and §19.77
+  // is the standing lesson about a screen's idea of the rules drifting from the
+  // server's.
+  //
+  // ⚠️ A MENU, NOT A PERMISSION. Nothing here authorises anything; the database
+  // refuses on its own terms. This only stops somebody being offered a tab that
+  // could never do anything but tell them no.
+  const allowedSections = adminSectionsFor(profile?.role, profile?.adminAnywhere);
+  const visibleSections = SECTIONS.filter(
+    (s) => allowedSections === "all" || allowedSections.includes(s.id),
+  );
+  // ⚠️ RESOLVED, not merely filtered. The screen opens on "hierarchy", which a
+  // supervisor cannot see — without this they would land on a heading with no
+  // rail button beside it and an empty pane, and nothing would say why.
+  const activeSection =
+    resolveAdminSection(
+      visibleSections.map((s) => s.id),
+      section,
+    ) ?? section;
   const orgId = profile?.orgId ?? null;
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
   const { data, isLoading, isError } = useHierarchyTree(canQuery);
@@ -256,13 +278,13 @@ export default function AdminPage() {
   return (
     <div className={styles.page}>
       <nav className={styles.rail} aria-label="Admin sections">
-        {SECTIONS.map((s) => (
+        {visibleSections.map((s) => (
           <button
             key={s.id}
             type="button"
-            className={section === s.id ? styles.railItemActive : styles.railItem}
+            className={activeSection === s.id ? styles.railItemActive : styles.railItem}
             disabled={!s.enabled}
-            aria-current={section === s.id ? "page" : undefined}
+            aria-current={activeSection === s.id ? "page" : undefined}
             title={s.enabled ? undefined : "Coming in a later brief"}
             onClick={() => setSection(s.id)}
           >
@@ -305,7 +327,7 @@ export default function AdminPage() {
             </select>
           </div>
         )}
-        {section === "hierarchy" && (
+        {activeSection === "hierarchy" && (
           <>
             <h1 className={styles.h1}>Hierarchy</h1>
             {/* `!canQuery || isLoading` — NOT `isLoading` alone. With
@@ -392,7 +414,7 @@ export default function AdminPage() {
           </>
         )}
 
-        {section === "access" && (
+        {activeSection === "access" && (
           <>
             <h1 className={styles.h1}>Access</h1>
             <SiteAccessPanel
@@ -409,35 +431,35 @@ export default function AdminPage() {
             wired now so that the four lanes never edit this file. The heading
             stays HERE, next to the two above it, so every section has the same
             chrome without four copies of it (D100). */}
-        {section === "shifts" && (
+        {activeSection === "shifts" && (
           <>
             <h1 className={styles.h1}>Shifts</h1>
             <ShiftsPanel />
           </>
         )}
 
-        {section === "operators" && (
+        {activeSection === "operators" && (
           <>
             <h1 className={styles.h1}>Operators</h1>
             <OperatorsPanel />
           </>
         )}
 
-        {section === "trainings" && (
+        {activeSection === "trainings" && (
           <>
             <h1 className={styles.h1}>Trainings</h1>
             <TrainingsPanel />
           </>
         )}
 
-        {section === "products" && (
+        {activeSection === "products" && (
           <>
             <h1 className={styles.h1}>Products</h1>
             <ProductsPanel />
           </>
         )}
 
-        {section === "import" && (
+        {activeSection === "import" && (
           <>
             <h1 className={styles.h1}>Import</h1>
             <ImportPanel />

@@ -40,7 +40,7 @@ import {
   revokeSkill,
   setOperatorActive,
   updateOperator,
-  updateSkillExpiry,
+  updateSkillRecord,
   type CreateOperatorInput,
   type CreateSkillInput,
   type GrantSkillInput,
@@ -163,14 +163,14 @@ export function useGrantSkill() {
   });
 }
 
-export function useUpdateSkillExpiry() {
+export function useUpdateSkillRecord() {
   const invalidate = useInvalidateOperators();
   return useMutation<
     OperatorSkillRecord,
     SchedulerError,
     { operatorId: string; skillId: string; expiresAt: string | null }
   >({
-    mutationFn: (input) => updateSkillExpiry(input),
+    mutationFn: (input) => updateSkillRecord(input),
     onSuccess: invalidate,
   });
 }
