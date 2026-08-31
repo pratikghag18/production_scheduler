@@ -146,17 +146,46 @@ export interface ScopeOption {
  * the right trade: an admin of a department who cannot read the plant above it
  * must still be able to scope things to their own department.
  *
- * @param canEdit ids the caller may scope TO. When given, everything else is
- *   dropped — a picker that offers a node the server will refuse is a control
- *   whose only outcome is an error message. When omitted, every node is
- *   offered, which is right for a company admin.
+ * ⚠⚠ THIS TOOK A `canEdit` SET AND IT HAS BEEN REMOVED. IT WAS DEAD, AND ITS
+ * DOC COMMENT ARGUED AGAINST A DECISION THAT HAD ALREADY BEEN MEASURED.
+ *
+ * The comment read: *"ids the caller may scope TO — a picker that offers a node
+ * the server will refuse is a control whose only outcome is an error message"*.
+ * Persuasive, D106-shaped, and **wrong for every caller this project has.**
+ *
+ *  1. **Nothing ever passed it.** All three callers — `OperatorsPanel`,
+ *     `ProductsPanel`, `ShiftsPanel` — called this with one argument.
+ *  2. **The one attempt was reverted after being measured.** `ProductsPanel`
+ *     narrowed its owner list to `adminSiteIds` and the comment it left behind
+ *     is the record: that set is derived from STRUCTURE ownership and *is not
+ *     the question the insert policy asks*, so **a site admin whose root has no
+ *     claimed structure was offered nothing at all.** Its verdict stands —
+ *     *"offering a node the server then refuses costs one clear sentence now
+ *     that §19.63's contract exists; offering nothing costs the whole
+ *     feature."*
+ *  3. **No correct set is derivable on the client today.** The server exposes
+ *     `editable_shape_ids()` (STRUCTURES, not nodes) and
+ *     `app_is_admin_anywhere()` (a BOOLEAN). There is no read that returns the
+ *     nodes a caller may administer, so there is nothing honest to pass.
+ *
+ * ⭐⭐ AND IT COST SOMETHING BEFORE IT WAS REMOVED: the parameter's own doc was
+ * read, believed, and filed as a live defect against all three panels — without
+ * the call site where the opposite had been measured. **A dead parameter with a
+ * persuasive comment is not neutral; it is a trap that argues for itself.** It
+ * is deleted rather than left unused, the same way §19.74 deleted
+ * `deletePrecheck` instead of relaxing it.
+ *
+ * ⚠️ WHAT WOULD BRING IT BACK: a server read returning the node ids the caller
+ * may administer (`app_is_admin_for` per node, or a set-returning twin of it).
+ * Until that exists, this function offers every node it is given and the write
+ * error is the honest answer — §19.63's contract was built for exactly that.
+ *
+ * ⚠️ NOT TO BE CONFUSED WITH THE PLANT FILTER (§19.79), which DOES narrow the
+ * `nodes` handed in. That is a VIEW CHOICE the reader made and can undo; this
+ * was a PERMISSION. Passing one as the other is the confusion §19.77 is about.
  */
-export function scopeOptions(
-  nodes: readonly ScopeNode[],
-  canEdit?: ReadonlySet<string>,
-): ScopeOption[] {
-  const usable = canEdit === undefined ? nodes : nodes.filter((n) => canEdit.has(n.id));
-  const sorted = [...usable].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+export function scopeOptions(nodes: readonly ScopeNode[]): ScopeOption[] {
+  const sorted = [...nodes].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   // ⭐ 0028: the list used to open with an "Everywhere (company-wide)" entry.
   // It is not filtered out here, it is not built — a picker that can emit a
   // value the database refuses is D106's defect with a different label on it.

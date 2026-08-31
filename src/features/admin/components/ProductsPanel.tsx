@@ -182,12 +182,12 @@ export function ProductsPanel() {
   //
   // ⚠️⚠️ THIS IS A SECOND NARROWING OF A DIFFERENT KIND FROM THE ONE ABOVE, AND
   // THE TWO MUST NOT BE FOLDED TOGETHER. The filter is a VIEW CHOICE and is
-  // reversible; `scopeOptions`' `canEdit` argument is a PERMISSION and is not.
-  // Passing the filter's nodes as `canEdit` would compile and look identical
+  // reversible; a PERMISSION narrowing would not be.
+  // Passing the filter's nodes as a permission would compile and look identical
   // today, and the day somebody widens back to All plants it would silently
   // widen what this form claims they may write. That is §19.77's lesson —
   // the reason `placesUnderSameRoot` sits outside `workPlacesFor` — one screen
-  // up. (`canEdit` is still deliberately omitted here: see the fail-open note
+  // up. (There is no permission set to pass: see the fail-open note
   // above, which is about the server, not about what is on screen.)
   const owners = scopeOptions(nodesInPlant(allNodes, plant.choice, plant.plants));
   const ownerLabels = new Map(owners.map((o) => [o.value, indentedLabel(o)]));

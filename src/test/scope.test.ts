@@ -181,12 +181,31 @@ describe("scope: the picker", () => {
     ]);
   });
 
-  it("X16: with an edit set, only nodes in it are offered — and nothing else at all", () => {
-    // ⭐ 0028: the title read "— plus company-wide", and that entry was the one
-    // thing the edit set could not filter out. It no longer exists, so the list
-    // is now exactly the set.
-    const opts = scopeOptions(NODES, new Set([LINE1.id, CELL1.id]));
-    expect(opts.map((o) => o.name)).toEqual(["Line 1", "Cell 1"]);
+  it("X16 ⭐: every node handed in is offered — narrowing is the CALLER's job, not this one's", () => {
+    // ⚠⚠ THIS CASE USED TO ASSERT THE OPPOSITE, and it went with the parameter.
+    // `scopeOptions(nodes, canEdit?)` took a permission set and dropped
+    // everything outside it. That parameter was DEAD — no caller ever passed it
+    // — and its doc comment argued for a narrowing that had already been tried
+    // and reverted: `ProductsPanel` measured that `adminSiteIds` is derived from
+    // STRUCTURE ownership and is not the question the insert policy asks, so a
+    // site admin whose root had no claimed structure was offered nothing at all.
+    //
+    // ⚠️ There is no honest set to pass today: the server exposes
+    // `editable_shape_ids()` (structures) and `app_is_admin_anywhere()` (a
+    // boolean), and nothing that returns the NODES a caller may administer.
+    // So this offers what it is given and the write error is the answer
+    // (§19.63's contract exists for exactly that).
+    //
+    // ⭐ The plant filter narrows the ARRAY before it arrives, which is a view
+    // choice the reader made and can undo — a different kind of thing entirely,
+    // and the distinction §19.77 is about.
+    // Membership, not order — the list is sorted by PATH (tree order), which is
+    // X14's job to pin, not this one's.
+    expect(
+      scopeOptions(NODES)
+        .map((o) => o.value)
+        .sort(),
+    ).toEqual(NODES.map((n) => n.id).sort());
   });
 
   it("X17: a node whose parent is unreadable is still offered, at its own depth", () => {

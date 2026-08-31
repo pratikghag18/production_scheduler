@@ -267,6 +267,40 @@
 >    **Neither may be implemented in terms of the other** — that is §19.77's own lesson about
 >    keeping a presentation rule out of the function that mirrors the server.
 >
+> 1(d). ✅ **DONE (session 18, 31 Aug) — AND IT WAS NOT THE DEFECT IT WAS FILED AS.**
+>    ⚠⚠ **THE FILING WAS WRONG AND THE CORRECTION IS THE VALUABLE PART.** It was filed as
+>    *"`scopeOptions` takes a `canEdit` set so a picker cannot offer a node the server will
+>    refuse, and all three callers pass none — fix them."* That came from reading the
+>    **parameter's own doc comment** and never reading the call site, where the opposite had
+>    already been measured:
+>    - **`ProductsPanel` tried exactly that narrowing and reverted it.** Its comment is the
+>      record: `adminSiteIds` is derived from STRUCTURE ownership and *is not the question the
+>      insert policy asks*, so **a site admin whose root has no claimed structure was offered
+>      nothing at all.** Its verdict stands — *"offering a node the server then refuses costs one
+>      clear sentence now that §19.63's contract exists; offering nothing costs the whole
+>      feature."*
+>    - **No correct set is derivable on the client today.** The server exposes
+>      `editable_shape_ids()` (STRUCTURES, not nodes) and `app_is_admin_anywhere()` (a BOOLEAN).
+>      Nothing returns the nodes a caller may administer, so there is nothing honest to pass.
+>    - **The parameter was DEAD** — no caller in the project ever passed it.
+>    **So it was deleted, not implemented**, with the reasoning kept in its place the way §19.74
+>    deleted `deletePrecheck`; `scope.test.ts`'s X16 was rewritten from asserting the narrowing to
+>    pinning the contract that replaced it. ⭐⭐ **The standing lesson: a DEAD PARAMETER WITH A
+>    PERSUASIVE DOC COMMENT IS NOT NEUTRAL — it is a trap that argues for itself**, and it cost a
+>    false defect filed against three panels and reported twice before anyone read the call site.
+>    ⚠️ **What would bring it back:** a server read returning the node ids the caller may
+>    administer. Until then the write error is the honest answer.
+>
+> 1(e). **🔴 A TEST THAT MOUNTS `OperatorsPanel`, AND ONE THAT MOUNTS `ShiftsPanel`.**
+>    `productsPanel.test.tsx` is the only panel-level suite in the project — and 1(c) rebuilt it
+>    to drive the real store, hook and lib rather than mocking them, **which is what caught two
+>    of that session's four defects**. ⚠⚠ It was also **green through the wrong branch for its
+>    whole life**: its `useQuery` stand-in omitted `isSuccess`, so every case T1–T8 ran the
+>    "structure read failed" path — no site names, every row "Another site", the count line
+>    unreachable. **A stand-in that omits a field does not fail; it silently picks a branch, and
+>    the suite reports coverage it never had.** The other two panels have no equivalent at all,
+>    so their trims, footnotes and selection de-stalings are pinned only at library level.
+>
 > 2. **🔴 Migration 0031 (D111), the starter library** a company admin curates and a site admin
 >    copies into their own plant — patterns and trainings. It carries a known problem: **training
 >    names are unique per ORG while the row is no longer company-wide**, so one plant can neither

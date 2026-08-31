@@ -835,18 +835,32 @@ export function OperatorsPanel() {
             <>
               <header className={styles.head}>
                 {renaming ? (
+                  /* ⚠⚠ EVERY CONTROL HERE IS NAMED FOR THE PERSON IT IS ABOUT, AND
+                     THAT IS A FIX, NOT A FLOURISH. While this form is open the
+                     Add card is still on screen with its own "Name", "Employee
+                     reference" and "Belongs to" — so a screen-reader user was
+                     offered TWO boxes of each, identically named, with no way
+                     to tell which one edits the person they just opened.
+                     `within(...)` disambiguates for a sighted reader and for a
+                     test; it does nothing for the person who needs the name.
+                     This is D106's rule ("a control may not be named after less
+                     than it does") and `ProductsPanel` already solved it the
+                     same way — `Name for ${row.sku}`, `Where ${row.sku} belongs`.
+                     ⚠️ Anchored on `selected.displayName`, the SAVED name, so the
+                     accessible name does not change under the reader as they
+                     type into the very field it names. */
                   <div className={styles.renameRow}>
                     <input
                       className={styles.input}
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
-                      aria-label="Name"
+                      aria-label={`Name for ${selected.displayName}`}
                     />
                     <input
                       className={styles.input}
                       value={editRef}
                       onChange={(e) => setEditRef(e.target.value)}
-                      aria-label="Employee reference"
+                      aria-label={`Employee reference for ${selected.displayName}`}
                     />
                     {/* ⭐ WHERE THEY BELONG, EDITABLE. See `saveRename`.
                         ⚠️ CHANGING THIS CHANGES WHERE THEY CAN BE BOOKED. Since
@@ -855,7 +869,7 @@ export function OperatorsPanel() {
                         recording a reason. The list above is what moves. */}
                     <select
                       className={styles.input}
-                      aria-label="Belongs to"
+                      aria-label={`Where ${selected.displayName} belongs`}
                       value={editSiteValue}
                       onChange={(e) => setEditSite(e.target.value)}
                     >
