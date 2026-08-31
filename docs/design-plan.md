@@ -8217,3 +8217,141 @@ exists as the precedent for one, and §19.67 / D106 is the record of what a scre
 Every rule above is pinned in the pure module; the mapping from `placeVerdict` to a mark and a
 class is pinned by nothing, which is why `placeVerdict` lives beside the rule rather than inside
 the component — the smallest thing the component can be trusted to do.
+
+## §19.79 — one plant filter for the whole admin screen (roadmap 1(c))
+
+> *"for the system admin, may be we need a filter for plants in all the sub tabs."*
+> — the maintainer, 31 August, minutes after §19.77 landed
+
+§19.77 fixed one list by deriving its cut from the row being looked at. **This is the general
+case, and it is a different kind of rule**: a system admin can read every node in the org, so
+every admin section — Hierarchy, Access, Shifts, Operators, Products — shows three plants' worth
+of everything. §19.77's cut takes no user input and holds no state. This one is a **choice the
+reader makes**, and it has to survive switching sections.
+
+### ⭐ ONE CONTROL, ON `AdminPage`, NOT SIX
+
+Six per-panel filters would be six controls that drift apart, and a reader who set one would have
+no way to know the other five were still wide open. The state lives once
+(`features/admin/store/adminView.ts`), every panel reads it through `usePlantFilter`, and no panel
+renders a control.
+
+⚠️ **The panels take NO NEW PROP for it.** `ShiftsPanel`, `OperatorsPanel` and `ProductsPanel`
+each document a "no props, owns its own read" invariant; they read the hook instead, which is the
+move `useRootPath` already makes for the board toolbar.
+
+### The three decisions, asked one at a time and answered
+
+**1. The default is THEIR LAST CHOICE, remembered across visits.**
+⚠⚠ **What makes that safe is the chip, and the two are one decision.** The chosen plant is
+spelled out in the header of every tab, always. `SiteAccessPanel`'s own header records what
+happens otherwise: it used to be scoped by the Hierarchy tab's picker, so a company admin standing
+there saw whichever plant another tab had chosen, *"with no control and nothing explaining why"* —
+**"Where is Plant 1?", reported from the running app, with no answer on the screen.** A remembered
+filter with nothing naming it is that bug again. Neither half ships without the other.
+
+**2. One readable root means NO CONTROL AND NO HEADER ROW.** Not a disabled dropdown: a greyed
+control reads as *"you lack permission"* rather than *"there is only one"*, which is D106's shape.
+⚠️ The test is `readablePlants(...).length`, **never the role** — a company admin of a one-plant
+org correctly gets none.
+
+**3. The filter narrows the FORMS too.** What you see is what you can create in. The rejected
+alternative lets somebody create a row into a plant they have filtered away and then watch it not
+appear — silent hiding in a new costume.
+
+⚠⚠ **SO THE PICKERS TAKE TWO NARROWINGS OF DIFFERENT KINDS, AND NEITHER IS IMPLEMENTED IN TERMS
+OF THE OTHER.** The filter is a VIEW CHOICE and reversible; `scopeOptions`' `canEdit` is a
+PERMISSION and is not. Collapsing them would make a reversible preference look like a permission,
+and the day somebody widened the filter they would silently widen what the form claims they may
+write. That is §19.77's lesson — the reason `placesUnderSameRoot` sits outside `workPlacesFor` —
+arriving one screen up. Every panel carries the warning at its own call site.
+
+### ⭐ IT COMPARES `path`, AND THE SURVEY IS WHY
+
+`ShiftsPanel` **throws `parentId` away** when `patternRows` reshapes its nodes — it currently
+hands `scopeOptions` a hardcoded `parentId: null` to compensate (`shiftDraft.ts`). A
+parent-walking filter, like §19.77's `rootIdFor`, **cannot run in that panel at all.** Every
+admin read keeps `path`, which is the value the server itself compares and which `isAtOrBelow`
+already tests label by label, so one rule covers all five sections and there is no second
+implementation of ancestry to disagree with the first.
+
+### ⚠️ THE HIERARCHY TAB IS FILTERED ON ITS **ROWS**, AND THAT IS THE ONLY LEGAL SEAM
+
+`NodeTreeEditor` and `LevelEditor` both document that they need the **complete** node array:
+`eligibleTargetIds`, `canDropOn`, `legalParentsFor`, `demoteTargets`, `groupDropState` and
+`findLevelOrderProblems` must see every node, because the component's standing invariant is that
+it **must never refuse client-side a move the server would accept**. A filtered `nodes` would make
+a node stop being a legal parent because somebody narrowed a view.
+
+⭐ So `visibleNodeIds` filters the **rows** and nothing else — and the seam was already there.
+The comment above `buildTreeRows` says sibling ORDER comes from *"the rows the admin is actually
+looking at, never from re-sorting `nodes`"*, so that the index handed to `place_node` means what
+they just saw. That stays true of a filtered list and stops being true one layer deeper.
+⚠️ A plant is a whole subtree, so the set never removes a node while keeping its children.
+
+⚠️ **Filtering the STRUCTURES instead would have looked right and been wrong**:
+`groupRowsByShape` buckets rows by each node's LEVEL's `templateId` and uses the summaries list
+only for the NAME, so a narrowed list leaves every group still rendered and merely unnamed.
+
+⭐ **The one form the filter cannot narrow says so.** Adding a ROOT creates a new plant by
+construction, so it cannot be offered "inside" the one on screen. Left working and annotated
+rather than disabled — a disabled control reads as a permission the reader does not have, and
+this is a view choice they can undo in one click.
+
+### Access keeps its own selection, and that is the history working
+
+The shared filter narrows the **list of places** Access chooses from; the panel still owns **which
+one** it is showing, and `resolvePlace` already drops a selection the list no longer contains.
+Those are different decisions, and conflating them is precisely what produced "Where is Plant 1?".
+
+### ⚠️ WHAT IS TRIMMED IS COUNTED, EVERYWHERE
+
+`scope.ts`'s header is the reason: hiding is invisible and permanent, and a list that quietly
+shrank looks exactly like a list of things nobody created. Every trimmed list gained a footnote —
+people, ticket types, products, patterns, places, tree rows — and **each names the filter's own
+label rather than the word "plant"**, because the hierarchy is user-defined and "plant" is only
+this company's name for its top level.
+
+### ⭐⭐ FOUR REAL DEFECTS THE WORK UNCOVERED, NONE OF THEM THE FEATURE
+
+The filter was the reason to look; these were already broken, and three are the same shape — **a
+`<select>` whose value is not among its options renders its FIRST option and reports nothing**, so
+the control and the write silently disagree.
+
+1. **`ProductsPanel`: show one owner, save another.** The edit `<select>` read `editDraft.siteNodeId`
+   straight into `value` *and* into the patch. Re-home a product to Plant 2, filter to Plant 1, and
+   the control reads "Plant 1" while Save sends Plant 2. Pinned by T13.
+2. **`ShiftsPanel`: `attachDraft` is keyed by node id and HOLDS a pattern id.** With the pattern
+   list trimmed, a draft naming a filtered-away pattern is a value with no option behind it — the
+   row reads "Inherit from above" and Apply sends the invisible id.
+3. **`OperatorsPanel`: a cold load submitted `site_node_id: ""`.** `draftSite` starts empty and the
+   select has no placeholder, so the control displayed option one while the state held `""`.
+   ⚠️ **And the comment beside it claimed a guard that did not exist** — drift rule 10 again,
+   now made true.
+4. **`productsPanel.test.tsx` was green through the wrong branch.** Its `useQuery` mock omitted
+   `isSuccess`, so **every existing case ran the "structure read failed" path**: `sites === null`,
+   every row labelled "Another site", `elsewhere` unreachable. T1–T8 passed without ever exercising
+   the code they name. ⚠️ A mock that omits a flag does not fail — it quietly selects a branch,
+   and the suite reports the coverage it did not have.
+
+### Numbers
+
+**Client-only — no migration; 30 migrations and 468 database checks stand.** **App tests 1224 in
+29 files**, from the runner's own total line: 1182 + 42 (28 in the new `plantFilter.test.ts`, 9 in
+`productsPanel.test.tsx`, 5 for `resolveSelectedOperator`). **12 deliberate breakages, 12 caught**
+— 7 on the shared rules (an unreadable stored choice kept, a control offered at one plant, an
+unresolvable owner hidden, `startsWith` for `isAtOrBelow`, a stored sentinel for "All plants", the
+org dropped from the key, every topmost node treated as a root) and 5 on `ProductsPanel`.
+⚠️ **One inert mutation, and its kind is named**: dropping the separator from the storage key
+prefix is cosmetic — both forms still scope per org, so no case can tell them apart.
+`tsc` 0, `eslint src` 0, prettier applied throughout.
+
+⚠️ **STILL OWED. `scopeOptions` takes a `canEdit` set precisely so a picker cannot offer a node
+the server will refuse, and all three callers still pass none.** Deliberately out of this change:
+it is a permission, the filter is a view choice, and the whole of §19.77 is about not confusing
+the two. It needs each panel to derive who may administer what, and it belongs in its own commit.
+
+⚠️ **And nothing mounts `OperatorsPanel` or `ShiftsPanel`.** `productsPanel.test.tsx` is the only
+panel-level suite and it now drives the real store, hook and lib rather than mocking them — which
+is what caught two of the four defects above. The other two panels have no equivalent, so their
+trims, footnotes and de-stalings are pinned only at the library level.

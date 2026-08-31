@@ -688,6 +688,40 @@ export function placeVerdict(place: WorkPlace): PlaceVerdict {
 }
 
 /* ===========================================================================
+ * Which person the screen is about.
+ *
+ * ⭐ IT LIVES HERE, NOT IN THE PANEL, AND THAT IS THE POINT OF §19.77. A rule
+ * about who may appear on a screen, written inside the component that draws
+ * it, is a rule nothing can pin — which is exactly how `workPlacesFor` came to
+ * disagree with the server for a whole release. Beside `placesUnderSameRoot`
+ * it is one import away from `operators.test.ts`.
+ * =========================================================================== */
+
+/**
+ * Which person the detail pane is about. Falls back, never sticks.
+ *
+ * ⭐ RESOLVED AGAINST THE PEOPLE THIS SCREEN IS SHOWING, not against every
+ * operator the reader can read. `selectedId` outlives a plant switch, and
+ * reading it out of the unfiltered array put somebody from Plant B in the
+ * detail pane while the list beside it held only Plant A — a selection
+ * outliving the list it was made from, which is the whole reason
+ * `resolveSelectedShape` and `resolvePlace` exist.
+ *
+ * ⚠️ IT FALLS BACK TO NOBODY, NOT TO THE FIRST ROW, and that is the one place
+ * it differs from those two. "Pick someone on the left" is this screen's real
+ * opening state rather than a failure of one, so a first-row fallback would
+ * open a person nobody asked for on every visit — and on this screen that
+ * person's name, area and tickets are the entire right-hand column.
+ */
+export function resolveSelectedOperator(
+  people: readonly OperatorLike[],
+  selectedId: string | null,
+): OperatorLike | null {
+  if (selectedId === null) return null;
+  return people.find((o) => o.id === selectedId) ?? null;
+}
+
+/* ===========================================================================
  * The operator list, and the draft that adds to it.
  * =========================================================================== */
 

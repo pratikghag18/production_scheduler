@@ -28,6 +28,7 @@ import {
   operatorRows,
   placeVerdict,
   placesUnderSameRoot,
+  resolveSelectedOperator,
   rootIdFor,
   summarisePlaces,
   ticketsFor,
@@ -37,6 +38,8 @@ import {
   type WorkPlace,
 } from "../lib/operators";
 import { indentedLabel, scopeOptions } from "../lib/scope";
+import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
+import { usePlantFilter } from "../hooks/usePlantFilter";
 import {
   useCreateOperator,
   useCreateSkill,
@@ -89,9 +92,27 @@ import styles from "./OperatorsPanel.module.css";
  * (override)"). Cutting at their own area instead would have deleted the third
  * state from this screen and made D113's door invisible here.
  *
- * ⚠️ WHAT IS TRIMMED IS COUNTED, in a footnote under the list. `scope.ts`'s
- * header records the reason: hiding is invisible and permanent, and a list
- * that quietly shrank looks exactly like a person with no options.
+ * ⭐⭐ AND THE READER'S OWN PLANT FILTER IS A SECOND CUT OF A DIFFERENT KIND —
+ * roadmap 1(c). The maintainer, 31 Aug: *"for the system admin, may be we need
+ * a filter for plants in all the sub tabs."* `AdminPage` owns the one control
+ * and names the chosen plant in its header; this panel only READS the choice
+ * (`usePlantFilter`) and applies it to the people list, the ticket types and
+ * both "Belongs to" pickers. It renders no control of its own — six per-panel
+ * filters would be six controls that drift apart.
+ *
+ * ⚠️⚠️ IT DOES NOT REPLACE `placesUnderSameRoot` AND THE TWO MUST NOT BE
+ * MERGED. They answer different questions: the filter is a CHOICE THE READER
+ * MADE about which plant this screen is about, and `placesUnderSameRoot` is
+ * derived from the SELECTED PERSON'S own root with no input at all. They
+ * COMPOSE — somebody appears in the left list only when they are in the chosen
+ * plant, and their places are then trimmed to their own root. Folding either
+ * into the other reads as identical on the day they agree and deletes one of
+ * them on the day they do not, which is every reader sitting on "All plants".
+ *
+ * ⚠️ WHAT IS TRIMMED IS COUNTED, in a footnote under the list — both trims,
+ * separately. `scope.ts`'s header records the reason: hiding is invisible and
+ * permanent, and a list that quietly shrank looks exactly like a person with no
+ * options, or like a company nobody has added anybody to yet.
  *
  * ⚠️ EVERY TICK IS AN INDICATION, NOT A PROMISE. `check_eligibility` on the
  * server is the authority and is re-asked at assignment time against the real
@@ -225,12 +246,58 @@ export function OperatorsPanel() {
   const operators = useMemo<readonly OperatorLike[]>(() => data?.operators ?? [], [data]);
   const skills = useMemo(() => data?.skills ?? [], [data]);
   const operatorSkills = useMemo(() => data?.operatorSkills ?? [], [data]);
+  // Same reason, and one more: `usePlantFilter` memoises on the array it is
+  // handed, so a fresh `[]` here would hand every derivation below a brand new
+  // `plant` object on every single render.
+  const nodes = useMemo(() => data?.nodes ?? [], [data]);
 
-  const rows = useMemo(
+  // ⚠️ MEMOISED so the derivations below have a stable map identity, and
+  // because `scopeChoices` rebuilds from the same array on every render today.
+  //
+  // ⭐ BUILT FROM EVERY READABLE NODE, NEVER FROM THE PLANT-FILTERED SET.
+  // `rowsInPlant` has to resolve the owner of a row it is about to EXCLUDE, and
+  // it fails open on an owner it cannot find — so a map built from the filtered
+  // nodes would fail open on precisely the rows the filter exists to drop, and
+  // the filter would appear to do nothing at all.
+  const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+
+  /* ---------------------------------------------------------------------
+   * ⭐⭐ WHICH PLANT THIS SCREEN IS ABOUT — roadmap 1(c). See the header.
+   * The control lives on `AdminPage`, which also names the choice in the
+   * header of every section; this panel reads it and renders no control.
+   * `choice === null` is "All plants" and every helper below is then a no-op,
+   * so nothing here has to special-case it.
+   * ------------------------------------------------------------------- */
+  const plant = usePlantFilter(nodes);
+
+  // ⭐ THE LIST AS IT WOULD BE WITH NO PLANT FILTER, KEPT SO THE TRIM CAN BE
+  // COUNTED. `scope.ts`'s header is the reason it is not simply dropped:
+  // hiding is invisible and permanent, and a list that quietly shrank looks
+  // exactly like a company nobody has added anybody to.
+  const allRows = useMemo(
     () => operatorRows(operators, operatorSkills, { query, includeInactive }),
     [operators, operatorSkills, query, includeInactive],
   );
-  const selected = operators.find((o) => o.id === selectedId) ?? null;
+  const rows = useMemo(
+    () => rowsInPlant(allRows, plant.choice, plant.plants, nodesById),
+    [allRows, plant.choice, plant.plants, nodesById],
+  );
+  // ⚠️ COUNTED AGAINST THE SAME SEARCH, not against the whole company. The
+  // footnote sits under a list "Find someone" has already narrowed, and a
+  // number ignoring the search would name people the reader cannot reach from
+  // where they are standing — the same reason the places headline counts what
+  // the list actually shows rather than all of `places`.
+  const hiddenPeople = allRows.length - rows.length;
+
+  // ⚠️ THE SELECTION IS RESOLVED AGAINST THE PLANT, NOT AGAINST `rows`. `rows`
+  // is also narrowed by the search box and the deactivated toggle, and typing
+  // in "Find someone" must not close the person being read: that narrows the
+  // LIST, it does not say they are gone. The plant filter says exactly that.
+  const peopleInPlant = useMemo(
+    () => rowsInPlant(operators, plant.choice, plant.plants, nodesById),
+    [operators, plant.choice, plant.plants, nodesById],
+  );
+  const selected = resolveSelectedOperator(peopleInPlant, selectedId);
 
   const places = useMemo(() => {
     if (selected === null || data === undefined) return [];
@@ -247,14 +314,18 @@ export function OperatorsPanel() {
     );
   }, [selected, data, asOf]);
 
-  // ⚠️ MEMOISED so the two derivations below have a stable map identity, and
-  // because `scopeChoices` rebuilds from the same array on every render today.
-  const nodesById = useMemo(() => new Map((data?.nodes ?? []).map((n) => [n.id, n])), [data]);
-
   // ⭐ TWO TRIMS, IN THIS ORDER, AND THE ORDER IS THE POINT. First to the
   // person's own plant (see the header), then to the places that are active
   // inside it — so "1 deactivated place is not shown" refers to something in
   // their own plant, which is the only place a reader can act on it.
+  //
+  // ⚠️ THE READER'S PLANT FILTER IS NOT A THIRD TRIM HERE, AND MUST NOT BECOME
+  // ONE. It has already decided WHETHER this person is on screen at all;
+  // `placesUnderSameRoot` then trims THEIR places to THEIR OWN root, which on
+  // "All plants" is a root the reader never chose. Running the filter over the
+  // places as well would be a no-op whenever the two agree and would silently
+  // re-cut the list to the reader's plant rather than the person's whenever
+  // they do not. The two rules compose; neither is the other. See the header.
   const sitePlaces =
     selected === null ? places : placesUnderSameRoot(places, selected.siteNodeId, nodesById);
   const offSitePlaces = places.length - sitePlaces.length;
@@ -269,9 +340,23 @@ export function OperatorsPanel() {
   const summary = summarisePlaces(visiblePlaces);
   const hiddenPlaces = sitePlaces.length - visiblePlaces.length;
 
+  // ⭐ THE TICKET TYPES ARE NARROWED LIKE THE PEOPLE ARE — decision 3: what you
+  // see is what you can grant. `skills` itself stays whole for the two other
+  // questions this screen asks of it, because neither of them is "what is on
+  // offer here" — see `tickets` just below and `clash` further down.
+  const skillsInPlant = useMemo(
+    () => rowsInPlant(skills, plant.choice, plant.plants, nodesById),
+    [skills, plant.choice, plant.plants, nodesById],
+  );
+  const hiddenSkills = skills.length - skillsInPlant.length;
+
+  // ⚠️ `skills`, NOT `skillsInPlant`. These are the tickets this person ACTUALLY
+  // HOLDS — rows in `operator_skills`, not a list of what is on offer. Filtering
+  // them would hide a real grant from the only screen that can revoke it: the
+  // plant filter reaching past a view and into the record.
   const tickets = selected === null ? [] : ticketsFor(selected, skills, operatorSkills, asOf);
   const heldIds = new Set(tickets.map((t) => t.skillId));
-  const grantable = skills.filter((s) => !heldIds.has(s.id));
+  const grantable = skillsInPlant.filter((s) => !heldIds.has(s.id));
 
   // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). The maintainer, Aug 27: *"I do want to
   // be able to assign operators to a specific hierarchy level, there are
@@ -287,9 +372,48 @@ export function OperatorsPanel() {
   // plus a required reason. So the field is LOAD-BEARING: it decides where
   // this person can be booked, and the list above says so in three states.
   // [[decision-record-drift]] rule 10 — a conclusion outliving its premise.
-  const scopeNodes = data?.nodes ?? [];
-  const scopeChoices = scopeOptions(scopeNodes);
+  //
+  // ⭐ AND THE LIST IS NARROWED BY THE PLANT FILTER — decision 3: what you see
+  // is what you can create in. The alternative lets somebody add a person into
+  // a plant they have filtered away and then watch them not appear, which is
+  // silent hiding wearing a form's clothes.
+  //
+  // ⚠️⚠️ THE FILTER GOES IN AS THE NODE ARRAY AND NEVER AS `scopeOptions`'
+  // `canEdit`, AND THAT IS NOT A DETAIL. The two narrowings are different
+  // kinds: the filter is a VIEW CHOICE and reversible, `canEdit` is a
+  // PERMISSION and is not. Collapsing them would make a preference look like a
+  // right, and the day somebody widened the filter it would silently widen what
+  // this form claims they may write.
+  const scopeNodes = useMemo(
+    () => nodesInPlant(nodes, plant.choice, plant.plants),
+    [nodes, plant.choice, plant.plants],
+  );
+  const scopeChoices = useMemo(() => scopeOptions(scopeNodes), [scopeNodes]);
 
+  // The "Belongs to" value on the ADD form, kept legal by construction — the
+  // same shape as `ProductsPanel`'s `ownerValue`, and load-bearing here for a
+  // second reason: the plant filter can take the held node out of the list
+  // while the half-filled form is still on screen. Falling back to the first
+  // node on offer is also what stops the select DISPLAYING option one while the
+  // state holds `""`, which is what it did from a cold load. `""` now survives
+  // only when there is nothing to offer at all, and `addOperator` says so.
+  const draftSiteValue = scopeChoices.some((o) => o.value === draftSite)
+    ? draftSite
+    : (scopeChoices[0]?.value ?? "");
+
+  // ⚠️ THE EDIT FORM FALLS BACK THE OTHER WAY — TO NOTHING, NEVER TO THE FIRST
+  // NODE. On the add form a default is a convenience; here it would MOVE
+  // somebody, silently, to wherever the list happens to begin — and where a
+  // person belongs decides where they can be booked (0028 / D109). `saveRename`
+  // already refuses `""` with a sentence, and the picker shows "Choose…" rather
+  // than pointing at a node it will not save.
+  const editSiteValue = scopeChoices.some((o) => o.value === editSite) ? editSite : "";
+
+  // ⚠️ THE CLASH CHECK IS NOT FILTERED, AND MUST NOT BE. Skill names are unique
+  // per ORG (`unique (org_id, name)`), so the question "does this name already
+  // exist" is company-wide whatever the reader is looking at. Asking it of
+  // `skillsInPlant` would let the screen offer to create a name the database
+  // then refuses — a view choice deciding a uniqueness rule.
   const clash = findExistingSkillByName(skills, newSkill);
   const busy =
     createOperator.isPending ||
@@ -319,14 +443,25 @@ export function OperatorsPanel() {
       setNotice(draft.message);
       return;
     }
+    // ⭐ 0028: `""` used to mean company-wide. It now means "nothing chosen",
+    // and `site_node_id` is NOT NULL, so sending it is a guaranteed round trip
+    // to a database error. This guard is what the comment beside `siteNodeId`
+    // used to CLAIM was here and was not — the same refusal `saveRename` makes,
+    // and reachable only when the picker has nothing to offer, since
+    // `draftSiteValue` otherwise falls back to the first node on the list.
+    if (draftSiteValue === "") {
+      setNotice("Choose where this person belongs.");
+      return;
+    }
     createOperator.mutate(
       {
         orgId,
         displayName: draft.displayName,
         employeeRef: draft.employeeRef,
-        // ⭐ 0028: `""` used to mean company-wide. It now means "nothing
-        // chosen", and the guard above refuses before we get here.
-        siteNodeId: draftSite,
+        // ⚠️ THE RESOLVED VALUE, NOT `draftSite`. The raw state can name a node
+        // the plant filter has taken out from under the form; what is submitted
+        // has to be what the control is showing.
+        siteNodeId: draftSiteValue,
       },
       {
         onSuccess: (created) => {
@@ -367,7 +502,11 @@ export function OperatorsPanel() {
     // "nothing chosen", and the one thing it must NOT become is `undefined`,
     // because an absent key means "leave it alone" and the screen would show a
     // move that never happened. Refuse instead, with a sentence.
-    if (editSite === "") {
+    // ⚠️ THE RESOLVED VALUE, NOT `editSite`. If the plant filter has taken the
+    // held node out of the picker, `editSiteValue` is `""` and this refuses —
+    // which is the point. The alternative is submitting a node the form is no
+    // longer showing, and this field decides where somebody can be booked.
+    if (editSiteValue === "") {
       setNotice("Choose where this person belongs.");
       return;
     }
@@ -376,7 +515,7 @@ export function OperatorsPanel() {
         id: selected.id,
         displayName: draft.displayName,
         employeeRef: draft.employeeRef,
-        siteNodeId: editSite,
+        siteNodeId: editSiteValue,
       },
       { onSuccess: () => setRenaming(false), onError: onErr },
     );
@@ -525,6 +664,20 @@ export function OperatorsPanel() {
             ))}
             {rows.length === 0 && <li className={styles.status}>Nobody matches that.</li>}
           </ul>
+          {/* ⚠️ TRIMMED, NOT SILENT — the same rule as the two footnotes under
+              the places list, and the one the maintainer will look at first.
+              Named by `plant.label`, which is the chosen plant's OWN NAME:
+              "plant" is this company's word for its top level and another
+              company's hierarchy may call it anything at all. The footnote also
+              rescues "Nobody matches that." above it, which would otherwise
+              blame the search box for a cut the search box did not make. */}
+          {hiddenPeople > 0 && (
+            <p className={styles.footnote}>
+              {hiddenPeople === 1
+                ? `1 person outside ${plant.label} is not shown.`
+                : `${hiddenPeople} people outside ${plant.label} are not shown.`}
+            </p>
+          )}
 
           <h3 className={styles.h3}>Add someone</h3>
           <label className={styles.field}>
@@ -545,9 +698,12 @@ export function OperatorsPanel() {
           </label>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Belongs to</span>
+            {/* ⭐ NARROWED TO THE CHOSEN PLANT (decision 3), and bound to the
+                RESOLVED value so the control can never display one node while
+                the state holds another — see `draftSiteValue`. */}
             <select
               className={styles.input}
-              value={draftSite}
+              value={draftSiteValue}
               onChange={(e) => setDraftSite(e.target.value)}
             >
               {scopeChoices.map((o) => (
@@ -570,7 +726,7 @@ export function OperatorsPanel() {
           </button>
           {showSkillAdmin && (
             <ul className={styles.ticketTypes}>
-              {skills.map((s) => (
+              {skillsInPlant.map((s) => (
                 <li key={s.id} className={styles.ticketType}>
                   {skillEditId === s.id ? (
                     <>
@@ -653,7 +809,20 @@ export function OperatorsPanel() {
                   )}
                 </li>
               ))}
-              {skills.length === 0 && <li className={styles.status}>No ticket types yet.</li>}
+              {skillsInPlant.length === 0 && (
+                <li className={styles.status}>No ticket types yet.</li>
+              )}
+              {/* ⚠️ COUNTED, like every other trim on this screen. This list
+                  carries a Delete that cascades (0029), so "it isn't there" and
+                  "you can't see it from here" are answers a reader must not be
+                  left to confuse. */}
+              {hiddenSkills > 0 && (
+                <li className={styles.footnote}>
+                  {hiddenSkills === 1
+                    ? `1 ticket type outside ${plant.label} is not shown.`
+                    : `${hiddenSkills} ticket types outside ${plant.label} are not shown.`}
+                </li>
+              )}
             </ul>
           )}
         </aside>
@@ -687,9 +856,18 @@ export function OperatorsPanel() {
                     <select
                       className={styles.input}
                       aria-label="Belongs to"
-                      value={editSite}
+                      value={editSiteValue}
                       onChange={(e) => setEditSite(e.target.value)}
                     >
+                      {/* ⚠️ ONLY WHEN THE HELD NODE IS NO LONGER OFFERED — the
+                          plant filter narrowed under an open form, or the node
+                          is one this reader cannot resolve. Without it the
+                          browser would show option one while the state holds
+                          `""`, so the control would point at a node
+                          `saveRename` then refuses: the value on screen and the
+                          value in hand disagreeing, which is the trap
+                          `editSiteValue` exists to close. */}
+                      {editSiteValue === "" && <option value="">Choose where they belong…</option>}
                       {scopeChoices.map((o) => (
                         <option key={o.value ?? "company"} value={o.value ?? ""}>
                           {indentedLabel(o)}

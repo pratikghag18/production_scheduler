@@ -61,6 +61,8 @@ export function NodeTreeEditor({
   levels,
   shapeSummaries,
   selectedTemplateId,
+  visibleNodeIds = null,
+  plantLabel = null,
 }: {
   nodes: BoardNode[];
   levels: HierarchyLevel[];
@@ -68,6 +70,34 @@ export function NodeTreeEditor({
   shapeSummaries: readonly ShapeSummary[];
   /** The shape currently selected in `ShapePicker`, used as the add-root default. */
   selectedTemplateId: string | null;
+  /**
+   * Roadmap 1(c) — which nodes the plant filter is SHOWING. `null` means no
+   * filter is applied and everything is drawn.
+   *
+   * ⚠⚠ **DISPLAY ONLY, AND THAT IS THE WHOLE CONTRACT OF THIS PROP.** `nodes`
+   * above stays the COMPLETE array and every rule keeps reading it —
+   * `eligibleTargetIds`, `canDropOn`, `legalParentsFor`, `demoteTargets`,
+   * `groupDropState`. This component's standing invariant is that it must
+   * never refuse client-side a move the server would accept, and answering a
+   * legality question from a filtered tree would do exactly that: a node would
+   * stop being a legal parent because somebody narrowed a view.
+   *
+   * ⭐ Filtering the ROWS rather than the nodes is also the seam that was
+   * already here. The comment above `buildTreeRows` says sibling ORDER comes
+   * from "the rows the admin is actually looking at, never from re-sorting
+   * `nodes`", so that the index handed to `place_node` means what they just
+   * saw — which stays true of a filtered list and would stop being true if the
+   * filter were pushed any deeper.
+   *
+   * ⚠️ A plant is a whole subtree, so this set never removes a node while
+   * keeping its children: every kept node's ancestors are kept with it, and
+   * the tree stays a tree. `reseatRootGuides` (inside `groupRowsByShape`)
+   * redraws the guides afterwards, so the survivors do not keep the indent
+   * furniture of rows that are gone.
+   */
+  visibleNodeIds?: ReadonlySet<string> | null;
+  /** What the plant filter is showing, for the footnote. `null` when unfiltered. */
+  plantLabel?: string | null;
 }) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [popover, setPopover] = useState<PopoverState | null>(null);
@@ -103,7 +133,13 @@ export function NodeTreeEditor({
   // needs them: sibling ORDER comes from the rows the admin is actually looking
   // at, never from re-sorting `nodes`, so the index handed to `place_node`
   // means the same thing they just saw.
-  const rows = buildTreeRows(nodes, levels, collapsedIds);
+  const allRows = buildTreeRows(nodes, levels, collapsedIds);
+  // ⭐ The plant filter, applied at the ONE place it may be applied — see
+  // `visibleNodeIds` above. Everything from here down is presentation; every
+  // legality question below still asks `nodes`.
+  const rows =
+    visibleNodeIds === null ? allRows : allRows.filter((r) => visibleNodeIds.has(r.node.id));
+  const hiddenByPlant = allRows.length - rows.length;
 
   type DragLive = {
     /** computed ONCE at drag start -- legalParentsFor is O(n) in canDropOn calls */
@@ -471,6 +507,20 @@ export function NodeTreeEditor({
               ))}
             </select>
           )}
+          {/* ⚠️ THE ONE PLACE THE FILTER CANNOT NARROW A FORM, AND IT SAYS SO.
+              Everywhere else on these screens "what you see is what you can
+              create in" (decision 3, roadmap 1(c)); here the thing being
+              created IS a new root, so it belongs to no existing plant by
+              construction and cannot be offered "inside" the one on screen.
+              Left working and annotated rather than disabled: a disabled
+              control reads as a permission the reader does not have, and this
+              is a view choice they can undo in one click. */}
+          {plantLabel !== null && (
+            <span className={styles.plantNote}>
+              A new root starts its own place — it will not appear until you switch back to All
+              plants.
+            </span>
+          )}
           <button
             type="submit"
             disabled={
@@ -619,6 +669,19 @@ export function NodeTreeEditor({
           </div>
         );
       })}
+
+      {/* ⚠️ COUNTED, NEVER SILENT. `scope.ts`'s header is the reason: hiding is
+          invisible and permanent, and a tree that quietly shrank looks exactly
+          like a company with fewer places in it than it has. Named by the
+          filter's own label rather than by a level word — the hierarchy is
+          user-defined and "plant" is only this company's name for its top. */}
+      {hiddenByPlant > 0 && plantLabel !== null && (
+        <p className={styles.plantNote}>
+          {hiddenByPlant === 1
+            ? `1 place outside ${plantLabel} is not shown.`
+            : `${hiddenByPlant} places outside ${plantLabel} are not shown.`}
+        </p>
+      )}
 
       {live && (
         <div

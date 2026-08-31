@@ -64,6 +64,7 @@ import {
   operatorRows,
   placeVerdict,
   placesUnderSameRoot,
+  resolveSelectedOperator,
   rootIdFor,
   summarisePlaces,
   ticketsFor,
@@ -748,6 +749,43 @@ it("S5: an area that could not be resolved counts as outside, never towards thei
   const s = summarisePlaces(workPlacesFor(ana, input(), TODAY));
   expect(s.ownArea).toBe(3); // Cell 1, Cell 2, Cell 3 — Ana belongs to the plant
   expect(s.outsideArea).toBe(3);
+});
+
+/* ===========================================================================
+ * resolveSelectedOperator — a selection must not outlive the list it came from.
+ *
+ * ⭐⭐ THIS RULE LIVED INSIDE `OperatorsPanel` UNTIL THE PLANT FILTER (roadmap
+ * 1(c)) GAVE THE LIST A SECOND WAY TO SHRINK. It is the same family as
+ * `resolveSelectedShape` and `resolvePlace`, and it is here rather than in the
+ * component for §19.77's reason: a rule about who may appear on a screen,
+ * written inside the component that draws it, is a rule nothing can pin.
+ * =========================================================================== */
+
+it("R11: the selected person comes back when they are still in the list", () => {
+  expect(resolveSelectedOperator([ana, bob], ANA)?.id).toBe(ANA);
+});
+
+it("R12 ⭐: and is dropped the moment the list stops containing them", () => {
+  // The plant filter is the second way this happens — the first was the search
+  // box. Reading `selectedId` out of the UNFILTERED array put somebody from
+  // Plant B in the detail pane beside a list holding only Plant A.
+  expect(resolveSelectedOperator([bob], ANA)).toBe(null);
+});
+
+it("R13 ⭐: it falls back to NOBODY, not to the first row", () => {
+  // The one place this differs from `resolveSelectedShape` / `resolvePlace`.
+  // "Pick someone on the left" is this screen's real opening state, so a
+  // first-row fallback would open a person nobody asked for on every visit —
+  // and their name, area and tickets are the entire right-hand column.
+  expect(resolveSelectedOperator([ana, bob], "no-such-person")).toBe(null);
+});
+
+it("R14: nothing selected stays nothing selected", () => {
+  expect(resolveSelectedOperator([ana, bob], null)).toBe(null);
+});
+
+it("R15: an empty list resolves to nobody rather than throwing", () => {
+  expect(resolveSelectedOperator([], ANA)).toBe(null);
 });
 
 /* ===========================================================================

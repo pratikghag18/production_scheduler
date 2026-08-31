@@ -60,6 +60,18 @@
   color: var(--ink-2);
 }
 
+/* What the plant filter trimmed off a list, counted underneath it (roadmap
+   1(c)). Deliberately the same weight and colour as `.skippedLine`: both say
+   "the list above is shorter than the data behind it", and a reader should not
+   have to work out which kind of shortening they are looking at from the
+   styling. --ink-2, not --muted, for the same contrast reason `.rowNote`
+   records — --muted is 3.50:1 on --surface and this is 12px text. */
+.footnote {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
 /* A saved row the database allows but the application does not: a break
    outside its shift, two shifts that would now collide. Amber, not red —
    nothing is broken, something needs looking at. Full width wherever it lands

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 // `fetchHierarchyTree` moved to src/lib/api/hierarchy.ts by the design session:
 // `src/lib/api/` is the only place allowed to touch supabase, snake_case or
@@ -9,6 +9,9 @@ import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "./hooks/useHierarchyMutations";
 import { buildShapeSummaries, filterEditableShapes, resolveSelectedShape } from "./lib/shapePicker";
+import { nodesInPlant } from "./lib/plantFilter";
+import { usePlantFilter } from "./hooks/usePlantFilter";
+import { useAdminViewStore } from "./store/adminView";
 import { LevelEditor } from "./components/LevelEditor";
 import { NodeTreeEditor } from "./components/NodeTreeEditor";
 import { ShapePicker } from "./components/ShapePicker";
@@ -79,6 +82,7 @@ function useHierarchyTree(enabled: boolean) {
 export default function AdminPage() {
   const [section, setSection] = useState<SectionId>("hierarchy");
   const { session, profile, loading: sessionLoading } = useSession();
+  const orgId = profile?.orgId ?? null;
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
   const { data, isLoading, isError } = useHierarchyTree(canQuery);
   // Shared by the Hierarchy section's own "Loading..." branch below and by
@@ -86,6 +90,53 @@ export default function AdminPage() {
   // not two call sites independently re-deriving the same D91-shaped
   // condition (`!canQuery || isLoading`) and risking them drifting apart.
   const hierarchyLoading = !canQuery || isLoading;
+
+  /* ---------------------------------------------------------------------
+   * ⭐⭐ WHICH PLANT THIS SCREEN IS SHOWING — roadmap 1(c).
+   *
+   * The maintainer, 31 Aug: *"for the system admin, may be we need a filter
+   * for plants in all the sub tabs."* A system admin can read every node in
+   * the org, so every section below shows three plants' worth of everything.
+   *
+   * ⚠️ ONE CONTROL, HERE, NOT SIX. Six per-panel filters would drift apart,
+   * and a reader who set one would have no way to know the other five were
+   * still wide open. The panels read the choice off `useAdminViewStore` and
+   * take no new prop for it, so `ShiftsPanel`, `OperatorsPanel` and
+   * `ProductsPanel` keep the "NO PROPS" invariant each of them documents.
+   *
+   * ⚠️⚠️ AND THE CONTROL IS ALWAYS VISIBLE WHEN IT APPLIES. That is not
+   * decoration: `SiteAccessPanel`'s own header records what happened the last
+   * time one tab's selection scoped another *"with no control and nothing
+   * explaining why"* — **"Where is Plant 1?", reported from the running app.**
+   * A remembered filter with nothing on screen naming it is that bug again.
+   * ------------------------------------------------------------------- */
+  const plantFilter = usePlantFilter(data?.nodes ?? []);
+  const hydratePlantChoice = useAdminViewStore((s) => s.hydratePlantChoice);
+  const setPlantChoice = useAdminViewStore((s) => s.setPlantChoice);
+  const hydratedOrgId = useAdminViewStore((s) => s.hydratedOrgId);
+
+  // ⭐ HYDRATION IS THIS PAGE'S JOB, ONCE. `loadPlantChoice` needs an org id,
+  // which lives behind `useSession()` — already called in five components, a
+  // cost recorded against P1-6b. Doing it here keeps every panel out of the
+  // session entirely.
+  //
+  // ⚠️ Keyed on the ORG, not on "have we run yet": the dev switcher changes
+  // identity with no reload, and `user_profiles` is unique on
+  // `(org_id, user_id)`, so a choice remembered in one org must not survive
+  // into another.
+  useEffect(() => {
+    if (orgId !== null && hydratedOrgId !== orgId) hydratePlantChoice(orgId);
+  }, [orgId, hydratedOrgId, hydratePlantChoice]);
+
+  // The node ids inside the chosen plant. `null` (All plants) yields every
+  // node, so nothing below has to special-case it.
+  const plantNodeIds = useMemo(
+    () =>
+      new Set(
+        nodesInPlant(data?.nodes ?? [], plantFilter.choice, plantFilter.plants).map((n) => n.id),
+      ),
+    [data, plantFilter.choice, plantFilter.plants],
+  );
 
   // D87 (brief P1-5f §7.6): this component owns the shape SELECTION; every
   // other fact about a shape (its levels, whether it has nodes) is derived
@@ -126,6 +177,19 @@ export default function AdminPage() {
         .filter((p): p is { nodeId: string; name: string } => p !== null)
     : [];
 
+  /**
+   * ⭐ THE FILTER NARROWS THE ACCESS PLACES; THE PANEL STILL OWNS WHICH ONE
+   * IT IS SHOWING. Those are different decisions and the difference is the
+   * whole history here — the panel took ownership of its selection precisely
+   * because another tab used to drive it. Trimming the LIST it chooses from
+   * is the shared filter doing its job; choosing WITHIN that list stays the
+   * panel's, and `resolvePlace` already drops a selection the list no longer
+   * contains. If the filter leaves one place, the panel's own picker hides
+   * itself (it renders only above one), which is the same rule the header
+   * above applies to itself.
+   */
+  const visibleAccessPlaces = accessPlaces.filter((p) => plantNodeIds.has(p.nodeId));
+
   return (
     <div className={styles.page}>
       <nav className={styles.rail} aria-label="Admin sections">
@@ -146,6 +210,38 @@ export default function AdminPage() {
       </nav>
 
       <div className={styles.content}>
+        {/* ⭐ SPELLED OUT, ALWAYS, WHENEVER IT APPLIES — see the block above.
+            The `<select>` IS the chip: it names the plant in the header of
+            every section rather than hiding the state behind a menu.
+            ⚠️ Rendered only above two readable plants (`plantFilter.visible`).
+            A greyed-out control for somebody with one plant reads as "you lack
+            permission" rather than "there is only one", which is D106's shape,
+            so there is no row at all. The test is READABLE ROOTS, never the
+            role — a company admin of a one-plant org correctly gets none. */}
+        {plantFilter.visible && (
+          <div className={styles.plantRow}>
+            <label className={styles.plantLabel} htmlFor="admin-plant">
+              Showing
+            </label>
+            <select
+              id="admin-plant"
+              className={styles.plantSelect}
+              value={plantFilter.choice ?? ""}
+              onChange={(e) => setPlantChoice(orgId, e.target.value === "" ? null : e.target.value)}
+            >
+              {/* ⭐ "All plants" is a real choice and is named as one, not an
+                  empty first entry. It is how a reader widens back out, and a
+                  blank option would make the header go silent in exactly the
+                  state where it most needs to speak. */}
+              <option value="">All plants</option>
+              {plantFilter.plants.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {section === "hierarchy" && (
           <>
             <h1 className={styles.h1}>Hierarchy</h1>
@@ -208,6 +304,12 @@ export default function AdminPage() {
                     levels={data.levels}
                     shapeSummaries={summaries}
                     selectedTemplateId={resolvedShapeId}
+                    /* Roadmap 1(c). DISPLAY ONLY — `nodes` above stays the
+                       complete array so no legality check is ever answered
+                       from a filtered tree. `null` when nothing is narrowed,
+                       so the unfiltered case draws exactly what it always did. */
+                    visibleNodeIds={plantFilter.choice === null ? null : plantNodeIds}
+                    plantLabel={plantFilter.choice === null ? null : plantFilter.label}
                   />
                 </div>
               </div>
@@ -219,7 +321,7 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Access</h1>
             <SiteAccessPanel
-              places={accessPlaces}
+              places={visibleAccessPlaces}
               treeLoading={hierarchyLoading}
               viewerProfileId={profile?.id ?? null}
               viewerIsCompanyAdmin={profile?.role === "admin"}
