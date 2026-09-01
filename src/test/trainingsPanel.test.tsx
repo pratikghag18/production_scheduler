@@ -64,6 +64,10 @@ const h = vi.hoisted(() => {
     name,
     siteNodeId,
     active,
+    // ⚠️ WIDENED so a case can override it with a real document number — a bare
+    // `null` infers the literal type and pins every `skills` element to `null`,
+    // which is what rejected D1/D3's `externalId: "QP-14"`.
+    externalId: null as string | null,
   });
   // ⭐ FACTORIES, NOT LITERALS, AND `beforeEach` RESTORES FROM THEM — the call
   // `productsPanel.test.tsx` records after three cases mutated a shared fixture
@@ -102,6 +106,7 @@ const h = vi.hoisted(() => {
     createMutate: vi.fn(),
     updateMutate: vi.fn(),
     activeMutate: vi.fn(),
+    docMutate: vi.fn(),
     deleteMutate: vi.fn(),
     node,
     skill,
@@ -169,6 +174,7 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
   useCreateSkill: () => ({ mutate: h.createMutate, isPending: false }),
   useUpdateSkill: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetSkillActive: () => ({ mutate: h.activeMutate, isPending: false }),
+  useSetSkillDocumentNumber: () => ({ mutate: h.docMutate, isPending: false }),
 }));
 
 /**
@@ -311,6 +317,7 @@ beforeEach(() => {
   h.createMutate.mockClear();
   h.updateMutate.mockClear();
   h.activeMutate.mockClear();
+  h.docMutate.mockReset();
   h.deleteMutate.mockClear();
   h.state.sessionLoading = false;
   h.state.isLoading = false;
@@ -939,5 +946,140 @@ describe("TrainingsPanel — moving a training (D105)", () => {
     expect(
       screen.queryByRole("combobox", { name: "Where Housekeeping at Plant 1 belongs" }),
     ).toBeNull();
+  });
+});
+
+/* ===========================================================================
+ * The document number (D115).
+ *
+ * ⭐⭐ A DISTINCT FACT FROM THE NAME (the maintainer, 1 Sept), so it has its own
+ * cell, its own optional field on the add form, and its own inline editor on its
+ * own write (`setSkillDocumentNumber`). The pure half — the label and the
+ * refusal sentence — is in `trainings.test.ts`; this is what only the rendered
+ * screen can answer.
+ * ======================================================================== */
+
+describe("TrainingsPanel — the document number (D115)", () => {
+  it("D1 ⭐ each training shows its document number, and a blank one shows a dash", () => {
+    h.state.data = {
+      ...h.state.data,
+      skills: [
+        { ...h.skill("s1", "Forklift", LINE_A), externalId: "QP-14" },
+        h.skill("s2", "Forklift", LINE_B),
+        h.skill("s3", "Welding", LINE_A, false),
+      ],
+    };
+    render(<TrainingsPanel />);
+    // ⭐ THE NUMBER READS ON ITS OWN, never folded into the name text — the same
+    // split products draw between `sku` and `name`.
+    expect(screen.getByText("QP-14")).toBeTruthy();
+    // ⚠️ A ROW WITH NONE SHOWS THE PLACEHOLDER, not an empty cell that reads as a
+    // column that failed to load.
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("D2 ⭐⭐ editing a document number sends the TRIMMED value to its own hook", () => {
+    render(<TrainingsPanel />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit the document number for Forklift at Line A" }),
+    );
+    const box = screen.getByRole("textbox", { name: "Document number for Forklift at Line A" });
+    fireEvent.change(box, { target: { value: "  QP-14  " } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save the document number for Forklift at Line A" }),
+    );
+    // ⚠️ ITS OWN WRITE, NOT `updateSkill`. The number is a nullable column with a
+    // real "clear it" state; the name/owner edit has no room for one.
+    expect(h.updateMutate).not.toHaveBeenCalled();
+    expect(h.docMutate.mock.calls[0][0]).toEqual({ id: "s1", externalId: "QP-14" });
+  });
+
+  it("D3 ⚠️ a blank box clears the number to null, not to an empty string", () => {
+    h.state.data = {
+      ...h.state.data,
+      skills: [{ ...h.skill("s1", "Forklift", LINE_A), externalId: "QP-14" }],
+    };
+    render(<TrainingsPanel />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit the document number for Forklift at Line A" }),
+    );
+    const box = screen.getByRole("textbox", {
+      name: "Document number for Forklift at Line A",
+    }) as HTMLInputElement;
+    // ⚠️ SEEDED TO WHAT IS THERE, so a change is an edit rather than a retype.
+    expect(box.value).toBe("QP-14");
+    fireEvent.change(box, { target: { value: "   " } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save the document number for Forklift at Line A" }),
+    );
+    // `null`, never `""` — an empty string would sit in the per-owner unique
+    // index as a real value.
+    expect(h.docMutate.mock.calls[0][0]).toEqual({ id: "s1", externalId: null });
+  });
+
+  it("D4 ⭐⭐ a duplicate number shows the DOCUMENT-NUMBER sentence, not the name one", () => {
+    // A DuplicateValue here is the NUMBER clashing, not the name — the separate
+    // helper is what keeps the reader from being sent to Rename a name that was
+    // never the trouble.
+    h.docMutate.mockImplementation((_input: unknown, opts: { onError: (e: unknown) => void }) =>
+      opts.onError({ kind: "DuplicateValue" }),
+    );
+    render(<TrainingsPanel />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit the document number for Forklift at Line A" }),
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Document number for Forklift at Line A" }),
+      { target: { value: "QP-14" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save the document number for Forklift at Line A" }),
+    );
+    expect(screen.getByText(/already uses that document number/i)).toBeTruthy();
+    // ⚠️ NOT the name-clash sentence, which would misdirect to Rename.
+    expect(screen.queryByText(/training with that name/)).toBeNull();
+  });
+
+  it("D5 ⭐ Add carries a document number when one is typed, and omits it when blank", () => {
+    render(<TrainingsPanel />);
+    fireEvent.change(ownerPicker(), { target: { value: LINE_B } });
+    fireEvent.change(nameBox(), { target: { value: "Rigging" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Document number" }), {
+      target: { value: "  RG-9  " },
+    });
+    fireEvent.click(addButton());
+    // Trimmed, and present because one was typed.
+    expect(h.createMutate.mock.calls[0][0]).toEqual({
+      orgId: ORG,
+      name: "Rigging",
+      siteNodeId: LINE_B,
+      externalId: "RG-9",
+    });
+  });
+
+  it("D6 ⚠️ a row the reader may not change offers no document-number editor either", () => {
+    // The same `useEditRights` preview (V14) that withholds Edit/Retire/Delete
+    // withholds this write too — `skills` document-number writes ride the same
+    // `app_can_edit_node` policy, so a surviving editor would be the one live
+    // write on a row that has just said it cannot be changed.
+    withPlantOwnedTraining();
+    h.state.rights = {
+      role: "supervisor",
+      adminPaths: [],
+      writablePaths: ["plant_1.line_a"],
+      known: true,
+    };
+    render(<TrainingsPanel />);
+    // Its number is still SHOWN — a fact worth reading — but there is no editor.
+    expect(
+      screen.queryByRole("button", {
+        name: "Edit the document number for Housekeeping at Plant 1",
+      }),
+    ).toBeNull();
+    // ...while their own line keeps the editor. A preview that took the editor
+    // off everything would be indistinguishable from one that worked.
+    expect(
+      screen.getByRole("button", { name: "Edit the document number for Forklift at Line A" }),
+    ).toBeTruthy();
   });
 });

@@ -27,7 +27,13 @@ import type { ImportPlan as TrainingImportPlan } from "@/features/admin/lib/trai
 import type { ImportPlan as CertificationImportPlan } from "@/features/admin/lib/certificationImport";
 import { supabase } from "@/lib/supabase";
 import { assignProductSite, updateProduct } from "./products";
-import { createSkill, grantSkill, updateOperator, updateSkillRecord } from "./operators";
+import {
+  createSkill,
+  grantSkill,
+  setSkillDocumentNumber,
+  updateOperator,
+  updateSkillRecord,
+} from "./operators";
 import { describeSchedulerError, requireWritten, toSchedulerError } from "./errors";
 import type { SchedulerError } from "./errors";
 import type { TablesInsert } from "@/lib/database.types";
@@ -261,13 +267,16 @@ export async function applyOperatorImport(
  * TYPES (Forklift, Welding…), one per plant.
  *
  * ⭐ THE SIMPLEST LANE OF THE THREE:
- *   - The only write is `createSkill` (there is no external_id / source on a
- *     training, and no plant follow-on: the owner IS `site_node_id`, set in the
- *     one insert, and the plan resolved it).
+ *   - An INSERT is `createSkill`, carrying the optional document number as
+ *     `externalId` (there is no source on a training, and no plant follow-on: the
+ *     owner IS `site_node_id`, set in the one insert, and the plan resolved it).
  *   - An "update" outcome means the (name, plant) training is ALREADY THERE. The
- *     import does not change it — apply is a NO-OP that only counts it as
- *     `updated`, so a re-upload is idempotent and the training's `active` flag is
- *     left alone. There is nothing to call.
+ *     training itself is left alone — the active flag is never touched — so a
+ *     re-upload stays idempotent. The one thing an update may do is record a
+ *     document number: the plan sets `documentNumber` to a non-null value only
+ *     when the row gives one that DIFFERS from what the training already carries,
+ *     and that is the only case that calls `setSkillDocumentNumber`. A null there
+ *     is a pure no-op that just counts as `updated`.
  * =========================================================================== */
 
 /**
@@ -288,11 +297,21 @@ export async function applyTrainingImport(
     if (o.kind === "error") continue;
     try {
       if (o.kind === "insert") {
-        await createSkill({ orgId: ctx.orgId, name: o.name, siteNodeId: o.plantNodeId });
+        await createSkill({
+          orgId: ctx.orgId,
+          name: o.name,
+          siteNodeId: o.plantNodeId,
+          externalId: o.documentNumber,
+        });
         inserted += 1;
       } else {
-        // A no-op "update": the (name, plant) training already exists. Nothing to
-        // write — do NOT touch its active flag — just count it.
+        // The (name, plant) training already exists — its active flag is never
+        // touched. The plan set `documentNumber` to a non-null value only when the
+        // row gives one that DIFFERS from the training's current number, so that
+        // is the only case that writes; a null is a pure no-op.
+        if (o.documentNumber !== null) {
+          await setSkillDocumentNumber({ id: o.skillId, externalId: o.documentNumber });
+        }
         updated += 1;
       }
     } catch (e) {

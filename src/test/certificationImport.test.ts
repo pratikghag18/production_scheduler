@@ -31,11 +31,12 @@ const op = (id: string, employeeRef: string | null, siteNodeId: string) => ({
   source: "manual",
   externalId: null,
 });
-const skill = (id: string, name: string, siteNodeId: string) => ({
+const skill = (id: string, name: string, siteNodeId: string, externalId: string | null = null) => ({
   id,
   name,
   siteNodeId,
   active: true,
+  externalId,
 });
 
 const DATA: CertificationData = {
@@ -46,9 +47,9 @@ const DATA: CertificationData = {
     op("o-dupB", "EMP-DUP", "pb"), // ...this one -> ambiguous
   ],
   skills: [
-    skill("s-fork-a", "Forklift", "pa"), // Forklift owned by Plant A
-    skill("s-fork-b", "Forklift", "pb"), // and by Plant B
-    skill("s-weld-l1", "Welding", "pa-l1"), // Welding owned by Line 1 (under Plant A)
+    skill("s-fork-a", "Forklift", "pa", "DOC-FORK-A"), // Forklift owned by Plant A
+    skill("s-fork-b", "Forklift", "pb", "DOC-FORK-B"), // and by Plant B
+    skill("s-weld-l1", "Welding", "pa-l1", "DOC-WELD"), // Welding owned by Line 1 (under Plant A)
   ],
   operatorSkills: [
     {
@@ -73,6 +74,7 @@ describe("detectColumns", () => {
     expect(m).toEqual({
       employeeRef: "employee ref",
       training: "training",
+      documentNumber: null,
       signedOffBy: "signed off by",
       certifiedAt: "certified",
       expiresAt: "expiry",
@@ -125,6 +127,37 @@ describe("resolving the person and the training", () => {
   });
 });
 
+describe("matching the training by its document number", () => {
+  it("N1: a document number resolves the training (Alice's Welding by DOC-WELD)", () => {
+    const o = only(planFrom("employee ref,training,document number\nEMP-1,Welding,DOC-WELD"));
+    expect(o.kind).toBe("insert");
+    expect(o.kind !== "error" && o.skillId).toBe("s-weld-l1");
+  });
+  it("N2: the document number is resolved ON THE PERSON'S BRANCH (Bob's Forklift by DOC-FORK-B)", () => {
+    const o = only(planFrom("employee ref,training,document number\nEMP-2,Forklift,DOC-FORK-B"));
+    expect(o.kind).toBe("insert");
+    expect(o.kind !== "error" && o.skillId).toBe("s-fork-b");
+  });
+  it("N3: an unknown document number is refused, naming it", () => {
+    const o = only(planFrom("employee ref,training,document number\nEMP-1,Forklift,DOC-NOPE"));
+    expect(o.kind).toBe("error");
+    expect(o.kind === "error" && o.messages.join(" ")).toContain(
+      "no training with document number DOC-NOPE",
+    );
+  });
+  it("N4 ⭐: a name and a document number that disagree are an error, not a silent pick", () => {
+    // Welding by name -> s-weld-l1, but DOC-FORK-A -> s-fork-a: two trainings.
+    const o = only(planFrom("employee ref,training,document number\nEMP-1,Welding,DOC-FORK-A"));
+    expect(o.kind).toBe("error");
+    expect(o.kind === "error" && o.messages.join(" ")).toContain("different trainings");
+  });
+  it("N5: a blank document number falls back to the name match (unchanged)", () => {
+    const o = only(planFrom("employee ref,training,document number\nEMP-1,Forklift,"));
+    expect(o.kind).toBe("update");
+    expect(o.kind !== "error" && o.skillId).toBe("s-fork-a");
+  });
+});
+
 describe("the record fields", () => {
   it("D1: a valid expiry and certified date are carried through", () => {
     const o = only(
@@ -165,7 +198,14 @@ describe("the template", () => {
   it("M1: every template header auto-detects to its field", () => {
     const keys = CERTIFICATION_TEMPLATE.headers.map((h) => h.toLowerCase());
     const m = detectColumns(keys);
-    expect([m.employeeRef, m.training, m.signedOffBy, m.certifiedAt, m.expiresAt]).toEqual(keys);
+    expect([
+      m.employeeRef,
+      m.training,
+      m.documentNumber,
+      m.signedOffBy,
+      m.certifiedAt,
+      m.expiresAt,
+    ]).toEqual(keys);
     expect(CERTIFICATION_TEMPLATE.legend.map((l) => l.column)).toEqual([
       ...CERTIFICATION_TEMPLATE.headers,
     ]);

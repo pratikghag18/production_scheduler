@@ -37,6 +37,8 @@ import {
   renameSkill,
   setSkillActive,
   type SetSkillActiveInput,
+  setSkillDocumentNumber,
+  type SetSkillDocumentNumberInput,
   revokeSkill,
   setOperatorActive,
   updateOperator,
@@ -144,6 +146,24 @@ export function useSetSkillActive() {
   const invalidate = useInvalidateOperators();
   return useMutation<SkillRecord, SchedulerError, SetSkillActiveInput>({
     mutationFn: (input) => setSkillActive(input),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Set, change or clear a training's DOCUMENT NUMBER.
+ *
+ * ⭐ THE SAME INVALIDATION EVERY SKILL WRITE HERE MAKES, and it matters for the
+ * same reason `useSetSkillActive`'s does: the document number rides on the
+ * `SkillRecord` the Operators screen reads too, so a mutation that refreshed
+ * only this list would leave the other screen showing a stale number. Mirrors
+ * `useSetSkillActive` exactly — one `mutationFn`, `onSuccess` invalidates the
+ * whole prefix, no optimistic update.
+ */
+export function useSetSkillDocumentNumber() {
+  const invalidate = useInvalidateOperators();
+  return useMutation<SkillRecord, SchedulerError, SetSkillDocumentNumberInput>({
+    mutationFn: (input) => setSkillDocumentNumber(input),
     onSuccess: invalidate,
   });
 }

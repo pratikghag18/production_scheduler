@@ -36,6 +36,7 @@ function skill(over: Partial<SkillRecord> = {}): SkillRecord {
     name: "Forklift",
     siteNodeId: "N1",
     active: true,
+    externalId: null,
     ...over,
   };
 }
@@ -79,6 +80,17 @@ describe("detectColumns", () => {
   it("C3: leaves an unmatched column null", () => {
     expect(detectColumns(["training name"]).plant).toBe(null);
     expect(detectColumns(["plant"]).name).toBe(null);
+    // The document number is optional — absent, it maps to null and is NOT in
+    // missingRequired.
+    expect(detectColumns(["training name", "plant"]).documentNumber).toBe(null);
+  });
+
+  it("C6: maps the document number from any of its aliases", () => {
+    expect(detectColumns(["document number"]).documentNumber).toBe("document number");
+    expect(detectColumns(["doc number"]).documentNumber).toBe("doc number");
+    expect(detectColumns(["doc no"]).documentNumber).toBe("doc no");
+    expect(detectColumns(["training number"]).documentNumber).toBe("training number");
+    expect(detectColumns(["document no"]).documentNumber).toBe("document no");
   });
 
   // C4 — BOTH columns are required-to-map, so an absent one is named in
@@ -101,7 +113,12 @@ describe("detectColumns", () => {
 describe("rule 4 — a new (name, plant) inserts", () => {
   it("I1: inserts, carrying the name and the resolved owning plant", () => {
     const plan = planFrom("training name,plant\nWelding,Plant A", [FORKLIFT_AT_A], [PLANT_A]);
-    expect(only(plan)).toEqual({ kind: "insert", name: "Welding", plantNodeId: "N1" });
+    expect(only(plan)).toEqual({
+      kind: "insert",
+      name: "Welding",
+      plantNodeId: "N1",
+      documentNumber: null,
+    });
   });
 
   it("I2: the SAME name at a DIFFERENT plant is a new training, so it inserts", () => {
@@ -112,7 +129,12 @@ describe("rule 4 — a new (name, plant) inserts", () => {
       [FORKLIFT_AT_A],
       [PLANT_A, PLANT_B],
     );
-    expect(only(plan)).toEqual({ kind: "insert", name: "Forklift", plantNodeId: "N2" });
+    expect(only(plan)).toEqual({
+      kind: "insert",
+      name: "Forklift",
+      plantNodeId: "N2",
+      documentNumber: null,
+    });
   });
 });
 
@@ -123,7 +145,12 @@ describe("rule 4 — a new (name, plant) inserts", () => {
 describe("rule 5 — an existing (name, plant) is a no-op update", () => {
   it("I3: an already-present training is an update carrying the existing id", () => {
     const plan = planFrom("training name,plant\nForklift,Plant A", [FORKLIFT_AT_A], [PLANT_A]);
-    expect(only(plan)).toEqual({ kind: "update", skillId: "S1", name: "Forklift" });
+    expect(only(plan)).toEqual({
+      kind: "update",
+      skillId: "S1",
+      name: "Forklift",
+      documentNumber: null,
+    });
   });
 
   it("I4: the name matches case-insensitively (so a re-upload is idempotent)", () => {
@@ -205,6 +232,123 @@ describe("counts", () => {
 });
 
 /* ===========================================================================
+ * Group D — the optional "Document number" column. It is a settable ATTRIBUTE,
+ * NOT part of the match key (a row is still matched by name + plant). It is
+ * recorded on an insert, set on an update when it DIFFERS, and left alone when
+ * blank or unchanged; a within-file clash on the same plant fails both rows.
+ * ======================================================================== */
+
+describe("the document number column", () => {
+  it("D1: a document number is recorded on an insert", () => {
+    const plan = planFrom(
+      "training name,plant,document number\nWelding,Plant A,DOC-1",
+      [],
+      [PLANT_A],
+    );
+    expect(only(plan)).toEqual({
+      kind: "insert",
+      name: "Welding",
+      plantNodeId: "N1",
+      documentNumber: "DOC-1",
+    });
+  });
+
+  it("D2: an existing training gets its document number set when the row differs", () => {
+    // Forklift at Plant A currently has no document number; the row gives one, so
+    // the update carries it for apply to set.
+    const plan = planFrom(
+      "training name,plant,document number\nForklift,Plant A,DOC-9",
+      [FORKLIFT_AT_A],
+      [PLANT_A],
+    );
+    expect(only(plan)).toEqual({
+      kind: "update",
+      skillId: "S1",
+      name: "Forklift",
+      documentNumber: "DOC-9",
+    });
+  });
+
+  it("D3: an unchanged document number on an existing training is a pure no-op", () => {
+    // The training already carries "DOC-9"; the row repeats it, so nothing is set.
+    const existing = skill({ externalId: "DOC-9" });
+    const plan = planFrom(
+      "training name,plant,document number\nForklift,Plant A,DOC-9",
+      [existing],
+      [PLANT_A],
+    );
+    expect(only(plan)).toEqual({
+      kind: "update",
+      skillId: "S1",
+      name: "Forklift",
+      documentNumber: null,
+    });
+  });
+
+  it("D4: a blank document number leaves an insert's at null", () => {
+    const plan = planFrom(
+      "training name,plant,document number\nWelding,Plant A,",
+      [],
+      [PLANT_A],
+    );
+    expect(only(plan)).toEqual({
+      kind: "insert",
+      name: "Welding",
+      plantNodeId: "N1",
+      documentNumber: null,
+    });
+  });
+
+  it("D5: a blank leaves an existing training's document number alone", () => {
+    // The training carries "DOC-9"; a blank row is NOT a request to clear it.
+    const existing = skill({ externalId: "DOC-9" });
+    const plan = planFrom(
+      "training name,plant,document number\nForklift,Plant A,",
+      [existing],
+      [PLANT_A],
+    );
+    expect(only(plan)).toEqual({
+      kind: "update",
+      skillId: "S1",
+      name: "Forklift",
+      documentNumber: null,
+    });
+  });
+
+  it("D6: two rows giving the SAME document number to the same plant are both errors", () => {
+    const plan = planFrom(
+      "training name,plant,document number\nWelding,Plant A,DOC-1\nForklift,Plant A,DOC-1",
+      [],
+      [PLANT_A],
+    );
+    expect(plan.rows.map((r) => r.outcome.kind)).toEqual(["error", "error"]);
+    expect(plan.counts.error).toBe(2);
+    const msg = plan.rows[0].outcome;
+    expect(msg.kind === "error" && msg.messages.join(" ")).toContain("DOC-1");
+  });
+
+  it("D7: the SAME document number at DIFFERENT plants is fine", () => {
+    const plan = planFrom(
+      "training name,plant,document number\nWelding,Plant A,DOC-1\nForklift,Plant B,DOC-1",
+      [],
+      [PLANT_A, PLANT_B],
+    );
+    expect(plan.rows.map((r) => r.outcome.kind)).toEqual(["insert", "insert"]);
+  });
+
+  it("D8: the document number is NOT a match key — a new number on a new (name, plant) inserts", () => {
+    // A document number that no existing training carries does not turn an insert
+    // into an update; the match is still (name, plant).
+    const plan = planFrom(
+      "training name,plant,document number\nWelding,Plant A,DOC-1",
+      [FORKLIFT_AT_A],
+      [PLANT_A],
+    );
+    expect(only(plan).kind).toBe("insert");
+  });
+});
+
+/* ===========================================================================
  * Group E — file-level errors ride along to the plan.
  * ======================================================================== */
 
@@ -224,7 +368,7 @@ describe("trainingPlanToView", () => {
     const plan = planFrom("training name,plant\nWelding,Plant A", [], [PLANT_A]);
     const view = trainingPlanToView(plan);
     expect(view.counts).toEqual({ insert: 1, update: 0, error: 0 });
-    expect(view.rows[0].cells).toEqual(["Welding", "Plant A"]);
+    expect(view.rows[0].cells).toEqual(["Welding", "Plant A", ""]);
     expect(view.rows[0].kind).toBe("insert");
   });
 
@@ -242,8 +386,8 @@ describe("TRAINING_TEMPLATE", () => {
   it("M1: every friendly template header still auto-detects to the right field", () => {
     const keys = TRAINING_TEMPLATE.headers.map((h) => h.toLowerCase());
     const map = detectColumns(keys);
-    expect(map).toEqual({ name: keys[0], plant: keys[1] });
-    expect(TRAINING_TEMPLATE.headers).toEqual(["Training name", "Plant"]);
+    expect(map).toEqual({ name: keys[0], plant: keys[1], documentNumber: keys[2] });
+    expect(TRAINING_TEMPLATE.headers).toEqual(["Training name", "Plant", "Document number"]);
   });
 
   it("M2: the example row and the legend both cover every header", () => {

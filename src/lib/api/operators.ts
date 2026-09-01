@@ -93,6 +93,18 @@ export interface SkillRecord {
    * what people have".
    */
   active: boolean;
+  /**
+   * The training's DOCUMENT NUMBER — `skills.external_id` from 0032, nullable
+   * and unique per owner.
+   *
+   * ⭐ THE MAINTAINER, 1 Sept: most trainings at a company carry a document
+   * number, and it must NOT be folded into the `name`. The name is what people
+   * read on the board, in the eligibility list, and match on in the
+   * certifications import; the document number churns on revision. They are two
+   * distinct facts — the same split products already draw between `name` and
+   * `sku`. This is the field that finally reads it: `null` = none recorded.
+   */
+  externalId: string | null;
 }
 
 export interface OperatorSkillRecord {
@@ -185,10 +197,16 @@ export function parseSkillRecord(v: unknown): SkillRecord | null {
   // retired training as live, on the one screen whose job is to tell them
   // apart. §19.76's lesson: a hand-written guard is the only thing between a
   // shape change and a screen that quietly says the wrong thing.
+  const externalId = strOrNull(v.external_id);
   if (id === null || name === null || siteNodeId === null || typeof v.active !== "boolean") {
     return null;
   }
-  return { id, name, siteNodeId, active: v.active };
+  // ⚠️ `undefined` (never `null`) means the SELECT forgot to ask for the column
+  // — REJECT it, the same guard `parseOperatorRecord` keeps on its own
+  // `external_id`. This is why `apiSkillShape` builds its fixture from
+  // `SKILL_COLUMNS` itself: the read and this guard must never drift.
+  if (externalId === undefined) return null;
+  return { id, name, siteNodeId, active: v.active, externalId };
 }
 
 export function parseOperatorSkillRecord(v: unknown): OperatorSkillRecord | null {
@@ -406,7 +424,7 @@ const OPERATOR_COLUMNS =
  * columns, so every training silently failed to parse. `apiSkillShape.test.ts`
  * is what makes that a red case instead of an empty screen.
  */
-export const SKILL_COLUMNS = "id, name, site_node_id, active";
+export const SKILL_COLUMNS = "id, name, site_node_id, active, external_id";
 /**
  * ⚠⚠ EXPORTED, AND THE PARSER IS HELD AGAINST IT BY A TEST.
  * `apiSkillShape.test.ts` exists because `SKILL_COLUMNS` and
@@ -536,6 +554,12 @@ export interface CreateSkillInput {
    * which is a much larger job than the one it used to have.
    */
   siteNodeId: string;
+  /**
+   * The document number (`skills.external_id`). Omit, or pass `null`/`""`, for a
+   * training with none — an empty string is normalised to `null` here so it
+   * never collides on the per-owner unique index.
+   */
+  externalId?: string | null;
 }
 
 /**
@@ -567,7 +591,15 @@ export interface CreateSkillInput {
 export async function createSkill(input: CreateSkillInput): Promise<SkillRecord> {
   const { data, error } = await supabase
     .from("skills")
-    .insert({ org_id: input.orgId, name: input.name, site_node_id: input.siteNodeId })
+    .insert({
+      org_id: input.orgId,
+      name: input.name,
+      site_node_id: input.siteNodeId,
+      // "" and undefined both mean "no document number" -> null, so a blank
+      // never trips `(org_id, site_node_id, external_id)` where several are free.
+      external_id:
+        input.externalId === undefined || input.externalId === "" ? null : input.externalId,
+    })
     .select(SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstOrThrow(data, parseSkillRecord, "createSkill");
@@ -598,6 +630,40 @@ export async function setSkillActive(input: SetSkillActiveInput): Promise<SkillR
     .select(SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstOrThrow(data, parseSkillRecord, "setSkillActive");
+}
+
+export interface SetSkillDocumentNumberInput {
+  id: string;
+  /** The new document number, or `null` to clear it. */
+  externalId: string | null;
+}
+
+/**
+ * Set or clear a training's DOCUMENT NUMBER — `skills.external_id`.
+ *
+ * ⭐ ITS OWN CALL, NOT A FIELD ON `updateSkill`, ON PURPOSE. `updateSkill` guards
+ * two NOT-NULL columns with a `!== undefined` test and has no "clear it" state;
+ * this column is NULLABLE, so `null` is a real value the caller means. Folding a
+ * nullable column into that function would force `in`-vs-`undefined` on the same
+ * patch — exactly the drift `updateSkill`'s own comment warns against.
+ *
+ * ⚠️ THE CALLER NORMALISES "" TO null before this — a blank clears the number
+ * rather than storing an empty string, which would otherwise sit in the
+ * per-owner unique index as a real value.
+ *
+ * 23505 -> `{kind:"DuplicateValue"}` when another training under the same owner
+ * already carries the number.
+ */
+export async function setSkillDocumentNumber(
+  input: SetSkillDocumentNumberInput,
+): Promise<SkillRecord> {
+  const { data, error } = await supabase
+    .from("skills")
+    .update({ external_id: input.externalId })
+    .eq("id", input.id)
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "setSkillDocumentNumber");
 }
 
 export async function renameSkill(input: { id: string; name: string }): Promise<SkillRecord> {

@@ -45,6 +45,7 @@ function rowFromSelect(over: Record<string, unknown> = {}): Record<string, unkno
     name: "Forklift",
     site_node_id: "2b1a0000-0000-0000-0000-000000000001",
     active: true,
+    external_id: "TRN-014",
   };
   const row: Record<string, unknown> = {};
   for (const col of selectedColumns()) row[col] = sample[col];
@@ -97,4 +98,18 @@ it("K6: the other required fields are still required", () => {
   for (const col of ["id", "name", "site_node_id"]) {
     expect(parseSkillRecord(rowFromSelect({ [col]: null }))).toBeNull();
   }
+});
+
+it("K7: a training with no document number parses, and keeps external_id null", () => {
+  // ⭐ The column is NULLABLE (0032), so `null` is a real value — the majority
+  // case, not a rejection. A doc number carried through is asserted by K1's
+  // sample; this pins the empty case.
+  expect(parseSkillRecord(rowFromSelect({ external_id: null }))?.externalId).toBe(null);
+});
+
+it("K8: a row MISSING external_id is REJECTED — the select must ask for it", () => {
+  // The K3 shape for the new column: absent can only mean the SELECT forgot it,
+  // and a silent null would render every training as having no document number.
+  const { external_id: _dropped, ...withoutExternalId } = rowFromSelect();
+  expect(parseSkillRecord(withoutExternalId)).toBeNull();
 });

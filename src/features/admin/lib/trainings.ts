@@ -80,6 +80,18 @@ export interface TrainingRow {
   name: string;
   siteNodeId: string;
   active: boolean;
+  /**
+   * The training's DOCUMENT NUMBER (`skills.external_id`, nullable) — and it is
+   * a DISTINCT FACT from the name, not a second spelling of it.
+   *
+   * ⭐ THE MAINTAINER, 1 Sept: most trainings at a company carry a document
+   * number, and it must NOT be folded into the name. The same split products
+   * already draw between `sku` and `name`: the NAME is what a reader recognises
+   * on the board, in the eligibility list and in the certifications import; the
+   * NUMBER churns on revision and belongs in its own column. `null` = none
+   * recorded, which is an ordinary answer and not a gap to nag about.
+   */
+  externalId: string | null;
 }
 
 /* ===========================================================================
@@ -149,6 +161,22 @@ export function retireActionLabel(active: boolean): string {
  */
 export function trainingHandle(name: string, ownerLabel: string): string {
   return `${name} at ${ownerLabel}`;
+}
+
+/**
+ * What a document-number cell shows when there is no number recorded.
+ *
+ * ⚠️ A DASH, NEVER THE EMPTY STRING. `null` is an ordinary answer — most rows
+ * on a young company have no number yet — and an empty cell reads as a column
+ * that failed to load rather than a fact nobody has entered. `hiddenByPlantNote`
+ * makes the same choice for a different reason: the honest blank still occupies
+ * its place.
+ */
+export const NO_DOCUMENT_NUMBER = "—";
+
+/** The document number as the cell shows it: the number itself, or the dash. */
+export function documentNumberLabel(externalId: string | null): string {
+  return externalId === null || externalId === "" ? NO_DOCUMENT_NUMBER : externalId;
 }
 
 /* ===========================================================================
@@ -243,6 +271,31 @@ export function describeTrainingWriteRefusal(err: SchedulerError, described: str
       // hierarchy screen. Same call the branch above makes: a shared
       // description that is right for several tables is wrong for this one.
       return "Somewhere outside the new place still requires this training. Take that requirement off first, then move it.";
+    default:
+      return described;
+  }
+}
+
+/**
+ * A DOCUMENT-NUMBER write refusal, in this screen's terms.
+ *
+ * ⭐⭐ ITS OWN HELPER, NOT `describeTrainingWriteRefusal`, AND THAT IS THE WHOLE
+ * OF IT. `setSkillDocumentNumber` collides on `(org_id, site_node_id,
+ * external_id)`, so a `DuplicateValue` from it means the NUMBER is taken — never
+ * the name. Sending it through the name helper would tell the reader another
+ * place already has a training "with that name" and point them at Rename, which
+ * would send them to change a name that was never the trouble — D106's shape, in
+ * an error. The number is unique per owner exactly as the name is (0031/0032), so
+ * "in this place" is the right scope for both, but the noun has to be the number.
+ *
+ * ⚠️ ANYTHING ELSE PASSES THE SHARED DESCRIPTION STRAIGHT THROUGH — a permission
+ * refusal on this write reads the same as on any other, and a second copy of that
+ * sentence here is a second thing to keep in step.
+ */
+export function describeDocumentNumberRefusal(err: SchedulerError, described: string): string {
+  switch (err.kind) {
+    case "DuplicateValue":
+      return "Another training in this place already uses that document number. Choose a different one.";
     default:
       return described;
   }

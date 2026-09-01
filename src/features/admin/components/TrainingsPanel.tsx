@@ -73,13 +73,16 @@ import {
   useCreateSkill,
   useOperatorsAdmin,
   useSetSkillActive,
+  useSetSkillDocumentNumber,
   useUpdateSkill,
 } from "../hooks/useOperators";
 import { useEditRights } from "../hooks/useEditRights";
 import { describeSkillNameClash, findExistingSkillByName } from "../lib/operators";
 import { notManagedNote } from "../lib/editRights";
 import {
+  describeDocumentNumberRefusal,
   describeTrainingWriteRefusal,
+  documentNumberLabel,
   hiddenByPlantNote,
   listStrandedHolders,
   matchesTrainingQuery,
@@ -132,10 +135,22 @@ export function TrainingsPanel() {
   // key means "leave it alone", so a rename still sends only a name.
   const updateMutation = useUpdateSkill();
   const activeMutation = useSetSkillActive();
+  // ⭐ THE DOCUMENT NUMBER IS ITS OWN WRITE, not a field on the edit form. It is
+  // a nullable column with a real "clear it" state (`setSkillDocumentNumber`
+  // takes `null` to mean cleared), which the name/owner edit — two NOT-NULL
+  // columns — has no room for; folding it in would force the two contracts into
+  // one patch. A separate affordance keeps them apart, exactly as the api layer
+  // keeps the two calls apart.
+  const docMutation = useSetSkillDocumentNumber();
 
   const [query, setQuery] = useState("");
   const [newName, setNewName] = useState("");
   const [newOwner, setNewOwner] = useState("");
+  // ⭐ OPTIONAL ON CREATE. A training with no document number is ordinary — most
+  // are, on a young company — so this is never required, and `createSkill`
+  // normalises a blank to `null` rather than storing an empty string in the
+  // per-owner unique index.
+  const [newDocNumber, setNewDocNumber] = useState("");
   const [newErrors, setNewErrors] = useState<{ name: string | null; owner: string | null }>({
     name: null,
     owner: null,
@@ -144,6 +159,11 @@ export function TrainingsPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editOwner, setEditOwner] = useState("");
+  // ⭐ THE DOCUMENT-NUMBER EDITOR IS INDEPENDENT of the name/owner one — its own
+  // open-row id and its own draft — so changing a number never opens the move
+  // machinery and a half-typed rename never carries a number with it.
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [docDraft, setDocDraft] = useState("");
   // ⭐⭐ THE MOVE ASKS BEFORE IT ACTS, AND ONLY WHEN IT COSTS SOMEBODY
   // SOMETHING. Set by Save when the owner really changed and
   // `previewTrainingMove` found holders or places in the way; the write does not
@@ -306,13 +326,18 @@ export function TrainingsPanel() {
   // about a move that can no longer be made, over a button that would make a
   // different one.
   const movingGone = movingId !== null && !inPlantIds.has(movingId);
+  // ⚠️ THE DOCUMENT-NUMBER EDITOR CLOSES BY THE SAME RULE. It is an open box on
+  // a row, so widening back to a plant that no longer holds the row must not
+  // leave it up to be saved against a row that has gone.
+  const docGone = editingDocId !== null && !inPlantIds.has(editingDocId);
   useEffect(() => {
     // Booleans, not the id set, as the dependencies: a fresh `Set` every render
     // would make this an effect that runs every render and clears nothing.
     if (editingGone) setEditingId(null);
     if (confirmingGone) setConfirmingId(null);
     if (movingGone) setMovingId(null);
-  }, [editingGone, confirmingGone, movingGone]);
+    if (docGone) setEditingDocId(null);
+  }, [editingGone, confirmingGone, movingGone, docGone]);
 
   /* -- writes ------------------------------------------------------------- */
 
@@ -335,6 +360,32 @@ export function TrainingsPanel() {
     clearRowError(row.id);
     setRowNotice(null);
     activeMutation.mutate({ id: row.id, active: !row.active }, { onError: onRowError(row.id) });
+  }
+
+  /**
+   * Save a document number — trimmed, and a blank CLEARS it to `null`.
+   *
+   * ⚠️ ITS ERRORS GO THROUGH `describeDocumentNumberRefusal`, NEVER
+   * `onRowError`. `onRowError` describes a name/owner refusal, and a
+   * `DuplicateValue` here is the NUMBER clashing, not the name — sending it
+   * through the shared row-error path would tell the reader to rename a training
+   * whose name was never in the way.
+   */
+  function saveDocNumber(row: TrainingRow) {
+    const trimmed = docDraft.trim();
+    clearRowError(row.id);
+    setRowNotice(null);
+    docMutation.mutate(
+      { id: row.id, externalId: trimmed === "" ? null : trimmed },
+      {
+        onSuccess: () => setEditingDocId((cur) => (cur === row.id ? null : cur)),
+        onError: (err: SchedulerError) =>
+          setRowError({
+            id: row.id,
+            message: describeDocumentNumberRefusal(err, describeSchedulerError(err)),
+          }),
+      },
+    );
   }
 
   /**
@@ -444,6 +495,10 @@ export function TrainingsPanel() {
     }
     setNewErrors({ name: null, owner: null });
     setFormError(null);
+    // ⭐ THE NUMBER RIDES ALONG ONLY WHEN ONE WAS TYPED. `createSkill` maps `""`
+    // and an absent key alike to `null`, so an untouched box adds nothing to the
+    // payload rather than storing a blank in the per-owner unique index.
+    const doc = newDocNumber.trim();
     createMutation.mutate(
       {
         // `skills.org_id` has no default — it comes from the session profile on
@@ -451,9 +506,13 @@ export function TrainingsPanel() {
         orgId,
         name: result.value.name,
         siteNodeId: result.value.siteNodeId,
+        ...(doc === "" ? {} : { externalId: doc }),
       },
       {
-        onSuccess: () => setNewName(""),
+        onSuccess: () => {
+          setNewName("");
+          setNewDocNumber("");
+        },
         onError: (err: SchedulerError) =>
           setFormError(describeTrainingWriteRefusal(err, describeSchedulerError(err))),
       },
@@ -488,6 +547,11 @@ export function TrainingsPanel() {
     // just been withdrawn.
     const isEditing = editable && editingId === row.id;
     const isConfirming = editable && confirmingId === row.id;
+    // ⚠️ GATED ON `editable` TOO — `skills` document-number writes ride the same
+    // `app_can_edit_node` policy as rename and retire, so a box open on a row
+    // that turns out read-only closes with the rest of the controls rather than
+    // becoming the one live write on a row that has just said no.
+    const isEditingDoc = editable && editingDocId === row.id;
 
     /* -- where the edit form would send it ------------------------------- */
 
@@ -758,6 +822,70 @@ export function TrainingsPanel() {
           </div>
         )}
 
+        {/* ⭐ THE DOCUMENT NUMBER — A DISTINCT FACT FROM THE NAME (the
+            maintainer, 1 Sept), so it reads on its own line rather than folded
+            into the name text, the same split products draw between `sku` and
+            `name`. A full-width `1 / -1` line like the tag and the notice below:
+            the three-track grid has room for a name, an owner and the actions and
+            nothing else, and squeezing a fourth column in would re-flow every
+            row. ⚠️ THE VALUE SHOWS EVEN ON A READ-ONLY ROW — it is a fact worth
+            reading whether or not this reader may change it — but the editor is
+            gated on `editable`, so no refused control survives. */}
+        <span className={styles.note}>
+          <span className={styles.fieldLabel}>Document number</span>{" "}
+          {isEditingDoc ? (
+            <>
+              <input
+                className={styles.input}
+                value={docDraft}
+                /* ⚠️ NAMED FOR ITS ROW, like every other per-row control here:
+                   two rows can share a name (0031), so a bare "Document number"
+                   would leave a screen-reader user choosing between identical
+                   fields. */
+                aria-label={`Document number for ${handle}`}
+                onChange={(e) => setDocDraft(e.target.value)}
+              />
+              <button
+                type="button"
+                className={styles.primary}
+                aria-label={`Save the document number for ${handle}`}
+                onClick={() => saveDocNumber(row)}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.quiet}
+                aria-label={`Stop editing the document number for ${handle}`}
+                onClick={() => setEditingDocId(null)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              {documentNumberLabel(row.externalId)}
+              {editable && (
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  aria-label={`Edit the document number for ${handle}`}
+                  onClick={() => {
+                    clearRowError(row.id);
+                    setRowNotice(null);
+                    setEditingDocId(row.id);
+                    // Seeded to what is there so a change is an edit, not a
+                    // retype; `null` seeds a blank box that clears on save.
+                    setDocDraft(row.externalId ?? "");
+                  }}
+                >
+                  Edit document number
+                </button>
+              )}
+            </>
+          )}
+        </span>
+
         {!row.active && <span className={styles.tag}>Retired</span>}
         {err !== null && <span className={styles.error}>{err}</span>}
         {notice !== null && <span className={styles.note}>{notice}</span>}
@@ -875,6 +1003,19 @@ export function TrainingsPanel() {
                 ))}
               </select>
               {newErrors.owner !== null && <span className={styles.error}>{newErrors.owner}</span>}
+            </label>
+            {/* ⭐ OPTIONAL, AND A DISTINCT FIELD FROM THE NAME. Most trainings
+                carry a document number (the maintainer, 1 Sept) but a new one
+                need not — a blank is normalised to `null` in `createSkill`, so an
+                untouched box never sits in the per-owner unique index. Visibly
+                labelled apart from "Name" so the two boxes are told apart. */}
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Document number</span>
+              <input
+                className={styles.input}
+                value={newDocNumber}
+                onChange={(e) => setNewDocNumber(e.target.value)}
+              />
             </label>
             <button
               type="button"

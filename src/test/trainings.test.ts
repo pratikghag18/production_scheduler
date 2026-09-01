@@ -25,7 +25,10 @@ import type { SchedulerError } from "@/lib/api";
 import {
   NAMES_SHOWN,
   NAME_MAX_LENGTH,
+  NO_DOCUMENT_NUMBER,
+  describeDocumentNumberRefusal,
   describeTrainingWriteRefusal,
+  documentNumberLabel,
   hiddenByPlantNote,
   listStrandedHolders,
   matchesTrainingQuery,
@@ -53,9 +56,30 @@ import { isAtOrBelow } from "../features/admin/lib/scope.ts";
 const LINE_A = "40000000-0000-0000-0000-00000000000a";
 const LINE_B = "40000000-0000-0000-0000-00000000000b";
 
-const FORKLIFT_A: TrainingRow = { id: "s1", name: "Forklift", siteNodeId: LINE_A, active: true };
-const FORKLIFT_B: TrainingRow = { id: "s2", name: "Forklift", siteNodeId: LINE_B, active: true };
-const WELDING_A: TrainingRow = { id: "s3", name: "Welding", siteNodeId: LINE_A, active: false };
+// ⭐ `externalId` IS PART OF THE ROW NOW (0032) — a document number distinct
+// from the name. Forklift-A carries one; the other two record none (`null`),
+// which is the ordinary answer and what `documentNumberLabel` shows a dash for.
+const FORKLIFT_A: TrainingRow = {
+  id: "s1",
+  name: "Forklift",
+  siteNodeId: LINE_A,
+  active: true,
+  externalId: "QP-14",
+};
+const FORKLIFT_B: TrainingRow = {
+  id: "s2",
+  name: "Forklift",
+  siteNodeId: LINE_B,
+  active: true,
+  externalId: null,
+};
+const WELDING_A: TrainingRow = {
+  id: "s3",
+  name: "Welding",
+  siteNodeId: LINE_A,
+  active: false,
+  externalId: null,
+};
 const ALL: readonly TrainingRow[] = [FORKLIFT_A, FORKLIFT_B, WELDING_A];
 
 /* ---------------------------------------------------------------------------
@@ -94,6 +118,10 @@ const EVERY_SENTENCE: readonly string[] = [
   skippedRowsNote(1) ?? "",
   skippedRowsNote(3) ?? "",
   retiredClashNote(false) ?? "",
+  documentNumberLabel(null),
+  documentNumberLabel("QP-14"),
+  describeDocumentNumberRefusal({ kind: "DuplicateValue" }, "described"),
+  describeDocumentNumberRefusal({ kind: "WriteRefused" }, "You don't have permission."),
   describeTrainingWriteRefusal({ kind: "DuplicateValue" }, "described"),
   describeTrainingWriteRefusal({ kind: "WriteRefused" }, "You don't have permission."),
   describeTrainingWriteRefusal(
@@ -179,8 +207,8 @@ describe("trainings.ts — the list", () => {
     // Re-sorting here would be a second ordering that can disagree with
     // `order("name")` in the read.
     const rows: TrainingRow[] = [
-      { id: "z", name: "Zebra", siteNodeId: LINE_A, active: true },
-      { id: "a", name: "Aardvark", siteNodeId: LINE_A, active: true },
+      { id: "z", name: "Zebra", siteNodeId: LINE_A, active: true, externalId: null },
+      { id: "a", name: "Aardvark", siteNodeId: LINE_A, active: true, externalId: null },
     ];
     expect(partitionTrainings(rows).live.map((r) => r.name)).toEqual(["Zebra", "Aardvark"]);
   });
@@ -364,6 +392,36 @@ describe("trainings.ts — what the screen says", () => {
     expect(skippedRowsNote(1)).toBe("1 row couldn't be read and isn't shown.");
     expect(skippedRowsNote(2)).toBe("2 rows couldn't be read and aren't shown.");
     expect(skippedRowsNote(2)).not.toContain("training");
+  });
+
+  it("T32 ⭐ a document number shows as typed, and a blank one shows a dash, never empty text", () => {
+    // The number is a distinct fact from the name (the maintainer, 1 Sept), and
+    // most rows on a young company have none — so `null` is an ordinary answer.
+    expect(documentNumberLabel("QP-14")).toBe("QP-14");
+    expect(documentNumberLabel(null)).toBe(NO_DOCUMENT_NUMBER);
+    // ⚠️ `""` reads the same as `null`: an empty string is not a document number,
+    // and `createSkill`/`setSkillDocumentNumber` normalise it to `null` anyway.
+    expect(documentNumberLabel("")).toBe(NO_DOCUMENT_NUMBER);
+    // ⚠️ A DASH, NOT EMPTY TEXT — an empty cell reads as a column that failed to
+    // load rather than a fact nobody has recorded.
+    expect(NO_DOCUMENT_NUMBER).not.toBe("");
+  });
+
+  it("T33 ⭐⭐ a duplicate DOCUMENT NUMBER is named as the number, never as the name", () => {
+    // A `DuplicateValue` from `setSkillDocumentNumber` is the NUMBER clashing on
+    // `(org_id, site_node_id, external_id)`, not the name. Reusing
+    // `describeTrainingWriteRefusal` here would send the reader to rename a
+    // training whose name was never the trouble — D106's shape, in an error.
+    const msg = describeDocumentNumberRefusal({ kind: "DuplicateValue" }, "generic");
+    expect(msg.toLowerCase()).toContain("document number");
+    expect(msg.toLowerCase()).not.toContain("name");
+    // ⚠️ AND IT MUST NOT BE THE NAME SENTENCE. The two helpers are separate for
+    // exactly this: the same error kind means different nouns on the two writes.
+    expect(msg).not.toBe(describeTrainingWriteRefusal({ kind: "DuplicateValue" }, "generic"));
+    // Anything else passes the shared description straight through, unrewritten.
+    expect(
+      describeDocumentNumberRefusal({ kind: "WriteRefused" }, "You don't have permission."),
+    ).toBe("You don't have permission.");
   });
 });
 
