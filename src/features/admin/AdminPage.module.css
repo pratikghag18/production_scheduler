@@ -19,6 +19,41 @@
   background: var(--surface);
 }
 
+/* Collapsed: the rail shrinks to fit just its toggle, and `.content` (flex: 1)
+   takes the width back. `width: auto` rather than a fixed narrow value so the
+   strip is exactly as wide as the one control left in it, at any scale. */
+.railCollapsed {
+  width: auto;
+  padding: 0.75rem 0.375rem;
+}
+
+/* The show/hide chevron. Sits at the rail's trailing edge when open (where a
+   reader reaches to shut it) and centred when the rail is a thin strip. */
+.railToggle {
+  align-self: flex-end;
+  flex: none;
+  border: 0;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  margin-bottom: 0.25rem;
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.railToggle:hover {
+  background: var(--page);
+  color: var(--ink);
+}
+
+.railCollapsed .railToggle {
+  align-self: center;
+  margin-bottom: 0;
+}
+
 .railItem,
 .railItemActive {
   display: flex;

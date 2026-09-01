@@ -92,8 +92,42 @@ function useHierarchyTree(enabled: boolean) {
   });
 }
 
+/**
+ * ⭐ THE RAIL COLLAPSES SO A WIDE SECTION GETS THE WHOLE WIDTH. The maintainer,
+ * 1 Sept: the Trainings table (and Products, and Import) can run to four columns
+ * plus a fixed action strip, and the rail is spending width a reader on a wide
+ * table would rather give the table. Collapsing it leaves a thin strip with the
+ * one control that brings it back.
+ *
+ * ⚠️ REMEMBERED PER VIEWER, and every read and write is wrapped: a private
+ * window or blocked storage throws on access rather than returning null, and the
+ * screen must open with the rail SHOWN in that case, never crash. It is a
+ * convenience, not state anything depends on.
+ */
+const RAIL_COLLAPSED_KEY = "admin.railCollapsed";
+
+function readRailCollapsed(): boolean {
+  try {
+    return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export default function AdminPage() {
   const [section, setSection] = useState<SectionId>("hierarchy");
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(readRailCollapsed);
+  const toggleRail = () =>
+    setRailCollapsed((collapsed) => {
+      const next = !collapsed;
+      try {
+        localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // A viewer with storage blocked still gets the toggle for this visit;
+        // it simply is not remembered into the next one.
+      }
+      return next;
+    });
   const { session, profile, loading: sessionLoading } = useSession();
   // ⭐⭐ D114: THE RAIL IS FILTERED, NOT THE PANELS. A supervisor gets the same
   // Operators and Trainings screens everybody else does — they simply show what
@@ -277,21 +311,44 @@ export default function AdminPage() {
 
   return (
     <div className={styles.page}>
-      <nav className={styles.rail} aria-label="Admin sections">
-        {visibleSections.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className={activeSection === s.id ? styles.railItemActive : styles.railItem}
-            disabled={!s.enabled}
-            aria-current={activeSection === s.id ? "page" : undefined}
-            title={s.enabled ? undefined : "Coming in a later brief"}
-            onClick={() => setSection(s.id)}
-          >
-            {s.label}
-            {!s.enabled && <span className={styles.soon}>soon</span>}
-          </button>
-        ))}
+      <nav
+        className={railCollapsed ? `${styles.rail} ${styles.railCollapsed}` : styles.rail}
+        aria-label="Admin sections"
+      >
+        {/* ⭐ THE ONE CONTROL THAT SURVIVES A COLLAPSE. When the rail is shut it
+            is the only thing in it, so it must always be reachable — the section
+            buttons are the thing being hidden, never this. `aria-expanded` names
+            the state a chevron only hints at. */}
+        <button
+          type="button"
+          className={styles.railToggle}
+          aria-label={railCollapsed ? "Show the admin sections" : "Hide the admin sections"}
+          aria-expanded={!railCollapsed}
+          title={railCollapsed ? "Show sections" : "Hide sections"}
+          onClick={toggleRail}
+        >
+          {railCollapsed ? "»" : "«"}
+        </button>
+        {/* ⚠️ NAVIGATION IS HIDDEN WHILE COLLAPSED, NOT DISABLED. A reader who
+            wants to switch section opens the rail first; leaving greyed buttons
+            in a 2rem strip would be controls named after more than they do
+            (D106). The active section keeps rendering its content full-width
+            behind the shut rail. */}
+        {!railCollapsed &&
+          visibleSections.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={activeSection === s.id ? styles.railItemActive : styles.railItem}
+              disabled={!s.enabled}
+              aria-current={activeSection === s.id ? "page" : undefined}
+              title={s.enabled ? undefined : "Coming in a later brief"}
+              onClick={() => setSection(s.id)}
+            >
+              {s.label}
+              {!s.enabled && <span className={styles.soon}>soon</span>}
+            </button>
+          ))}
       </nav>
 
       <div className={styles.content}>
