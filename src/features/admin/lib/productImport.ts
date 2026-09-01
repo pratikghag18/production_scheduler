@@ -58,9 +58,13 @@ export interface ColumnMap {
 }
 
 const ALIASES: Record<keyof ColumnMap, readonly string[]> = {
-  sku: ["sku", "part number", "part_number", "part no", "part", "code", "product code"],
-  name: ["name", "product name", "description", "product", "title"],
-  externalId: ["external_id", "external id", "id", "ref", "reference", "source id", "source_id"],
+  // ⭐ THE FRIENDLY, SELF-EXPLANATORY NAME IS FIRST in each list, so it is what
+  // the downloadable template writes (see PRODUCT_TEMPLATE) — a person opening
+  // the CSV a week later reads "Product code", not "sku". The terse forms stay in
+  // the list so an ERP export or a hand-edited header still auto-detects.
+  sku: ["product code", "sku", "part number", "part_number", "part no", "part", "code"],
+  name: ["product name", "name", "description", "product", "title"],
+  externalId: ["import id", "import_id", "external_id", "external id", "id", "ref", "reference"],
   plant: ["plant", "site", "location", "facility", "made in", "made_in"],
 };
 
@@ -81,19 +85,37 @@ export function detectColumns(headerKeys: readonly string[]): ColumnMap {
 }
 
 /**
- * The downloadable "model CSV" for products: the header row a human fills in,
- * plus one example row.
+ * The downloadable "model CSV" for products: a plain-English header row, one
+ * example row, and a `legend` explaining what each column means.
  *
- * ⭐ THE HEADERS ARE THE CANONICAL ALIASES, DERIVED FROM `ALIASES` ABOVE, so the
- * template and the detector cannot drift — a column the template writes is by
- * construction one `detectColumns` will map. (`sku`,`name` are required;
- * `external_id`,`plant` optional — but the template lists all four so a human
- * sees the full shape.) A list of columns written twice is a bug with a delay on
- * it; this is written once.
+ * ⭐ THE HEADERS ARE SELF-EXPLANATORY, NOT TERSE — "Product code", not "sku" — so
+ * a person who opens the file a week later still knows what to type. Each one is
+ * a `detectColumns` alias (its lower-cased form is first in `ALIASES` above), so
+ * the guided path still auto-detects; case case `M1` in the tests pins that every
+ * template header maps to the field it should, which is the real no-drift
+ * guarantee. Required vs optional is spelled out in the `legend`, not baked into
+ * the header (a header with "(required)" in it would not auto-detect).
  */
-export const PRODUCT_TEMPLATE: { headers: readonly string[]; example: readonly string[] } = {
-  headers: [ALIASES.sku[0], ALIASES.name[0], ALIASES.externalId[0], ALIASES.plant[0]],
+export const PRODUCT_TEMPLATE: {
+  headers: readonly string[];
+  example: readonly string[];
+  legend: ReadonlyArray<{ column: string; means: string }>;
+} = {
+  headers: ["Product code", "Product name", "Import ID", "Plant"],
   example: ["WX-100", "Widget X", "EXT-100", "Plant A"],
+  legend: [
+    {
+      column: "Product code",
+      means: "the part number — unique across the whole company (required)",
+    },
+    { column: "Product name", means: "what the part is called (required)" },
+    {
+      column: "Import ID",
+      means:
+        "your own system's id for this part — lets a re-upload update it instead of adding a duplicate (optional)",
+    },
+    { column: "Plant", means: "which plant makes it; leave blank to assign later (optional)" },
+  ],
 };
 
 /* ===========================================================================

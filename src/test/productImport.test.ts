@@ -283,19 +283,26 @@ describe("file errors", () => {
 });
 
 describe("PRODUCT_TEMPLATE — the model CSV cannot drift from what the detector looks for", () => {
-  it("M1: every template header is one detectColumns maps, in the right field", () => {
-    // The template is downloaded, filled in, re-uploaded; if a header it writes
-    // were not one the detector recognises, the guided path would map nothing.
-    const map = detectColumns(PRODUCT_TEMPLATE.headers.map((h) => h.toLowerCase()));
-    expect(map).toEqual({
-      sku: PRODUCT_TEMPLATE.headers[0],
-      name: PRODUCT_TEMPLATE.headers[1],
-      externalId: PRODUCT_TEMPLATE.headers[2],
-      plant: PRODUCT_TEMPLATE.headers[3],
-    });
+  it("M1: every friendly template header still auto-detects to the right field", () => {
+    // The template writes plain-English headers ("Product code", not "sku"); the
+    // real no-drift guarantee is that each still maps. parseCsvTable lower-cases
+    // headers before matching, so the detector sees the lower-cased form.
+    const keys = PRODUCT_TEMPLATE.headers.map((h) => h.toLowerCase());
+    const map = detectColumns(keys);
+    expect(map).toEqual({ sku: keys[0], name: keys[1], externalId: keys[2], plant: keys[3] });
+    // ...and the headers are NOT the terse column names any more.
+    expect(PRODUCT_TEMPLATE.headers).toEqual([
+      "Product code",
+      "Product name",
+      "Import ID",
+      "Plant",
+    ]);
   });
 
-  it("M2: the example row has one value per header", () => {
+  it("M2: the example row and the legend both cover every header", () => {
     expect(PRODUCT_TEMPLATE.example.length).toBe(PRODUCT_TEMPLATE.headers.length);
+    // Every header has a legend entry explaining what it means, so nothing on the
+    // template is unexplained.
+    expect(PRODUCT_TEMPLATE.legend.map((l) => l.column)).toEqual([...PRODUCT_TEMPLATE.headers]);
   });
 });

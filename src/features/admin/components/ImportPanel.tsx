@@ -190,6 +190,14 @@ export function ImportPanel() {
           </button>{" "}
           with the right columns and an example row.
         </p>
+        <dl className={styles.legend}>
+          {PRODUCT_TEMPLATE.legend.map((entry) => (
+            <div key={entry.column} className={styles.legendRow}>
+              <dt className={styles.legendTerm}>{entry.column}</dt>
+              <dd className={styles.legendDesc}>{entry.means}</dd>
+            </div>
+          ))}
+        </dl>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>CSV file</span>
           <input

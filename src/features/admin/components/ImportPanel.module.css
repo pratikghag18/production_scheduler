@@ -206,6 +206,28 @@
   opacity: 0.45;
 }
 
+/* The legend under the file picker: what each template column means. */
+.legend {
+  margin: 0 0 0.5rem;
+  display: grid;
+  gap: 0.25rem;
+}
+.legendRow {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.legendTerm {
+  margin: 0;
+  font-weight: 600;
+}
+.legendDesc {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.9em;
+}
+
 /* An inline "Download a template" link inside the hint sentence. */
 .linkButton {
   padding: 0;
