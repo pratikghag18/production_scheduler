@@ -14,16 +14,20 @@
 import { useState } from "react";
 import { ProductsImport } from "./ProductsImport";
 import { OperatorsImport } from "./OperatorsImport";
+import { TrainingsImport } from "./TrainingsImport";
+import { CertificationsImport } from "./CertificationsImport";
 import styles from "./ImportPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
 export const IMPORT_PANEL_READY = true;
 
-type ImportEntity = "products" | "operators";
+type ImportEntity = "products" | "operators" | "trainings" | "certifications";
 
 const TABS: { key: ImportEntity; label: string }[] = [
   { key: "products", label: "Products" },
   { key: "operators", label: "People" },
+  { key: "trainings", label: "Trainings" },
+  { key: "certifications", label: "Certifications" },
 ];
 
 export function ImportPanel() {
@@ -47,7 +51,10 @@ export function ImportPanel() {
           </button>
         ))}
       </div>
-      {entity === "products" ? <ProductsImport /> : <OperatorsImport />}
+      {entity === "products" && <ProductsImport />}
+      {entity === "operators" && <OperatorsImport />}
+      {entity === "trainings" && <TrainingsImport />}
+      {entity === "certifications" && <CertificationsImport />}
     </div>
   );
 }

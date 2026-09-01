@@ -23,9 +23,11 @@
  */
 import type { ImportPlan } from "@/features/admin/lib/productImport";
 import type { ImportPlan as OperatorImportPlan } from "@/features/admin/lib/operatorImport";
+import type { ImportPlan as TrainingImportPlan } from "@/features/admin/lib/trainingImport";
+import type { ImportPlan as CertificationImportPlan } from "@/features/admin/lib/certificationImport";
 import { supabase } from "@/lib/supabase";
 import { assignProductSite, updateProduct } from "./products";
-import { updateOperator } from "./operators";
+import { createSkill, grantSkill, updateOperator, updateSkillRecord } from "./operators";
 import { describeSchedulerError, requireWritten, toSchedulerError } from "./errors";
 import type { SchedulerError } from "./errors";
 import type { TablesInsert } from "@/lib/database.types";
@@ -243,6 +245,103 @@ export async function applyOperatorImport(
           id: o.operatorId,
           displayName: o.displayName,
           employeeRef: o.employeeRef,
+        });
+        updated += 1;
+      }
+    } catch (e) {
+      failed.push({ line: row.line, message: describeSchedulerError(asSchedulerError(e)) });
+    }
+  }
+
+  return { inserted, updated, failed };
+}
+
+/* ===========================================================================
+ * §3. Trainings. The catalogue lane of the same wizard — bulk-adding training
+ * TYPES (Forklift, Welding…), one per plant.
+ *
+ * ⭐ THE SIMPLEST LANE OF THE THREE:
+ *   - The only write is `createSkill` (there is no external_id / source on a
+ *     training, and no plant follow-on: the owner IS `site_node_id`, set in the
+ *     one insert, and the plan resolved it).
+ *   - An "update" outcome means the (name, plant) training is ALREADY THERE. The
+ *     import does not change it — apply is a NO-OP that only counts it as
+ *     `updated`, so a re-upload is idempotent and the training's `active` flag is
+ *     left alone. There is nothing to call.
+ * =========================================================================== */
+
+/**
+ * Apply the trainings plan. Collects per-row failures like the lanes above;
+ * propagates a whole-call failure (a dropped connection). Error rows in the plan
+ * are already excluded — they were never going to be written.
+ */
+export async function applyTrainingImport(
+  plan: TrainingImportPlan,
+  ctx: ImportContext,
+): Promise<ImportResult> {
+  let inserted = 0;
+  let updated = 0;
+  const failed: ImportRowFailure[] = [];
+
+  for (const row of plan.rows) {
+    const o = row.outcome;
+    if (o.kind === "error") continue;
+    try {
+      if (o.kind === "insert") {
+        await createSkill({ orgId: ctx.orgId, name: o.name, siteNodeId: o.plantNodeId });
+        inserted += 1;
+      } else {
+        // A no-op "update": the (name, plant) training already exists. Nothing to
+        // write — do NOT touch its active flag — just count it.
+        updated += 1;
+      }
+    } catch (e) {
+      failed.push({ line: row.line, message: describeSchedulerError(asSchedulerError(e)) });
+    }
+  }
+
+  return { inserted, updated, failed };
+}
+
+/* ===========================================================================
+ * §4. Training records (certifications). Each row grants a training to a
+ * person, or updates the sign-off/dates of one they already hold.
+ *
+ * ⭐ The plan already resolved the person and the training to ids and refused
+ * the ambiguous rows; this only writes. An INSERT is `grantSkill`, an UPDATE is
+ * `updateSkillRecord` — both existing writes, so nothing new is needed here. The
+ * CSV is authoritative for the three record fields, so all three are sent on
+ * both paths (a blank cell is `null`).
+ * ======================================================================== */
+export async function applyCertificationImport(
+  plan: CertificationImportPlan,
+  ctx: ImportContext,
+): Promise<ImportResult> {
+  let inserted = 0;
+  let updated = 0;
+  const failed: ImportRowFailure[] = [];
+
+  for (const row of plan.rows) {
+    const o = row.outcome;
+    if (o.kind === "error") continue;
+    try {
+      if (o.kind === "insert") {
+        await grantSkill({
+          orgId: ctx.orgId,
+          operatorId: o.operatorId,
+          skillId: o.skillId,
+          expiresAt: o.expiresAt,
+          certifiedAt: o.certifiedAt,
+          signedOffBy: o.signedOffBy,
+        });
+        inserted += 1;
+      } else {
+        await updateSkillRecord({
+          operatorId: o.operatorId,
+          skillId: o.skillId,
+          expiresAt: o.expiresAt,
+          certifiedAt: o.certifiedAt,
+          signedOffBy: o.signedOffBy,
         });
         updated += 1;
       }

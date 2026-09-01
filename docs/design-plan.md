@@ -8811,3 +8811,31 @@ insert row must resolve a plant by name and a blank one is a per-row error; an U
 alone (re-homing a person is out of scope for import v1). Verified in the browser: three people added
 with their plants, a no-plant row refused, and the imported rows carried `external_id` + the file name
 as `source`.
+
+---
+
+## §19.85 — training import: a catalogue and a join (the fourth and fifth lanes)
+
+The maintainer, having seen the imports: *"add a similar import function for training as well… the
+supervisor will bulk upload new trainings in the training tab as well as they would want bulk update
+trainings for people."* Two importers, both on the generic `ImportWizard`:
+
+- **Trainings (the catalogue).** Bulk-add training TYPES, one per plant. Match key is (name, owner) —
+  skills are unique per (org, owner, name) since 0031 — so a supervisor's "Forklift, Plant A" resolves
+  the plant by name; a new pair inserts (`createSkill`), an existing one is a no-op "update". A blank
+  or unresolvable plant is a per-row error because `skills.site_node_id` is NOT NULL.
+- **Certifications (the records).** A JOIN import: each row records that a PERSON holds a TRAINING,
+  with a sign-off and dates. ⭐ **The match keys are what a supervisor actually has** (the maintainer
+  chose this): an EMPLOYEE REF and the TRAINING NAME — no import ids. The person is the operator with
+  that ref (ambiguous ref -> refused, since employee_ref is not unique); the training is the skill of
+  that name owned by a node ON THE PERSON'S OWN BRANCH, the same comparability
+  `app_guard_operator_skill_scope` enforces (a Plant-1 person may hold a Plant-1 or Line-1 training,
+  never a Plant-2 one). A held training updates (`updateSkillRecord`), an unheld one grants
+  (`grantSkill`); the CSV is authoritative for sign-off/certified/expiry, and a malformed date is
+  refused rather than stored. Both gate on admin-anywhere (a site admin imports their own plant), not
+  company-admin — recording a certification is an admin act on the person's branch.
+
+Driven in the browser: a training added and an existing one no-op'd; a person granted a training, a
+held one's sign-off updated, an unknown employee ref refused. Tree CSV import was DROPPED here — the
+starter library covers a new plant's structure by copying, and the visual editor beats a
+parents/children CSV.
