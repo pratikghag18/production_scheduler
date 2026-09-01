@@ -8699,3 +8699,48 @@ Every existing product has exactly one `site_node_id`; the backfill inserts one 
 row per product from it before the column is dropped. A strict widening in meaning (one plant
 becomes a one-element list), so nothing legal becomes illegal — but the transform runs on real data
 so `upgrade_0034_` exercises it against pre-0034 rows the same way 0028 and 0031 did.
+
+---
+
+## §19.82 — CSV import, products first (stage 23)
+
+The import screen that D115 was sequenced before. It reads a CSV, shows what it WOULD do, lets a
+human fix what is wrong, and applies. Products lead because D115 made them the clean case; operators
+and the hierarchy tree follow into the same wizard.
+
+### The three parts, and why they are three
+- **`csv.ts` — an RFC 4180 parser, entity-agnostic.** A split-on-comma "parser" is what this exists
+  to not be: a real spreadsheet quotes any field with a comma, a newline or a quote in it, and
+  doubles an interior quote. It tolerates LF, CRLF and a bare CR as record breaks and strips a
+  leading BOM (Excel's "CSV UTF-8" writes one, and without stripping it the first header cell is
+  `﻿sku` and no column maps — the server's `app_trim_ws` strips U+FEFF from NAMES but that is
+  downstream of column mapping). It turns bytes into a grid and knows nothing about products, which
+  is what lets operators and the tree reuse it.
+- **`productImport.ts` — the PLAN, pure.** It decides, per row, INSERT / UPDATE / ERROR, as data a
+  test checks and a screen renders. ⭐⭐ **The match key is `external_id`, and D115 is what makes
+  that possible:** a part is company-wide and (since 0034) so is its import id, so a re-upload of the
+  same export UPDATES rather than DUPLICATES. Validation REUSES `validateProductDraft`, so an import
+  cannot write a row the manual form would have refused.
+- **`imports.ts` — apply, author-only.** Row-at-a-time on purpose: the wizard's value is telling a
+  human which rows landed and which did not, which a per-row apply produces and a single bulk
+  statement cannot. An imported UPDATE is the ordinary `updateProduct`; only the INSERT is new, because
+  it must set `external_id` (the match key) and a non-'manual' `source`.
+
+### The matching rules (the order a row is judged)
+1. external_id matches an existing part → UPDATE (sku, name) — unless the new sku is already a
+   DIFFERENT part's, which no import may move.
+2. external_id matches nothing → INSERT.
+3. no external_id but the sku matches an existing part → UPDATE that part (the sku is company-wide,
+   so the same code IS the same part); a new sku → INSERT.
+4. two file rows sharing an external_id, or a sku, are BOTH errors — otherwise the outcome would
+   depend on row order.
+5. the optional `plant` column assigns a `product_sites` row after the write; a name that resolves to
+   nothing is an error (never a silent skip), a blank plant is fine (a part offered nowhere is a
+   legitimate D115 state).
+
+### Company-admin only
+Importing creates company-wide parts, so it lands on `products_insert = app_is_admin()` — the Split
+decision, unchanged. A site admin sees the preview but not the Apply button. Verified on the running
+database: an imported insert with `external_id` + `source` set lands, a plant assigns, and a second
+row with the same `external_id` is refused `23505` — which is exactly why the plan UPDATES on a match
+rather than re-inserting.
