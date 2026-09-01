@@ -459,9 +459,18 @@ export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]
  * inside the chain that writes.
  * ======================================================================== */
 
-/** The API modules that own a scoped table, and the table each one writes. */
+/**
+ * The API modules that own a scoped table, and the table each one writes.
+ *
+ * ⭐ D115 / migration 0034 REMOVED PRODUCTS from this audit. A product no longer
+ * carries a single `site_node_id`; where it belongs is a LIST in `product_sites`,
+ * written by `assignProductSite` / `unassignProductSite` — which are inherently a
+ * set AND an un-set, so the "can you also change it after creation" hazard this
+ * audit exists for cannot arise there. Operators and shift patterns keep the
+ * single-owner column and the parity rule. (Adding products back here would
+ * report the honest offence "nothing sets products.site_node_id" — J5's shape.)
+ */
 export const SCOPED_WRITE_SURFACES: ReadonlyArray<{ file: string; table: string }> = [
-  { file: "src/lib/api/products.ts", table: "products" },
   { file: "src/lib/api/operators.ts", table: "operators" },
   { file: "src/lib/api/shifts.ts", table: "shift_templates" },
 ];

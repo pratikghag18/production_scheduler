@@ -574,6 +574,46 @@ export type Database = {
         }
         Relationships: []
       }
+      product_sites: {
+        Row: {
+          node_id: string
+          org_id: string
+          product_id: string
+        }
+        Insert: {
+          node_id: string
+          org_id: string
+          product_id: string
+        }
+        Update: {
+          node_id?: string
+          org_id?: string
+          product_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_sites_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_sites_org_id_node_id_fkey"
+            columns: ["org_id", "node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "product_sites_org_id_product_id_fkey"
+            columns: ["org_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
       products: {
         Row: {
           active: boolean
@@ -583,7 +623,6 @@ export type Database = {
           id: string
           name: string
           org_id: string
-          site_node_id: string
           sku: string
           source: string
           updated_at: string
@@ -596,7 +635,6 @@ export type Database = {
           id?: string
           name: string
           org_id: string
-          site_node_id: string
           sku: string
           source?: string
           updated_at?: string
@@ -609,7 +647,6 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string
-          site_node_id?: string
           sku?: string
           source?: string
           updated_at?: string
@@ -621,13 +658,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "orgs"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "products_org_id_site_node_id_fkey"
-            columns: ["org_id", "site_node_id"]
-            isOneToOne: false
-            referencedRelation: "nodes"
-            referencedColumns: ["org_id", "id"]
           },
         ]
       }
@@ -991,6 +1021,7 @@ export type Database = {
       app_can_read_node: { Args: { p_node: string }; Returns: boolean }
       app_can_read_operator: { Args: { p_operator: string }; Returns: boolean }
       app_can_read_owned: { Args: { p_site_node: string }; Returns: boolean }
+      app_can_read_product: { Args: { p_product: string }; Returns: boolean }
       app_can_read_shift: { Args: { p_shift: string }; Returns: boolean }
       app_can_read_shift_template: {
         Args: { p_template: string }
@@ -1031,9 +1062,14 @@ export type Database = {
         Args: { p_node: string; p_org: string; p_owner: string }
         Returns: boolean
       }
-      app_pick_product_color: {
-        Args: { p_org_id: string; p_site_node_id: string }
-        Returns: string
+      app_pick_product_color: { Args: { p_org_id: string }; Returns: string }
+      app_product_offered_at: {
+        Args: { p_node: string; p_product: string }
+        Returns: boolean
+      }
+      app_product_offered_at_in_org: {
+        Args: { p_node: string; p_org: string; p_product: string }
+        Returns: boolean
       }
       app_product_palette: { Args: never; Returns: string[] }
       app_profile_exists_in_org: {

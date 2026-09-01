@@ -32,7 +32,7 @@ const LIVE: Product = {
   sku: "WX",
   name: "Widget X",
   active: true,
-  siteNodeId: "n1",
+  siteNodeIds: ["n1"],
   colorToken: "product-1",
 };
 const PRODUCTS: ReadonlyMap<string, Product> = new Map([["p1", LIVE]]);
@@ -213,13 +213,17 @@ describe("the synthesised rows carry no identity that anything could look up", (
     expect(operatorViewFor(departed, OPERATORS)?.id).toBe("");
   });
 
-  it("H19 ⚠️: an empty OWNER, which must never reach offeredAt — it fails OPEN", () => {
-    // `offeredAt` returns true for an owner it cannot resolve (scope.ts), so a
-    // synthesised row handed to it would read as belonging at every cell. It
-    // cannot happen by construction — `offeredHere` filters the arrays
-    // `board_window` returns and nothing synthesised is ever put in them — and
-    // this case is here so that stays true.
-    expect(productViewFor(run(GONE), PRODUCTS)?.siteNodeId).toBe("");
+  it("H19 ⚠️: a deleted product has an EMPTY places list, offered nowhere (D115)", () => {
+    // ⭐ D115 made the empty list the SAFE value rather than a hazard: a
+    // synthesised product carries `siteNodeIds: []`, which `productOfferedAt`
+    // reads as "offered at no cell" — the honest zero, not the fail-open "cannot
+    // tell" a single unreadable owner used to be. It still never reaches the
+    // picker (`productsOfferedHere` filters the arrays `board_window` returns and
+    // nothing synthesised is ever put in them); this case pins the empty list.
+    // The departed OPERATOR still carries `siteNodeId: ""` — operators kept the
+    // single owner, and there the empty string fails OPEN, so it must never reach
+    // offeredAt (it does not, for the same construction reason).
+    expect(productViewFor(run(GONE), PRODUCTS)?.siteNodeIds).toEqual([]);
     const departed = asg({ operatorId: null, operatorDisplayName: "Dana" });
     expect(operatorViewFor(departed, OPERATORS)?.siteNodeId).toBe("");
   });

@@ -113,11 +113,11 @@ const boardWindowJson: Json = {
       // now. The fixture carries it so the happy path matches the real payload
       // rather than the subset the parser happens to tolerate.
       color_token: "product-2",
-      // D108/0028: `products.site_node_id` is NOT NULL and `board_window` has
-      // emitted it since 0025 — the node this product BELONGS TO. REQUIRED by
-      // `parseProduct`; the last describe in this file pins that. It names the
-      // node in `nodes` above, as the real payload's foreign key does.
-      site_node_id: "30000000-0000-0000-0000-000000000001",
+      // D115/0034: `board_window` emits `site_node_ids` — the LIST of nodes this
+      // product is made at, from `product_sites`. REQUIRED as an array by
+      // `parseProduct` (the last describe pins the shape). Here a one-element
+      // list naming the node in `nodes` above, as the real payload does.
+      site_node_ids: ["30000000-0000-0000-0000-000000000001"],
     },
   ],
   skills: [{ id: "40000000-0000-0000-0000-000000000001", name: "CNC" }],
@@ -442,40 +442,57 @@ describe("parseProduct — the colour is presentation, not identity", () => {
 });
 
 /*
- * D108 / migration 0028 — the OWNER, and why it is the opposite trade from the
- * colour directly above.
+ * D115 / migration 0034 — the PLACES, and why an empty list is the new honest
+ * zero rather than a rejection.
  *
- * `products.site_node_id` is NOT NULL and says where the product belongs;
+ * `board_window` emits `site_node_ids`, the LIST of nodes a product is made at;
  * `app_guard_run_scope` / `app_guard_assignment_scope` refuse a run or
- * assignment whose product is not owned by an ancestor-or-self of the target
- * cell (`not_offered_here`), and there is NO override for products. So it is
+ * assignment whose product is offered in NO plant covering the target cell
+ * (`not_offered_here`), and there is NO override for products. So the list is
  * identity, like `sku`, not presentation like `color_token`.
  *
- * ⚠️ And a coerced `""` would not be the cautious choice it looks like:
- * `offeredAt` FAILS OPEN on an owner it cannot resolve, so an empty owner
- * reads as "cannot tell" and the product would be offered at EVERY cell and
- * refused at all of them. Rejecting the row is the honest answer to a payload
- * this client does not understand.
+ * ⚠️ BUT AN EMPTY ARRAY IS ACCEPTED, and that is the change from the pre-0034
+ * single owner. A part assigned to no plant is a legitimate state — offered
+ * nowhere, which `productOfferedAt` reads correctly as "no cell". What is
+ * rejected is a MALFORMED shape (a non-array, or an array with a non-string
+ * entry): a payload this client does not understand, unlike an honest zero.
  */
-describe("parseProduct — the owner is identity, and has no degraded value", () => {
-  it("keeps the owner the server actually sends", () => {
+describe("parseProduct — the places are identity, and an empty list is honest", () => {
+  it("keeps the list the server actually sends", () => {
     const win = parseBoardWindow(boardWindowJson);
-    expect(win?.products[0]?.siteNodeId).toBe("30000000-0000-0000-0000-000000000001");
+    expect(win?.products[0]?.siteNodeIds).toEqual(["30000000-0000-0000-0000-000000000001"]);
   });
 
-  it("rejects a product with no site_node_id rather than coercing it to empty", () => {
+  it("⭐ accepts an EMPTY list — a part assigned to no plant, offered nowhere", () => {
     const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
-      products: { site_node_id?: string | null }[];
+      products: { site_node_ids: unknown }[];
     };
-    delete raw.products[0].site_node_id;
+    raw.products[0].site_node_ids = [];
+    const win = parseBoardWindow(raw as unknown as Json);
+    expect(win?.products[0]?.siteNodeIds).toEqual([]);
+  });
+
+  it("rejects a product with no site_node_ids rather than coercing it", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids?: unknown }[];
+    };
+    delete raw.products[0].site_node_ids;
     expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
   });
 
-  it("rejects a product whose site_node_id is null — 0028 removed that option", () => {
+  it("rejects site_node_ids that is not an array — a shape it does not understand", () => {
     const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
-      products: { site_node_id?: string | null }[];
+      products: { site_node_ids: unknown }[];
     };
-    raw.products[0].site_node_id = null;
+    raw.products[0].site_node_ids = "30000000-0000-0000-0000-000000000001";
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+
+  it("rejects an array with a non-string entry", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids: unknown }[];
+    };
+    raw.products[0].site_node_ids = ["30000000-0000-0000-0000-000000000001", 42];
     expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
   });
 });

@@ -328,7 +328,15 @@
 >    **15 checks on a real database (7 upgrade + 8 acceptance through RLS as real site admins);
 >    5 breakages, 4 caught, 1 inert with its kind named and the rule it leans on pinned by T8.**
 >
-> 0. **🔴🔴 D115 — A PRODUCT BELONGS TO A LIST OF PLACES, NOT ONE. DECIDED, NOT BUILT.**
+> 0. **✅ D115 — A PRODUCT BELONGS TO A LIST OF PLACES, NOT ONE. BUILT (migration 0034, §19.81).**
+>    ⭐ **The Split decision (1 Sept):** the shared record (sku/name/colour/delete) is company
+>    property (`app_is_admin()` only); the list of makers is per-plant (a plant admin adds/removes
+>    THEIR own plant via `product_sites`). `products.site_node_id` is DROPPED, replaced by the
+>    `product_sites (org_id, product_id, node_id)` join table; reading, offering (`app_product_offered_at`,
+>    the run/assignment guards, the board), the plant filter, `ProductsPanel`, and the write policies
+>    all moved to the list. External-id import identity became company-wide too (parts, like people).
+>    Colour is now company-wide. `board_window` emits `site_node_ids`. **App tests still 35 files (1397);
+>    tsc 0, eslint 0.** *(original DECIDED-not-built note kept below for the record.)*
 >    The maintainer, 31 Aug, answering the part-number question and opening a bigger one:
 >    *"Part number is company wide, no company has different part numbers for the same product…
 >    A Product can be assigned to multiple plants as there can be different plants at different geo

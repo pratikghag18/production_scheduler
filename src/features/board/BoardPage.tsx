@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { offeredHere } from "@/features/admin/lib/scope";
+import { offeredHere, productsOfferedHere } from "@/features/admin/lib/scope";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useRootPath } from "./hooks/useRootPath";
@@ -283,14 +283,17 @@ export default function BoardPage() {
   const offeredProducts = useMemo(() => {
     if (!boardQuery.data || createNodeId === null) return [];
     const active = boardQuery.data.products.filter((p) => p.active);
-    // FAILS OPEN on a node this client cannot resolve a path for, matching
-    // `offeredAt`'s own default (scope.ts's header): "I cannot tell" offers
-    // and lets the server decide, because hiding is silent and permanent
-    // while a refusal is loud and lands on the write-error contract.
+    // D115: a product is offered where ANY of its plants covers this cell, so
+    // this uses `productsOfferedHere` (the list) rather than `offeredHere` (a
+    // single owner, still right for operators below). FAILS OPEN per place on a
+    // node this client cannot resolve a path for, matching `offeredAt`'s default
+    // (scope.ts's header): "I cannot tell" offers and lets the server decide,
+    // because hiding is silent and permanent while a refusal is loud and lands
+    // on the write-error contract. A part with no places is offered nowhere.
     if (index === null) return active;
     const path = index.nodeById.get(createNodeId)?.path;
     if (path === undefined) return active;
-    return offeredHere(active, path, index.nodeById);
+    return productsOfferedHere(active, path, index.nodeById);
   }, [boardQuery.data, index, createNodeId]);
 
   /**

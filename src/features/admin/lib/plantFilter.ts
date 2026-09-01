@@ -195,6 +195,39 @@ export function rowsInPlant<T extends { siteNodeId: string }>(
   });
 }
 
+/**
+ * The products made at or below the chosen plant — D115's list-shaped twin of
+ * `rowsInPlant`.
+ *
+ * ⭐ A product is IN the plant when ANY of its places is at or below the chosen
+ * root. A single-owner row (operators, trainings, shift patterns) uses
+ * `rowsInPlant`; a product is made in one, several or all plants, so it belongs
+ * to the filtered view if even one of its places does. Fails open per place, for
+ * the same reason `rowsInPlant` does: an owner this reader cannot resolve is
+ * "cannot tell" -> show it.
+ *
+ * ⚠️ AN EMPTY LIST FALLS OUT OF A NARROWED VIEW, deliberately. A part assigned
+ * to no plant is not made in the chosen plant, so it is hidden while a plant is
+ * selected — and shown again on "All plants" (the `root === undefined` early
+ * return), where every part the reader can see belongs.
+ */
+export function productRowsInPlant<T extends { siteNodeIds: readonly string[] }>(
+  rows: readonly T[],
+  choice: PlantChoice,
+  plants: readonly PlantOption[],
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): T[] {
+  const root = choice === null ? undefined : plants.find((p) => p.id === choice);
+  if (root === undefined) return [...rows];
+  return rows.filter((r) =>
+    r.siteNodeIds.some((placeId) => {
+      const owner = nodesById.get(placeId);
+      if (owner === undefined) return true; // cannot tell -> show it
+      return isAtOrBelow(owner.path, root.path);
+    }),
+  );
+}
+
 /* ===========================================================================
  * Remembering the choice.
  *

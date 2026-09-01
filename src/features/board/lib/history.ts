@@ -38,12 +38,13 @@ export interface ProductHistory {
  * point at any more — and inventing one would put a value in front of a
  * component that no lookup anywhere could resolve.
  *
- * ⚠️ `siteNodeId` IS EMPTY FOR THE SAME REASON, AND IT MUST NEVER REACH
- * `offeredHere`. That predicate FAILS OPEN on an owner it cannot resolve
- * (`scope.ts`), so a synthesised row handed to it would be "offered" at every
- * cell. It cannot happen by construction — `offeredHere` filters the catalogue
- * array `board_window` returns, and nothing synthesised is ever put in it — and
- * this comment is here so it stays that way.
+ * ⚠️ `siteNodeIds` IS EMPTY, AND UNDER D115 THAT IS THE SAFE VALUE RATHER THAN A
+ * HAZARD. An empty places list means `productOfferedAt` returns FALSE — offered
+ * nowhere — the honest zero, not the fail-open "cannot tell" a single unreadable
+ * owner used to be. So even if a synthesised row reached the picker it would
+ * simply not be offered; it still never does, because `productsOfferedHere`
+ * filters the catalogue array `board_window` returns and nothing synthesised is
+ * ever put in it.
  */
 function deletedProduct(row: ProductHistory): Product | undefined {
   if (row.productSku === null) return undefined;
@@ -52,7 +53,7 @@ function deletedProduct(row: ProductHistory): Product | undefined {
     sku: row.productSku,
     name: row.productName ?? row.productSku,
     active: false,
-    siteNodeId: "",
+    siteNodeIds: [],
     colorToken: row.productColorToken ?? "",
   };
 }

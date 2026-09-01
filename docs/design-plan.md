@@ -8564,3 +8564,138 @@ anyway (N16), and the owner scoping lost entirely (13 cases).
 NOT in this migration.** 0031 is its precondition and nothing more: a shared set whose whole
 purpose is "every plant copies Forklift into their own" cannot work while the second copy is
 refused. That is now possible; the curating and copying is the next piece.
+
+---
+
+## §19.81 — D115: a product belongs to a LIST of plants, not one (migration 0034)
+
+> *"Part number is company wide, no company has different part numbers for the same product… A
+> Product can be assigned to multiple plants as there can be different plants at different geo
+> locations within the company manufacturing the same part number."* — the maintainer, 31 August.
+> And on how many: *"It could be one plant, a number of plants or all plants, I don't have an
+> answer to it. The company will decide it, we need to be flexible."*
+
+### ⭐⭐ ONE COLUMN WAS DOING THREE JOBS, AND ONLY ONE OF THEM BECOMES A LIST
+
+`products.site_node_id` — a single NOT NULL node since 0028 — answered three separate questions at
+once, and the whole design is realising they are separate:
+
+| the question | who asks it | under D115 |
+| --- | --- | --- |
+| **who may READ this row** | `products_select` / `app_can_read_owned` | any plant it is made in is on your branch |
+| **where is it OFFERED** | `offeredHere` (board), `app_guard_run_scope` | any plant it is made in covers the cell |
+| **who may EDIT the shared record** | `products_insert/update/delete` | **a company admin** (see the Split decision) |
+
+D108 fused reading and offering deliberately — one owner, so "can I see it" and "is it offered
+here" had the same answer. D115 un-fuses them: **a part made in Plant A and Plant B is readable by
+both plants' admins and offered on both plants' cells, and neither of those is a single-node
+question any more.** The join table is the easy half; separating the three jobs is the design.
+
+### The shape — a join table, `node_shift_templates`' shape with the CARDINALITY FLIPPED
+
+```sql
+create table product_sites (
+  org_id     uuid not null references orgs(id),
+  product_id uuid not null,
+  node_id    uuid not null,
+  primary key (product_id, node_id),
+  foreign key (org_id, product_id) references products (org_id, id) on delete cascade,
+  foreign key (org_id, node_id)    references nodes (org_id, id)
+);
+```
+
+⚠️ **THE PRIMARY KEY IS `(product_id, node_id)`, NOT `node_id`, AND THAT IS THE TRAININGS TRAP THE
+BRIEF WARNED ABOUT.** `node_shift_templates` has `node_id` as its whole PK because **a node runs
+exactly one shift pattern** — the opposite cardinality. A product is made in *many* places, so the
+key is the pair. Reaching for `node_shift_templates`' single-node PK here would silently forbid the
+very thing D115 exists to allow. Same table shape, opposite cardinality — [[decision-record-drift]]
+rule 9, and the reason the training answer (per-plant *names*) is also the wrong analogy: parts are
+one thing made in several places, trainings are several courses that share a word.
+
+`on delete cascade` on the product FK: deleting a part takes its assignment rows with it. The node
+FK has no cascade — a plant is not deleted out from under its parts (the hierarchy has its own
+guards for that).
+
+### THE SPLIT DECISION — who may change a part several plants share (the maintainer, 1 Sept)
+
+A part number is company-wide, so a rename touches everyone who makes it. Asked which of three
+governance models to build, the maintainer chose **Split**:
+
+- **The shared record — sku, name, colour, and delete — is company property: `app_is_admin()`
+  only.** A plant admin cannot rename a part their plant happens to make, because the number is not
+  theirs to change.
+- **The list of makers is per-plant: a plant admin may add or remove THEIR OWN plant**
+  (`app_is_admin_for(node_id)` on the `product_sites` row), and a company admin may manage the whole
+  list.
+
+⭐ **This is why creating a product is a company-admin act now.** Creating a part number *is*
+creating the shared record. A plant admin no longer creates parts; they opt their plant into parts
+the company has defined. A part with **zero** plants is therefore a legitimate, ordinary state — a
+catalogue entry not yet assigned to anyone — not an error to guard against. The board simply does
+not offer it. This is the cleanest reading of "the company decides which plants make it": the
+part exists first, the assignment follows.
+
+⚠️ **`validateProductDraft`'s owner requirement (added by 0028) is DELETED, not moved.** The create
+form used to demand a single owner; there is no single owner to demand. Places are assigned
+separately, so the draft is `{ sku, name }` and nothing about a node.
+
+### Reading — the D108 proof carries, PER PLACE
+
+`products_select` becomes: readable when you are a company admin, or **any** of the part's plants is
+on one of your grant branches (either direction). `product_sites_select` is scoped by
+`app_can_read_node(node_id)`, exactly as 0028 §7 scoped the two join tables it found leaking — so a
+Plant B admin reading a part made in A and B sees the part (a company-wide fact) and the Plant B
+assignment row, but **not** the Plant A one. The full list of makers is a company-admin view.
+
+⚠️ **D108's proof that the board-history read exception is redundant STILL HOLDS, and it holds one
+place at a time.** A run at node `r` uses a part; the offering guard (below) guarantees *some* plant
+`o` of that part covers `r` (`o.path @> r.path`). If the caller can read `r`, the 0028 argument
+shows that particular `o` satisfies `app_can_read_owned(o)`, so the part's `products_select` EXISTS
+is satisfied by that row. ∎ The exception stays deleted; no plant needs the history clause.
+
+### Offering — `app_product_offered_at`, ANY place covers the cell
+
+`app_guard_run_scope` and `app_guard_assignment_scope` stop reading a single owner and ask
+`app_product_offered_at(product, node)` = *does any `product_sites` row's node cover this node*. The
+refusal is unchanged (`not_offered_here`); what changed is that a part offered in Plant A **or**
+Plant B is accepted on either, and refused only where **no** assigned plant reaches.
+
+### The strand guard MOVES from re-home to un-assign
+
+0028 §5's `products_rehome_guard` fired when the single owner changed. There is no single owner to
+change now; the equivalent hazard is **removing a plant a part is still scheduled under**. So the
+guard fires on `DELETE` from `product_sites`: a run or assignment at node `n` is *stranded* if the
+plant being removed is the last remaining maker that covers `n`. If removing this row would strand
+any live schedule, it raises `owner_change_blocked` naming the count — the same contract, the same
+sentence family, a different trigger. Adding a plant strands nothing and is unguarded.
+
+### Colour becomes company-wide
+
+`app_pick_product_color` took the owner node and balanced the palette *within that owner's* rows
+(`IS NOT DISTINCT FROM p_site_node_id`). A part has no single owner, and its colour is one value
+shown on every board it appears on, so the pick balances **across the whole org's products** now —
+`app_pick_product_color(p_org_id)`, one argument. `products_set_color_token` no longer reads
+`new.site_node_id` (there is none). Re-assignment never re-colours, as before: colour is set once at
+insert and only a deliberate hand-override changes it (0025).
+
+### The column is DROPPED, not left vestigial
+
+`products.site_node_id` is dropped at the end of the migration. A kept-but-unused owner column would
+be exactly the two-homes-for-one-fact trap this project keeps deleting (`ownerOptions`,
+`app_product_on_visible_schedule`, the dead `canEdit` param): whoever restored it would re-fuse the
+three jobs D115 spent a migration separating. Operators, skills and shift patterns keep their single
+`site_node_id` — D115 is products-only, because only parts are "one thing made in several places".
+
+⚠️ **Dropping the column is a CLIENT change `db:types` surfaces AND some it does not.** `AdminProduct`
+loses `siteNodeId` and gains `siteNodeIds: string[]`; `offeredHere` (generic over `siteNodeId`)
+still serves operators on the board but products get their own list-aware offering; `rowsInPlant`'s
+product caller becomes "any place at or below the chosen plant"; `canOwnProduct` / `canEditProduct`
+/ `editRefusalNote` and the whole owner picker in `ProductsPanel` are rebuilt around the Split
+decision. Grep `siteNodeId` in the products path, not just `tsc`.
+
+### Backfill
+
+Every existing product has exactly one `site_node_id`; the backfill inserts one `product_sites`
+row per product from it before the column is dropped. A strict widening in meaning (one plant
+becomes a one-element list), so nothing legal becomes illegal — but the transform runs on real data
+so `upgrade_0034_` exercises it against pre-0034 rows the same way 0028 and 0031 did.

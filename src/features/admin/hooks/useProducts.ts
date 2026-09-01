@@ -22,14 +22,17 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  assignProductSite,
   createProduct,
   deleteProduct,
   fetchAdminProducts,
   setProductActive,
   setProductColor,
+  unassignProductSite,
   updateProduct,
   type AdminProduct,
   type CreateProductInput,
+  type ProductSiteInput,
   type SchedulerError,
   type SetProductActiveInput,
   type SetProductColorInput,
@@ -72,7 +75,7 @@ export function useCreateProduct() {
   });
 }
 
-/** Rename / re-sku. Owner and colour are untouched — see `updateProduct`. */
+/** Rename / re-sku the shared record (company admin only). Places and colour are untouched. */
 export function useUpdateProduct() {
   const queryClient = useQueryClient();
 
@@ -80,6 +83,36 @@ export function useUpdateProduct() {
     mutationFn: (input) => updateProduct(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: productKeys.all });
+    },
+  });
+}
+
+/**
+ * Add a plant to a product's list of makers (D115). Invalidates the BOARD too:
+ * assigning a plant changes where the product is offered, and a stale board
+ * would keep refusing (or keep offering) it until something else refreshed.
+ */
+export function useAssignProductSite() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, ProductSiteInput>({
+    mutationFn: (input) => assignProductSite(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+  });
+}
+
+/** Remove a plant from a product's list of makers (D115). Same board invalidation. */
+export function useUnassignProductSite() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, ProductSiteInput>({
+    mutationFn: (input) => unassignProductSite(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["board"] });
     },
   });
 }

@@ -18,6 +18,8 @@ import {
   isAtOrBelow,
   offeredAt,
   offeredHere,
+  productOfferedAt,
+  productsOfferedHere,
   scopeIndex,
   scopeLabel,
   scopeOptions,
@@ -144,6 +146,50 @@ describe("scope: what is offered where", () => {
       { siteNodeId: PLANT.id, sku: "A" },
     ];
     expect(offeredHere(items, CELL1.path, BY_ID).map((i) => i.sku)).toEqual(["B", "A"]);
+  });
+});
+
+describe("scope: a product is offered from a LIST of places (D115)", () => {
+  it("XP1: offered where ANY of its places covers the cell", () => {
+    // Made on Line 1 and in Plant 2. Offered at a Line 1 cell (Line 1 covers it)
+    // and at Plant 2 (Plant 2 covers itself), and NOT at the Line 10 cell, which
+    // neither place covers. This is the union — the whole point of D115.
+    const places = [LINE1.id, PLANT2.id];
+    expect(productOfferedAt(places, CELL1.path, BY_ID)).toBe(true);
+    expect(productOfferedAt(places, PLANT2.path, BY_ID)).toBe(true);
+    expect(productOfferedAt(places, CELL10.path, BY_ID)).toBe(false);
+  });
+
+  it("XP2: ⭐ an EMPTY list is offered NOWHERE — the honest zero, not fail-open", () => {
+    // A part assigned to no plant is a legitimate state and must be offered at no
+    // cell. `some` over `[]` is false, which is exactly right — contrast a single
+    // UNREADABLE owner, which fails OPEN (XP4). Emptiness is known, not unknown.
+    expect(productOfferedAt([], CELL1.path, BY_ID)).toBe(false);
+    expect(productOfferedAt([], PLANT.path, BY_ID)).toBe(false);
+  });
+
+  it("XP3: one covering place is enough even among several that do not", () => {
+    // Line 10 and Cell 1 and Plant 1: at the Line 1 cell only Plant 1 covers, and
+    // that is sufficient. A predicate needing ALL places to cover fails here.
+    expect(productOfferedAt([LINE10.id, PLANT.id], CELL1.path, BY_ID)).toBe(true);
+  });
+
+  it("XP4: a place this client cannot resolve FAILS OPEN, per place", () => {
+    // Same direction as offeredAt (X11): "I cannot tell" offers and lets the
+    // server decide. One unreadable place is enough to offer, since it might cover.
+    expect(productOfferedAt(["n-hidden"], CELL1.path, BY_ID)).toBe(true);
+    // ...but a resolvable place that does NOT cover, alongside no others, hides.
+    expect(productOfferedAt([PLANT2.id], CELL1.path, BY_ID)).toBe(false);
+  });
+
+  it("XP5: productsOfferedHere filters the catalogue and preserves order", () => {
+    const items = [
+      { sku: "A", siteNodeIds: [LINE1.id] }, // covers CELL1
+      { sku: "B", siteNodeIds: [PLANT2.id] }, // does not
+      { sku: "C", siteNodeIds: [PLANT.id, LINE10.id] }, // covers via Plant 1
+      { sku: "D", siteNodeIds: [] }, // offered nowhere
+    ];
+    expect(productsOfferedHere(items, CELL1.path, BY_ID).map((i) => i.sku)).toEqual(["A", "C"]);
   });
 });
 

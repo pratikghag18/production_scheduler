@@ -556,9 +556,10 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
   it("J2: and the audit names all three surfaces, so none can be quietly dropped", () => {
     // The list that drives a test is itself untested unless something asserts
     // the list — three times over, on this project. A sorted literal.
+    // ⭐ D115 REMOVED PRODUCTS: its "where it belongs" is the product_sites list,
+    // not a single column, so the create/edit-parity hazard cannot arise there.
     expect(SCOPED_WRITE_SURFACES.map((s) => `${s.file}|${s.table}`).sort()).toEqual([
       "src/lib/api/operators.ts|operators",
-      "src/lib/api/products.ts|products",
       "src/lib/api/shifts.ts|shift_templates",
     ]);
   });
@@ -576,16 +577,19 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
     // source by string match and does not check that the match happened is a
     // test that quietly measures nothing the day somebody rewords the line, and
     // this one only failed loudly because it expected a non-empty result.
+    // ⭐ D115 removed products from the audit, so J3 now targets OPERATORS, which
+    // still carries the single-owner column. `expect(cut).not.toBe(src)` makes a
+    // reworded line fail loudly instead of quietly measuring nothing.
     const frozen = new Map(sources);
-    const src = sources.get("src/lib/api/products.ts")!;
+    const src = sources.get("src/lib/api/operators.ts")!;
     const cut = src.replace(
       "if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;",
       "",
     );
     expect(cut).not.toBe(src);
-    frozen.set("src/lib/api/products.ts", cut);
+    frozen.set("src/lib/api/operators.ts", cut);
     expect(scopeParityOffences(frozen)).toEqual([
-      "src/lib/api/products.ts: nothing can CHANGE products.site_node_id after creation",
+      "src/lib/api/operators.ts: nothing can CHANGE operators.site_node_id after creation",
     ]);
   });
 

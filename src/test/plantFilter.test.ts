@@ -39,6 +39,7 @@ import {
   nodesInPlant,
   plantChipLabel,
   plantControlVisible,
+  productRowsInPlant,
   readablePlants,
   resolvePlantChoice,
   rowsInPlant,
@@ -229,6 +230,49 @@ it("PF22 ⭐: a row whose OWNER cannot be read is KEPT — 'cannot tell' is not 
 it("PF23: order is preserved — filtering must not reshuffle a sorted list", () => {
   const kept = ids(rowsInPlant(ROWS, A, PLANTS, BY_ID));
   expect(kept).toEqual(ids(ROWS).filter((id) => kept.includes(id)));
+});
+
+/* ===========================================================================
+ * productRowsInPlant — the D115 list-shaped half. A product is in the filtered
+ * view when ANY of its places is at or below the chosen plant.
+ * =========================================================================== */
+
+interface ProductRow {
+  id: string;
+  siteNodeIds: string[];
+}
+const PRODUCTS: readonly ProductRow[] = [
+  { id: "p-a-only", siteNodeIds: [A_L1] }, // Plant A only
+  { id: "p-b-only", siteNodeIds: [B] }, // Plant B only
+  { id: "p-shared", siteNodeIds: [A, B] }, // made in BOTH plants
+  { id: "p-none", siteNodeIds: [] }, // assigned to no plant
+  { id: "p-unreadable", siteNodeIds: [NOWHERE] }, // place cannot be resolved
+];
+
+it("PF29: All plants keeps every product, placeless and shared alike", () => {
+  expect(ids(productRowsInPlant(PRODUCTS, null, PLANTS, BY_ID))).toEqual(ids(PRODUCTS));
+});
+
+it("PF30 ⭐: a product made in the chosen plant is kept — including a shared one", () => {
+  const kept = ids(productRowsInPlant(PRODUCTS, A, PLANTS, BY_ID));
+  expect(kept).toContain("p-a-only");
+  expect(kept).toContain("p-shared"); // the whole point of D115
+  expect(kept).not.toContain("p-b-only");
+});
+
+it("PF31: and the same shared product appears in the OTHER plant's view too", () => {
+  const kept = ids(productRowsInPlant(PRODUCTS, B, PLANTS, BY_ID));
+  expect(kept).toContain("p-b-only");
+  expect(kept).toContain("p-shared");
+  expect(kept).not.toContain("p-a-only");
+});
+
+it("PF32 ⭐: a placeless product FALLS OUT of a narrowed view (kept on All plants)", () => {
+  expect(ids(productRowsInPlant(PRODUCTS, A, PLANTS, BY_ID))).not.toContain("p-none");
+});
+
+it("PF33 ⭐: a product with an unresolvable place is KEPT — 'cannot tell' is not 'hide'", () => {
+  expect(ids(productRowsInPlant(PRODUCTS, A, PLANTS, BY_ID))).toContain("p-unreadable");
 });
 
 /* ===========================================================================

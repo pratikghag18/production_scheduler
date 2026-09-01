@@ -119,6 +119,49 @@ export function offeredHere<T extends { siteNodeId: string }>(
   return items.filter((i) => offeredAt(i.siteNodeId, targetPath, nodesById));
 }
 
+/* ---------------------------------------------------------------------------
+ * ⭐ D115 / migration 0034: A PRODUCT IS OFFERED FROM A LIST OF PLACES.
+ *
+ * Operators, trainings and shift patterns keep a single owner and use
+ * `offeredAt` above. A product is made in one, several or all plants, so it is
+ * offered where ANY of its places covers the cell — the union, not one owner.
+ * This is a SECOND function rather than a widening of `offeredAt`, because
+ * folding a list into the single-owner path would make every caller carry an
+ * array it does not have (operators do not) and would blur the one place the
+ * cardinalities differ. `app_product_offered_at` (0034 §3) is the server twin.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Is a product with these places offered at the node `targetPath`?
+ *
+ * ⭐ ANY place covering the cell is enough. A place this client cannot resolve
+ * FAILS OPEN (offer it, let the server decide) — the file header's rule, applied
+ * per place. ⚠️ AN EMPTY LIST IS NOT "cannot tell" — it is the honest zero: a
+ * part assigned to no plant is offered NOWHERE, and `some` over `[]` is `false`,
+ * which is exactly right. (Contrast `offeredAt`, where a single unreadable owner
+ * fails open; here emptiness is a real, offered-nowhere state, not an unknown.)
+ */
+export function productOfferedAt(
+  siteNodeIds: readonly string[],
+  targetPath: string,
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): boolean {
+  return siteNodeIds.some((placeId) => {
+    const place = nodesById.get(placeId);
+    if (place === undefined) return true; // cannot tell -> offer it
+    return isAtOrBelow(targetPath, place.path);
+  });
+}
+
+/** Every product in `items` offered at `targetPath`. Order is preserved. */
+export function productsOfferedHere<T extends { siteNodeIds: readonly string[] }>(
+  items: readonly T[],
+  targetPath: string,
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): T[] {
+  return items.filter((i) => productOfferedAt(i.siteNodeIds, targetPath, nodesById));
+}
+
 /* ===========================================================================
  * The picker.
  * ======================================================================== */

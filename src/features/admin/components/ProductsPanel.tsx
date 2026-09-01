@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------------------
-   Products — the catalogue admin section (§19.62, D102).
+   Products — the catalogue admin section (§19.62, D102; §19.81 / D115).
 
    ⭐ `PRODUCTS_PANEL_READY` LIVES HERE, NOT IN `AdminPage.tsx`. The nav entry
    reads it, so turning this section on is a one-line edit to THIS file — the
@@ -15,11 +15,30 @@
    query key `AdminPage` already uses, so React Query serves it from one
    request rather than two.
 
-   DECIDES NOTHING ITSELF. Every rule on this screen — the palette, the owner
-   labels, who may write, what a draft must look like, what to say when a
-   delete is refused — is a function in `../lib/products.ts`, which is pure and
-   is what `src/test/products.test.ts` tests. This file renders what those
+   DECIDES NOTHING ITSELF. Every rule on this screen — the palette, who may
+   write the shared record, who may manage a plant, what a draft must look
+   like, what to say when a write is refused — is a function in
+   `../lib/products.ts` (pure, tested by `src/test/products.test.ts`) or in
+   `../lib/scope.ts` / `../lib/plantFilter.ts`. This file renders what those
    functions return.
+
+   ⭐⭐ D115 / THE SPLIT (§19.81). A product is no longer owned by ONE node.
+   It is the company-wide record — sku, name, colour — plus a SEPARATE LIST of
+   the plants that make it (`row.siteNodeIds`). The two are governed apart:
+
+     THE SHARED RECORD  (create, rename, recolour, retire, delete)  — company
+                                                                      admin only
+     THE LIST OF MAKERS (add / remove a plant)                      — a plant
+                                                                      admin may
+                                                                      manage a
+                                                                      node THEY
+                                                                      administer
+
+   So there is NO owner picker any more, on the create form or on the row. The
+   create form asks only for sku + name; each row shows a "Made in" area — the
+   plants it is made in, by name — with a remove control per plant and an "Add
+   plant" tree picker. A product made in ZERO plants is an ordinary catalogue
+   entry, not an error; it is shown plainly as "Not assigned to any plant yet".
    --------------------------------------------------------------------------- */
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -29,6 +48,7 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import {
   canEditProduct,
+  canManagePlace,
   describeWriteRefusal,
   editRefusalNote,
   matchesProductQuery,
@@ -41,19 +61,27 @@ import {
   productColorVar,
   validateProductDraft,
   type ProductRow,
-  type ProductSite,
 } from "../lib/products";
 import {
   useAdminProducts,
+  useAssignProductSite,
   useCreateProduct,
   useSetProductActive,
   useSetProductColor,
+  useUnassignProductSite,
   useUpdateProduct,
 } from "../hooks/useProducts";
 import { DeleteDialog } from "./DeleteDialog";
 import { usePlantFilter } from "../hooks/usePlantFilter";
-import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
-import { indentedLabel, scopeIndex, scopeOptions, scopePathLabel } from "../lib/scope";
+import { nodesInPlant, productRowsInPlant } from "../lib/plantFilter";
+import {
+  indentedLabel,
+  scopeIndex,
+  scopeLabel,
+  scopeOptions,
+  scopePathLabel,
+  type ScopeNode,
+} from "../lib/scope";
 import styles from "./ProductsPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
@@ -77,13 +105,17 @@ export function ProductsPanel() {
   const updateMutation = useUpdateProduct();
   const activeMutation = useSetProductActive();
   const colorMutation = useSetProductColor();
+  const assignMutation = useAssignProductSite();
+  const unassignMutation = useUnassignProductSite();
 
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<{ sku: string; name: string; siteNodeId: string }>({
+  // ⭐ D115: THE EDIT IS THE SHARED RECORD ONLY — sku and name. Where a product
+  // is made is the `product_sites` list, managed by its own controls (the chips
+  // and the add picker), not by this draft. There is no owner field here.
+  const [editDraft, setEditDraft] = useState<{ sku: string; name: string }>({
     sku: "",
     name: "",
-    siteNodeId: "",
   });
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [recolouringId, setRecolouringId] = useState<string | null>(null);
@@ -92,209 +124,108 @@ export function ProductsPanel() {
   // succeeds still has something to say — what went and what stayed — and
   // saying it in the row's error slot would style an outcome as a failure.
   const [rowNotice, setRowNotice] = useState<{ id: string; message: string } | null>(null);
-  const [newDraft, setNewDraft] = useState({ sku: "", name: "", siteNodeId: "" });
-  const [newErrors, setNewErrors] = useState<{
-    sku: string | null;
-    name: string | null;
-    owner: string | null;
-  }>({
+  const [newDraft, setNewDraft] = useState({ sku: "", name: "" });
+  const [newErrors, setNewErrors] = useState<{ sku: string | null; name: string | null }>({
     sku: null,
     name: null,
-    owner: null,
   });
   const [formError, setFormError] = useState<string | null>(null);
 
   /* -- who this person is, and what that lets them change --------------- */
 
+  // ⭐ D115 / the Split: the shared record is company property. This client
+  // knows for certain whether it may touch it — `role === 'admin'`, no grant
+  // read needed — so `canEditProduct` is now simply this boolean.
   const isCompanyAdmin = profile?.role === "admin";
-  const adminAnywhere = profile?.adminAnywhere === true;
 
-  // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). Until 0025 the trigger refused
-  // anything but a root as an owner, so this filtered to `parentId === null`.
-  // The maintainer: *"how do we assign them to a specific hierarchy level so the lower
-  // levels inherit them?"* — so the picker is the tree now, and `nodes_select`
-  // already limits it to what this person may see.
   const allNodes = treeQuery.data?.nodes ?? [];
   const nodesById = scopeIndex(allNodes);
-  const sites: readonly ProductSite[] = allNodes.map((n) => ({ id: n.id, name: n.name }));
 
   /* -- which plant this screen is showing (roadmap 1(c)) ------------------ */
 
   // ⭐ THE CHOICE IS MADE ONE SCREEN UP AND THIS PANEL ONLY READS IT. The
   // control and the header chip live on `AdminPage`, once, for the whole admin
-  // screen — six per-panel filters would be six controls that drift apart, and
-  // a reader who set one would have no way to know the other five were still
-  // wide open. `usePlantFilter` takes no session and returns `choice: null`
-  // ("All plants") for anyone with a single readable root, so this panel never
-  // has to ask who is looking or whether a control exists.
+  // screen. `usePlantFilter` returns `choice: null` ("All plants") for anyone
+  // with a single readable root, so this panel never has to ask who is looking.
   //
-  // ⚠️ IT FAILS OPEN WHEN THE STRUCTURE READ FAILED, for free and on purpose.
-  // `allNodes` is then `[]`, so there are no readable roots, `resolvePlantChoice`
-  // collapses a remembered id to `null`, and every trim below is the identity.
-  // A failed tree read must not be able to empty this catalogue — which is the
-  // same reason `productRows` is handed `null` rather than `sites` just below.
+  // ⚠️ IT FAILS OPEN WHEN THE STRUCTURE READ FAILED. `allNodes` is then `[]`,
+  // so there are no readable roots, `resolvePlantChoice` collapses to `null`,
+  // and every trim below is the identity — a failed tree read cannot empty this
+  // catalogue.
   const plant = usePlantFilter(allNodes);
 
-  // ⚠️ FAILS CLOSED when `editable_shape_ids()` could not be read. That RPC is
-  // a PREVIEW and `filterEditableShapes` fails OPEN on it one screen over —
-  // right there, because the worst case is offering a structure the server
-  // then refuses. Here the worst case is offering a WRITE, so the answer flips:
-  // a company admin is unaffected either way (their answer comes from their
-  // own profile role), and a site admin whose preview failed sees a read-only
-  // catalogue with a reason rather than buttons that all fail.
+  // ⚠️ FAILS CLOSED when `editable_shape_ids()` could not be read, for the
+  // shared-record controls a company admin does not depend on this for. A site
+  // admin whose preview failed sees the plant controls read-only with a reason
+  // rather than buttons that all fail. (A company admin's rights come from their
+  // profile role, so they are unaffected either way.)
   const editableShapeIds = treeQuery.data?.editableShapeIds ?? null;
   const siteNodeIds: Record<string, string | null> = treeQuery.data?.siteNodeIds ?? {};
+  // ⭐ THE COARSE CLIENT SET OF NODES THIS PERSON ADMINISTERS — roots derived
+  // from the structures they may edit. `canManagePlace` uses it to decide which
+  // plant chips get a remove control and whether to offer the add picker.
   const adminSiteIds: readonly string[] =
     editableShapeIds === null
       ? []
       : editableShapeIds
           .map((shapeId) => siteNodeIds[shapeId] ?? null)
           .filter((id): id is string => id !== null);
-  // ⚠️ NOT gated on `treeQuery.data !== undefined`. That term made this flag
-  // unreachable in the failure it was written for: when the WHOLE tree read
-  // throws, `data` stays undefined for good (`retry: 1`, no refetch on focus),
-  // so `previewUnavailable` was false and the add-form fell through to "You
-  // don't administer a site, so there's nowhere to add a product." — a flat lie
-  // to a site admin whose writes the server would have accepted, with every row
-  // simultaneously labelled "Another site" and every button dead. The honest
-  // message is the one for a read we could not make, whichever read failed.
   const previewUnavailable = !isCompanyAdmin && (treeQuery.isError || editableShapeIds === null);
 
-  // ⭐ THE PICKER FAILS OPEN AND THE SERVER DECIDES. `ownerOptions` narrowed the
-  // list to `adminSiteIds`, which is derived from STRUCTURE ownership and is
-  // not the question the insert policy asks (see `canEditProduct`'s header) —
-  // so a site admin whose root has no claimed structure was offered nothing at
-  // all. Offering a node the server then refuses costs one clear sentence now
-  // that §19.63's contract exists; offering nothing costs the whole feature.
-  //
-  // ⭐ 0028 / D108 COLLAPSED THE TWO BRANCHES THAT USED TO BE HERE. A company
-  // admin got the list with a "company-wide" entry on top and everybody else
-  // got the same list with that entry filtered back out. `scopeOptions` no
-  // longer emits it, so there is one list and `isCompanyAdmin` no longer
-  // decides anything about this control.
-  //
-  // ⭐⭐ AND THE PLANT FILTER NARROWS IT — decision 3, "what you see is what you
-  // can create in". The rejected alternative lets somebody create a product
-  // into a plant they have filtered away and then watch it not appear, which is
-  // `scope.ts`'s silent hiding in a new costume; adding to another plant means
-  // switching to it first, which makes the target an explicit act rather than a
-  // dropdown entry scrolled past.
-  //
-  // ⚠️⚠️ THIS IS A SECOND NARROWING OF A DIFFERENT KIND FROM THE ONE ABOVE, AND
-  // THE TWO MUST NOT BE FOLDED TOGETHER. The filter is a VIEW CHOICE and is
-  // reversible; a PERMISSION narrowing would not be.
-  // Passing the filter's nodes as a permission would compile and look identical
-  // today, and the day somebody widens back to All plants it would silently
-  // widen what this form claims they may write. That is §19.77's lesson —
-  // the reason `placesUnderSameRoot` sits outside `workPlacesFor` — one screen
-  // up. (There is no permission set to pass: see the fail-open note
-  // above, which is about the server, not about what is on screen.)
-  const owners = scopeOptions(nodesInPlant(allNodes, plant.choice, plant.plants));
-  const ownerLabels = new Map(owners.map((o) => [o.value, indentedLabel(o)]));
+  // ⭐ WHO MAY OPEN THE ADD-PLANT PICKER AT ALL. A company admin always; a site
+  // admin only if they administer something. Someone who administers nowhere is
+  // offered nothing to add rather than a picker whose every choice the server
+  // refuses. The picker's contents still fail open per node (see the row).
+  const canManageAny = isCompanyAdmin || adminSiteIds.length > 0;
 
-  // The owner picker's value, kept legal by construction: falls back to the
-  // first owner this person may actually use. `""` survives only when the list
-  // itself is empty — the structure read did not land — and `submitNew` then
-  // refuses with a message rather than sending a null the database rejects.
-  //
-  // ⭐ THE FILTER IS WHY THIS ALREADY-EXISTING FALL-BACK NOW EARNS ITS KEEP.
-  // Narrowing `owners` can strand a half-typed draft on a node that is no
-  // longer offered; because the value is resolved on every render rather than
-  // stored, the picker moves to the chosen plant's first node instead of
-  // showing option 0 while holding another plant's id. ⚠️ `newDraft.siteNodeId`
-  // is deliberately NOT rewritten — widening back to All plants restores what
-  // they picked, which is the reversibility a view choice is supposed to have.
-  const ownerValue = owners.some((o) => o.value === newDraft.siteNodeId)
-    ? newDraft.siteNodeId
-    : (owners[0]?.value ?? "");
-
-  // ⚠️⚠️ THE SAME RESOLUTION FOR THE ROW'S PICKER, AND IT WAS MISSING. The add
-  // card has had it since 0028; the edit form read `editDraft.siteNodeId`
-  // straight into `value` and straight into the patch. A `<select>` handed a
-  // value none of its options carries renders its FIRST option and reports no
-  // error, so re-homing WX to Plant 2 and then filtering to Plant 1 gave a
-  // control reading "Plant 1" and a Save that sent Plant 2 — the control saying
-  // one thing and the write doing another, which is the failure D106 is about.
-  //
-  // ⭐ SO WHAT IS ON SCREEN IS WHAT SAVE SENDS, and the trade is deliberate: a
-  // row whose owner cannot be resolved at all (`rowsInPlant` fails open and
-  // keeps it) is re-homed to the first offered node if somebody presses Save on
-  // it. That is a change they can see spelled out in the picker before they
-  // press it; sending an id nothing on screen names is one they cannot.
-  const editOwnerValue = owners.some((o) => o.value === editDraft.siteNodeId)
-    ? editDraft.siteNodeId
-    : (owners[0]?.value ?? "");
+  // ⭐ THE ADD PICKER'S NODE POOL — the whole readable tree on "All plants", the
+  // chosen plant's subtree otherwise (the plant filter narrows the FORMS too,
+  // 1(c) decision 3). A node already in a product's list is filtered out per row.
+  // ⚠️ This is a VIEW-CHOICE narrowing, not a PERMISSION one: the server decides
+  // whether an offered node may actually be added, and refuses with a sentence.
+  const addableNodes: readonly ScopeNode[] = nodesInPlant(allNodes, plant.choice, plant.plants);
 
   /* -- the catalogue ----------------------------------------------------- */
 
-  // ⚠️ `null`, NOT `sites`, WHEN THE STRUCTURE READ FAILED. `sites` is derived
-  // from `treeQuery.data?.nodes ?? []`, so a failed read and "you can see no
-  // nodes" are the same empty array — and `productRows` would read that as
-  // "every owned product belongs elsewhere" and quietly empty the catalogue.
-  // Passing `null` says we could not find out, and it keeps every row.
-  const view = productRows(productsQuery.data ?? [], treeQuery.isSuccess ? sites : null);
+  // ⭐ D115: `productRows` no longer takes `sites` and no longer drops an
+  // "elsewhere" product. Every product that arrives here legitimately belongs to
+  // this reader's world (`products_select` admits only those), so there is
+  // nothing to resolve an owner name for and nothing to drop — just the
+  // skip-and-count for a row this client could not read.
+  const view = productRows(productsQuery.data ?? []);
 
-  // ⭐⭐ THE PLANT FILTER TRIMS THE ROWS, NOT `sites`, AND THAT IS THE WHOLE
-  // DECISION HERE. `productRows` uses `sites` for TWO jobs: it RESOLVES a
-  // product's owner name (`ownerLabel`), and it drops-and-counts any product
-  // whose owner is not in the list as `elsewhere`. Handing it a filtered
-  // `sites` would do both at once — every other plant's products would be
-  // counted as "belongs to another site, so it isn't listed", which is a
-  // sentence about PERMISSION, and the ones that survived would lose their
-  // labels. **A reversible view choice would have been reported as a fact
-  // about what this person may see.** So resolution stays complete and the
-  // trim happens outside it, exactly as §19.77 keeps `workPlacesFor` whole and
-  // cuts after it.
-  //
-  // ⚠️ AND THE TWO COUNTS THEREFORE CANNOT DOUBLE-COUNT. `view.elsewhere` is
-  // decided before this line and its rows never reach `rowsInPlant`; what is
-  // counted below is drawn from `view.rows`, which is what is left.
-  const inPlant = rowsInPlant(view.rows, plant.choice, plant.plants, nodesById);
+  // ⭐⭐ THE PLANT FILTER TRIMS THE ROWS. A product is in the chosen plant when
+  // ANY of its places is at or below it (`productRowsInPlant`). A part assigned
+  // to no plant falls out of a narrowed view and returns on "All plants" — see
+  // that function's header.
+  const inPlant = productRowsInPlant(view.rows, plant.choice, plant.plants, nodesById);
   const hiddenByPlant = view.rows.length - inPlant.length;
 
   // ⚠️ THE PLANT CUT COMES BEFORE THE SEARCH, so `hiddenByPlant` is a fact
   // about the control in the header and does not move while somebody types.
-  // Counting after the search was the alternative — it would answer "is the
-  // code I just typed one of the hidden ones?" — and it was rejected because a
-  // number that changes with every keystroke reads as being about the box
-  // being typed in, and the other two lines above it are search-independent
-  // too.
   const visible = inPlant.filter((r) => matchesProductQuery(r, query));
   const { active, inactive } = partitionProducts(visible);
 
   /* -- id-keyed state, when the filter takes its row away ----------------- */
 
-  // ⭐ THE THREE THINGS THAT OPEN SOMETHING, AND ONLY THOSE. `editingId`,
-  // `confirmingId` and `recolouringId` name a row that has a FORM open on it;
-  // `rowError` and `rowNotice` name a row that has a SENTENCE on it, and those
-  // are deliberately left alone — `onDeleted` above depends on a notice simply
-  // stopping being rendered when its row goes, which is the honest lifetime for
-  // "here is what just happened to a thing that no longer exists".
-  //
-  // ⚠️ A FORM IS NOT A SENTENCE. Resolve-or-fall-back (the `ownerValue` idiom)
-  // is not enough for these: it is reversible by construction, so widening back
-  // to All plants would re-open a delete confirmation the reader had left
-  // behind two plants ago. Clearing is the only thing that closes a door.
-  //
-  // ⚠️ MEASURED AGAINST `inPlant`, NOT `visible`: the search box is on this
-  // card, one keystroke from being cleared, and a row it hides is out of view
-  // rather than out of scope. The plant choice persists across visits and
-  // across sections, and it is also what narrows `owners` — so a row it removes
-  // is one whose editor could no longer offer its own owner.
+  // ⭐ THE THREE THINGS THAT OPEN A FORM ON A ROW. When the plant filter removes
+  // that row, the door has to be closed — a form is not a sentence, and
+  // resolve-or-fall-back is not enough for it (widening back would re-open a
+  // delete confirmation the reader left behind two plants ago). `rowError` and
+  // `rowNotice` are deliberately left alone — a sentence about a vanished row
+  // honestly stops being rendered when the row goes.
   const inPlantIds = new Set(inPlant.map((r) => r.id));
   const editingGone = editingId !== null && !inPlantIds.has(editingId);
   const confirmingGone = confirmingId !== null && !inPlantIds.has(confirmingId);
   const recolouringGone = recolouringId !== null && !inPlantIds.has(recolouringId);
   useEffect(() => {
-    // Booleans, not the id set, as the dependencies: a fresh `Set` every render
-    // would make this an effect that runs on every render and clears nothing.
     if (editingGone) setEditingId(null);
     if (confirmingGone) setConfirmingId(null);
     if (recolouringGone) setRecolouringId(null);
   }, [editingGone, confirmingGone, recolouringGone]);
 
   // BOTH reads, not just the products one. The tree is what decides who may
-  // edit what; rendering the catalogue before it lands showed a fully
+  // manage what; rendering the catalogue before it lands showed a fully
   // disabled, mislabelled screen for the width of that window.
   const loading = !canQuery || productsQuery.isLoading || treeQuery.isLoading;
 
@@ -306,33 +237,21 @@ export function ProductsPanel() {
     clearRowError(row.id);
     setConfirmingId(null);
     setEditingId(row.id);
-    setEditDraft({ sku: row.sku, name: row.name, siteNodeId: row.siteNodeId ?? "" });
+    setEditDraft({ sku: row.sku, name: row.name });
   }
 
   function saveEdit(row: ProductRow) {
-    // ⭐ THE SCOPE IS PART OF THE EDIT NOW. It was set at creation and frozen,
-    // which meant a line could be reorganised and its products could not follow
-    // — and the create form had a picker while the edit form did not, which is
-    // the same shape of gap as a break that could only be deleted and retyped.
-    // ⭐ 0028: `""` used to be folded to `null`, meaning company-wide. There is
-    // no such destination now, so the empty string travels as itself and
-    // `validateProductDraft` refuses it with a message beside the picker.
-    // ⚠️ `editOwnerValue`, NOT `editDraft.siteNodeId` — see its header. The
-    // patch has to carry the owner the picker is SHOWING, or a filter that
-    // narrowed the list turns Save into a write nothing on screen described.
-    const nextScope = editOwnerValue;
-    const result = validateProductDraft({
-      sku: editDraft.sku,
-      name: editDraft.name,
-      siteNodeId: nextScope,
-    });
+    // ⭐ D115: THE RENAME IS THE SHARED RECORD ONLY. Places travel through their
+    // own writes, so this carries just sku and name and can only fail on a
+    // duplicate sku or a refused write — one write, one thing that can be wrong.
+    const result = validateProductDraft({ sku: editDraft.sku, name: editDraft.name });
     if (!result.ok) {
       setRowError({ id: row.id, message: result.skuError ?? result.nameError ?? "" });
       return;
     }
     clearRowError(row.id);
     updateMutation.mutate(
-      { id: row.id, sku: result.value.sku, name: result.value.name, siteNodeId: nextScope },
+      { id: row.id, sku: result.value.sku, name: result.value.name },
       {
         onSuccess: () => setEditingId((cur) => (cur === row.id ? null : cur)),
         onError: (err: SchedulerError) =>
@@ -358,28 +277,67 @@ export function ProductsPanel() {
     );
   }
 
+  function addPlant(row: ProductRow, nodeId: string) {
+    if (profile === null || nodeId === "") return;
+    clearRowError(row.id);
+    setRowNotice(null);
+    assignMutation.mutate(
+      { orgId: profile.orgId, productId: row.id, nodeId },
+      {
+        onError: (err: SchedulerError) => {
+          // ⭐ ADDING A PLANT TWICE IS `DuplicateValue` — the plant is already in
+          // the list, which is the outcome the reader wanted. Say nothing; the
+          // refetch shows it. Every other refusal (a plant that is not theirs ->
+          // `WriteRefused`) gets its own sentence.
+          if (err.kind === "DuplicateValue") return;
+          setRowError({ id: row.id, message: describeSchedulerError(err) });
+        },
+      },
+    );
+  }
+
+  function removePlant(row: ProductRow, nodeId: string) {
+    if (profile === null) return;
+    clearRowError(row.id);
+    setRowNotice(null);
+    unassignMutation.mutate(
+      { orgId: profile.orgId, productId: row.id, nodeId },
+      {
+        // ⚠️ TWO REFUSALS, EACH ITS OWN SENTENCE. `owner_change_blocked` ->
+        // `OwnerChangeBlocked` (the part is still scheduled somewhere only this
+        // plant covers); a plant that is not theirs -> `WriteRefused`.
+        // `describeSchedulerError` says the right thing for each and
+        // `describeWriteRefusal` passes both through unchanged.
+        onError: (err: SchedulerError) =>
+          setRowError({
+            id: row.id,
+            message: describeWriteRefusal(err, describeSchedulerError(err)),
+          }),
+      },
+    );
+  }
+
   function submitNew() {
     if (profile === null) return;
-    const siteNodeId = ownerValue;
-    const result = validateProductDraft({ sku: newDraft.sku, name: newDraft.name, siteNodeId });
+    const result = validateProductDraft({ sku: newDraft.sku, name: newDraft.name });
     if (!result.ok) {
-      setNewErrors({ sku: result.skuError, name: result.nameError, owner: result.ownerError });
+      setNewErrors({ sku: result.skuError, name: result.nameError });
       setFormError(null);
       return;
     }
-    setNewErrors({ sku: null, name: null, owner: null });
+    setNewErrors({ sku: null, name: null });
     setFormError(null);
     createMutation.mutate(
       {
         // `products.org_id` has NO DEFAULT (0002) — it comes from the session
-        // profile on every insert, never from a database default that is not there.
+        // profile on every insert. ⭐ D115: no place here — a just-created part
+        // is offered nowhere until a plant is added, a legitimate state.
         orgId: profile.orgId,
         sku: result.value.sku,
         name: result.value.name,
-        siteNodeId: result.value.siteNodeId,
       },
       {
-        onSuccess: () => setNewDraft({ sku: "", name: "", siteNodeId: ownerValue }),
+        onSuccess: () => setNewDraft({ sku: "", name: "" }),
         onError: (err: SchedulerError) =>
           setFormError(describeWriteRefusal(err, describeSchedulerError(err))),
       },
@@ -389,32 +347,28 @@ export function ProductsPanel() {
   /* -- render ------------------------------------------------------------ */
 
   function renderRow(row: ProductRow) {
-    // The fourth argument is the fail-open one — see `canEditProduct`'s header.
-    // `adminAnywhere` is `app_is_admin_anywhere()`, fetched with the profile,
-    // and it is a `boolean | null`: `=== true` rather than a truthiness test,
-    // because "we could not ask" must not read as "yes".
-    const editable = canEditProduct(row, isCompanyAdmin, adminSiteIds, adminAnywhere);
-    const note = editRefusalNote(row, isCompanyAdmin, adminSiteIds, adminAnywhere);
+    // ⭐ D115: TWO DIFFERENT PERMISSIONS ON ONE ROW. `editable` gates the shared
+    // record (rename, recolour, retire, delete) and is simply "are you a company
+    // admin". Managing a PLACE is decided per place by `canManagePlace`.
+    const editable = canEditProduct(isCompanyAdmin);
+    const note = editRefusalNote(isCompanyAdmin);
     const isEditing = editingId === row.id;
     const isConfirming = confirmingId === row.id;
     const error = rowError !== null && rowError.id === row.id ? rowError.message : null;
     const notice = rowNotice !== null && rowNotice.id === row.id ? rowNotice.message : null;
 
+    // The nodes offerable in THIS row's add picker: the readable pool (already
+    // narrowed by the plant filter) minus the places it is already made in.
+    const assigned = new Set(row.siteNodeIds);
+    const addOptions = scopeOptions(addableNodes.filter((n) => !assigned.has(n.id)));
+
     return (
       <li key={row.id} className={row.active ? styles.row : `${styles.row} ${styles.retired}`}>
         <span className={styles.skuCell}>
-          {/* The product's OWN colour (0023 §3), not its position in a list.
-              `colorVar` has already fallen back if the token is one this
-              stylesheet does not define. */}
-          {/* ⭐ THE SWATCH IS THE CONTROL (the maintainer, Aug 27). The colour is still
-              CHOSEN for a product when it is created — least-used in its
-              owner's palette, D102 — and that stays the default, because the
-              thing D102 exists to prevent is a colour moving on its own. What
-              was missing is a person deliberately overriding one row, which is
-              a different act. Clicking the swatch opens the palette; the
-              picker offers only tokens `tokens.css` defines, because
-              `product-9` passes the database CHECK and renders as no colour
-              at all. */}
+          {/* The product's OWN colour (0023 §3). `colorVar` has already fallen
+              back if the token is one this stylesheet does not define. Clicking
+              the swatch opens the palette — a company-admin act (recolour is the
+              shared record), so it is disabled for anyone who cannot edit. */}
           <button
             type="button"
             className={styles.swatchBtn}
@@ -437,12 +391,9 @@ export function ProductsPanel() {
             <input
               className={styles.input}
               value={editDraft.sku}
-              /* ⚠️ NAMED FOR ITS ROW, not just for its field. The ADD card one
-                 card up has a field whose visible label is also "Product code",
-                 so while a row is open there were two controls on this screen
-                 with the same accessible name and nothing to tell them apart —
-                 which is what anyone not using a mouse hears. The swatch above
-                 already names its row; these now match it. */
+              /* ⚠️ NAMED FOR ITS ROW, not just for its field — the Add card's
+                 field is also labelled "Product code", so two identically-named
+                 boxes would be indistinguishable to a screen reader. */
               aria-label={`Product code for ${row.sku}`}
               onChange={(e) => setEditDraft((d) => ({ ...d, sku: e.target.value }))}
             />
@@ -462,35 +413,73 @@ export function ProductsPanel() {
           <span className={styles.name}>{row.name}</span>
         )}
 
-        {/* ⭐ THE "BELONGS TO" COLUMN IS THE CONTROL WHEN THE ROW IS BEING
-            EDITED. The maintainer asked three times for a way to change where an
-            existing product belongs, and each time I had wired only the CREATE
-            form — the picker existed one card up and nowhere on the row. **The
-            edit path is not a smaller version of the create path; it is the
-            other half of it**, and every field the create form offers has to
-            be reachable here or the value is frozen at birth.
-
-            ⚠️ THE FULL PATH IS THE TOOLTIP when it is not being edited, because
-            a scope can be any node and "Line 1" is ambiguous the moment a
-            second plant has one. */}
-        {isEditing ? (
-          <select
-            className={styles.input}
-            aria-label={`Where ${row.sku} belongs`}
-            value={editOwnerValue}
-            onChange={(e) => setEditDraft((d) => ({ ...d, siteNodeId: e.target.value }))}
-          >
-            {owners.map((o) => (
-              <option key={o.value ?? "company"} value={o.value ?? ""}>
-                {ownerLabels.get(o.value)}
-              </option>
+        {/* ⭐ D115: "MADE IN" — the LIST of plants, not one owner. Each place is
+            a chip; a chip this reader may manage carries a remove control, one
+            they cannot is plain text (a site admin sees only their own plants
+            here anyway — the list is RLS-scoped). An empty list says so plainly.
+            The add picker sits below, offered when this reader manages anywhere. */}
+        <span className={styles.madeIn}>
+          {row.siteNodeIds.length === 0 ? (
+            <span className={styles.unassigned}>Not assigned to any plant yet</span>
+          ) : (
+            <span className={styles.plantChips}>
+              {row.siteNodeIds.map((placeId) => {
+                const label = scopeLabel(placeId, nodesById);
+                const removable = canManagePlace(placeId, isCompanyAdmin, adminSiteIds);
+                return (
+                  <span
+                    key={placeId}
+                    className={styles.plantChip}
+                    title={scopePathLabel(placeId, nodesById)}
+                  >
+                    <span className={styles.plantName}>{label}</span>
+                    {removable && (
+                      <button
+                        type="button"
+                        className={styles.plantRemove}
+                        aria-label={`Remove ${label} from ${row.sku}`}
+                        disabled={unassignMutation.isPending}
+                        onClick={() => removePlant(row, placeId)}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </span>
+          )}
+          {(canManageAny || previewUnavailable) &&
+            (previewUnavailable ? (
+              <span className={styles.note}>
+                We couldn&rsquo;t check which plants you administer, so adding one is unavailable
+                for now. Reload to try again.
+              </span>
+            ) : (
+              addOptions.length > 0 && (
+                <select
+                  className={styles.addPlant}
+                  aria-label={`Add a plant to ${row.sku}`}
+                  value=""
+                  disabled={assignMutation.isPending}
+                  onChange={(e) => {
+                    const nodeId = e.target.value;
+                    // Reset to the placeholder immediately — the control is a
+                    // one-shot action, not a value the row remembers.
+                    e.target.value = "";
+                    addPlant(row, nodeId);
+                  }}
+                >
+                  <option value="">Add a plant…</option>
+                  {addOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {indentedLabel(o)}
+                    </option>
+                  ))}
+                </select>
+              )
             ))}
-          </select>
-        ) : (
-          <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
-            {row.owner}
-          </span>
-        )}
+        </span>
 
         <span className={styles.actions}>
           {isEditing ? (
@@ -503,55 +492,37 @@ export function ProductsPanel() {
               </button>
             </>
           ) : (
-            <>
-              {/* ⭐ DEACTIVATE FIRST AND DELETE SECOND, and the order on screen
-                  is the decision: anything that has ever been scheduled can
-                  never be deleted at all (no ON DELETE on runs/assignments). */}
-              <button
-                type="button"
-                className={styles.primary}
-                disabled={!editable}
-                onClick={() => toggleActive(row)}
-              >
-                {row.active ? "Deactivate" : "Reactivate"}
-              </button>
-              {/* ⭐ THE DOOR HAS TO SAY WHAT IS BEHIND IT (D106, §19.67).
-                  This button opens a form that changes the product's code, its
-                  name AND where it belongs — and it was labelled "Rename",
-                  which names the narrowest of the three. The maintainer reported "I
-                  still cannot edit a product" four times against a screen where
-                  the picker was already wired and already worked: he was never
-                  going to press "Rename" to change an area, and nothing else on
-                  the row offered to. D105 says what you can SET once you must be
-                  able to CHANGE; D106 is its other half — a control may not be
-                  named after less than it does. */}
-              <button
-                type="button"
-                className={styles.quiet}
-                disabled={!editable}
-                title="Change its code, name, or where it belongs"
-                onClick={() => beginEdit(row)}
-              >
-                Edit
-              </button>
-              {/* ⭐ ONE CONTROL NOW, NOT TWO. This used to flip in place to
-                  "Delete for good?" — a confirmation that asked the same
-                  question whether the answer was "nothing happens" or "eleven
-                  jobs disappear", because before 0029 the client had no way to
-                  find out which. `DeleteDialog` asks the server first. */}
-              <button
-                type="button"
-                className={styles.quiet}
-                disabled={!editable || isConfirming}
-                onClick={() => {
-                  clearRowError(row.id);
-                  setRowNotice(null);
-                  setConfirmingId(row.id);
-                }}
-              >
-                Delete
-              </button>
-            </>
+            editable && (
+              <>
+                {/* ⭐ DEACTIVATE FIRST AND DELETE SECOND: anything ever scheduled
+                    can never be fully deleted, so retire is the main action. */}
+                <button type="button" className={styles.primary} onClick={() => toggleActive(row)}>
+                  {row.active ? "Deactivate" : "Reactivate"}
+                </button>
+                {/* ⭐ D115: THE EDIT IS RENAME/RE-SKU ONLY now — places have their
+                    own controls above. The label names what it does. */}
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  title="Change its code or name"
+                  onClick={() => beginEdit(row)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  disabled={isConfirming}
+                  onClick={() => {
+                    clearRowError(row.id);
+                    setRowNotice(null);
+                    setConfirmingId(row.id);
+                  }}
+                >
+                  Delete
+                </button>
+              </>
+            )
           )}
         </span>
 
@@ -572,9 +543,6 @@ export function ProductsPanel() {
                 disabled={colorMutation.isPending}
                 onClick={() => {
                   clearRowError(row.id);
-                  // The narrow rule — a token this stylesheet can actually
-                  // draw — is checked HERE, beside the palette it is about.
-                  // `setProductColor` deliberately does not import it.
                   if (!isPaletteToken(token)) return;
                   colorMutation.mutate(
                     { id: row.id, colorToken: token },
@@ -587,14 +555,6 @@ export function ProductsPanel() {
                 }}
               />
             ))}
-            {/* ⭐ THE PALETTE IS THE SHORTCUT; THE FIELD IS THE ANSWER.
-                The maintainer asked for both, and they are not the same control: four
-                swatches cover the common case in one click, and a company with
-                six products on one line needs a colour the palette does not
-                have. `normaliseHexInput` is deliberately lenient about what a
-                person types (`#1BAF7A`, `1baf7a`, `#1ba`) and strict about
-                what it stores, because the CHECK takes exactly one spelling
-                and refusing a typed `#1BAF7A` would be indefensible. */}
             <input
               type="color"
               className={styles.colorField}
@@ -668,10 +628,6 @@ export function ProductsPanel() {
             onCancel={() => setConfirmingId(null)}
             onDeleted={(message) => {
               setConfirmingId(null);
-              // The row itself is about to vanish from the refetched list, so
-              // the sentence is keyed to it and simply stops being rendered —
-              // which is the honest lifetime for "here is what just happened
-              // to a thing that no longer exists".
               setRowNotice({ id: row.id, message });
             }}
             onFailed={(message) => {
@@ -706,15 +662,13 @@ export function ProductsPanel() {
 
   return (
     <div className={styles.panel}>
-      <section className={styles.card}>
-        <h2 className={styles.h2}>Add a product</h2>
-        {owners.length === 0 ? (
-          <p className={styles.status}>
-            {previewUnavailable
-              ? "We couldn't check which sites you administer, so this list is read-only for now. Reload to try again."
-              : "You don't administer a site, so there's nowhere to add a product."}
-          </p>
-        ) : (
+      {/* ⭐ D115 / THE SPLIT: CREATING A PART IS A COMPANY-ADMIN ACT — it makes
+          the company-wide record. A site admin does not create parts; they opt
+          their plant into parts the company has defined (the add picker on each
+          row). So the whole card is company-admin-only. */}
+      {isCompanyAdmin && (
+        <section className={styles.card}>
+          <h2 className={styles.h2}>Add a product</h2>
           <div className={styles.form}>
             <label className={styles.field}>
               <span className={styles.fieldLabel}>Product code</span>
@@ -734,58 +688,29 @@ export function ProductsPanel() {
               />
               {newErrors.name !== null && <span className={styles.error}>{newErrors.name}</span>}
             </label>
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>Belongs to</span>
-              {/* ⭐ THE TREE, INDENTED (0025 / D103, D109) — the WHOLE tree on
-                  "All plants", and the chosen plant's subtree otherwise (1(c)
-                  decision 3, see `owners`). Every node in it is offered to
-                  anyone who administers anywhere and the server has the final
-                  say. 0028 removed the company-wide entry that used to sit on
-                  top for a company admin — there is nowhere for it to point. */}
-              <select
-                className={styles.input}
-                value={ownerValue}
-                onChange={(e) => setNewDraft((d) => ({ ...d, siteNodeId: e.target.value }))}
-              >
-                {owners.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {ownerLabels.get(o.value)}
-                  </option>
-                ))}
-              </select>
-              {newErrors.owner !== null && <span className={styles.error}>{newErrors.owner}</span>}
-            </label>
             <button type="button" className={styles.primary} onClick={submitNew}>
               Add
             </button>
           </div>
-        )}
-        {formError !== null && <p className={styles.error}>{formError}</p>}
-        {/* ⭐ THE FORM'S OWN "COUNT WHAT YOU HIDE". The list below says how many
-            products the filter is keeping back; this says what it is keeping
-            back from the picker, because "why can't I choose Plant 2 here?" is
-            the question decision 3 creates and the picker alone cannot answer —
-            an absent option looks like a missing permission. Only rendered when
-            the filter is actually narrowing something. */}
-        {plant.choice !== null && owners.length > 0 && (
+          {formError !== null && <p className={styles.error}>{formError}</p>}
+          {/* ⭐ D115: A NEW PART IS OFFERED NOWHERE UNTIL A PLANT IS ADDED, and
+              that is an ordinary state. The plant it is made in is chosen per
+              row, in the catalogue below, not on this form. */}
           <p className={styles.hint}>
-            You&rsquo;re showing {plant.label}, so a new product can only go there. Switch to
-            &ldquo;All plants&rdquo; above to add it somewhere else.
+            A new part isn&rsquo;t made anywhere yet — add it to a plant from its row below. Its
+            colour is chosen for it automatically; click a swatch in the list to set it by hand.
           </p>
-        )}
-        {/* ⚠️ This sentence used to end "and never changes afterwards", which
-            stopped being true the moment the swatch became a picker. A hint that
-            describes the old behaviour is worse than none: it tells someone the
-            control they are looking at does not exist. */}
-        <p className={styles.hint}>
-          A product&rsquo;s colour is chosen for it when it&rsquo;s created — the least-used one in
-          its owner&rsquo;s palette — and never changes on its own afterwards. Click a swatch in the
-          list to set it by hand.
-        </p>
-      </section>
+        </section>
+      )}
 
       <section className={styles.card}>
         <h2 className={styles.h2}>Catalogue</h2>
+        {!isCompanyAdmin && (
+          <p className={styles.status}>
+            Only a company admin can add or rename a part number. You can add or remove your own
+            plant on any part below.
+          </p>
+        )}
         <input
           className={styles.search}
           value={query}
@@ -802,30 +727,8 @@ export function ProductsPanel() {
           </p>
         )}
 
-        {/* ⭐ A FACT ABOUT THIS SITE, NOT ABOUT THE OTHER ONE. These rows are
-            readable only because they are already on a run here, and they are
-            kept out of the catalogue because they are not this person's to
-            manage. Saying nothing would leave "why is Rework on my board and
-            not in my list?" unanswerable; naming them would be the leak the
-            filter exists to close. So: a count, and no identity. */}
-        {view.elsewhere > 0 && (
-          <p className={styles.skippedLine}>
-            {view.elsewhere === 1
-              ? "1 product scheduled here belongs to another site, so it isn't listed."
-              : `${view.elsewhere} products scheduled here belong to another site, so they aren't listed.`}
-          </p>
-        )}
-
-        {/* ⭐ COUNT WHAT YOU HIDE — `scope.ts`'s rule, and the reason decision 1
-            could persist this choice at all: hiding is invisible and permanent,
-            and a list that quietly shrank looks exactly like a list of things
-            nobody created. The line above says the same thing about a
-            PERMISSION; this one says it about a CHOICE, and so it names the way
-            back out. The two never count the same product — see `inPlant`.
-
-            ⚠️ NAMED BY `plant.label`, NEVER BY THE WORD "plant". The hierarchy
-            is user-defined and the top level is whatever this company calls it;
-            the same care §19.77 takes with `ownRootName` one screen over. */}
+        {/* ⭐ COUNT WHAT YOU HIDE — `scope.ts`'s rule. Naming the plant, never the
+            word "plant" (the hierarchy is user-defined). */}
         {hiddenByPlant > 0 && (
           <p className={styles.skippedLine}>
             {hiddenByPlant === 1
@@ -843,7 +746,7 @@ export function ProductsPanel() {
             <li className={styles.head}>
               <span>Code</span>
               <span>Name</span>
-              <span>Belongs to</span>
+              <span>Made in</span>
               <span />
             </li>
             {active.map(renderRow)}

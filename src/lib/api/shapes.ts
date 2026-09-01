@@ -402,17 +402,19 @@ export interface Product {
   name: string;
   active: boolean;
   /**
-   * The node this product BELONGS TO — `products.site_node_id`, NOT NULL
-   * since 0028 — and therefore the node at or below which it may be run
-   * (`scope.ts`'s one-line rule). `board_window` has emitted it since 0025.
+   * The nodes this product is MADE AT — `product_sites`, D115 / migration 0034 —
+   * and therefore the nodes at or below any of which it may be run
+   * (`scope.ts`'s `productOfferedAt`). `board_window` emits `site_node_ids` (an
+   * array) since 0034; before that it was a single `site_node_id`.
    *
    * ⭐ This is not decoration: `app_guard_run_scope` / `app_guard_assignment_scope`
-   * REFUSE a run or assignment whose product is not owned by an ancestor-or-self
-   * of the target cell (`not_offered_here`), and there is no override for
-   * products. A picker that does not read this field offers work the server is
-   * guaranteed to reject.
+   * REFUSE a run or assignment whose product is offered in NO plant covering the
+   * target cell (`not_offered_here`), and there is no override for products. A
+   * picker that does not read this list offers work the server is guaranteed to
+   * reject. An EMPTY list is a real state (a part not assigned to any plant), and
+   * it means the product is offered NOWHERE — the picker must not show it.
    */
-  siteNodeId: string;
+  siteNodeIds: string[];
   /**
    * The palette token this product renders in — `product-1` .. `product-4`
    * (0023 §3, D102). A TOKEN NAME, NEVER A HEX: the board resolves it through
@@ -440,15 +442,14 @@ export interface Product {
  * board. Blanking an entire plant's schedule because one product's swatch is
  * missing is not a trade anyone would make.
  *
- * ⭐ `site_node_id` is the counter-example, and it goes the other way for the
- * same reason: it is where the product BELONGS, which is identity, and there
- * is no safe degraded value. Coercing an absent one to `""` would not fail
- * loudly — `offeredAt` fails OPEN on a scope node it cannot read, so an empty
- * owner reads as "cannot tell" and the product is offered at EVERY cell, where
- * the server then refuses every create with `not_offered_here` and no override.
- * The field is NOT NULL server-side since 0028, so a row arriving without a
- * readable string owner is a payload this client does not understand, and
- * rejecting the row is the honest answer.
+ * ⭐ `site_node_ids` is the counter-example, and it goes the other way for the
+ * same reason: it is where the product is MADE, which is identity. But an EMPTY
+ * array is not a failure — a part assigned to no plant is a legitimate state
+ * (D115), and it correctly means "offered nowhere", which `productOfferedAt`
+ * reads as "show it at no cell". What is rejected is a MALFORMED array or a
+ * non-string entry: that is a payload this client does not understand, unlike an
+ * honestly-empty list. (Before 0034 the field was a single required owner and an
+ * absent one rejected the row; the array's empty case is the new, honest zero.)
  *
  * So an absent or null `color_token` becomes `""`, and the two board call
  * sites fall back to the first palette token for anything that is not a token
@@ -460,23 +461,29 @@ export interface Product {
  */
 function parseProduct(v: Json): Product | null {
   if (!isJsonObject(v)) return null;
-  const { id, sku, name, active, color_token, site_node_id } = v;
+  const { id, sku, name, active, color_token, site_node_ids } = v;
   if (
     !isStr(id) ||
     !isStr(sku) ||
     !isStr(name) ||
     !isBool(active) ||
-    // Required, like `id`/`sku`/`name` and unlike `color_token` — see above.
-    !isStr(site_node_id)
+    // Required as a shape, unlike `color_token` — see above. An empty array is
+    // accepted; a non-array, or an array with a non-string entry, is not.
+    !Array.isArray(site_node_ids)
   ) {
     return null;
+  }
+  const siteNodeIds: string[] = [];
+  for (const n of site_node_ids) {
+    if (!isStr(n)) return null;
+    siteNodeIds.push(n);
   }
   return {
     id,
     sku,
     name,
     active,
-    siteNodeId: site_node_id,
+    siteNodeIds,
     colorToken: isStr(color_token) ? color_token : "",
   };
 }
