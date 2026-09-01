@@ -615,50 +615,14 @@ export function TrainingsPanel() {
           <span className={styles.name}>{row.name}</span>
         )}
 
-        {/* ⭐ THE OWNER IS A COLUMN, NEVER PART OF THE NAME. The demo seed used
-            to spell the plant into the text (`A-Welding`); read from the column
-            instead it follows a node rename for free, and 0031 drops the prefix.
-            ⚠️ THE FULL PATH IS THE TOOLTIP, because `scopeLabel` gives the
-            leaf's own name and two plants can each have a "Line 1".
-
-            ⭐⭐ AND WHILE EDITING IT IS THE PICKER — THE SAME ONE THE ADD FORM
-            USES, narrowed by the plant filter in exactly the same way. Where a
-            training belongs was a create-only choice until now (D105), and the
-            column that DISPLAYED it is the honest place for the control that
-            changes it: the reader edits the answer where they read it, and the
-            two can never show different things. */}
-        {isEditing && ownerOffered ? (
-          <select
-            className={styles.input}
-            value={editOwnerValue}
-            /* ⚠️ NAMED FOR ITS ROW. The Add card's picker is visibly labelled
-               "Belongs to" and is on screen at the same time. */
-            aria-label={`Where ${handle} belongs`}
-            onChange={(e) => {
-              // ⚠️ A NEW DESTINATION VOIDS THE OLD CONFIRMATION. The count in
-              // that box is about the place they just stopped choosing.
-              setMovingId(null);
-              setEditOwner(e.target.value);
-            }}
-          >
-            {owners.map((o) => (
-              <option key={o.value} value={o.value}>
-                {ownerLabels.get(o.value)}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
-            {owner}
-          </span>
-        )}
-
         {/* ⭐ THE DOCUMENT NUMBER IS ITS OWN COLUMN — a distinct fact from the
             name (the maintainer, 1 Sept), lifted out of the full-width line it
             used to take under the name, which "could get messy and long very
-            easily". The VALUE shows on every row, read-only ones included: it is
-            worth reading whether or not this reader may change it. The EDITOR is
-            gated on `editable`, so no refused control survives.
+            easily". It sits SECOND, between the name and the owner, because that
+            is the order the maintainer asked for: a reader scans a name and its
+            number together. The VALUE shows on every row, read-only ones
+            included: it is worth reading whether or not this reader may change it.
+            The EDITOR is gated on `editable`, so no refused control survives.
             ⚠️ NO PER-ROW VISIBLE LABEL — the column header names it, exactly as
             the owner column carries none. The editor's controls still name their
             row (0031 lets two share a name), so a screen-reader user is never left
@@ -713,6 +677,44 @@ export function TrainingsPanel() {
             </>
           )}
         </span>
+
+        {/* ⭐ THE OWNER IS A COLUMN, NEVER PART OF THE NAME. The demo seed used
+            to spell the plant into the text (`A-Welding`); read from the column
+            instead it follows a node rename for free, and 0031 drops the prefix.
+            ⚠️ THE FULL PATH IS THE TOOLTIP, because `scopeLabel` gives the
+            leaf's own name and two plants can each have a "Line 1".
+
+            ⭐⭐ AND WHILE EDITING IT IS THE PICKER — THE SAME ONE THE ADD FORM
+            USES, narrowed by the plant filter in exactly the same way. Where a
+            training belongs was a create-only choice until now (D105), and the
+            column that DISPLAYED it is the honest place for the control that
+            changes it: the reader edits the answer where they read it, and the
+            two can never show different things. */}
+        {isEditing && ownerOffered ? (
+          <select
+            className={styles.input}
+            value={editOwnerValue}
+            /* ⚠️ NAMED FOR ITS ROW. The Add card's picker is visibly labelled
+               "Belongs to" and is on screen at the same time. */
+            aria-label={`Where ${handle} belongs`}
+            onChange={(e) => {
+              // ⚠️ A NEW DESTINATION VOIDS THE OLD CONFIRMATION. The count in
+              // that box is about the place they just stopped choosing.
+              setMovingId(null);
+              setEditOwner(e.target.value);
+            }}
+          >
+            {owners.map((o) => (
+              <option key={o.value} value={o.value}>
+                {ownerLabels.get(o.value)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
+            {owner}
+          </span>
+        )}
 
         {/* ⭐⭐ NO CONTROLS AT ALL ON A ROW THE SERVER WILL REFUSE, AND THE
             REASON IN THEIR PLACE. D106 forbids a control named after more than
@@ -1110,8 +1112,8 @@ export function TrainingsPanel() {
           <ul className={styles.list}>
             <li className={styles.head}>
               <span>Name</span>
-              <span>Belongs to</span>
               <span>Document number</span>
+              <span>Belongs to</span>
               <span />
             </li>
             {live.map(renderRow)}

@@ -121,12 +121,13 @@
    owner and the actions land at a different x on every line and the panel reads
    as ragged text rather than as data.
 
-   ⭐ FOUR TRACKS — a name, its owner, its DOCUMENT NUMBER, and the actions. The
-   document number moved OUT of a full-width line under the name and into a
-   column of its own (the maintainer, 1 Sept: a stacked line "could get messy and
-   long very easily"). The owner track stays WIDER than on the products grid on
-   purpose: since 0031 it is the only thing telling two same-named rows apart, so
-   it is the column a reader actually scans rather than a footnote to the name.
+   ⭐ FOUR TRACKS — a name, its DOCUMENT NUMBER, its owner, and the actions, in
+   that order (the maintainer, 1 Sept). The document number moved OUT of a
+   full-width line under the name and into a column of its own ("could get messy
+   and long very easily") and sits SECOND, beside the name a reader scans it with.
+   The owner track stays WIDER than on the products grid on purpose: since 0031 it
+   is the only thing telling two same-named rows apart, so it is a column a reader
+   actually scans rather than a footnote to the name.
 
    The action column is FIXED, because a button strip that changes width with
    its labels is what makes the right-hand edge zig-zag -- and "Retire" and
@@ -147,7 +148,7 @@
 .head,
 .row {
   display: grid;
-  grid-template-columns: minmax(9rem, 1.8fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) 15rem;
+  grid-template-columns: minmax(9rem, 1.8fr) minmax(5rem, 0.9fr) minmax(8rem, 1.2fr) 15rem;
   align-items: center;
   column-gap: 0.75rem;
   row-gap: 0.375rem;
