@@ -20,6 +20,7 @@ import { parseCsvTable } from "../features/admin/lib/csv.ts";
 import {
   detectColumns,
   planProductImport,
+  PRODUCT_TEMPLATE,
   type ImportPlant,
 } from "../features/admin/lib/productImport.ts";
 
@@ -278,5 +279,23 @@ describe("file errors", () => {
   it("I15: carries a parse-level error from the CSV onto plan.fileErrors", () => {
     const plan = planFrom('sku,name\n"WX,Widget', [P1]);
     expect(plan.fileErrors.some((e) => e.message.includes("never closed"))).toBe(true);
+  });
+});
+
+describe("PRODUCT_TEMPLATE — the model CSV cannot drift from what the detector looks for", () => {
+  it("M1: every template header is one detectColumns maps, in the right field", () => {
+    // The template is downloaded, filled in, re-uploaded; if a header it writes
+    // were not one the detector recognises, the guided path would map nothing.
+    const map = detectColumns(PRODUCT_TEMPLATE.headers.map((h) => h.toLowerCase()));
+    expect(map).toEqual({
+      sku: PRODUCT_TEMPLATE.headers[0],
+      name: PRODUCT_TEMPLATE.headers[1],
+      externalId: PRODUCT_TEMPLATE.headers[2],
+      plant: PRODUCT_TEMPLATE.headers[3],
+    });
+  });
+
+  it("M2: the example row has one value per header", () => {
+    expect(PRODUCT_TEMPLATE.example.length).toBe(PRODUCT_TEMPLATE.headers.length);
   });
 });

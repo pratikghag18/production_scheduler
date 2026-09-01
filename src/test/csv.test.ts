@@ -13,7 +13,7 @@
  * nothing about products; `productImport.ts` is the half that reads the header.
  */
 import { describe, expect, it } from "vitest";
-import { parseCsv, parseCsvTable } from "../features/admin/lib/csv.ts";
+import { parseCsv, parseCsvTable, toCsv } from "../features/admin/lib/csv.ts";
 
 /* ===========================================================================
  * Group F — fields. Comma-split, quoting, and the doubled-quote escape.
@@ -207,5 +207,27 @@ describe("parseCsvTable", () => {
   it("T9: carries a parse-level error through onto the table errors", () => {
     const table = parseCsvTable('SKU,Name\n"broken,row');
     expect(table.errors.some((e) => e.message.includes("never closed"))).toBe(true);
+  });
+});
+
+describe("toCsv — the model-template writer, and it round-trips parseCsv", () => {
+  it("W1: quotes ONLY fields that need it, and doubles an interior quote", () => {
+    // A plain field is left bare; a comma, a quote or a newline forces quotes.
+    const out = toCsv([
+      ["sku", "name"],
+      ["WX", "Widget, X"],
+      ["WY", 'He said "hi"'],
+    ]);
+    expect(out).toBe('sku,name\r\nWX,"Widget, X"\r\nWY,"He said ""hi"""');
+  });
+
+  it("W2: what toCsv writes, parseCsv reads back identically", () => {
+    // The whole point: a template the user downloads and re-uploads must survive.
+    const records = [
+      ["sku", "name", "external_id", "plant"],
+      ["WX-100", "Widget, X", "EXT-100", "Plant A"],
+      ["WY", 'Odd "quoted" name', "", ""],
+    ];
+    expect(parseCsv(toCsv(records)).records).toEqual(records);
   });
 });

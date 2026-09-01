@@ -29,8 +29,13 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import { useAdminProducts } from "../hooks/useProducts";
 import { useProductImport } from "../hooks/useProductImport";
-import { parseCsvTable, type CsvTable } from "../lib/csv";
-import { detectColumns, planProductImport, type ColumnMap } from "../lib/productImport";
+import { parseCsvTable, toCsv, type CsvTable } from "../lib/csv";
+import {
+  detectColumns,
+  planProductImport,
+  PRODUCT_TEMPLATE,
+  type ColumnMap,
+} from "../lib/productImport";
 import { readablePlants } from "../lib/plantFilter";
 import styles from "./ImportPanel.module.css";
 
@@ -110,6 +115,22 @@ export function ImportPanel() {
     setColumns((cur) => (cur === null ? cur : { ...cur, [key]: value === "" ? null : value }));
   }
 
+  /**
+   * Hand the user the model CSV — the exact headers this importer looks for,
+   * plus one example row — so filling it in is the guided path and the columns
+   * are never a guess. A Blob + a transient object URL + a synthetic click is the
+   * ordinary browser download; nothing here reaches the server.
+   */
+  function downloadTemplate() {
+    const text = toCsv([PRODUCT_TEMPLATE.headers, PRODUCT_TEMPLATE.example]);
+    const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "products-import-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function startOver() {
     setTable(null);
     setColumns(null);
@@ -163,7 +184,11 @@ export function ImportPanel() {
         <h2 className={styles.h2}>Import products from a CSV</h2>
         <p className={styles.hint}>
           Choose a spreadsheet exported as CSV. Nothing is written until you have seen the preview
-          and pressed Apply.
+          and pressed Apply. Not sure of the format?{" "}
+          <button type="button" className={styles.linkButton} onClick={downloadTemplate}>
+            Download a template
+          </button>{" "}
+          with the right columns and an example row.
         </p>
         <label className={styles.field}>
           <span className={styles.fieldLabel}>CSV file</span>

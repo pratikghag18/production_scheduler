@@ -170,6 +170,22 @@ export interface CsvTable {
   errors: CsvError[];
 }
 
+/**
+ * The inverse of `parseCsv`: turn a grid of records back into RFC 4180 text, for
+ * the downloadable "model CSV" a tab offers so a human fills in the right columns.
+ *
+ * ⭐ A FIELD IS QUOTED ONLY WHEN IT HAS TO BE — it contains a comma, a quote, a CR
+ * or an LF — and an interior quote is doubled. So a plain `WX,Widget X` round-trips
+ * to itself and a `Widget, X` comes back quoted, which is exactly what `parseCsv`
+ * expects to read. Records are joined with CRLF, the separator RFC 4180 names and
+ * the one Excel writes.
+ */
+export function toCsv(records: readonly (readonly string[])[]): string {
+  const quoteIfNeeded = (field: string): string =>
+    /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
+  return records.map((row) => row.map(quoteIfNeeded).join(",")).join("\r\n");
+}
+
 export function parseCsvTable(text: string): CsvTable {
   const { records, errors } = parseCsv(text);
   if (records.length === 0) {

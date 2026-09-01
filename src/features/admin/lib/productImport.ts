@@ -80,6 +80,22 @@ export function detectColumns(headerKeys: readonly string[]): ColumnMap {
   };
 }
 
+/**
+ * The downloadable "model CSV" for products: the header row a human fills in,
+ * plus one example row.
+ *
+ * ⭐ THE HEADERS ARE THE CANONICAL ALIASES, DERIVED FROM `ALIASES` ABOVE, so the
+ * template and the detector cannot drift — a column the template writes is by
+ * construction one `detectColumns` will map. (`sku`,`name` are required;
+ * `external_id`,`plant` optional — but the template lists all four so a human
+ * sees the full shape.) A list of columns written twice is a bug with a delay on
+ * it; this is written once.
+ */
+export const PRODUCT_TEMPLATE: { headers: readonly string[]; example: readonly string[] } = {
+  headers: [ALIASES.sku[0], ALIASES.name[0], ALIASES.externalId[0], ALIASES.plant[0]],
+  example: ["WX-100", "Widget X", "EXT-100", "Plant A"],
+};
+
 /* ===========================================================================
  * §2. The plan.
  * ======================================================================== */

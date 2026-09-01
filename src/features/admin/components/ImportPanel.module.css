@@ -205,3 +205,17 @@
 .quiet:disabled {
   opacity: 0.45;
 }
+
+/* An inline "Download a template" link inside the hint sentence. */
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, #2a6);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkButton:hover {
+  text-decoration: none;
+}
