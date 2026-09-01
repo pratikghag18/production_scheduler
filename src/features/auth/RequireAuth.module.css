@@ -1,0 +1,41 @@
+/* The signed-in-but-no-profile dead-end. A plain centred page, OUTSIDE the
+   shell, styled from the same tokens as the sign-in screen. */
+.screen {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px 24px;
+  border: 1px solid var(--grid);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: center;
+}
+
+.title {
+  font-size: calc(17px * var(--chrome-scale, 1));
+  font-weight: 650;
+  margin: 0;
+}
+
+.body {
+  font-size: calc(13px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+}

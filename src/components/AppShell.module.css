@@ -40,6 +40,21 @@
   margin-left: auto;
 }
 
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.email {
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .main {
   flex: 1;
   min-height: 0;

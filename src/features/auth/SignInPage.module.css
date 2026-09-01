@@ -1,0 +1,105 @@
+/* The production sign-in screen. Lives OUTSIDE the app shell (no rail/nav),
+   so it owns its own full-height centred layout. Styled from the same tokens
+   as the rest of the chrome. */
+.screen {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg, var(--surface));
+}
+
+.card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px 24px;
+  border: 1px solid var(--grid);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.title {
+  font-size: calc(18px * var(--chrome-scale, 1));
+  font-weight: 650;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: calc(12.5px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+  margin: 0;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.input {
+  font: inherit;
+  font-size: calc(13px * var(--chrome-scale, 1));
+  padding: 8px 10px;
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+.submit {
+  font: inherit;
+  font-size: calc(13px * var(--chrome-scale, 1));
+  font-weight: 600;
+  margin-top: 4px;
+  padding: 9px 12px;
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--surface);
+  cursor: pointer;
+}
+
+.submit:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.error {
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--signal-conflict);
+  margin: 0;
+}
+
+/* The dev switcher, when it rides along on this screen in a dev build. */
+.devZone {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--grid);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.devNote {
+  font-size: calc(11px * var(--chrome-scale, 1));
+  color: var(--muted);
+}

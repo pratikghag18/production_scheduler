@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { HealthPill } from "@/components/HealthPill";
+import { SignOutButton } from "@/features/auth/SignOutButton";
 import { adminAccess } from "@/features/auth/session";
 import { useSession } from "@/features/auth/useSession";
 import styles from "./AppShell.module.css";
@@ -13,7 +14,7 @@ export function AppShell() {
   // link that refuses them. Rendered only on "granted" -- during "pending"
   // it stays hidden, so the failure mode is a link appearing a moment late
   // for an admin, never one shown briefly to everyone else.
-  const { profile, loading } = useSession();
+  const { session, profile, loading } = useSession();
   const canSeeAdmin = adminAccess(profile?.role, profile?.adminAnywhere, loading) === "granted";
 
   return (
@@ -32,6 +33,14 @@ export function AppShell() {
         </nav>
         <div className={styles.health}>
           <HealthPill />
+        </div>
+        {/* P1-6b: the real, non-DEV identity + sign-out, near the health pill
+            on the right of the chrome. `DevProfileSwitcher` still handles
+            identity SWITCHING in a dev build (rendered inside BoardPage); this
+            is the production door out that any signed-in user can reach. */}
+        <div className={styles.identity}>
+          {session?.user.email && <span className={styles.email}>{session.user.email}</span>}
+          <SignOutButton />
         </div>
       </header>
       <main className={styles.main}>
