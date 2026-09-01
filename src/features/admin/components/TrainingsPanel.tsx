@@ -653,6 +653,67 @@ export function TrainingsPanel() {
           </span>
         )}
 
+        {/* ⭐ THE DOCUMENT NUMBER IS ITS OWN COLUMN — a distinct fact from the
+            name (the maintainer, 1 Sept), lifted out of the full-width line it
+            used to take under the name, which "could get messy and long very
+            easily". The VALUE shows on every row, read-only ones included: it is
+            worth reading whether or not this reader may change it. The EDITOR is
+            gated on `editable`, so no refused control survives.
+            ⚠️ NO PER-ROW VISIBLE LABEL — the column header names it, exactly as
+            the owner column carries none. The editor's controls still name their
+            row (0031 lets two share a name), so a screen-reader user is never left
+            choosing between identical fields. ⚠️ THE EDITOR WRAPS WITHIN THE CELL
+            (`.docCell`), never onto the name column: only this row grows. */}
+        <span className={styles.docCell}>
+          {isEditingDoc ? (
+            <>
+              <input
+                className={styles.input}
+                value={docDraft}
+                aria-label={`Document number for ${handle}`}
+                onChange={(e) => setDocDraft(e.target.value)}
+              />
+              <button
+                type="button"
+                className={styles.primary}
+                aria-label={`Save the document number for ${handle}`}
+                onClick={() => saveDocNumber(row)}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.quiet}
+                aria-label={`Stop editing the document number for ${handle}`}
+                onClick={() => setEditingDocId(null)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              {documentNumberLabel(row.externalId)}
+              {editable && (
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  aria-label={`Edit the document number for ${handle}`}
+                  onClick={() => {
+                    clearRowError(row.id);
+                    setRowNotice(null);
+                    setEditingDocId(row.id);
+                    // Seeded to what is there so a change is an edit, not a
+                    // retype; `null` seeds a blank box that clears on save.
+                    setDocDraft(row.externalId ?? "");
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+            </>
+          )}
+        </span>
+
         {/* ⭐⭐ NO CONTROLS AT ALL ON A ROW THE SERVER WILL REFUSE, AND THE
             REASON IN THEIR PLACE. D106 forbids a control named after more than
             it does, and a disabled "Rename" is exactly that — plus it is
@@ -821,70 +882,6 @@ export function TrainingsPanel() {
             </span>
           </div>
         )}
-
-        {/* ⭐ THE DOCUMENT NUMBER — A DISTINCT FACT FROM THE NAME (the
-            maintainer, 1 Sept), so it reads on its own line rather than folded
-            into the name text, the same split products draw between `sku` and
-            `name`. A full-width `1 / -1` line like the tag and the notice below:
-            the three-track grid has room for a name, an owner and the actions and
-            nothing else, and squeezing a fourth column in would re-flow every
-            row. ⚠️ THE VALUE SHOWS EVEN ON A READ-ONLY ROW — it is a fact worth
-            reading whether or not this reader may change it — but the editor is
-            gated on `editable`, so no refused control survives. */}
-        <span className={styles.note}>
-          <span className={styles.fieldLabel}>Document number</span>{" "}
-          {isEditingDoc ? (
-            <>
-              <input
-                className={styles.input}
-                value={docDraft}
-                /* ⚠️ NAMED FOR ITS ROW, like every other per-row control here:
-                   two rows can share a name (0031), so a bare "Document number"
-                   would leave a screen-reader user choosing between identical
-                   fields. */
-                aria-label={`Document number for ${handle}`}
-                onChange={(e) => setDocDraft(e.target.value)}
-              />
-              <button
-                type="button"
-                className={styles.primary}
-                aria-label={`Save the document number for ${handle}`}
-                onClick={() => saveDocNumber(row)}
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                className={styles.quiet}
-                aria-label={`Stop editing the document number for ${handle}`}
-                onClick={() => setEditingDocId(null)}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              {documentNumberLabel(row.externalId)}
-              {editable && (
-                <button
-                  type="button"
-                  className={styles.quiet}
-                  aria-label={`Edit the document number for ${handle}`}
-                  onClick={() => {
-                    clearRowError(row.id);
-                    setRowNotice(null);
-                    setEditingDocId(row.id);
-                    // Seeded to what is there so a change is an edit, not a
-                    // retype; `null` seeds a blank box that clears on save.
-                    setDocDraft(row.externalId ?? "");
-                  }}
-                >
-                  Edit document number
-                </button>
-              )}
-            </>
-          )}
-        </span>
 
         {!row.active && <span className={styles.tag}>Retired</span>}
         {err !== null && <span className={styles.error}>{err}</span>}
@@ -1114,6 +1111,7 @@ export function TrainingsPanel() {
             <li className={styles.head}>
               <span>Name</span>
               <span>Belongs to</span>
+              <span>Document number</span>
               <span />
             </li>
             {live.map(renderRow)}

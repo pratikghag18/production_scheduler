@@ -121,10 +121,12 @@
    owner and the actions land at a different x on every line and the panel reads
    as ragged text rather than as data.
 
-   ⭐ THREE TRACKS, NOT FOUR — a training has a name and an owner and nothing
-   else. The owner track is WIDER here than on the products grid on purpose:
-   since 0031 it is the only thing telling two same-named rows apart, so it is
-   the column a reader actually scans rather than a footnote to the name.
+   ⭐ FOUR TRACKS — a name, its owner, its DOCUMENT NUMBER, and the actions. The
+   document number moved OUT of a full-width line under the name and into a
+   column of its own (the maintainer, 1 Sept: a stacked line "could get messy and
+   long very easily"). The owner track stays WIDER than on the products grid on
+   purpose: since 0031 it is the only thing telling two same-named rows apart, so
+   it is the column a reader actually scans rather than a footnote to the name.
 
    The action column is FIXED, because a button strip that changes width with
    its labels is what makes the right-hand edge zig-zag -- and "Retire" and
@@ -145,7 +147,7 @@
 .head,
 .row {
   display: grid;
-  grid-template-columns: minmax(10rem, 2fr) minmax(9rem, 1.2fr) 15rem;
+  grid-template-columns: minmax(9rem, 1.8fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) 15rem;
   align-items: center;
   column-gap: 0.75rem;
   row-gap: 0.375rem;
@@ -182,6 +184,20 @@
 }
 
 .owner {
+  min-width: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* The document number, in its own column since it outgrew a stacked line (the
+   maintainer, 1 Sept). It WRAPS its own editor rather than cramping it onto one
+   line: the input takes the cell width and Save/Cancel fall beneath it, so only
+   the row being edited grows and the columns above never re-flow. */
+.docCell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
   min-width: 0;
   color: var(--ink-2);
   overflow-wrap: anywhere;
