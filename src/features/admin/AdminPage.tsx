@@ -104,6 +104,94 @@ function useHierarchyTree(enabled: boolean) {
  * screen must open with the rail SHOWN in that case, never crash. It is a
  * convenience, not state anything depends on.
  */
+/**
+ * ⭐ ONE SMALL LINE ICON PER SECTION, so the rail reads as icons+labels open and
+ * as icons alone when collapsed — the maintainer, 1 Sept, asked for icons on the
+ * tabs and specifically for the collapsed strip. Inline SVG rather than a new
+ * dependency: there is no icon library in the tree and seven simple glyphs do not
+ * justify one. `stroke="currentColor"` so each icon takes its button's colour —
+ * white on the active row, muted on a "soon" one — with nothing per-state to set.
+ * `aria-hidden` because the button already carries the name (its label when open,
+ * an `aria-label` when collapsed); the icon is decoration a reader never needs
+ * announced.
+ */
+function SectionIcon({ id }: { id: SectionId }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {sectionIconBody(id)}
+    </svg>
+  );
+}
+
+function sectionIconBody(id: SectionId) {
+  switch (id) {
+    case "hierarchy": // an org chart: a parent node bracketed down to two children
+      return (
+        <>
+          <rect x="6.25" y="1.75" width="3.5" height="3" rx="0.6" />
+          <rect x="1.75" y="11.25" width="3.5" height="3" rx="0.6" />
+          <rect x="10.75" y="11.25" width="3.5" height="3" rx="0.6" />
+          <path d="M8 4.75V9.25M3.5 11.25V9.25H12.5V11.25" />
+        </>
+      );
+    case "access": // a shield with a tick — permission granted
+      return (
+        <>
+          <path d="M8 1.75 3.25 3.6V8c0 3 2.1 4.9 4.75 6.25C10.65 12.9 12.75 11 12.75 8V3.6Z" />
+          <path d="M6.1 7.9 7.4 9.2 10 6.3" />
+        </>
+      );
+    case "shifts": // a clock
+      return (
+        <>
+          <circle cx="8" cy="8" r="6" />
+          <path d="M8 4.6V8l2.4 1.6" />
+        </>
+      );
+    case "operators": // a person
+      return (
+        <>
+          <circle cx="8" cy="5.25" r="2.75" />
+          <path d="M3.4 13.5c0-2.6 2.05-4.15 4.6-4.15s4.6 1.55 4.6 4.15" />
+        </>
+      );
+    case "trainings": // a mortarboard — the training catalogue
+      return (
+        <>
+          <path d="M8 3 1.5 6l6.5 3 6.5-3L8 3Z" />
+          <path d="M4.6 7.6v3c0 .9 1.5 1.7 3.4 1.7s3.4-.8 3.4-1.7v-3" />
+          <path d="M14 6v3" />
+        </>
+      );
+    case "products": // a box
+      return (
+        <>
+          <path d="M8 1.9 2.6 5v6L8 14.1 13.4 11V5Z" />
+          <path d="M2.6 5 8 8.05 13.4 5M8 8.05V14.1" />
+        </>
+      );
+    case "import": // a down-arrow into a tray
+      return (
+        <>
+          <path d="M8 2v6.6" />
+          <path d="M5.3 6 8 8.7 10.7 6" />
+          <path d="M2.75 10.6v1.9c0 .66.5 1.2 1.15 1.2h8.2c.65 0 1.15-.54 1.15-1.2v-1.9" />
+        </>
+      );
+  }
+}
+
 const RAIL_COLLAPSED_KEY = "admin.railCollapsed";
 
 function readRailCollapsed(): boolean {
@@ -329,26 +417,34 @@ export default function AdminPage() {
         >
           {railCollapsed ? "»" : "«"}
         </button>
-        {/* ⚠️ NAVIGATION IS HIDDEN WHILE COLLAPSED, NOT DISABLED. A reader who
-            wants to switch section opens the rail first; leaving greyed buttons
-            in a 2rem strip would be controls named after more than they do
-            (D106). The active section keeps rendering its content full-width
-            behind the shut rail. */}
-        {!railCollapsed &&
-          visibleSections.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={activeSection === s.id ? styles.railItemActive : styles.railItem}
-              disabled={!s.enabled}
-              aria-current={activeSection === s.id ? "page" : undefined}
-              title={s.enabled ? undefined : "Coming in a later brief"}
-              onClick={() => setSection(s.id)}
-            >
-              {s.label}
-              {!s.enabled && <span className={styles.soon}>soon</span>}
-            </button>
-          ))}
+        {/* ⭐ ICON-ONLY WHILE COLLAPSED, NOT HIDDEN. Each section keeps its
+            button in the thin strip, shown as its icon, so a reader can still
+            switch section without reopening the rail — the icons are what make
+            that legible. The label is hidden by CSS, and an `aria-label` carries
+            the name for a screen reader in its place; a `title` gives the sighted
+            reader the same tooltip over an icon that no longer sits beside its
+            word. */}
+        {visibleSections.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={activeSection === s.id ? styles.railItemActive : styles.railItem}
+            disabled={!s.enabled}
+            aria-current={activeSection === s.id ? "page" : undefined}
+            // ⚠️ NAMED FOR THE SR ONLY WHEN THE WORD IS GONE. Open, the visible
+            // label is the name; collapsed, it is hidden, so the name moves to
+            // `aria-label` — set in only one state so the two never double up.
+            aria-label={railCollapsed ? s.label : undefined}
+            title={!s.enabled ? "Coming in a later brief" : railCollapsed ? s.label : undefined}
+            onClick={() => setSection(s.id)}
+          >
+            <span className={styles.railIcon} aria-hidden="true">
+              <SectionIcon id={s.id} />
+            </span>
+            <span className={styles.railLabel}>{s.label}</span>
+            {!s.enabled && <span className={styles.soon}>soon</span>}
+          </button>
+        ))}
       </nav>
 
       <div className={styles.content}>
