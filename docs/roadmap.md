@@ -328,6 +328,31 @@
 >    **15 checks on a real database (7 upgrade + 8 acceptance through RLS as real site admins);
 >    5 breakages, 4 caught, 1 inert with its kind named and the rule it leans on pinned by T8.**
 >
+> 0. **🔴🔴 D115 — A PRODUCT BELONGS TO A LIST OF PLACES, NOT ONE. DECIDED, NOT BUILT.**
+>    The maintainer, 31 Aug, answering the part-number question and opening a bigger one:
+>    *"Part number is company wide, no company has different part numbers for the same product…
+>    A Product can be assigned to multiple plants as there can be different plants at different geo
+>    locations within the company manufacturing the same part number."* And on how many:
+>    *"It could be one plant, a number of plants or all plants… we need to be flexible."*
+>    ⚠️⚠️ **THE MODEL CANNOT EXPRESS THAT TODAY.** `products.sku` is `unique (org_id, sku)` and
+>    `products.site_node_id` is a single NOT NULL node, so **one part number exists once, in exactly
+>    one plant** — two rows for SKU-9 are refused and one row names one place.
+>    ⭐⭐ **"Where a product belongs" is doing two jobs that have to be separated:** who owns the
+>    part number (**the company** — `unique (org_id, sku)` stays exactly as it is) and which plants
+>    make it (**a LIST** — one, several or all, which falls out of a join table with no special
+>    case, the shape `node_shift_templates` already uses).
+>    ⚠️ **THE TRAININGS ANSWER IS THE WRONG ANALOGY.** 0031 made training NAMES per-plant because
+>    each plant runs its own Forklift course; **parts are the opposite — one part, made in several
+>    places.** Same-shaped question, opposite answer: [[decision-record-drift]] rule 9 waiting to
+>    happen.
+>    ⚠️ **It reopens D108** ("nothing is company-wide"), so read §19.72 first — D108's reason was
+>    READING and this is about OFFERING, but the two were deliberately fused and un-fusing them is
+>    the design work. **Everything reading `products.site_node_id` moves with it**: `offeredAt` /
+>    `offeredHere` in `scope.ts`, the board's picker, `ProductsPanel`, the plant filter's
+>    `rowsInPlant`, and the `products_*` policies. Grep before estimating.
+>    ⚠️ **It comes BEFORE the import screen**: overlapping SKUs across plants are refused today, so
+>    an importer built first would be built against a rule about to change.
+>
 > 1(g). **🔴 TWO DATABASE DECISIONS SURFACED BY THE IMPORT WORK, both measured and neither
 >    guessed at.**
 >    (a) **A part number is company-wide.** `products_org_id_sku_key` is `unique (org_id, sku)`
