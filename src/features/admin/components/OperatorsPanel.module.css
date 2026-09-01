@@ -383,6 +383,20 @@
   margin-top: 0.9375rem;
 }
 
+/* ---------------------------------------------------------------------------
+   ⭐ THE ADD FORM CARRIES THE SAME THREE FACTS A HELD ROW DOES — the training,
+   then trained on, signed off by and expires. It went from two controls to
+   four, so `flex-wrap` is now load-bearing rather than defensive: on a narrow
+   detail column the boxes drop to a second line and the Attach button follows
+   them, which is why `align-items: flex-end` is on the row — the button lines
+   up with the BOTTOM of whichever boxes end up beside it, not with their labels.
+
+   ⚠️ THESE ARE `.field` COLUMNS, NOT `.record`'s. The held rows group their
+   three boxes so a row wraps as one training's record; this form is a single
+   record and has nothing to keep together, so it wraps box by box like every
+   other form on this screen. Copying `.record` here would add a wrapper whose
+   only reason for existing is on the other list.
+   --------------------------------------------------------------------------- */
 .grantRow {
   display: flex;
   flex-wrap: wrap;
@@ -390,6 +404,9 @@
   gap: 0.5rem;
 }
 
+/* ⚠️ A `max-width` AND NOT A `flex-basis`. Four boxes sized by their content
+   would let the free-text signer grow past the two date controls beside it and
+   turn the row into a ragged line; capped, they read as a set of columns. */
 .grantRow .field {
   max-width: 13rem;
 }

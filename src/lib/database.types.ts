@@ -360,6 +360,7 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
+          external_id: string | null
           id: string
           level_id: string
           name: string
@@ -367,11 +368,13 @@ export type Database = {
           parent_id: string | null
           path: unknown
           sort_order: number
+          source: string
           updated_at: string
         }
         Insert: {
           active?: boolean
           created_at?: string
+          external_id?: string | null
           id?: string
           level_id: string
           name: string
@@ -379,11 +382,13 @@ export type Database = {
           parent_id?: string | null
           path: unknown
           sort_order?: number
+          source?: string
           updated_at?: string
         }
         Update: {
           active?: boolean
           created_at?: string
+          external_id?: string | null
           id?: string
           level_id?: string
           name?: string
@@ -391,6 +396,7 @@ export type Database = {
           parent_id?: string | null
           path?: unknown
           sort_order?: number
+          source?: string
           updated_at?: string
         }
         Relationships: [

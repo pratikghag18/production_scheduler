@@ -184,6 +184,12 @@ const h = vi.hoisted(() => {
     createMutate: vi.fn(),
     updateMutate: vi.fn(),
     recordMutate: vi.fn(),
+    // ⚠️ HOISTED LIKE THE OTHERS, AND IT WAS NOT. `useGrantSkill` used to
+    // return a FRESH `vi.fn()` on every render, which is unobservable by
+    // construction — the object the panel called is not the object a case can
+    // look at. Attaching was the one write on this screen nothing could inspect,
+    // which is exactly how it went a whole release sending one field of three.
+    grantMutate: vi.fn(),
     state: {
       profile: {
         id: "u1",
@@ -237,7 +243,7 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
   useCreateOperator: () => ({ mutate: h.createMutate, isPending: false }),
   useUpdateOperator: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetOperatorActive: () => ({ mutate: vi.fn(), isPending: false }),
-  useGrantSkill: () => ({ mutate: vi.fn(), isPending: false }),
+  useGrantSkill: () => ({ mutate: h.grantMutate, isPending: false }),
   useUpdateSkillRecord: () => ({ mutate: h.recordMutate, isPending: false }),
   useRevokeSkill: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -377,6 +383,7 @@ beforeEach(() => {
   h.createMutate.mockClear();
   h.updateMutate.mockClear();
   h.recordMutate.mockClear();
+  h.grantMutate.mockClear();
   // ⚠️ FACTORIES, NOT A SHARED LITERAL. Several cases below mutate the fixture
   // in place — revoking Ann's training, adding an orphaned person — and a shared
   // object would leave every later case running against a world shaped by its
@@ -969,5 +976,268 @@ describe("OperatorsPanel — the training record: who signed it off, and when (D
     expect((screen.getByLabelText("Signed off by for Forklift") as HTMLInputElement).value).toBe(
       "",
     );
+  });
+});
+
+/* ===========================================================================
+ * ROADMAP STAGE 22 / 0032 / D114, THE OTHER HALF — THE ADD FORM RECORDS WHAT
+ * THE LIST ABOVE IT SHOWS.
+ *
+ * The maintainer, having used the screen: *"for adding a training, there is no
+ * option to add a signed off by and trained on which the section above it has,
+ * this is a loss of continuity which needs to be fixed."*
+ *
+ * ⚠️⚠️ THIS BLOCK IS ALMOST ALL PAYLOAD, FOR A REASON THE RENDER CANNOT SHOW.
+ * A form that DRAWS both boxes and drops them on the way to `grantSkill` looks
+ * completely correct: the supervisor types the date and the signer, presses
+ * Attach, and the row appears — empty in both columns, which is the state a
+ * half-known record is legitimately in. Nothing on screen is wrong. Only the
+ * argument `useGrantSkill` was handed can tell the two apart.
+ *
+ * ⚠️ AND THE INDEPENDENCE IS PINNED AS HARD AS THE PLUMBING. 0032 deliberately
+ * carries no CHECK tying the date to the signer — a spreadsheet arrives with one
+ * column filled in — so the failure to watch for is not a missing field but an
+ * INVENTED RULE: a disabled Attach, a date defaulted because a signer was typed,
+ * one box cleared because the other went empty.
+ * =========================================================================== */
+
+/** What `useGrantSkill` was handed, as a plain object. */
+function grantPayload(callIndex = 0): Record<string, unknown> {
+  return h.grantMutate.mock.calls[callIndex][0] as Record<string, unknown>;
+}
+
+/** Fill in the add-a-training form the way a supervisor does, box by box. */
+function fillGrant(fields: {
+  training?: string;
+  trainedOn?: string;
+  signer?: string;
+  expires?: string;
+}) {
+  if (fields.training !== undefined) {
+    fireEvent.change(grantPicker(), { target: { value: fields.training } });
+  }
+  if (fields.trainedOn !== undefined) {
+    fireEvent.change(screen.getByLabelText("Trained on (optional)"), {
+      target: { value: fields.trainedOn },
+    });
+  }
+  if (fields.signer !== undefined) {
+    fireEvent.change(screen.getByLabelText("Signed off by (optional)"), {
+      target: { value: fields.signer },
+    });
+  }
+  if (fields.expires !== undefined) {
+    fireEvent.change(screen.getByLabelText("Expires (blank = never)"), {
+      target: { value: fields.expires },
+    });
+  }
+}
+
+function attach() {
+  fireEvent.click(screen.getByRole("button", { name: "Attach" }));
+}
+
+describe("OperatorsPanel — the add form records what the list shows (D114)", () => {
+  it("O31 ⭐⭐ the two new boxes exist and CANNOT share a name with any row's", () => {
+    // ⚠️⚠️ THE COLLISION THIS PINS IS ON THE PAGE ALREADY, TWICE OVER. Every
+    // held training carries `Trained on for <name>` and `Signed off by for
+    // <name>`, and the add form sits a few lines under that list — so a form
+    // whose boxes were simply called "Trained on" and "Signed off by" would be
+    // one training named nothing at all away from being ambiguous, and is in
+    // any case the unqualified name D106 forbids beside a qualified one (O28
+    // pins the other direction).
+    //
+    // ⚠️ `getByLabelText` THROWS ON MULTIPLE MATCHES, so each line here is the
+    // uniqueness assertion and not merely a lookup.
+    annHoldsTwo();
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    expect(screen.getByLabelText("Trained on (optional)")).toBeTruthy();
+    expect(screen.getByLabelText("Signed off by (optional)")).toBeTruthy();
+    // The row-level names are untouched and still one per training.
+    for (const name of ["Forklift", "Welding"]) {
+      expect(screen.getByLabelText(`Trained on for ${name}`)).toBeTruthy();
+      expect(screen.getByLabelText(`Signed off by for ${name}`)).toBeTruthy();
+    }
+    // ⚠️ AND NO BARE NAME SURVIVES. An unqualified "Trained on" sitting beside
+    // the qualified ones is the collision unchanged, whichever control owns it.
+    expect(screen.queryByLabelText("Trained on")).toBeNull();
+    expect(screen.queryByLabelText("Signed off by")).toBeNull();
+  });
+
+  it("O32 ⭐⭐ attaching sends all three facts with the training, in one gesture", () => {
+    // The defect verbatim: the insert used to carry the expiry alone, so the
+    // supervisor entered the same record twice — once here, once into the row
+    // that appeared. ⚠️ ONLY THE PAYLOAD CAN SEE THIS; the screen after a drop
+    // is indistinguishable from a legitimately half-known record.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fillGrant({
+      training: id.WELD,
+      trainedOn: "2026-03-14",
+      signer: "R. Okonkwo",
+      expires: "2027-01-31",
+    });
+    attach();
+    expect(h.grantMutate).toHaveBeenCalledTimes(1);
+    const sent = grantPayload();
+    expect(sent.operatorId).toBe(id.ANN);
+    expect(sent.skillId).toBe(id.WELD);
+    expect(sent.certifiedAt).toBe("2026-03-14");
+    expect(sent.signedOffBy).toBe("R. Okonkwo");
+    expect(sent.expiresAt).toBe("2027-01-31");
+  });
+
+  it("O33 ⭐⭐ a signer with no date attaches, and so does a date with no signer", () => {
+    // ⚠️ THE HALF-KNOWN ROW IS THE ORDINARY CASE, and 0032 writes no CHECK
+    // tying the two precisely so it stays enterable. The failure to watch for
+    // is not a missing field but an INVENTED RULE — one box refused, defaulted
+    // or cleared for want of the other — which sends people to type something
+    // untrue into the box they were made to fill.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fillGrant({ training: id.WELD, signer: "Vendor trainer" });
+    attach();
+    const signerOnly = grantPayload(0);
+    expect(signerOnly.signedOffBy).toBe("Vendor trainer");
+    expect(signerOnly.certifiedAt).toBeNull();
+    expect(signerOnly.expiresAt).toBeNull();
+
+    fillGrant({ trainedOn: "2026-03-14", signer: "" });
+    attach();
+    const dateOnly = grantPayload(1);
+    expect(dateOnly.certifiedAt).toBe("2026-03-14");
+    expect(dateOnly.signedOffBy).toBeNull();
+  });
+
+  it("O34 ⭐ Attach waits for the TRAINING and for nothing else", () => {
+    // ⚠️ THE CHECK 0032 REFUSED TO WRITE MUST NOT REAPPEAR AS A DISABLED
+    // BUTTON. Gating Attach on a date or a signer would be O33's invented rule
+    // wearing a control's clothes instead of a payload's.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    expect((screen.getByRole("button", { name: "Attach" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    // A training and nothing else: live, with both record boxes empty.
+    fillGrant({ training: id.WELD });
+    expect((screen.getByRole("button", { name: "Attach" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    attach();
+    const sent = grantPayload();
+    expect(sent.certifiedAt).toBeNull();
+    expect(sent.signedOffBy).toBeNull();
+  });
+
+  it("O35: the signer is trimmed on the way out, and a blank one is null rather than ''", () => {
+    // 0032: *"NULL means nobody recorded one, never 'unsigned'."* `signed_off_by`
+    // is a plain `text` column with no trim trigger and no CHECK — verified
+    // against the migration, not assumed — so this form is the only thing
+    // between a user and a signer called "  ", exactly as the held row is.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fillGrant({ training: id.WELD, signer: "   " });
+    attach();
+    expect(grantPayload(0).signedOffBy).toBeNull();
+    fillGrant({ signer: "  R. Okonkwo  " });
+    attach();
+    expect(grantPayload(1).signedOffBy).toBe("R. Okonkwo");
+  });
+
+  it("O36 ⭐ a successful attach empties the form, signer included", () => {
+    // ⚠️ A SIGNER LEFT STANDING WOULD ARRIVE ON THE NEXT TRAINING'S RECORD — a
+    // fact about one course silently signed onto another, with nothing on
+    // screen looking wrong. `grantId` and the expiry were already cleared; the
+    // two new boxes have to go with them.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    fillGrant({ training: id.WELD, trainedOn: "2026-03-14", signer: "R. Okonkwo" });
+    attach();
+    const handlers = h.grantMutate.mock.calls[0][1] as { onSuccess: () => void };
+    act(() => handlers.onSuccess());
+    expect((screen.getByLabelText("Signed off by (optional)") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Trained on (optional)") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Expires (blank = never)") as HTMLInputElement).value).toBe("");
+    expect(grantPicker().value).toBe("");
+  });
+
+  it("O37: the signer here is free text too, never a picker of people in this system", () => {
+    // ⚠️ THE SAME DECISION AS O29, ON THE OTHER CONTROL. The signer is routinely
+    // an external assessor with no login here, so a `<select>` would make the
+    // record either impossible to enter or a lie. Two boxes for one fact must
+    // not drift into two different kinds of box.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    const box = screen.getByLabelText("Signed off by (optional)");
+    expect(box.tagName).toBe("INPUT");
+    expect((box as HTMLInputElement).type).toBe("text");
+    expect(screen.queryByRole("combobox", { name: "Signed off by (optional)" })).toBeNull();
+  });
+});
+
+/* ===========================================================================
+ * WHERE THEY BELONG, WITHOUT AN EDIT MODE.
+ *
+ * The maintainer: *"does not show where they belong until you hit edit, not the
+ * end of the world but breaks the info flow."*
+ *
+ * ⚠️⚠️ IT LOOKS COSMETIC AND IS NOT. Since 0028 / D109 the node somebody
+ * belongs to decides WHERE THEY CAN BE BOOKED, and everything under this header
+ * is computed from it — the places list, its two footnotes, and the count line
+ * whose denominator IS that area. A reader shown "0 of 2 places in their own
+ * area" had no way to find out which area, short of opening a form that also
+ * offers to move them.
+ * =========================================================================== */
+
+describe("OperatorsPanel — the header says where somebody belongs", () => {
+  it("O38 ⭐⭐ picking somebody names their area without opening the edit form", () => {
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    // ⚠️ THE FORM STAYS SHUT. The fact was always available — one click into a
+    // control that also offers to MOVE them, which is not where a read-only
+    // answer should have to be looked up.
+    expect(screen.queryByRole("combobox", { name: "Where Ann Adams belongs" })).toBeNull();
+    expect(screen.getByText("Belongs to Line A")).toBeTruthy();
+  });
+
+  it("O39 ⭐⭐ the LEAF is drawn and the whole chain is the tooltip", () => {
+    // ⚠️ THE LEAF ALONE IS AMBIGUOUS AND THAT IS WHY BOTH ARE HERE: three plants
+    // in this company can each hold a "Line 1", so a header reading "Line 1"
+    // names one of three areas. The path answers it and is too long to draw
+    // beside a name, so it is the `title` — `scope.ts`'s own pair, used the way
+    // every other admin screen uses it.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    const where = screen.getByText("Belongs to Line A");
+    expect(where.getAttribute("title")).toBe("Plant 1 › Line A");
+    // And it is the person's OWN area, not their root — Ann belongs to a LINE
+    // (D109: an area need not be a root), which is the whole reason the places
+    // list can hold a ⚠ row one line over.
+    expect(where.textContent).not.toBe("Belongs to Plant 1");
+  });
+
+  it("O40: it follows the selection rather than sticking to whoever was read first", () => {
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    expect(screen.getByText("Belongs to Line A")).toBeTruthy();
+    pick("Zoe Zhang");
+    expect(screen.getByText("Belongs to Line Z")).toBeTruthy();
+    expect(screen.queryByText("Belongs to Line A")).toBeNull();
+  });
+
+  it("O41 ⭐ an area this reader cannot resolve says so, rather than going blank", () => {
+    // ⚠️ A BLANK WOULD READ AS "BELONGS NOWHERE", which is not a state that
+    // exists — `site_node_id` is NOT NULL since 0028 / D108. Ora's area is a
+    // node this reader cannot see; `scope.ts` answers "Somewhere else" for
+    // exactly this, and `rowsInPlant` fails open and still lists her, so the
+    // header really can be asked about an area it cannot name.
+    h.state.data.operators = [
+      ...h.state.data.operators,
+      h.operator(id.ORA, "Ora Orphan", "O-7", "n-gone"),
+    ];
+    render(<OperatorsPanel />);
+    pick("Ora Orphan");
+    expect(screen.getByText("Belongs to Somewhere else")).toBeTruthy();
   });
 });

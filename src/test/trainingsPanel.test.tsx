@@ -79,13 +79,35 @@ const h = vi.hoisted(() => {
     skill("s2", "Forklift", B),
     skill("s3", "Welding", A, false),
   ];
+  // The move fixture (D105). ⚠️ NOT in the base state — holders would give
+  // every case above something to warn about.
+  const operator = (id: string, displayName: string, siteNodeId: string) => ({
+    id,
+    displayName,
+    employeeRef: null,
+    active: true,
+    siteNodeId,
+    source: "manual",
+    externalId: null,
+  });
+  const held = (operatorId: string, skillId: string) => ({
+    operatorId,
+    skillId,
+    expiresAt: null,
+    certifiedAt: null,
+    signedOffBy: null,
+  });
+  const req = (nodeId: string, skillId: string) => ({ nodeId, skillId });
   return {
     createMutate: vi.fn(),
-    renameMutate: vi.fn(),
+    updateMutate: vi.fn(),
     activeMutate: vi.fn(),
     deleteMutate: vi.fn(),
     node,
     skill,
+    operator,
+    held,
+    req,
     baseNodes,
     baseSkills,
     state: {
@@ -108,10 +130,14 @@ const h = vi.hoisted(() => {
         adminAnywhere: true,
       },
       data: {
-        operators: [],
+        // ⚠️ TYPED THROUGH THE FACTORIES rather than left as `never[]`. A bare
+        // `[]` in a `vi.hoisted` literal infers `never[]`, and the move cases
+        // below could then not put a person in it without a cast — which is how
+        // a fixture ends up asserting against a shape the panel never sees.
+        operators: [] as ReturnType<typeof operator>[],
         skills: baseSkills(),
-        operatorSkills: [],
-        requirements: [],
+        operatorSkills: [] as ReturnType<typeof held>[],
+        requirements: [] as ReturnType<typeof req>[],
         nodes: baseNodes(),
         levels: [],
         skipped: 0,
@@ -141,7 +167,7 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
     error: h.state.error,
   }),
   useCreateSkill: () => ({ mutate: h.createMutate, isPending: false }),
-  useRenameSkill: () => ({ mutate: h.renameMutate, isPending: false }),
+  useUpdateSkill: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetSkillActive: () => ({ mutate: h.activeMutate, isPending: false }),
 }));
 
@@ -212,6 +238,42 @@ function withPlantOwnedTraining() {
   };
 }
 
+/**
+ * The world the move preview is about (D105).
+ *
+ * ⭐⭐ "Forklift at Line A" (s1) is held by TWO people who sit on different
+ * branches, and that pair is the whole fixture:
+ *
+ *   Ana  owned by Line A   -> moving the training to Line B STRANDS her
+ *   Bo   owned by Line B   -> moving it to Line B leaves her comparable
+ *
+ * A fixture with only Ana would pass with the comparability test replaced by
+ * "warn about everybody", which is the assertion this has to be able to fail.
+ */
+function withHolders() {
+  h.state.data = {
+    ...h.state.data,
+    operators: [h.operator("o1", "Ana", LINE_A), h.operator("o2", "Bo", LINE_B)],
+    operatorSkills: [h.held("o1", "s1"), h.held("o2", "s1")],
+  };
+}
+
+/** Line A requires the Forklift training — the half the SERVER refuses over. */
+function withRequirement() {
+  h.state.data = { ...h.state.data, requirements: [h.req(LINE_A, "s1")] };
+}
+
+/** The picker inside an open edit row, as a person would look for it. */
+function editOwnerPicker(handle: string): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: `Where ${handle} belongs` }) as HTMLSelectElement;
+}
+
+/** Open Edit on a row and hand back its owner picker. */
+function openEdit(handle: string): HTMLSelectElement {
+  fireEvent.click(screen.getByRole("button", { name: `Edit ${handle}` }));
+  return editOwnerPicker(handle);
+}
+
 /** Choose a plant the way the header control on `AdminPage` does. */
 function showPlant(choice: string | null) {
   act(() => useAdminViewStore.setState({ plantChoice: choice }));
@@ -233,7 +295,7 @@ function draft(name: string, owner: string) {
 }
 /** The `<li>` a row's controls live in, found through one of them. */
 function rowFor(handle: string): HTMLElement {
-  const li = screen.getByRole("button", { name: `Rename ${handle}` }).closest("li");
+  const li = screen.getByRole("button", { name: `Edit ${handle}` }).closest("li");
   if (li === null) throw new Error("the row's controls are not inside a row");
   return li;
 }
@@ -247,7 +309,7 @@ function sectionAfter(heading: string): HTMLElement {
 
 beforeEach(() => {
   h.createMutate.mockClear();
-  h.renameMutate.mockClear();
+  h.updateMutate.mockClear();
   h.activeMutate.mockClear();
   h.deleteMutate.mockClear();
   h.state.sessionLoading = false;
@@ -475,17 +537,22 @@ describe("TrainingsPanel — create and rename", () => {
     expect(h.activeMutate.mock.calls[0][0]).toEqual({ id: "s3", active: true });
   });
 
-  it("T17: Rename opens a box named for its row, and saves the trimmed name", () => {
+  it("T17 ⭐⭐ Edit saves the trimmed name and sends NO owner, because the owner did not change", () => {
     render(<TrainingsPanel />);
-    fireEvent.click(screen.getByRole("button", { name: "Rename Forklift at Line A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit Forklift at Line A" }));
     const box = screen.getByRole("textbox", { name: "Name for Forklift at Line A" });
     // ⚠️ THE ADD CARD'S BOX IS STILL PLAINLY "Name", so the two are told apart —
     // `OperatorsPanel` had a real defect from two controls both called
     // "Belongs to", and an open editor is exactly when it bites.
     expect(screen.getAllByRole("textbox", { name: "Name" })).toHaveLength(1);
     fireEvent.change(box, { target: { value: "  Fork lift  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Save the name of Forklift at Line A" }));
-    expect(h.renameMutate.mock.calls[0][0]).toEqual({ id: "s1", name: "Fork lift" });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes to Forklift at Line A" }));
+    // ⚠️⚠️ `toEqual` WITH NO `siteNodeId` IS THE ASSERTION, not a tidy shape.
+    // `updateSkill`'s contract is that an ABSENT key means "leave it alone", and
+    // under 0028 `skills.site_node_id` is one side of the comparability test
+    // every holder is measured against — so a rename that helpfully resent the
+    // current owner would be a MOVE, with the same trigger and the same silence.
+    expect(h.updateMutate.mock.calls[0][0]).toEqual({ id: "s1", name: "Fork lift" });
   });
 
   it("T18: the search narrows on the name", () => {
@@ -531,14 +598,14 @@ describe("TrainingsPanel — the plant filter", () => {
     expect(picker.value).toBe(PLANT2);
   });
 
-  it("T21 ⚠️ a rename box on a row the filter took away does not come back open", () => {
+  it("T21 ⚠️ an edit box on a row the filter took away does not come back open", () => {
     // Resolve-or-fall-back is reversible by construction, so widening back to
     // All plants would re-open a form the reader left behind two plants ago.
     // Clearing is the only thing that closes a door.
     withTwoPlants();
     render(<TrainingsPanel />);
     showPlant(PLANT2);
-    fireEvent.click(screen.getByRole("button", { name: "Rename Rigging at Plant 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit Rigging at Plant 2" }));
     expect(screen.getAllByRole("textbox", { name: "Name for Rigging at Plant 2" })).toHaveLength(1);
     showPlant(PLANT1);
     showPlant(null);
@@ -589,9 +656,9 @@ describe("TrainingsPanel — the plant filter", () => {
  * that the screen agrees with it before anybody clicks.
  * ======================================================================== */
 
-/** Is there a Rename/Retire/Delete anywhere for this row? */
+/** Is there an Edit/Retire/Delete anywhere for this row? */
 function controlsFor(handle: string): string[] {
-  return ["Rename", "Retire", "Bring back", "Delete"].filter(
+  return ["Edit", "Retire", "Bring back", "Delete"].filter(
     (verb) => screen.queryByRole("button", { name: `${verb} ${handle}` }) !== null,
   );
 }
@@ -621,7 +688,7 @@ describe("TrainingsPanel — the permission preview (V14 / D115)", () => {
 
     // ...and their own line is untouched. A preview that took the controls off
     // everything would be indistinguishable from one that worked.
-    expect(controlsFor("Forklift at Line A")).toEqual(["Rename", "Retire", "Delete"]);
+    expect(controlsFor("Forklift at Line A")).toEqual(["Edit", "Retire", "Delete"]);
     // ⚠️ AND THE SIBLING LINE IS NOT THEIRS EITHER — `path <@ gp` is downward
     // only, so Line B is no more reachable than the plant above.
     expect(controlsFor("Forklift at Line B")).toEqual([]);
@@ -634,7 +701,7 @@ describe("TrainingsPanel — the permission preview (V14 / D115)", () => {
     withPlantOwnedTraining();
     h.state.rights = { role: "supervisor", adminPaths: [], writablePaths: [], known: false };
     render(<TrainingsPanel />);
-    expect(controlsFor("Housekeeping at Plant 1")).toEqual(["Rename", "Retire", "Delete"]);
+    expect(controlsFor("Housekeeping at Plant 1")).toEqual(["Edit", "Retire", "Delete"]);
     expect(screen.queryByText(notManagedNote("Plant 1"))).toBeNull();
   });
 
@@ -651,16 +718,16 @@ describe("TrainingsPanel — the permission preview (V14 / D115)", () => {
       known: true,
     };
     render(<TrainingsPanel />);
-    expect(controlsFor("Housekeeping at Plant 1")).toEqual(["Rename", "Retire", "Delete"]);
-    expect(controlsFor("Forklift at Line B")).toEqual(["Rename", "Retire", "Delete"]);
+    expect(controlsFor("Housekeeping at Plant 1")).toEqual(["Edit", "Retire", "Delete"]);
+    expect(controlsFor("Forklift at Line B")).toEqual(["Edit", "Retire", "Delete"]);
   });
 
-  it("T27 ⚠️ a rename box already open on a row that turns out read-only is closed", () => {
+  it("T27 ⚠️ an edit box already open on a row that turns out read-only is closed", () => {
     // ⚠️ THE GRANT READ LANDS AFTER THE LIST, so this ordering is the normal
     // one and not an edge case. Leaving the editor up would leave a Save button
-    // on a row whose Rename had just been withdrawn.
+    // on a row whose Edit had just been withdrawn.
     const { rerender } = render(<TrainingsPanel />);
-    fireEvent.click(screen.getByRole("button", { name: "Rename Forklift at Line B" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit Forklift at Line B" }));
     expect(screen.getByRole("textbox", { name: "Name for Forklift at Line B" })).toBeTruthy();
 
     h.state.rights = {
@@ -671,9 +738,7 @@ describe("TrainingsPanel — the permission preview (V14 / D115)", () => {
     };
     rerender(<TrainingsPanel />);
     expect(screen.queryByRole("textbox", { name: "Name for Forklift at Line B" })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Save the name of Forklift at Line B" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save changes to Forklift at Line B" })).toBeNull();
     expect(screen.getByText(notManagedNote("Line B"))).toBeTruthy();
   });
 
@@ -702,5 +767,177 @@ describe("TrainingsPanel — the permission preview (V14 / D115)", () => {
     // offer — `scopeOptions`' header records that a client-derived permission
     // set left a site admin with nothing to choose at all.
     expect(ownerPicker().value).toBe(LINE_A);
+  });
+});
+
+/* ===========================================================================
+ * Moving a training (D105).
+ *
+ * ⭐⭐ MEASURED FIRST, ON THE RUNNING DATABASE, 31 August, and every case here
+ * is pinned to one of those observations:
+ *
+ *   The move that strands a HOLDER is ALLOWED and silent — nothing re-checks
+ *   `app_guard_operator_skill_scope` when `skills.site_node_id` changes, so the
+ *   rows survive in a state a re-grant of the same pair would be refused. The
+ *   client's job is to say so BEFORE the press, never to refuse.
+ *
+ *   The move that strands a REQUIREMENT is REFUSED — `app_guard_skill_rehome`
+ *   counts `node_skill_requirements` and only those. The client's job there is
+ *   the opposite: withhold the button, exactly as `clashBlocks` does.
+ * ======================================================================== */
+
+describe("TrainingsPanel — moving a training (D105)", () => {
+  it("T29 ⭐ the owner column becomes the picker, seeded to where the row already is", () => {
+    render(<TrainingsPanel />);
+    const picker = openEdit("Forklift at Line A");
+    // ⚠️ SEEDED TO THE ROW'S OWN OWNER, never to the first option. A `<select>`
+    // handed a value none of its options carries renders option 0 and reports
+    // nothing — which here would silently move the training on the next Save.
+    expect(picker.value).toBe(LINE_A);
+    // ⚠️ AND IT IS NAMED FOR ITS ROW: the Add card's picker is visibly labelled
+    // "Belongs to" and is on screen at the same moment.
+    expect(screen.getAllByRole("combobox", { name: "Belongs to" })).toHaveLength(1);
+  });
+
+  it("T30 ⭐ a move that costs nobody anything goes straight through, with no confirmation", () => {
+    // `DeleteDialog`'s second decision: a warning shown every time is how people
+    // learn to click past the one that matters. Both holders sit under Plant 1,
+    // so moving the training up to Plant 1 strands neither.
+    withHolders();
+    render(<TrainingsPanel />);
+    const picker = openEdit("Forklift at Line A");
+    fireEvent.change(picker, { target: { value: PLANT1 } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes to Forklift at Line A" }));
+    expect(h.updateMutate.mock.calls[0][0]).toEqual({
+      id: "s1",
+      name: "Forklift",
+      siteNodeId: PLANT1,
+    });
+  });
+
+  it("T31 ⭐⭐ a move that strands somebody WRITES NOTHING — it counts them, and names them", () => {
+    // THE WHOLE POINT OF THIS CHANGE. The server allows this move and says
+    // nothing; if the press went through, Ana's record would quietly stop
+    // belonging where she works and nobody would connect it to this click.
+    withHolders();
+    render(<TrainingsPanel />);
+    const picker = openEdit("Forklift at Line A");
+    fireEvent.change(picker, { target: { value: LINE_B } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes to Forklift at Line A" }));
+
+    expect(h.updateMutate).not.toHaveBeenCalled();
+    const box = screen.getByRole("group", { name: "Move Forklift at Line A" });
+    // ⭐ ONE person, not two: Bo is owned by Line B and stays comparable. A
+    // preview that warned about everybody would pass without this half.
+    expect(within(box).getByText(/1 person you can see holds it/)).toBeTruthy();
+    expect(within(box).getByText("Ana")).toBeTruthy();
+    expect(within(box).queryByText("Bo")).toBeNull();
+  });
+
+  it("T32 ⭐⭐ the confirm names the count (D106), and IT is what finally writes", () => {
+    withHolders();
+    render(<TrainingsPanel />);
+    fireEvent.change(openEdit("Forklift at Line A"), { target: { value: LINE_B } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes to Forklift at Line A" }));
+
+    const go = screen.getByRole("button", {
+      name: "Move it and leave 1 person holding it — Forklift at Line A",
+    });
+    // ⚠️ THE VISIBLE LABEL IS THE WHOLE SENTENCE, so the accessible name
+    // contains it (WCAG 2.5.3) and the count is not hidden in the aria-label.
+    expect(go.textContent).toBe("Move it and leave 1 person holding it");
+    fireEvent.click(go);
+    expect(h.updateMutate.mock.calls[0][0]).toEqual({
+      id: "s1",
+      name: "Forklift",
+      siteNodeId: LINE_B,
+    });
+  });
+
+  it("T33 ⭐⭐ a stranded REQUIREMENT offers no confirm at all — the server refuses it", () => {
+    // Measured: `UPDATE skills SET site_node_id = <Line B>` with a Line A
+    // requirement still standing raises PT409 `owner_change_blocked`. This is
+    // the same call `clashBlocks` makes on the add form — the client withholds
+    // only what the database also refuses, never the converse.
+    withHolders();
+    withRequirement();
+    render(<TrainingsPanel />);
+    fireEvent.change(openEdit("Forklift at Line A"), { target: { value: LINE_B } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes to Forklift at Line A" }));
+
+    const box = screen.getByRole("group", { name: "Move Forklift at Line A" });
+    expect(within(box).getByText(/can’t move to Line B yet/)).toBeTruthy();
+    expect(within(box).getByText(/1 place outside Line B still requires it/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Move it and leave/ })).toBeNull();
+    // ⚠️ AND THE WAY OUT IS STILL A BUTTON, not just a dead end.
+    fireEvent.click(screen.getByRole("button", { name: "Leave Forklift at Line A where it is" }));
+    expect(screen.queryByRole("group", { name: "Move Forklift at Line A" })).toBeNull();
+    expect(h.updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("T34 ⚠️ picking a different destination voids the confirmation it was about", () => {
+    // The count in that box is about the place they have just stopped choosing.
+    // Leaving it up would put "1 person" over a button that now moves it
+    // somewhere else entirely.
+    withHolders();
+    render(<TrainingsPanel />);
+    const picker = openEdit("Forklift at Line A");
+    fireEvent.change(picker, { target: { value: LINE_B } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes to Forklift at Line A" }));
+    expect(screen.getByRole("group", { name: "Move Forklift at Line A" })).toBeTruthy();
+
+    fireEvent.change(picker, { target: { value: PLANT1 } });
+    expect(screen.queryByRole("group", { name: "Move Forklift at Line A" })).toBeNull();
+    expect(h.updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("T35 ⭐ the edit picker is narrowed by the plant filter, exactly as the ADD form is", () => {
+    // Decision 3, applied to the control that moves a row rather than the one
+    // that creates it: what you see is what you can move it into. The
+    // alternative lets somebody send a training into a plant they have filtered
+    // away and then watch it vanish from the list.
+    withTwoPlants();
+    render(<TrainingsPanel />);
+    showPlant(PLANT1);
+    const picker = openEdit("Forklift at Line A");
+    const offered = Array.from(picker.options).map((o) => o.value);
+    expect(offered).toContain(LINE_B);
+    expect(offered).not.toContain(PLANT2);
+    expect(offered).not.toContain(LINE_9);
+  });
+
+  it("T36 ⚠️ Cancel closes the confirmation with it, so it cannot be left armed", () => {
+    withHolders();
+    render(<TrainingsPanel />);
+    fireEvent.change(openEdit("Forklift at Line A"), { target: { value: LINE_B } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes to Forklift at Line A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop editing Forklift at Line A" }));
+
+    expect(screen.queryByRole("group", { name: "Move Forklift at Line A" })).toBeNull();
+    // ⚠️ AND RE-OPENING STARTS FROM THE ROW AGAIN, not from the draft that was
+    // abandoned — the picker is shared across rows, so a destination left
+    // behind here is one that would move the NEXT row opened.
+    expect(openEdit("Forklift at Line A").value).toBe(LINE_A);
+    expect(h.updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("T37 ⚠️ a row the reader may not change offers no picker either", () => {
+    // The new control is withheld by the same `useEditRights` preview as the
+    // other three (V14). A picker surviving on a read-only row would be the one
+    // live control on a row that has just said it cannot be changed — and this
+    // one moves people's records.
+    withPlantOwnedTraining();
+    withHolders();
+    h.state.rights = {
+      role: "supervisor",
+      adminPaths: [],
+      writablePaths: ["plant_1.line_a"],
+      known: true,
+    };
+    render(<TrainingsPanel />);
+    expect(controlsFor("Housekeeping at Plant 1")).toEqual([]);
+    expect(
+      screen.queryByRole("combobox", { name: "Where Housekeeping at Plant 1 belongs" }),
+    ).toBeNull();
   });
 });

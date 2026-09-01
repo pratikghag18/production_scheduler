@@ -328,6 +328,37 @@
 >    **15 checks on a real database (7 upgrade + 8 acceptance through RLS as real site admins);
 >    5 breakages, 4 caught, 1 inert with its kind named and the rule it leans on pinned by T8.**
 >
+> 1(g). **🔴 TWO DATABASE DECISIONS SURFACED BY THE IMPORT WORK, both measured and neither
+>    guessed at.**
+>    (a) **A part number is company-wide.** `products_org_id_sku_key` is `unique (org_id, sku)`
+>    from 0002, so two plants cannot both hold `SKU-9` whatever `external_id` says — an importer
+>    fed overlapping part numbers gets a 23505 on the second row, not an update. **The same
+>    question 0031 settled for training names, on a table nobody has asked yet.** `60_`'s W12
+>    measures today's answer so the import screen is written knowing it. THE MAINTAINER'S CALL.
+>    ⚠️ And note the resulting asymmetry an importer must know: **people match company-wide;
+>    parts and trainings match per plant.** The same code under two plants is two parts and two
+>    trainings, and one person.
+>    (b) **⚠⚠ `app_guard_skill_rehome` (0028 §5) COUNTS REQUIREMENTS AND NOT HOLDERS.** Measured
+>    on a real database: moving a training to another branch is ALLOWED and SILENT, the existing
+>    `operator_skills` rows survive and become incomparable — a state that **cannot be recreated**
+>    (a re-grant raises `PT409 not_offered_here`) — and `check_eligibility` still answers
+>    `eligible: true`, because its `held` CTE applies no scope test. So nothing is destroyed and
+>    nobody is un-qualified; what exists is a row the rules would not admit today.
+>    ⚠️ **Reachable in scope**, not a company-admin edge case: a plant supervisor moving a
+>    training between two of their own lines strands a holder. The Trainings screen now warns with
+>    a count before the press, **but the client is a preview and the server is the authority** — a
+>    CSV import or a psql session still does it silently. ⚠️ **The fix is a decision, not a
+>    patch:** refusing would break the move the maintainer just asked for, so the choice is
+>    refuse / warn-and-record / leave. Recorded rather than guessed.
+>
+> 1(h). **🟢 CLOSED BY MEASUREMENT, kept because the question will recur.** Two columns in two
+>    weeks existed with no screen behind them (`skills.active`, `operator_skills.certified_at`),
+>    which looked like a pattern worth chasing. **Chased: all 94 columns in the schema checked
+>    against every line of `src/`, and exactly two go unmentioned — `audit_log.actor_id` and
+>    `audit_log.table_name`, on a table written and never read back by design.** There is no third.
+>    ⭐ One command turned a standing suspicion into a number; re-run it after any migration that
+>    adds a column.
+>
 > 2b. **🔴 Migration 0032 (D111b), the starter library ITSELF — STAGE 21's LAST ITEM, AND
 >    NOW UNBLOCKED.** 0031 was its precondition and nothing more: a shared set whose whole purpose
 >    is *"every plant copies Forklift into their own"* could not exist while the second copy was

@@ -23,18 +23,32 @@
 import { describe, expect, it } from "vitest";
 import type { SchedulerError } from "@/lib/api";
 import {
+  NAMES_SHOWN,
   NAME_MAX_LENGTH,
   describeTrainingWriteRefusal,
   hiddenByPlantNote,
+  listStrandedHolders,
   matchesTrainingQuery,
+  moveCosts,
   partitionTrainings,
+  previewTrainingMove,
   retireActionLabel,
   retiredClashNote,
   skippedRowsNote,
+  summariseTrainingMove,
   trainingHandle,
   validateTrainingDraft,
+  type TrainingHolder,
+  type TrainingPlace,
   type TrainingRow,
 } from "../features/admin/lib/trainings.ts";
+// ⭐⭐ THE **REAL** `isAtOrBelow`, NOT A STAND-IN. `previewTrainingMove` takes
+// the predicate as a parameter precisely so `trainings.ts` keeps no runtime
+// imports; a test that passed its own `startsWith` would pin the plumbing and
+// miss the one thing that has actually bitten this codebase — `plant_1.line_1`
+// is a string prefix of `plant_1.line_10` and is not an ancestor of that node.
+// T29 is the case that fails if this import is swapped for a hand-rolled one.
+import { isAtOrBelow } from "../features/admin/lib/scope.ts";
 
 const LINE_A = "40000000-0000-0000-0000-00000000000a";
 const LINE_B = "40000000-0000-0000-0000-00000000000b";
@@ -43,6 +57,32 @@ const FORKLIFT_A: TrainingRow = { id: "s1", name: "Forklift", siteNodeId: LINE_A
 const FORKLIFT_B: TrainingRow = { id: "s2", name: "Forklift", siteNodeId: LINE_B, active: true };
 const WELDING_A: TrainingRow = { id: "s3", name: "Welding", siteNodeId: LINE_A, active: false };
 const ALL: readonly TrainingRow[] = [FORKLIFT_A, FORKLIFT_B, WELDING_A];
+
+/* ---------------------------------------------------------------------------
+   The move fixture (§6). ⚠️ PATHS, NOT IDS — `previewTrainingMove` compares the
+   ltree the SERVER compares, and `plant_1.line_1` vs `plant_1.line_10` is the
+   pair that makes a naive prefix test wrong.
+
+     plant_1                 the plant
+     plant_1.line_a          Line A
+     plant_1.line_b          Line B
+     plant_2                 a second plant entirely
+--------------------------------------------------------------------------- */
+const P1 = "plant_1";
+const A_PATH = "plant_1.line_a";
+const B_PATH = "plant_1.line_b";
+const P2 = "plant_2";
+
+const holder = (name: string, ownerPath: string | null): TrainingHolder => ({
+  operatorId: `op-${name}`,
+  name,
+  ownerPath,
+});
+const place = (name: string, path: string | null): TrainingPlace => ({
+  nodeId: `n-${name}`,
+  name,
+  path,
+});
 
 /** Every export that produces a sentence a reader can see. Used by T17. */
 const EVERY_SENTENCE: readonly string[] = [
@@ -56,6 +96,35 @@ const EVERY_SENTENCE: readonly string[] = [
   retiredClashNote(false) ?? "",
   describeTrainingWriteRefusal({ kind: "DuplicateValue" }, "described"),
   describeTrainingWriteRefusal({ kind: "WriteRefused" }, "You don't have permission."),
+  describeTrainingWriteRefusal(
+    { kind: "OwnerChangeBlocked", what: "skill", id: "s1", newOwnerNodeId: LINE_B, stranded: 2 },
+    "described",
+  ),
+  ...(() => {
+    // Both faces of the move confirmation: the one that warns and the one that
+    // refuses. Adding a sentence-producing export without adding it here is the
+    // gap T17 cannot close by itself.
+    const warns = summariseTrainingMove(
+      { strandedHolders: [holder("Ana", "plant_2"), holder("Bo", "plant_2")], strandedPlaces: [] },
+      "Line B",
+    );
+    const refuses = summariseTrainingMove(
+      { strandedHolders: [], strandedPlaces: [place("Line A", "plant_1.line_a")] },
+      "Line B",
+    );
+    return [
+      warns.headline,
+      ...warns.costs,
+      warns.confirmLabel,
+      refuses.headline,
+      ...refuses.costs,
+      refuses.confirmLabel,
+      listStrandedHolders({
+        strandedHolders: Array.from({ length: NAMES_SHOWN + 3 }, (_, i) => holder(`P${i}`, "x")),
+        strandedPlaces: [],
+      }).more ?? "",
+    ];
+  })(),
   ...(() => {
     const bad = validateTrainingDraft({ name: "", siteNodeId: "" });
     if (bad.ok) throw new Error("the fixture for T17 stopped being a refusal");
@@ -273,6 +342,19 @@ describe("trainings.ts — what the screen says", () => {
     expect(note).not.toContain("outside plant");
   });
 
+  it("T20a ⭐ a move refusal is told in PLACES, not in 'scheduled items'", () => {
+    // `app_guard_skill_rehome` (0028 §5) counts `node_skill_requirements`, and
+    // nothing schedules a training — so the SHARED `OwnerChangeBlocked`
+    // sentence ("already used outside the site... N scheduled items") sends the
+    // reader to look at a board for rows that live on a hierarchy screen.
+    const said = describeTrainingWriteRefusal(
+      { kind: "OwnerChangeBlocked", what: "skill", id: "s1", newOwnerNodeId: LINE_B, stranded: 2 },
+      "This is already used outside the site you're moving it to (2 scheduled items).",
+    );
+    expect(said).toContain("requires this training");
+    expect(said).not.toContain("scheduled");
+  });
+
   it("T20 ⚠️ the skipped footnote says 'rows', not 'trainings'", () => {
     // `fetchOperatorsAdmin` runs six reads and returns ONE `skipped` count
     // across all of them, so a number here may be about people or requirements
@@ -282,5 +364,237 @@ describe("trainings.ts — what the screen says", () => {
     expect(skippedRowsNote(1)).toBe("1 row couldn't be read and isn't shown.");
     expect(skippedRowsNote(2)).toBe("2 rows couldn't be read and aren't shown.");
     expect(skippedRowsNote(2)).not.toContain("training");
+  });
+});
+
+/* ===========================================================================
+ * §6 — moving a training, and what it costs the people who hold it.
+ *
+ * ⭐⭐ EVERY EXPECTATION HERE IS A MEASUREMENT, taken on the local Supabase
+ * stack on 31 August rather than read off the migration:
+ *
+ *   M2  moving a training away from its holders is ALLOWED — `UPDATE skills SET
+ *       site_node_id = <other plant>` returns without raising.
+ *   M3  the `operator_skills` rows SURVIVE, and their owner is then
+ *       incomparable with the training's: exactly what
+ *       `app_guard_operator_skill_scope` refuses on INSERT.
+ *   M4  a re-grant of that same pair raises PT409 `not_offered_here`. What was
+ *       silently allowed cannot be silently undone.
+ *   M5  the same move WITH a requirement outside the destination is REFUSED,
+ *       PT409 `owner_change_blocked` — `app_guard_skill_rehome` counts
+ *       `node_skill_requirements` and nothing else.
+ *   M6  `check_eligibility` still answers `eligible: true` for a stranded
+ *       holder: `held` reads `operator_skills` with no scope test.
+ *
+ * So the database refuses one of the two hazards and is silent about the
+ * other, and these cases pin the client to that exact split: the requirement
+ * BLOCKS, the holder WARNS.
+ * ======================================================================== */
+describe("trainings.ts — moving a training (D105)", () => {
+  it("T21 ⭐⭐ M3: a holder on another branch is stranded, and the move is not refused", () => {
+    const p = previewTrainingMove(
+      {
+        newOwnerPath: P2,
+        holders: [holder("Ana", A_PATH)],
+        requiredAt: [],
+      },
+      isAtOrBelow,
+    );
+    expect(p.strandedHolders.map((h) => h.name)).toEqual(["Ana"]);
+    expect(p.strandedPlaces).toEqual([]);
+    // The SERVER allows this (M2). The client must warn, never refuse — a
+    // client enforcing a rule the database does not have is §19.74's defect.
+    expect(summariseTrainingMove(p, "Plant 2").refused).toBe(false);
+  });
+
+  it("T22 ⭐⭐ the holder test is COMPARABILITY — both directions, unlike every other scope test", () => {
+    // 0028 §4's own comment: a plant-wide person holding a Line 1 training is
+    // ORDINARY (they are qualified for Line 1 work); a Plant 2 person holding a
+    // Plant 1 training is not. A one-directional test would warn about half the
+    // company on every move.
+    const downward = previewTrainingMove(
+      { newOwnerPath: A_PATH, holders: [holder("Ana", P1)], requiredAt: [] },
+      isAtOrBelow,
+    );
+    expect(downward.strandedHolders).toEqual([]); // owner ABOVE the destination
+
+    const upward = previewTrainingMove(
+      { newOwnerPath: P1, holders: [holder("Bo", A_PATH)], requiredAt: [] },
+      isAtOrBelow,
+    );
+    expect(upward.strandedHolders).toEqual([]); // owner BELOW the destination
+
+    const sideways = previewTrainingMove(
+      { newOwnerPath: B_PATH, holders: [holder("Cy", A_PATH)], requiredAt: [] },
+      isAtOrBelow,
+    );
+    // ⭐ SIBLINGS ARE THE WHOLE HAZARD, and this is the move an ORDINARY plant
+    // admin can make entirely inside their own grant: measured as allowed, and
+    // silent.
+    expect(sideways.strandedHolders.map((h) => h.name)).toEqual(["Cy"]);
+  });
+
+  it("T23 ⭐⭐ M5: a requirement outside the destination BLOCKS, because the server refuses it", () => {
+    const p = previewTrainingMove(
+      {
+        newOwnerPath: B_PATH,
+        holders: [],
+        requiredAt: [place("Line A", A_PATH)],
+      },
+      isAtOrBelow,
+    );
+    expect(p.strandedPlaces.map((q) => q.name)).toEqual(["Line A"]);
+    const summary = summariseTrainingMove(p, "Line B");
+    expect(summary.refused).toBe(true);
+    expect(summary.costs.join(" ")).toContain("1 place");
+  });
+
+  it("T24 ⚠️ the PLACE test is containment only — a requirement ABOVE the destination is stranded too", () => {
+    // `app_owner_covers_in_org` asks whether the requirement sits AT OR BELOW
+    // the training's owner. Reusing the holder's comparability test here would
+    // predict "allowed" for a move the server refuses, which is the one
+    // prediction this may never make.
+    const p = previewTrainingMove(
+      { newOwnerPath: A_PATH, holders: [], requiredAt: [place("The plant", P1)] },
+      isAtOrBelow,
+    );
+    expect(p.strandedPlaces.map((q) => q.name)).toEqual(["The plant"]);
+    // A requirement BELOW the destination is fine — requirements inherit down.
+    const below = previewTrainingMove(
+      { newOwnerPath: P1, holders: [], requiredAt: [place("Line A", A_PATH)] },
+      isAtOrBelow,
+    );
+    expect(below.strandedPlaces).toEqual([]);
+  });
+
+  it("T25 ⭐⭐ the two halves fail in OPPOSITE directions, on purpose", () => {
+    // A HOLDER we cannot place is COUNTED: the output is a sentence and blocks
+    // nothing, so one name too many costs a sentence and one too few hides a
+    // consequence nobody will connect to this press.
+    const p = previewTrainingMove(
+      {
+        newOwnerPath: P2,
+        holders: [holder("Ghost", null)],
+        requiredAt: [place("Nowhere", null)],
+      },
+      isAtOrBelow,
+    );
+    expect(p.strandedHolders.map((h) => h.name)).toEqual(["Ghost"]);
+    // A PLACE we cannot resolve is NOT counted: that half BLOCKS, so it is back
+    // under `scope.ts`'s rule — "I cannot tell" must never become a refusal.
+    expect(p.strandedPlaces).toEqual([]);
+    expect(summariseTrainingMove(p, "Plant 2").refused).toBe(false);
+  });
+
+  it("T26 ⭐ a move that costs nothing gets NO confirmation", () => {
+    // `DeleteDialog`'s second decision: a warning shown every time is how
+    // people learn to click past the one that matters.
+    const free = previewTrainingMove(
+      { newOwnerPath: P1, holders: [holder("Ana", A_PATH)], requiredAt: [place("Line A", A_PATH)] },
+      isAtOrBelow,
+    );
+    expect(moveCosts(free)).toBe(false);
+    const costly = previewTrainingMove(
+      { newOwnerPath: P2, holders: [holder("Ana", A_PATH)], requiredAt: [] },
+      isAtOrBelow,
+    );
+    expect(moveCosts(costly)).toBe(true);
+  });
+
+  it("T27 ⭐⭐ the confirm button NAMES the count (D106), and the number is right", () => {
+    // `DeleteDialog`'s third decision: *"the screen this replaces said 'Delete
+    // for good?' whether the answer was 'nothing happens' or 'eleven jobs
+    // disappear'."* "Move it" alone would be that mistake again.
+    const one = summariseTrainingMove(
+      { strandedHolders: [holder("Ana", P2)], strandedPlaces: [] },
+      "Line B",
+    );
+    expect(one.confirmLabel).toBe("Move it and leave 1 person holding it");
+    expect(one.costs.join(" ")).toContain("1 person you can see holds it");
+
+    const many = summariseTrainingMove(
+      {
+        strandedHolders: [holder("Ana", P2), holder("Bo", P2), holder("Cy", P2)],
+        strandedPlaces: [],
+      },
+      "Line B",
+    );
+    expect(many.confirmLabel).toBe("Move it and leave 3 people holding it");
+    expect(many.costs.join(" ")).toContain("3 people you can see hold it");
+  });
+
+  it("T28 ⚠️⚠️ M6: the sentence says they STAY QUALIFIED, because they do", () => {
+    // `check_eligibility` reads `operator_skills` with no scope test, so a
+    // stranded holder is still answered `eligible: true`. Nothing is destroyed
+    // and nobody is un-qualified — and a warning people learn is exaggerated is
+    // a warning they stop reading. What it must NOT do is call this a loss.
+    const said = summariseTrainingMove(
+      { strandedHolders: [holder("Ana", P2)], strandedPlaces: [] },
+      "Line B",
+    ).costs.join(" ");
+    expect(said).toContain("stay qualified");
+    expect(said.toLowerCase()).not.toContain("lose");
+    expect(said.toLowerCase()).not.toContain("removed");
+    // ⭐ M4 is the half that IS permanent, and it has to be in there: a re-grant
+    // of the same pair raises `not_offered_here`.
+    expect(said).toContain("be given back there");
+  });
+
+  it("T29 ⚠️⚠️ ancestry is compared LABEL BY LABEL, not by string prefix", () => {
+    // `plant_1.line_1` IS a string prefix of `plant_1.line_10` and is NOT an
+    // ancestor of that node. Six trainings across ten lines is enough for this
+    // to bite, and the failure is silent: a confirmation that says nobody is
+    // stranded while somebody is.
+    const p = previewTrainingMove(
+      {
+        newOwnerPath: "plant_1.line_1",
+        holders: [holder("Ana", "plant_1.line_10")],
+        requiredAt: [place("Line 10", "plant_1.line_10")],
+      },
+      isAtOrBelow,
+    );
+    expect(p.strandedHolders.map((h) => h.name)).toEqual(["Ana"]);
+    expect(p.strandedPlaces.map((q) => q.name)).toEqual(["Line 10"]);
+  });
+
+  it("T30 ⭐ the names are listed, and a long list says how many it did not show", () => {
+    // "3 people" is a number to accept; three names are three people to ask.
+    const few = listStrandedHolders({
+      strandedHolders: [holder("Ana", P2), holder("Bo", P2)],
+      strandedPlaces: [],
+    });
+    expect(few.names).toEqual(["Ana", "Bo"]);
+    expect(few.more).toBeNull();
+
+    const many = listStrandedHolders({
+      strandedHolders: Array.from({ length: NAMES_SHOWN + 2 }, (_, i) => holder(`P${i}`, P2)),
+      strandedPlaces: [],
+    });
+    // ⚠️ THE REMAINDER IS SAID OUT LOUD rather than trailing off — a
+    // confirmation that silently shows five of two hundred is a confirmation
+    // about a smaller move than the one being made.
+    expect(many.names).toHaveLength(NAMES_SHOWN);
+    expect(many.more).toBe("and 2 more");
+  });
+
+  it("T31 ⭐ nothing the move confirmation says calls a training a 'skill' or a 'ticket'", () => {
+    // T17's rule, restated over §6 because `EVERY_SENTENCE` is hand-maintained
+    // and this section added six sentences at once.
+    const said = [
+      ...summariseTrainingMove(
+        { strandedHolders: [holder("Ana", P2)], strandedPlaces: [] },
+        "Line B",
+      ).costs,
+      summariseTrainingMove({ strandedHolders: [holder("Ana", P2)], strandedPlaces: [] }, "Line B")
+        .headline,
+      summariseTrainingMove(
+        { strandedHolders: [], strandedPlaces: [place("Line A", A_PATH)] },
+        "Line B",
+      ).headline,
+    ];
+    for (const line of said) {
+      expect(line.toLowerCase()).not.toContain("ticket");
+      expect(line.toLowerCase()).not.toContain("skill");
+    }
   });
 });

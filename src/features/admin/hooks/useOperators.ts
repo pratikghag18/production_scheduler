@@ -40,6 +40,7 @@ import {
   revokeSkill,
   setOperatorActive,
   updateOperator,
+  updateSkill,
   updateSkillRecord,
   type CreateOperatorInput,
   type CreateSkillInput,
@@ -50,6 +51,7 @@ import {
   type SchedulerError,
   type SkillRecord,
   type UpdateOperatorInput,
+  type UpdateSkillInput,
 } from "@/lib/api";
 
 export const operatorKeys = {
@@ -142,6 +144,34 @@ export function useSetSkillActive() {
   const invalidate = useInvalidateOperators();
   return useMutation<SkillRecord, SchedulerError, SetSkillActiveInput>({
     mutationFn: (input) => setSkillActive(input),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Rename a training, move it, or both.
+ *
+ * ⚠️⚠️ THE VARIABLES TYPE CARRIES THE API'S "AT LEAST ONE FIELD" INTERSECTION
+ * RATHER THAN WIDENING IT AWAY. A hook typed `UpdateSkillInput` alone would
+ * accept `{ id }` — a patch with nothing in it — and the refusal would arrive
+ * from PostgREST at runtime instead of from `tsc`. `useUpdateSkillRecord` below
+ * records the same mistake made in the other direction: a generic that was
+ * NARROWER than the call it wrapped, so "change one field and touch nothing
+ * else" became unsayable.
+ *
+ * ⭐ It invalidates the whole prefix, which matters more here than for a
+ * rename: moving a training changes which places offer it AND which people the
+ * Operators screen will let you grant it to, so a mutation that refreshed only
+ * this list would leave that one offering a training it can no longer reach.
+ */
+export function useUpdateSkill() {
+  const invalidate = useInvalidateOperators();
+  return useMutation<
+    SkillRecord,
+    SchedulerError,
+    UpdateSkillInput & ({ name: string } | { siteNodeId: string })
+  >({
+    mutationFn: (input) => updateSkill(input),
     onSuccess: invalidate,
   });
 }

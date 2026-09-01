@@ -13,6 +13,26 @@
    up borrowing that consumer's vocabulary too, which is where "ticket" came
    from. Giving trainings a section of their own fixes both at once.
 
+   ⭐⭐ AND SINCE D105 THE EDIT FORM MOVES A TRAINING AS WELL AS RENAMING IT.
+   The api layer had `renameSkill` and nothing else, so where a training
+   belonged was a create-only choice; the control was honestly called "Rename"
+   and the hint under the list admitted the gap out loud. `updateSkill` closes
+   it, and the button is renamed in the same change because D106 forbids a
+   control named after LESS than it does exactly as firmly as one named after
+   more.
+
+   ⚠️⚠️ MOVING ONE IS NOT FREE, AND THE DATABASE WILL NOT SAY SO.
+   `app_guard_operator_skill_scope` (0028 §4) requires a training's owner and a
+   HOLDER's owner to be comparable, and it is a trigger on `operator_skills`
+   fired on INSERT or on an UPDATE of `operator_id`/`skill_id` — so nothing
+   re-checks it when `skills` moves out from under those rows. Measured on the
+   running stack: the move is ALLOWED, the holder rows survive and still count
+   in `check_eligibility`, and they are left in a state a re-grant of the same
+   pair would be refused. `app_guard_skill_rehome` (§5) guards this column and
+   counts `node_skill_requirements` ONLY. So the count, the names and the
+   confirmation below are the whole of the protection — see
+   `previewTrainingMove` in `../lib/trainings.ts`.
+
    ⭐ `TRAININGS_PANEL_READY` LIVES HERE, NOT IN `AdminPage.tsx`, exactly as
    `PRODUCTS_PANEL_READY` does. The nav entry reads it, so turning this section
    on is a one-line edit to THIS file — the lane that builds the panel is the
@@ -52,8 +72,8 @@ import { canQueryAsUser } from "@/features/auth/session";
 import {
   useCreateSkill,
   useOperatorsAdmin,
-  useRenameSkill,
   useSetSkillActive,
+  useUpdateSkill,
 } from "../hooks/useOperators";
 import { useEditRights } from "../hooks/useEditRights";
 import { describeSkillNameClash, findExistingSkillByName } from "../lib/operators";
@@ -61,19 +81,24 @@ import { notManagedNote } from "../lib/editRights";
 import {
   describeTrainingWriteRefusal,
   hiddenByPlantNote,
+  listStrandedHolders,
   matchesTrainingQuery,
+  moveCosts,
   partitionTrainings,
+  previewTrainingMove,
   retireActionLabel,
   retiredClashNote,
   skippedRowsNote,
+  summariseTrainingMove,
   trainingHandle,
   validateTrainingDraft,
+  type TrainingMovePreview,
   type TrainingRow,
 } from "../lib/trainings";
 import { DeleteDialog } from "./DeleteDialog";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
-import { indentedLabel, scopeLabel, scopeOptions, scopePathLabel } from "../lib/scope";
+import { indentedLabel, isAtOrBelow, scopeLabel, scopeOptions, scopePathLabel } from "../lib/scope";
 import styles from "./TrainingsPanel.module.css";
 
 /** Read by `AdminPage`'s rail, the same way `PRODUCTS_PANEL_READY` is. */
@@ -100,7 +125,12 @@ export function TrainingsPanel() {
   const { canEdit } = useEditRights(canQuery, profile?.role ?? null);
 
   const createMutation = useCreateSkill();
-  const renameMutation = useRenameSkill();
+  // ⭐⭐ `useUpdateSkill`, NOT `useRenameSkill`, AND THAT IS D105 CLOSING. The
+  // api layer had `renameSkill` and nothing else, so where a training belonged
+  // was settable once and never again — which is what the hint under this list
+  // used to admit to. `updateSkill` patches either field or both, and an ABSENT
+  // key means "leave it alone", so a rename still sends only a name.
+  const updateMutation = useUpdateSkill();
   const activeMutation = useSetSkillActive();
 
   const [query, setQuery] = useState("");
@@ -111,8 +141,17 @@ export function TrainingsPanel() {
     owner: null,
   });
   const [formError, setFormError] = useState<string | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editOwner, setEditOwner] = useState("");
+  // ⭐⭐ THE MOVE ASKS BEFORE IT ACTS, AND ONLY WHEN IT COSTS SOMEBODY
+  // SOMETHING. Set by Save when the owner really changed and
+  // `previewTrainingMove` found holders or places in the way; the write does not
+  // happen until the button in that box is pressed. `DeleteDialog`'s second
+  // decision is why it is conditional rather than always: a confirmation shown
+  // for a move that costs nothing is how people learn to click past the one
+  // that matters.
+  const [movingId, setMovingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   // ⭐ SEPARATE FROM `rowError`, and the separation is the point — the same call
@@ -128,6 +167,16 @@ export function TrainingsPanel() {
   // would hand every derivation below a brand new `plant` object every time.
   const trainings = useMemo(() => data?.skills ?? [], [data]);
   const nodes = useMemo(() => data?.nodes ?? [], [data]);
+  // ⭐⭐ THE THREE READS THE MOVE PREVIEW IS MADE OF, AND `fetchOperatorsAdmin`
+  // ALREADY RETURNS ALL THREE. That is the whole reason this screen can warn
+  // about a move without a second round trip: `DeleteDialog` must ask
+  // `deletion_preview` and disable its buttons until the answer lands, whereas
+  // the answer here is already in the same cache entry the list came from. No
+  // new read, no new spinner, and no window in which the box is on screen not
+  // yet knowing what it is confirming.
+  const operators = useMemo(() => data?.operators ?? [], [data]);
+  const operatorSkills = useMemo(() => data?.operatorSkills ?? [], [data]);
+  const requirements = useMemo(() => data?.requirements ?? [], [data]);
 
   // ⭐ BUILT FROM EVERY READABLE NODE, NEVER FROM THE PLANT-FILTERED SET.
   // `rowsInPlant` has to resolve the owner of a row it is about to EXCLUDE and
@@ -140,6 +189,7 @@ export function TrainingsPanel() {
   // map of `BoardNode` satisfies both interfaces; two maps of the same nodes
   // would be D100's defect in miniature.
   const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+  const operatorsById = useMemo(() => new Map(operators.map((o) => [o.id, o])), [operators]);
 
   /* -- which plant this screen is showing (roadmap 1(c)) ------------------ */
 
@@ -248,14 +298,21 @@ export function TrainingsPanel() {
   // rather than out of scope. The plant choice persists across visits and
   // across sections.
   const inPlantIds = useMemo(() => new Set(inPlant.map((r) => r.id)), [inPlant]);
-  const renamingGone = renamingId !== null && !inPlantIds.has(renamingId);
+  const editingGone = editingId !== null && !inPlantIds.has(editingId);
   const confirmingGone = confirmingId !== null && !inPlantIds.has(confirmingId);
+  // ⚠️ THE MOVE CONFIRMATION IS CLOSED BY THE SAME RULE AND FOR A SHARPER
+  // REASON. It carries a COUNT computed against a destination the reader picked
+  // from a list the filter has just changed; leaving it up would be a sentence
+  // about a move that can no longer be made, over a button that would make a
+  // different one.
+  const movingGone = movingId !== null && !inPlantIds.has(movingId);
   useEffect(() => {
     // Booleans, not the id set, as the dependencies: a fresh `Set` every render
     // would make this an effect that runs every render and clears nothing.
-    if (renamingGone) setRenamingId(null);
+    if (editingGone) setEditingId(null);
     if (confirmingGone) setConfirmingId(null);
-  }, [renamingGone, confirmingGone]);
+    if (movingGone) setMovingId(null);
+  }, [editingGone, confirmingGone, movingGone]);
 
   /* -- writes ------------------------------------------------------------- */
 
@@ -280,24 +337,101 @@ export function TrainingsPanel() {
     activeMutation.mutate({ id: row.id, active: !row.active }, { onError: onRowError(row.id) });
   }
 
-  function saveRename(row: TrainingRow) {
-    // ⚠️ VALIDATED THROUGH THE SAME FUNCTION THE ADD FORM USES, owner included.
-    // A rename cannot change the owner (see the hint under the list), so the
-    // row's own owner goes in — a second, laxer rule for the same field is how
-    // two forms end up disagreeing about what a legal name is.
-    const result = validateTrainingDraft({ name: renameDraft, siteNodeId: row.siteNodeId });
+  /**
+   * ⚠️⚠️ `siteNodeId` IS SENT ONLY WHEN IT REALLY CHANGED, and that is the
+   * absent-key contract in `updateSkill` earning its keep rather than a
+   * micro-optimisation. Under 0028 the owner is one side of the comparability
+   * test every holder is measured against, so a rename that helpfully resent
+   * the current owner would be a MOVE — same value, same trigger, and one day
+   * the same value arriving from a stale render.
+   */
+  function commitEdit(row: TrainingRow, name: string, siteNodeId: string | null) {
+    updateMutation.mutate(
+      siteNodeId === null ? { id: row.id, name } : { id: row.id, name, siteNodeId },
+      {
+        onSuccess: () => {
+          setEditingId((cur) => (cur === row.id ? null : cur));
+          setMovingId((cur) => (cur === row.id ? null : cur));
+        },
+        onError: onRowError(row.id),
+      },
+    );
+  }
+
+  /**
+   * Save the edit — or, when the owner changed and somebody is in the way, stop
+   * and ask first.
+   *
+   * ⚠️ VALIDATED THROUGH THE SAME FUNCTION THE ADD FORM USES, owner included. A
+   * second, laxer rule for the same field is how two forms end up disagreeing
+   * about what a legal name is — and since 0031 the owner decides whether the
+   * name is legal at all, so an edit that moves the row is asking a different
+   * uniqueness question from the one the reader typed under.
+   */
+  function saveEdit(row: TrainingRow, move: { to: string; preview: TrainingMovePreview } | null) {
+    const result = validateTrainingDraft({
+      name: editName,
+      siteNodeId: move === null ? row.siteNodeId : move.to,
+    });
     if (!result.ok) {
       setRowError({ id: row.id, message: result.nameError ?? result.ownerError ?? "" });
       return;
     }
     clearRowError(row.id);
-    renameMutation.mutate(
-      { id: row.id, name: result.value.name },
-      {
-        onSuccess: () => setRenamingId((cur) => (cur === row.id ? null : cur)),
-        onError: onRowError(row.id),
-      },
-    );
+    if (move === null) {
+      commitEdit(row, result.value.name, null);
+      return;
+    }
+    // ⭐ THE ONE PLACE THE WARNING IS ENFORCED. A costly move never reaches the
+    // api layer from here; it reaches `movingId`, which draws the box.
+    if (moveCosts(move.preview)) {
+      setMovingId(row.id);
+      return;
+    }
+    commitEdit(row, result.value.name, move.to);
+  }
+
+  /** The button inside the confirmation. Re-validates: the name box is still live. */
+  function confirmMove(row: TrainingRow, to: string) {
+    const result = validateTrainingDraft({ name: editName, siteNodeId: to });
+    if (!result.ok) {
+      setMovingId(null);
+      setRowError({ id: row.id, message: result.nameError ?? result.ownerError ?? "" });
+      return;
+    }
+    commitEdit(row, result.value.name, to);
+  }
+
+  /**
+   * Everybody this client can see who holds `skillId`.
+   *
+   * ⚠️ AN UNRESOLVABLE PERSON OR NODE BECOMES `ownerPath: null`, WHICH
+   * `previewTrainingMove` COUNTS AS STRANDED. That is the one fail-CLOSED door
+   * in this feature and that function's header argues it: the output is a
+   * sentence and blocks nothing, so a name too many costs a sentence and a name
+   * too few hides a consequence nobody will connect to this press.
+   */
+  function holdersOf(skillId: string) {
+    return operatorSkills
+      .filter((os) => os.skillId === skillId)
+      .map((os) => {
+        const person = operatorsById.get(os.operatorId);
+        return {
+          operatorId: os.operatorId,
+          name: person?.displayName ?? "Someone you can’t see",
+          ownerPath: person === undefined ? null : (nodesById.get(person.siteNodeId)?.path ?? null),
+        };
+      });
+  }
+
+  /** Every place that requires `skillId` — the half the SERVER refuses over. */
+  function placesRequiring(skillId: string) {
+    return requirements
+      .filter((r) => r.skillId === skillId)
+      .map((r) => {
+        const node = nodesById.get(r.nodeId);
+        return { nodeId: r.nodeId, name: node?.name ?? "Somewhere else", path: node?.path ?? null };
+      });
   }
 
   function submitNew() {
@@ -347,25 +481,71 @@ export function TrainingsPanel() {
     // client cannot resolve means "I cannot tell", and `canEditNode` answers
     // yes so the server gets to refuse out loud.
     const editable = canEdit(nodesById.get(row.siteNodeId)?.path ?? null);
-    // ⚠️ `editable` OVERRIDES BOTH OPEN STATES rather than sitting beside them.
-    // The grant read lands AFTER the list, so a rename box or a delete dialog
-    // can already be open on a row that turns out to be read-only; leaving them
-    // up would be a Save button on a row whose Rename has just been withdrawn.
-    const isRenaming = editable && renamingId === row.id;
+    // ⚠️ `editable` OVERRIDES EVERY OPEN STATE rather than sitting beside them.
+    // The grant read lands AFTER the list, so an edit box, a move confirmation
+    // or a delete dialog can already be open on a row that turns out to be
+    // read-only; leaving them up would be a Save button on a row whose Edit has
+    // just been withdrawn.
+    const isEditing = editable && editingId === row.id;
     const isConfirming = editable && confirmingId === row.id;
+
+    /* -- where the edit form would send it ------------------------------- */
+
+    // ⚠️⚠️ THE ROW'S OWN HOME MUST BE ONE OF THE OPTIONS OR THERE IS NO PICKER.
+    // A `<select>` handed a value none of its options carries renders its FIRST
+    // option and reports nothing — which here would not be a cosmetic slip: the
+    // reader would open Edit to fix a typo, press Save, and silently move the
+    // training to whatever happened to sort first. The add form documents the
+    // same trap; there the cost is a create in the wrong place, here it is a
+    // move nobody asked for.
+    const ownerOffered = owners.some((o) => o.value === row.siteNodeId);
+    // Falls back to the ROW'S OWN OWNER, never to `owners[0]` — see above. The
+    // draft is shared across rows, so this is also what stops a value left
+    // behind on one row leaking into the next one opened.
+    const editOwnerValue = owners.some((o) => o.value === editOwner) ? editOwner : row.siteNodeId;
+    // ⚠️ A DESTINATION THIS CLIENT CANNOT PLACE IS NOT A DESTINATION. Without
+    // the node we have no path, so `previewTrainingMove` cannot say who it
+    // strands — and moving on an unanswerable question is exactly what this
+    // whole section exists to stop. Unreachable by construction (`owners` is
+    // built from nodes we hold), and kept because "unreachable" is a claim
+    // about a read.
+    const nextOwnerNode = ownerOffered ? (nodesById.get(editOwnerValue) ?? null) : null;
+    const move =
+      nextOwnerNode === null || nextOwnerNode.id === row.siteNodeId
+        ? null
+        : {
+            to: nextOwnerNode.id,
+            label: scopeLabel(nextOwnerNode.id, nodesById),
+            preview: previewTrainingMove(
+              {
+                newOwnerPath: nextOwnerNode.path,
+                holders: holdersOf(row.id),
+                requiredAt: placesRequiring(row.id),
+              },
+              // ⭐ THE REAL `isAtOrBelow`, injected. `trainings.ts` has no
+              // runtime imports, and a second ancestry test living there could
+              // disagree with the one the rest of the client — and the server —
+              // compares with.
+              isAtOrBelow,
+            ),
+          };
+    const isMoving = isEditing && move !== null && movingId === row.id;
+    const summary =
+      isMoving && move !== null ? summariseTrainingMove(move.preview, move.label) : null;
+    const stranded = isMoving && move !== null ? listStrandedHolders(move.preview) : null;
     const err = rowError !== null && rowError.id === row.id ? rowError.message : null;
     const notice = rowNotice !== null && rowNotice.id === row.id ? rowNotice.message : null;
 
     return (
       <li key={row.id} className={row.active ? styles.row : `${styles.row} ${styles.retired}`}>
-        {isRenaming ? (
+        {isEditing ? (
           <input
             className={styles.input}
-            value={renameDraft}
+            value={editName}
             /* ⚠️ NAMED FOR ITS ROW, not just for its field. The Add card one
                card up has a box whose visible label is also "Name". */
             aria-label={`Name for ${handle}`}
-            onChange={(e) => setRenameDraft(e.target.value)}
+            onChange={(e) => setEditName(e.target.value)}
           />
         ) : (
           <span className={styles.name}>{row.name}</span>
@@ -375,10 +555,39 @@ export function TrainingsPanel() {
             to spell the plant into the text (`A-Welding`); read from the column
             instead it follows a node rename for free, and 0031 drops the prefix.
             ⚠️ THE FULL PATH IS THE TOOLTIP, because `scopeLabel` gives the
-            leaf's own name and two plants can each have a "Line 1". */}
-        <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
-          {owner}
-        </span>
+            leaf's own name and two plants can each have a "Line 1".
+
+            ⭐⭐ AND WHILE EDITING IT IS THE PICKER — THE SAME ONE THE ADD FORM
+            USES, narrowed by the plant filter in exactly the same way. Where a
+            training belongs was a create-only choice until now (D105), and the
+            column that DISPLAYED it is the honest place for the control that
+            changes it: the reader edits the answer where they read it, and the
+            two can never show different things. */}
+        {isEditing && ownerOffered ? (
+          <select
+            className={styles.input}
+            value={editOwnerValue}
+            /* ⚠️ NAMED FOR ITS ROW. The Add card's picker is visibly labelled
+               "Belongs to" and is on screen at the same time. */
+            aria-label={`Where ${handle} belongs`}
+            onChange={(e) => {
+              // ⚠️ A NEW DESTINATION VOIDS THE OLD CONFIRMATION. The count in
+              // that box is about the place they just stopped choosing.
+              setMovingId(null);
+              setEditOwner(e.target.value);
+            }}
+          >
+            {owners.map((o) => (
+              <option key={o.value} value={o.value}>
+                {ownerLabels.get(o.value)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className={styles.owner} title={scopePathLabel(row.siteNodeId, nodesById)}>
+            {owner}
+          </span>
+        )}
 
         {/* ⭐⭐ NO CONTROLS AT ALL ON A ROW THE SERVER WILL REFUSE, AND THE
             REASON IN THEIR PLACE. D106 forbids a control named after more than
@@ -392,21 +601,24 @@ export function TrainingsPanel() {
 
         {editable && (
           <span className={styles.actions}>
-            {isRenaming ? (
+            {isEditing ? (
               <>
                 <button
                   type="button"
                   className={styles.primary}
-                  aria-label={`Save the name of ${handle}`}
-                  onClick={() => saveRename(row)}
+                  aria-label={`Save changes to ${handle}`}
+                  onClick={() => saveEdit(row, move)}
                 >
                   Save
                 </button>
                 <button
                   type="button"
                   className={styles.quiet}
-                  aria-label={`Stop renaming ${handle}`}
-                  onClick={() => setRenamingId(null)}
+                  aria-label={`Stop editing ${handle}`}
+                  onClick={() => {
+                    setEditingId(null);
+                    setMovingId(null);
+                  }}
                 >
                   Cancel
                 </button>
@@ -429,26 +641,30 @@ export function TrainingsPanel() {
                 >
                   {retireActionLabel(row.active)}
                 </button>
-                {/* ⚠️ "RENAME" IS THE HONEST NAME FOR WHAT THIS OPENS, and it is
-                  narrower than `ProductsPanel`'s "Edit" on purpose: the form
+                {/* ⭐⭐ IT SAID "RENAME", AND THE COMMENT HERE ARGUED FOR IT:
+                  *"narrower than `ProductsPanel`'s 'Edit' on purpose: the form
                   behind it changes the name and NOTHING ELSE, because the api
-                  layer has no write that moves a training to another owner.
-                  D106 forbids a control named after LESS than it does; naming
-                  it "Edit" would be the opposite error, and the missing write
-                  is recorded in the hint under the list rather than hidden
-                  behind a button that cannot deliver it. */}
+                  layer has no write that moves a training to another owner."*
+                  That was true and it was D105's gap wearing an honest label.
+                  `updateSkill` is the missing write, so the form behind this
+                  now changes the name AND where it belongs — and D106 forbids a
+                  control named after LESS than it does just as firmly as one
+                  named after more. The button had to be renamed the moment the
+                  write landed, which is why it is renamed in the same change. */}
                 <button
                   type="button"
                   className={styles.quiet}
-                  aria-label={`Rename ${handle}`}
+                  aria-label={`Edit ${handle}`}
                   onClick={() => {
                     clearRowError(row.id);
                     setConfirmingId(null);
-                    setRenamingId(row.id);
-                    setRenameDraft(row.name);
+                    setMovingId(null);
+                    setEditingId(row.id);
+                    setEditName(row.name);
+                    setEditOwner(row.siteNodeId);
                   }}
                 >
-                  Rename
+                  Edit
                 </button>
                 {/* ⭐ ONE CONTROL, AND IT OPENS A DIALOG THAT ASKS THE SERVER
                   FIRST. The screen this replaces deleted a training outright on
@@ -471,6 +687,75 @@ export function TrainingsPanel() {
               </>
             )}
           </span>
+        )}
+
+        {/* ⚠️ THE PICKER IS ABSENT, SO SAY SO. Reachable only when the row's
+            own home is not among the offered nodes — `rowsInPlant` fails open on
+            an owner it cannot resolve and shows the row anyway. A control that
+            silently is not there looks exactly like a screen that never had
+            one, which is `scope.ts`'s rule about hiding, one control down. */}
+        {isEditing && !ownerOffered && (
+          <span className={styles.readOnly}>
+            Where this belongs can&rsquo;t be changed here &mdash; we can&rsquo;t place its current
+            home. The name still can.
+          </span>
+        )}
+
+        {/* ⭐⭐ WHAT THE MOVE COSTS, BEFORE THE MOVE. Measured on the running
+            database, 31 August: `app_guard_operator_skill_scope` is a trigger on
+            `operator_skills` and NOTHING re-checks it when `skills` moves out
+            from under those rows, so a move that strands holders is allowed and
+            silent. `previewTrainingMove`'s header carries all five observations.
+            This box is the only thing that stands between that and a person
+            finding out months later.
+            ⚠️ IT IS NOT A DIALOG AND IT IS NOT MODAL. The name box and the
+            picker above stay live on purpose — the answer to "3 people?" is
+            often "then send it somewhere else", and a modal would make changing
+            the destination require dismissing the thing that explained why. */}
+        {isMoving && summary !== null && move !== null && stranded !== null && (
+          <div className={styles.confirm} role="group" aria-label={`Move ${handle}`}>
+            <p className={styles.headline}>{summary.headline}</p>
+            {summary.costs.map((line) => (
+              <p key={line} className={styles.cost}>
+                {line}
+              </p>
+            ))}
+            {/* ⭐ THE NAMES, NOT ONLY THE COUNT. "3 people" is a number to
+                accept; three names are three people to go and ask. */}
+            {stranded.names.length > 0 && (
+              <ul className={styles.names}>
+                {stranded.names.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+                {stranded.more !== null && <li>{stranded.more}</li>}
+              </ul>
+            )}
+            <span className={styles.actions}>
+              {/* ⚠️⚠️ NO CONFIRM BUTTON AT ALL WHEN THE SERVER WILL REFUSE.
+                  `app_guard_skill_rehome` (0028 §5) really does raise on a
+                  stranded requirement, so this is the same call `clashBlocks`
+                  makes on the add form — the client withholds only what the
+                  database also refuses, never the converse. */}
+              {!summary.refused && (
+                <button
+                  type="button"
+                  className={styles.primary}
+                  aria-label={`${summary.confirmLabel} — ${handle}`}
+                  onClick={() => confirmMove(row, move.to)}
+                >
+                  {summary.confirmLabel}
+                </button>
+              )}
+              <button
+                type="button"
+                className={styles.quiet}
+                aria-label={`Leave ${handle} where it is`}
+                onClick={() => setMovingId(null)}
+              >
+                Keep it where it is
+              </button>
+            </span>
+          </div>
         )}
 
         {!row.active && <span className={styles.tag}>Retired</span>}
@@ -704,15 +989,18 @@ export function TrainingsPanel() {
           <ul className={styles.list}>{retired.map(renderRow)}</ul>
         )}
 
-        {/* ⚠️ SAYING WHAT THIS SCREEN CANNOT DO, rather than leaving a reader to
-            hunt for a control that is not there. Where a training belongs is
-            settable at creation and not changeable afterwards — the api layer
-            has no write for it — which is D105's gap, recorded on screen
-            instead of hidden behind a button named after more than it does. */}
+        {/* ⭐ THIS PARAGRAPH USED TO SAY WHERE A TRAINING BELONGS *"can't be
+            moved afterwards yet"*, which was D105's gap recorded on screen
+            rather than hidden. `updateSkill` closes it, so the sentence had to
+            go with it — a hint that describes a limit the screen no longer has
+            is worse than no hint, because it stops people looking for a control
+            that is right there. What replaces it is the thing the reader cannot
+            see from the button: a move is not free. */}
         <p className={styles.hint}>
-          Where a training belongs is set when it&rsquo;s created and can&rsquo;t be moved
-          afterwards yet. Retiring one keeps it on everyone who already holds it; deleting one takes
-          it off them.
+          Edit changes a training&rsquo;s name, where it belongs, or both. Moving one can leave
+          people holding it from somewhere it no longer reaches &mdash; you&rsquo;ll be told how
+          many, and who, before anything happens. Retiring one keeps it on everyone who already
+          holds it; deleting one takes it off them.
         </p>
       </section>
     </div>

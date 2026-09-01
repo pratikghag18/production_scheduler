@@ -235,6 +235,14 @@ export function describeTrainingWriteRefusal(err: SchedulerError, described: str
   switch (err.kind) {
     case "DuplicateValue":
       return "This place already has a training with that name — including one that has been retired. Bring that one back, or choose another name.";
+    case "OwnerChangeBlocked":
+      // ⭐ THE SHARED SENTENCE COUNTS "scheduled items" AND NOTHING SCHEDULES A
+      // TRAINING. `app_guard_skill_rehome` (0028 §5) counts
+      // `node_skill_requirements` — PLACES that require it — so the shared
+      // wording sends the reader to look at a board for rows that live on a
+      // hierarchy screen. Same call the branch above makes: a shared
+      // description that is right for several tables is wrong for this one.
+      return "Somewhere outside the new place still requires this training. Take that requirement off first, then move it.";
     default:
       return described;
   }
@@ -301,4 +309,234 @@ export function skippedRowsNote(count: number): string | null {
   return count === 1
     ? "1 row couldn't be read and isn't shown."
     : `${count} rows couldn't be read and aren't shown.`;
+}
+
+/* ===========================================================================
+ * §6. Moving a training, and what it costs the people who hold it.
+ *
+ * ⭐⭐ MEASURED BEFORE IT WAS DESIGNED, on the local stack, 31 August. Every
+ * claim below is an observation of a running database, not a reading of the
+ * migration:
+ *
+ *   1. `app_guard_operator_skill_scope` (0028 §4) requires a training's owner
+ *      and a HOLDER's owner to be COMPARABLE — either an ancestor of the
+ *      other. It is a trigger on `operator_skills`, fired `BEFORE INSERT OR
+ *      UPDATE OF operator_id, skill_id`. **Nothing re-checks it when `skills`
+ *      moves out from under those rows.**
+ *   2. So a move that strands holders is ALLOWED, and silent. The rows survive.
+ *   3. They still count: `check_eligibility` reads `operator_skills` with no
+ *      scope test, so a stranded holder is still answered `eligible`. Nothing
+ *      is destroyed and nobody is un-qualified — this is not a delete, and
+ *      saying it were would be the fear that makes people ignore warnings.
+ *   4. But the pair is left in a state the guard would refuse to CREATE: a
+ *      re-grant of exactly that person and that training raises
+ *      `not_offered_here`. Revoke it once and it cannot be given back.
+ *   5. `app_guard_skill_rehome` (0028 §5) DOES guard this column — and counts
+ *      `node_skill_requirements` only. A stranded REQUIREMENT raises
+ *      `owner_change_blocked`; a stranded HOLDER raises nothing at all.
+ *
+ * ⭐ WHICH IS WHY THIS IS A WARNING AND NOT A BLOCK. The database permits the
+ * move, so a client that refused it would be enforcing a rule the server does
+ * not have — §19.74's stale-refusal defect, the quiet kind that never fails and
+ * just stops people working. What is owed is that nobody finds out afterwards:
+ * the count, before the press, in the reader's words. The stranded REQUIREMENT
+ * is the other shape — the server really will refuse it — so that one blocks,
+ * exactly as `clashBlocks` does on the add form.
+ * ======================================================================== */
+
+/**
+ * `isAtOrBelow` from `../lib/scope`, PASSED IN rather than imported.
+ *
+ * ⚠️ THIS MODULE HAS NO RUNTIME IMPORTS (see the header) and this is the one
+ * thing that has ever wanted one. The alternative was a second label-aware
+ * ltree prefix test living here, and `plantFilter.ts`'s header is the standing
+ * ruling on that: *"this file must not become a second implementation of
+ * ancestry that can disagree with the first."* An injected predicate keeps one
+ * implementation and keeps this file runnable under
+ * `node --experimental-strip-types` with nothing to resolve.
+ */
+export type AtOrBelow = (targetPath: string, ancestorPath: string) => boolean;
+
+/** Somebody who holds the training, as the preview needs them. */
+export interface TrainingHolder {
+  operatorId: string;
+  name: string;
+  /** The ltree path of the node that owns this PERSON. `null` = unresolvable. */
+  ownerPath: string | null;
+}
+
+/** A place that requires the training. */
+export interface TrainingPlace {
+  nodeId: string;
+  name: string;
+  /** The place's own ltree path. `null` = unresolvable. */
+  path: string | null;
+}
+
+export interface TrainingMovePreview {
+  /** Holders the move would leave on a branch the training no longer reaches. */
+  strandedHolders: readonly TrainingHolder[];
+  /** Places whose requirement the move would strand. The server REFUSES these. */
+  strandedPlaces: readonly TrainingPlace[];
+}
+
+/**
+ * What moving a training to `newOwnerPath` would cost.
+ *
+ * ⭐⭐ THE TWO HALVES FAIL IN OPPOSITE DIRECTIONS, AND THAT IS THE DESIGN
+ * RATHER THAN AN INCONSISTENCY.
+ *
+ *   A HOLDER WHOSE OWNER CANNOT BE PLACED IS COUNTED AS STRANDED. This is the
+ *   one thing in this feature that fails CLOSED, and the reason is which way
+ *   the harm runs. `editRights.ts` fails open because hiding a control stops
+ *   somebody doing their job — loudly, recoverably, with something on screen to
+ *   argue with. This output blocks nothing; it is a sentence. So one name too
+ *   many costs a sentence, and one name too few hides a consequence that has
+ *   already happened by the time anybody notices.
+ *
+ *   A PLACE WHOSE PATH CANNOT BE RESOLVED IS NOT COUNTED. That half DOES block,
+ *   because the server refuses it — so it is back under `scope.ts`'s rule:
+ *   *"I cannot tell"* must never become a refusal. If the client is wrong there,
+ *   the server says so in its own words through `describeTrainingWriteRefusal`.
+ *
+ * ⚠️ THE HOLDER TEST IS COMPARABILITY, NOT CONTAINMENT, and it is the only
+ * both-ways test in this feature. 0028 §4's own comment says why: a plant-wide
+ * person holding a Line 1 training is ordinary — they are qualified for Line 1
+ * work — while a Plant 2 person holding a Plant 1 training is not. A
+ * one-directional test would warn about half the company on every move.
+ *
+ * ⚠️ THE PLACE TEST IS CONTAINMENT, one direction only, because that is what
+ * `app_owner_covers_in_org` asks: a requirement must sit AT OR BELOW the
+ * training's owner. Comparability here would predict "allowed" for moves the
+ * server refuses, which is the one prediction this must never make.
+ */
+export function previewTrainingMove(
+  move: {
+    newOwnerPath: string;
+    holders: readonly TrainingHolder[];
+    requiredAt: readonly TrainingPlace[];
+  },
+  atOrBelow: AtOrBelow,
+): TrainingMovePreview {
+  const strandedHolders = move.holders.filter((h) => {
+    if (h.ownerPath === null) return true; // cannot tell -> say so
+    return !(
+      atOrBelow(h.ownerPath, move.newOwnerPath) || atOrBelow(move.newOwnerPath, h.ownerPath)
+    );
+  });
+  const strandedPlaces = move.requiredAt.filter(
+    (p) => p.path !== null && !atOrBelow(p.path, move.newOwnerPath),
+  );
+  return { strandedHolders, strandedPlaces };
+}
+
+/**
+ * Is there anything to warn about at all?
+ *
+ * ⭐ A MOVE THAT COSTS NOTHING GETS NO CONFIRMATION, and that is
+ * `DeleteDialog`'s second decision rather than a shortcut: *"pushing it every
+ * time — including for a part nothing has ever been scheduled against — is how
+ * a warning becomes something people learn to click past, and then the one that
+ * matters gets clicked past too."*
+ */
+export function moveCosts(preview: TrainingMovePreview): boolean {
+  return preview.strandedHolders.length > 0 || preview.strandedPlaces.length > 0;
+}
+
+export interface TrainingMoveSummary {
+  headline: string;
+  /** One line per consequence. */
+  costs: readonly string[];
+  /** What the button that goes ahead is called. It NAMES what it costs (D106). */
+  confirmLabel: string;
+  /** The database itself will refuse this move, so the confirm is not offered. */
+  refused: boolean;
+}
+
+/**
+ * The confirmation, in the reader's words. `summariseDeletion`'s shape,
+ * deliberately — this screen already shows one of those, and two confirmations
+ * on one panel built to different plans is how the second ends up saying less
+ * than the first.
+ *
+ * ⭐ THE CONFIRM BUTTON NAMES THE COUNT. `DeleteDialog`'s third decision:
+ * *"the screen this replaces said 'Delete for good?' whether the answer was
+ * 'nothing happens' or 'eleven jobs disappear'."* A button that just said "Move
+ * it" would be that mistake again — what this does is move it AND leave three
+ * people holding it from somewhere it no longer reaches, so that is what it
+ * says.
+ *
+ * ⚠️ "YOU CAN SEE" IS ACCURACY, NOT MODESTY. Reads are scoped (0026), so this
+ * count is over the holders THIS CLIENT was handed. A reader granted one line
+ * may hold a shorter list than the company admin looking at the same training,
+ * and a bare number would be the screen claiming to know something the read did
+ * not tell it — the same care `skippedRowsNote` takes with the word "rows".
+ *
+ * ⚠️ AND IT SAYS THEY STAY QUALIFIED, BECAUSE THEY DO (observation 3 above).
+ * Overstating this as "they lose it" would be the easier sentence and a false
+ * one, and a warning people learn is exaggerated is a warning they stop
+ * reading.
+ */
+export function summariseTrainingMove(
+  preview: TrainingMovePreview,
+  newOwnerLabel: string,
+): TrainingMoveSummary {
+  const places = preview.strandedPlaces.length;
+  const holders = preview.strandedHolders.length;
+
+  if (places > 0) {
+    const one = places === 1;
+    return {
+      headline: `This training can’t move to ${newOwnerLabel} yet.`,
+      costs: [
+        `${one ? "1 place" : `${places} places`} outside ${newOwnerLabel} still ${
+          one ? "requires" : "require"
+        } it. Take the requirement off ${one ? "that place" : "those places"} first.`,
+      ],
+      confirmLabel: `Move it to ${newOwnerLabel}`,
+      refused: true,
+    };
+  }
+
+  const one = holders === 1;
+  const who = one ? "1 person" : `${holders} people`;
+  const lead = `${who} you can see ${one ? "holds" : "hold"} it from outside ${newOwnerLabel}.`;
+  // ⚠️ ONE SENTENCE FOR BOTH COUNTS, and singular "they" throughout rather than
+  // a second string that differs only in a verb. Two near-identical sentences
+  // are two places for the honest half — *they stay qualified* — to be edited
+  // out of only one.
+  const tail =
+    "They stay qualified and keep what they’ve earned, but it will no longer belong where they work — and once it’s taken off them, it can’t be given back there.";
+  return {
+    headline: `Moving this training to ${newOwnerLabel} affects the people who hold it.`,
+    costs: [`${lead} ${tail}`],
+    confirmLabel: `Move it and leave ${who} holding it`,
+    refused: false,
+  };
+}
+
+/**
+ * The names behind the count, for the confirmation to list.
+ *
+ * ⭐ A COUNT ALONE IS NOT SOMETHING TO ACT ON. `DeleteDialog` lists what goes
+ * rather than only counting it, for this reason: "3 people" is a number to
+ * accept, and three names are three people to go and ask.
+ *
+ * ⚠️ CAPPED, AND THE REMAINDER SAID OUT LOUD rather than trailing off. A
+ * training half the plant holds would otherwise put two hundred names in a
+ * confirmation and bury the button under them.
+ */
+export const NAMES_SHOWN = 5;
+
+export function listStrandedHolders(preview: TrainingMovePreview): {
+  names: readonly string[];
+  more: string | null;
+} {
+  const all = preview.strandedHolders.map((h) => h.name);
+  if (all.length <= NAMES_SHOWN) return { names: all, more: null };
+  const rest = all.length - NAMES_SHOWN;
+  return {
+    names: all.slice(0, NAMES_SHOWN),
+    more: rest === 1 ? "and 1 more" : `and ${rest} more`,
+  };
 }

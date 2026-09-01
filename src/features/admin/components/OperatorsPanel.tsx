@@ -43,7 +43,7 @@ import {
 // lets `operators.test.ts` run it under `node --experimental-strip-types`. An
 // id becomes a node NAME on this side of the line, in the one place that
 // already owns `nodesById`.
-import { indentedLabel, scopeOptions } from "../lib/scope";
+import { indentedLabel, scopeLabel, scopeOptions, scopePathLabel } from "../lib/scope";
 import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import {
@@ -79,6 +79,22 @@ import styles from "./OperatorsPanel.module.css";
  * thing the company owns and a grant is a fact about a person, and only the
  * second one belongs on a screen headed with somebody's name.
  *
+ * ⭐⭐ AND THE ADD FORM RECORDS THE SAME THREE FACTS THE LIST ABOVE IT SHOWS.
+ * The maintainer, after using the screen: *"for adding a training, there is no
+ * option to add a signed off by and trained on which the section above it has,
+ * this is a loss of continuity which needs to be fixed."* Attaching used to
+ * record the expiry alone, so the ordinary gesture was attach-then-correct: the
+ * supervisor typed the date and the signer into the row that appeared, entering
+ * one record in two goes, with the form and the list disagreeing about what a
+ * training record even IS. `GrantSkillInput` has carried both fields since 0032
+ * / D114 and nothing passed them.
+ *
+ * ⚠️ THE TWO STAY OPTIONAL AND INDEPENDENT, exactly as they are on a held row.
+ * 0032 deliberately writes no CHECK tying the date to the signer, because a
+ * half-known record is the ORDINARY case — a spreadsheet arrives with one
+ * column filled in. So neither box enables the other, neither clears the other,
+ * and Attach goes on asking only for a training to attach.
+ *
  * ⚠️ THE MAINTAINER'S WORD IS "TRAINING", AND IT WINS OVER BOTH OF THE OTHERS.
  * The database calls these rows `skills` / `operator_skills` and this screen
  * used to call them "tickets". What a user READS says training, everywhere;
@@ -93,6 +109,19 @@ import styles from "./OperatorsPanel.module.css";
  * asked only about trainings, so it ticked cells in plants the person cannot
  * be booked into at all — a stale PERMISSION, the screen saying yes where the
  * server says no. `../lib/operators` carries the full account.
+ *
+ * ⭐⭐ AND THE HEADER SAYS WHERE THE PERSON BELONGS, WITHOUT AN EDIT MODE. The
+ * maintainer: *"does not show where they belong until you hit edit, not the end
+ * of the world but breaks the info flow."* It looks cosmetic and is not: since
+ * 0028 / D109 where somebody belongs decides WHERE THEY CAN BE BOOKED, and the
+ * places list directly under the header — including its "0 of 2 places in their
+ * own area" — is computed from that one field. A reader who cannot see the area
+ * has no way to check the number the screen just gave them.
+ *
+ * ⚠️ THE LEAF NAME IS SHOWN AND THE FULL PATH IS THE `title`, which is
+ * `scope.ts`'s pair (`scopeLabel` / `scopePathLabel`) doing the same job it does
+ * on every other admin screen. Three plants can all hold a "Line 1", so the leaf
+ * alone is ambiguous and the path alone is too long to sit in a header.
  *
  * ⭐⭐ AND THE LIST STOPS AT THE PERSON'S OWN PLANT — THE MAINTAINER, 31 AUG,
  * AFTER SEEING THE THREE STATES: *"I see all plants not just Plant A for him,
@@ -242,8 +271,20 @@ export function OperatorsPanel() {
   const [editSite, setEditSite] = useState<string>("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  /* ---------------------------------------------------------------------
+   * The add/attach form, which records the SAME THREE FACTS a held row shows —
+   * see the header. Held as plain state rather than through `signerDraft`
+   * below: nothing here is written until Attach is pressed, so there is no
+   * per-keystroke write for a draft to protect an audit trail from.
+   *
+   * ⚠️ THREE INDEPENDENT BOXES, NOT A RECORD WITH REQUIRED PARTS. `grantId` is
+   * the only one Attach waits for; the other three may each be left empty on
+   * their own, in any combination (0032 writes no CHECK tying them).
+   * ------------------------------------------------------------------- */
   const [grantId, setGrantId] = useState("");
   const [grantExpiry, setGrantExpiry] = useState("");
+  const [grantCertifiedAt, setGrantCertifiedAt] = useState("");
+  const [grantSignedOffBy, setGrantSignedOffBy] = useState("");
 
   /* ---------------------------------------------------------------------
    * ⭐⭐ THE ONE DRAFT ON THIS SCREEN, AND IT IS HERE BECAUSE THE SIGN-OFF IS
@@ -588,7 +629,28 @@ export function OperatorsPanel() {
     saveRecord(t.skillId, { signedOffBy: next });
   }
 
-  function attachSkill(skillId: string, expiresAt: string | null) {
+  /**
+   * Give the person on screen a training, WITH whatever is known about it.
+   *
+   * ⭐ ALL THREE FACTS TRAVEL WITH THE INSERT. Attaching used to send the expiry
+   * alone, so the same record was entered twice — once here, once into the row
+   * that appeared. `GrantSkillInput` has carried `certifiedAt` and
+   * `signedOffBy` since D114; this is the caller that finally fills them.
+   *
+   * ⚠️ `null` HERE IS NOT THE PATCH CONTRACT'S `null`. `saveRecord` edits a row
+   * that exists, where an absent key means "leave it alone" and `null` means
+   * "clear it"; this INSERTS one, so every column is being written and an empty
+   * box is simply a fact nobody recorded. There is nothing to leave alone yet.
+   *
+   * ⚠️ AND NOTHING IS INFERRED FROM ANYTHING ELSE — no defaulting the date to
+   * today because a signer was typed, no refusing a signer for want of a date.
+   * 0032 has no CHECK tying them and inventing one on the way in would make the
+   * ordinary half-known row impossible to enter honestly.
+   */
+  function attachSkill(
+    skillId: string,
+    record: { expiresAt: string | null; certifiedAt: string | null; signedOffBy: string | null },
+  ) {
     if (selected === null) return;
     setNotice(null);
     if (orgId === null) {
@@ -596,11 +658,16 @@ export function OperatorsPanel() {
       return;
     }
     grantSkill.mutate(
-      { orgId, operatorId: selected.id, skillId, expiresAt },
+      { orgId, operatorId: selected.id, skillId, ...record },
       {
         onSuccess: () => {
           setGrantId("");
           setGrantExpiry("");
+          // ⚠️ CLEARED WITH THE REST OF THE FORM. Left standing, the next
+          // training attached would silently inherit the last one's signer —
+          // a fact about one course arriving on the record of another.
+          setGrantCertifiedAt("");
+          setGrantSignedOffBy("");
         },
         onError: onErr,
       },
@@ -830,6 +897,26 @@ export function OperatorsPanel() {
                     <span className={styles.headMeta}>
                       {selected.employeeRef ?? "no reference"}
                       {!selected.active && <span className={styles.badge}>deactivated</span>}
+                    </span>
+                    {/* ⭐⭐ WHERE THEY BELONG, READABLE WITHOUT OPENING THE
+                        EDIT FORM — see the header. It is not decoration: this
+                        field decides where they can be booked (0028 / D109) and
+                        the count line under it is computed from it, so a reader
+                        looking at "0 of 2 places in their own area" cannot check
+                        that number without it.
+                        ⚠️ THE LEAF NAME IS DRAWN AND THE FULL PATH IS THE
+                        TOOLTIP. Three plants can each hold a "Line 1", so the
+                        leaf alone is ambiguous; the whole chain in a header is
+                        longer than the name it sits beside. `scope.ts` is the
+                        one place an id becomes a name on this screen, and both
+                        of its answers fall back to "Somewhere else" rather than
+                        to a blank — an area this reader cannot resolve is a
+                        fact worth saying, not a gap worth hiding. */}
+                    <span
+                      className={styles.headMeta}
+                      title={scopePathLabel(selected.siteNodeId, nodesById)}
+                    >
+                      Belongs to {scopeLabel(selected.siteNodeId, nodesById)}
                     </span>
                     <button
                       type="button"
@@ -1140,6 +1227,42 @@ export function OperatorsPanel() {
                     ))}
                   </select>
                 </label>
+                {/* ⭐⭐ THE SAME THREE FACTS THE ROWS ABOVE CARRY, IN THE SAME
+                    ORDER — trained on, signed off by, expires. The list and the
+                    form disagreeing about what a training record is was the
+                    whole of the maintainer's complaint; the order is part of
+                    the answer, because a reader who has just read the rows
+                    above scans for the columns in the places they were.
+                    ⚠️⚠️ NAMED SO THEY CANNOT COLLIDE WITH A ROW'S. Those are
+                    `Trained on for Forklift` / `Signed off by for Forklift` —
+                    one per training held — and these sit a few lines below
+                    them on the same page. "(optional)" is not a decoration
+                    here: it is what keeps the accessible name unique against
+                    EVERY possible training name, since no `… for X` can ever
+                    equal `… (optional)`. D106, and O31 pins it. */}
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Trained on (optional)</span>
+                  <input
+                    className={styles.input}
+                    type="date"
+                    value={grantCertifiedAt}
+                    onChange={(e) => setGrantCertifiedAt(e.target.value)}
+                  />
+                </label>
+                {/* ⚠️ FREE TEXT, FOR 0032's OWN REASON: the signer is routinely
+                    an external assessor or a vendor's trainer with no login
+                    here. A picker of people in this system would make the
+                    record either impossible to enter or untrue — the same
+                    decision the held rows above record at length. */}
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Signed off by (optional)</span>
+                  <input
+                    className={styles.input}
+                    type="text"
+                    value={grantSignedOffBy}
+                    onChange={(e) => setGrantSignedOffBy(e.target.value)}
+                  />
+                </label>
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>Expires (blank = never)</span>
                   <input
@@ -1149,11 +1272,26 @@ export function OperatorsPanel() {
                     onChange={(e) => setGrantExpiry(e.target.value)}
                   />
                 </label>
+                {/* ⚠️ STILL DISABLED ON `grantId` ALONE. The three record boxes
+                    are each optional and independent, so none of them may gate
+                    this button — requiring one would be the CHECK migration
+                    0032 deliberately did not write, arriving as a disabled
+                    control instead. */}
                 <button
                   type="button"
                   className={styles.primary}
                   disabled={busy || grantId === ""}
-                  onClick={() => attachSkill(grantId, grantExpiry === "" ? null : grantExpiry)}
+                  onClick={() =>
+                    attachSkill(grantId, {
+                      expiresAt: grantExpiry === "" ? null : grantExpiry,
+                      certifiedAt: grantCertifiedAt === "" ? null : grantCertifiedAt,
+                      // ⚠️ TRIMMED ON THE WAY OUT, like the row above commits
+                      // it: `signed_off_by` is a plain `text` column with no
+                      // trim trigger and no CHECK, so this is the only thing
+                      // between a user and a signer called "  ".
+                      signedOffBy: normaliseSignedOffBy(grantSignedOffBy),
+                    })
+                  }
                 >
                   Attach
                 </button>

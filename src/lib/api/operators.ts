@@ -610,6 +610,86 @@ export async function renameSkill(input: { id: string; name: string }): Promise<
   return firstOrThrow(data, parseSkillRecord, "renameSkill");
 }
 
+export interface UpdateSkillInput {
+  id: string;
+  /** The new name. **Omit to leave it alone.** */
+  name?: string;
+  /**
+   * Where the training belongs. **Omit to leave it alone**; supplying it MOVES
+   * the training, which is a different act from renaming it and has to be
+   * expressible on its own.
+   *
+   * ⭐⭐ THIS IS THE WRITE D105 WAS MISSING, AND IT IS NOT A SAFE FIELD.
+   * `skills.site_node_id` is one side of `app_guard_operator_skill_scope`
+   * (0028 §4), which requires the training's owner and the HOLDER's owner to be
+   * comparable — either one an ancestor of the other. Moving the training
+   * changes that side of the comparison for everybody at once, and **the
+   * database does not re-check it**: the guard is a `BEFORE INSERT OR UPDATE OF
+   * operator_id, skill_id` trigger on `operator_skills`, so nothing fires when
+   * `skills` moves out from under those rows. Measured on the local stack, 31
+   * August: the rows SURVIVE, still count in `check_eligibility`, and are left
+   * in a state the same guard would refuse to create — a re-grant of the
+   * identical pair raises `not_offered_here`.
+   *
+   * ⚠️ SO THE SCREEN OWES A WARNING THAT THE SERVER WILL NOT RAISE.
+   * `app_guard_skill_rehome` (0028 §5) guards this column, but it counts
+   * `node_skill_requirements` ONLY — never `operator_skills` — so a move that
+   * strands holders is ALLOWED and silent, while a move that strands a
+   * requirement raises `owner_change_blocked`. `previewTrainingMove` in
+   * `features/admin/lib/trainings.ts` is the client half; it is a WARNING and
+   * not a permission, and it must never be mistaken for the guard that is not
+   * there.
+   */
+  siteNodeId?: string;
+}
+
+/**
+ * Change a training's name, where it belongs, or both.
+ *
+ * ⚠️⚠️ AN ABSENT KEY MEANS "LEAVE IT ALONE" — the same contract
+ * `updateSkillRecord` below spells out, and it is load-bearing in the other
+ * direction here. A rename that also resent `site_node_id` would be a MOVE
+ * every time somebody fixed a typo, and under 0028 that silently re-scopes the
+ * row for everyone holding it. So the panel sends the owner only when it
+ * really changed, and this function sends nothing it was not given.
+ *
+ * ⚠️ NOTE THE TEST IS `!== undefined`, NOT `in`, WHICH IS THE OPPOSITE OF
+ * `updateSkillRecord`. Both columns here are `NOT NULL`, so there is no "clear
+ * it" state for `null` to mean and no third case to keep apart — the same call
+ * `updateOperator` makes for `site_node_id`. `updateSkillRecord` guards three
+ * NULLABLE columns, where `null` is a real value and `in` is the only test that
+ * can tell it from "not supplied".
+ *
+ * ⚠️ SENDING NEITHER FIELD IS A CALLER BUG. PostgREST is handed an empty patch
+ * and there is nothing honest for this to return, so the type refuses it:
+ * `UpdateSkillInput` is intersected with a union that requires at least one.
+ *
+ * 23505 -> `{kind:"DuplicateValue"}` from `skills_owner_name_unique`, and since
+ * 0031 that key is `(org_id, site_node_id, name)` — so a MOVE can collide on a
+ * name that was free where the training used to live.
+ * `owner_change_blocked` -> `{kind:"OwnerChangeBlocked"}` when a place outside
+ * the new owner still requires it (0028 §5).
+ */
+export async function updateSkill(
+  input: UpdateSkillInput & ({ name: string } | { siteNodeId: string }),
+): Promise<SkillRecord> {
+  // ⚠️ A TYPED PATCH, not `Record<string, string>` — `updateSkillRecord`'s
+  // reason applies verbatim: the generated Update type rejects excess
+  // properties, so a loose index signature does not satisfy it, and that
+  // strictness is what would catch either column renamed out from under this.
+  const patch: { name?: string; site_node_id?: string } = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;
+
+  const { data, error } = await supabase
+    .from("skills")
+    .update(patch)
+    .eq("id", input.id)
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "updateSkill");
+}
+
 /** Raises 23503 -> `{kind:"StillInUse"}` while any person holds it or any place requires it. */
 export async function deleteSkill(id: string): Promise<void> {
   const { data, error } = await supabase.from("skills").delete().eq("id", id).select("id");
