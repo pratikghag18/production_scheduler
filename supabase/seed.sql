@@ -113,11 +113,19 @@ INSERT INTO operator_skills (operator_id, skill_id, org_id) VALUES
 -- Products — colors are a UI concern only (client maps sku -> --product-N
 -- token, brief P1-1 §4); no color column here.
 -- ----------------------------------------------------------------------------
-INSERT INTO products (id, org_id, sku, name, source, site_node_id) VALUES
-  ('60000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'WX', 'Widget X', 'manual', '30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'WY', 'Widget Y', 'manual', '30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 'GZ', 'Gadget Z', 'manual', '30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 'RW', 'Rework',   'manual', '30000000-0000-0000-0000-000000000001');
+-- D115 (0034): a product is company-wide; which plants make it is a LIST in
+-- product_sites, not a column here. All four are made in the single seed plant.
+INSERT INTO products (id, org_id, sku, name, source) VALUES
+  ('60000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'WX', 'Widget X', 'manual'),
+  ('60000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'WY', 'Widget Y', 'manual'),
+  ('60000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 'GZ', 'Gadget Z', 'manual'),
+  ('60000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 'RW', 'Rework',   'manual');
+
+INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+  ('10000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001'),
+  ('10000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000001'),
+  ('10000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000003', '30000000-0000-0000-0000-000000000001'),
+  ('10000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000004', '30000000-0000-0000-0000-000000000001');
 
 -- ----------------------------------------------------------------------------
 -- Shift templates, shifts, breaks — exact SHIFT_TEMPLATES constants from the
@@ -321,8 +329,11 @@ INSERT INTO operator_skills (operator_id, skill_id, org_id) VALUES
 
 -- Same SKU as org 1's Widget X (unique is (org_id, sku)) -- so 'WX' means a
 -- DIFFERENT product in each org, which is the sharpest possible product leak.
-INSERT INTO products (id, org_id, sku, name, source, site_node_id) VALUES
-  ('6000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'WX', 'Contoso Widget', 'manual', '3000000b-0000-0000-0000-000000000001');
+-- D115 (0034): the owner is a product_sites row, not a column here.
+INSERT INTO products (id, org_id, sku, name, source) VALUES
+  ('6000000b-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'WX', 'Contoso Widget', 'manual');
+INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+  ('10000000-0000-0000-0000-000000000002', '6000000b-0000-0000-0000-000000000001', '3000000b-0000-0000-0000-000000000001');
 
 -- Same template NAME as org 1's (unique is (org_id, name)).
 INSERT INTO shift_templates (id, org_id, name, site_node_id) VALUES

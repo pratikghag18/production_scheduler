@@ -86,14 +86,23 @@ BEGIN
   -- Three scopes, which is the fewest that can tell "is" from "contains" from
   -- "elsewhere": the Plant 1 ROOT, LINE 1 strictly below it, and the other
   -- plant. A fixture of roots alone cannot fail on D109's "any level" half.
-  INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
-    ('62000000-0000-0000-0000-0000000000c1', v_org,'NP1','N Plant-1 Product','30000000-0000-0000-0000-000000000001'),
-    ('62000000-0000-0000-0000-0000000000c2', v_org,'NL1','N Line-1 Product', '30000000-0000-0000-0000-000000000004'),
-    ('62000000-0000-0000-0000-0000000000c3', v_org,'NP2','N Plant-2 Product', v_p2),
-    -- Owned by a single CELL. N4 needs an owner that is neither an ancestor of
+  -- D115 (0034): a product's place is a product_sites row, not a column. Each
+  -- product below carries exactly ONE place, at what used to be its owner, so
+  -- the offering guard (app_product_offered_at) answers exactly as the old
+  -- single owner did -- every N2-N8 outcome is preserved by construction.
+  INSERT INTO products (id, org_id, sku, name) VALUES
+    ('62000000-0000-0000-0000-0000000000c1', v_org,'NP1','N Plant-1 Product'),
+    ('62000000-0000-0000-0000-0000000000c2', v_org,'NL1','N Line-1 Product'),
+    ('62000000-0000-0000-0000-0000000000c3', v_org,'NP2','N Plant-2 Product'),
+    -- Made in a single CELL. N4 needs a place that is neither an ancestor of
     -- nor equal to the node under test, while still being inside Plant 1 --
     -- otherwise "refused" cannot be told from "refused because other plant".
-    ('62000000-0000-0000-0000-0000000000c4', v_org,'NC1','N Cell-1 Product', '30000000-0000-0000-0000-000000000007');
+    ('62000000-0000-0000-0000-0000000000c4', v_org,'NC1','N Cell-1 Product');
+  INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+    (v_org,'62000000-0000-0000-0000-0000000000c1','30000000-0000-0000-0000-000000000001'),
+    (v_org,'62000000-0000-0000-0000-0000000000c2','30000000-0000-0000-0000-000000000004'),
+    (v_org,'62000000-0000-0000-0000-0000000000c3', v_p2),
+    (v_org,'62000000-0000-0000-0000-0000000000c4','30000000-0000-0000-0000-000000000007');
 
   INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES
     ('52000000-0000-0000-0000-0000000000c1', v_org,'N Plant-1 Operator','30000000-0000-0000-0000-000000000001'),
@@ -119,14 +128,16 @@ DECLARE v_roots int; v_scopes int; v_admins int; v_below int;
 BEGIN
   SELECT count(*) INTO v_roots FROM nodes
    WHERE org_id='10000000-0000-0000-0000-000000000001' AND parent_id IS NULL;
-  SELECT count(DISTINCT site_node_id) INTO v_scopes FROM products
-   WHERE id::text LIKE '62000000-0000-0000-0000-0000000000c%';
+  -- D115: the scope is a product_sites place now, not a column. Each of the four
+  -- products carries exactly one, so four distinct places is four owners.
+  SELECT count(DISTINCT node_id) INTO v_scopes FROM product_sites
+   WHERE product_id::text LIKE '62000000-0000-0000-0000-0000000000c%';
   SELECT count(*) INTO v_admins FROM user_profiles
    WHERE id::text LIKE 'e1000000%' AND role = 'admin';
-  -- at least one product owner strictly below a root, or D109's "any level"
+  -- at least one product place strictly below a root, or D109's "any level"
   -- half is never exercised by this file
-  SELECT count(*) INTO v_below FROM products p JOIN nodes n ON n.id = p.site_node_id
-   WHERE p.id::text LIKE '62000000-0000-0000-0000-0000000000c%' AND n.parent_id IS NOT NULL;
+  SELECT count(*) INTO v_below FROM product_sites ps JOIN nodes n ON n.id = ps.node_id
+   WHERE ps.product_id::text LIKE '62000000-0000-0000-0000-0000000000c%' AND n.parent_id IS NOT NULL;
   IF v_roots >= 2 AND v_scopes = 4 AND v_admins = 0 AND v_below >= 2
   THEN RAISE NOTICE 'PASS N0';
   ELSE RAISE NOTICE 'FAIL N0: roots=% scopes=% org_wide_admins=% owners_below_a_root=% (want >=2, 4, 0, >=2)',
@@ -137,7 +148,7 @@ ROLLBACK TO SAVEPOINT sp_N0;
 -- ---------------------------------------------------------------------------
 -- D108 — THERE IS NO COMPANY-WIDE ROW.
 -- ---------------------------------------------------------------------------
-\echo 'N1 ⭐: NULL ownership is refused by the CONSTRAINT, on all four tables, with nobody''s permissions in the way'
+\echo 'N1 ⭐ (rewritten by 0034): NULL ownership is refused by the CONSTRAINT on the three tables that still own a single node — and a PLACELESS product is now an ordinary catalogue state, not a refusal'
 SAVEPOINT sp_N1;
 DO $$
 DECLARE v_p int; v_o int; v_s int; v_t int;
@@ -146,13 +157,18 @@ BEGIN
   -- here, because an UPDATE's new row meets the policy's WITH CHECK before the
   -- constraint (postgres gotcha 20) and `app_is_admin_for(NULL)` is false.
   -- That is a real refusal but it is a refusal about the CALLER. This case is
-  -- about the COLUMN, so it asks as the one caller no policy applies to. If
-  -- the NOT NULL were dropped tomorrow, Q3 would still pass and only this
-  -- would go red.
+  -- about the COLUMN, so it asks as the one caller no policy applies to.
   RESET ROLE;
-  BEGIN INSERT INTO products (org_id, sku, name, site_node_id)
-    VALUES ('10000000-0000-0000-0000-000000000001','NNUL','N Null', NULL);
-    v_p := 0; EXCEPTION WHEN not_null_violation THEN v_p := 1; WHEN OTHERS THEN v_p := -1; END;
+  -- ⭐⭐ SUPERSEDES THE OLD PRODUCTS ARM. D115 (0034) drops products.site_node_id:
+  -- a product is company-wide and its makers are a LIST in product_sites, so a
+  -- product with NO places is a catalogue entry not yet assigned anywhere (the
+  -- migration header's "ordinary state"). There is no NULL to refuse. This
+  -- creates one and asserts it is ACCEPTED, exactly inverting the old arm.
+  BEGIN INSERT INTO products (org_id, sku, name)
+    VALUES ('10000000-0000-0000-0000-000000000001','NNUL','N Placeless');
+    v_p := 1; EXCEPTION WHEN OTHERS THEN v_p := -1; END;
+  -- operators, skills and shift_templates are UNCHANGED by D115 — they still own
+  -- exactly one node and NULL is still refused by the NOT NULL constraint.
   BEGIN INSERT INTO operators (org_id, display_name, site_node_id)
     VALUES ('10000000-0000-0000-0000-000000000001','N Null Op', NULL);
     v_o := 0; EXCEPTION WHEN not_null_violation THEN v_o := 1; WHEN OTHERS THEN v_o := -1; END;
@@ -163,7 +179,7 @@ BEGIN
     VALUES ('10000000-0000-0000-0000-000000000001','N Null Pattern', NULL);
     v_t := 0; EXCEPTION WHEN not_null_violation THEN v_t := 1; WHEN OTHERS THEN v_t := -1; END;
   IF v_p=1 AND v_o=1 AND v_s=1 AND v_t=1 THEN RAISE NOTICE 'PASS N1';
-  ELSE RAISE NOTICE 'FAIL N1: products=% operators=% skills=% shift_templates=% (want all 1; 0=accepted, -1=wrong error)',
+  ELSE RAISE NOTICE 'FAIL N1: placeless_product_accepted=% operators=% skills=% shift_templates=% (want product 1=accepted; other three 1=refused; 0/-1=wrong)',
     v_p, v_o, v_s, v_t; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_N1;
@@ -231,9 +247,12 @@ BEGIN
   -- The KEYS, not the message. doc_drift rule 7: a refusal a screen renders is
   -- a contract, and `schedulable_level_locked` shipped with the wrong shape
   -- for a day because only the code was ever asserted.
-  IF v_err = 'PT409' AND v_n = 0 AND v_keys = 'error,id,kind,node_id,owner_node_id'
+  -- ⭐ D115: the product refusal no longer carries `owner_node_id` — a product
+  -- has no single owner to name, only a LIST of places, none of which covers
+  -- this node. The run-scope guard emits kind/id/node_id and nothing more.
+  IF v_err = 'PT409' AND v_n = 0 AND v_keys = 'error,id,kind,node_id'
   THEN RAISE NOTICE 'PASS N3';
-  ELSE RAISE NOTICE 'FAIL N3: sqlstate=% runs=% keys=% (want PT409, 0, error,id,kind,node_id,owner_node_id)',
+  ELSE RAISE NOTICE 'FAIL N3: sqlstate=% runs=% keys=% (want PT409, 0, error,id,kind,node_id)',
     v_err, v_n, v_keys; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_N3;
@@ -372,57 +391,69 @@ END $$;
 ROLLBACK TO SAVEPOINT sp_N8;
 
 -- ---------------------------------------------------------------------------
--- ⭐⭐ N9-N11 — AN OWNER CANNOT BE MOVED OUT FROM UNDER ITS OWN HISTORY.
+-- ⭐⭐ N9-N11 — A THING CANNOT BE MOVED OUT FROM UNDER ITS OWN HISTORY.
 --
 -- This is the same defect the maintainer reported, arriving by a door no INSERT
--- guards. Without §5 of the migration, re-homing a Plant 1 product to Plant 2
--- turns every run it already has into a foreign-owned row on a Plant 1 board
--- -- the leak restored, and nothing to catch it, because the check was made at
--- write time and never re-made. [[doc-drift]] shape 4: an invariant checked
--- once and never re-checked is an invariant with an expiry date.
+-- guards. For OPERATORS (N11) it is still the re-home guard: an owner column
+-- being moved. For PRODUCTS (N9), D115 replaced the single owner with a LIST, so
+-- there is no owner to re-home; the equivalent hazard is REMOVING the last plant
+-- a part is still scheduled under. The strand guard moved from re-home to
+-- un-assign accordingly (0034 §5), and N9/N10 follow it. [[doc-drift]] shape 4:
+-- an invariant checked once at write time and never re-checked has an expiry.
 -- ---------------------------------------------------------------------------
-\echo 'N9 ⭐⭐: re-homing a product that is already scheduled elsewhere is refused, and the owner is unchanged'
+\echo 'N9 ⭐⭐ (rewritten by 0034): removing the LAST plant a product is still scheduled under is refused, and the place row survives'
 SAVEPOINT sp_N9;
 DO $$
-DECLARE v_p2 uuid; v_err text := 'no error'; v_keys text := '-'; v_detail text; v_owner uuid;
+DECLARE v_err text := 'no error'; v_keys text := '-'; v_detail text; v_places int;
 BEGIN
-  SELECT v INTO v_p2 FROM n_fix WHERE k='p2';
   RESET ROLE;
+  -- c1 is made only in Plant 1, and now scheduled there.
   INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
   VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000007',
           '62000000-0000-0000-0000-0000000000c1',
           tstzrange('2099-07-01 08:00+00','2099-07-01 10:00+00'), 'planned', 1);
+  -- Removing that plant would strand the run — no remaining plant covers Cell 1.
   BEGIN
-    UPDATE products SET site_node_id = v_p2 WHERE id = '62000000-0000-0000-0000-0000000000c1';
+    DELETE FROM product_sites
+     WHERE product_id = '62000000-0000-0000-0000-0000000000c1'
+       AND node_id = '30000000-0000-0000-0000-000000000001';
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLSTATE;
     GET STACKED DIAGNOSTICS v_detail = PG_EXCEPTION_DETAIL;
     v_keys := coalesce((SELECT string_agg(k, ',' ORDER BY k)
                           FROM jsonb_object_keys(nullif(v_detail,'')::jsonb) k), '-');
   END;
-  SELECT site_node_id INTO v_owner FROM products WHERE id='62000000-0000-0000-0000-0000000000c1';
+  -- The place must still be there: a refusal that already removed the row is no
+  -- refusal. The strand payload names the plant being removed, not a new owner.
+  SELECT count(*) INTO v_places FROM product_sites
+   WHERE product_id='62000000-0000-0000-0000-0000000000c1'
+     AND node_id='30000000-0000-0000-0000-000000000001';
   IF v_err = 'PT409'
-     AND v_owner = '30000000-0000-0000-0000-000000000001'
-     AND v_keys = 'error,id,kind,new_owner_node_id,stranded'
+     AND v_places = 1
+     AND v_keys = 'error,id,kind,removed_node_id,stranded'
   THEN RAISE NOTICE 'PASS N9';
-  ELSE RAISE NOTICE 'FAIL N9: sqlstate=% owner=% keys=% (want PT409, plant_1, error,id,kind,new_owner_node_id,stranded)',
-    v_err, v_owner, v_keys; END IF;
+  ELSE RAISE NOTICE 'FAIL N9: sqlstate=% place_rows=% keys=% (want PT409, 1, error,id,kind,removed_node_id,stranded)',
+    v_err, v_places, v_keys; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_N9;
 
-\echo 'N10: the CONTROL for N9 — with no runs in the way the same re-home succeeds, so N9 is not just "owners are immutable"'
+\echo 'N10: the CONTROL for N9 — with no runs in the way the same plant can be removed, so N9 is not just "places are immutable"'
 SAVEPOINT sp_N10;
 DO $$
-DECLARE v_p2 uuid; v_err text := 'no error'; v_owner uuid;
+DECLARE v_err text := 'no error'; v_places int;
 BEGIN
-  SELECT v INTO v_p2 FROM n_fix WHERE k='p2';
   RESET ROLE;
+  -- c1 has no runs against it here, so its sole plant may be removed cleanly,
+  -- leaving a placeless catalogue entry (an ordinary state under D115).
   BEGIN
-    UPDATE products SET site_node_id = v_p2 WHERE id = '62000000-0000-0000-0000-0000000000c1';
+    DELETE FROM product_sites
+     WHERE product_id = '62000000-0000-0000-0000-0000000000c1'
+       AND node_id = '30000000-0000-0000-0000-000000000001';
   EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM; END;
-  SELECT site_node_id INTO v_owner FROM products WHERE id='62000000-0000-0000-0000-0000000000c1';
-  IF v_err = 'no error' AND v_owner = v_p2 THEN RAISE NOTICE 'PASS N10';
-  ELSE RAISE NOTICE 'FAIL N10: err=% owner=% (want no error, plant 2)', v_err, v_owner; END IF;
+  SELECT count(*) INTO v_places FROM product_sites
+   WHERE product_id='62000000-0000-0000-0000-0000000000c1';
+  IF v_err = 'no error' AND v_places = 0 THEN RAISE NOTICE 'PASS N10';
+  ELSE RAISE NOTICE 'FAIL N10: err=% remaining_places=% (want no error, 0)', v_err, v_places; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_N10;
 
@@ -462,11 +493,16 @@ BEGIN
   -- nothing about the seed's own 9 operators and 4 products. If the seed, a
   -- later migration or another test file ever writes a row that breaks it,
   -- this is where it surfaces -- before a user sees "(unknown product)".
+  -- D115: a run's product is well-placed when SOME product_sites place is an
+  -- ancestor-or-self of the run's node — the list-aware successor to "the single
+  -- owner covers it". A run whose product no remaining plant covers is the
+  -- "(unknown product)" band this invariant exists to make impossible.
   SELECT count(*) INTO v_runs FROM runs r
     JOIN products p ON p.id = r.product_id
-    JOIN nodes po ON po.id = p.site_node_id
     JOIN nodes rn ON rn.id = r.node_id
-   WHERE NOT (po.path @> rn.path);
+   WHERE NOT EXISTS (
+     SELECT 1 FROM product_sites ps JOIN nodes po ON po.id = ps.node_id
+      WHERE ps.product_id = p.id AND po.path @> rn.path);
   SELECT count(*) INTO v_asg_op FROM assignments a
     JOIN operators o ON o.id = a.operator_id
     JOIN nodes oo ON oo.id = o.site_node_id
@@ -474,9 +510,10 @@ BEGIN
    WHERE NOT (oo.path @> an.path);
   SELECT count(*) INTO v_asg_prod FROM assignments a
     JOIN products p ON p.id = a.product_id
-    JOIN nodes po ON po.id = p.site_node_id
     JOIN nodes an ON an.id = a.node_id
-   WHERE NOT (po.path @> an.path);
+   WHERE NOT EXISTS (
+     SELECT 1 FROM product_sites ps JOIN nodes po ON po.id = ps.node_id
+      WHERE ps.product_id = p.id AND po.path @> an.path);
   SELECT count(*) INTO v_req FROM node_skill_requirements q
     JOIN skills s ON s.id = q.skill_id
     JOIN nodes so ON so.id = s.site_node_id
@@ -551,30 +588,41 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_N15;
 
-\echo 'N17 ⭐: a plant admin may create a product owned by a LINE inside their plant, and may not create one owned by the other plant'
+\echo 'N17 ⭐ (rewritten by 0034/Split): a plant admin may add a MAKER inside their plant, and may not add one in the other plant — the product RECORD itself is company-only'
 SAVEPOINT sp_N17;
 DO $$
-DECLARE v_p2 uuid; v_line text := 'no error'; v_other text := 'no error'; v_n int;
+DECLARE v_p2 uuid; v_record text := 'no error'; v_line text := 'no error'; v_other text := 'no error'; v_n int;
 BEGIN
   SELECT v INTO v_p2 FROM n_fix WHERE k='p2';
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000bb01', true);
   SET LOCAL ROLE authenticated;
+  -- ⭐⭐ THE SPLIT (D115). Creating the shared product RECORD is company property
+  -- now — a plant admin cannot do it. This supersedes the old case, which had a
+  -- plant admin CREATE a product. `app_is_admin()` is false for a Plant 1 site
+  -- admin, so products_insert refuses (42501) before anything is written.
   BEGIN
-    -- D109's ancestor rule doing its job: `app_is_admin_for` is an admin grant
-    -- on an ancestor-or-self, so the plant admin owns everything below them.
-    INSERT INTO products (org_id, sku, name, site_node_id)
-      VALUES ('10000000-0000-0000-0000-000000000001','NNEW','N New Line Product',
+    INSERT INTO products (org_id, sku, name)
+      VALUES ('10000000-0000-0000-0000-000000000001','NNEW','N New Product');
+  EXCEPTION WHEN OTHERS THEN v_record := SQLSTATE; END;
+  -- But the LIST of makers is per-plant: D109's ancestor rule still does its
+  -- job through product_sites_insert. `app_is_admin_for` is an admin grant on an
+  -- ancestor-or-self, so the Plant 1 admin may add any place under their plant.
+  BEGIN
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','62000000-0000-0000-0000-0000000000c1',
               '30000000-0000-0000-0000-000000000004');
   EXCEPTION WHEN OTHERS THEN v_line := SQLSTATE || ' ' || SQLERRM; END;
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id)
-      VALUES ('10000000-0000-0000-0000-000000000001','NNEW2','N New Foreign Product', v_p2);
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','62000000-0000-0000-0000-0000000000c1', v_p2);
   EXCEPTION WHEN OTHERS THEN v_other := SQLSTATE; END;
   RESET ROLE;
-  SELECT count(*) INTO v_n FROM products WHERE sku = 'NNEW2';
-  IF v_line = 'no error' AND v_other = '42501' AND v_n = 0 THEN RAISE NOTICE 'PASS N17';
-  ELSE RAISE NOTICE 'FAIL N17: own_line=% other_plant=% stored=% (want no error, 42501, 0)',
-    v_line, v_other, v_n; END IF;
+  SELECT count(*) INTO v_n FROM product_sites
+   WHERE product_id='62000000-0000-0000-0000-0000000000c1' AND node_id = v_p2;
+  IF v_record = '42501' AND v_line = 'no error' AND v_other = '42501' AND v_n = 0
+  THEN RAISE NOTICE 'PASS N17';
+  ELSE RAISE NOTICE 'FAIL N17: create_record=% own_line_place=% other_plant_place=% stored=% (want 42501, no error, 42501, 0)',
+    v_record, v_line, v_other, v_n; END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE NOTICE 'FAIL N17: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;

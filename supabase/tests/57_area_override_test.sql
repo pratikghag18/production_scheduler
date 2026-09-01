@@ -107,9 +107,13 @@ BEGIN
     ('f5000000-0000-0000-0000-0000000000f2', v_org, 'Line-1 Lena',  'EMP-F02', '30000000-0000-0000-0000-000000000004'),
     ('f5000000-0000-0000-0000-0000000000f3', v_org, 'Plantwide Pia','EMP-F03', '30000000-0000-0000-0000-000000000001');
 
-  -- A product owned by Plant E, for the half that has no door (A6).
-  INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
-    ('f6000000-0000-0000-0000-0000000000f1', v_org, 'FP1', 'Foreign Part', v_pe);
+  -- A product made only in Plant E, for the half that has no door (A6). D115
+  -- (0034): a product's places are product_sites rows, not a column; one place,
+  -- Plant E, so the offering guard covers Plant E and nothing under Plant 1.
+  INSERT INTO products (id, org_id, sku, name) VALUES
+    ('f6000000-0000-0000-0000-0000000000f1', v_org, 'FP1', 'Foreign Part');
+  INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+    (v_org, 'f6000000-0000-0000-0000-0000000000f1', v_pe);
 
   -- A run on Cell 1 crewed by Lena, so a move to Cell 4 crosses out of her line.
   INSERT INTO runs (id, org_id, node_id, product_id, timerange, planned_headcount) VALUES

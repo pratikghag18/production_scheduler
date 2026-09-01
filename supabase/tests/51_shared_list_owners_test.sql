@@ -101,9 +101,15 @@ BEGIN
     ('72000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','71000000-0000-0000-0000-00000000ee01','Q Lunch', 600, 630),
     ('72000000-0000-0000-0000-00000000ee02','10000000-0000-0000-0000-000000000001','71000000-0000-0000-0000-00000000ee02','Q Lunch', 600, 630);
 
-  INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
-    ('60000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','QP1','Q P1 Product','30000000-0000-0000-0000-000000000001'::uuid),
-    ('60000000-0000-0000-0000-00000000ee02','10000000-0000-0000-0000-000000000001','QP2','Q P2 Product', v_p2);
+  -- D115 (0034): a product's place is a product_sites row, not a column. QP1 is
+  -- made in Plant 1, QP2 in Plant 2 — one place each, so the who-may-edit-the-
+  -- makers-list cases below read exactly as the old single-owner ones did.
+  INSERT INTO products (id, org_id, sku, name) VALUES
+    ('60000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','QP1','Q P1 Product'),
+    ('60000000-0000-0000-0000-00000000ee02','10000000-0000-0000-0000-000000000001','QP2','Q P2 Product');
+  INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+    ('10000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-00000000ee01','30000000-0000-0000-0000-000000000001'::uuid),
+    ('10000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-00000000ee02', v_p2);
 
   INSERT INTO skills (id, org_id, name, site_node_id) VALUES
     ('40000000-0000-0000-0000-00000000ee01','10000000-0000-0000-0000-000000000001','Q Welding','30000000-0000-0000-0000-000000000001'::uuid),
@@ -587,22 +593,39 @@ ROLLBACK TO SAVEPOINT sp_Q19;
 -- ---------------------------------------------------------------------------
 -- PRODUCTS, SKILLS, OPERATOR_SKILLS
 -- ---------------------------------------------------------------------------
-\echo 'Q20: products — a site admin edits their own and not the other site''s'
+\echo 'Q20 ⭐ (rewritten by 0034/Split): the shared product RECORD is company-only, but a site admin manages their OWN plant''s makers-list and not the other plant''s'
 SAVEPOINT sp_Q20;
 DO $$
-DECLARE v_mine int; v_theirs int; v_state text;
+DECLARE v_record int; v_mine int; v_theirs int; v_state text; v_p2 uuid;
 BEGIN
+  -- ⚠️ Read the TEMP-table value before the role change: `authenticated` cannot
+  -- select q_fix and the refusal reads exactly like RLS.
+  SELECT v INTO v_p2 FROM q_fix WHERE k = 'p2';
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
   SET LOCAL ROLE authenticated;
+  -- ⭐⭐ THE SPLIT (D115). Until 0034 a site admin renamed their own product;
+  -- now the shared record (sku/name/colour/delete) is company property, so g1's
+  -- rename removes ZERO rows (products_update USING app_is_admin()). This
+  -- supersedes the old "mine=1" half.
   UPDATE products SET name = 'Q P1 Product (edited)' WHERE id = '60000000-0000-0000-0000-00000000ee01';
+  GET DIAGNOSTICS v_record = ROW_COUNT;
+  -- The LIST of makers is per-plant. g1 administers Plant 1, so they may remove
+  -- Plant 1 as a maker of QP1 (its only run-free place) ...
+  DELETE FROM product_sites
+   WHERE product_id = '60000000-0000-0000-0000-00000000ee01'
+     AND node_id = '30000000-0000-0000-0000-000000000001';
   GET DIAGNOSTICS v_mine = ROW_COUNT;
+  -- ... and may NOT remove Plant 2 as a maker of QP2 — the USING half filters it
+  -- to zero rows, silently.
   BEGIN
-    UPDATE products SET name = 'x' WHERE id = '60000000-0000-0000-0000-00000000ee02';
+    DELETE FROM product_sites
+     WHERE product_id = '60000000-0000-0000-0000-00000000ee02'
+       AND node_id = v_p2;
     GET DIAGNOSTICS v_theirs = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_mine = 1 AND v_theirs = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q20';
-  ELSE RAISE NOTICE 'FAIL Q20: mine=% theirs=% (want 1,0)', v_mine, v_theirs; END IF;
+  IF v_record = 0 AND v_mine = 1 AND v_theirs = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q20';
+  ELSE RAISE NOTICE 'FAIL Q20: record_rename=% own_plant_removed=% other_plant_removed=% (want 0,1,0)', v_record, v_mine, v_theirs; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q20;
 
@@ -743,45 +766,55 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q24;
 
-\echo 'Q25 ⭐: a new product takes the LEAST-USED token in its OWN owner scope'
+\echo 'Q25 ⭐ (rewritten by 0034): a new product takes the LEAST-USED token across the WHOLE ORG — colour is company-wide now'
 SAVEPOINT sp_Q25;
 DO $$
-DECLARE v_p2 uuid; v_tok text; v_tok2 text;
+DECLARE v_expected text; v_got text;
 BEGIN
-  SELECT v INTO v_p2 FROM q_fix WHERE k = 'p2';
   RESET ROLE;
-  -- Plant 2's scope holds exactly one product so far (QP2 -> product-1), so the
-  -- next one must be product-2 and NOT whatever the org-wide ordinal would give.
-  SELECT color_token INTO v_tok FROM products WHERE id = '60000000-0000-0000-0000-00000000ee02';
-  INSERT INTO products (org_id, sku, name, site_node_id)
-    VALUES ('10000000-0000-0000-0000-000000000001','QP2B','Q P2 Product B', v_p2)
-    RETURNING color_token INTO v_tok2;
-  IF v_tok = 'product-1' AND v_tok2 = 'product-2' THEN RAISE NOTICE 'PASS Q25';
-  ELSE RAISE NOTICE 'FAIL Q25: first=% second=% (want product-1, product-2)', v_tok, v_tok2; END IF;
+  -- ⭐⭐ SUPERSEDES THE PER-OWNER BALANCE. D115 drops the single owner, so
+  -- app_pick_product_color balances across every product in the org, not within
+  -- one scope. Computed the same way the picker does (least count, ties by
+  -- palette order), then asserted the trigger chose exactly it. A product needs
+  -- no place to be created — its colour does not depend on where it is made.
+  SELECT t.token INTO v_expected
+    FROM unnest(app_product_palette()) WITH ORDINALITY AS t(token, pos)
+    LEFT JOIN products p
+      ON p.color_token = t.token AND p.org_id = '10000000-0000-0000-0000-000000000001'
+   GROUP BY t.token, t.pos
+   ORDER BY count(p.id), t.pos
+   LIMIT 1;
+  INSERT INTO products (org_id, sku, name)
+    VALUES ('10000000-0000-0000-0000-000000000001','QNC','Q New Colour Product')
+    RETURNING color_token INTO v_got;
+  IF v_got = v_expected THEN RAISE NOTICE 'PASS Q25';
+  ELSE RAISE NOTICE 'FAIL Q25: assigned=% (want the org-wide least-used token %)', v_got, v_expected; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q25;
 
-\echo 'Q26 ⭐⭐: two sites can both hold product-1, and neither re-shuffles the other'
+\echo 'Q26 ⭐⭐ (rewritten by 0034): colour is COMPANY-WIDE, so two products take DISTINCT tokens — and inserting one still never re-shuffles another'
 SAVEPOINT sp_Q26;
 DO $$
 DECLARE v_p1 text; v_p2 text; v_gz_before text; v_gz_after text;
 BEGIN
   RESET ROLE;
+  -- ⭐⭐ INVERTED BY D115. The old case's point was that two SEPARATE owner
+  -- scopes could each hold product-1 independently. There is no per-owner scope
+  -- any more — colour balances across the whole org — so QP1 and QP2 take
+  -- DIFFERENT tokens, and a design that recoloured by scope would break that.
+  -- What SURVIVES is the other half, and it is the load-bearing one: inserting a
+  -- product never re-colours an existing one (colour is set once, at insert).
   SELECT color_token INTO v_gz_before FROM products
    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND sku = 'GZ';
   SELECT color_token INTO v_p1 FROM products WHERE id = '60000000-0000-0000-0000-00000000ee01';
   SELECT color_token INTO v_p2 FROM products WHERE id = '60000000-0000-0000-0000-00000000ee02';
-  -- Inserting into one scope must not move a token in another. Under the
-  -- ordinal rule this insert re-coloured every product in the org whose sku
-  -- sorts after it; that is the defect the column exists to remove.
-  INSERT INTO products (org_id, sku, name, site_node_id)
-    VALUES ('10000000-0000-0000-0000-000000000001','AAA','Q Alphabetically First',
-            '30000000-0000-0000-0000-000000000001');
+  INSERT INTO products (org_id, sku, name)
+    VALUES ('10000000-0000-0000-0000-000000000001','AAA','Q Alphabetically First');
   SELECT color_token INTO v_gz_after FROM products
    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND sku = 'GZ';
-  IF v_p1 = 'product-1' AND v_p2 = 'product-1' AND v_gz_before = v_gz_after
+  IF v_p1 <> v_p2 AND v_gz_before = v_gz_after
   THEN RAISE NOTICE 'PASS Q26';
-  ELSE RAISE NOTICE 'FAIL Q26: p1_first=% p2_first=% gz % -> % (want both product-1, and gz unchanged)',
+  ELSE RAISE NOTICE 'FAIL Q26: qp1=% qp2=% gz % -> % (want QP1<>QP2 company-wide, and gz unchanged)',
     v_p1, v_p2, v_gz_before, v_gz_after; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q26;
@@ -821,18 +854,21 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q27;
 
-\echo 'Q28: moving a product between owners does NOT re-colour it'
+\echo 'Q28: changing a product''s makers-list does NOT re-colour it'
 SAVEPOINT sp_Q28;
 DO $$
 DECLARE v_p2 uuid; v_before text; v_after text;
 BEGIN
   SELECT v INTO v_p2 FROM q_fix WHERE k = 'p2';
   RESET ROLE;
+  -- D115: "moving a product between owners" is now editing product_sites. Adding
+  -- a second plant fires no colour trigger — colour is set once, at insert.
   SELECT color_token INTO v_before FROM products WHERE id = '60000000-0000-0000-0000-00000000ee01';
-  UPDATE products SET site_node_id = v_p2 WHERE id = '60000000-0000-0000-0000-00000000ee01';
+  INSERT INTO product_sites (org_id, product_id, node_id)
+    VALUES ('10000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-00000000ee01', v_p2);
   SELECT color_token INTO v_after FROM products WHERE id = '60000000-0000-0000-0000-00000000ee01';
   IF v_before = v_after THEN RAISE NOTICE 'PASS Q28';
-  ELSE RAISE NOTICE 'FAIL Q28: % -> % — a re-assignment changed a colour', v_before, v_after; END IF;
+  ELSE RAISE NOTICE 'FAIL Q28: % -> % — a makers-list change re-coloured a product', v_before, v_after; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q28;
 
@@ -875,7 +911,7 @@ BEGIN
     RETURN;
   END IF;
   SELECT array_agg(f) INTO v_open FROM unnest(ARRAY[
-    'app_pick_product_color(uuid, uuid)',
+    'app_pick_product_color(uuid)',
     'app_product_palette()',
     'app_is_admin_for_operator(uuid)',
     'app_is_admin_for_shift_template(uuid)',
@@ -1010,16 +1046,17 @@ BEGIN
   -- The fix is a grant, not a predicate (a `= app_current_org()` guard returns
   -- NULL during the backfill and the seed, where there is no session profile).
   -- A grant is a thing people delete, so this is the tripwire.
-  v_auth := has_function_privilege('authenticated', 'app_pick_product_color(uuid, uuid)', 'EXECUTE');
+  v_auth := has_function_privilege('authenticated', 'app_pick_product_color(uuid)', 'EXECUTE');
   v_pal  := has_function_privilege('authenticated', 'app_product_palette()', 'EXECUTE');
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    v_anon := has_function_privilege('anon', 'app_pick_product_color(uuid, uuid)', 'EXECUTE');
+    v_anon := has_function_privilege('anon', 'app_pick_product_color(uuid)', 'EXECUTE');
   ELSE
     v_anon := false;
   END IF;
   -- And the thing it would have leaked, so the case says what it is protecting:
-  -- org 2's company-wide scope, asked about from outside org 2.
-  SELECT app_pick_product_color('10000000-0000-0000-0000-000000000002', NULL) INTO v_leak;
+  -- org 2's whole-org palette usage, asked about from outside org 2. D115: the
+  -- picker takes only the org now (one arg) — there is no per-owner scope.
+  SELECT app_pick_product_color('10000000-0000-0000-0000-000000000002') INTO v_leak;
   IF v_auth = false AND v_anon = false AND v_pal = false AND v_leak IS NOT NULL
   THEN RAISE NOTICE 'PASS Q35';
   ELSE RAISE NOTICE 'FAIL Q35: authenticated=% anon=% palette=% (all must be false; owner still gets %)',
@@ -1027,16 +1064,20 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q35;
 
-\echo 'Q36: color_token is NOT NULL — a site admin cannot blank their own product''s colour'
+\echo 'Q36 ⭐ (rewritten by 0034/Split): color_token is NOT NULL — even a COMPANY admin cannot blank a product''s colour'
 SAVEPOINT sp_Q36;
 DO $$
 DECLARE v_state text;
 BEGIN
   -- The column shipped nullable with a comment saying "NULL only transiently".
-  -- An adversarial reviewer showed the UPDATE path made that untrue: a site
-  -- admin may edit their own row, the CHECK permits NULL, and no trigger fires
-  -- on UPDATE — so the product would render with no colour at all.
-  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+  -- An adversarial reviewer showed the UPDATE path made that untrue: the CHECK
+  -- permits NULL and no trigger fires on UPDATE, so a product could render with
+  -- no colour at all — the NOT NULL is what forbids it.
+  -- ⭐ D115/Split: editing the shared product record is now a COMPANY-admin act,
+  -- so the old "site admin" framing would refuse at RLS (0 rows) and never reach
+  -- the constraint. Asked as a1 (company admin), whom no policy refuses, the
+  -- NOT NULL is the only thing left to bite — and it still does (23502).
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
     UPDATE products SET color_token = NULL WHERE id = '60000000-0000-0000-0000-00000000ee01';

@@ -89,17 +89,24 @@ BEGIN
     -- would be refused one layer earlier and prove nothing about the policy.
     ('f0000000-0000-0000-0000-000000000003', v_dept, '10000000-0000-0000-0000-000000000001','supervisor');
 
-  -- One product scoped to a LINE, one to the DEPARTMENT above it, one to the
-  -- PLANT ROOT above that. Three answers to "is this offered at Cell A", and
-  -- ⭐ the third used to be company-wide (NULL) -- 0028/D108 abolished that
-  -- state, so the widest scope this file can express is now the root.
-  INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
-    ('61000000-0000-0000-0000-00000000ff01','10000000-0000-0000-0000-000000000001','SLA','S Line A Product', v_line_a),
-    ('61000000-0000-0000-0000-00000000ff02','10000000-0000-0000-0000-000000000001','SDP','S Dept Product',   v_dept),
-    ('61000000-0000-0000-0000-00000000ff03','10000000-0000-0000-0000-000000000001','SCW','S Plant-wide Product', '30000000-0000-0000-0000-000000000001'::uuid),
-    -- Scoped to the OTHER site. S18 needs a product that must never be OFFERED
+  -- One product made in a LINE, one in the DEPARTMENT above it, one in the
+  -- PLANT ROOT above that. Three answers to "is this offered at Cell A".
+  -- ⭐ D115 (0034): a product's place is a product_sites row, not a column, and
+  -- a product may be made in MANY places — these each start with one, at what
+  -- used to be their single scope, so the offering arithmetic (S10/S11) is
+  -- preserved and the cases can add a second place where the point is the list.
+  INSERT INTO products (id, org_id, sku, name) VALUES
+    ('61000000-0000-0000-0000-00000000ff01','10000000-0000-0000-0000-000000000001','SLA','S Line A Product'),
+    ('61000000-0000-0000-0000-00000000ff02','10000000-0000-0000-0000-000000000001','SDP','S Dept Product'),
+    ('61000000-0000-0000-0000-00000000ff03','10000000-0000-0000-0000-000000000001','SCW','S Plant-wide Product'),
+    -- Made at the OTHER site. S18 needs a product that must never be OFFERED
     -- under plant_1 and must still be RETURNED by the read.
-    ('61000000-0000-0000-0000-00000000ff04','10000000-0000-0000-0000-000000000001','SP2','S Plant 2 Product',
+    ('61000000-0000-0000-0000-00000000ff04','10000000-0000-0000-0000-000000000001','SP2','S Plant 2 Product');
+  INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+    ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff01', v_line_a),
+    ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff02', v_dept),
+    ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff03','30000000-0000-0000-0000-000000000001'::uuid),
+    ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff04',
      (SELECT v FROM s_fix WHERE k = 'p2'));
 
   INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES
@@ -139,23 +146,27 @@ ROLLBACK TO SAVEPOINT sp_S0;
 -- ---------------------------------------------------------------------------
 -- THE WIDENING — every level is now a legal scope.
 -- ---------------------------------------------------------------------------
-\echo 'S1: a product can belong to a LINE, four levels down'
+\echo 'S1: a product can be made at a LINE, four levels down — any level is a legal place'
 SAVEPOINT sp_S1;
 DO $$
-DECLARE v_line_a uuid; v_got uuid; v_err text := NULL;
+DECLARE v_line_a uuid; v_got int; v_err text := NULL;
 BEGIN
   SELECT v INTO v_line_a FROM s_fix WHERE k = 'line_a';
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
+  -- D115: the scope is a product_sites place. Adding a maker at a LINE, four
+  -- levels down, is the widening D103 asked for, expressed on the join table.
   BEGIN
-    UPDATE products SET site_node_id = v_line_a WHERE id = '61000000-0000-0000-0000-00000000ff03';
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff03', v_line_a);
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_err = RETURNED_SQLSTATE; END;
-  SELECT site_node_id INTO v_got FROM products WHERE id = '61000000-0000-0000-0000-00000000ff03';
+  SELECT count(*) INTO v_got FROM product_sites
+   WHERE product_id = '61000000-0000-0000-0000-00000000ff03' AND node_id = v_line_a;
   RESET ROLE;
-  -- Asserts the STATE, not merely the absence of an error: a `USING` clause
-  -- refuses by matching zero rows, which from out here looks like success.
-  IF v_err IS NULL AND v_got = v_line_a THEN RAISE NOTICE 'PASS S1';
-  ELSE RAISE NOTICE 'FAIL S1: sqlstate=% scope=% (want no error, scope = the line)', v_err, v_got; END IF;
+  -- Asserts the STATE, not merely the absence of an error: a `WITH CHECK` that
+  -- refuses raises, but a silent no-op would look like success from out here.
+  IF v_err IS NULL AND v_got = 1 THEN RAISE NOTICE 'PASS S1';
+  ELSE RAISE NOTICE 'FAIL S1: sqlstate=% place_rows=% (want no error, the line placed)', v_err, v_got; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_S1;
 
@@ -182,25 +193,26 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_S2;
 
-\echo 'S3 ⭐ (inverted by 0028): NULL no longer means company-wide — it is refused, because there is no company-wide'
+\echo 'S3 ⭐ (rewritten by 0034): a PLACE has no NULL node — a maker is a real node or it is not a row'
 SAVEPOINT sp_S3;
 DO $$
-DECLARE v_got uuid; v_err text := NULL;
+DECLARE v_err text := NULL;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
+  -- ⭐⭐ SUPERSEDES THE OLD NULL-OWNER CASE. Until 0028 a NULL owner meant
+  -- company-wide; D108 removed the destination; D115 removes the column
+  -- entirely. There is no "clear the scope" any more — a product with no places
+  -- is an ordinary catalogue state (55_'s N1). What is still refused is a place
+  -- row that names no node: node_id is NOT NULL (it is half the primary key), so
+  -- a NULL maker is 23502, and no phantom row is left behind.
   BEGIN
-    UPDATE products SET site_node_id = NULL WHERE id = '61000000-0000-0000-0000-00000000ff01';
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff01', NULL);
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_err = RETURNED_SQLSTATE; END;
-  SELECT site_node_id INTO v_got FROM products WHERE id = '61000000-0000-0000-0000-00000000ff01';
   RESET ROLE;
-  -- ⭐⭐ INVERTED BY 0028. 0025 widened the scope picker so a site admin could
-  -- clear a product back to company-wide, and S3 asserted that widening. D108
-  -- removes the destination: there is nowhere to clear it TO. The refusal is
-  -- the NOT NULL constraint itself (23502), and the row must be untouched --
-  -- asserting only the error would pass if the update half-applied.
-  IF v_err = '23502' AND v_got IS NOT NULL THEN RAISE NOTICE 'PASS S3';
-  ELSE RAISE NOTICE 'FAIL S3: sqlstate=% scope=% (want 23502, unchanged)', v_err, v_got; END IF;
+  IF v_err = '23502' THEN RAISE NOTICE 'PASS S3';
+  ELSE RAISE NOTICE 'FAIL S3: sqlstate=% (want 23502 — a place must name a node)', v_err; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_S3;
 
@@ -209,116 +221,119 @@ ROLLBACK TO SAVEPOINT sp_S3;
 -- header. A widening is the shape where the suite goes green over a migration
 -- that went too far.
 -- ---------------------------------------------------------------------------
-\echo 'S4: a node in ANOTHER ORG is still refused, and the reason still says "not found"'
+\echo 'S4 ⭐ (rewritten by 0034): a place whose node is in ANOTHER ORG is refused — now by the composite FK, since the products_check_site trigger is gone'
 SAVEPOINT sp_S4;
 DO $$
-DECLARE v_detail jsonb; v_raw text;
+DECLARE v_state text := NULL;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    -- Org 2's root. It exists; it is not in this org. This is the ONLY refusal
-    -- branch the trigger has left, which makes it load-bearing rather than one
-    -- of two — the org scope is now the whole of what this function protects.
-    UPDATE products SET site_node_id = '3000000b-0000-0000-0000-000000000001'
-     WHERE id = '61000000-0000-0000-0000-00000000ff01';
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL;
-    BEGIN v_detail := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
-  END;
+    -- Org 2's root. It exists; it is not in this org. The old products_check_site
+    -- trigger ("owner is a root, and in this org") is DROPPED (0034 §6); the
+    -- product_sites composite FK (org_id, node_id) -> nodes(org_id, id) now
+    -- refuses a node the claimed org does not own, and that is the whole of the
+    -- protection. a1 is a company admin so app_is_admin() passes the WITH CHECK;
+    -- the FK is what bites.
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff01',
+              '3000000b-0000-0000-0000-000000000001');
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_detail->>'error' = 'invalid_argument' AND v_detail->>'reason' = 'not found'
-  THEN RAISE NOTICE 'PASS S4';
-  ELSE RAISE NOTICE 'FAIL S4: detail=% (want invalid_argument / not found)', v_detail; END IF;
+  IF v_state = '23503' THEN RAISE NOTICE 'PASS S4';
+  ELSE RAISE NOTICE 'FAIL S4: sqlstate=% (want 23503 — the composite FK refuses a cross-org node)', v_state; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_S4;
 
 \echo 'S5: a node id that exists NOWHERE is refused the same way'
 SAVEPOINT sp_S5;
 DO $$
-DECLARE v_detail jsonb; v_raw text;
+DECLARE v_state text := NULL;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    UPDATE products SET site_node_id = '3fffffff-ffff-ffff-ffff-ffffffffffff'
-     WHERE id = '61000000-0000-0000-0000-00000000ff01';
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL;
-    BEGIN v_detail := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
-  END;
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff01',
+              '3fffffff-ffff-ffff-ffff-ffffffffffff');
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_detail->>'reason' = 'not found' THEN RAISE NOTICE 'PASS S5';
-  ELSE RAISE NOTICE 'FAIL S5: detail=% (want not found)', v_detail; END IF;
+  IF v_state = '23503' THEN RAISE NOTICE 'PASS S5';
+  ELSE RAISE NOTICE 'FAIL S5: sqlstate=% (want 23503 — a place must name a real node in this org)', v_state; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_S5;
 
-\echo 'S6: a DEPARTMENT admin may scope a product to a line inside their grant'
+\echo 'S6: a DEPARTMENT admin may add a maker on a line inside their grant'
 SAVEPOINT sp_S6;
 DO $$
-DECLARE v_line_b uuid; v_got uuid; v_rows int;
+DECLARE v_line_b uuid; v_rows int; v_err text := NULL;
 BEGIN
   SELECT v INTO v_line_b FROM s_fix WHERE k = 'line_b';
   -- ⭐ f1 is an admin of the DEPARTMENT and an org-wide VIEWER. Before 0019
   -- there was no such person; after 0025 they are the whole point of the
-  -- feature. `app_is_admin()` cannot short-circuit anything for them.
-  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000f1', true);
-  SET LOCAL ROLE authenticated;
-  UPDATE products SET site_node_id = v_line_b WHERE id = '61000000-0000-0000-0000-00000000ff01';
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
-  SELECT site_node_id INTO v_got FROM products WHERE id = '61000000-0000-0000-0000-00000000ff01';
-  RESET ROLE;
-  IF v_rows = 1 AND v_got = v_line_b THEN RAISE NOTICE 'PASS S6';
-  ELSE RAISE NOTICE 'FAIL S6: rows=% scope=% (want 1 and the line)', v_rows, v_got; END IF;
-END $$;
-ROLLBACK TO SAVEPOINT sp_S6;
-
-\echo 'S7: that same admin may NOT touch a row outside their grant — and it is the POLICY that says so, silently'
-SAVEPOINT sp_S7;
-DO $$
-DECLARE v_p2 uuid; v_line_b uuid; v_rows int; v_got uuid; v_err text := NULL;
-BEGIN
-  SELECT v INTO v_p2     FROM s_fix WHERE k = 'p2';
-  SELECT v INTO v_line_b FROM s_fix WHERE k = 'line_b';
+  -- feature. `app_is_admin()` cannot short-circuit anything for them. D115: the
+  -- makers-list is per-plant, and app_is_admin_for(line_b) holds via their
+  -- department admin grant on an ancestor, so product_sites_insert admits it.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000f1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    -- ⚠️ THE TARGET VALUE MUST BE ONE THE ROW DOES NOT ALREADY HOLD. Written
-    -- first as "set Plant 2's product to Plant 2", which the fixture had
-    -- already done — so the case passed or failed on whether a no-op is a
-    -- refusal, which is not the question. Rule 3b: measure whether the fixture
-    -- can deliver the claim in the case's name. It moves toward the admin's
-    -- OWN line, which is the tempting direction and still not theirs to do.
-    UPDATE products SET site_node_id = v_line_b WHERE id = '61000000-0000-0000-0000-00000000ff04';
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff01', v_line_b);
     GET DIAGNOSTICS v_rows = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_err = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  SELECT site_node_id INTO v_got FROM products WHERE id = '61000000-0000-0000-0000-00000000ff04';
+  IF v_err IS NULL AND v_rows = 1 THEN RAISE NOTICE 'PASS S6';
+  ELSE RAISE NOTICE 'FAIL S6: sqlstate=% rows=% (want no error and the line placed)', v_err, v_rows; END IF;
+END $$;
+ROLLBACK TO SAVEPOINT sp_S6;
+
+\echo 'S7: that same admin may NOT touch a maker outside their grant — and it is the POLICY that says so, silently'
+SAVEPOINT sp_S7;
+DO $$
+DECLARE v_p2 uuid; v_rows int; v_left int; v_err text := NULL;
+BEGIN
+  SELECT v INTO v_p2 FROM s_fix WHERE k = 'p2';
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000f1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    -- SP2's only maker is Plant 2, which f1 (a Plant 1 department admin) does
+    -- not administer. Removing it is exactly "touch a row outside your grant".
+    DELETE FROM product_sites
+     WHERE product_id = '61000000-0000-0000-0000-00000000ff04' AND node_id = v_p2;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_err = RETURNED_SQLSTATE; END;
+  RESET ROLE;
+  SELECT count(*) INTO v_left FROM product_sites
+   WHERE product_id = '61000000-0000-0000-0000-00000000ff04' AND node_id = v_p2;
   -- ⚠️ 0023's lesson, and §19.63's: a `USING` clause FILTERS. The refusal is
   -- zero rows and NO error, so asserting "it threw" would fail against correct
   -- code and asserting "rows = 0" alone cannot tell a refusal from a no-op.
-  -- All three: no error, no rows, and the value still where it was.
-  IF v_err IS NULL AND v_rows = 0 AND v_got = v_p2
+  -- All three: no error, no rows deleted, and the maker still there.
+  IF v_err IS NULL AND v_rows = 0 AND v_left = 1
   THEN RAISE NOTICE 'PASS S7';
-  ELSE RAISE NOTICE 'FAIL S7: sqlstate=% rows=% scope=% (want no error, 0 rows, still Plant 2)',
-    v_err, v_rows, v_got; END IF;
+  ELSE RAISE NOTICE 'FAIL S7: sqlstate=% rows_deleted=% place_remaining=% (want no error, 0, 1)',
+    v_err, v_rows, v_left; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_S7;
 
-\echo 'S8: and the widening did NOT hand a supervisor the pencil'
+\echo 'S8: and the makers-list did NOT hand a supervisor the pencil'
 SAVEPOINT sp_S8;
 DO $$
-DECLARE v_line_a uuid; v_rows int;
+DECLARE v_line_a uuid; v_state text := NULL;
 BEGIN
   SELECT v INTO v_line_a FROM s_fix WHERE k = 'line_a';
   -- f3: a SUPERVISOR on the department, org-wide viewer, not an admin anywhere.
+  -- product_sites_insert needs app_is_admin_for (an ADMIN grant), so a WITH
+  -- CHECK violation RAISES 42501 rather than filtering silently.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000f3', true);
   SET LOCAL ROLE authenticated;
-  UPDATE products SET site_node_id = v_line_a WHERE id = '61000000-0000-0000-0000-00000000ff01';
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  BEGIN
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','61000000-0000-0000-0000-00000000ff03', v_line_a);
+  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_rows = 0 THEN RAISE NOTICE 'PASS S8';
-  ELSE RAISE NOTICE 'FAIL S8: rows=% (want 0 — a supervisor is not an admin)', v_rows; END IF;
+  IF v_state = '42501' THEN RAISE NOTICE 'PASS S8';
+  ELSE RAISE NOTICE 'FAIL S8: sqlstate=% (want 42501 — a supervisor is not an admin)', v_state; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_S8;
 
@@ -364,13 +379,15 @@ BEGIN
   -- product, the department product above it and the company-wide one are all
   -- offered at Cell A. Anyone reusing `resolve_shift_template`'s ORDER BY /
   -- LIMIT 1 shape here would silently offer one product out of three.
+  -- D115: offered at a node when ANY product_sites place is an ancestor-or-self
+  -- of it — the list-aware union app_product_offered_at computes.
   SELECT count(*) INTO v_n
     FROM products p
-    LEFT JOIN nodes s ON s.id = p.site_node_id
    WHERE p.org_id = '10000000-0000-0000-0000-000000000001'
      AND p.sku IN ('SLA','SDP','SCW')
-     AND (p.site_node_id IS NULL
-          OR (SELECT t.path FROM nodes t WHERE t.id = v_cell_a) <@ s.path);
+     AND EXISTS (SELECT 1 FROM product_sites ps JOIN nodes s ON s.id = ps.node_id
+                  WHERE ps.product_id = p.id
+                    AND (SELECT t.path FROM nodes t WHERE t.id = v_cell_a) <@ s.path);
   IF v_n = 3 THEN RAISE NOTICE 'PASS S10';
   ELSE RAISE NOTICE 'FAIL S10: offered=% (want 3 — line, department and company-wide all apply)', v_n; END IF;
 END $$;
@@ -386,11 +403,11 @@ BEGIN
   -- would still report 3 and pass.
   SELECT count(*), string_agg(p.sku, ',' ORDER BY p.sku) INTO v_n, v_skus
     FROM products p
-    LEFT JOIN nodes s ON s.id = p.site_node_id
    WHERE p.org_id = '10000000-0000-0000-0000-000000000001'
      AND p.sku IN ('SLA','SDP','SCW')
-     AND (p.site_node_id IS NULL
-          OR (SELECT t.path FROM nodes t WHERE t.id = v_cell_b) <@ s.path);
+     AND EXISTS (SELECT 1 FROM product_sites ps JOIN nodes s ON s.id = ps.node_id
+                  WHERE ps.product_id = p.id
+                    AND (SELECT t.path FROM nodes t WHERE t.id = v_cell_b) <@ s.path);
   IF v_n = 2 AND v_skus = 'SCW,SDP' THEN RAISE NOTICE 'PASS S11';
   ELSE RAISE NOTICE 'FAIL S11: offered=% (%) (want 2: SCW,SDP — Line A''s product must not reach Line B)',
     v_n, v_skus; END IF;
@@ -469,8 +486,10 @@ DO $$
 DECLARE v_got text;
 BEGIN
   RESET ROLE;
-  INSERT INTO products (org_id, sku, name, site_node_id)
-    VALUES ('10000000-0000-0000-0000-000000000001','SNEW','S New Product', '30000000-0000-0000-0000-000000000001'::uuid);
+  -- D115: a product is created with no place (its makers are added separately);
+  -- the colour trigger still fires on insert regardless of the makers-list.
+  INSERT INTO products (org_id, sku, name)
+    VALUES ('10000000-0000-0000-0000-000000000001','SNEW','S New Product');
   SELECT color_token INTO v_got FROM products
    WHERE org_id = '10000000-0000-0000-0000-000000000001' AND sku = 'SNEW';
   -- ⭐ D102 SURVIVES 0025 INTACT. Widening what the column ACCEPTS must not
@@ -511,9 +530,14 @@ BEGIN
   RESET ROLE;
 
   -- ⚠️ ASSERTS THE VALUE, NOT THE KEY'S PRESENCE. `jsonb_build_object` will
-  -- happily emit `"site_node_id": null` for every row if the column reference
-  -- is wrong, and a `? 'site_node_id'` test passes against exactly that.
-  SELECT (e->>'site_node_id')::uuid = v_line_a INTO v_prod_has
+  -- happily emit an empty array for every row if the sub-select is wrong, and a
+  -- `? 'site_node_ids'` test passes against exactly that.
+  -- ⭐ D115: the product payload emits `site_node_ids` (a jsonb array from
+  -- product_sites), not a single `site_node_id`. SLA is made only at Line A, so
+  -- the array is exactly [line_a]; operators and trainings keep their single
+  -- `site_node_id` and are asserted unchanged below.
+  SELECT v_line_a::text IN (SELECT jsonb_array_elements_text(e->'site_node_ids'))
+    INTO v_prod_has
     FROM jsonb_array_elements(v_w->'products') e WHERE e->>'sku' = 'SLA';
   SELECT (e->>'site_node_id')::uuid = v_line_a INTO v_op_has
     FROM jsonb_array_elements(v_w->'operators') e WHERE e->>'display_name' = 'S Line A Person';

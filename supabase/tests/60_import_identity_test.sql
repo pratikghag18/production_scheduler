@@ -7,15 +7,20 @@
 --   0033a  THE HIERARCHY CAN BE IMPORTED AT ALL. A node carries the id its
 --          exporting system knows the place by, and that id names ONE place in
 --          the company. W1-W5.
---   0033b  A PRODUCTS RE-IMPORT UPDATES INSTEAD OF DUPLICATING, and it does so
---          PER OWNER, so two plants may each bring their own catalog — over a
---          table where every row HAS an owner to be scoped by. W6-W9.
+--   0033b  A PRODUCTS RE-IMPORT UPDATES INSTEAD OF DUPLICATING. ⚠️ 0034 (D115)
+--          RE-SETTLED THE KEY: a part number is COMPANY-WIDE now, so external_id
+--          is unique ORG-WIDE (not per owner), the products.site_node_id column
+--          is gone, and creating the shared record is a company-admin act (the
+--          Split). Two plants making one part is ONE product with a product_sites
+--          row per plant, not two products. W6-W9 pin the new rules.
 --
 -- and a third thing the migration only records:
 --
---   0033c  THE COLUMNS GAVE NOBODY ANY NEW RIGHT (W10-W11), and the tables do
---          NOT agree with each other about what "already exists" means (W12) —
---          which an importer has to know before it writes a single row.
+--   0033c  THE COLUMNS GAVE NOBODY ANY NEW RIGHT (W10-W11) — under 0034 the
+--          shared product record is company-only and the makers-list is
+--          per-plant — and the tables do NOT all agree about what "already
+--          exists" means (W12): products and operators now match ORG-WIDE, only
+--          skills stay per owner. An importer must know this before it writes.
 --
 -- ⚠️⚠️ EVERY CASE RUNS AS `authenticated`, AS A NAMED PERSON. The owner of these
 -- tables is not subject to RLS, so a suite that ran as the owner would pass
@@ -205,62 +210,63 @@ EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W5: unexpected % (%)',
 END $$;
 ROLLBACK TO SAVEPOINT sp_W5;
 
-\echo 'W6 ⭐⭐: TWO PLANTS MAY EACH IMPORT SKU-100 — two site admins, two uploads, two products'
+\echo 'W6 ⭐⭐ (inverted by 0034): a part number is COMPANY-WIDE — SKU-100 is ONE product made in two plants, not two products'
 SAVEPOINT sp_W6;
 DO $$
-DECLARE v_a text := 'none'; v_b text := 'none'; v_n int;
+DECLARE v_a text := 'none'; v_dup text := 'none'; v_plants int; v_rows int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006020', true);
+  -- ⭐⭐ THIS CASE INVERTED. Until 0034 external_id was per owner and two plants
+  -- each imported their own SKU-100 as two products. D115 makes a part
+  -- company-wide: external_id is unique ORG-WIDE, so SKU-100 names ONE product,
+  -- and "made in two plants" is a product_sites row per plant. Creating the
+  -- shared record is a company-admin act (the Split), so `adm` does it.
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006010', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'A-100', 'Widget',
-       '23111111-0000-0000-0000-0000000000a0', 'csv', 'SKU-100');
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'A-100', 'Widget', 'csv', 'SKU-100');
     v_a := 'allowed';
   EXCEPTION WHEN OTHERS THEN v_a := SQLSTATE; END;
-  RESET ROLE;
-
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006030', true);
-  SET LOCAL ROLE authenticated;
+  -- A SECOND product row carrying the same part number is refused ORG-WIDE.
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'B-100', 'Widget',
-       '23111111-0000-0000-0000-0000000000b0', 'csv', 'SKU-100');
-    v_b := 'allowed';
-  EXCEPTION WHEN OTHERS THEN v_b := SQLSTATE; END;
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'B-100', 'Widget', 'csv', 'SKU-100');
+    v_dup := 'allowed';
+  EXCEPTION WHEN unique_violation THEN v_dup := SQLSTATE; WHEN OTHERS THEN v_dup := SQLSTATE; END;
+  -- The right model: ONE product, a product_sites row in each plant.
+  INSERT INTO product_sites (org_id, product_id, node_id)
+    SELECT '11111111-0000-0000-0000-000000000060', p.id, n.id
+      FROM products p, (VALUES ('23111111-0000-0000-0000-0000000000a0'::uuid),
+                               ('23111111-0000-0000-0000-0000000000b0'::uuid)) n(id)
+     WHERE p.external_id = 'SKU-100';
   RESET ROLE;
-
-  SELECT count(*) INTO v_n FROM products WHERE external_id = 'SKU-100';
-  -- ⭐ 0031's rule, one table further: a product is owned by a place, and two
-  -- plants each bringing their own SKU-100 from their own system is the
-  -- ORDINARY case. An org-wide rule would refuse the second plant's whole
-  -- upload on a collision that is not a collision.
-  IF v_a = 'allowed' AND v_b = 'allowed' AND v_n = 2 THEN RAISE NOTICE 'PASS W6';
-  ELSE RAISE NOTICE 'FAIL W6: plant A=% plant B=% rows=% (want allowed/allowed/2)', v_a, v_b, v_n; END IF;
+  SELECT count(*) INTO v_rows FROM products WHERE external_id = 'SKU-100';
+  SELECT count(*) INTO v_plants FROM product_sites ps JOIN products p ON p.id = ps.product_id
+   WHERE p.external_id = 'SKU-100';
+  IF v_a = 'allowed' AND v_dup = '23505' AND v_rows = 1 AND v_plants = 2 THEN RAISE NOTICE 'PASS W6';
+  ELSE RAISE NOTICE 'FAIL W6: first=% second=% product_rows=% plants=% (want allowed/23505/1/2 — one part, two plants)', v_a, v_dup, v_rows, v_plants; END IF;
 EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W6: unexpected % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_W6;
 
-\echo 'W7 ⭐: and one plant may not hold SKU-100 twice — the duplicate 0033 exists to stop'
+\echo 'W7 ⭐: a re-import of the same part number does not duplicate — the second row is refused, org-wide'
 SAVEPOINT sp_W7;
 DO $$
 DECLARE v_state text := 'none';
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006020', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006010', true);
   SET LOCAL ROLE authenticated;
-  INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-    ('11111111-0000-0000-0000-000000000060', 'A-100', 'Widget',
-     '23111111-0000-0000-0000-0000000000a0', 'csv', 'SKU-100');
+  INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+    ('11111111-0000-0000-0000-000000000060', 'A-100', 'Widget', 'csv', 'SKU-100');
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'A-100-B', 'Widget, second upload',
-       '23111111-0000-0000-0000-0000000000a0', 'csv', 'SKU-100');
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'A-100-B', 'Widget, second upload', 'csv', 'SKU-100');
     v_state := 'allowed';
   EXCEPTION WHEN unique_violation THEN v_state := SQLSTATE;
             WHEN OTHERS THEN v_state := SQLSTATE; END;
   RESET ROLE;
-  -- Before 0033 this was 'allowed', and the second run of the same spreadsheet
-  -- doubled the catalog with nothing to say which row was the live one.
+  -- Before 0033 this was 'allowed'; 0033 stopped it per owner and 0034 widened
+  -- it to the whole company. An importer must UPDATE the existing row, not add.
   IF v_state = '23505' THEN RAISE NOTICE 'PASS W7';
   ELSE RAISE NOTICE 'FAIL W7: state=% (want 23505) — a re-import still duplicates', v_state; END IF;
 EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W7: unexpected % (%)', SQLERRM, SQLSTATE;
@@ -272,18 +278,19 @@ SAVEPOINT sp_W8;
 DO $$
 DECLARE v_state text := 'none'; v_n int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006020', true);
+  -- The index is PARTIAL (WHERE external_id IS NOT NULL), so hand-typed products
+  -- with no part number are not indexed and never collide. Creating them is a
+  -- company-admin act now (the Split), so `adm` does it.
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006010', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'A-M1', 'Typed In One',
-       '23111111-0000-0000-0000-0000000000a0'),
-      ('11111111-0000-0000-0000-000000000060', 'A-M2', 'Typed In Two',
-       '23111111-0000-0000-0000-0000000000a0');
+    INSERT INTO products (org_id, sku, name) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'A-M1', 'Typed In One'),
+      ('11111111-0000-0000-0000-000000000060', 'A-M2', 'Typed In Two');
     v_state := 'allowed';
   EXCEPTION WHEN OTHERS THEN v_state := SQLSTATE; END;
   SELECT count(*) INTO v_n FROM products
-   WHERE site_node_id = '23111111-0000-0000-0000-0000000000a0' AND external_id IS NULL;
+   WHERE sku IN ('A-M1','A-M2') AND external_id IS NULL;
   RESET ROLE;
   IF v_state = 'allowed' AND v_n = 2 THEN RAISE NOTICE 'PASS W8';
   ELSE RAISE NOTICE 'FAIL W8: state=% typed-in rows=% (want allowed/2)', v_state, v_n; END IF;
@@ -291,74 +298,92 @@ EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W8: unexpected % (%)',
 END $$;
 ROLLBACK TO SAVEPOINT sp_W8;
 
-\echo 'W9 ⭐⭐: the per-owner rule has no escape hatch — every product HAS an owner'
+\echo 'W9 ⭐⭐ (rewritten by 0034): the part-number index is ORG-WIDE and PARTIAL, and products.site_node_id is GONE — the index rename is pinned'
 SAVEPOINT sp_W9;
 DO $$
-DECLARE v_nullable text; v_state text := 'none';
+DECLARE v_col int; v_old int; v_new_def text;
 BEGIN
-  -- ⭐⭐ THIS CASE PINS A NEIGHBOURING RULE THAT 0033 LEANS ON WITHOUT OWNING.
-  -- A per-owner unique index over a NULLABLE owner is a leaky rule: NULL is not
-  -- equal to itself in an index, so every unowned row would slip past W7's
-  -- refusal and a re-import of the company-wide catalog would duplicate anyway,
-  -- silently and with the index still looking correct.
-  --
-  -- That does not happen HERE only because 0028 §2 (D108) got there first:
-  -- `products.site_node_id` is NOT NULL — *"there is no company-wide product."*
-  -- 0033 never restates that rule, so nothing else in this file would notice it
-  -- going away. If this case ever fails, W6 and W7 are still green and the
-  -- import is quietly duplicating rows.
-  SELECT is_nullable INTO v_nullable FROM information_schema.columns
-   WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'site_node_id';
-
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006010', true);
-  SET LOCAL ROLE authenticated;
-  BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'CW-100', 'Company Widget',
-       NULL, 'csv', 'SKU-100');
-    v_state := 'allowed';
-  EXCEPTION WHEN not_null_violation THEN v_state := SQLSTATE;
-            WHEN OTHERS THEN v_state := SQLSTATE; END;
-  RESET ROLE;
-
-  IF v_nullable = 'NO' AND v_state = '23502' THEN RAISE NOTICE 'PASS W9';
-  ELSE RAISE NOTICE 'FAIL W9: site_node_id nullable=% unowned insert=% (want NO/23502) — the per-owner index now has rows it cannot see', v_nullable, v_state; END IF;
+  -- ⭐⭐ SUPERSEDES THE OLD "every product HAS an owner" CASE. The old W9 leaned
+  -- on products.site_node_id being NOT NULL so a per-owner index had no NULL
+  -- escape hatch. D115 removes the column entirely and re-keys the part number
+  -- company-wide, so the rule that guards a re-import is now a single org-wide
+  -- partial index. This pins the migration's rename directly: the column is
+  -- gone, the old per-owner index is gone, and the org-wide one is exactly as
+  -- specified. If any of these regresses, W6/W7 could silently duplicate.
+  SELECT count(*) INTO v_col FROM information_schema.columns
+   WHERE table_schema='public' AND table_name='products' AND column_name='site_node_id';
+  SELECT count(*) INTO v_old FROM pg_indexes
+   WHERE schemaname='public' AND indexname='products_owner_external_id_unique';
+  SELECT indexdef INTO v_new_def FROM pg_indexes
+   WHERE schemaname='public' AND indexname='products_org_external_id_unique';
+  IF v_col = 0 AND v_old = 0
+     AND v_new_def LIKE '%UNIQUE%'
+     AND v_new_def LIKE '%(org_id, external_id)%'
+     AND v_new_def LIKE '%WHERE (external_id IS NOT NULL)%'
+  THEN RAISE NOTICE 'PASS W9';
+  ELSE RAISE NOTICE 'FAIL W9: site_node_id_cols=% old_index=% new_def=% (want 0/0 and an org-wide partial unique)', v_col, v_old, v_new_def; END IF;
 EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W9: unexpected % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_W9;
 
-\echo 'W10 ⭐⭐: an external id is not a back door — the catalog rules are exactly what they were'
+\echo 'W10 ⭐⭐ (rewritten by 0034/Split): importing the shared product RECORD is company-only; the makers-list is per-plant'
 SAVEPOINT sp_W10;
 DO $$
-DECLARE v_other text := 'none'; v_sup text := 'none';
+DECLARE v_sa text := 'none'; v_sup text := 'none'; v_adm text := 'none';
+        v_own_place text := 'none'; v_other_place text := 'none'; v_pid uuid;
 BEGIN
-  -- The migration adds a column and an index and touches no policy. This is the
-  -- case that says so out loud: importing is still an OWNER's act. A site admin
-  -- of Plant A may not import into Plant B, and a supervisor whose grant is not
-  -- an admin grant may not import at all — the same two refusals that existed
-  -- before 0033.
+  -- ⭐⭐ THE SPLIT (D115) CHANGED WHO MAY IMPORT. Until 0034 importing a product
+  -- was an OWNER's act and a site admin uploaded their own plant's catalog. Now
+  -- the shared record is company property: creating a product is a company-admin
+  -- act, so BOTH a site admin (sa_a) and a plain supervisor (sup_a) are refused.
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006020', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'B-200', 'Reaching Into B',
-       '23111111-0000-0000-0000-0000000000b0', 'csv', 'SKU-200');
-    v_other := 'allowed';
-  EXCEPTION WHEN OTHERS THEN v_other := SQLSTATE; END;
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'A-200', 'Site Admin Upload', 'csv', 'SKU-200');
+    v_sa := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_sa := SQLSTATE; END;
   RESET ROLE;
 
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006040', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'A-201', 'Supervisor Upload',
-       '23111111-0000-0000-0000-0000000000a0', 'csv', 'SKU-201');
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'A-201', 'Supervisor Upload', 'csv', 'SKU-201');
     v_sup := 'allowed';
   EXCEPTION WHEN OTHERS THEN v_sup := SQLSTATE; END;
   RESET ROLE;
 
-  IF v_other = '42501' AND v_sup = '42501' THEN RAISE NOTICE 'PASS W10';
-  ELSE RAISE NOTICE 'FAIL W10: other plant=% plain supervisor=% (want 42501/42501)', v_other, v_sup; END IF;
+  -- The company admin creates the record; the site admin then adds THEIR OWN
+  -- plant to its makers-list (product_sites) but not the other plant's.
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006010', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'A-202', 'Company Upload', 'csv', 'SKU-202')
+      RETURNING id INTO v_pid;
+    v_adm := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_adm := SQLSTATE; END;
+  RESET ROLE;
+
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006020', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', v_pid, '23111111-0000-0000-0000-0000000000a0');
+    v_own_place := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_own_place := SQLSTATE; END;
+  BEGIN
+    INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', v_pid, '23111111-0000-0000-0000-0000000000b0');
+    v_other_place := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_other_place := SQLSTATE; END;
+  RESET ROLE;
+
+  IF v_sa = '42501' AND v_sup = '42501' AND v_adm = 'allowed'
+     AND v_own_place = 'allowed' AND v_other_place = '42501' THEN RAISE NOTICE 'PASS W10';
+  ELSE RAISE NOTICE 'FAIL W10: site_admin_record=% supervisor_record=% company_record=% own_plant_place=% other_plant_place=% (want 42501/42501/allowed/allowed/42501)',
+    v_sa, v_sup, v_adm, v_own_place, v_other_place; END IF;
 EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W10: unexpected % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_W10;
@@ -390,33 +415,30 @@ EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W11: unexpected % (%)'
 END $$;
 ROLLBACK TO SAVEPOINT sp_W11;
 
-\echo 'W12 ⚠️⚠️: THE TABLES DISAGREE — the same code is TWO products but ONE operator'
+\echo 'W12 ⚠️⚠️ (rewritten by 0034): the tables now MOSTLY AGREE — the same code is ONE product and ONE operator (org-wide), but TWO skills (per owner)'
 SAVEPOINT sp_W12;
 DO $$
-DECLARE v_prod text := 'none'; v_op text := 'none'; v_sku text := 'none';
+DECLARE v_prod text := 'none'; v_op text := 'none'; v_skill text := 'none'; v_sku text := 'none';
 BEGIN
-  -- ⚠️⚠️ THE INCONSISTENCY 0033 RECORDS RATHER THAN FIXES, MEASURED. `operators`
-  -- has answered "does this row already exist?" ORG-WIDE since 0002; products
-  -- and skills now answer PER OWNER. So an importer given one spreadsheet per
-  -- plant must match on a different key per table, and the operator upload's
-  -- second plant is a hard 23505 rather than an update.
-  --
-  -- Changing `operators` is a separate decision about PEOPLE (are two plants
-  -- each holding EMP-1044 two payroll systems, or one person duplicated?), not
-  -- about indexes, and 0033 deliberately leaves it alone. This case exists so
-  -- the disagreement is a measured fact the importer is written against.
+  -- ⚠️⚠️ 0033 RECORDED A DISAGREEMENT; 0034 HALF-RESOLVED IT, AND THIS MEASURES
+  -- WHAT IS LEFT. `operators` answered "already exists?" ORG-WIDE since 0002;
+  -- 0033 made products and skills answer PER OWNER; 0034 (D115) re-keyed
+  -- PRODUCTS to org-wide too. So products and operators now MATCH — a second row
+  -- with CODE-1 is a hard 23505 in both — and only SKILLS still answer per
+  -- owner, where two plants may each hold CODE-1. An importer matches on a
+  -- different key for skills than for products/operators, and this pins it.
+  -- All three creates run as the company admin: a product is company-only now,
+  -- and adm can also create operators and skills anywhere.
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000006010', true);
   SET LOCAL ROLE authenticated;
 
-  INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-    ('11111111-0000-0000-0000-000000000060', 'A-300', 'Widget',
-     '23111111-0000-0000-0000-0000000000a0', 'csv', 'CODE-1');
+  INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+    ('11111111-0000-0000-0000-000000000060', 'A-300', 'Widget', 'csv', 'CODE-1');
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'B-300', 'Widget',
-       '23111111-0000-0000-0000-0000000000b0', 'csv', 'CODE-1');
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'B-300', 'Widget', 'csv', 'CODE-1');
     v_prod := 'allowed';
-  EXCEPTION WHEN OTHERS THEN v_prod := SQLSTATE; END;
+  EXCEPTION WHEN unique_violation THEN v_prod := SQLSTATE; WHEN OTHERS THEN v_prod := SQLSTATE; END;
 
   INSERT INTO operators (org_id, display_name, site_node_id, source, external_id) VALUES
     ('11111111-0000-0000-0000-000000000060', 'A. Nowak',
@@ -429,23 +451,30 @@ BEGIN
   EXCEPTION WHEN unique_violation THEN v_op := SQLSTATE;
             WHEN OTHERS THEN v_op := SQLSTATE; END;
 
-  -- ⚠️ AND A THIRD DISAGREEMENT THE IMPORT SCREEN WILL MEET FIRST. `products`
-  -- is `unique (org_id, sku)` — ORG-WIDE, from 0002 and untouched by 0033 — so
-  -- the two plants above only got their own rows because their SKUs differ. An
-  -- importer that uses the exported code AS the sku collides here no matter
-  -- what the external_id index says. Whether a sku is a company-wide name or a
-  -- plant's name is an open decision; this pins today's answer.
+  -- Skills stay per owner: two owners may each carry CODE-1.
+  INSERT INTO skills (org_id, name, site_node_id, source, external_id) VALUES
+    ('11111111-0000-0000-0000-000000000060', 'Training A',
+     '23111111-0000-0000-0000-0000000000a0', 'csv', 'CODE-1');
   BEGIN
-    INSERT INTO products (org_id, sku, name, site_node_id, source, external_id) VALUES
-      ('11111111-0000-0000-0000-000000000060', 'A-300', 'Same sku, other plant',
-       '23111111-0000-0000-0000-0000000000b0', 'csv', 'CODE-2');
+    INSERT INTO skills (org_id, name, site_node_id, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'Training B',
+       '23111111-0000-0000-0000-0000000000b0', 'csv', 'CODE-1');
+    v_skill := 'allowed';
+  EXCEPTION WHEN unique_violation THEN v_skill := SQLSTATE;
+            WHEN OTHERS THEN v_skill := SQLSTATE; END;
+
+  -- ⚠️ THE SKU IS STILL ORG-WIDE (`unique (org_id, sku)`, from 0002, untouched)
+  -- — reusing A-300 collides no matter what the external_id index says.
+  BEGIN
+    INSERT INTO products (org_id, sku, name, source, external_id) VALUES
+      ('11111111-0000-0000-0000-000000000060', 'A-300', 'Same sku again', 'csv', 'CODE-2');
     v_sku := 'allowed';
   EXCEPTION WHEN unique_violation THEN v_sku := SQLSTATE;
             WHEN OTHERS THEN v_sku := SQLSTATE; END;
   RESET ROLE;
 
-  IF v_prod = 'allowed' AND v_op = '23505' AND v_sku = '23505' THEN RAISE NOTICE 'PASS W12';
-  ELSE RAISE NOTICE 'FAIL W12: product=% operator=% sku=% (want allowed/23505/23505)', v_prod, v_op, v_sku; END IF;
+  IF v_prod = '23505' AND v_op = '23505' AND v_skill = 'allowed' AND v_sku = '23505' THEN RAISE NOTICE 'PASS W12';
+  ELSE RAISE NOTICE 'FAIL W12: product=% operator=% skill=% sku=% (want 23505/23505/allowed/23505)', v_prod, v_op, v_skill, v_sku; END IF;
 EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL W12: unexpected % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_W12;

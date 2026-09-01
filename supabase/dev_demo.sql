@@ -245,13 +245,25 @@ BEGIN
     SELECT v INTO v_area2 FROM d_fix WHERE k = v_letter || ':area2';
     SELECT v INTO v_cell5 FROM d_fix WHERE k = v_letter || ':cell5';
 
-    -- Two owned by the whole plant, one by a LINE, one by an AREA. The last
-    -- two are what make "offered here and nowhere else" visible on screen.
-    INSERT INTO products (org_id, sku, name, site_node_id) VALUES
-      (v_org, 'PN-' || v_n || '001', 'Housing ' || v_letter,        v_plant),
-      (v_org, 'PN-' || v_n || '002', 'Bracket ' || v_letter,        v_plant),
-      (v_org, 'PN-' || v_n || '003', 'Line 1 Subassembly ' || v_letter, v_line1),
-      (v_org, 'PN-' || v_n || '004', 'Area 2 Frame ' || v_letter,   v_area2);
+    -- D115 (0034): each product is company-wide; product_sites lists where it is
+    -- made. Two made plant-wide, one by a LINE, one by an AREA -- the last two
+    -- are what make "offered here and nowhere else" visible on screen.
+    WITH ins AS (
+      INSERT INTO products (org_id, sku, name) VALUES
+        (v_org, 'PN-' || v_n || '001', 'Housing ' || v_letter),
+        (v_org, 'PN-' || v_n || '002', 'Bracket ' || v_letter),
+        (v_org, 'PN-' || v_n || '003', 'Line 1 Subassembly ' || v_letter),
+        (v_org, 'PN-' || v_n || '004', 'Area 2 Frame ' || v_letter)
+      RETURNING id, sku
+    )
+    INSERT INTO product_sites (org_id, product_id, node_id)
+    SELECT v_org, id,
+           CASE
+             WHEN sku = 'PN-' || v_n || '003' THEN v_line1
+             WHEN sku = 'PN-' || v_n || '004' THEN v_area2
+             ELSE v_plant
+           END
+      FROM ins;
 
     -- Six people. Five belong to the plant; one belongs to Line 1 only, which
     -- is the operator half of the same rule. `home_node_id` must sit inside
@@ -279,6 +291,19 @@ BEGIN
       (v_org, 'Forklift',    v_plant),
       (v_org, 'Line 1 Cert', v_line1);
   END LOOP;
+
+  -- ⭐⭐ D115: ONE PART MADE IN TWO PLANTS -- the case a single owner could not
+  -- express and this whole migration exists for. A company-wide sku, offered in
+  -- Plant A and Plant B and nowhere else. Dana (Plant A) and Quinn (Plant B) each
+  -- see it in their catalogue; Rosa (Plant C) does not.
+  WITH ins AS (
+    INSERT INTO products (org_id, sku, name)
+    VALUES (v_org, 'PN-9001', 'Common Fastener')
+    RETURNING id
+  )
+  INSERT INTO product_sites (org_id, product_id, node_id)
+  SELECT v_org, ins.id, pn.v
+    FROM ins CROSS JOIN (SELECT v FROM d_fix WHERE k IN ('A:plant', 'B:plant')) AS pn;
 END $$;
 
 -- Who holds what. A person may only hold a training on their own branch
@@ -467,6 +492,7 @@ DECLARE
   v_org uuid := '10000000-0000-0000-0000-000000000001';
   v_roots int; v_nodes int; v_structs int; v_prod int; v_ops int;
   v_unowned int; v_narrow int; v_runs int; v_orphan int; v_logins int;
+  v_placeless int; v_shared int;
 BEGIN
   SELECT count(*) INTO v_roots FROM nodes WHERE org_id = v_org AND parent_id IS NULL;
   SELECT count(*) INTO v_nodes FROM nodes WHERE org_id = v_org;
@@ -475,29 +501,47 @@ BEGIN
   SELECT count(*) INTO v_prod FROM products  WHERE org_id = v_org;
   SELECT count(*) INTO v_ops  FROM operators WHERE org_id = v_org;
 
-  -- D108: nothing may be company-wide. The column is NOT NULL, so this can only
-  -- fail if a future migration loosens it -- which is exactly when a demo file
-  -- full of unowned rows would stop being noticed.
+  -- D108: nothing may be company-wide. Operators, skills and shift patterns keep
+  -- their single owner; this can only fail if a future migration loosens the NOT
+  -- NULL -- exactly when a demo full of unowned rows would stop being noticed.
+  -- (D115: products no longer carry site_node_id -- their places are counted by
+  -- v_placeless below.)
   SELECT count(*) INTO v_unowned FROM (
-    SELECT site_node_id FROM products WHERE org_id = v_org
-    UNION ALL SELECT site_node_id FROM operators WHERE org_id = v_org
+    SELECT site_node_id FROM operators WHERE org_id = v_org
     UNION ALL SELECT site_node_id FROM skills WHERE org_id = v_org
     UNION ALL SELECT site_node_id FROM shift_templates WHERE org_id = v_org
   ) x WHERE site_node_id IS NULL;
 
-  -- ⭐ D109: at least one row per plant owned BELOW a root. Without this the
-  -- world looks right and demonstrates only half the rule.
+  -- D115: every product is offered in at least one plant. A placeless part is a
+  -- legitimate STATE (a catalogue entry not yet assigned), but the demo has none
+  -- -- one that appeared would mean a product_sites insert silently did nothing.
+  SELECT count(*) INTO v_placeless FROM products p
+   WHERE p.org_id = v_org
+     AND NOT EXISTS (SELECT 1 FROM product_sites ps WHERE ps.product_id = p.id);
+
+  -- ⭐ D115: the two-plant part is genuinely offered in two plants.
+  SELECT count(*) INTO v_shared FROM product_sites ps
+    JOIN products p ON p.id = ps.product_id
+   WHERE p.org_id = v_org AND p.sku = 'PN-9001';
+
+  -- ⭐ D109: at least one product place per plant sits BELOW a root (a line/area).
+  -- Without this the world looks right and demonstrates only half the rule.
   SELECT count(*) INTO v_narrow
-    FROM products p JOIN nodes n ON n.id = p.site_node_id
-   WHERE p.org_id = v_org AND n.parent_id IS NOT NULL;
+    FROM product_sites ps JOIN nodes n ON n.id = ps.node_id
+   WHERE ps.org_id = v_org AND n.parent_id IS NOT NULL;
 
   SELECT count(*) INTO v_runs FROM runs WHERE org_id = v_org;
 
-  -- and the invariant 0028 exists for, over the whole demo world
+  -- and the invariant 0028/0034 exists for, over the whole demo world: every run
+  -- uses a product offered in some plant that contains the run's node.
   SELECT count(*) INTO v_orphan
-    FROM runs r JOIN products p ON p.id = r.product_id
-    JOIN nodes po ON po.id = p.site_node_id JOIN nodes rn ON rn.id = r.node_id
-   WHERE r.org_id = v_org AND NOT (po.path @> rn.path);
+    FROM runs r
+   WHERE r.org_id = v_org
+     AND NOT EXISTS (
+       SELECT 1 FROM product_sites ps
+         JOIN nodes po ON po.id = ps.node_id
+         JOIN nodes rn ON rn.id = r.node_id
+        WHERE ps.product_id = r.product_id AND po.path @> rn.path);
 
   SELECT count(*) INTO v_logins FROM auth.users
    WHERE email IN ('admin@example.test','dana@example.test','quinn@example.test',
@@ -507,10 +551,12 @@ BEGIN
   IF v_roots <> 3 THEN RAISE EXCEPTION 'dev_demo: % root plants, expected 3', v_roots; END IF;
   IF v_nodes <> 36 THEN RAISE EXCEPTION 'dev_demo: % nodes, expected 36 (3 x 12: plant + 2 areas + 3 lines + 6 cells)', v_nodes; END IF;
   IF v_structs <> 4 THEN RAISE EXCEPTION 'dev_demo: % structures, expected 4 (one per plant + the original)', v_structs; END IF;
-  IF v_prod <> 12 THEN RAISE EXCEPTION 'dev_demo: % products, expected 12', v_prod; END IF;
+  IF v_prod <> 13 THEN RAISE EXCEPTION 'dev_demo: % products, expected 13 (12 per-plant + 1 shared across two plants, D115)', v_prod; END IF;
   IF v_ops <> 18 THEN RAISE EXCEPTION 'dev_demo: % operators, expected 18', v_ops; END IF;
-  IF v_unowned <> 0 THEN RAISE EXCEPTION 'dev_demo: % company-wide rows, expected 0 (D108)', v_unowned; END IF;
-  IF v_narrow < 6 THEN RAISE EXCEPTION 'dev_demo: only % products owned below a root, expected >= 6 (D109)', v_narrow; END IF;
+  IF v_unowned <> 0 THEN RAISE EXCEPTION 'dev_demo: % company-wide operators/skills/patterns, expected 0 (D108)', v_unowned; END IF;
+  IF v_placeless <> 0 THEN RAISE EXCEPTION 'dev_demo: % products offered in no plant, expected 0 (D115)', v_placeless; END IF;
+  IF v_shared <> 2 THEN RAISE EXCEPTION 'dev_demo: the shared part is in % plants, expected 2 (D115)', v_shared; END IF;
+  IF v_narrow < 6 THEN RAISE EXCEPTION 'dev_demo: only % product places below a root, expected >= 6 (D109)', v_narrow; END IF;
   IF v_runs <> 36 THEN RAISE EXCEPTION 'dev_demo: % runs, expected 36', v_runs; END IF;
   IF v_orphan <> 0 THEN RAISE EXCEPTION 'dev_demo: % runs use a product owned outside them', v_orphan; END IF;
   IF v_logins <> 6 THEN RAISE EXCEPTION 'dev_demo: % of 6 accounts have a password', v_logins; END IF;

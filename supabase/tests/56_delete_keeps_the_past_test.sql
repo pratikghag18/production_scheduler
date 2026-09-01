@@ -106,12 +106,18 @@ BEGIN
     ('e2000000-0000-0000-0000-0000000000d3','30000000-0000-0000-0000-000000000004', v_org, 'admin'),
     ('e2000000-0000-0000-0000-0000000000d4','30000000-0000-0000-0000-000000000001', v_org, 'supervisor');
 
-  -- Four owners, three scopes. DP1 belongs to LINE 1 and nothing else.
-  INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
-    ('d6000000-0000-0000-0000-0000000000d1', v_org, 'DP1', 'Line-owned Part',  '30000000-0000-0000-0000-000000000004'),
-    ('d6000000-0000-0000-0000-0000000000d2', v_org, 'DP2', 'Plant-wide Part',  '30000000-0000-0000-0000-000000000001'),
-    ('d6000000-0000-0000-0000-0000000000d3', v_org, 'DP3', 'Staffing Part',    '30000000-0000-0000-0000-000000000001'),
-    ('d6000000-0000-0000-0000-0000000000d4', v_org, 'DP4', 'Never Scheduled',  '30000000-0000-0000-0000-000000000001');
+  -- Four products, three scopes. D115 (0034): the place is a product_sites row,
+  -- not a column. DP1 is made in LINE 1 and nowhere else; the rest in Plant 1.
+  INSERT INTO products (id, org_id, sku, name) VALUES
+    ('d6000000-0000-0000-0000-0000000000d1', v_org, 'DP1', 'Line-owned Part'),
+    ('d6000000-0000-0000-0000-0000000000d2', v_org, 'DP2', 'Plant-wide Part'),
+    ('d6000000-0000-0000-0000-0000000000d3', v_org, 'DP3', 'Staffing Part'),
+    ('d6000000-0000-0000-0000-0000000000d4', v_org, 'DP4', 'Never Scheduled');
+  INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+    (v_org, 'd6000000-0000-0000-0000-0000000000d1', '30000000-0000-0000-0000-000000000004'),
+    (v_org, 'd6000000-0000-0000-0000-0000000000d2', '30000000-0000-0000-0000-000000000001'),
+    (v_org, 'd6000000-0000-0000-0000-0000000000d3', '30000000-0000-0000-0000-000000000001'),
+    (v_org, 'd6000000-0000-0000-0000-0000000000d4', '30000000-0000-0000-0000-000000000001');
 
   INSERT INTO operators (id, org_id, display_name, employee_ref, site_node_id) VALUES
     ('d5000000-0000-0000-0000-0000000000d1', v_org, 'Dana Departing', 'EMP-D01', '30000000-0000-0000-0000-000000000001'),
@@ -416,7 +422,7 @@ SAVEPOINT sp_D12;
 DO $$
 DECLARE v_left int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -433,7 +439,7 @@ SAVEPOINT sp_D13;
 DO $$
 DECLARE v_future int; v_past int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -451,7 +457,7 @@ SAVEPOINT sp_D14;
 DO $$
 DECLARE v_future int; v_past int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -469,7 +475,7 @@ SAVEPOINT sp_D15;
 DO $$
 DECLARE v_future int; v_past int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -487,7 +493,7 @@ SAVEPOINT sp_D16;
 DO $$
 DECLARE v_pre jsonb; v_post jsonb;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: product delete is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   v_pre  := deletion_preview('product','d6000000-0000-0000-0000-0000000000d2');
   v_post := delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
@@ -509,7 +515,7 @@ SAVEPOINT sp_D17;
 DO $$
 DECLARE v_left int; v_sku text;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -528,7 +534,7 @@ DO $$
 DECLARE v_colour text; r record;
 BEGIN
   SELECT color_token INTO v_colour FROM products WHERE id = 'd6000000-0000-0000-0000-0000000000d2';
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -573,7 +579,7 @@ SAVEPOINT sp_D20;
 DO $$
 DECLARE r record;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -596,7 +602,7 @@ SAVEPOINT sp_D21;
 DO $$
 DECLARE v_state text := 'none';
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   BEGIN
@@ -753,7 +759,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_D26;
 
-\echo 'D27 ⭐: a SUPERVISOR on the very same plant may schedule but may not delete the catalogue'
+\echo 'D27 ⭐ (message updated by 0034/Split): a SUPERVISOR on the very same plant may schedule but may not delete the catalogue — the refusal now says "only a company admin"'
 SAVEPOINT sp_D27;
 DO $$
 DECLARE v_state text := 'none'; v_left int; v_node text; v_detail text; v_msg text := '';
@@ -780,35 +786,52 @@ BEGIN
   -- other says "the product itself could not be deleted", which is a sentence
   -- nobody can act on. Measured: without the message this case, and every
   -- other case in this file, passes against a version with no permission check.
+  -- ⭐ D115/Split: a product is company property, so the refusal is no longer
+  -- "no admin rights over the site" (the owner-scoped message the other three
+  -- kinds still use) but "only a company admin can delete a shared part".
   IF v_state = 'PT403' AND v_node = 'not_permitted' AND v_left = 1
-     AND v_msg LIKE '%no admin rights over the site%'
+     AND v_msg LIKE '%only a company admin can delete a shared part%'
   THEN RAISE NOTICE 'PASS D27';
-  ELSE RAISE NOTICE 'FAIL D27: state=% error=% product_rows=% message=% (want PT403/not_permitted/1 and the up-front refusal)', v_state, v_node, v_left, v_msg; END IF;
+  ELSE RAISE NOTICE 'FAIL D27: state=% error=% product_rows=% message=% (want PT403/not_permitted/1 and the company-admin refusal)', v_state, v_node, v_left, v_msg; END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE NOTICE 'FAIL D27: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_D27;
 
-\echo 'D28 ⭐⭐: the migration header proof, measured — a LINE 1 admin deletes a LINE-owned part and the run on a cell under it goes too'
+\echo 'D28 ⭐⭐ (rewritten by 0034/Split): a LINE 1 admin may NOT delete a shared part even though they administer its only line — it is company property; a COMPANY admin can, and the run on a cell under it goes too'
 SAVEPOINT sp_D28;
 DO $$
-DECLARE v_state text := 'none'; v_prod int; v_run int; v_admin_cell boolean;
+DECLARE v_admin_cell boolean; v_line_state text := 'none'; v_left_after_line int;
+        v_co_state text := 'none'; v_prod int; v_run int;
 BEGIN
+  -- ⭐⭐ SUPERSEDES THE OLD "the owner deletes it" CASE. D115's Split makes the
+  -- shared product record company property, so administering the part's only
+  -- place (Line 1) is NOT enough to delete it. d3 can edit every cell under Line
+  -- 1 -- Cell 1 is reached only through it -- and still cannot delete the part.
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd03', true);
   SET LOCAL ROLE authenticated;
-  -- The claim is that admin over the OWNER implies edit over every node the
-  -- owner covers. Cell 1 is named nowhere in d3's grants; it is reached only
-  -- through Line 1.
   SELECT app_can_edit_node('30000000-0000-0000-0000-000000000007') INTO v_admin_cell;
   BEGIN
     PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d1');
-    v_state := 'allowed';
-  EXCEPTION WHEN OTHERS THEN v_state := SQLSTATE; END;
+    v_line_state := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_line_state := SQLSTATE; END;
+  RESET ROLE;
+  SELECT count(*) INTO v_left_after_line FROM products WHERE id = 'd6000000-0000-0000-0000-0000000000d1';
+  -- The company admin CAN, and the migration header's cascade still holds: the
+  -- future run on Cell 1 (which only Line 1 covers) goes with the part.
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d1');
+    v_co_state := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_co_state := SQLSTATE; END;
   RESET ROLE;
   SELECT count(*) INTO v_prod FROM products WHERE id = 'd6000000-0000-0000-0000-0000000000d1';
   SELECT count(*) INTO v_run  FROM runs     WHERE id = 'd8000000-0000-0000-0000-0000000000d4';
-  IF v_admin_cell AND v_state = 'allowed' AND v_prod = 0 AND v_run = 0 THEN RAISE NOTICE 'PASS D28';
-  ELSE RAISE NOTICE 'FAIL D28: can_edit_cell=% state=% product=% run=% (want true/allowed/0/0)', v_admin_cell, v_state, v_prod, v_run; END IF;
+  IF v_admin_cell AND v_line_state = 'PT403' AND v_left_after_line = 1
+     AND v_co_state = 'allowed' AND v_prod = 0 AND v_run = 0 THEN RAISE NOTICE 'PASS D28';
+  ELSE RAISE NOTICE 'FAIL D28: can_edit_cell=% line_admin=% part_left=% company_admin=% product=% run=% (want true/PT403/1/allowed/0/0)',
+    v_admin_cell, v_line_state, v_left_after_line, v_co_state, v_prod, v_run; END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE NOTICE 'FAIL D28: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;
@@ -837,7 +860,7 @@ SAVEPOINT sp_D30;
 DO $$
 DECLARE v_n int; v_before jsonb;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115: deleting a product is a COMPANY-admin act (Split)
   SET LOCAL ROLE authenticated;
   PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d2');
   RESET ROLE;
@@ -862,7 +885,7 @@ SAVEPOINT sp_D31;
 DO $$
 DECLARE v_active boolean; v_runs int; v_asg int;
 BEGIN
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd01', true);
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true); -- D115/Split: editing the shared product record is company-only
   SET LOCAL ROLE authenticated;
   UPDATE products SET active = false WHERE id = 'd6000000-0000-0000-0000-0000000000d2';
   RESET ROLE;
