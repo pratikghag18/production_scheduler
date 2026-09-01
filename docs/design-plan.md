@@ -8744,3 +8744,49 @@ decision, unchanged. A site admin sees the preview but not the Apply button. Ver
 database: an imported insert with `external_id` + `source` set lands, a plant assigns, and a second
 row with the same `external_id` is refused `23505` — which is exactly why the plan UPDATES on a match
 rather than re-inserting.
+
+---
+
+## §19.83 — the starter library, structure-only (migration 0035)
+
+> *"Let's put the hierarchy in plant A as the starter library with an option for the company system
+> admin to edit it later."* — the maintainer, 1 Sep. Asked what a new plant copies, he chose
+> **structure only**: a new plant starts as a copy of an existing plant's node tree and is empty of
+> parts and people until those are imported.
+
+### The whole feature is `copy_plant_structure`, and it is a LOOP over `create_node`
+
+There is no new "library" concept in the schema. The library is just an existing plant; editing it
+is the ordinary tree editor already on that plant. Creating a new plant from it is one RPC:
+
+```
+copy_plant_structure(p_source_root uuid, p_new_name text) returns {id, name, nodes_copied}
+```
+
+⭐ **It reuses `create_node` rather than inserting nodes, and that is the whole design.** `create_node`
+already does every hard part: a root create COPIES the source template's levels into a fresh per-site
+template (0020 §10 — the thing that makes "one site, one structure" true), a child create resolves
+its level from its parent, paths are trigger-maintained, and every step re-checks permission.
+Re-implementing that here would be a second copy of the most intricate logic in the schema. So this
+is a loop: create the new root from the source's template, then walk the source's descendants and
+recreate each under the node its source-parent maps to.
+
+- **One function is one transaction**, so a failure part-way rolls the whole new plant back — there
+  is never a half-built plant left behind.
+- **Parents before children falls out of `order by path`**: a parent's ltree path is a strict prefix
+  of each child's, and a prefix sorts first, so a parent is always created (and its id mapped) before
+  any child needs it.
+- **No RLS bypass, unlike a generic bulk import.** `create_node` is SECURITY INVOKER and each call is
+  checked as the caller, which is exactly why the `nodes_cascade_path` org-blind hazard the roadmap
+  warns bulk import about does not arise on this path. Company-admin only, because creating a plant
+  is (create_node's root branch enforces it).
+
+Verified on the running database: copying the seed's Plant 1 (13 nodes) produced a new plant with the
+same 13 nodes — same names, same levels — in one atomic call.
+
+### The client adds one choice to an existing form
+
+A new plant (a root) is already created in `NodeTreeEditor`'s add-root form. The starter library adds
+a second way to start it: **Empty (from a shape)** — the existing behaviour, unchanged — or **Copy an
+existing plant**, a picker of the org's roots wired to `copyPlantStructure`. Structure-only means the
+copy stops at the tree; parts and people arrive through the CSV import (§19.82).

@@ -301,6 +301,44 @@ export async function createNode(input: CreateNodeInput): Promise<BoardNode> {
 }
 
 // ---------------------------------------------------------------------------
+// copyPlantStructure — `copy_plant_structure(p_source_root uuid, p_new_name
+// text)` (migration 0035, the starter library). Creates a NEW plant as a copy
+// of an existing plant's node tree, atomically. Company-admin only (the RPC's
+// create_node root branch enforces it). Raises not_permitted, invalid_argument,
+// level_mismatch. Returns { id, name, nodes_copied } — the new root and how many
+// descendants were copied.
+// ---------------------------------------------------------------------------
+export interface CopyPlantStructureInput {
+  /** The existing plant (a ROOT node) whose structure to copy. */
+  sourceRootId: string;
+  /** The new plant's name. */
+  newName: string;
+}
+export interface CopyPlantStructureResult {
+  id: string;
+  name: string;
+  nodesCopied: number;
+}
+export async function copyPlantStructure(
+  input: CopyPlantStructureInput,
+): Promise<CopyPlantStructureResult> {
+  const { data, error } = await supabase.rpc("copy_plant_structure", {
+    p_source_root: input.sourceRootId,
+    p_new_name: input.newName,
+  });
+  if (error) throw toSchedulerError(error);
+  if (
+    !isJsonObject(data) ||
+    typeof data.id !== "string" ||
+    typeof data.name !== "string" ||
+    typeof data.nodes_copied !== "number"
+  ) {
+    throw shapeMismatch("copy_plant_structure", "expected { id, name, nodes_copied }");
+  }
+  return { id: data.id, name: data.name, nodesCopied: data.nodes_copied };
+}
+
+// ---------------------------------------------------------------------------
 // renameNode — `rename_node(p_node_id uuid, p_name text)`. Raises:
 // not_permitted, invalid_argument, path_collision. Descendant paths cascade
 // server-side (migration 0001's `nodes_after_path` trigger) — this wrapper

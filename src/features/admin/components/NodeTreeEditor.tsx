@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { DRAG_THRESHOLD_PX } from "@/lib/interaction";
 import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/lib/api";
 import {
+  useCopyPlantStructure,
   useCreateNode,
   useDeleteNode,
   useDemoteNode,
@@ -110,8 +111,20 @@ export function NodeTreeEditor({
   const [addRootTemplateId, setAddRootTemplateId] = useState<string | null>(selectedTemplateId);
   const requiresShapeChoice = shapeSummaries.length > 1;
 
+  // Starter library (0035): a new root can either start EMPTY from a shape (the
+  // path above) or COPY an existing plant's whole node tree. `addRootMode`
+  // defaults to "empty" so the established behaviour is untouched until the
+  // admin opts in. `addRootSourceId` is the ROOT node being copied.
+  const [addRootMode, setAddRootMode] = useState<"empty" | "copy">("empty");
+  const [addRootSourceId, setAddRootSourceId] = useState<string | null>(null);
+  // The existing plants offered as copy sources: every ROOT node, in the order
+  // `nodes` already carries (the same stable order the tree is drawn from).
+  const rootNodes = nodes.filter((n) => n.parentId === null);
+  const canCopyPlant = rootNodes.length > 0;
+
   const renameMutation = useRenameNode();
   const createMutation = useCreateNode();
+  const copyMutation = useCopyPlantStructure();
   const moveMutation = useMoveNode();
   const placeMutation = usePlaceNode();
   const promoteMutation = usePromoteNode();
@@ -447,7 +460,11 @@ export function NodeTreeEditor({
           type="button"
           className={styles.addRootBtn}
           onClick={() => {
-            if (!addRootOpen) setAddRootTemplateId(selectedTemplateId);
+            if (!addRootOpen) {
+              setAddRootTemplateId(selectedTemplateId);
+              setAddRootMode("empty");
+              setAddRootSourceId(null);
+            }
             setAddRootOpen((v) => !v);
           }}
         >
@@ -461,6 +478,22 @@ export function NodeTreeEditor({
           onSubmit={(e) => {
             e.preventDefault();
             if (addRootName.trim() === "") return;
+            const closeOnSuccess = () => {
+              setAddRootName("");
+              setAddRootSourceId(null);
+              setAddRootMode("empty");
+              setAddRootOpen(false);
+            };
+            if (addRootMode === "copy") {
+              // Starter library: copy an existing plant's structure (0035). The
+              // source plant carries its own template, so no shape is chosen here.
+              if (addRootSourceId === null) return;
+              copyMutation.mutate(
+                { sourceRootId: addRootSourceId, newName: addRootName },
+                { onSuccess: closeOnSuccess },
+              );
+              return;
+            }
             if (requiresShapeChoice && addRootTemplateId === null) return;
             createMutation.mutate(
               {
@@ -470,12 +503,7 @@ export function NodeTreeEditor({
                 // so the RPC's own single-template inference runs (§7.5).
                 templateId: requiresShapeChoice ? (addRootTemplateId ?? undefined) : undefined,
               },
-              {
-                onSuccess: () => {
-                  setAddRootName("");
-                  setAddRootOpen(false);
-                },
-              },
+              { onSuccess: closeOnSuccess },
             );
           }}
         >
@@ -486,7 +514,37 @@ export function NodeTreeEditor({
             placeholder="Root node name"
             onChange={(e) => setAddRootName(e.target.value)}
           />
-          {requiresShapeChoice && (
+          {/* Starter library (0035): how the new plant starts. Offered only when
+              there is at least one existing plant to copy — a brand-new org has
+              nothing to copy from, so the toggle would be a choice with one real
+              answer. Default "empty" keeps the established behaviour. */}
+          {canCopyPlant && (
+            <select
+              aria-label="How the new root node starts"
+              value={addRootMode}
+              onChange={(e) => setAddRootMode(e.target.value === "copy" ? "copy" : "empty")}
+            >
+              <option value="empty">Start: Empty structure</option>
+              <option value="copy">Start: Copy an existing plant</option>
+            </select>
+          )}
+          {addRootMode === "copy" && canCopyPlant && (
+            <select
+              aria-label="Plant to copy the structure from"
+              value={addRootSourceId ?? ""}
+              onChange={(e) => setAddRootSourceId(e.target.value === "" ? null : e.target.value)}
+            >
+              <option value="" disabled>
+                Choose a plant to copy…
+              </option>
+              {rootNodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {requiresShapeChoice && addRootMode === "empty" && (
             <select
               aria-label="Site structure for the new root node"
               value={addRootTemplateId ?? ""}
@@ -524,7 +582,9 @@ export function NodeTreeEditor({
           <button
             type="submit"
             disabled={
-              createMutation.isPending || (requiresShapeChoice && addRootTemplateId === null)
+              addRootMode === "copy"
+                ? copyMutation.isPending || addRootSourceId === null || addRootName.trim() === ""
+                : createMutation.isPending || (requiresShapeChoice && addRootTemplateId === null)
             }
           >
             Add
@@ -537,6 +597,11 @@ export function NodeTreeEditor({
       {createMutation.isError && !popover && (
         <p className={styles.errorLine} role="alert">
           {describeSchedulerError(createMutation.error)}
+        </p>
+      )}
+      {copyMutation.isError && !popover && (
+        <p className={styles.errorLine} role="alert">
+          {describeSchedulerError(copyMutation.error)}
         </p>
       )}
 

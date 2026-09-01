@@ -1107,6 +1107,10 @@ export type Database = {
         Args: { p_node_id: string; p_operator_id: string; p_timerange: unknown }
         Returns: Json
       }
+      copy_plant_structure: {
+        Args: { p_new_name: string; p_source_root: string }
+        Returns: Json
+      }
       create_assignment: {
         Args: {
           p_area_override?: boolean

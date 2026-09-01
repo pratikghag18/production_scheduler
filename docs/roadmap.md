@@ -392,15 +392,17 @@
 >    ⭐ One command turned a standing suspicion into a number; re-run it after any migration that
 >    adds a column.
 >
-> 2b. **🔴 Migration 0032 (D111b), the starter library ITSELF — STAGE 21's LAST ITEM, AND
->    NOW UNBLOCKED.** 0031 was its precondition and nothing more: a shared set whose whole purpose
->    is *"every plant copies Forklift into their own"* could not exist while the second copy was
->    refused by a company-wide unique index. That is fixed, so this is buildable.
->    Was: a company admin curates and a site admin
->    copies into their own plant — patterns and trainings. It carries a known problem: **training
->    names are unique per ORG while the row is no longer company-wide**, so one plant can neither
->    see nor create another's "Forklift". Per-owner uniqueness belongs here. **Renumbered from
->    0030 — the area override took that number.**
+> 2b. **✅ THE STARTER LIBRARY — BUILT, STRUCTURE-ONLY (1 Sep, migration 0035, §19.83).** ⭐ **The
+>    maintainer redefined it:** not a curated set of products/trainings a plant copies, but *"put the
+>    hierarchy in plant A as the starter library"* — **a new plant is created as a copy of an
+>    existing plant's node TREE**, and starts empty of parts/people until those are imported (which
+>    the CSV import now does). `copy_plant_structure` is a LOOP over `create_node` (one transaction,
+>    reuses the level-copy + permission checks, parents-first by path, no RLS bypass). The client adds
+>    one choice to `NodeTreeEditor`'s add-root form: Empty (from a shape) or Copy an existing plant.
+>    ⚠️ **The ORIGINAL D111b idea — a company admin curating a set of products/trainings/shifts a
+>    plant copies — is NOT this, and is not built.** It is superseded for onboarding by "copy the
+>    structure, then import the data". If a curated-catalogue library is ever wanted it is a separate
+>    feature. (0031's per-owner training-name uniqueness, its old precondition, shipped regardless.)
 > 3(b). ✅ **DONE (session 18, 31 Aug) — D114 / migration 0032.** `signed_off_by` is free text
 >    (the CSV requirement decided it: a spreadsheet cannot carry a profile id and the signer often
 >    has no login); `certified_at` already existed and needed only a screen; supervisors keep the
