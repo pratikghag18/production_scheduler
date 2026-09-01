@@ -41,6 +41,7 @@
  */
 import type { AdminProduct } from "@/lib/api";
 import type { CsvError, CsvTable } from "./csv";
+import type { FieldDef, ImportView } from "./importView";
 import { validateProductDraft } from "./products";
 
 /* ===========================================================================
@@ -334,5 +335,36 @@ export function planProductImport(
     counts: { insert, update, error },
     fileErrors: table.errors,
     missingRequired,
+  };
+}
+
+/* ===========================================================================
+ * §3. The generic VIEW — flatten the products plan to what `ImportWizard` draws.
+ *
+ * The wizard is entity-agnostic (`importView.ts`); this is the one place a
+ * products plan becomes rows of cells + a verdict. The columns are in the same
+ * order as the wizard's `PRODUCT_FIELDS`, and a missing required column is named
+ * in the reader's words ("product code", not "sku").
+ * ======================================================================== */
+
+/** The mappable columns, in the order the wizard shows them. */
+export const PRODUCT_FIELDS: FieldDef[] = [
+  { key: "sku", label: "Product code", required: true },
+  { key: "name", label: "Product name", required: true },
+  { key: "externalId", label: "Import ID", required: false },
+  { key: "plant", label: "Plant", required: false },
+];
+
+export function productPlanToView(plan: ImportPlan): ImportView {
+  return {
+    counts: { ...plan.counts },
+    fileErrors: plan.fileErrors.map((e) => ({ line: e.line, message: e.message })),
+    missingRequired: plan.missingRequired.map((f) => (f === "sku" ? "product code" : "name")),
+    rows: plan.rows.map((r) => ({
+      line: r.line,
+      cells: [r.values.sku, r.values.name, r.values.externalId, r.values.plant],
+      kind: r.outcome.kind,
+      messages: r.outcome.kind === "error" ? r.outcome.messages : [],
+    })),
   };
 }

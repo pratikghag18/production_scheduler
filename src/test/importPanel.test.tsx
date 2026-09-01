@@ -200,7 +200,7 @@ describe("ImportPanel — the company-admin gate", () => {
     expect(screen.getByText(/1 to add · 1 to update · 1 problem row/)).toBeTruthy();
     // But applying is gone.
     expect(screen.queryByRole("button", { name: /^Apply/ })).toBeNull();
-    expect(screen.getByText(/Only a company admin can import parts\./)).toBeTruthy();
+    expect(screen.getByText(/Only a company admin can import products\./)).toBeTruthy();
   });
 });
 

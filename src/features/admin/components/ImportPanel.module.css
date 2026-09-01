@@ -12,6 +12,25 @@
   gap: 0.75rem;
 }
 
+/* Which entity to import — Products / People. */
+.entityTabs {
+  display: flex;
+  gap: 0.25rem;
+}
+.entityTab {
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--axis);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.entityTabOn {
+  border-color: var(--ink-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .card {
   border: 1px solid var(--axis);
   border-radius: 0.625rem;

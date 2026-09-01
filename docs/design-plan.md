@@ -8790,3 +8790,24 @@ A new plant (a root) is already created in `NodeTreeEditor`'s add-root form. The
 a second way to start it: **Empty (from a shape)** — the existing behaviour, unchanged — or **Copy an
 existing plant**, a picker of the org's roots wired to `copyPlantStructure`. Structure-only means the
 copy stops at the tree; parts and people arrive through the CSV import (§19.82).
+
+---
+
+## §19.84 — operators import, and the wizard goes generic
+
+Products import (§19.82) was one wizard hard-wired to products. Operators import the same way — choose a
+CSV, template, map, preview, apply — so the wizard CHROME was extracted into a generic `ImportWizard`
+driven by a per-entity descriptor (`importView.ts`: `FieldDef`, `ImportView`, `ImportTemplate`).
+`ProductsImport` and `OperatorsImport` are thin containers — each fetches what its rows are matched and
+resolved against, and hands the wizard its plan builder, apply mutation, and template. `ImportPanel` is
+now a tab picker (Products / People). Duplicating the wizard body per entity would have been the
+"written twice" defect at component scale.
+
+⭐ **Two people-specific twists.** Operators match on `external_id` only — `employee_ref` carries no
+uniqueness, so a row without an import id can only INSERT (a re-upload of such a file duplicates people;
+the template's legend says external_id is what makes it idempotent). And the SITE is **required for an
+insert** (`operators.site_node_id` is NOT NULL, unlike a product's optional `product_sites` list), so an
+insert row must resolve a plant by name and a blank one is a per-row error; an UPDATE leaves the site
+alone (re-homing a person is out of scope for import v1). Verified in the browser: three people added
+with their plants, a no-plant row refused, and the imported rows carried `external_id` + the file name
+as `source`.

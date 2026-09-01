@@ -22,8 +22,10 @@
  * company-wide), and `source` records that this row came from a file.
  */
 import type { ImportPlan } from "@/features/admin/lib/productImport";
+import type { ImportPlan as OperatorImportPlan } from "@/features/admin/lib/operatorImport";
 import { supabase } from "@/lib/supabase";
 import { assignProductSite, updateProduct } from "./products";
+import { updateOperator } from "./operators";
 import { describeSchedulerError, requireWritten, toSchedulerError } from "./errors";
 import type { SchedulerError } from "./errors";
 import type { TablesInsert } from "@/lib/database.types";
@@ -151,6 +153,98 @@ export async function applyProductImport(
             });
           }
         }
+      }
+    } catch (e) {
+      failed.push({ line: row.line, message: describeSchedulerError(asSchedulerError(e)) });
+    }
+  }
+
+  return { inserted, updated, failed };
+}
+
+/* ===========================================================================
+ * §2. People. The operators lane of the same wizard.
+ *
+ * ⭐ THE SAME SHAPE AS PRODUCTS, WITH TWO PEOPLE-SPECIFIC TWISTS:
+ *   - There is NO plant follow-on. A product's plant is a separate
+ *     `product_sites` row assigned AFTER the insert; a person's plant IS their
+ *     `site_node_id`, set in the one insert below and NOT NULL — so the plan
+ *     guarantees an inserted row has one, and there is nothing to assign after.
+ *   - ⚠️⚠️ AN IMPORTED UPDATE OMITS `siteNodeId`, on purpose. `updateOperator`
+ *     leaves the site alone when the field is absent (its own header says why);
+ *     re-homing a person is out of scope for import v1, so the update carries
+ *     only the name and employee ref, never a plant.
+ * =========================================================================== */
+
+type OperatorInsert = TablesInsert<"operators">;
+
+/**
+ * Insert one imported person. Sets `external_id` and `source`, which a manual
+ * create (`createOperator`) leaves at null/'manual'. `site_node_id` is required
+ * (NOT NULL) and the plan resolved it; returns the new id for parity with
+ * `insertImportedProduct` (people have no plant follow-on to use it for).
+ */
+async function insertImportedOperator(input: {
+  orgId: string;
+  displayName: string;
+  employeeRef: string | null;
+  externalId: string | null;
+  siteNodeId: string;
+  source: string;
+}): Promise<string> {
+  const payload: OperatorInsert = {
+    org_id: input.orgId,
+    display_name: input.displayName,
+    employee_ref: input.employeeRef,
+    site_node_id: input.siteNodeId,
+    external_id: input.externalId,
+    source: input.source,
+  };
+  const { data, error } = await supabase.from("operators").insert(payload).select("id");
+  if (error) throw toSchedulerError(error);
+  const rows = requireWritten(data);
+  const first = rows[0] as { id?: unknown } | undefined;
+  if (first === undefined || typeof first.id !== "string") {
+    throw toSchedulerError(new Error("operators.import.insert returned no id"));
+  }
+  return first.id;
+}
+
+/**
+ * Apply the people plan. Collects per-row failures like `applyProductImport`;
+ * propagates a whole-call failure (a dropped connection). Error rows in the plan
+ * are already excluded — they were never going to be written.
+ */
+export async function applyOperatorImport(
+  plan: OperatorImportPlan,
+  ctx: ImportContext,
+): Promise<ImportResult> {
+  let inserted = 0;
+  let updated = 0;
+  const failed: ImportRowFailure[] = [];
+
+  for (const row of plan.rows) {
+    const o = row.outcome;
+    if (o.kind === "error") continue;
+    try {
+      if (o.kind === "insert") {
+        await insertImportedOperator({
+          orgId: ctx.orgId,
+          displayName: o.displayName,
+          employeeRef: o.employeeRef,
+          externalId: o.externalId,
+          siteNodeId: o.plantNodeId,
+          source: ctx.source,
+        });
+        inserted += 1;
+      } else {
+        // ⚠️ siteNodeId OMITTED — leave the person's plant alone (rule 1).
+        await updateOperator({
+          id: o.operatorId,
+          displayName: o.displayName,
+          employeeRef: o.employeeRef,
+        });
+        updated += 1;
       }
     } catch (e) {
       failed.push({ line: row.line, message: describeSchedulerError(asSchedulerError(e)) });
