@@ -844,24 +844,17 @@ export function ShiftsPanel() {
         className={open ? `${styles.patternRow} ${styles.patternRowOpen}` : styles.patternRow}
         key={pattern.id}
       >
-        {/* ⚠️ IT HAS TO LOOK LIKE IT OPENS. This was a bare <button> styled with
-            `border:0; background:none`, i.e. indistinguishable from the text in
-            the column beside it — and the whole shift list of a pattern sits
-            behind it. The maintainer found it by clicking on the off-chance. A caret
-            that turns, and a name that underlines on hover and focus, is the
-            smallest thing that says "there is more under here". */}
-        <button
-          type="button"
-          className={styles.patternName}
-          aria-expanded={open}
-          onClick={() => setOpenId(open ? null : pattern.id)}
-        >
-          <span className={styles.caret} aria-hidden="true">
-            {open ? "\u25be" : "\u25b8"}
-          </span>
+        {/* ⭐ ONE DOOR (the maintainer, 2 Sept). The name USED to be a button that
+            toggled the shift list on its own. Opening it that way left the Edit
+            button still reading "Edit" over an already-open row — the name said
+            one thing, the button another. So the name is plain text now, and Edit
+            is the only way in and out: Edit carries `aria-expanded`, because it is
+            the control that actually opens the disclosure. Its earlier life as a
+            near-invisible caret button is why the row had to look like it opens;
+            that job now falls to the Edit button, which unmistakably is one. */}
+        <span className={styles.patternName}>
           <span className={styles.patternNameText}>{pattern.name}</span>
-          <span className={styles.openHint}>{open ? "hide shifts" : "show shifts"}</span>
-        </button>
+        </span>
         <span className={styles.owner}>{pattern.ownerLabel}</span>
         <span className={styles.meta}>
           {pattern.shifts.length === 1 ? "1 shift" : `${pattern.shifts.length} shifts`}
@@ -873,6 +866,7 @@ export function ShiftsPanel() {
           <button
             type="button"
             className={styles.btn}
+            aria-expanded={open}
             title="Edit this pattern — its name, owner and shifts"
             onClick={() => {
               if (renaming) {

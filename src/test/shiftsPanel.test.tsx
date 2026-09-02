@@ -172,10 +172,11 @@ vi.mock("@/features/admin/hooks/useDeletion", () => ({
 /**
  * Every pattern row's opener, in list order.
  *
- * ⚠️ `aria-expanded` is the filter because ONLY the pattern openers carry it —
- * and that is a fact about the screen, not a convenience: the caret button was
- * once indistinguishable from the text beside it, and `aria-expanded` is half
- * of the fix that made "there is more under here" sayable at all.
+ * ⚠️ `aria-expanded` is the filter because ONLY the Edit buttons carry it — one
+ * per pattern. One-door (2 Sept): the pattern name stopped being a toggle and is
+ * plain text now, so the disclosure lives on the Edit button, which is the single
+ * control that opens and closes a row. Filtering on `aria-expanded` still finds
+ * exactly the pattern rows, in order.
  */
 function patternOpeners(): HTMLElement[] {
   return screen.queryAllByRole("button").filter((b) => b.getAttribute("aria-expanded") !== null);
@@ -184,14 +185,12 @@ function patternOpeners(): HTMLElement[] {
 /**
  * The name a row SHOWS.
  *
- * ⚠️ Read from the visible text rather than the computed accessible name: the
- * opener also holds a caret (aria-hidden) and a "show shifts" hint, and whether
- * a name computation puts spaces between three inline spans is a detail of the
- * DOM library rather than of this screen. The two decorations are stripped by
- * what they are.
+ * ⚠️ The opener is the Edit button now ("Edit"/"Cancel"), not the name — so the
+ * name is read from the row itself. It is the row's first element (the title
+ * cell), ahead of the owner, the counts and the actions.
  */
 function patternNameOf(opener: HTMLElement): string {
-  return (opener.textContent ?? "").replace(/^[▸▾]/u, "").replace(/(show|hide) shifts$/u, "");
+  return opener.closest("li")?.firstElementChild?.textContent ?? "";
 }
 
 function patternNames(): string[] {
@@ -582,6 +581,30 @@ describe("ShiftsPanel — nothing is left holding an id the filter removed", () 
     fireEvent.click(within(patternRow("Zulu")).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox", { name: "Pattern name" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Shifts in this pattern" })).toBeNull();
+  });
+
+  it("S13c ⭐ ONE DOOR: the name is plain text, and Edit is the sole opener", () => {
+    // The maintainer, 2 Sept: clicking the name expanded the row while the Edit
+    // button still read "Edit" — two controls disagreeing about one row. The name
+    // is not a control any more; the only thing that opens a pattern is Edit, and
+    // Edit is the only button carrying aria-expanded.
+    withTwoPlants();
+    render(<ShiftsPanel />);
+    const row = patternRow("Zulu");
+    // The name is not clickable — there is no button whose accessible name is the
+    // pattern's, and the row is shut.
+    expect(within(row).queryByRole("button", { name: "Zulu" })).toBeNull();
+    expect(within(row).getByRole("button", { name: "Edit" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    // Exactly one opener per pattern, and it is the Edit button.
+    expect(patternOpeners()).toHaveLength(3);
+    // Edit opens the row; the same button, now "Cancel", still reports it open.
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("heading", { name: "Shifts in this pattern" })).toBeTruthy();
+    expect(
+      within(patternRow("Zulu")).getByRole("button", { name: "Cancel" }).getAttribute("aria-expanded"),
+    ).toBe("true");
   });
 
   it("S14 ⭐ an armed delete confirmation is not left open over a row nobody can see", () => {
