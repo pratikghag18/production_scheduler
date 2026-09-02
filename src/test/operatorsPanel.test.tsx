@@ -283,16 +283,24 @@ function aside(): HTMLElement {
 }
 
 /**
- * One place's row, found by the place's own name.
+ * One place's CELL in the "where they can work" matrix (§19.77 → M4), found by
+ * the place's whole-chain label — `"Plant 1 › Line A › Cell A1"` — which the
+ * matrix keeps in each cell's visually-hidden hint (the flat list showed it
+ * inline; a one-row grid moves it to the hint the reader's software speaks).
  *
- * The label is the whole chain — `"Plant 1 › Line A › Cell A1"` — because two
- * lines in one company really can both have a "Cell 1", and that is what
- * `labelFor` builds it for.
+ * The chain is still the key because two lines in one company really can both
+ * have a "Cell 1"; the matrix disambiguates them by the header bands above, and
+ * the hint by the whole chain.
  */
-function placeRow(label: string): HTMLElement {
-  const li = screen.getByText(label).closest("li");
-  if (li === null) throw new Error(`no place row labelled ${label}`);
-  return li;
+function placeCell(label: string): HTMLElement {
+  const hint = screen.getByText((content) => content.startsWith(`${label}:`));
+  const td = hint.closest("td");
+  if (td === null) throw new Error(`no place cell labelled ${label}`);
+  return td;
+}
+/** Whether a place is present in the matrix at all (its hint exists). */
+function placeShown(label: string): boolean {
+  return screen.queryByText((content) => content.startsWith(`${label}:`)) !== null;
 }
 
 /**
@@ -426,55 +434,55 @@ describe("OperatorsPanel — where somebody can work has THREE answers (§19.77)
   it("O1: a place in their own area whose trainings they hold reads ✓ and says so", () => {
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    const row = placeRow("Plant 1 › Line A › Cell A1");
-    expect(within(row).getByText("✓")).toBeTruthy();
+    const cell = placeCell("Plant 1 › Line A › Cell A1");
+    expect(within(cell).getByText("✓")).toBeTruthy();
     // ⚠️ THE MARK IS `aria-hidden` AND CARRIES NO MEANING ON ITS OWN (D100:
-    // colour is never the only signal). The tick's meaning is spoken by this
-    // visually-hidden sentence, so a ✓ without it is half a row.
-    expect(within(row).getByText("can work here")).toBeTruthy();
+    // colour is never the only signal). The tick's meaning is spoken by the
+    // visually-hidden hint beside it, so a ✓ without it is half a cell.
+    expect(within(cell).getByText(/can work here/)).toBeTruthy();
   });
 
-  it("O2: a place in their own area they are not trained for reads ✕ and names the training", () => {
+  it("O2: a place in their own area they are not trained for reads × and names the training", () => {
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    const row = placeRow("Plant 1 › Line A › Cell A2");
-    expect(within(row).getByText("✕")).toBeTruthy();
+    const cell = placeCell("Plant 1 › Line A › Cell A2");
+    expect(within(cell).getByText("×")).toBeTruthy();
     // Named, not merely refused. "Not eligible" is a fact the reader can do
     // nothing with; "missing Welding" is one click from being fixed, and the
-    // Trainings section below is where that click lives.
-    expect(within(row).getByText("missing Welding")).toBeTruthy();
-    expect(within(row).queryByText("can work here")).toBeNull();
+    // Trainings matrix below is where that click lives.
+    expect(within(cell).getByText(/missing Welding/)).toBeTruthy();
+    expect(within(cell).queryByText(/can work here/)).toBeNull();
   });
 
   it("O3 ⭐⭐ a place outside their area reads ⚠ and asks for a reason — even holding every training", () => {
     // ⚠️ THIS IS THE §19.77 DEFECT ITSELF. Cell B1 requires Forklift and Ann
-    // holds Forklift, so on trainings alone this row is a clean yes — and the
+    // holds Forklift, so on trainings alone this cell is a clean yes — and the
     // old screen ticked it. The server does not: `app_guard_assignment_scope`
     // (0028 / D109) refuses an assignment outside the area somebody belongs to,
     // and D113 lets a supervisor through only by RECORDING A REASON. A tick
     // here is the screen saying yes where the server says no.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    const row = placeRow("Plant 1 › Line B › Cell B1");
-    expect(within(row).getByText("⚠")).toBeTruthy();
-    expect(within(row).getByText("not from this area — needs a recorded reason")).toBeTruthy();
-    expect(within(row).queryByText("✓")).toBeNull();
-    expect(within(row).queryByText("can work here")).toBeNull();
-    // And the row must not have arrived at ⚠ by way of a training failure — if
+    const cell = placeCell("Plant 1 › Line B › Cell B1");
+    expect(within(cell).getByText("⚠")).toBeTruthy();
+    expect(within(cell).getByText(/not from this area — needs a recorded reason/)).toBeTruthy();
+    expect(within(cell).queryByText("✓")).toBeNull();
+    expect(within(cell).queryByText(/can work here/)).toBeNull();
+    // And the cell must not have arrived at ⚠ by way of a training failure — if
     // it had, this case would be O2 wearing a different mark.
-    expect(within(row).queryByText(/missing/)).toBeNull();
+    expect(within(cell).queryByText(/missing/)).toBeNull();
   });
 
-  it("O4: the list stops at their own root, and says how many places it dropped", () => {
+  it("O4: the matrix stops at their own root, and says how many places it dropped", () => {
     // The maintainer, 31 Aug, having seen the three states: *"I see all plants
     // not just Plant A for him… those locations should not be visible at all is
     // my point."* Annotating another plant's cells was not enough — a system
-    // admin reads every node in the org, so the list was every cell in the
+    // admin reads every node in the org, so the matrix would be every cell in the
     // company. Cell Z1 is another root's; Cell B1 is the same root's and stays.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    expect(screen.queryByText("Plant 2 › Line Z › Cell Z1")).toBeNull();
-    expect(screen.queryByText("Plant 1 › Line B › Cell B1")).not.toBeNull();
+    expect(placeShown("Plant 2 › Line Z › Cell Z1")).toBe(false);
+    expect(placeShown("Plant 1 › Line B › Cell B1")).toBe(true);
     // ⚠️ COUNTED, NOT SILENT, and named by the ROOT rather than by a level word:
     // "plant" is this company's name for its top level and another company's
     // hierarchy may call it anything at all.
@@ -513,14 +521,10 @@ describe("OperatorsPanel — the count line names what it counts (§19.77)", () 
     );
     // The old shape would have read "1 of 4" — Cell Z1 needs no training at all.
     expect(countLine()).not.toContain(" of 4");
-    // And the denominator is a real claim about two visible rows, not a number
-    // the reader has no way to reconcile with the list under it.
-    expect(
-      within(placeRow("Plant 1 › Line A › Cell A1")).getByText("missing Forklift"),
-    ).toBeTruthy();
-    expect(
-      within(placeRow("Plant 1 › Line A › Cell A2")).getByText("missing Welding"),
-    ).toBeTruthy();
+    // And the denominator is a real claim about two visible cells, not a number
+    // the reader has no way to reconcile with the matrix under it.
+    expect(within(placeCell("Plant 1 › Line A › Cell A1")).getByText(/missing Forklift/)).toBeTruthy();
+    expect(within(placeCell("Plant 1 › Line A › Cell A2")).getByText(/missing Welding/)).toBeTruthy();
   });
 });
 

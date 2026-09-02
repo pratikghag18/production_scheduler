@@ -50,23 +50,32 @@ export function MatrixChip({
   title,
   onClick,
   ariaLabel,
+  ariaHidden,
+  glyph,
 }: {
   state: CellState;
   title: string;
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   ariaLabel?: string;
+  /** Hide the chip from the a11y tree — for a decorative chip whose meaning a
+   *  sibling already speaks (the places matrix pairs it with a hidden reason). */
+  ariaHidden?: boolean;
+  /** Override the glyph — the places matrix borrows the chip's SHAPE and colour
+   *  but names its own verdicts (✓ / ✕ / ⚠), not the training states. */
+  glyph?: string;
 }) {
   const cls = `${styles.chip} ${styles[state]}`;
+  const mark = glyph ?? STATE_GLYPH[state];
   if (onClick) {
     return (
       <button type="button" className={`${cls} ${styles.cellBtn}`} title={title} aria-label={ariaLabel} onClick={onClick}>
-        {STATE_GLYPH[state]}
+        {mark}
       </button>
     );
   }
   return (
-    <span className={cls} title={title} aria-label={ariaLabel}>
-      {STATE_GLYPH[state]}
+    <span className={cls} title={title} aria-label={ariaLabel} aria-hidden={ariaHidden}>
+      {mark}
     </span>
   );
 }

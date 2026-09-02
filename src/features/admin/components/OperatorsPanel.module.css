@@ -525,3 +525,21 @@
 .matrixWarn {
   color: color-mix(in srgb, var(--warn) 62%, #000);
 }
+
+/* The "where they can work" matrix legend — its three verdicts, drawn as the
+   shared chip so the mark and colour match the grid below. */
+.placeLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.125rem;
+  align-items: center;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  margin-bottom: 0.5rem;
+}
+
+.placeLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}

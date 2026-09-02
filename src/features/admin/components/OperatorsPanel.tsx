@@ -31,9 +31,9 @@ import {
   validateOperatorDraft,
   workPlacesFor,
   type OperatorLike,
-  type WorkPlace,
+  type PlaceVerdict,
 } from "../lib/operators";
-import { buildOperatorMatrix } from "../lib/matrix";
+import { buildColumns, buildOperatorMatrix, type CellState } from "../lib/matrix";
 import {
   EXPIRING_WINDOW_DAYS,
   MatrixChip,
@@ -209,46 +209,24 @@ function todayIso(): string {
 }
 
 /**
- * One place, with the mark its verdict earns.
+ * The three place verdicts, as chips that borrow the matrix chip's SHAPE and
+ * colour but name their own answers. `placeVerdict` stays in `../lib/operators`
+ * beside the rule it reads (this and `operators.test.ts` cannot drift), and the
+ * mark is decorative here — the visually-hidden reason beside each chip is what
+ * a screen reader speaks, and colour is never the only signal (D100).
  *
- * ⚠️ THE VERDICT IS NOT DERIVED HERE. `placeVerdict` is in `../lib/operators`
- * beside the rule it reads, so this component and `operators.test.ts` cannot
- * drift apart — which is exactly how the screen came to disagree with the
- * server in the first place.
- *
- * ⚠️ The mark is `aria-hidden` and carries no meaning on its own: a tick's
- * meaning is spoken by the visually-hidden hint, and the other two are spoken
- * by the reason sentence, which every non-tick row has. Colour is never the
- * only signal (D100).
+ * ⚠️ THE COLOUR ROLES ARE BORROWED, NOT THE MEANINGS. A `missing-training`
+ * place reuses the "missing" chip because both are a red gap; `outside-area`
+ * reuses the amber "expiring" colour because both are a warning, not a refusal
+ * (D113 lets somebody be scheduled there with a recorded reason). The glyph and
+ * the legend name the PLACE verdict, so the two are never read as the training
+ * states they borrow their paint from.
  */
-function PlaceRow({ place }: { place: WorkPlace }) {
-  const verdict = placeVerdict(place);
-  const rowClass =
-    verdict === "can-work"
-      ? styles.placeYes
-      : verdict === "outside-area"
-        ? styles.placeWarn
-        : styles.placeNo;
-  const mark = verdict === "can-work" ? "✓" : verdict === "outside-area" ? "⚠" : "✕";
-  return (
-    <li className={rowClass}>
-      <span className={styles.mark} aria-hidden="true">
-        {mark}
-      </span>
-      <span className={styles.placeLabel}>
-        {place.label}
-        {!place.active && <span className={styles.badge}>inactive place</span>}
-      </span>
-      <span className={styles.placeWhy}>
-        {verdict === "can-work" ? (
-          <span className={styles.srHint}>can work here</span>
-        ) : (
-          place.reasons.join(" · ")
-        )}
-      </span>
-    </li>
-  );
-}
+const PLACE_CHIP: Record<PlaceVerdict, { state: CellState; glyph: string; label: string }> = {
+  "can-work": { state: "trained", glyph: "✓", label: "Can work here" },
+  "missing-training": { state: "missing", glyph: "×", label: "Missing a training" },
+  "outside-area": { state: "expiring", glyph: "⚠", label: "Outside their area" },
+};
 
 export function OperatorsPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
@@ -397,10 +375,36 @@ export function OperatorsPanel() {
   const summary = summarisePlaces(visiblePlaces);
   const hiddenPlaces = sitePlaces.length - visiblePlaces.length;
 
-  // ⭐ WHAT CAN BE GRANTED IS NARROWED LIKE THE PEOPLE ARE — decision 3: what
-  // you see is what you can grant. `skills` itself stays whole for the other
-  // question this screen asks of it, because that one is not "what is on offer
-  // here" — see `tickets` just below.
+  // ⭐⭐ "WHERE THEY CAN WORK", AS THE MATRIX. The maintainer, 2 September: draw
+  // the places the same nested-header way, reaching DOWN TO THE CELL where work
+  // is booked — the level the flat list already reached. Each schedulable place
+  // is a column OWNED BY ITS PARENT, so the header climbs plant → area → line and
+  // the cell's own name lands on the leaf column row rather than doubling as an
+  // owner band; the three-state verdict rides each cell as a ✓ / ✕ / ⚠ chip.
+  const levelsById = useMemo(
+    () => new Map((data?.levels ?? []).map((l) => [l.id, l] as const)),
+    [data],
+  );
+  const placesColumns = useMemo(
+    () =>
+      buildColumns(
+        visiblePlaces.map((p) => ({
+          id: p.nodeId,
+          name: p.name,
+          siteNodeId: nodesById.get(p.nodeId)?.parentId ?? p.nodeId,
+          active: true,
+          externalId: null,
+        })),
+        nodesById,
+        levelsById,
+      ),
+    [visiblePlaces, nodesById, levelsById],
+  );
+  const placeByNode = useMemo(
+    () => new Map(visiblePlaces.map((p) => [p.nodeId, p] as const)),
+    [visiblePlaces],
+  );
+
   // ⭐ THE TRAININGS FOR THE PERSON ON SCREEN, AS A MATRIX — the same visual the
   // team matrix draws, for one person. Columns are the trainings that apply to
   // them (owner an ancestor-or-self of their node) plus any they already hold,
@@ -999,16 +1003,84 @@ export function OperatorsPanel() {
                 the area this person belongs to — whoever schedules there can still put them on it,
                 but has to record a reason for it.
               </p>
-              <ul className={styles.places}>
-                {visiblePlaces.map((p) => (
-                  <PlaceRow key={p.nodeId} place={p} />
-                ))}
-                {visiblePlaces.length === 0 && (
-                  <li className={styles.status}>
-                    There are no schedulable places in the hierarchy yet.
-                  </li>
-                )}
-              </ul>
+              {visiblePlaces.length === 0 || placesColumns.cols.length === 0 ? (
+                <p className={styles.status}>There are no schedulable places in the hierarchy yet.</p>
+              ) : (
+                <>
+                  <div className={styles.placeLegend}>
+                    {(Object.keys(PLACE_CHIP) as PlaceVerdict[]).map((v) => (
+                      <span key={v} className={styles.placeLegendItem}>
+                        <MatrixChip
+                          state={PLACE_CHIP[v].state}
+                          glyph={PLACE_CHIP[v].glyph}
+                          title={PLACE_CHIP[v].label}
+                          ariaHidden
+                        />
+                        {PLACE_CHIP[v].label}
+                      </span>
+                    ))}
+                  </div>
+                  <div className={styles.matrixScroll}>
+                    <table className={styles.matrix}>
+                      <thead>
+                        {placesColumns.bands.map((band, b) => (
+                          <tr key={b}>
+                            {band.map((cell, i) => (
+                              <th
+                                key={i}
+                                className={styles.matrixOwner}
+                                colSpan={cell.colspan}
+                                rowSpan={cell.rowspan}
+                              >
+                                {cell.label}
+                              </th>
+                            ))}
+                          </tr>
+                        ))}
+                        <tr>
+                          {placesColumns.cols.map((c) => (
+                            <th key={c.id} className={styles.matrixColName} scope="col">
+                              {c.name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          {placesColumns.cols.map((c) => {
+                            const place = placeByNode.get(c.id);
+                            if (place === undefined) {
+                              return <td key={c.id} className={styles.matrixCell} />;
+                            }
+                            const verdict = placeVerdict(place);
+                            const chip = PLACE_CHIP[verdict];
+                            // ⚠️ THE REASON MOVES FROM A VISIBLE COLUMN TO THE
+                            // CELL'S HIDDEN HINT AND HOVER — the flat list spelled
+                            // "missing Welding" beside every cross; a one-row grid
+                            // cannot, so the chip is decorative and the sentence a
+                            // screen reader speaks rides beside it, D100.
+                            const why =
+                              verdict === "can-work" ? "can work here" : place.reasons.join(" · ");
+                            return (
+                              <td key={c.id} className={styles.matrixCell}>
+                                <MatrixChip
+                                  state={chip.state}
+                                  glyph={chip.glyph}
+                                  title={`${place.label} — ${why}`}
+                                  ariaHidden
+                                />
+                                <span className={styles.srHint}>
+                                  {place.label}: {why}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
               {/* ⚠️ TRIMMED, NOT SILENT. Named by the root rather than by a level
                   word: "plant" is this company's name for the top level and
                   another company's hierarchy may call it anything at all. */}
