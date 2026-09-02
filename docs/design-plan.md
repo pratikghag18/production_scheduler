@@ -8839,3 +8839,55 @@ Driven in the browser: a training added and an existing one no-op'd; a person gr
 held one's sign-off updated, an unknown employee ref refused. Tree CSV import was DROPPED here — the
 starter library covers a new plant's structure by copying, and the visual editor beats a
 parents/children CSV.
+
+## §19.86 — the Operator Training Matrix (its own buildout)
+
+The maintainer, 2 September: *"a matrix which lets the supervisor see who on his team is trained on
+what vs reading through individual teams... very visual, status at a glance."* The plan of record for
+it is `_delivery/operator-training-matrix.html`; this section is the decision record.
+
+### The shape, settled over an interactive mockup before any code
+Every load-bearing choice was made against a live mockup, not prose:
+
+- **Layout A** — one column per training (not a rollup). The maintainer chose it for reading like the
+  paper skills matrix people already know.
+- **The header IS the hierarchy.** Each training sits under the exact node that owns it, and the header
+  climbs from the highest level in view down to that owner: an area spans the top, then splits into its
+  lines; a node that owns trainings AND has child nodes shows its own ones under a `<node> · <level>-wide`
+  bucket beside its children (so a plant-wide training lands under "Plant A · site-wide" while a line's
+  lands under "Line 1"). ⭐ The maintainer's correction that drove this: *"Area 1 and Area 2 sit under
+  Plant A, so it should naturally show that as well... it should go up to the highest possible hierarchy."*
+  Where the data has no node above the plants (roots have `parent_id NULL`), the plants sit side by side
+  at the top with no invented root — the common-ancestor walk falls back to each training's own chain.
+- **Filters at every level, scoped by what you can read.** The plant chooser is `AdminPage`'s shared one;
+  the panel adds an area then line cascade and a multi-select over operators. No per-role special-casing —
+  the node set is already RLS-scoped, so a supervisor simply has fewer nodes to filter by.
+- **Record-in-place**, not read-only-plus-jump: a cell opens a form that grants or edits the record
+  without leaving the grid.
+- **Cell states and their glyphs.** Trained `✓`, Expiring `▲`, Expired `↻`, Not trained `×`, N/A. ⚠️ The
+  maintainer's note that fixed the glyphs: people read a red cross as *not trained*, so `×` is not-trained
+  and Expired uses `↻` (renewal overdue) — the two are different problems (never trained vs lapsed) and
+  must never read alike.
+
+### Why it needed no new plumbing
+The join that says who holds which training — `operator_skills` — already comes back from
+`fetchOperatorsAdmin`, cached under `["operators","admin"]`, alongside operators, skills, nodes and
+levels. A cell is *trained* when a row exists; *expiring/expired* is read off `expires_at` against a
+"today" and a window (30 days for now, a setting at stage M5); *N/A* is when the owner is not on the
+person's branch. So v1 is pure client work: no migration, no server function, no new read.
+
+### The one rule, restated (§19.72)
+Anything the grid SHOWS as a tick, the server must ALLOW. Applicability is `isAtOrBelow` on the ltree
+`path` — the same test the server runs — and record-in-place mirrors `app_can_edit_operator` through
+`useEditRights`, failing OPEN so the write-error contract answers rather than the client hiding a cell.
+The grid never offers a cell `app_guard_operator_skill_scope` would refuse.
+
+### What shipped, and what remains
+Pure core `src/features/admin/lib/matrix.ts` (`cellStateFor`, `buildColumns`, `buildMatrix`) with 22
+tests in `src/test/matrix.test.ts`; the read-only `MatrixPanel` registered as the `matrix` admin
+section (its own `MATRIX_PANEL_READY`, added to `adminSectionsFor` for supervisors, listed in
+`REM_SURFACES` in both places); and record-in-place over `grantSkill`/`updateSkillRecord`/`revokeSkill`.
+Stages M1–M3. **M4 (next): the Operators tab reuses the same visual for one person, replacing today's
+per-operator training list.** M5 is polish (expiry window as a setting, remembered filters, empty
+states). This buildout is the home for the Phase-2 roadmap lines "Skills matrix admin UI" and
+"certification expiry checks"; eligibility ENFORCEMENT on the board stays on the main plan.
