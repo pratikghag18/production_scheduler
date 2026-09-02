@@ -6672,6 +6672,34 @@ findings:
     a person holds. **A column list that appears twice is a bug with a delay on it.** The new check builds
     its test data *from* the list itself, so the two cannot drift apart again.
 sessions:
+- id: 22
+  date: 2026-09-02
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1582
+    app_test_files: 44
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    First run of the tester in its own worktree, judging 51c3d04..21c868f — a single commit that
+    installs the tester role itself (the brief, plan.yaml, plan-format, the defect template, the run
+    script, CI). It changes no product code, so no requirement's source or delivers stage was in the
+    diff and there was nothing to mutation-test; there were no fix-claimed defects to re-verify. I
+    confirmed the baseline instead. `npm run test` reports 1582 tests in 44 files, exactly the count
+    in session 21. The runner first showed 1418 in 35 files with nine suites failing to collect on
+    `Missing VITE_SUPABASE_URL`; that was my worktree lacking a gitignored `.env.local`, not a code
+    fault — after pointing it at the local stack all 44 files collect and the count matches. Every SQL
+    check passed (26 files). Three things that looked red on the instruments are not defects: the
+    `database.types.ts` "drift" is CRLF-vs-LF line endings only, with zero content hunks under
+    `git diff --ignore-all-space`; the Playwright smoke run failed because `reuseExistingServer` reused
+    the maintainer's already-running dev server, which is wired to a live backend where a signed-out
+    visitor is correctly sent to sign-in, so the "renders without a backend" premise never held — a
+    clean dummy-backend run is needed to judge it, and either way it cannot be a regression from a
+    commit that touched no product code; `format:check` is red across 236 committed files, a Prettier
+    gate that is not one of the tracked baseline numbers. No defects filed.
+  shipped: []
 - id: 21
   date: 2026-09-02
   title: The Operators tab becomes one matrix
