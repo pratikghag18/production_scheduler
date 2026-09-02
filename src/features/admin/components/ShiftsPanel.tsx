@@ -873,22 +873,31 @@ export function ShiftsPanel() {
           <button
             type="button"
             className={styles.btn}
-            title="Change its name or where it belongs"
-            onClick={() =>
-              setRenameDraft(
-                renaming
-                  ? null
-                  : {
-                      id: pattern.id,
-                      name: pattern.name,
-                      siteNodeId: pattern.siteNodeId ?? "",
-                    },
-              )
-            }
+            title="Edit this pattern — its name, owner and shifts"
+            onClick={() => {
+              if (renaming) {
+                // Close the name/owner editor. Leave the shifts expanded — the
+                // reader opened them to edit and collapsing under them would
+                // yank the thing they came for out from under the click.
+                setRenameDraft(null);
+              } else {
+                setRenameDraft({
+                  id: pattern.id,
+                  name: pattern.name,
+                  siteNodeId: pattern.siteNodeId ?? "",
+                });
+                // ⭐ EDIT OPENS THE WHOLE PATTERN. The maintainer, 2 Sept: an
+                // Edit that only renamed, with the shifts behind a separate
+                // click on the name, "feels wrong and non-intuitive". So Edit
+                // now also expands the pattern, putting name, owner and every
+                // shift and break in reach at once. The name button still
+                // expands on its own; this makes Edit the door to all of it.
+                setOpenId(pattern.id);
+              }
+            }}
           >
-            {/* ⭐ "Edit", not "Rename" — D106. The draft this opens carries
-                the pattern's name AND its "Owned by" scope, so the old label
-                named half of it. Same defect as the products row, same fix. */}
+            {/* "Edit", not "Rename" (D106): the draft carries the name AND the
+                "Owned by" scope, and Edit now also opens the shifts. */}
             {renaming ? "Cancel" : "Edit"}
           </button>
         </div>

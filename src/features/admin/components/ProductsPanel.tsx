@@ -499,12 +499,16 @@ export function ProductsPanel() {
                 <button type="button" className={styles.primary} onClick={() => toggleActive(row)}>
                   {row.active ? "Deactivate" : "Reactivate"}
                 </button>
-                {/* ⭐ D115: THE EDIT IS RENAME/RE-SKU ONLY now — places have their
-                    own controls above. The label names what it does. */}
+                {/* ⭐ D115 scoped Edit to code + name, with places above and
+                    colour on the swatch. The maintainer, 2 Sept: hitting Edit and
+                    not finding the colour "feels wrong and non-intuitive", so the
+                    palette now rides inside the Edit panel too (the swatch stays a
+                    shortcut). Places keep their own controls above — they are a
+                    per-place permission, not the shared record. */}
                 <button
                   type="button"
                   className={styles.quiet}
-                  title="Change its code or name"
+                  title="Change its code, name or colour"
                   onClick={() => beginEdit(row)}
                 >
                   Edit
@@ -526,8 +530,9 @@ export function ProductsPanel() {
           )}
         </span>
 
-        {recolouringId === row.id && editable && (
+        {(recolouringId === row.id || isEditing) && editable && (
           <span className={styles.palette} role="group" aria-label="Product colour">
+            {isEditing && <span className={styles.paletteLabel}>Colour</span>}
             {PRODUCT_PALETTE.map((token) => (
               <button
                 key={token}

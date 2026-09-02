@@ -220,6 +220,15 @@
   padding-top: 0.125rem;
 }
 
+/* The word "Colour" in front of the swatches when the palette rides inside the
+   Edit panel, so it reads as one of the things Edit changes rather than a loose
+   strip of colours. */
+.paletteLabel {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  margin-right: 0.125rem;
+}
+
 .paletteChip {
   width: 1.25rem;
   height: 1.25rem;

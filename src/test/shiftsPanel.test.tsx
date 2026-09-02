@@ -546,8 +546,12 @@ describe("ShiftsPanel — nothing is left holding an id the filter removed", () 
     // goes away, which passes the first half and fails the last three lines.
     withTwoPlants();
     render(<ShiftsPanel />);
+    // ⭐ CONTRACT CHANGE (maintainer, 2 Sept): Edit now opens the WHOLE pattern —
+    // the name/owner editor AND the shifts — in one click, so there is no longer
+    // a separate expand step here. (This case used to click the name opener too;
+    // now that would TOGGLE the just-expanded shifts shut.) What S13 defends is
+    // unchanged: both editors survive the row leaving and re-entering the filter.
     fireEvent.click(within(patternRow("Zulu")).getByRole("button", { name: "Edit" }));
-    fireEvent.click(patternOpeners().find((b) => patternNameOf(b) === "Zulu") as HTMLElement);
     expect((screen.getByRole("textbox", { name: "Pattern name" }) as HTMLInputElement).value).toBe(
       "Zulu",
     );
