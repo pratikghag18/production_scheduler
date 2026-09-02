@@ -98,26 +98,26 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 21 · 2026-09-02 · The Operators tab becomes one matrix</h2>
-  <div class="lead"><p>The per-person pane on the Operators tab was two lists: where someone can work, and which trainings they hold. After four rounds it is one grid keyed on places, down to the cell, with a tick, cross or warning on each. Clicking a cross opens a chooser of the trainings that would fix it and hands off to the shared record form. The chip and popover were first pulled into one shared file so the two matrices cannot drift. A stand-in training lacking <code>active</code> had silently emptied the grid. Driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p></div>
+  <h2>Session 22 · 2026-09-02 · The matrix's window and scope become remembered settings</h2>
+  <div class="lead"><p>M5, the last matrix stage. The &quot;expiring soon&quot; window became a 30/60/90 control and the area/line scope is remembered per viewer, both in a new <code>matrixPrefs.ts</code> on the plant-filter pattern — a guarded, org-scoped store that folds a corrupt or out-of-range value back onto the default; the operator multi-select is session-only by design. The empty state now names which absence it is. Dark theme was split out with the maintainer, the app having no theming to build it on. Driving the screen as three roles surfaced the maintainer's own report — site admins and supervisors had no hierarchy filters, because the cascade hung off the plant chooser only a multi-plant reader sees — fixed by anchoring the cascade on the reader's own topmost node. Counts read from the session's own <code>npm run test</code> run.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">1582</span><span class="l">app tests in 44 files — session 21, 2026-09-02</span></div>
+  <div class="stat ok"><span class="n">1605</span><span class="l">app tests in 45 files — session 22, 2026-09-02</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">522</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">35</span><span class="l">database changes (migrations)</span></div>
   <div class="stat ok"><span class="n">0</span><span class="l">open defects</span></div>
-  <div class="stat "><span class="n">123 / 246</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">125 / 248</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>51c3d04</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>bc3b712</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
   <span class="eyebrow">Next</span>
   <h2>What comes next, in order</h2>
   <p class="fine">The order is a guess about priority, not a fact. If it has drifted from what the maintainer wants, ask rather than working down the list.</p>
-  <div class="glance"><table><tbody><tr class="g-now"><td class="g-n">1</td><td><a href="#M5">M5</a> M5 polish — expiry window as a setting, remembered filters<br><span class="fine">Session 21's own NEXT: the matrix's expiry window is a constant and its filters reset per visit.</span></td></tr>
-<tr class="g-next"><td class="g-n">2</td><td><a href="#S24">S24</a> P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail<br><span class="fine">The gate on a second human using the product; needs the project's first server-side code. Tabled twice, still open.</span></td></tr>
-<tr class="g-next"><td class="g-n">3</td><td><a href="#S24">S24</a> P1-6d password reset and change-password<br><span class="fine">Same browser-only shape as the sign-in screen; listed as likely next in the restart prompt.</span></td></tr>
+  <div class="glance"><table><tbody><tr class="g-now"><td class="g-n">1</td><td>Dark theme — app-wide colour tokens first, then the matrix<br><span class="fine">Split out of M5 with the maintainer (session 22): the app has NO theming today — no colour variables, no prefers-color-scheme, no toggle anywhere in src/ — so a matrix-only dark mode would read as a bug beside the light admin tabs. It is its own stage: introduce colour tokens across the admin screens and a toggle, then apply to the matrix.</span></td></tr>
+<tr class="g-next"><td class="g-n">2</td><td><a href="#S24">S24</a> P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail<br><span class="fine">TABLED BY THE MAINTAINER, session 22, until the app's capability meets the required standard — do not pick this up without a fresh go-ahead. The gate on a second human using the product; needs the project's first server-side code.</span></td></tr>
+<tr class="g-next"><td class="g-n">3</td><td><a href="#S24">S24</a> P1-6d password reset and change-password<br><span class="fine">Same browser-only shape as the sign-in screen. Sits behind invitations, which the maintainer tabled in session 22.</span></td></tr>
 <tr class="g-next"><td class="g-n">4</td><td>app_guard_skill_rehome is blind to holders — refuse / warn-and-record / leave<br><span class="fine">Moving a training strands its holders silently; a decision, not a patch (NEXT 1(g)(b)).</span></td></tr>
 <tr class="g-next"><td class="g-n">5</td><td>Small/known: renameSkill unused; same-name trainings collide by accessible name; supervisor with no grants reaches an empty admin screen; dead if (!session) branch in BoardPage<br><span class="fine">Session 19's item 4 — small follow-ups written down, not owed.</span></td></tr>
 <tr class="g-next"><td class="g-n">6</td><td>assignments.status has no CHECK<br><span class="fine">Still open per session 19's item 5.</span></td></tr>
@@ -458,16 +458,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">Operator training matrix</span>
   <h2>The operator training matrix — its own buildout</h2>
   <div class="lead"><p>Who on the team is trained on what, at a glance — a colour grid a supervisor reads without opening anyone's record. A new view over data the app already loads: no migration, no server function, no new read.</p></div>
-  <h3 class="grouphead">Open — this is what is left</h3><div class="stages"><div class="stage open" id="M5">
-  <span class="num">5</span>
-  <h3>Polish</h3>
-  <div class="what"><p>The window that decides “expiring soon” as a setting (30/60/90 days); the filters remembered per viewer like the plant filter already is; honest empty states (“nothing in scope — widen a filter”); dark theme; and a look at the real screen in the browser, because five of the last six defects came from using a screen, not a green suite.</p>
-<p><b>What is left in this stage</b></p><ul><li>Expiry window setting; per-viewer remembered filters; empty/edge states; browser drive.</li></ul></div>
   
-  <p class="fine">§19.86</p>
-  <span class="tags"><span class="chip next">Open</span><span class="chip mine">Mine</span></span>
-</div></div>
-  <details class="donefold"><summary>4 stages shipped — open to read them</summary><div class="stages"><div class="stage done" id="M1">
+  <details class="donefold"><summary>5 stages shipped — open to read them</summary><div class="stages"><div class="stage done" id="M1">
   <span class="num">1</span>
   <h3>The pure core</h3>
   <div class="what"><p><b>A dependency-free module a supervisor never sees, and the whole feature rests on it.</b> Everything load-bearing decided from plain values — no React, no Supabase — the way <code>scope.ts</code> and <code>operators.ts</code> already are, so it is unit-tested under vitest with no browser. It computes: the <b>nested column header</b> (each training's owner walked up to the common root, grouped into bands with the right colspans and rowspans, own-trainings of a node bucketed as “… area-wide” beside its children); the <b>cell state</b> for an operator×training from the holding and its expiry against a “today” and a window; <b>applicability / N/A</b> via <code>isAtOrBelow</code>; <b>scope filtering</b> of rows and columns; and <b>team grouping</b> of the rows.</p>
@@ -502,6 +494,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="state"><p>Shipped in session 21 (2 Sept, §19.87): the Operators tab's detail pane became one place-keyed matrix down to the cell, with a chooser of the trainings behind each cross.</p></div>
   <p class="fine">§19.87 · D100</p><p class="fine">Delivers <a href="#R-302">R-302</a>, <a href="#R-303">R-303</a></p>
   <span class="tags"><span class="chip done">Done</span><span class="chip mine">Mine</span></span>
+</div>
+<div class="stage done" id="M5">
+  <span class="num">5</span>
+  <h3>Polish</h3>
+  <div class="what"><p>The window that decides “expiring soon” as a setting (30/60/90 days); the filters remembered per viewer like the plant filter already is; honest empty states that name which absence they are; and a look at the real screen in the browser, because five of the last six defects came from using a screen, not a green suite. Driving it surfaced the maintainer's own report — that site admins and supervisors had no hierarchy filters at all — which this stage also fixes (R-305).</p></div>
+  <div class="state"><p>Shipped in session 22 (2 Sept). Window and area/line scope remembered per viewer in a new <code>matrixPrefs.ts</code> on the plant-filter pattern; the operator multi-select is session-only by design. The empty state now names no-trainings / no-operators / none-selected. Dark theme was SPLIT OUT of this stage — the app has no theming at all, so a panel-only dark mode would read as a bug; it is its own queue item now, decided with the maintainer. Driven in the browser as three roles.</p></div>
+  <p class="fine">§19.86</p><p class="fine">Delivers <a href="#R-304">R-304</a>, <a href="#R-305">R-305</a></p>
+  <span class="tags"><span class="chip done">Done</span><span class="chip mine">Mine</span></span>
 </div></div></details>
 </section>
 
@@ -516,8 +516,16 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>74 things that weren't in the plan</h2>
-  <div class="find fix" id="F-074">
+  <h2>75 things that weren't in the plan</h2>
+  <div class="find fix" id="F-075">
+  <span class="tag">Found by driving it as the real roles · fixed · you found it · <a href="#M5">M5</a></span>
+  <h3>Everyone but the system admin had no hierarchy filters on the matrix</h3>
+  <p><b>The maintainer reported it in the middle of building M5:</b> <em>&quot;site admins and supervisors have no hierarchy level filters in the matrix tab, only the system admin has them.&quot;</em> Exactly right, and the cause was a quiet one.</p>
+<p>The matrix's area/line filters were anchored on the plant chooser's value. But that chooser only appears for a reader who can see <b>more than one plant</b> — a company/system admin. Anyone with a single readable plant (every site admin, every supervisor) has the chooser hidden, and the shared plant-filter code correctly resolves their choice to null. Anchoring the cascade on that null meant they got no area or line filter at all — the very readers a supervisor view is for.</p>
+<p><b>The fix is to stop asking &quot;what plant did they pick&quot; and ask &quot;what is the top of what they can see&quot;.</b> A new <code>readableRootIds</code> finds the nodes with no readable parent — which is a supervisor's own area just as much as an admin's whole plant — and <code>cascadeBaseId</code> hangs the cascade off the sole such root when there is no explicit choice. The multi-plant admin at &quot;All plants&quot; is deliberately left with no cascade until they pick a plant, because &quot;Area 1&quot; in three different plants is ambiguous. Proven both ways: pure tests on the two functions, and driving the screen as a site admin and a supervisor, who now each see a filter labelled with their hierarchy's own level word.</p>
+  <p class="fine">§19.86</p>
+</div>
+<div class="find fix" id="F-074">
   <span class="tag">The same mistake twice in one day, in one file · fixed · found while building · <a href="#S22">S22</a></span>
   <h3>A list of columns written out twice, and the second copy empties a screen in silence</h3>
   <p><b>This happened, was fixed, and then very nearly happened again four hours later in the same file.</b> Asking the database for a training means naming the columns you want; checking what comes back means naming them again. When a column was added, the named list was updated and <b>a second, older copy of the same list three hundred lines away was not</b>. The check then rejected every row that came back, because it was missing a column nobody had asked for.</p>
@@ -1083,7 +1091,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>246 requirements · 123 covered · 109 uncovered · 0 contradicted · 14 superseded</caption>
+<caption>248 requirements · 125 covered · 109 uncovered · 0 contradicted · 14 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -2805,6 +2813,20 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
       <br><span class="fine">§19.87 · maintainer</span></td>
   <td class="fine">vitest · <code>src/test/operatorsPanel.test.tsx</code> O19–O29</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-covered" id="R-304">
+  <td class="g-n">R-304</td>
+  <td class="reqmain"><b>The matrix remembers its viewer's window and scope</b><br><span class="fine">The &quot;expiring soon&quot; window is a per-viewer setting of 30 / 60 / 90 days, not a constant, feeding <code>buildMatrix</code>'s <code>windowDays</code>. It and the area / line scope are remembered per viewer (per org) the way the plant filter is — a guarded, org-scoped <code>localStorage</code> value that folds a corrupt or out-of-range store back onto the default and never takes the screen down. The operator multi-select is deliberately session-only. When the grid is empty it names which absence it is — no trainings, no operators, or none selected — each with its own fix.</span>
+      <br><span class="fine">§19.86 · maintainer</span></td>
+  <td class="fine">vitest · <code>src/test/matrixPrefs.test.ts</code> MP1–MP16</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-covered" id="R-305">
+  <td class="g-n">R-305</td>
+  <td class="reqmain"><b>Site admins and supervisors get the matrix's hierarchy filters</b><br><span class="fine">The area / line cascade anchors on what the reader can see, not on the plant chooser — which appears only for a reader of more than one plant. A site admin or supervisor with a single readable root gets the cascade under that root (its own level words as labels); a supervisor whose top is an area anchors on the area. A multi-plant system admin at &quot;All plants&quot; still gets no area cascade until a plant is picked, since it would otherwise be ambiguous.</span>
+      <br><span class="fine">the maintainer, 2 Sept (in session) · maintainer</span></td>
+  <td class="fine">vitest · <code>src/test/matrixPrefs.test.ts</code> MP17–MP23 (readableRootIds / cascadeBaseId)<br>screen: Signed in against the dev_demo cast and opened the Matrix section as each role. dana (site admin, Plant A) and ana (supervisor, Line 1) each gained a hierarchy filter labelled with their own level word (Department, Work cell) where before they had none; admin (system) still shows only the window until a plant is picked.</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr></tbody></table></div>
 </section>
 
@@ -2813,6 +2835,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 22</b> · 2026-09-02 · The matrix's window and scope become remembered settings <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>M5, the last matrix stage. The &quot;expiring soon&quot; window became a 30/60/90 control and the area/line scope is remembered per viewer, both in a new <code>matrixPrefs.ts</code> on the plant-filter pattern — a guarded, org-scoped store that folds a corrupt or out-of-range value back onto the default; the operator multi-select is session-only by design. The empty state now names which absence it is. Dark theme was split out with the maintainer, the app having no theming to build it on. Driving the screen as three roles surfaced the maintainer's own report — site admins and supervisors had no hierarchy filters, because the cascade hung off the plant chooser only a multi-plant reader sees — fixed by anchoring the cascade on the reader's own topmost node. Counts read from the session's own <code>npm run test</code> run.</p>
+    <p class="fine">1605 app tests in 45 files · tsc 0 · eslint 0 · commits bc3b712 · shipped <a href="#M5">M5</a></p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 21</b> · 2026-09-02 · The Operators tab becomes one matrix <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The per-person pane on the Operators tab was two lists: where someone can work, and which trainings they hold. After four rounds it is one grid keyed on places, down to the cell, with a tick, cross or warning on each. Clicking a cross opens a chooser of the trainings that would fix it and hands off to the shared record form. The chip and popover were first pulled into one shared file so the two matrices cannot drift. A stand-in training lacking <code>active</code> had silently emptied the grid. Driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p>

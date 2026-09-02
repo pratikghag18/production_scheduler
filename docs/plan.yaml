@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-02'
-  tip: 51c3d04
+  tip: bc3b712
   baseline:
-    app_tests: 1582
-    app_test_files: 44
+    app_tests: 1605
+    app_test_files: 45
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -1513,21 +1513,25 @@ stages:
   track: matrix
   num: 5
   title: Polish
-  status: open
+  status: done
   owner: agent
   refs:
   - §19.86
-  delivers: []
+  delivers:
+  - R-304
+  - R-305
   what: >-
     The window that decides “expiring soon” as a setting (30/60/90 days); the filters remembered per viewer
-    like the plant filter already is; honest empty states (“nothing in scope — widen a filter”); dark
-    theme; and a look at the real screen in the browser, because five of the last six defects came from
-    using a screen, not a green suite.
-
-
-    **What is left in this stage**
-
-    - Expiry window setting; per-viewer remembered filters; empty/edge states; browser drive.
+    like the plant filter already is; honest empty states that name which absence they are; and a look at
+    the real screen in the browser, because five of the last six defects came from using a screen, not a
+    green suite. Driving it surfaced the maintainer's own report — that site admins and supervisors had
+    no hierarchy filters at all — which this stage also fixes (R-305).
+  state: >-
+    Shipped in session 22 (2 Sept). Window and area/line scope remembered per viewer in a new
+    `matrixPrefs.ts` on the plant-filter pattern; the operator multi-select is session-only by design.
+    The empty state now names no-trainings / no-operators / none-selected. Dark theme was SPLIT OUT of
+    this stage — the app has no theming at all, so a panel-only dark mode would read as a bug; it is its
+    own queue item now, decided with the maintainer. Driven in the browser as three roles.
 requirements:
 - id: R-D1
   title: Profiles reference auth.users by uuid
@@ -4950,6 +4954,45 @@ requirements:
     file: src/test/operatorsPanel.test.tsx
     cases: O19–O29
   status: covered
+- id: R-304
+  title: The matrix remembers its viewer's window and scope
+  source:
+  - §19.86
+  stated_by: maintainer
+  claim: >-
+    The "expiring soon" window is a per-viewer setting of 30 / 60 / 90 days, not a constant, feeding
+    `buildMatrix`'s `windowDays`. It and the area / line scope are remembered per viewer (per org) the
+    way the plant filter is — a guarded, org-scoped `localStorage` value that folds a corrupt or
+    out-of-range store back onto the default and never takes the screen down. The operator multi-select
+    is deliberately session-only. When the grid is empty it names which absence it is — no trainings, no
+    operators, or none selected — each with its own fix.
+  verified_by:
+  - kind: vitest
+    file: src/test/matrixPrefs.test.ts
+    cases: MP1–MP16
+  status: covered
+- id: R-305
+  title: Site admins and supervisors get the matrix's hierarchy filters
+  source:
+  - the maintainer, 2 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    The area / line cascade anchors on what the reader can see, not on the plant chooser — which appears
+    only for a reader of more than one plant. A site admin or supervisor with a single readable root gets
+    the cascade under that root (its own level words as labels); a supervisor whose top is an area anchors
+    on the area. A multi-plant system admin at "All plants" still gets no area cascade until a plant is
+    picked, since it would otherwise be ambiguous.
+  verified_by:
+  - kind: vitest
+    file: src/test/matrixPrefs.test.ts
+    cases: MP17–MP23 (readableRootIds / cascadeBaseId)
+  - kind: screen
+    steps: >-
+      Signed in against the dev_demo cast and opened the Matrix section as each role. dana (site admin,
+      Plant A) and ana (supervisor, Line 1) each gained a hierarchy filter labelled with their own level
+      word (Department, Work cell) where before they had none; admin (system) still shows only the window
+      until a plant is picked.
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6671,7 +6714,60 @@ findings:
     the pattern, and there it was on the next table down — about to do the same thing to every training
     a person holds. **A column list that appears twice is a bug with a delay on it.** The new check builds
     its test data *from* the list itself, so the two cannot drift apart again.
+- id: F-075
+  title: Everyone but the system admin had no hierarchy filters on the matrix
+  tag: Found by driving it as the real roles
+  status: fixed
+  found_by: maintainer
+  stage: M5
+  refs:
+  - §19.86
+  violates:
+  - R-305
+  story: >-
+    **The maintainer reported it in the middle of building M5:** *"site admins and supervisors have no
+    hierarchy level filters in the matrix tab, only the system admin has them."* Exactly right, and the
+    cause was a quiet one.
+
+
+    The matrix's area/line filters were anchored on the plant chooser's value. But that chooser only
+    appears for a reader who can see **more than one plant** — a company/system admin. Anyone with a
+    single readable plant (every site admin, every supervisor) has the chooser hidden, and the shared
+    plant-filter code correctly resolves their choice to null. Anchoring the cascade on that null meant
+    they got no area or line filter at all — the very readers a supervisor view is for.
+
+
+    **The fix is to stop asking "what plant did they pick" and ask "what is the top of what they can
+    see".** A new `readableRootIds` finds the nodes with no readable parent — which is a supervisor's own
+    area just as much as an admin's whole plant — and `cascadeBaseId` hangs the cascade off the sole such
+    root when there is no explicit choice. The multi-plant admin at "All plants" is deliberately left
+    with no cascade until they pick a plant, because "Area 1" in three different plants is ambiguous.
+    Proven both ways: pure tests on the two functions, and driving the screen as a site admin and a
+    supervisor, who now each see a filter labelled with their hierarchy's own level word.
 sessions:
+- id: 22
+  date: 2026-09-02
+  title: The matrix's window and scope become remembered settings
+  commits:
+  - bc3b712
+  numbers:
+    app_tests: 1605
+    app_test_files: 45
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    M5, the last matrix stage. The "expiring soon" window became a 30/60/90 control and the area/line
+    scope is remembered per viewer, both in a new `matrixPrefs.ts` on the plant-filter pattern — a
+    guarded, org-scoped store that folds a corrupt or out-of-range value back onto the default; the
+    operator multi-select is session-only by design. The empty state now names which absence it is.
+    Dark theme was split out with the maintainer, the app having no theming to build it on. Driving the
+    screen as three roles surfaced the maintainer's own report — site admins and supervisors had no
+    hierarchy filters, because the cascade hung off the plant chooser only a multi-plant reader sees —
+    fixed by anchoring the cascade on the reader's own topmost node. Counts read from the session's own
+    `npm run test` run.
+  shipped:
+  - M5
 - id: 21
   date: 2026-09-02
   title: The Operators tab becomes one matrix
@@ -6972,19 +7068,23 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
-- stage: M5
-  text: M5 polish — expiry window as a setting, remembered filters
+- text: Dark theme — app-wide colour tokens first, then the matrix
   why: >-
-    Session 21's own NEXT: the matrix's expiry window is a constant and its filters reset per visit.
+    Split out of M5 with the maintainer (session 22): the app has NO theming today — no colour variables,
+    no prefers-color-scheme, no toggle anywhere in src/ — so a matrix-only dark mode would read as a bug
+    beside the light admin tabs. It is its own stage: introduce colour tokens across the admin screens
+    and a toggle, then apply to the matrix.
 - stage: S24
   text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
   why: >-
-    The gate on a second human using the product; needs the project's first server-side code. Tabled twice,
-    still open.
+    TABLED BY THE MAINTAINER, session 22, until the app's capability meets the required standard — do not
+    pick this up without a fresh go-ahead. The gate on a second human using the product; needs the
+    project's first server-side code.
 - stage: S24
   text: P1-6d password reset and change-password
   why: >-
-    Same browser-only shape as the sign-in screen; listed as likely next in the restart prompt.
+    Same browser-only shape as the sign-in screen. Sits behind invitations, which the maintainer tabled
+    in session 22.
 - text: app_guard_skill_rehome is blind to holders — refuse / warn-and-record / leave
   why: Moving a training strands its holders silently; a decision, not a patch (NEXT 1(g)(b)).
 - text: >-
