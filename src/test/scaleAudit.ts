@@ -101,6 +101,8 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/TrainingsPanel.module.css",
   "src/features/admin/components/ProductsPanel.module.css",
   "src/features/admin/components/ImportPanel.module.css",
+  // The Operator Training Matrix (its own buildout). Same two-place edit.
+  "src/features/admin/components/MatrixPanel.module.css",
   // 0029 / D110. ⚠️ NOT PRE-SEATED, AND THAT IS HOW IT WAS MISSED: the
   // pre-seat above covered the four sections §19.62 knew were coming, and
   // `DeleteDialog` is a shared surface none of them predicted. The audit

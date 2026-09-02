@@ -22,6 +22,7 @@ import { SiteAccessPanel } from "./components/SiteAccessPanel";
 import { ShiftsPanel, SHIFTS_PANEL_READY } from "./components/ShiftsPanel";
 import { OperatorsPanel, OPERATORS_PANEL_READY } from "./components/OperatorsPanel";
 import { TrainingsPanel, TRAININGS_PANEL_READY } from "./components/TrainingsPanel";
+import { MatrixPanel, MATRIX_PANEL_READY } from "./components/MatrixPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import styles from "./AdminPage.module.css";
@@ -43,7 +44,14 @@ import styles from "./AdminPage.module.css";
  */
 
 type SectionId =
-  "hierarchy" | "access" | "shifts" | "operators" | "trainings" | "products" | "import";
+  | "hierarchy"
+  | "access"
+  | "shifts"
+  | "operators"
+  | "trainings"
+  | "matrix"
+  | "products"
+  | "import";
 
 /*
  * ⭐ §19.62 — `enabled` IS NOT A LITERAL FOR THE QUEUED SECTIONS, AND THAT IS
@@ -69,6 +77,11 @@ const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }
   // the two look alike: creating, renaming and retiring a TRAINING happens
   // here; GRANTING one to a person stays on Operators, where the person is.
   { id: "trainings", label: "Trainings", enabled: TRAININGS_PANEL_READY },
+  // ⭐ THE OPERATOR TRAINING MATRIX — its own buildout. It reads the SAME
+  // `useOperatorsAdmin` query Operators and Trainings do, so it adds no fetch;
+  // it sits beside them because it is a third view of the same people-and-
+  // trainings data. `MATRIX_PANEL_READY` lives in the panel, like the others.
+  { id: "matrix", label: "Matrix", enabled: MATRIX_PANEL_READY },
   { id: "products", label: "Products", enabled: PRODUCTS_PANEL_READY },
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
 ];
@@ -172,6 +185,13 @@ function sectionIconBody(id: SectionId) {
           <path d="M8 3 1.5 6l6.5 3 6.5-3L8 3Z" />
           <path d="M4.6 7.6v3c0 .9 1.5 1.7 3.4 1.7s3.4-.8 3.4-1.7v-3" />
           <path d="M14 6v3" />
+        </>
+      );
+    case "matrix": // a grid — rows and columns of cells
+      return (
+        <>
+          <rect x="2" y="2" width="12" height="12" rx="1" />
+          <path d="M2 6.5h12M2 10h12M6.5 2v12M10 2v12" />
         </>
       );
     case "products": // a box
@@ -602,6 +622,13 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Trainings</h1>
             <TrainingsPanel />
+          </>
+        )}
+
+        {activeSection === "matrix" && (
+          <>
+            <h1 className={styles.h1}>Training matrix</h1>
+            <MatrixPanel />
           </>
         )}
 

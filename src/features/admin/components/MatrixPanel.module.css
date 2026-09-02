@@ -1,0 +1,341 @@
+/* Operator Training Matrix (its own buildout, stage M2).
+
+   Sized in `rem`, not px (D84, design plan §19.16): the root font-size scales
+   with `--chrome-scale`, so the whole surface follows the viewport with nothing
+   to remember per-property. Hairline borders stay in px on purpose -- a 1px rule
+   scaled up renders blurry, and `unscaledPxLengths` exempts a border/outline
+   width of <=2px and nothing else. Same tokens and idioms as the panels beside
+   it; no `--ui-scale` anywhere (that token is fitted board content only).
+
+   ⚠️ LISTED IN `REM_SURFACES` IN BOTH `src/test/scaleAudit.ts` AND its R10 copy
+   in `scaleAudit.test.ts` -- a stylesheet in this directory that is not in both
+   is a test failure. Added there in the same change as this file.
+
+   The state colours come from the semantic tokens (`--signal-ok`, `--warn`,
+   `--crit`), softened with `color-mix` rather than hardcoded, so the grid and
+   the board name their greens, ambers and reds the same way. NOTHING HERE IS A
+   DRAG SURFACE: no `cursor: grab`, no `user-select: none`, no `touch-action`. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.h1 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.lead {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+.status {
+  font-size: 0.875rem;
+  color: var(--muted);
+  padding: 0.5rem 0;
+}
+
+/* ---- filters ---- */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.filterLabel {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.select {
+  border: 1px solid var(--axis);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  min-width: 8rem;
+}
+
+/* operator multi-select via a native <details> disclosure */
+.opFilter {
+  position: relative;
+}
+
+.opSummary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--axis);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.375rem 0.625rem;
+  font-size: 0.875rem;
+  display: inline-flex;
+  gap: 0.625rem;
+  align-items: center;
+  min-width: 9.5rem;
+  justify-content: space-between;
+}
+
+.opSummary::-webkit-details-marker {
+  display: none;
+}
+
+.opCount {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.opMenu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.375rem);
+  left: 0;
+  min-width: 13rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  box-shadow: 0 0.5rem 1.75rem -0.5rem var(--ring);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.opActions {
+  display: flex;
+  gap: 0.375rem;
+  padding: 0.25rem 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--grid);
+  margin-bottom: 0.25rem;
+}
+
+.opActions button {
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  padding: 0.1875rem 0.625rem;
+  cursor: pointer;
+}
+
+.opRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3125rem 0.4375rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.opRow:hover {
+  background: var(--page);
+}
+
+.opName {
+  color: var(--ink);
+}
+
+/* ---- legend ---- */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.125rem;
+  align-items: center;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ---- the grid ---- */
+.scroll {
+  overflow-x: auto;
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  background: var(--surface);
+}
+
+.mx {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.mx th,
+.mx td {
+  border-bottom: 1px solid var(--grid);
+  border-right: 1px solid var(--grid);
+}
+
+.mx thead th {
+  background: var(--page);
+}
+
+/* frozen operator column */
+.op {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--surface);
+  text-align: left;
+  padding: 0.4375rem 0.75rem;
+  min-width: 11rem;
+  border-right: 1px solid var(--axis);
+}
+
+.mx thead .op {
+  z-index: 5;
+  background: var(--page);
+}
+
+.opNm {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.opRef {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.groupRow th.owner {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  padding: 0.4375rem 0.625rem;
+  text-align: center;
+  vertical-align: middle;
+  background: var(--page);
+  border-right: 1px solid var(--axis);
+  border-bottom: 1px solid var(--axis);
+}
+
+.nameRow th.colName {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  padding: 0.4375rem 0.375rem;
+  text-align: center;
+  vertical-align: bottom;
+  min-width: 3.5rem;
+  line-height: 1.25;
+}
+
+.doc {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--muted);
+  margin-top: 0.125rem;
+}
+
+.teamRow td {
+  background: var(--page);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.375rem 0.75rem;
+  border-right: 0;
+}
+
+.cell {
+  padding: 0;
+  text-align: center;
+  height: 2.375rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.875rem;
+  height: 1.625rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+
+.trained {
+  background: color-mix(in srgb, var(--signal-ok) 15%, var(--surface));
+  color: color-mix(in srgb, var(--signal-ok) 78%, #000);
+}
+
+.expiring {
+  background: color-mix(in srgb, var(--warn) 22%, var(--surface));
+  color: color-mix(in srgb, var(--warn) 62%, #000);
+}
+
+.expired {
+  background: color-mix(in srgb, var(--crit) 16%, var(--surface));
+  color: var(--crit);
+}
+
+.missing {
+  background: transparent;
+  color: var(--crit);
+  border: 1px dashed color-mix(in srgb, var(--crit) 55%, var(--axis));
+}
+
+.na {
+  color: var(--muted);
+  background-color: color-mix(in srgb, var(--muted) 8%, var(--surface));
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 0.25rem,
+    color-mix(in srgb, var(--muted) 14%, transparent) 0.25rem 0.3125rem
+  );
+}
+
+/* ---- count line ---- */
+.count {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.gap {
+  color: var(--crit);
+}
+
+.warn {
+  color: color-mix(in srgb, var(--warn) 62%, #000);
+}

@@ -200,7 +200,10 @@ export function adminSectionsFor(
 ): "all" | readonly string[] {
   // Exactly who could reach this screen before D114, so nobody loses a tab.
   if (role === "admin" || adminAnywhere === true) return "all";
-  return ["operators", "trainings"];
+  // The Matrix is a third view of the same operators-and-trainings data those
+  // two screens show, scoped to what the reader can already see, so a supervisor
+  // gets it for the same reason they get Operators and Trainings.
+  return ["operators", "trainings", "matrix"];
 }
 
 /**
