@@ -3,6 +3,7 @@ import {
   addDays,
   buildColumns,
   buildMatrix,
+  buildOperatorMatrix,
   cellStateFor,
   trainingApplies,
   type MatrixInput,
@@ -268,5 +269,82 @@ describe("buildMatrix — cell states, teams and counts", () => {
   it("can include retired trainings and inactive operators when asked", () => {
     const withRetired = buildMatrix(makeInput("pa", { includeInactive: true }));
     expect(withRetired.operators.some((o) => o.id === "zoe")).toBe(true);
+  });
+});
+
+/* -------------------------- buildOperatorMatrix -------------------------- */
+
+describe("buildOperatorMatrix — one person, header down to where they work", () => {
+  function makeOpInput(operator: OperatorRecord, over: Partial<Parameters<typeof buildOperatorMatrix>[0]> = {}) {
+    return {
+      nodes: NODES,
+      levels: LEVELS,
+      skills: [...PLANT_A_SKILLS, bFork, bPress],
+      operatorSkills: HOLDINGS,
+      operator,
+      today: "2026-09-02",
+      windowDays: 30,
+      ...over,
+    };
+  }
+
+  it("shows only the trainings that apply to a line operator, header climbing to their line", () => {
+    const m = buildOperatorMatrix(makeOpInput(op("ana", "Ana", "l1")));
+    // Ana is on Line 1: plant-wide (forklift, fire), Area 1 (loto, crane) and
+    // Line 1 (solder, torque) apply; Line 2 (pallet) and Area 2 (weld) do not.
+    expect(m.columns.cols.map((c) => c.id)).toEqual([
+      "fire",
+      "forklift",
+      "loto",
+      "crane",
+      "solder",
+      "torque",
+    ]);
+    // Header climbs PA › A1 › L1 — the lowest node is the line where Ana works.
+    expect(m.columns.bands[0][0].label).toBe("PA");
+    expect(m.columns.bands[2].map((c) => c.label)).toEqual(["A1 · area-wide", "L1"]);
+  });
+
+  it("derives each held cell's state and marks an applicable gap as missing", () => {
+    const m = buildOperatorMatrix(makeOpInput(op("ana", "Ana", "l1")));
+    expect(m.cellState("forklift")).toBe("trained");
+    expect(m.cellState("crane")).toBe("expiring");
+    expect(m.cellState("torque")).toBe("expired");
+    expect(m.cellState("loto")).toBe("missing"); // applies, not held
+    expect(m.cellState("solder")).toBe("missing");
+  });
+
+  it("never returns na — a training off this person's branch is simply not a column", () => {
+    const m = buildOperatorMatrix(makeOpInput(op("ana", "Ana", "l1")));
+    for (const c of m.columns.cols) expect(m.cellState(c.id)).not.toBe("na");
+    expect(m.columns.cols.some((c) => c.id === "pallet" || c.id === "weld")).toBe(false);
+  });
+
+  it("keeps a held training that no longer applies, shown as held not na", () => {
+    // Eli is on Line 3 (Area 2), yet holds Line 1's torque — a stale grant after
+    // a move. It stays a column, reads as expired (its date), and can be removed.
+    const m = buildOperatorMatrix(
+      makeOpInput(op("eli", "Eli", "l3"), {
+        operatorSkills: [...HOLDINGS, osk("eli", "torque", "2026-01-01")],
+      }),
+    );
+    expect(m.columns.cols.some((c) => c.id === "torque")).toBe(true);
+    expect(m.cellState("torque")).toBe("expired");
+  });
+
+  it("counts trainings, holdings, gaps and renewals for the one person", () => {
+    const m = buildOperatorMatrix(makeOpInput(op("ana", "Ana", "l1")));
+    expect(m.counts.trainings).toBe(6);
+    expect(m.counts.held).toBe(3); // forklift, crane, torque
+    expect(m.counts.needRenewal).toBe(2); // crane expiring + torque expired
+    expect(m.counts.gaps).toBe(3); // fire, loto, solder unheld
+  });
+
+  it("shows an area operator their plant- and area-wide trainings, not the lines below", () => {
+    const m = buildOperatorMatrix(makeOpInput(op("sam", "Sam", "a1")));
+    // Owner ancestor-or-self of Area 1: plant-wide and area-wide only. A line's
+    // training does NOT apply to an area-level person.
+    expect(m.columns.cols.map((c) => c.id).sort()).toEqual(["crane", "fire", "forklift", "loto"]);
+    expect(m.columns.bands[0][0].label).toBe("PA");
   });
 });
