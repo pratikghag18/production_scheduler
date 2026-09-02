@@ -29,11 +29,19 @@
    ⚠️ Record-in-place (clicking a cell to record or edit a training) is the next
    stage; this is the read-only view. --------------------------------------- */
 import { Fragment, useMemo, useState } from "react";
+import { describeSchedulerError } from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { useOperatorsAdmin } from "../hooks/useOperators";
+import {
+  useGrantSkill,
+  useOperatorsAdmin,
+  useRevokeSkill,
+  useUpdateSkillRecord,
+} from "../hooks/useOperators";
+import { useEditRights } from "../hooks/useEditRights";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { buildMatrix, type CellState } from "../lib/matrix";
+import type { OperatorRecord, OperatorSkillRecord, SkillRecord } from "@/lib/api";
 import styles from "./MatrixPanel.module.css";
 
 /** Read by `AdminPage`'s rail, the same way `TRAININGS_PANEL_READY` is. */
@@ -62,9 +70,19 @@ function todayIso(): string {
 }
 
 export function MatrixPanel() {
-  const { session, loading: sessionLoading } = useSession();
+  const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  const orgId = profile?.orgId ?? null;
   const { data, isLoading, isError } = useOperatorsAdmin(canQuery);
+  // ⭐ Record-in-place is gated by whether this reader may edit the OPERATOR's
+  // node (`app_can_edit_operator` = `app_can_edit_node(operator.site_node_id)`),
+  // not the training's owner. Fails OPEN, like `editRights` itself — a cell the
+  // client is unsure about is offered and the server's write-error contract
+  // answers, never hidden. A slow grant read must not hold up the grid.
+  const { canEdit } = useEditRights(canQuery, profile?.role ?? null);
+  const grant = useGrantSkill();
+  const updateRecord = useUpdateSkillRecord();
+  const revoke = useRevokeSkill();
   // ⚠️ `!canQuery || isLoading`, never `isLoading` alone (D91): a gated query
   // leaves `isLoading` FALSE, so this is what tells a spinner from an empty grid.
   const loading = !canQuery || isLoading;
@@ -77,6 +95,17 @@ export function MatrixPanel() {
   const [areaId, setAreaId] = useState<string | null>(null);
   const [lineId, setLineId] = useState<string | null>(null);
   const [pickedOps, setPickedOps] = useState<ReadonlySet<string> | null>(null); // null = all
+
+  // Record-in-place: which cell's popover is open, and its form fields.
+  const [editing, setEditing] = useState<{
+    operatorId: string;
+    skillId: string;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [formCertified, setFormCertified] = useState("");
+  const [formExpires, setFormExpires] = useState("");
+  const [formSignedBy, setFormSignedBy] = useState("");
 
   const childrenOf = useMemo(() => {
     return (parentId: string | null): typeof nodes => {
@@ -110,6 +139,13 @@ export function MatrixPanel() {
       windowDays: EXPIRING_WINDOW_DAYS,
     });
   }, [data, scopeNodeId]);
+
+  const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n] as const)), [nodes]);
+  const holdings = useMemo(() => {
+    const m = new Map<string, OperatorSkillRecord>();
+    for (const h of data?.operatorSkills ?? []) m.set(`${h.operatorId}:${h.skillId}`, h);
+    return m;
+  }, [data]);
 
   // Every operator in scope, for the multi-select checklist.
   const opsInScope = model?.operators ?? [];
@@ -146,6 +182,42 @@ export function MatrixPanel() {
   const showTeams = teams.length > 1;
 
   const scopeName = scopeNodeId ? (nodes.find((n) => n.id === scopeNodeId)?.name ?? "") : "everything you can see";
+
+  // ---- record-in-place ----
+  const operatorEditable = (o: OperatorRecord) =>
+    orgId !== null && canEdit(nodesById.get(o.siteNodeId)?.path ?? null);
+  const openEditor = (o: OperatorRecord, t: SkillRecord, target: HTMLElement) => {
+    const h = holdings.get(`${o.id}:${t.id}`);
+    setFormCertified(h?.certifiedAt ?? "");
+    setFormExpires(h?.expiresAt ?? "");
+    setFormSignedBy(h?.signedOffBy ?? "");
+    const r = target.getBoundingClientRect();
+    setEditing({ operatorId: o.id, skillId: t.id, top: r.bottom + 4, left: r.left });
+  };
+  const closeEditor = () => {
+    setEditing(null);
+    grant.reset();
+    updateRecord.reset();
+    revoke.reset();
+  };
+  const held = editing !== null && holdings.has(`${editing.operatorId}:${editing.skillId}`);
+  const saveRecord = () => {
+    if (editing === null || orgId === null) return;
+    const expiresAt = formExpires === "" ? null : formExpires;
+    const certifiedAt = formCertified === "" ? null : formCertified;
+    const signedOffBy = formSignedBy.trim() === "" ? null : formSignedBy.trim();
+    const vars = { operatorId: editing.operatorId, skillId: editing.skillId };
+    if (held) updateRecord.mutate({ ...vars, expiresAt, certifiedAt, signedOffBy }, { onSuccess: closeEditor });
+    else grant.mutate({ orgId, ...vars, expiresAt, certifiedAt, signedOffBy }, { onSuccess: closeEditor });
+  };
+  const doRevoke = () => {
+    if (editing === null) return;
+    revoke.mutate({ operatorId: editing.operatorId, skillId: editing.skillId }, { onSuccess: closeEditor });
+  };
+  const saving = grant.isPending || updateRecord.isPending || revoke.isPending;
+  const saveError = grant.error ?? updateRecord.error ?? revoke.error ?? null;
+  const editingOp = editing !== null ? (opsInScope.find((o) => o.id === editing.operatorId) ?? null) : null;
+  const editingSkill = editing !== null ? (columns.cols.find((c) => c.id === editing.skillId) ?? null) : null;
 
   return (
     <div className={styles.panel}>
@@ -271,27 +343,42 @@ export function MatrixPanel() {
                       </td>
                     </tr>
                   )}
-                  {team.operators.map((o) => (
-                    <tr key={o.id}>
-                      <td className={styles.op}>
-                        <span className={styles.opNm}>{o.displayName}</span>
-                        {o.employeeRef && <span className={styles.opRef}>{o.employeeRef}</span>}
-                      </td>
-                      {columns.cols.map((t) => {
-                        const st = model.cellState(o.id, t.id);
-                        return (
-                          <td key={t.id} className={styles.cell}>
-                            <span
-                              className={`${styles.chip} ${styles[st]}`}
-                              title={`${o.displayName} — ${t.name}: ${STATE_LABEL[st]}`}
-                            >
-                              {STATE_GLYPH[st]}
-                            </span>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                  {team.operators.map((o) => {
+                    const canEditRow = operatorEditable(o);
+                    return (
+                      <tr key={o.id}>
+                        <td className={styles.op}>
+                          <span className={styles.opNm}>{o.displayName}</span>
+                          {o.employeeRef && <span className={styles.opRef}>{o.employeeRef}</span>}
+                        </td>
+                        {columns.cols.map((t) => {
+                          const st = model.cellState(o.id, t.id);
+                          const clickable = st !== "na" && canEditRow;
+                          const title = `${o.displayName} — ${t.name}: ${STATE_LABEL[st]}${
+                            clickable ? " (click to record)" : ""
+                          }`;
+                          return (
+                            <td key={t.id} className={styles.cell}>
+                              {clickable ? (
+                                <button
+                                  type="button"
+                                  className={`${styles.chip} ${styles[st]} ${styles.cellBtn}`}
+                                  title={title}
+                                  onClick={(e) => openEditor(o, t, e.currentTarget)}
+                                >
+                                  {STATE_GLYPH[st]}
+                                </button>
+                              ) : (
+                                <span className={`${styles.chip} ${styles[st]}`} title={title}>
+                                  {STATE_GLYPH[st]}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </Fragment>
               ))}
             </tbody>
@@ -304,6 +391,61 @@ export function MatrixPanel() {
         <b className={styles.gap}>{model.counts.gaps} gaps</b> ·{" "}
         <b className={styles.warn}>{model.counts.needRenewal} need renewal</b>
       </p>
+
+      {editing !== null && editingOp !== null && editingSkill !== null && (
+        <>
+          <div className={styles.scrim} onClick={closeEditor} aria-hidden="true" />
+          <div
+            className={styles.pop}
+            role="dialog"
+            aria-label={`Record ${editingSkill.name} for ${editingOp.displayName}`}
+            style={{ top: editing.top, left: editing.left }}
+          >
+            <div className={styles.popHead}>
+              <span className={styles.popWho}>{editingOp.displayName}</span>
+              <span className={styles.popWhat}>
+                {editingSkill.name}
+                {editingSkill.externalId ? ` · ${editingSkill.externalId}` : ""}
+              </span>
+            </div>
+            <label className={styles.popField}>
+              <span>Certified on</span>
+              <input type="date" value={formCertified} onChange={(e) => setFormCertified(e.target.value)} />
+            </label>
+            <label className={styles.popField}>
+              <span>Expires</span>
+              <input type="date" value={formExpires} onChange={(e) => setFormExpires(e.target.value)} />
+            </label>
+            <label className={styles.popField}>
+              <span>Signed off by</span>
+              <input
+                type="text"
+                value={formSignedBy}
+                placeholder="e.g. R. Silva"
+                onChange={(e) => setFormSignedBy(e.target.value)}
+              />
+            </label>
+            {saveError && (
+              <p className={styles.popError} role="alert">
+                {describeSchedulerError(saveError)}
+              </p>
+            )}
+            <div className={styles.popActions}>
+              <button type="button" className={styles.popPrimary} onClick={saveRecord} disabled={saving}>
+                {held ? "Save changes" : "Record training"}
+              </button>
+              {held && (
+                <button type="button" className={styles.popDanger} onClick={doRevoke} disabled={saving}>
+                  Remove
+                </button>
+              )}
+              <button type="button" className={styles.popCancel} onClick={closeEditor} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
