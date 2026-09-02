@@ -876,10 +876,13 @@ export function ShiftsPanel() {
             title="Edit this pattern — its name, owner and shifts"
             onClick={() => {
               if (renaming) {
-                // Close the name/owner editor. Leave the shifts expanded — the
-                // reader opened them to edit and collapsing under them would
-                // yank the thing they came for out from under the click.
+                // ⭐ Cancel closes EVERYTHING Edit opened — the name/owner editor
+                // AND the shifts (the maintainer, 2 Sept: Cancel was leaving the
+                // expanded options open). Edit is one door in, so its Cancel is
+                // one door out. The name button still expands the shifts on its
+                // own for a reader who only wants to look.
                 setRenameDraft(null);
+                setOpenId(null);
               } else {
                 setRenameDraft({
                   id: pattern.id,

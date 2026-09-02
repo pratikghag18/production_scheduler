@@ -569,6 +569,21 @@ describe("ShiftsPanel — nothing is left holding an id the filter removed", () 
     expect(screen.getByRole("heading", { name: "Shifts in this pattern" })).toBeTruthy();
   });
 
+  it("S13b ⭐ Cancel closes EVERYTHING Edit opened — the editor and the shifts", () => {
+    // The maintainer, 2 Sept: Cancel was leaving the expanded shifts open after
+    // Edit had opened them. Edit is one door in (name/owner AND shifts), so its
+    // Cancel is one door out — both go away together.
+    withTwoPlants();
+    render(<ShiftsPanel />);
+    const row = patternRow("Zulu");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("textbox", { name: "Pattern name" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Shifts in this pattern" })).toBeTruthy();
+    fireEvent.click(within(patternRow("Zulu")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("textbox", { name: "Pattern name" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Shifts in this pattern" })).toBeNull();
+  });
+
   it("S14 ⭐ an armed delete confirmation is not left open over a row nobody can see", () => {
     // The worst version of S13's defect: `confirmId` holds a pattern id and the
     // dialog it opens deletes. Left unresolved, the box floats over a list that
