@@ -34,6 +34,10 @@ jobs:
 
       - run: npm ci
 
+      # The plan of record must validate before anything else: an entry that names a
+      # stage, requirement or pin that does not exist is a broken record of the work.
+      - run: npm run plan -- --check
+
       - run: npm run typecheck
 
       - run: npm run lint
