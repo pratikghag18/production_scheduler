@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the fourteen admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the fifteen admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -249,6 +249,9 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         "src/features/admin/components/DeleteDialog.module.css",
         // The Operator Training Matrix, its own buildout (stage M2).
         "src/features/admin/components/MatrixPanel.module.css",
+        // The shared matrix cell visual (stage M4) — one source for the chip,
+        // legend and record popover, used by both matrices.
+        "src/features/admin/components/matrixCells.module.css",
       ].sort(),
     );
   });

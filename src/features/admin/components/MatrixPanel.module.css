@@ -161,22 +161,6 @@
   color: var(--ink);
 }
 
-/* ---- legend ---- */
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.125rem;
-  align-items: center;
-  font-size: 0.8125rem;
-  color: var(--ink-2);
-}
-
-.legendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 /* ---- the grid ---- */
 .scroll {
   overflow-x: auto;
@@ -281,49 +265,9 @@
   height: 2.375rem;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.875rem;
-  height: 1.625rem;
-  border-radius: 0.375rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1;
-  border: 1px solid transparent;
-}
-
-.trained {
-  background: color-mix(in srgb, var(--signal-ok) 15%, var(--surface));
-  color: color-mix(in srgb, var(--signal-ok) 78%, #000);
-}
-
-.expiring {
-  background: color-mix(in srgb, var(--warn) 22%, var(--surface));
-  color: color-mix(in srgb, var(--warn) 62%, #000);
-}
-
-.expired {
-  background: color-mix(in srgb, var(--crit) 16%, var(--surface));
-  color: var(--crit);
-}
-
-.missing {
-  background: transparent;
-  color: var(--crit);
-  border: 1px dashed color-mix(in srgb, var(--crit) 55%, var(--axis));
-}
-
-.na {
-  color: var(--muted);
-  background-color: color-mix(in srgb, var(--muted) 8%, var(--surface));
-  background-image: repeating-linear-gradient(
-    45deg,
-    transparent 0 0.25rem,
-    color-mix(in srgb, var(--muted) 14%, transparent) 0.25rem 0.3125rem
-  );
-}
+/* The chip glyph/colour and the record-in-place popover moved to the shared
+   `matrixCells.module.css`, so this grid and the single-operator matrix name
+   them identically. */
 
 /* ---- count line ---- */
 .count {
@@ -338,131 +282,4 @@
 
 .warn {
   color: color-mix(in srgb, var(--warn) 62%, #000);
-}
-
-/* ---- record-in-place ---- */
-.cellBtn {
-  appearance: none;
-  padding: 0;
-  cursor: pointer;
-}
-
-.cellBtn:hover {
-  outline: 2px solid var(--axis);
-  outline-offset: 1px;
-}
-
-.cellBtn:focus-visible {
-  outline: 2px solid var(--ink-2);
-  outline-offset: 1px;
-}
-
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: transparent;
-}
-
-.pop {
-  position: fixed;
-  z-index: 50;
-  min-width: 14rem;
-  max-width: 17rem;
-  background: var(--surface);
-  border: 1px solid var(--axis);
-  border-radius: 0.625rem;
-  box-shadow: 0 0.5rem 1.875rem -0.5rem var(--ring);
-  padding: 0.75rem 0.875rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.popHead {
-  display: flex;
-  flex-direction: column;
-  gap: 0.0625rem;
-  border-bottom: 1px solid var(--grid);
-  padding-bottom: 0.5rem;
-}
-
-.popWho {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.popWhat {
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-
-.popField {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1875rem;
-}
-
-.popField span {
-  font-size: 0.6875rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.popField input {
-  border: 1px solid var(--axis);
-  border-radius: 0.375rem;
-  background: var(--surface);
-  color: var(--ink);
-  padding: 0.3125rem 0.5rem;
-  font-size: 0.8125rem;
-}
-
-.popError {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--crit);
-}
-
-.popActions {
-  display: flex;
-  gap: 0.375rem;
-  align-items: center;
-  margin-top: 0.125rem;
-}
-
-.popPrimary,
-.popDanger,
-.popCancel {
-  border-radius: 0.375rem;
-  border: 1px solid var(--axis);
-  padding: 0.3125rem 0.625rem;
-  font-size: 0.8125rem;
-  background: var(--surface);
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.popPrimary {
-  border-color: var(--ink-2);
-  font-weight: 600;
-}
-
-.popDanger {
-  color: var(--crit);
-  border-color: color-mix(in srgb, var(--crit) 45%, var(--axis));
-  margin-left: auto;
-}
-
-.popCancel {
-  color: var(--ink-2);
-}
-
-.popPrimary:disabled,
-.popDanger:disabled,
-.popCancel:disabled {
-  opacity: 0.45;
-  cursor: default;
 }

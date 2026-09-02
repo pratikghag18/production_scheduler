@@ -103,6 +103,9 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/ImportPanel.module.css",
   // The Operator Training Matrix (its own buildout). Same two-place edit.
   "src/features/admin/components/MatrixPanel.module.css",
+  // The shared matrix cell visual — chip, legend and record popover, drawn the
+  // same by the team matrix and the single-operator matrix (D100).
+  "src/features/admin/components/matrixCells.module.css",
   // 0029 / D110. ⚠️ NOT PRE-SEATED, AND THAT IS HOW IT WAS MISSED: the
   // pre-seat above covered the four sections §19.62 knew were coming, and
   // `DeleteDialog` is a shared surface none of them predicted. The audit
