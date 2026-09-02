@@ -6,13 +6,21 @@
  * this file — the hook, the pure module, the panel — works in camelCase and
  * never learns that `site_node_id` exists.
  *
- * ⚠️ THERE IS NO RPC FOR PRODUCTS, AND THAT CHANGES THE ERROR STORY. Every
- * other write in this layer calls a function that ends in `api_raise`, so a
- * refusal arrives with a machine code in `DETAIL`. Here the writes are plain
- * PostgREST table calls and RLS is the only gate, so a refusal arrives as a
- * bare SQLSTATE — which is exactly what §19.63's five extra `SchedulerError`
- * kinds (`WriteRefused`, `DuplicateValue`, `StillInUse`, `InvalidValue`,
- * `ShiftOverlap`) were added for. `toSchedulerError` already maps them.
+ * ⚠️ ALMOST EVERY WRITE HERE IS A PLAIN TABLE CALL, AND THAT CHANGES THE ERROR
+ * STORY. Every other write in this layer calls a function that ends in
+ * `api_raise`, so a refusal arrives with a machine code in `DETAIL`. Here the
+ * writes are plain PostgREST table calls and RLS is the only gate, so a refusal
+ * arrives as a bare SQLSTATE — which is exactly what §19.63's five extra
+ * `SchedulerError` kinds (`WriteRefused`, `DuplicateValue`, `StillInUse`,
+ * `InvalidValue`, `ShiftOverlap`) were added for. `toSchedulerError` maps both.
+ *
+ * ⭐ THE ONE EXCEPTION IS `createProductAtNode` (D116, migration 0036). A site
+ * admin's create must be authorised against the plant it lands in, which an
+ * INSERT WITH CHECK on `products` cannot see, so create-at-a-plant is the RPC
+ * `create_product_at_node` — the one products write that DOES raise a machine
+ * code. Its refusal (`not_permitted`) is a plant the caller does not administer;
+ * `updateProduct` / `setProductColor` / `deleteProduct` widened to allow a site
+ * admin who administers every plant a part is made at (`app_can_edit_product_record`).
  *
  * ⭐ AND THE HALF THAT RAISES NOTHING AT ALL. A policy's `WITH CHECK` clause
  * raises 42501; its `USING` clause merely FILTERS. So a refused INSERT is an
@@ -195,6 +203,54 @@ export async function createProduct(input: CreateProductInput): Promise<AdminPro
     .select(PRODUCT_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstProduct(requireWritten(data), "products.insert");
+}
+
+export interface CreateProductAtNodeInput {
+  sku: string;
+  name: string;
+  /**
+   * A plant — or a node under one — the caller administers. The part is created
+   * AND assigned here in one act. `org_id` is NOT passed: the RPC reads it from
+   * the session, so a caller cannot mint a part into another tenant.
+   */
+  nodeId: string;
+}
+
+/**
+ * Creates the shared product AND drops it onto one plant the caller administers,
+ * in a single server transaction — the SITE-ADMIN create path (D116, migration
+ * 0036, `create_product_at_node`).
+ *
+ * ⭐ WHY AN RPC, WHEN `createProduct` IS A PLAIN INSERT. A site admin's create
+ * has to be authorised against the plant it lands in, and that plant is not a
+ * column on `products` — it is the first `product_sites` row, written second. An
+ * `INSERT ... WITH CHECK` cannot see it, and `app_is_admin_anywhere()` is
+ * visibility-only and must never authorise a write (0019 §5). So the RPC gates on
+ * `app_is_admin_for(node)` and does both inserts in one transaction: a refused
+ * assignment can never leave a company-wide part orphaned at no plant.
+ *
+ * A company admin keeps the plant-less `createProduct` above (they choose plants
+ * afterwards); this is the plant admin's door, whose part must be born somewhere
+ * they administer. The RPC returns the bare products row — no `product_sites`
+ * embed — so the one place we KNOW, the node just assigned, is folded back in.
+ */
+export async function createProductAtNode(
+  input: CreateProductAtNodeInput,
+): Promise<AdminProduct> {
+  const { data, error } = await supabase.rpc("create_product_at_node", {
+    p_sku: input.sku,
+    p_name: input.name,
+    p_node_id: input.nodeId,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseAdminProduct({
+    ...(data as Record<string, unknown>),
+    product_sites: [{ node_id: input.nodeId }],
+  });
+  if (parsed === null) {
+    throw shapeMismatch("products.createAtNode", "expected a products row (see AdminProduct)");
+  }
+  return parsed;
 }
 
 export interface UpdateProductInput {

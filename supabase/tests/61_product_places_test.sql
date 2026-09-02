@@ -17,8 +17,12 @@
 --   P2   product_sites_select hides the other plant's place row from a plant admin
 --   P3   a run/assignment is schedulable where ANY place covers, refused where none do
 --   P4   a plant admin adds/removes THEIR OWN plant's place, not another's (42501)
---   P5   the Split: products insert/update/delete refused to a site admin, allowed to a company admin
---   P6   delete_owned_row('product',...) refused to a site admin, allowed to a company admin
+--   P5   D116: a site admin renames a part they WHOLLY make (allowed), not one
+--        another plant shares (filtered to 0); a plain INSERT is still 42501
+--        (create is the RPC now — see 62); a company admin renames any
+--   P6   delete_owned_row('product',...) under D116: allowed to a site admin for
+--        a part they wholly make, refused (PT403) for one another plant shares,
+--        allowed to a company admin
 --   P7   the strand guard blocks removing the LAST plant covering a scheduled run
 --   P8   ...and ALLOWS the removal when another plant still covers it
 --   P9   adding a plant is never stranded; and colour picks with no owner
@@ -289,16 +293,17 @@ END $$;
 ROLLBACK TO SAVEPOINT sp_P4;
 
 -- ---------------------------------------------------------------------------
--- P5 — THE SPLIT. The shared record is company property.
+-- P5 — D116 REVERSES THE SPLIT ON EDIT. A site admin may rename a part made
+-- entirely within plants they administer; not one another plant also makes; a
+-- plain INSERT stays refused (create is the RPC create_product_at_node — see 62).
 -- ---------------------------------------------------------------------------
-\echo 'P5 ⭐⭐: products insert/update/delete are refused to a site admin and allowed to a company admin'
+\echo 'P5 ⭐⭐ (D116): a site admin renames a part they WHOLLY make (1) not one another plant shares (0); plain INSERT still 42501; a company admin renames any'
 SAVEPOINT sp_P5;
 DO $$
-DECLARE v_ins text := 'no error'; v_upd int; v_del int;
-        v_ins_co text := 'no error'; v_upd_co int; v_del_co int;
+DECLARE v_ins text := 'no error'; v_upd_free int; v_upd_shared int; v_upd_co int;
 BEGIN
-  -- Site admin (Plant 1): the shared record is not theirs to create, rename or
-  -- delete. INSERT raises 42501; UPDATE/DELETE filter to zero rows (USING).
+  -- Site admin (Plant 1). FREE (f4) is made only in Plant 1; SHARED (f1) is made
+  -- in Plant 1 AND Plant P, which this admin does not administer.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000061a1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
@@ -306,59 +311,65 @@ BEGIN
       VALUES ('10000000-0000-0000-0000-000000000001','SA-NEW','Site Admin Product');
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_ins = RETURNED_SQLSTATE; END;
   UPDATE products SET name = 'renamed by pa' WHERE id = '6a000000-0000-0000-0000-0000000000f4';
-  GET DIAGNOSTICS v_upd = ROW_COUNT;
-  DELETE FROM products WHERE id = '6a000000-0000-0000-0000-0000000000f4';
-  GET DIAGNOSTICS v_del = ROW_COUNT;
+  GET DIAGNOSTICS v_upd_free = ROW_COUNT;
+  -- SHARED is also made in Plant P; the USING clause filters this to zero rows.
+  UPDATE products SET name = 'renamed by pa' WHERE id = '6a000000-0000-0000-0000-0000000000f1';
+  GET DIAGNOSTICS v_upd_shared = ROW_COUNT;
   RESET ROLE;
-  -- Company admin: all three allowed.
+  -- Company admin renames the shared one freely.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
-  BEGIN
-    INSERT INTO products (org_id, sku, name)
-      VALUES ('10000000-0000-0000-0000-000000000001','CO-NEW','Company Product');
-  EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_ins_co = RETURNED_SQLSTATE; END;
-  UPDATE products SET name = 'renamed by a1' WHERE id = '6a000000-0000-0000-0000-0000000000f4';
+  UPDATE products SET name = 'renamed by a1' WHERE id = '6a000000-0000-0000-0000-0000000000f1';
   GET DIAGNOSTICS v_upd_co = ROW_COUNT;
-  DELETE FROM products WHERE id = '6a000000-0000-0000-0000-0000000000f4';
-  GET DIAGNOSTICS v_del_co = ROW_COUNT;
   RESET ROLE;
-  IF v_ins = '42501' AND v_upd = 0 AND v_del = 0
-     AND v_ins_co = 'no error' AND v_upd_co = 1 AND v_del_co = 1
+  IF v_ins = '42501' AND v_upd_free = 1 AND v_upd_shared = 0 AND v_upd_co = 1
   THEN RAISE NOTICE 'PASS P5';
-  ELSE RAISE NOTICE 'FAIL P5: site(ins=% upd=% del=%) company(ins=% upd=% del=%) (want 42501/0/0 and no error/1/1)',
-    v_ins, v_upd, v_del, v_ins_co, v_upd_co, v_del_co; END IF;
+  ELSE RAISE NOTICE 'FAIL P5: ins=% upd_free=% upd_shared=% upd_co=% (want 42501/1/0/1)',
+    v_ins, v_upd_free, v_upd_shared, v_upd_co; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_P5;
 
 -- ---------------------------------------------------------------------------
--- P6 — delete_owned_row('product',...) is a company-admin act.
+-- P6 — delete_owned_row('product',...) under D116. A site admin may delete a
+-- part they wholly make; not one another plant shares; a company admin, any.
 -- ---------------------------------------------------------------------------
-\echo 'P6 ⭐: delete_owned_row(''product'',...) is refused to a site admin (not_permitted) and allowed to a company admin'
+\echo 'P6 ⭐ (D116): delete_owned_row(product) — a site admin deletes a part they wholly make, is refused (PT403) one another plant shares, and a company admin deletes that one'
 SAVEPOINT sp_P6;
 DO $$
-DECLARE v_site text := 'none'; v_left int; v_co text := 'none'; v_gone int;
+DECLARE v_free text := 'none'; v_free_left int;
+        v_shared text := 'none'; v_shared_left int;
+        v_co text := 'none'; v_co_gone int;
 BEGIN
-  -- FREE is made only in Plant 1, which the Plant 1 admin administers — so the
-  -- refusal is about the Split, not about reach.
+  -- Site admin (Plant 1). FREE (f4) is made only in Plant 1 — theirs to delete.
+  -- SHARED (f1) is also made in Plant P — company property, refused with PT403.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000061a1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
     PERFORM delete_owned_row('product','6a000000-0000-0000-0000-0000000000f4');
-    v_site := 'allowed';
-  EXCEPTION WHEN OTHERS THEN v_site := SQLSTATE; END;
+    v_free := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_free := SQLSTATE; END;
+  BEGIN
+    PERFORM delete_owned_row('product','6a000000-0000-0000-0000-0000000000f1');
+    v_shared := 'allowed';
+  EXCEPTION WHEN OTHERS THEN v_shared := SQLSTATE; END;
   RESET ROLE;
-  SELECT count(*) INTO v_left FROM products WHERE id = '6a000000-0000-0000-0000-0000000000f4';
+  SELECT count(*) INTO v_free_left   FROM products WHERE id = '6a000000-0000-0000-0000-0000000000f4';
+  SELECT count(*) INTO v_shared_left FROM products WHERE id = '6a000000-0000-0000-0000-0000000000f1';
+  -- Company admin deletes the shared one.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   BEGIN
-    PERFORM delete_owned_row('product','6a000000-0000-0000-0000-0000000000f4');
+    PERFORM delete_owned_row('product','6a000000-0000-0000-0000-0000000000f1');
     v_co := 'allowed';
   EXCEPTION WHEN OTHERS THEN v_co := SQLSTATE; END;
   RESET ROLE;
-  SELECT count(*) INTO v_gone FROM products WHERE id = '6a000000-0000-0000-0000-0000000000f4';
-  IF v_site = 'PT403' AND v_left = 1 AND v_co = 'allowed' AND v_gone = 0 THEN RAISE NOTICE 'PASS P6';
-  ELSE RAISE NOTICE 'FAIL P6: site=% left_after_site=% company=% gone=% (want PT403/1/allowed/0)',
-    v_site, v_left, v_co, v_gone; END IF;
+  SELECT count(*) INTO v_co_gone FROM products WHERE id = '6a000000-0000-0000-0000-0000000000f1';
+  IF v_free = 'allowed' AND v_free_left = 0
+     AND v_shared = 'PT403' AND v_shared_left = 1
+     AND v_co = 'allowed' AND v_co_gone = 0
+  THEN RAISE NOTICE 'PASS P6';
+  ELSE RAISE NOTICE 'FAIL P6: free=% free_left=% shared=% shared_left=% co=% co_gone=% (want allowed/0/PT403/1/allowed/0)',
+    v_free, v_free_left, v_shared, v_shared_left, v_co, v_co_gone; END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE NOTICE 'FAIL P6: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;

@@ -215,28 +215,49 @@ export function matchesProductQuery(row: ProductRow, query: string): boolean {
  * ======================================================================== */
 
 /**
- * May this reader change the shared record — rename, recolour, retire, delete,
- * or create a product at all?
+ * May this reader change the shared record — rename, recolour, retire, delete?
  *
- * ⭐ D115: THIS IS NOW SIMPLY "ARE YOU A COMPANY ADMIN", and the client knows
- * that for certain (`role === 'admin'`, no grant read needed). Under the Split
- * the part number is company property; a site admin manages which plants make a
- * part, never the part's own identity. `updateProduct` / `deleteProduct` /
- * `createProduct` all land on an `app_is_admin()` policy, and a site admin's
- * attempt is refused as `WriteRefused` — the loud, recoverable half of §19.63.
+ * ⭐ D116 (the maintainer, 2 Sept): a company admin always; otherwise a site
+ * admin who administers EVERY plant that makes this part, and only while at least
+ * one plant does. This mirrors the server's `app_can_edit_product_record` exactly
+ * — company admin, or a part wholly made within one's own plants. A part another
+ * plant also makes is company property again; an orphan (no makers) is too.
  *
- * (This replaced a fail-open `canEditProduct(row, isCompanyAdmin, adminSiteIds,
- * adminAnywhere)`: with the write narrowed to company admins there is nothing
- * uncertain left to fail open on, so the certain answer is the honest one.)
+ * `isAdminAt(nodeId)` is the reader's own "do I administer this node" test — on
+ * the panel, path containment against the reader's admin roots, the client mirror
+ * of the server's `app_is_admin_for` ancestor walk.
+ *
+ * ⚠️ A POSITIVE HINT THAT CAN BE OPTIMISTIC, exactly like `canManagePlace`. The
+ * makers this sees are RLS-scoped (`row.siteNodeIds` is "as far as the reader can
+ * see"). If a part is ALSO made at a plant the reader cannot read, that maker is
+ * invisible here, so this may say yes where the server — which sees every maker —
+ * says no. That refusal arrives as `WriteRefused` with a clear sentence, the
+ * loud, recoverable backstop this file's previews lean on rather than a screen
+ * that hides what the server would allow.
  */
-export function canEditProduct(isCompanyAdmin: boolean): boolean {
-  return isCompanyAdmin;
+export function canEditProduct(
+  isCompanyAdmin: boolean,
+  siteNodeIds: readonly string[],
+  isAdminAt: (nodeId: string) => boolean,
+): boolean {
+  if (isCompanyAdmin) return true;
+  if (siteNodeIds.length === 0) return false;
+  return siteNodeIds.every((nodeId) => isAdminAt(nodeId));
 }
 
 /** Why the shared-record controls on this row are absent, in the row's terms. */
-export function editRefusalNote(isCompanyAdmin: boolean): string | null {
-  if (canEditProduct(isCompanyAdmin)) return null;
-  return "Only a company admin can change a part number — but you can add or remove your own plant below.";
+export function editRefusalNote(
+  isCompanyAdmin: boolean,
+  siteNodeIds: readonly string[],
+  isAdminAt: (nodeId: string) => boolean,
+): string | null {
+  if (canEditProduct(isCompanyAdmin, siteNodeIds, isAdminAt)) return null;
+  // Administers some makers but not all: another plant shares the part, so its
+  // identity is company-owned even though one of the reader's plants makes it.
+  if (siteNodeIds.some((nodeId) => isAdminAt(nodeId))) {
+    return "Another plant also makes this part, so its number and colour are company-owned — but you can add or remove your own plant below.";
+  }
+  return "Only a company admin can change a part your plant doesn't make — but you can add or remove your own plant below.";
 }
 
 /**

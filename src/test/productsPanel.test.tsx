@@ -75,6 +75,7 @@ const h = vi.hoisted(() => {
     // history warns about).
     updateMutate: vi.fn(),
     createMutate: vi.fn(),
+    createAtNodeMutate: vi.fn(),
     colorMutate: vi.fn(),
     assignMutate: vi.fn(),
     unassignMutate: vi.fn(),
@@ -129,6 +130,7 @@ vi.mock("@/features/admin/hooks/useProducts", () => ({
     error: null,
   }),
   useCreateProduct: () => ({ mutate: h.createMutate, isPending: false }),
+  useCreateProductAtNode: () => ({ mutate: h.createAtNodeMutate, isPending: false }),
   useUpdateProduct: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetProductActive: () => ({ mutate: vi.fn(), isPending: false }),
   useSetProductColor: () => ({ mutate: h.colorMutate, isPending: false }),
@@ -215,6 +217,7 @@ beforeEach(() => {
   // case uses these as plain spies, so a bare reset is what they expect anyway.
   h.updateMutate.mockReset();
   h.createMutate.mockReset();
+  h.createAtNodeMutate.mockReset();
   h.colorMutate.mockReset();
   h.assignMutate.mockReset();
   h.unassignMutate.mockReset();
@@ -389,18 +392,37 @@ describe("ProductsPanel — the list of makers (D115 / the Split)", () => {
   });
 });
 
-describe("ProductsPanel — a plant admin, not a company admin", () => {
-  it("T10: sees no create card and no rename controls, and is told why", () => {
+describe("ProductsPanel — a plant admin, not a company admin (D116)", () => {
+  it("T10 ⭐ (D116): sees the create card with a plant picker, and may edit a part made only in their plant", () => {
     asPlantAdmin();
     render(<ProductsPanel />);
-    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
-    expect(screen.queryByLabelText("Product code")).toBeNull();
-    expect(screen.queryAllByRole("button", { name: "Edit" })).toHaveLength(0);
-    expect(
-      screen.getAllByText(
-        "Only a company admin can change a part number — but you can add or remove your own plant below.",
-      ),
-    ).toHaveLength(2);
+    // The create card is here now — a site admin may add a part, born at a plant
+    // they administer via the required "Made at" picker (their one plant).
+    expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(screen.getByLabelText("Product code")).toBeTruthy();
+    const madeAt = screen.getByRole("combobox", { name: "Made at" }) as HTMLSelectElement;
+    expect([...madeAt.options].map((o) => o.text)).toEqual(["Plant 1"]);
+    // Both fixture parts are made only in Plant 1, which they administer, so each
+    // is theirs to rename/recolour/delete — the Edit control shows on both.
+    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(2);
+  });
+
+  it("T10b ⭐ (D116): creating as a plant admin lands the part at their plant in one act", () => {
+    asPlantAdmin();
+    render(<ProductsPanel />);
+    fireEvent.change(screen.getByLabelText("Product code"), { target: { value: "NEWSKU" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New Part" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    // The site-admin create RPC, carrying the plant — NOT the plant-less company
+    // create. A one-plant admin never has to touch the picker; its sole plant is
+    // the default.
+    expect(h.createAtNodeMutate).toHaveBeenCalledTimes(1);
+    expect(h.createAtNodeMutate.mock.calls[0][0]).toEqual({
+      sku: "NEWSKU",
+      name: "New Part",
+      nodeId: PLANT1,
+    });
+    expect(h.createMutate).not.toHaveBeenCalled();
   });
 
   it("T11: can still REMOVE their own plant", () => {

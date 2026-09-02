@@ -549,7 +549,7 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_R14;
 
-\echo 'R15 ⭐ (rewritten by 0034/Split): the shared product RECORD is company property now, but the plant admin still manages their OWN plant''s makers-list — reads narrowed, that write still works'
+\echo 'R15 ⭐ (rewritten by 0036/D116): a plant admin RENAMES a part they wholly make, and still manages their OWN plant''s makers-list — reads narrowed, both writes work'
 SAVEPOINT sp_R15;
 DO $$
 DECLARE v_record int; v_place text := 'no error'; v_line uuid;
@@ -559,9 +559,10 @@ BEGIN
   SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f2', true);
   SET LOCAL ROLE authenticated;
-  -- ⭐⭐ THE SPLIT (D115) CHANGED THE OWNER'S REACH. Renaming the shared record
-  -- is now a company-admin act (products_update USING app_is_admin()), so the
-  -- Plant 2 site admin's rename removes ZERO rows — silently, the USING way.
+  -- ⭐⭐ D116 (0036) HANDS THE OWNER BACK THEIR EDIT. ff02 is made only in Plant
+  -- 2, which f2 administers, so renaming it is theirs again (products_update USING
+  -- app_can_edit_product_record) — ONE row, not the zero the Split gave. The read
+  -- narrowing of 0026 is what this case still has to prove does not eat the write.
   UPDATE products SET name = 'R P2 Product (renamed)' WHERE id='60000000-0000-0000-0000-00000000ff02';
   GET DIAGNOSTICS v_record = ROW_COUNT;
   -- But the LIST of makers is still per-plant, so they may add a place inside
@@ -572,8 +573,8 @@ BEGIN
       VALUES ('10000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-00000000ff02', v_line);
   EXCEPTION WHEN OTHERS THEN v_place := SQLSTATE; END;
   RESET ROLE;
-  IF v_record = 0 AND v_place = 'no error' THEN RAISE NOTICE 'PASS R15';
-  ELSE RAISE NOTICE 'FAIL R15: record_rename_rows=% own_plant_place=% (want 0, no error — record company-only, list per-plant)', v_record, v_place; END IF;
+  IF v_record = 1 AND v_place = 'no error' THEN RAISE NOTICE 'PASS R15';
+  ELSE RAISE NOTICE 'FAIL R15: record_rename_rows=% own_plant_place=% (want 1, no error — wholly-owned record editable, list per-plant)', v_record, v_place; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R15;
 

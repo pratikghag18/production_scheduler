@@ -759,7 +759,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_D26;
 
-\echo 'D27 ⭐ (message updated by 0034/Split): a SUPERVISOR on the very same plant may schedule but may not delete the catalogue — the refusal now says "only a company admin"'
+\echo 'D27 ⭐ (message updated by 0036/D116): a SUPERVISOR on the very same plant may schedule but may not delete the catalogue — the refusal now says they do not administer every plant that makes the part'
 SAVEPOINT sp_D27;
 DO $$
 DECLARE v_state text := 'none'; v_left int; v_node text; v_detail text; v_msg text := '';
@@ -786,28 +786,31 @@ BEGIN
   -- other says "the product itself could not be deleted", which is a sentence
   -- nobody can act on. Measured: without the message this case, and every
   -- other case in this file, passes against a version with no permission check.
-  -- ⭐ D115/Split: a product is company property, so the refusal is no longer
-  -- "no admin rights over the site" (the owner-scoped message the other three
-  -- kinds still use) but "only a company admin can delete a shared part".
+  -- ⭐ D116 (0036): a supervisor holds no admin grant, so they administer none of
+  -- the part's makers and the delete is refused — with the D116 message "you do
+  -- not administer every plant that makes this part" (the same predicate the
+  -- UPDATE/DELETE policies apply), not the owner-scoped message the other three
+  -- kinds use. A wholly-owning site admin passes it; a supervisor never can.
   IF v_state = 'PT403' AND v_node = 'not_permitted' AND v_left = 1
-     AND v_msg LIKE '%only a company admin can delete a shared part%'
+     AND v_msg LIKE '%you do not administer every plant that makes this part%'
   THEN RAISE NOTICE 'PASS D27';
-  ELSE RAISE NOTICE 'FAIL D27: state=% error=% product_rows=% message=% (want PT403/not_permitted/1 and the company-admin refusal)', v_state, v_node, v_left, v_msg; END IF;
+  ELSE RAISE NOTICE 'FAIL D27: state=% error=% product_rows=% message=% (want PT403/not_permitted/1 and the D116 refusal)', v_state, v_node, v_left, v_msg; END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE NOTICE 'FAIL D27: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_D27;
 
-\echo 'D28 ⭐⭐ (rewritten by 0034/Split): a LINE 1 admin may NOT delete a shared part even though they administer its only line — it is company property; a COMPANY admin can, and the run on a cell under it goes too'
+\echo 'D28 ⭐⭐ (rewritten by 0036/D116): a LINE 1 admin MAY delete a part made only under their line — it is wholly theirs — and the future run on a cell under it goes with it'
 SAVEPOINT sp_D28;
 DO $$
-DECLARE v_admin_cell boolean; v_line_state text := 'none'; v_left_after_line int;
-        v_co_state text := 'none'; v_prod int; v_run int;
+DECLARE v_admin_cell boolean; v_line_state text := 'none'; v_prod int; v_run int;
 BEGIN
-  -- ⭐⭐ SUPERSEDES THE OLD "the owner deletes it" CASE. D115's Split makes the
-  -- shared product record company property, so administering the part's only
-  -- place (Line 1) is NOT enough to delete it. d3 can edit every cell under Line
-  -- 1 -- Cell 1 is reached only through it -- and still cannot delete the part.
+  -- ⭐⭐ RESTORES "THE OWNER DELETES IT", NOW UNDER D116. D115's Split had made
+  -- this a refusal; D116 hands a site admin the whole lifecycle of a part made
+  -- only within their own reach. d1 is made only at Line 1, which d3 administers
+  -- (Cell 1 under it is reached only through Line 1), so the part is wholly theirs
+  -- to delete — and the migration header's cascade holds: the future run on Cell
+  -- 1, which only Line 1 covers, goes with the part, all under d3's own RLS.
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dd03', true);
   SET LOCAL ROLE authenticated;
   SELECT app_can_edit_node('30000000-0000-0000-0000-000000000007') INTO v_admin_cell;
@@ -816,22 +819,12 @@ BEGIN
     v_line_state := 'allowed';
   EXCEPTION WHEN OTHERS THEN v_line_state := SQLSTATE; END;
   RESET ROLE;
-  SELECT count(*) INTO v_left_after_line FROM products WHERE id = 'd6000000-0000-0000-0000-0000000000d1';
-  -- The company admin CAN, and the migration header's cascade still holds: the
-  -- future run on Cell 1 (which only Line 1 covers) goes with the part.
-  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1', true);
-  SET LOCAL ROLE authenticated;
-  BEGIN
-    PERFORM delete_owned_row('product','d6000000-0000-0000-0000-0000000000d1');
-    v_co_state := 'allowed';
-  EXCEPTION WHEN OTHERS THEN v_co_state := SQLSTATE; END;
-  RESET ROLE;
   SELECT count(*) INTO v_prod FROM products WHERE id = 'd6000000-0000-0000-0000-0000000000d1';
   SELECT count(*) INTO v_run  FROM runs     WHERE id = 'd8000000-0000-0000-0000-0000000000d4';
-  IF v_admin_cell AND v_line_state = 'PT403' AND v_left_after_line = 1
-     AND v_co_state = 'allowed' AND v_prod = 0 AND v_run = 0 THEN RAISE NOTICE 'PASS D28';
-  ELSE RAISE NOTICE 'FAIL D28: can_edit_cell=% line_admin=% part_left=% company_admin=% product=% run=% (want true/PT403/1/allowed/0/0)',
-    v_admin_cell, v_line_state, v_left_after_line, v_co_state, v_prod, v_run; END IF;
+  IF v_admin_cell AND v_line_state = 'allowed' AND v_prod = 0 AND v_run = 0
+  THEN RAISE NOTICE 'PASS D28';
+  ELSE RAISE NOTICE 'FAIL D28: can_edit_cell=% line_admin=% product=% run=% (want true/allowed/0/0)',
+    v_admin_cell, v_line_state, v_prod, v_run; END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE NOTICE 'FAIL D28: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;

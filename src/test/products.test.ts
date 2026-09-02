@@ -289,30 +289,46 @@ describe("matchesProductQuery", () => {
 });
 
 /* ===========================================================================
- * Group W — who may write. The SPLIT decision (D115, migration 0034 §9).
+ * Group W — who may write. The SPLIT (D115) as reopened by D116 (2 Sept).
  *
- * The shared record (create/rename/recolour/delete) is COMPANY property; the
- * list of makers is per-plant.
+ * D115 made the shared record (create/rename/recolour/delete) COMPANY property
+ * and the list of makers per-plant. D116 hands a site admin the WHOLE lifecycle
+ * of a part made only within their own plants: they may create it (at a plant
+ * they administer) and rename/recolour/delete it while no other plant makes it.
+ * The moment a second plant adopts it, its identity is company property again.
  * ======================================================================== */
 
-describe("canEditProduct — the shared record is company-admin only", () => {
-  it("W1: a company admin may change the shared record", () => {
-    expect(canEditProduct(true)).toBe(true);
+describe("canEditProduct — a part wholly made in your own plants (D116)", () => {
+  // The reader administers Plant 1 and, by ancestor walk, the line under it.
+  const adminOfPlant1 = (nodeId: string) => nodeId === PLANT_1 || nodeId === LINE_1;
+
+  it("W1: a company admin may change any shared record, whatever its makers", () => {
+    expect(canEditProduct(true, [PLANT_2], () => false)).toBe(true);
+    expect(canEditProduct(true, [], () => false)).toBe(true);
   });
 
-  // W2 ⭐ (D115): the headline change. A SITE admin may NOT rename/recolour/delete
-  // a part number — it is company property now. This used to be "a site admin
-  // owns their own site's list"; the Split moved the shared record to the
-  // company and left the plant admin only their own plant's MEMBERSHIP.
-  it("W2 ⭐: a site admin may NOT change the shared record", () => {
-    expect(canEditProduct(false)).toBe(false);
+  // W2 ⭐ (D116): the headline change. A site admin MAY rename/recolour/delete a
+  // part — but only one made entirely within plants they administer (the client
+  // mirror of the server's app_can_edit_product_record).
+  it("W2 ⭐: a site admin may change a part made only in plants they administer", () => {
+    expect(canEditProduct(false, [PLANT_1], adminOfPlant1)).toBe(true);
+    expect(canEditProduct(false, [PLANT_1, LINE_1], adminOfPlant1)).toBe(true);
   });
 
-  // W3 — it needs no grant read to be certain of either answer, so there is no
-  // fail-open branch here (unlike the place hint below): `role === 'admin'` is a
-  // fact the client already holds.
-  it("W3: the answer is the role and nothing else — no grants consulted", () => {
-    expect([canEditProduct(true), canEditProduct(false)]).toEqual([true, false]);
+  it("W2b ⭐: but NOT once another plant also makes it — company property again", () => {
+    expect(canEditProduct(false, [PLANT_1, PLANT_2], adminOfPlant1)).toBe(false);
+  });
+
+  it("W2c: nor a part they make none of", () => {
+    expect(canEditProduct(false, [PLANT_2], adminOfPlant1)).toBe(false);
+  });
+
+  // W3 ⭐ — an orphan part (assigned to no plant, or all its plants foreign to
+  // this reader) is company property, matching the server's "at least one maker
+  // AND I administer every one". A company admin is unaffected.
+  it("W3 ⭐: an orphan part (no visible makers) is company property to a site admin", () => {
+    expect(canEditProduct(false, [], adminOfPlant1)).toBe(false);
+    expect(canEditProduct(true, [], adminOfPlant1)).toBe(true);
   });
 });
 
@@ -341,17 +357,27 @@ describe("canManagePlace — a plant admin manages their own plant's membership"
   });
 });
 
-describe("editRefusalNote", () => {
-  it("W8: says nothing to a company admin, who may change the record", () => {
-    expect(editRefusalNote(true)).toBe(null);
+describe("editRefusalNote (D116)", () => {
+  const adminOfPlant1 = (nodeId: string) => nodeId === PLANT_1;
+
+  it("W8: says nothing when the reader may change the record", () => {
+    expect(editRefusalNote(true, [PLANT_2], () => false)).toBe(null);
+    expect(editRefusalNote(false, [PLANT_1], adminOfPlant1)).toBe(null);
   });
 
-  it("W9 ⭐: tells a site admin the record is company-owned, and points at what they CAN do", () => {
-    const note = editRefusalNote(false);
+  it("W9 ⭐: a part another plant shares is company-owned, and points at what they CAN do", () => {
+    const note = editRefusalNote(false, [PLANT_1, PLANT_2], adminOfPlant1);
     expect(note).not.toBe(null);
-    expect(note).toContain("company admin");
+    expect(note).toContain("Another plant");
     // ⭐ names the way through — a note that only refuses invites a support
     // ticket; this one says "you can add or remove your own plant".
+    expect(note).toContain("plant");
+  });
+
+  it("W9b: a part they make none of is company-admin only, still pointing the way", () => {
+    const note = editRefusalNote(false, [PLANT_2], adminOfPlant1);
+    expect(note).not.toBe(null);
+    expect(note).toContain("company admin");
     expect(note).toContain("plant");
   });
 });

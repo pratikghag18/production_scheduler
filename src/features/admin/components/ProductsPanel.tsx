@@ -66,6 +66,7 @@ import {
   useAdminProducts,
   useAssignProductSite,
   useCreateProduct,
+  useCreateProductAtNode,
   useSetProductActive,
   useSetProductColor,
   useUnassignProductSite,
@@ -76,6 +77,7 @@ import { usePlantFilter } from "../hooks/usePlantFilter";
 import { nodesInPlant, productRowsInPlant } from "../lib/plantFilter";
 import {
   indentedLabel,
+  isAtOrBelow,
   scopeIndex,
   scopeLabel,
   scopeOptions,
@@ -102,6 +104,7 @@ export function ProductsPanel() {
   });
 
   const createMutation = useCreateProduct();
+  const createAtNodeMutation = useCreateProductAtNode();
   const updateMutation = useUpdateProduct();
   const activeMutation = useSetProductActive();
   const colorMutation = useSetProductColor();
@@ -131,7 +134,10 @@ export function ProductsPanel() {
   // succeeds still has something to say — what went and what stayed — and
   // saying it in the row's error slot would style an outcome as a failure.
   const [rowNotice, setRowNotice] = useState<{ id: string; message: string } | null>(null);
-  const [newDraft, setNewDraft] = useState({ sku: "", name: "" });
+  // ⭐ D116: `nodeId` is the plant a SITE ADMIN's new part is made at — required
+  // for them (create must land somewhere they administer), unused by a company
+  // admin, whose create is plant-less and who assigns plants per row afterwards.
+  const [newDraft, setNewDraft] = useState({ sku: "", name: "", nodeId: "" });
   const [newErrors, setNewErrors] = useState<{ sku: string | null; name: string | null }>({
     sku: null,
     name: null,
@@ -184,6 +190,30 @@ export function ProductsPanel() {
   // offered nothing to add rather than a picker whose every choice the server
   // refuses. The picker's contents still fail open per node (see the row).
   const canManageAny = isCompanyAdmin || adminSiteIds.length > 0;
+
+  // ⭐ D116: "do I administer this node?", the client mirror of the server's
+  // `app_is_admin_for` ancestor walk. `adminSiteIds` are the ROOTS this reader
+  // administers; a maker node is theirs when its path is at or below one of them
+  // — so a maker that is a LINE inside an administered plant counts, exactly as
+  // it does on the server. `canEditProduct` / `editRefusalNote` take this to
+  // decide the shared-record controls per row (a part wholly made in the reader's
+  // own plants is theirs to rename, recolour and delete).
+  const adminPaths = adminSiteIds
+    .map((id) => nodesById.get(id)?.path)
+    .filter((p): p is string => p !== undefined);
+  const isAdminAt = (nodeId: string): boolean => {
+    if (isCompanyAdmin) return true;
+    const node = nodesById.get(nodeId);
+    if (node === undefined) return false;
+    return adminPaths.some((p) => isAtOrBelow(node.path, p));
+  };
+
+  // ⭐ D116: the plants a SITE ADMIN may create a part into — their admin roots,
+  // by name. A company admin does not use this (their create is plant-less).
+  const adminPlantOptions = adminSiteIds.map((id) => ({
+    value: id,
+    label: scopeLabel(id, nodesById),
+  }));
 
   // ⭐ THE ADD PICKER'S NODE POOL — the whole readable tree on "All plants", the
   // chosen plant's subtree otherwise (the plant filter narrows the FORMS too,
@@ -358,6 +388,11 @@ export function ProductsPanel() {
     );
   }
 
+  // ⭐ D116: the plant a site admin's create lands in. `newDraft.nodeId` once
+  // chosen, else the sole admin plant (so a one-plant admin never has to pick),
+  // else empty — which `submitNew` refuses before it writes.
+  const chosenCreateNode = newDraft.nodeId || (adminPlantOptions.length === 1 ? adminPlantOptions[0].value : "");
+
   function submitNew() {
     if (profile === null) return;
     const result = validateProductDraft({ sku: newDraft.sku, name: newDraft.name });
@@ -368,19 +403,35 @@ export function ProductsPanel() {
     }
     setNewErrors({ sku: null, name: null });
     setFormError(null);
-    createMutation.mutate(
+
+    const onError = (err: SchedulerError) =>
+      setFormError(describeWriteRefusal(err, describeSchedulerError(err)));
+
+    if (isCompanyAdmin) {
+      // ⭐ D115: a company admin's create is plant-less — `products.org_id` has NO
+      // DEFAULT (0002) and comes from the session; the part is offered nowhere
+      // until a plant is added per row, a legitimate state.
+      createMutation.mutate(
+        { orgId: profile.orgId, sku: result.value.sku, name: result.value.name },
+        {
+          onSuccess: () => setNewDraft({ sku: "", name: "", nodeId: "" }),
+          onError,
+        },
+      );
+      return;
+    }
+
+    // ⭐ D116: a site admin creates AT a plant they administer, and the part is
+    // dropped onto it in one act (no company-wide orphan). The plant is required.
+    if (chosenCreateNode === "") {
+      setFormError("Choose the plant this part is made at.");
+      return;
+    }
+    createAtNodeMutation.mutate(
+      { sku: result.value.sku, name: result.value.name, nodeId: chosenCreateNode },
       {
-        // `products.org_id` has NO DEFAULT (0002) — it comes from the session
-        // profile on every insert. ⭐ D115: no place here — a just-created part
-        // is offered nowhere until a plant is added, a legitimate state.
-        orgId: profile.orgId,
-        sku: result.value.sku,
-        name: result.value.name,
-      },
-      {
-        onSuccess: () => setNewDraft({ sku: "", name: "" }),
-        onError: (err: SchedulerError) =>
-          setFormError(describeWriteRefusal(err, describeSchedulerError(err))),
+        onSuccess: () => setNewDraft({ sku: "", name: "", nodeId: "" }),
+        onError,
       },
     );
   }
@@ -391,8 +442,8 @@ export function ProductsPanel() {
     // ⭐ D115: TWO DIFFERENT PERMISSIONS ON ONE ROW. `editable` gates the shared
     // record (rename, recolour, retire, delete) and is simply "are you a company
     // admin". Managing a PLACE is decided per place by `canManagePlace`.
-    const editable = canEditProduct(isCompanyAdmin);
-    const note = editRefusalNote(isCompanyAdmin);
+    const editable = canEditProduct(isCompanyAdmin, row.siteNodeIds, isAdminAt);
+    const note = editRefusalNote(isCompanyAdmin, row.siteNodeIds, isAdminAt);
     const isEditing = editingId === row.id;
     const isConfirming = confirmingId === row.id;
     const error = rowError !== null && rowError.id === row.id ? rowError.message : null;
@@ -719,11 +770,15 @@ export function ProductsPanel() {
 
   return (
     <div className={styles.panel}>
-      {/* ⭐ D115 / THE SPLIT: CREATING A PART IS A COMPANY-ADMIN ACT — it makes
-          the company-wide record. A site admin does not create parts; they opt
-          their plant into parts the company has defined (the add picker on each
-          row). So the whole card is company-admin-only. */}
-      {isCompanyAdmin && (
+      {/* ⭐ D116 (the maintainer, 2 Sept): a SITE ADMIN may add a part too — the
+          part number is unique and there is little risk in it. But create is the
+          birth of a company-wide identity, so a site admin's part is born AT a
+          plant they administer and assigned to it in one act (the "Made at"
+          picker below), which also makes it theirs to rename and delete while
+          only their plant makes it. A company admin's create stays plant-less
+          (they assign plants per row). Someone who administers nowhere sees no
+          form — nothing they could create would land anywhere. */}
+      {canManageAny && (
         <section className={styles.card}>
           <h2 className={styles.h2}>Add a product</h2>
           <div className={styles.form}>
@@ -745,27 +800,52 @@ export function ProductsPanel() {
               />
               {newErrors.name !== null && <span className={styles.error}>{newErrors.name}</span>}
             </label>
-            <button type="button" className={styles.primary} onClick={submitNew}>
+            {/* ⭐ D116: a site admin picks the plant their part is made at; a
+                company admin does not (their create is plant-less). */}
+            {!isCompanyAdmin && (
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Made at</span>
+                <select
+                  className={styles.input}
+                  aria-label="Made at"
+                  value={chosenCreateNode}
+                  onChange={(e) => setNewDraft((d) => ({ ...d, nodeId: e.target.value }))}
+                >
+                  {adminPlantOptions.length !== 1 && <option value="">Choose a plant…</option>}
+                  {adminPlantOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={createMutation.isPending || createAtNodeMutation.isPending}
+              onClick={submitNew}
+            >
               Add
             </button>
           </div>
           {formError !== null && <p className={styles.error}>{formError}</p>}
-          {/* ⭐ D115: A NEW PART IS OFFERED NOWHERE UNTIL A PLANT IS ADDED, and
-              that is an ordinary state. The plant it is made in is chosen per
-              row, in the catalogue below, not on this form. */}
+          {/* The plant-less company-admin note only applies to them; a site
+              admin's part IS made somewhere the moment it is created. */}
           <p className={styles.hint}>
-            A new part isn&rsquo;t made anywhere yet — add it to a plant from its row below. Its
-            colour is chosen for it automatically; click a swatch in the list to set it by hand.
+            {isCompanyAdmin
+              ? "A new part isn’t made anywhere yet — add it to a plant from its row below. Its colour is chosen for it automatically; click a swatch in the list to set it by hand."
+              : "Your new part is made at the plant you choose and is yours to rename and delete while only your plant makes it. Its colour is chosen automatically; click a swatch in the list to set it by hand."}
           </p>
         </section>
       )}
 
       <section className={styles.card}>
         <h2 className={styles.h2}>Catalogue</h2>
-        {!isCompanyAdmin && (
+        {!isCompanyAdmin && !canManageAny && (
           <p className={styles.status}>
-            Only a company admin can add or rename a part number. You can add or remove your own
-            plant on any part below.
+            You can view the catalogue. Adding a part, or a plant to one, needs admin rights on the
+            plant that makes it.
           </p>
         )}
         <input

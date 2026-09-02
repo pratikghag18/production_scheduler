@@ -1018,6 +1018,10 @@ export type Database = {
         Args: { p_operator_id: string }
         Returns: boolean
       }
+      app_can_edit_product_record: {
+        Args: { p_product_id: string }
+        Returns: boolean
+      }
       app_can_read_node: { Args: { p_node: string }; Returns: boolean }
       app_can_read_operator: { Args: { p_operator: string }; Returns: boolean }
       app_can_read_owned: { Args: { p_site_node: string }; Returns: boolean }
@@ -1137,6 +1141,27 @@ export type Database = {
           p_template_id?: string
         }
         Returns: Json
+      }
+      create_product_at_node: {
+        Args: { p_name: string; p_node_id: string; p_sku: string }
+        Returns: {
+          active: boolean
+          color_token: string
+          created_at: string
+          external_id: string | null
+          id: string
+          name: string
+          org_id: string
+          sku: string
+          source: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "products"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       create_run: {
         Args: {

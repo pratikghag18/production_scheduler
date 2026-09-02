@@ -593,7 +593,7 @@ ROLLBACK TO SAVEPOINT sp_Q19;
 -- ---------------------------------------------------------------------------
 -- PRODUCTS, SKILLS, OPERATOR_SKILLS
 -- ---------------------------------------------------------------------------
-\echo 'Q20 ⭐ (rewritten by 0034/Split): the shared product RECORD is company-only, but a site admin manages their OWN plant''s makers-list and not the other plant''s'
+\echo 'Q20 ⭐ (rewritten by 0036/D116): a site admin RENAMES a part they wholly make, manages their OWN plant''s makers-list, and cannot touch the other plant''s'
 SAVEPOINT sp_Q20;
 DO $$
 DECLARE v_record int; v_mine int; v_theirs int; v_state text; v_p2 uuid;
@@ -603,10 +603,10 @@ BEGIN
   SELECT v INTO v_p2 FROM q_fix WHERE k = 'p2';
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
   SET LOCAL ROLE authenticated;
-  -- ⭐⭐ THE SPLIT (D115). Until 0034 a site admin renamed their own product;
-  -- now the shared record (sku/name/colour/delete) is company property, so g1's
-  -- rename removes ZERO rows (products_update USING app_is_admin()). This
-  -- supersedes the old "mine=1" half.
+  -- ⭐⭐ D116 (0036) REOPENS THE SPLIT ON EDIT. D115 made the shared record
+  -- company-only; D116 hands it back to a site admin for a part made ONLY within
+  -- their own plants. QP1 is made only in Plant 1, which g1 administers, so g1's
+  -- rename now removes ONE row (products_update USING app_can_edit_product_record).
   UPDATE products SET name = 'Q P1 Product (edited)' WHERE id = '60000000-0000-0000-0000-00000000ee01';
   GET DIAGNOSTICS v_record = ROW_COUNT;
   -- The LIST of makers is per-plant. g1 administers Plant 1, so they may remove
@@ -624,8 +624,8 @@ BEGIN
     GET DIAGNOSTICS v_theirs = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE; END;
   RESET ROLE;
-  IF v_record = 0 AND v_mine = 1 AND v_theirs = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q20';
-  ELSE RAISE NOTICE 'FAIL Q20: record_rename=% own_plant_removed=% other_plant_removed=% (want 0,1,0)', v_record, v_mine, v_theirs; END IF;
+  IF v_record = 1 AND v_mine = 1 AND v_theirs = 0 AND v_state IS NULL THEN RAISE NOTICE 'PASS Q20';
+  ELSE RAISE NOTICE 'FAIL Q20: record_rename=% own_plant_removed=% other_plant_removed=% (want 1,1,0)', v_record, v_mine, v_theirs; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_Q20;
 

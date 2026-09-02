@@ -24,6 +24,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   assignProductSite,
   createProduct,
+  createProductAtNode,
   deleteProduct,
   fetchAdminProducts,
   setProductActive,
@@ -31,6 +32,7 @@ import {
   unassignProductSite,
   updateProduct,
   type AdminProduct,
+  type CreateProductAtNodeInput,
   type CreateProductInput,
   type ProductSiteInput,
   type SchedulerError,
@@ -75,7 +77,25 @@ export function useCreateProduct() {
   });
 }
 
-/** Rename / re-sku the shared record (company admin only). Places and colour are untouched. */
+/**
+ * Create a part AND assign it to one plant the caller administers, in one act
+ * (D116, the site-admin create path). Invalidates the BOARD as well as the
+ * catalogue: the new part arrives already made at a plant, so where it is
+ * offered has changed — the same reason `useAssignProductSite` refreshes both.
+ */
+export function useCreateProductAtNode() {
+  const queryClient = useQueryClient();
+
+  return useMutation<AdminProduct, SchedulerError, CreateProductAtNodeInput>({
+    mutationFn: (input) => createProductAtNode(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+  });
+}
+
+/** Rename / re-sku the shared record. Places and colour are untouched. */
 export function useUpdateProduct() {
   const queryClient = useQueryClient();
 
