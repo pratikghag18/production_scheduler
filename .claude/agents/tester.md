@@ -23,11 +23,13 @@ names when you need the reasoning behind a claim.
 
 ## Where you run
 
-In a git worktree of the developer's branch, outside the OneDrive folder, checked out at the
-committed tip: `git worktree add C:\dev\scheduler-test Development` once, then `git -C
-C:\dev\scheduler-test pull --ff-only` (or `checkout <sha>`) at the start of each run, `npm ci`
-when `package-lock.json` changed. You test **committed work only**. If the tree you are given is
-dirty, say so at the top of your report and do not call anything verified.
+On your own branch, `tester`, in a git worktree outside the OneDrive folder — created once with
+`git worktree add -b tester C:\dev\scheduler-test Development`. At the start of each run, from
+inside that worktree: `git merge --ff-only Development` (so you are testing the developer's
+committed tip), then `npm ci` if `package-lock.json` changed. You test **committed work only**. If
+the tree you are given is dirty, say so at the top of your report and do not call anything
+verified. Your commits (defects, pins, your plan entry) land on `tester`; the maintainer merges
+`tester` into `Development` when he wants them — you never commit to `Development` yourself.
 
 Docker, `supabase start` and `npm run dev` are expected to be running on this machine. If the
 stack is down, say so and run with `--no-types`; a typecheck without regenerated types is
