@@ -235,6 +235,21 @@ describe("ProductsPanel — the shared record (D115 / the Split)", () => {
     expect(screen.queryByRole("combobox", { name: /Where WX belongs/ })).toBeNull();
   });
 
+  it("T2b ⭐: Edit also opens the colour palette — the maintainer, 2 Sept", () => {
+    // Hitting Edit and not finding the colour "feels wrong and non-intuitive";
+    // D115 had scoped Edit to code + name with colour on the swatch alone. The
+    // palette now rides inside the Edit panel (R-307). The swatch stays a
+    // shortcut, so the group exists closed too — this asserts the "Colour" label
+    // that only the edit panel adds, and that the palette is inside THIS row.
+    render(<ProductsPanel />);
+    // Closed: no "Colour" label anywhere yet.
+    expect(screen.queryByText("Colour")).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    expect(within(row).getByRole("group", { name: "Product colour" })).toBeTruthy();
+    expect(within(row).getByText("Colour")).toBeTruthy();
+  });
+
   it("T3: editing sends only { id, sku, name } — no place travels on the rename", () => {
     render(<ProductsPanel />);
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);

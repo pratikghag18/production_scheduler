@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-02'
-  tip: bc3b712
+  tip: 7dd278d
   baseline:
-    app_tests: 1605
+    app_tests: 1606
     app_test_files: 45
     tsc: 0
     eslint: 0
@@ -4993,6 +4993,43 @@ requirements:
       word (Department, Work cell) where before they had none; admin (system) still shows only the window
       until a plant is picked.
   status: covered
+- id: R-306
+  title: A shift pattern's Edit opens the whole pattern
+  source:
+  - the maintainer, 2 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button
+    that reveals everything editable about the pattern, not a rename that leaves the times behind a
+    separate click. Reverses D106's narrow-Edit scoping at the maintainer's request; the name still
+    expands the shifts on its own.
+  verified_by:
+  - kind: vitest
+    file: src/test/shiftsPanel.test.tsx
+    cases: S13 (Edit opens name + shifts in one click)
+  - kind: screen
+    steps: >-
+      As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern
+      expanded to its shifts and breaks in one action.
+  status: covered
+- id: R-307
+  title: A product's Edit reaches its colour
+  source:
+  - the maintainer, 2 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    Editing a product opens its code, its name, and its colour palette together, so Edit changes the whole
+    shared record. The row swatch stays a shortcut to the same palette. Reverses D115's split of colour
+    onto the swatch alone at the maintainer's request.
+  verified_by:
+  - kind: vitest
+    file: src/test/productsPanel.test.tsx
+    cases: T2b (Edit opens the colour palette)
+  - kind: screen
+    steps: >-
+      As the company admin, clicked Edit on a product: the code and name inputs opened with a "Colour"
+      palette row (swatches, native picker and hex) inside the same edit panel.
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6744,7 +6781,61 @@ findings:
     with no cascade until they pick a plant, because "Area 1" in three different plants is ambiguous.
     Proven both ways: pure tests on the two functions, and driving the screen as a site admin and a
     supervisor, who now each see a filter labelled with their hierarchy's own level word.
+- id: F-076
+  title: '"Edit" opened half of what it named, on two tabs'
+  tag: The label named more than the button did
+  status: fixed
+  found_by: maintainer
+  stage: S22
+  refs:
+  - D106
+  - D115
+  violates:
+  - R-306
+  - R-307
+  story: >-
+    **The maintainer, 2 Sept:** on Shifts, *"the edit button on the shift doesn't actually open the whole
+    tab, it only opens to rename it, is very misleading"*; on Products, *"hitting edit does not open the
+    option to change colours. Feels wrong and non-intuitive."* Right on both.
+
+
+    Two earlier decisions had each scoped "Edit" deliberately narrow and moved the rest elsewhere: D106
+    made the pattern's Edit a name-and-owner control, with the shifts behind a separate click on the
+    pattern name; D115 made the product's Edit code-and-name, with the colour on a clickable swatch. Each
+    was defensible in isolation, and together they taught the reader that "Edit" meant "edit some of it"
+    — and left the most-wanted thing (the shift times, the colour) down a path they had to already know
+    about.
+
+
+    **The fix follows the label, not the old scoping.** A pattern's Edit now also expands the pattern, so
+    name, owner, shifts and breaks all open at once; a product's Edit now shows the colour palette inside
+    the edit panel, the swatch kept as a shortcut. One existing shift test had opened the pattern with a
+    second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
+    driven in the browser as the company admin.
 sessions:
+- id: 23
+  date: 2026-09-02
+  title: '"Edit" opens the whole thing on shifts and products'
+  commits:
+  - 7dd278d
+  numbers:
+    app_tests: 1606
+    app_test_files: 45
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer reported two edit buttons that named more than they did: a shift pattern's Edit only
+    renamed it, with the shifts behind a separate click, and a product's Edit did not reach the colour.
+    Both had been scoped narrow by earlier decisions (D106, D115). Reversed at his request: a pattern's
+    Edit now also expands the pattern so name, owner, shifts and breaks all open together, and a product's
+    Edit shows the colour palette inside the edit panel with the swatch kept as a shortcut. One shift test
+    drove the pattern open with a click that now toggles it shut, so that step was removed; what it
+    defends is unchanged. Both driven in the browser as the company admin. Counts read from the session's
+    own `npm run test` run.
+  shipped:
+  - S21
+  - S22
 - id: 22
   date: 2026-09-02
   title: The matrix's window and scope become remembered settings

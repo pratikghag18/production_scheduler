@@ -98,17 +98,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 22 · 2026-09-02 · The matrix's window and scope become remembered settings</h2>
-  <div class="lead"><p>M5, the last matrix stage. The &quot;expiring soon&quot; window became a 30/60/90 control and the area/line scope is remembered per viewer, both in a new <code>matrixPrefs.ts</code> on the plant-filter pattern — a guarded, org-scoped store that folds a corrupt or out-of-range value back onto the default; the operator multi-select is session-only by design. The empty state now names which absence it is. Dark theme was split out with the maintainer, the app having no theming to build it on. Driving the screen as three roles surfaced the maintainer's own report — site admins and supervisors had no hierarchy filters, because the cascade hung off the plant chooser only a multi-plant reader sees — fixed by anchoring the cascade on the reader's own topmost node. Counts read from the session's own <code>npm run test</code> run.</p></div>
+  <h2>Session 23 · 2026-09-02 · &quot;Edit&quot; opens the whole thing on shifts and products</h2>
+  <div class="lead"><p>The maintainer reported two edit buttons that named more than they did: a shift pattern's Edit only renamed it, with the shifts behind a separate click, and a product's Edit did not reach the colour. Both had been scoped narrow by earlier decisions (D106, D115). Reversed at his request: a pattern's Edit now also expands the pattern so name, owner, shifts and breaks all open together, and a product's Edit shows the colour palette inside the edit panel with the swatch kept as a shortcut. One shift test drove the pattern open with a click that now toggles it shut, so that step was removed; what it defends is unchanged. Both driven in the browser as the company admin. Counts read from the session's own <code>npm run test</code> run.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">1605</span><span class="l">app tests in 45 files — session 22, 2026-09-02</span></div>
+  <div class="stat ok"><span class="n">1606</span><span class="l">app tests in 45 files — session 23, 2026-09-02</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">522</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">35</span><span class="l">database changes (migrations)</span></div>
   <div class="stat ok"><span class="n">0</span><span class="l">open defects</span></div>
-  <div class="stat "><span class="n">125 / 248</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">127 / 250</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>bc3b712</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>7dd278d</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -516,8 +516,16 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>75 things that weren't in the plan</h2>
-  <div class="find fix" id="F-075">
+  <h2>76 things that weren't in the plan</h2>
+  <div class="find fix" id="F-076">
+  <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
+  <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
+  <p><b>The maintainer, 2 Sept:</b> on Shifts, <em>&quot;the edit button on the shift doesn't actually open the whole tab, it only opens to rename it, is very misleading&quot;</em>; on Products, <em>&quot;hitting edit does not open the option to change colours. Feels wrong and non-intuitive.&quot;</em> Right on both.</p>
+<p>Two earlier decisions had each scoped &quot;Edit&quot; deliberately narrow and moved the rest elsewhere: D106 made the pattern's Edit a name-and-owner control, with the shifts behind a separate click on the pattern name; D115 made the product's Edit code-and-name, with the colour on a clickable swatch. Each was defensible in isolation, and together they taught the reader that &quot;Edit&quot; meant &quot;edit some of it&quot; — and left the most-wanted thing (the shift times, the colour) down a path they had to already know about.</p>
+<p><b>The fix follows the label, not the old scoping.</b> A pattern's Edit now also expands the pattern, so name, owner, shifts and breaks all open at once; a product's Edit now shows the colour palette inside the edit panel, the swatch kept as a shortcut. One existing shift test had opened the pattern with a second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both driven in the browser as the company admin.</p>
+  <p class="fine">D106 · D115</p>
+</div>
+<div class="find fix" id="F-075">
   <span class="tag">Found by driving it as the real roles · fixed · you found it · <a href="#M5">M5</a></span>
   <h3>Everyone but the system admin had no hierarchy filters on the matrix</h3>
   <p><b>The maintainer reported it in the middle of building M5:</b> <em>&quot;site admins and supervisors have no hierarchy level filters in the matrix tab, only the system admin has them.&quot;</em> Exactly right, and the cause was a quiet one.</p>
@@ -1091,7 +1099,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>248 requirements · 125 covered · 109 uncovered · 0 contradicted · 14 superseded</caption>
+<caption>250 requirements · 127 covered · 109 uncovered · 0 contradicted · 14 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -2827,6 +2835,20 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
       <br><span class="fine">the maintainer, 2 Sept (in session) · maintainer</span></td>
   <td class="fine">vitest · <code>src/test/matrixPrefs.test.ts</code> MP17–MP23 (readableRootIds / cascadeBaseId)<br>screen: Signed in against the dev_demo cast and opened the Matrix section as each role. dana (site admin, Plant A) and ana (supervisor, Line 1) each gained a hierarchy filter labelled with their own level word (Department, Work cell) where before they had none; admin (system) still shows only the window until a plant is picked.</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-covered" id="R-306">
+  <td class="g-n">R-306</td>
+  <td class="reqmain"><b>A shift pattern's Edit opens the whole pattern</b><br><span class="fine">Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button that reveals everything editable about the pattern, not a rename that leaves the times behind a separate click. Reverses D106's narrow-Edit scoping at the maintainer's request; the name still expands the shifts on its own.</span>
+      <br><span class="fine">the maintainer, 2 Sept (in session) · maintainer</span></td>
+  <td class="fine">vitest · <code>src/test/shiftsPanel.test.tsx</code> S13 (Edit opens name + shifts in one click)<br>screen: As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern expanded to its shifts and breaks in one action.</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-covered" id="R-307">
+  <td class="g-n">R-307</td>
+  <td class="reqmain"><b>A product's Edit reaches its colour</b><br><span class="fine">Editing a product opens its code, its name, and its colour palette together, so Edit changes the whole shared record. The row swatch stays a shortcut to the same palette. Reverses D115's split of colour onto the swatch alone at the maintainer's request.</span>
+      <br><span class="fine">the maintainer, 2 Sept (in session) · maintainer</span></td>
+  <td class="fine">vitest · <code>src/test/productsPanel.test.tsx</code> T2b (Edit opens the colour palette)<br>screen: As the company admin, clicked Edit on a product: the code and name inputs opened with a &quot;Colour&quot; palette row (swatches, native picker and hex) inside the same edit panel.</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr></tbody></table></div>
 </section>
 
@@ -2835,6 +2857,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 23</b> · 2026-09-02 · &quot;Edit&quot; opens the whole thing on shifts and products <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer reported two edit buttons that named more than they did: a shift pattern's Edit only renamed it, with the shifts behind a separate click, and a product's Edit did not reach the colour. Both had been scoped narrow by earlier decisions (D106, D115). Reversed at his request: a pattern's Edit now also expands the pattern so name, owner, shifts and breaks all open together, and a product's Edit shows the colour palette inside the edit panel with the swatch kept as a shortcut. One shift test drove the pattern open with a click that now toggles it shut, so that step was removed; what it defends is unchanged. Both driven in the browser as the company admin. Counts read from the session's own <code>npm run test</code> run.</p>
+    <p class="fine">1606 app tests in 45 files · tsc 0 · eslint 0 · commits 7dd278d · shipped <a href="#S21">S21</a>, <a href="#S22">S22</a></p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 22</b> · 2026-09-02 · The matrix's window and scope become remembered settings <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>M5, the last matrix stage. The &quot;expiring soon&quot; window became a 30/60/90 control and the area/line scope is remembered per viewer, both in a new <code>matrixPrefs.ts</code> on the plant-filter pattern — a guarded, org-scoped store that folds a corrupt or out-of-range value back onto the default; the operator multi-select is session-only by design. The empty state now names which absence it is. Dark theme was split out with the maintainer, the app having no theming to build it on. Driving the screen as three roles surfaced the maintainer's own report — site admins and supervisors had no hierarchy filters, because the cascade hung off the plant chooser only a multi-plant reader sees — fixed by anchoring the cascade on the reader's own topmost node. Counts read from the session's own <code>npm run test</code> run.</p>
