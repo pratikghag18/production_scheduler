@@ -22,22 +22,27 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { useSession } from "@/features/auth/useSession";
 import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 import {
-  describeCertifiedAt,
-  describeSignedOffBy,
-  formatDay,
-  normaliseSignedOffBy,
   operatorRows,
   placeVerdict,
   placesUnderSameRoot,
   resolveSelectedOperator,
   rootIdFor,
   summarisePlaces,
-  ticketsFor,
   validateOperatorDraft,
   workPlacesFor,
   type OperatorLike,
   type WorkPlace,
 } from "../lib/operators";
+import { buildOperatorMatrix } from "../lib/matrix";
+import {
+  EXPIRING_WINDOW_DAYS,
+  MatrixChip,
+  MatrixLegend,
+  RecordPopover,
+  STATE_LABEL,
+  type RecordFields,
+} from "./matrixCells";
+import type { OperatorSkillRecord } from "@/lib/api";
 // ⚠️ THE SCOPE HELPERS ARE IMPORTED HERE AND NOT INTO `../lib/operators`. That
 // module is dependency-free by design — its header says so, and that is what
 // lets `operators.test.ts` run it under `node --experimental-strip-types`. An
@@ -272,39 +277,18 @@ export function OperatorsPanel() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   /* ---------------------------------------------------------------------
-   * The add/attach form, which records the SAME THREE FACTS a held row shows —
-   * see the header. Held as plain state rather than through `signerDraft`
-   * below: nothing here is written until Attach is pressed, so there is no
-   * per-keystroke write for a draft to protect an audit trail from.
-   *
-   * ⚠️ THREE INDEPENDENT BOXES, NOT A RECORD WITH REQUIRED PARTS. `grantId` is
-   * the only one Attach waits for; the other three may each be left empty on
-   * their own, in any combination (0032 writes no CHECK tying them).
+   * ⭐⭐ RECORD-IN-PLACE, THE SAME GESTURE THE TEAM MATRIX USES. The trainings
+   * a person holds are now a row of matrix cells; clicking one opens the shared
+   * `RecordPopover`, which records the same three facts a held row always showed
+   * — certified on, expires, signed off by — kept optional and independent (0032
+   * / D114 writes no CHECK tying them). This state is only WHICH cell's popover
+   * is open and where; the popover owns the three fields, keyed by the cell so a
+   * fresh one never inherits the last cell's text.
    * ------------------------------------------------------------------- */
-  const [grantId, setGrantId] = useState("");
-  const [grantExpiry, setGrantExpiry] = useState("");
-  const [grantCertifiedAt, setGrantCertifiedAt] = useState("");
-  const [grantSignedOffBy, setGrantSignedOffBy] = useState("");
-
-  /* ---------------------------------------------------------------------
-   * ⭐⭐ THE ONE DRAFT ON THIS SCREEN, AND IT IS HERE BECAUSE THE SIGN-OFF IS
-   * FREE TEXT (0032 / D114). Every other editable control in this panel is a
-   * `<select>` or a `type="date"`, which commit a WHOLE value in one gesture —
-   * so they write straight through on `onChange` and hold no draft. A text box
-   * does not: `onChange` fires per keystroke, and writing per keystroke would
-   * put "R", "R.", "R. O" into an AUDIT TRAIL as separate rows. So this one is
-   * typed locally and committed on blur.
-   *
-   * ⚠️ KEYED BY OPERATOR **AND** TRAINING, NOT BY TRAINING ALONE. Two people
-   * can hold the same training, and a draft keyed only by `skillId` would
-   * survive a click onto somebody else and show one person's half-typed signer
-   * under another person's name. `null` means nothing is being typed and every
-   * box shows what is stored.
-   * ------------------------------------------------------------------- */
-  const [signerDraft, setSignerDraft] = useState<{
-    operatorId: string;
+  const [editingCell, setEditingCell] = useState<{
     skillId: string;
-    value: string;
+    top: number;
+    left: number;
   } | null>(null);
 
   const createOperator = useCreateOperator();
@@ -318,7 +302,6 @@ export function OperatorsPanel() {
   // identity, so every `useMemo` below it recomputes every time and the
   // dependency lint says so. `data` itself is stable between refetches.
   const operators = useMemo<readonly OperatorLike[]>(() => data?.operators ?? [], [data]);
-  const skills = useMemo(() => data?.skills ?? [], [data]);
   const operatorSkills = useMemo(() => data?.operatorSkills ?? [], [data]);
   // Same reason, and one more: `usePlantFilter` memoises on the array it is
   // handed, so a fresh `[]` here would hand every derivation below a brand new
@@ -418,23 +401,42 @@ export function OperatorsPanel() {
   // you see is what you can grant. `skills` itself stays whole for the other
   // question this screen asks of it, because that one is not "what is on offer
   // here" — see `tickets` just below.
-  const skillsInPlant = useMemo(
-    () => rowsInPlant(skills, plant.choice, plant.plants, nodesById),
-    [skills, plant.choice, plant.plants, nodesById],
-  );
-
-  // ⚠️ `skills`, NOT `skillsInPlant`. These are the trainings this person
-  // ACTUALLY HOLDS — rows in `operator_skills`, not a list of what is on offer.
-  // Filtering them would hide a real grant from the only screen that can revoke
-  // it: the plant filter reaching past a view and into the record.
+  // ⭐ THE TRAININGS FOR THE PERSON ON SCREEN, AS A MATRIX — the same visual the
+  // team matrix draws, for one person. Columns are the trainings that apply to
+  // them (owner an ancestor-or-self of their node) plus any they already hold,
+  // and the header climbs their own branch DOWN TO WHERE THEY WORK. All of that
+  // shaping is the pure `../lib/matrix`, tested by `src/test/matrix.test.ts`.
   //
-  // ⚠️ THE NAME `tickets` IS THE CODE'S, NOT THE READER'S — see the header. The
-  // screen says "Trainings" everywhere a person can see it; `ticketsFor` and
-  // this local keep the word the module already used, because renaming the
-  // module's own vocabulary is a separate change from renaming the screen's.
-  const tickets = selected === null ? [] : ticketsFor(selected, skills, operatorSkills, asOf);
-  const heldIds = new Set(tickets.map((t) => t.skillId));
-  const grantable = skillsInPlant.filter((s) => !heldIds.has(s.id));
+  // ⚠️ `data.skills` / `data.operatorSkills`, NOT a plant-filtered set. The apply
+  // test already narrows to this person's own branch, and a held training is
+  // never dropped for the plant filter reaching past a view into the record.
+  //
+  // ⚠️ NON-APPLICABLE TRAININGS ARE NO LONGER OFFERED. The old "Add a training"
+  // picker let you attach any training in the plant, including one owned by a
+  // branch this person is not on; the matrix shows only what genuinely applies
+  // (plus what they already hold), so a cross is always a gap you can fill and
+  // the server would accept — the §19.72 rule, drawn.
+  const operatorMatrix = useMemo(() => {
+    if (selected === null || data === undefined) return null;
+    return buildOperatorMatrix({
+      nodes: data.nodes,
+      levels: data.levels,
+      skills: data.skills,
+      operatorSkills: data.operatorSkills,
+      operator: selected,
+      today: todayIso(),
+      windowDays: EXPIRING_WINDOW_DAYS,
+    });
+  }, [selected, data]);
+
+  // The selected person's holdings, keyed by training id, for the popover.
+  const opHoldings = useMemo(() => {
+    const m = new Map<string, OperatorSkillRecord>();
+    if (selected !== null) {
+      for (const h of operatorSkills) if (h.operatorId === selected.id) m.set(h.skillId, h);
+    }
+    return m;
+  }, [operatorSkills, selected]);
 
   // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). The maintainer, Aug 27: *"I do want to
   // be able to assign operators to a specific hierarchy level, there are
@@ -592,87 +594,51 @@ export function OperatorsPanel() {
   }
 
   /**
-   * Change ONE recorded fact about a training this person holds.
+   * ⭐⭐ RECORD-IN-PLACE, the same gesture the team matrix uses. A cell click
+   * opens the shared `RecordPopover`; Save writes the three facts at once —
+   * GRANT (insert) when nothing is held yet, UPDATE when a holding exists. The
+   * three facts stay optional and independent (0032 / D114 writes no CHECK tying
+   * them): an empty box is a fact nobody recorded, never an error, and none
+   * gates the others. Every column is being written on a grant, so an empty box
+   * is simply unrecorded; on an update the popover sends all three from what the
+   * reader left in the fields, which is exactly what they see.
    *
-   * ⚠️⚠️ THE PATCH CARRIES ONLY THE KEY THAT MOVED, AND THAT IS THE WHOLE
-   * CONTRACT. `updateSkillRecord` reads an ABSENT key as "leave it alone" and
-   * `null` as "clear it" — so a helper that filled all three in from what is on
-   * screen would look identical on the day the screen is up to date and would
-   * overwrite the other two fields with a stale render the day it is not.
-   * A field the reader did not touch is not a field they emptied.
-   *
-   * ⚠️ AND THE THREE FACTS ARE INDEPENDENT (0032 writes no CHECK tying them).
-   * No caller below may clear one because another went empty, or refuse one for
-   * want of another: a half-known record is the ordinary case here.
+   * ⚠️ THE ERROR SHOWS IN THE POPOVER, beside the fields, not in the panel
+   * notice — it is about the one record being entered, the way the team matrix
+   * surfaces it. `closeCell` resets the mutation so a stale error never trails
+   * onto the next cell opened.
    */
-  function saveRecord(
-    skillId: string,
-    patch: { expiresAt?: string | null; certifiedAt?: string | null; signedOffBy?: string | null },
-  ) {
-    if (selected === null) return;
+  const openCell = (skillId: string, target: HTMLElement) => {
+    const r = target.getBoundingClientRect();
+    setEditingCell({ skillId, top: r.bottom + 4, left: r.left });
+  };
+  const closeCell = () => {
+    setEditingCell(null);
+    grantSkill.reset();
+    updateRecord.reset();
+    revokeSkill.reset();
+  };
+  const matrixSave = (fields: RecordFields) => {
+    if (selected === null || editingCell === null) return;
     setNotice(null);
-    updateRecord.mutate({ operatorId: selected.id, skillId, ...patch }, { onError: onErr });
-  }
-
-  /**
-   * Commit the signer box, if what it holds differs from what is stored.
-   *
-   * ⚠️ THE "IF" IS NOT AN OPTIMISATION. Blur fires on every tab-through and
-   * every click elsewhere, so an unconditional write would put a row in the
-   * audit log for merely LOOKING at a field — and would rewrite a stored `"  "`
-   * to `null` on a record nobody edited.
-   */
-  function commitSigner(t: { skillId: string; signedOffBy: string | null }, raw: string) {
-    setSignerDraft(null);
-    const next = normaliseSignedOffBy(raw);
-    if (next === t.signedOffBy) return;
-    saveRecord(t.skillId, { signedOffBy: next });
-  }
-
-  /**
-   * Give the person on screen a training, WITH whatever is known about it.
-   *
-   * ⭐ ALL THREE FACTS TRAVEL WITH THE INSERT. Attaching used to send the expiry
-   * alone, so the same record was entered twice — once here, once into the row
-   * that appeared. `GrantSkillInput` has carried `certifiedAt` and
-   * `signedOffBy` since D114; this is the caller that finally fills them.
-   *
-   * ⚠️ `null` HERE IS NOT THE PATCH CONTRACT'S `null`. `saveRecord` edits a row
-   * that exists, where an absent key means "leave it alone" and `null` means
-   * "clear it"; this INSERTS one, so every column is being written and an empty
-   * box is simply a fact nobody recorded. There is nothing to leave alone yet.
-   *
-   * ⚠️ AND NOTHING IS INFERRED FROM ANYTHING ELSE — no defaulting the date to
-   * today because a signer was typed, no refusing a signer for want of a date.
-   * 0032 has no CHECK tying them and inventing one on the way in would make the
-   * ordinary half-known row impossible to enter honestly.
-   */
-  function attachSkill(
-    skillId: string,
-    record: { expiresAt: string | null; certifiedAt: string | null; signedOffBy: string | null },
-  ) {
-    if (selected === null) return;
-    setNotice(null);
-    if (orgId === null) {
+    const vars = { operatorId: selected.id, skillId: editingCell.skillId };
+    if (opHoldings.has(editingCell.skillId)) {
+      updateRecord.mutate({ ...vars, ...fields }, { onSuccess: closeCell });
+    } else if (orgId === null) {
       setNotice("Your profile hasn't loaded yet — try again in a moment.");
-      return;
+    } else {
+      grantSkill.mutate({ orgId, ...vars, ...fields }, { onSuccess: closeCell });
     }
-    grantSkill.mutate(
-      { orgId, operatorId: selected.id, skillId, ...record },
-      {
-        onSuccess: () => {
-          setGrantId("");
-          setGrantExpiry("");
-          // ⚠️ CLEARED WITH THE REST OF THE FORM. Left standing, the next
-          // training attached would silently inherit the last one's signer —
-          // a fact about one course arriving on the record of another.
-          setGrantCertifiedAt("");
-          setGrantSignedOffBy("");
-        },
-        onError: onErr,
-      },
-    );
-  }
+  };
+  const matrixRemove = () => {
+    if (selected === null || editingCell === null) return;
+    setNotice(null);
+    revokeSkill.mutate({ operatorId: selected.id, skillId: editingCell.skillId }, { onSuccess: closeCell });
+  };
+  const matrixSaving = grantSkill.isPending || updateRecord.isPending || revokeSkill.isPending;
+  const matrixError = grantSkill.error ?? updateRecord.error ?? revokeSkill.error ?? null;
+  const editingSkill =
+    editingCell === null ? null : (operatorMatrix?.columns.cols.find((c) => c.id === editingCell.skillId) ?? null);
 
   if (loading) {
     return (
@@ -1066,246 +1032,117 @@ export function OperatorsPanel() {
                   their name, beside the list of places it just turned green.
                   Creating, renaming and deleting the training TYPE is a
                   company-level job and lives on the Trainings tab. */}
+              {/* ⭐⭐ THE SAME MATRIX VISUAL AS THE TEAM VIEW, FOR ONE PERSON.
+                  The maintainer, 2 September: "copy this visual in the operator
+                  tab as well instead of what we have in there right now for
+                  individual operators", and "the hierarchy level should go the
+                  lowest in this one where the operator works". So the header
+                  climbs this person's own branch down to their line, each column
+                  is a training they can hold, and a cell click records it. The
+                  three facts a held row always showed — certified on, expires,
+                  signed off by — live in the shared `RecordPopover` now, kept
+                  optional and independent exactly as before (0032 / D114). */}
               <h3 className={styles.h3}>Trainings</h3>
               <p className={styles.footnote}>
-                A training is what changes the answer above. Adding one can turn several crosses
-                green at once — requirements sit on places and inherit downward. Who signed somebody
-                off and when are recorded here; both are optional, and either can be filled in on
-                its own.
+                A training is what changes the answer above — requirements sit on places and inherit
+                downward, so recording one can turn several crosses green at once. Each column is a
+                training {selected.displayName} can hold; click a cell to record it, change its
+                dates, or remove it. Who signed somebody off and when are optional.
               </p>
-              <ul className={styles.tickets}>
-                {tickets.map((t) => {
-                  /* ⚠️⚠️ EVERY CONTROL IN THIS ROW IS NAMED FOR ITS TRAINING, AND
-                     WITHOUT THAT THE LIST IS UNUSABLE. There is one of these rows
-                     per training somebody holds, so a bare "Expires" was already
-                     N boxes sharing one accessible name — the defect the edit form
-                     above had, where "Belongs to" appeared twice and became
-                     `Where Ann Adams belongs`. D114 adds two more boxes per row,
-                     which would have made it N×3. `within(...)` disambiguates for
-                     a sighted reader and for a test and does NOTHING for the
-                     person who needs the name (D106).
-                     ⚠️ The visible label stays short — the qualified name is what
-                     is SPOKEN, not what is drawn, and a column of "Expires for
-                     Forklift" labels would repeat the row's own heading. */
-                  const drafting =
-                    signerDraft !== null &&
-                    signerDraft.operatorId === selected.id &&
-                    signerDraft.skillId === t.skillId;
-                  return (
-                    <li key={t.skillId} className={styles.ticket}>
-                      <span className={styles.ticketName}>
-                        {t.name}
-                        {t.lapsed && <span className={styles.badge}>lapsed</span>}
-                      </span>
-                      <div className={styles.record}>
-                        {/* ⭐ WHEN IT WAS DONE — the half of the audit question
-                            that needed no column at all. `certified_at` has been
-                            on this table since it was created and nothing had
-                            ever read it (0032's header); this is the screen it
-                            was missing.
-                            ⚠️ NOT `created_at`. A row entered today may record a
-                            course sat last March, which is why the date is typed
-                            rather than stamped. */}
-                        <label className={styles.field}>
-                          <span className={styles.fieldLabel}>Trained on</span>
-                          <input
-                            className={styles.input}
-                            type="date"
-                            aria-label={`Trained on for ${t.name}`}
-                            value={t.certifiedAt ?? ""}
-                            disabled={busy}
-                            onChange={(e) =>
-                              // ⚠️ ONLY THIS KEY. Emptying the date does not
-                              // touch the signer beside it — 0032 has no CHECK
-                              // tying the two, and inventing one here would
-                              // erase a fact the reader never asked about.
-                              saveRecord(t.skillId, {
-                                certifiedAt: e.target.value === "" ? null : e.target.value,
-                              })
-                            }
-                          />
-                          <span className={styles.ticketWhen}>
-                            {describeCertifiedAt(t.certifiedAt)}
-                          </span>
-                        </label>
-                        {/* ⭐⭐ WHO SIGNED IT OFF — FREE TEXT, AND THAT IS A
-                            DECISION, NOT A SHORTCUT (0032 / D114). The signer is
-                            routinely an external assessor or a vendor's trainer
-                            with no login here, and a CSV row cannot carry a user
-                            id. **This box holds the CLAIM; who typed it in is the
-                            audit log's answer.** It must not become a picker of
-                            people in this system — that would make the record
-                            either impossible to enter or untrue.
-                            ⚠️ COMMITTED ON BLUR, never per keystroke — see
-                            `signerDraft`. */}
-                        <label className={styles.field}>
-                          <span className={styles.fieldLabel}>Signed off by</span>
-                          <input
-                            className={styles.input}
-                            type="text"
-                            aria-label={`Signed off by for ${t.name}`}
-                            value={drafting ? signerDraft.value : (t.signedOffBy ?? "")}
-                            disabled={busy}
-                            onChange={(e) =>
-                              setSignerDraft({
-                                operatorId: selected.id,
-                                skillId: t.skillId,
-                                value: e.target.value,
-                              })
-                            }
-                            onBlur={(e) => commitSigner(t, e.target.value)}
-                            // Enter is what a person types to mean "done"; it
-                            // commits through the same blur path rather than a
-                            // second one that could drift from it.
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") e.currentTarget.blur();
-                            }}
-                          />
-                          <span className={styles.ticketWhen}>
-                            {describeSignedOffBy(t.signedOffBy)}
-                          </span>
-                        </label>
-                        <label className={styles.field}>
-                          <span className={styles.fieldLabel}>Expires</span>
-                          <input
-                            className={styles.input}
-                            type="date"
-                            aria-label={`Expires for ${t.name}`}
-                            value={t.expiresAt ?? ""}
-                            disabled={busy}
-                            onChange={(e) =>
-                              saveRecord(t.skillId, {
-                                expiresAt: e.target.value === "" ? null : e.target.value,
-                              })
-                            }
-                          />
-                          {/* ⚠️ "never expires" IS NOT "not recorded" AND THE
-                              TWO MUST NOT BE COLLAPSED. An empty expiry is a
-                              positive fact — this training does not lapse —
-                              while an empty sign-off is an absence. Same blank
-                              box, opposite meanings. */}
-                          <span className={styles.ticketWhen}>
-                            {t.expiresAt === null ? "never expires" : formatDay(t.expiresAt)}
-                          </span>
-                        </label>
-                      </div>
-                      <button
-                        type="button"
-                        className={styles.small}
-                        aria-label={`Remove ${t.name}`}
-                        disabled={busy}
-                        onClick={() => {
-                          setNotice(null);
-                          revokeSkill.mutate(
-                            { operatorId: selected.id, skillId: t.skillId },
-                            { onError: onErr },
-                          );
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  );
-                })}
-                {tickets.length === 0 && <li className={styles.status}>No trainings yet.</li>}
-              </ul>
+              {operatorMatrix === null || operatorMatrix.columns.cols.length === 0 ? (
+                <p className={styles.status}>No trainings apply to {selected.displayName} yet.</p>
+              ) : (
+                <>
+                  <MatrixLegend />
+                  <div className={styles.matrixScroll}>
+                    <table className={styles.matrix}>
+                      <thead>
+                        {operatorMatrix.columns.bands.map((band, b) => (
+                          <tr key={b}>
+                            {band.map((cell, i) => (
+                              <th
+                                key={i}
+                                className={styles.matrixOwner}
+                                colSpan={cell.colspan}
+                                rowSpan={cell.rowspan}
+                              >
+                                {cell.label}
+                              </th>
+                            ))}
+                          </tr>
+                        ))}
+                        <tr>
+                          {operatorMatrix.columns.cols.map((t) => (
+                            <th key={t.id} className={styles.matrixColName} scope="col">
+                              {t.name}
+                              {t.externalId && <span className={styles.matrixDoc}>{t.externalId}</span>}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          {operatorMatrix.columns.cols.map((t) => {
+                            const st = operatorMatrix.cellState(t.id);
+                            return (
+                              <td key={t.id} className={styles.matrixCell}>
+                                <MatrixChip
+                                  state={st}
+                                  title={`${t.name}: ${STATE_LABEL[st]} (click to record)`}
+                                  ariaLabel={`${t.name}: ${STATE_LABEL[st]} — record`}
+                                  onClick={(e) => openCell(t.id, e.currentTarget)}
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className={styles.matrixCount}>
+                    {operatorMatrix.counts.held} of {operatorMatrix.counts.trainings} held
+                    {operatorMatrix.counts.gaps > 0 && (
+                      <>
+                        {" · "}
+                        <b className={styles.matrixGap}>{operatorMatrix.counts.gaps} not trained</b>
+                      </>
+                    )}
+                    {operatorMatrix.counts.needRenewal > 0 && (
+                      <>
+                        {" · "}
+                        <b className={styles.matrixWarn}>
+                          {operatorMatrix.counts.needRenewal} need renewal
+                        </b>
+                      </>
+                    )}
+                  </p>
+                </>
+              )}
 
-              <h3 className={styles.h3}>Add a training</h3>
-              <div className={styles.grantRow}>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Existing training</span>
-                  <select
-                    className={styles.input}
-                    value={grantId}
-                    onChange={(e) => setGrantId(e.target.value)}
-                  >
-                    <option value="">Choose…</option>
-                    {grantable.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {/* ⭐⭐ THE SAME THREE FACTS THE ROWS ABOVE CARRY, IN THE SAME
-                    ORDER — trained on, signed off by, expires. The list and the
-                    form disagreeing about what a training record is was the
-                    whole of the maintainer's complaint; the order is part of
-                    the answer, because a reader who has just read the rows
-                    above scans for the columns in the places they were.
-                    ⚠️⚠️ NAMED SO THEY CANNOT COLLIDE WITH A ROW'S. Those are
-                    `Trained on for Forklift` / `Signed off by for Forklift` —
-                    one per training held — and these sit a few lines below
-                    them on the same page. "(optional)" is not a decoration
-                    here: it is what keeps the accessible name unique against
-                    EVERY possible training name, since no `… for X` can ever
-                    equal `… (optional)`. D106, and O31 pins it. */}
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Trained on (optional)</span>
-                  <input
-                    className={styles.input}
-                    type="date"
-                    value={grantCertifiedAt}
-                    onChange={(e) => setGrantCertifiedAt(e.target.value)}
-                  />
-                </label>
-                {/* ⚠️ FREE TEXT, FOR 0032's OWN REASON: the signer is routinely
-                    an external assessor or a vendor's trainer with no login
-                    here. A picker of people in this system would make the
-                    record either impossible to enter or untrue — the same
-                    decision the held rows above record at length. */}
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Signed off by (optional)</span>
-                  <input
-                    className={styles.input}
-                    type="text"
-                    value={grantSignedOffBy}
-                    onChange={(e) => setGrantSignedOffBy(e.target.value)}
-                  />
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Expires (blank = never)</span>
-                  <input
-                    className={styles.input}
-                    type="date"
-                    value={grantExpiry}
-                    onChange={(e) => setGrantExpiry(e.target.value)}
-                  />
-                </label>
-                {/* ⚠️ STILL DISABLED ON `grantId` ALONE. The three record boxes
-                    are each optional and independent, so none of them may gate
-                    this button — requiring one would be the CHECK migration
-                    0032 deliberately did not write, arriving as a disabled
-                    control instead. */}
-                <button
-                  type="button"
-                  className={styles.primary}
-                  disabled={busy || grantId === ""}
-                  onClick={() =>
-                    attachSkill(grantId, {
-                      expiresAt: grantExpiry === "" ? null : grantExpiry,
-                      certifiedAt: grantCertifiedAt === "" ? null : grantCertifiedAt,
-                      // ⚠️ TRIMMED ON THE WAY OUT, like the row above commits
-                      // it: `signed_off_by` is a plain `text` column with no
-                      // trim trigger and no CHECK, so this is the only thing
-                      // between a user and a signer called "  ".
-                      signedOffBy: normaliseSignedOffBy(grantSignedOffBy),
-                    })
-                  }
-                >
-                  Attach
-                </button>
-              </div>
-              {/* ⚠️ A DEAD END HAS TO SAY WHERE THE ROAD IS. This box used to
-                  carry a "…or a new one" field that created the training on the
-                  spot, so an empty picker was never the end of the story; with
-                  the catalogue on its own tab it is, and a picker offering
-                  nothing with no sentence under it reads as a broken screen
-                  rather than as an empty company. */}
-              {grantable.length === 0 && (
-                <p className={styles.footnote}>
-                  Nothing left to attach. New trainings are created on the Trainings tab.
-                </p>
+              {/* ⭐ RECORD-IN-PLACE. A grant is no longer a separate "Add a
+                  training" form — a training that applies but is not held shows
+                  as a `×` cell above, and clicking it opens this same popover to
+                  record it. New training TYPES are still created on the Trainings
+                  tab; this only gives one to the person on screen. */}
+              {editingCell !== null && editingSkill !== null && (
+                <RecordPopover
+                  key={editingCell.skillId}
+                  who={selected.displayName}
+                  what={editingSkill.name}
+                  whatRef={editingSkill.externalId}
+                  held={opHoldings.has(editingCell.skillId)}
+                  initial={{
+                    certifiedAt: opHoldings.get(editingCell.skillId)?.certifiedAt ?? null,
+                    expiresAt: opHoldings.get(editingCell.skillId)?.expiresAt ?? null,
+                    signedOffBy: opHoldings.get(editingCell.skillId)?.signedOffBy ?? null,
+                  }}
+                  position={{ top: editingCell.top, left: editingCell.left }}
+                  saving={matrixSaving}
+                  error={matrixError}
+                  onSave={matrixSave}
+                  onRemove={matrixRemove}
+                  onClose={closeCell}
+                />
               )}
             </>
           )}

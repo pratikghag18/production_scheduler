@@ -437,3 +437,91 @@
   color: var(--muted);
   border-color: var(--grid);
 }
+
+/* ---------------------------------------------------------------------------
+   The single-operator training matrix (stage M4). Same look as the team matrix
+   in `MatrixPanel.module.css`, minus the frozen operator column and the team
+   dividers — there is one person and one row here. The chip glyph, its colour
+   and the record popover come from the shared `matrixCells.module.css`; these
+   are only the table frame around them. Sized in `rem` (D84); hairlines stay px.
+   --------------------------------------------------------------------------- */
+.matrixScroll {
+  overflow-x: auto;
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  background: var(--surface);
+}
+
+.matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix th,
+.matrix td {
+  border-bottom: 1px solid var(--grid);
+  border-right: 1px solid var(--grid);
+}
+
+.matrix tr th:last-child,
+.matrix tr td:last-child {
+  border-right: 0;
+}
+
+.matrix tbody td {
+  border-bottom: 0;
+}
+
+.matrixOwner {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  padding: 0.4375rem 0.625rem;
+  text-align: center;
+  vertical-align: middle;
+  background: var(--page);
+  border-bottom: 1px solid var(--axis);
+}
+
+.matrixColName {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  padding: 0.4375rem 0.5rem;
+  text-align: center;
+  vertical-align: bottom;
+  min-width: 3.5rem;
+  line-height: 1.25;
+  background: var(--page);
+}
+
+.matrixDoc {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--muted);
+  margin-top: 0.125rem;
+}
+
+.matrixCell {
+  padding: 0.375rem;
+  text-align: center;
+  height: 2.375rem;
+}
+
+.matrixCount {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.matrixGap {
+  color: var(--crit);
+}
+
+.matrixWarn {
+  color: color-mix(in srgb, var(--warn) 62%, #000);
+}
