@@ -75,6 +75,7 @@ const h = vi.hoisted(() => {
     // history warns about).
     updateMutate: vi.fn(),
     createMutate: vi.fn(),
+    colorMutate: vi.fn(),
     assignMutate: vi.fn(),
     unassignMutate: vi.fn(),
     node,
@@ -130,7 +131,7 @@ vi.mock("@/features/admin/hooks/useProducts", () => ({
   useCreateProduct: () => ({ mutate: h.createMutate, isPending: false }),
   useUpdateProduct: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetProductActive: () => ({ mutate: vi.fn(), isPending: false }),
-  useSetProductColor: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetProductColor: () => ({ mutate: h.colorMutate, isPending: false }),
   // ⭐ D115: the two new writes, mocked to the EXACT shape of the others.
   useAssignProductSite: () => ({ mutate: h.assignMutate, isPending: false }),
   useUnassignProductSite: () => ({ mutate: h.unassignMutate, isPending: false }),
@@ -208,10 +209,15 @@ function showPlant(choice: string | null) {
 }
 
 beforeEach(() => {
-  h.updateMutate.mockClear();
-  h.createMutate.mockClear();
-  h.assignMutate.mockClear();
-  h.unassignMutate.mockClear();
+  // ⚠️ mockReset, not mockClear — one case sets an `updateMutate` implementation
+  // (to fire its onSuccess), and mockClear would leave that leaking into the
+  // next test. Reset clears the call log AND the implementation; every other
+  // case uses these as plain spies, so a bare reset is what they expect anyway.
+  h.updateMutate.mockReset();
+  h.createMutate.mockReset();
+  h.colorMutate.mockReset();
+  h.assignMutate.mockReset();
+  h.unassignMutate.mockReset();
   asCompanyAdmin();
   h.state.products = h.baseProducts();
   h.state.tree = h.baseTree();
@@ -248,6 +254,54 @@ describe("ProductsPanel — the shared record (D115 / the Split)", () => {
     const row = editingRow("WX");
     expect(within(row).getByRole("group", { name: "Product colour" })).toBeTruthy();
     expect(within(row).getByText("Colour")).toBeTruthy();
+  });
+
+  it("T2c ⭐: a colour picked in Edit is STAGED — it does not write until Save", () => {
+    // The maintainer, 2 Sept: colour should wait for Save like the code and name,
+    // not apply on the click. So picking a swatch inside Edit writes nothing yet;
+    // Save is what sends it — as its own call (setProductColor is separate from
+    // updateProduct), and with sku/name unchanged there is no rename write at all.
+    render(<ProductsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    fireEvent.click(within(row).getByRole("button", { name: "product-2" }));
+    expect(h.colorMutate).not.toHaveBeenCalled();
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    expect(h.colorMutate).toHaveBeenCalledTimes(1);
+    expect(h.colorMutate.mock.calls[0][0]).toEqual({ id: "p1", colorToken: "product-2" });
+    expect(h.updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("T2d ⭐: Cancel after picking a colour writes nothing — the note that prompted this", () => {
+    render(<ProductsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    fireEvent.click(within(row).getByRole("button", { name: "product-2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(h.colorMutate).not.toHaveBeenCalled();
+    expect(h.updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("T2e ⭐: Save with a rename AND a recolour writes each on its own call, rename first", () => {
+    // The two are separate writes on purpose (products.ts). Save orders them: the
+    // rename, then the colour once the rename is in, so a rejected rename never
+    // recolours the row underneath it. The update mock invokes its onSuccess so
+    // the colour, which is chained on it, actually fires.
+    h.updateMutate.mockImplementation((_input: unknown, opts?: { onSuccess?: () => void }) =>
+      opts?.onSuccess?.(),
+    );
+    render(<ProductsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    fireEvent.change(within(row).getByRole("textbox", { name: "Name for WX" }), {
+      target: { value: "Widget X2" },
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "product-2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    expect(h.updateMutate).toHaveBeenCalledTimes(1);
+    expect(h.updateMutate.mock.calls[0][0]).toEqual({ id: "p1", sku: "WX", name: "Widget X2" });
+    expect(h.colorMutate).toHaveBeenCalledTimes(1);
+    expect(h.colorMutate.mock.calls[0][0]).toEqual({ id: "p1", colorToken: "product-2" });
   });
 
   it("T3: editing sends only { id, sku, name } — no place travels on the rename", () => {

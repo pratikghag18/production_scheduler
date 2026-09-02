@@ -110,12 +110,19 @@ export function ProductsPanel() {
 
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  // ⭐ D115: THE EDIT IS THE SHARED RECORD ONLY — sku and name. Where a product
-  // is made is the `product_sites` list, managed by its own controls (the chips
-  // and the add picker), not by this draft. There is no owner field here.
-  const [editDraft, setEditDraft] = useState<{ sku: string; name: string }>({
+  // ⭐ D115: THE EDIT IS THE SHARED RECORD — sku, name, and (2 Sept) colour. Where
+  // a product is made is the `product_sites` list, managed by its own controls
+  // (the chips and the add picker), not by this draft. There is no owner field.
+  // ⭐ COLOUR IS STAGED HERE AND APPLIED ON SAVE (the maintainer, 2 Sept), so
+  // picking a colour then hitting Cancel discards it, like the sku and name — the
+  // note that a swatch click "was already saved" is what prompted this. It stays
+  // a SEPARATE write on the way out (see `saveEdit`): `setProductColor` is not
+  // an extra field on `updateProduct`, so a colour change cannot fail on a
+  // duplicate sku and a rename cannot fail on a colour (products.ts's rule).
+  const [editDraft, setEditDraft] = useState<{ sku: string; name: string; colorToken: string }>({
     sku: "",
     name: "",
+    colorToken: "",
   });
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [recolouringId, setRecolouringId] = useState<string | null>(null);
@@ -236,31 +243,65 @@ export function ProductsPanel() {
   function beginEdit(row: ProductRow) {
     clearRowError(row.id);
     setConfirmingId(null);
-    setEditingId(row.id);
-    setEditDraft({ sku: row.sku, name: row.name });
+    setRecolouringId(null); // the standalone quick-recolour and the edit palette
+    setEditingId(row.id); //   are one control now — don't leave both open.
+    setEditDraft({ sku: row.sku, name: row.name, colorToken: row.colorToken });
   }
 
   function saveEdit(row: ProductRow) {
-    // ⭐ D115: THE RENAME IS THE SHARED RECORD ONLY. Places travel through their
-    // own writes, so this carries just sku and name and can only fail on a
-    // duplicate sku or a refused write — one write, one thing that can be wrong.
+    // sku and name validate together; colour is a palette token already checked
+    // as it was staged, so it needs no validation here.
     const result = validateProductDraft({ sku: editDraft.sku, name: editDraft.name });
     if (!result.ok) {
       setRowError({ id: row.id, message: result.skuError ?? result.nameError ?? "" });
       return;
     }
     clearRowError(row.id);
-    updateMutation.mutate(
-      { id: row.id, sku: result.value.sku, name: result.value.name },
-      {
-        onSuccess: () => setEditingId((cur) => (cur === row.id ? null : cur)),
-        onError: (err: SchedulerError) =>
-          setRowError({
-            id: row.id,
-            message: describeWriteRefusal(err, describeSchedulerError(err)),
-          }),
-      },
-    );
+
+    const renameChanged = result.value.sku !== row.sku || result.value.name !== row.name;
+    const colourChanged = editDraft.colorToken !== row.colorToken;
+    if (!renameChanged && !colourChanged) {
+      setEditingId((cur) => (cur === row.id ? null : cur));
+      return;
+    }
+
+    const close = () => setEditingId((cur) => (cur === row.id ? null : cur));
+
+    // ⭐ TWO WRITES, NOT ONE (products.ts): `setProductColor` is a separate call
+    // from `updateProduct` so each carries one thing that can be wrong. Save just
+    // orders them — the rename first, because it is the one that can fail on a
+    // duplicate sku; the colour follows only once the rename is in, so a rejected
+    // rename never quietly recolours the row underneath it.
+    const saveColour = () => {
+      if (!colourChanged) {
+        close();
+        return;
+      }
+      colorMutation.mutate(
+        { id: row.id, colorToken: editDraft.colorToken },
+        {
+          onSuccess: close,
+          onError: (err: SchedulerError) =>
+            setRowError({ id: row.id, message: describeWriteRefusal(err, "product") }),
+        },
+      );
+    };
+
+    if (renameChanged) {
+      updateMutation.mutate(
+        { id: row.id, sku: result.value.sku, name: result.value.name },
+        {
+          onSuccess: saveColour,
+          onError: (err: SchedulerError) =>
+            setRowError({
+              id: row.id,
+              message: describeWriteRefusal(err, describeSchedulerError(err)),
+            }),
+        },
+      );
+    } else {
+      saveColour();
+    }
   }
 
   function toggleActive(row: ProductRow) {
@@ -357,6 +398,28 @@ export function ProductsPanel() {
     const error = rowError !== null && rowError.id === row.id ? rowError.message : null;
     const notice = rowNotice !== null && rowNotice.id === row.id ? rowNotice.message : null;
 
+    // ⭐ WHERE COLOUR GOES DEPENDS ON WHY THE PALETTE IS OPEN. Inside the Edit
+    // panel it is STAGED into the draft and applied on Save with the rest; on the
+    // standalone swatch shortcut (no Save to wait for) it still writes at once.
+    // The palette reads the staged colour while editing so a picked-but-unsaved
+    // choice shows as selected.
+    const currentColour = isEditing ? editDraft.colorToken : row.colorToken;
+    const applyColour = (colorToken: string) => {
+      clearRowError(row.id);
+      if (isEditing) {
+        setEditDraft((d) => ({ ...d, colorToken }));
+        return;
+      }
+      colorMutation.mutate(
+        { id: row.id, colorToken },
+        {
+          onSuccess: () => setRecolouringId(null),
+          onError: (err: SchedulerError) =>
+            setRowError({ id: row.id, message: describeWriteRefusal(err, "product") }),
+        },
+      );
+    };
+
     // The nodes offerable in THIS row's add picker: the readable pool (already
     // narrowed by the plant filter) minus the places it is already made in.
     const assigned = new Set(row.siteNodeIds);
@@ -384,6 +447,9 @@ export function ProductsPanel() {
             }
             onClick={() => {
               clearRowError(row.id);
+              // While editing, the palette is already open in the edit panel and
+              // stages into the draft — don't also open the immediate one.
+              if (isEditing) return;
               setRecolouringId(recolouringId === row.id ? null : row.id);
             }}
           />
@@ -484,7 +550,12 @@ export function ProductsPanel() {
         <span className={styles.actions}>
           {isEditing ? (
             <>
-              <button type="button" className={styles.primary} onClick={() => saveEdit(row)}>
+              <button
+                type="button"
+                className={styles.primary}
+                disabled={updateMutation.isPending || colorMutation.isPending}
+                onClick={() => saveEdit(row)}
+              >
                 Save
               </button>
               <button type="button" className={styles.quiet} onClick={() => setEditingId(null)}>
@@ -538,25 +609,17 @@ export function ProductsPanel() {
                 key={token}
                 type="button"
                 className={
-                  token === row.colorToken
+                  token === currentColour
                     ? `${styles.paletteChip} ${styles.paletteChipOn}`
                     : styles.paletteChip
                 }
                 style={{ background: productColorVar(token) }}
                 aria-label={token}
-                aria-pressed={token === row.colorToken}
+                aria-pressed={token === currentColour}
                 disabled={colorMutation.isPending}
                 onClick={() => {
-                  clearRowError(row.id);
                   if (!isPaletteToken(token)) return;
-                  colorMutation.mutate(
-                    { id: row.id, colorToken: token },
-                    {
-                      onSuccess: () => setRecolouringId(null),
-                      onError: (e) =>
-                        setRowError({ id: row.id, message: describeWriteRefusal(e, "product") }),
-                    },
-                  );
+                  applyColour(token);
                 }}
               />
             ))}
@@ -564,27 +627,24 @@ export function ProductsPanel() {
               type="color"
               className={styles.colorField}
               aria-label="Pick a colour"
-              value={isHexColor(row.colorToken) ? row.colorToken : "#1baf7a"}
+              value={isHexColor(currentColour) ? currentColour : "#1baf7a"}
               disabled={colorMutation.isPending}
               onChange={(e) => {
                 const hex = normaliseHexInput(e.target.value);
                 if (hex === null) return;
-                clearRowError(row.id);
-                colorMutation.mutate(
-                  { id: row.id, colorToken: hex },
-                  {
-                    onError: (err) =>
-                      setRowError({ id: row.id, message: describeWriteRefusal(err, "product") }),
-                  },
-                );
+                applyColour(hex);
               }}
             />
             <input
+              // Re-mount when the committed colour changes (e.g. a chip was
+              // clicked) so this uncontrolled field shows the new value while
+              // still allowing free typing between changes.
+              key={`hex-${currentColour}`}
               type="text"
               className={styles.hexField}
               aria-label="Colour hex code"
               placeholder="#1baf7a"
-              defaultValue={isHexColor(row.colorToken) ? row.colorToken : ""}
+              defaultValue={isHexColor(currentColour) ? currentColour : ""}
               disabled={colorMutation.isPending}
               onBlur={(e) => {
                 const typed = e.target.value.trim();
@@ -597,15 +657,7 @@ export function ProductsPanel() {
                   });
                   return;
                 }
-                clearRowError(row.id);
-                colorMutation.mutate(
-                  { id: row.id, colorToken: hex },
-                  {
-                    onSuccess: () => setRecolouringId(null),
-                    onError: (err) =>
-                      setRowError({ id: row.id, message: describeWriteRefusal(err, "product") }),
-                  },
-                );
+                applyColour(hex);
               }}
             />
           </span>
