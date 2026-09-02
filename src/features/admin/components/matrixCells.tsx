@@ -18,9 +18,6 @@ import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 import type { CellState } from "../lib/matrix";
 import styles from "./matrixCells.module.css";
 
-/** How many days ahead counts as "expiring soon". A setting later (stage M5). */
-export const EXPIRING_WINDOW_DAYS = 30;
-
 /** Legend order — worst-to-clear so a reader scans the problems first. */
 export const STATE_ORDER: readonly CellState[] = ["trained", "expiring", "expired", "missing", "na"];
 

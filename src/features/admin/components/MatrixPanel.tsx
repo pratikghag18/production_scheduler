@@ -28,7 +28,7 @@
 
    ⚠️ Record-in-place (clicking a cell to record or edit a training) is the next
    stage; this is the read-only view. --------------------------------------- */
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import {
@@ -41,13 +41,23 @@ import { useEditRights } from "../hooks/useEditRights";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { buildMatrix } from "../lib/matrix";
 import {
-  EXPIRING_WINDOW_DAYS,
   MatrixChip,
   MatrixLegend,
   RecordPopover,
   STATE_LABEL,
   type RecordFields,
 } from "./matrixCells";
+import {
+  DEFAULT_EXPIRY_WINDOW,
+  EXPIRY_WINDOWS,
+  MATRIX_EMPTY_TEXT,
+  cascadeBaseId,
+  loadMatrixView,
+  matrixEmptyReason,
+  readableRootIds,
+  saveMatrixView,
+  type ExpiryWindow,
+} from "../lib/matrixPrefs";
 import type { OperatorRecord, OperatorSkillRecord, SkillRecord } from "@/lib/api";
 import styles from "./MatrixPanel.module.css";
 
@@ -79,11 +89,39 @@ export function MatrixPanel() {
   const nodes = useMemo(() => data?.nodes ?? [], [data]);
   const plantFilter = usePlantFilter(nodes);
 
-  // The area / line cascade below the shared plant chooser, plus the operator
-  // multi-select. Kept local — a view choice, not shared state.
+  // ⭐ M5: the "expiring soon" window and the area / line the reader last chose,
+  // remembered PER VIEWER (per org) the way the plant filter is — see
+  // `../lib/matrixPrefs`. Hydrated ONCE per org from storage; every change writes
+  // through in its own handler, never in an effect watching the value — an effect
+  // would re-save the value hydration had only just read, the trap `adminView`'s
+  // store header records. The operator multi-select is deliberately NOT
+  // remembered: it is a momentary refinement with none of the staleness handling
+  // area / line inherit from the cascade, and re-opening to the whole team is the
+  // right default.
+  const [windowDays, setWindowDays] = useState<ExpiryWindow>(DEFAULT_EXPIRY_WINDOW);
   const [areaId, setAreaId] = useState<string | null>(null);
   const [lineId, setLineId] = useState<string | null>(null);
-  const [pickedOps, setPickedOps] = useState<ReadonlySet<string> | null>(null); // null = all
+  const [pickedOps, setPickedOps] = useState<ReadonlySet<string> | null>(null); // null = all, session-only
+  const hydratedOrg = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (orgId === null || hydratedOrg.current === orgId) return;
+    const view = loadMatrixView(orgId);
+    setWindowDays(view.window);
+    setAreaId(view.areaId);
+    setLineId(view.lineId);
+    hydratedOrg.current = orgId;
+  }, [orgId]);
+
+  // Write the whole remembered view through on any change; a caller passes only
+  // the field it changed and the rest read from the current render's state.
+  const persist = (next: { window?: ExpiryWindow; areaId?: string | null; lineId?: string | null }) => {
+    saveMatrixView(orgId, {
+      window: next.window ?? windowDays,
+      areaId: next.areaId !== undefined ? next.areaId : areaId,
+      lineId: next.lineId !== undefined ? next.lineId : lineId,
+    });
+  };
 
   // Record-in-place: which cell's popover is open (the popover owns its fields).
   const [editing, setEditing] = useState<{
@@ -102,9 +140,29 @@ export function MatrixPanel() {
     };
   }, [nodes]);
 
+  // Which level each node belongs to, by name — so the area / line dropdowns
+  // carry the hierarchy's OWN words ("Department", "Cell") rather than assuming
+  // every company calls the two levels below a plant "Area" and "Line".
+  const levelNameByNode = useMemo(() => {
+    const levelName = new Map((data?.levels ?? []).map((l) => [l.id, l.name] as const));
+    const m = new Map<string, string>();
+    for (const n of nodes) {
+      const nm = levelName.get(n.levelId);
+      if (nm) m.set(n.id, nm);
+    }
+    return m;
+  }, [data, nodes]);
+
+  // ⭐ THE AREA / LINE CASCADE IS ANCHORED ON WHAT THE READER CAN SEE, NOT ONLY
+  // ON A CHOSEN PLANT — the maintainer flagged, 2 Sept, that a site admin or
+  // supervisor (one readable root, so no plant chooser) had no area or line
+  // filter at all. `cascadeBaseId` / `readableRootIds` carry the rule and its
+  // proof (`matrixPrefs.test.ts`); this reads what they return.
+  const rootIds = useMemo(() => readableRootIds(nodes), [nodes]);
+
   // Resolve the cascade against what is actually available now, so a stale
   // selection (after the plant changed) collapses to "All" rather than sticking.
-  const plantId = plantFilter.choice;
+  const plantId = cascadeBaseId(plantFilter.choice, rootIds);
   const areas = plantId ? childrenOf(plantId) : [];
   const effectiveAreaId = areas.some((a) => a.id === areaId) ? areaId : null;
   const lines = effectiveAreaId ? childrenOf(effectiveAreaId) : [];
@@ -122,9 +180,9 @@ export function MatrixPanel() {
       operatorSkills: data.operatorSkills,
       scopeNodeId,
       today: todayIso(),
-      windowDays: EXPIRING_WINDOW_DAYS,
+      windowDays,
     });
-  }, [data, scopeNodeId]);
+  }, [data, scopeNodeId, windowDays]);
 
   const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n] as const)), [nodes]);
   const holdings = useMemo(() => {
@@ -167,6 +225,15 @@ export function MatrixPanel() {
   const shownOps = teams.reduce((n, t) => n + t.operators.length, 0);
   const showTeams = teams.length > 1;
 
+  // ⭐ M5: an honest empty state names WHICH absence it is — no trainings here, no
+  // people here, or "you unchecked everyone" — because the three have three
+  // different fixes. `matrixEmptyReason` orders them widest-first.
+  const emptyReason = matrixEmptyReason(columns.cols.length, opsInScope.length, shownOps);
+
+  // The area / line dropdowns carry the hierarchy's own level words.
+  const areaLabel = areas.length > 0 ? (levelNameByNode.get(areas[0].id) ?? "Area") : "Area";
+  const lineLabel = lines.length > 0 ? (levelNameByNode.get(lines[0].id) ?? "Line") : "Line";
+
   const scopeName = scopeNodeId ? (nodes.find((n) => n.id === scopeNodeId)?.name ?? "") : "everything you can see";
 
   // ---- record-in-place ----
@@ -205,21 +272,41 @@ export function MatrixPanel() {
         {shownOps === 1 ? "person" : "people"}, {columns.cols.length} trainings.
       </p>
 
-      {/* Filters: the plant chooser lives on AdminPage above; area and line and
-          the operator picker are here. */}
+      {/* Filters: the plant chooser lives on AdminPage above; the "expiring
+          soon" window, area, line and the operator picker are here. */}
       <div className={styles.filters}>
+        <label className={styles.filter}>
+          <span className={styles.filterLabel}>Expiring soon</span>
+          <select
+            className={styles.select}
+            value={windowDays}
+            onChange={(e) => {
+              const w = Number(e.target.value) as ExpiryWindow;
+              setWindowDays(w);
+              persist({ window: w });
+            }}
+          >
+            {EXPIRY_WINDOWS.map((w) => (
+              <option key={w} value={w}>
+                within {w} days
+              </option>
+            ))}
+          </select>
+        </label>
         {plantId && areas.length > 0 && (
           <label className={styles.filter}>
-            <span className={styles.filterLabel}>Area</span>
+            <span className={styles.filterLabel}>{areaLabel}</span>
             <select
               className={styles.select}
               value={effectiveAreaId ?? ""}
               onChange={(e) => {
-                setAreaId(e.target.value === "" ? null : e.target.value);
+                const v = e.target.value === "" ? null : e.target.value;
+                setAreaId(v);
                 setLineId(null);
+                persist({ areaId: v, lineId: null });
               }}
             >
-              <option value="">All areas</option>
+              <option value="">All {areaLabel.toLowerCase()}s</option>
               {areas.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
@@ -230,13 +317,17 @@ export function MatrixPanel() {
         )}
         {effectiveAreaId && lines.length > 0 && (
           <label className={styles.filter}>
-            <span className={styles.filterLabel}>Line</span>
+            <span className={styles.filterLabel}>{lineLabel}</span>
             <select
               className={styles.select}
               value={effectiveLineId ?? ""}
-              onChange={(e) => setLineId(e.target.value === "" ? null : e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value === "" ? null : e.target.value;
+                setLineId(v);
+                persist({ lineId: v });
+              }}
             >
-              <option value="">All lines</option>
+              <option value="">All {lineLabel.toLowerCase()}s</option>
               {lines.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
@@ -276,8 +367,8 @@ export function MatrixPanel() {
       {/* Legend — shared with the single-operator matrix on the Operators tab. */}
       <MatrixLegend />
 
-      {teams.length === 0 || columns.cols.length === 0 ? (
-        <p className={styles.status}>Nothing in scope — widen a filter above.</p>
+      {emptyReason !== "ok" ? (
+        <p className={styles.status}>{MATRIX_EMPTY_TEXT[emptyReason]}</p>
       ) : (
         <div className={styles.scroll}>
           <table className={styles.mx}>
