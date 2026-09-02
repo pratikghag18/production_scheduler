@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-02'
-  tip: 599e365
+  tip: 3509bc2
   baseline:
-    app_tests: 1609
+    app_tests: 1610
     app_test_files: 45
     tsc: 0
     eslint: 0
@@ -4994,23 +4994,24 @@ requirements:
       until a plant is picked.
   status: covered
 - id: R-306
-  title: A shift pattern's Edit opens the whole pattern
+  title: A shift pattern's Edit opens the whole pattern, and Cancel closes it
   source:
   - the maintainer, 2 Sept (in session)
   stated_by: maintainer
   claim: >-
     Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button
     that reveals everything editable about the pattern, not a rename that leaves the times behind a
-    separate click. Reverses D106's narrow-Edit scoping at the maintainer's request; the name still
-    expands the shifts on its own.
+    separate click. Cancel closes everything Edit opened — the name/owner editor AND the shifts — since
+    Edit is one door in. Reverses D106's narrow-Edit scoping at the maintainer's request; the name button
+    still expands the shifts on its own for a reader who only wants to look.
   verified_by:
   - kind: vitest
     file: src/test/shiftsPanel.test.tsx
-    cases: S13 (Edit opens name + shifts in one click)
+    cases: S13 (Edit opens name + shifts), S13b (Cancel closes both)
   - kind: screen
     steps: >-
       As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern
-      expanded to its shifts and breaks in one action.
+      expanded to its shifts and breaks. Cancel then collapsed both back.
   status: covered
 - id: R-307
   title: A product's Edit reaches its colour, and colour waits for Save
@@ -6817,6 +6818,25 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 25
+  date: 2026-09-02
+  title: Cancel closes the shifts Edit opened
+  commits:
+  - 3509bc2
+  numbers:
+    app_tests: 1610
+    app_test_files: 45
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    A fix on session 23's heels: making a pattern's Edit open the whole thing left its Cancel closing only
+    the name/owner editor, so the expanded shifts stayed open — the maintainer reported Cancel not closing
+    the expanded options. Cancel now collapses the pattern as well, since Edit is one door in. The name
+    button still expands the shifts on its own. Test S13b pins it; driven in the browser. Counts read from
+    the session's own `npm run test` run.
+  shipped:
+  - S22
 - id: 24
   date: 2026-09-02
   title: A product's colour waits for Save

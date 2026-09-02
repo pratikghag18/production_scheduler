@@ -98,17 +98,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 24 · 2026-09-02 · A product's colour waits for Save</h2>
-  <div class="lead"><p>A follow-up to session 23's Edit work: colour picked inside the product Edit panel was writing on the click, so picking one and then cancelling had already saved it — out of step with the code and name. Colour now stages into the edit draft and applies on Save, Cancel discards it. It stays a separate write from the rename (products.ts keeps the two apart on purpose), so Save orders them: the rename, which can be refused, first; the colour once it is in. The standalone swatch shortcut still writes at once, having no Save to wait for. Three tests pin the staging, the discard and the ordered writes; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p></div>
+  <h2>Session 25 · 2026-09-02 · Cancel closes the shifts Edit opened</h2>
+  <div class="lead"><p>A fix on session 23's heels: making a pattern's Edit open the whole thing left its Cancel closing only the name/owner editor, so the expanded shifts stayed open — the maintainer reported Cancel not closing the expanded options. Cancel now collapses the pattern as well, since Edit is one door in. The name button still expands the shifts on its own. Test S13b pins it; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">1609</span><span class="l">app tests in 45 files — session 24, 2026-09-02</span></div>
+  <div class="stat ok"><span class="n">1610</span><span class="l">app tests in 45 files — session 25, 2026-09-02</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">522</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">35</span><span class="l">database changes (migrations)</span></div>
   <div class="stat ok"><span class="n">0</span><span class="l">open defects</span></div>
   <div class="stat "><span class="n">127 / 250</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>599e365</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>3509bc2</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2838,9 +2838,9 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 </tr>
 <tr class="r-covered" id="R-306">
   <td class="g-n">R-306</td>
-  <td class="reqmain"><b>A shift pattern's Edit opens the whole pattern</b><br><span class="fine">Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button that reveals everything editable about the pattern, not a rename that leaves the times behind a separate click. Reverses D106's narrow-Edit scoping at the maintainer's request; the name still expands the shifts on its own.</span>
+  <td class="reqmain"><b>A shift pattern's Edit opens the whole pattern, and Cancel closes it</b><br><span class="fine">Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button that reveals everything editable about the pattern, not a rename that leaves the times behind a separate click. Cancel closes everything Edit opened — the name/owner editor AND the shifts — since Edit is one door in. Reverses D106's narrow-Edit scoping at the maintainer's request; the name button still expands the shifts on its own for a reader who only wants to look.</span>
       <br><span class="fine">the maintainer, 2 Sept (in session) · maintainer</span></td>
-  <td class="fine">vitest · <code>src/test/shiftsPanel.test.tsx</code> S13 (Edit opens name + shifts in one click)<br>screen: As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern expanded to its shifts and breaks in one action.</td>
+  <td class="fine">vitest · <code>src/test/shiftsPanel.test.tsx</code> S13 (Edit opens name + shifts), S13b (Cancel closes both)<br>screen: As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern expanded to its shifts and breaks. Cancel then collapsed both back.</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-307">
@@ -2857,6 +2857,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 25</b> · 2026-09-02 · Cancel closes the shifts Edit opened <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>A fix on session 23's heels: making a pattern's Edit open the whole thing left its Cancel closing only the name/owner editor, so the expanded shifts stayed open — the maintainer reported Cancel not closing the expanded options. Cancel now collapses the pattern as well, since Edit is one door in. The name button still expands the shifts on its own. Test S13b pins it; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p>
+    <p class="fine">1610 app tests in 45 files · tsc 0 · eslint 0 · commits 3509bc2 · shipped <a href="#S22">S22</a></p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 24</b> · 2026-09-02 · A product's colour waits for Save <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>A follow-up to session 23's Edit work: colour picked inside the product Edit panel was writing on the click, so picking one and then cancelling had already saved it — out of step with the code and name. Colour now stages into the edit draft and applies on Save, Cancel discards it. It stays a separate write from the rename (products.ts keeps the two apart on purpose), so Save orders them: the rename, which can be refused, first; the colour once it is in. The standalone swatch shortcut still writes at once, having no Save to wait for. Three tests pin the staging, the discard and the ordered writes; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p>
