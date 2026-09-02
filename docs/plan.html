@@ -98,17 +98,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 23 · 2026-09-02 · &quot;Edit&quot; opens the whole thing on shifts and products</h2>
-  <div class="lead"><p>The maintainer reported two edit buttons that named more than they did: a shift pattern's Edit only renamed it, with the shifts behind a separate click, and a product's Edit did not reach the colour. Both had been scoped narrow by earlier decisions (D106, D115). Reversed at his request: a pattern's Edit now also expands the pattern so name, owner, shifts and breaks all open together, and a product's Edit shows the colour palette inside the edit panel with the swatch kept as a shortcut. One shift test drove the pattern open with a click that now toggles it shut, so that step was removed; what it defends is unchanged. Both driven in the browser as the company admin. Counts read from the session's own <code>npm run test</code> run.</p></div>
+  <h2>Session 24 · 2026-09-02 · A product's colour waits for Save</h2>
+  <div class="lead"><p>A follow-up to session 23's Edit work: colour picked inside the product Edit panel was writing on the click, so picking one and then cancelling had already saved it — out of step with the code and name. Colour now stages into the edit draft and applies on Save, Cancel discards it. It stays a separate write from the rename (products.ts keeps the two apart on purpose), so Save orders them: the rename, which can be refused, first; the colour once it is in. The standalone swatch shortcut still writes at once, having no Save to wait for. Three tests pin the staging, the discard and the ordered writes; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">1606</span><span class="l">app tests in 45 files — session 23, 2026-09-02</span></div>
+  <div class="stat ok"><span class="n">1609</span><span class="l">app tests in 45 files — session 24, 2026-09-02</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">522</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">35</span><span class="l">database changes (migrations)</span></div>
   <div class="stat ok"><span class="n">0</span><span class="l">open defects</span></div>
   <div class="stat "><span class="n">127 / 250</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>7dd278d</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>599e365</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2845,9 +2845,9 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 </tr>
 <tr class="r-covered" id="R-307">
   <td class="g-n">R-307</td>
-  <td class="reqmain"><b>A product's Edit reaches its colour</b><br><span class="fine">Editing a product opens its code, its name, and its colour palette together, so Edit changes the whole shared record. The row swatch stays a shortcut to the same palette. Reverses D115's split of colour onto the swatch alone at the maintainer's request.</span>
+  <td class="reqmain"><b>A product's Edit reaches its colour, and colour waits for Save</b><br><span class="fine">Editing a product opens its code, its name, and its colour palette together, so Edit changes the whole shared record. Colour picked in the Edit panel is STAGED and applied on Save, like the code and name — Cancel discards it — rather than writing on the click. It stays a separate write from the rename (products.ts keeps setProductColor apart from updateProduct), so Save orders the two: rename first, colour only once the rename is in. The row swatch stays a shortcut that still writes at once, having no Save to wait for. Reverses D115's split of colour onto the swatch alone at the maintainer's request.</span>
       <br><span class="fine">the maintainer, 2 Sept (in session) · maintainer</span></td>
-  <td class="fine">vitest · <code>src/test/productsPanel.test.tsx</code> T2b (Edit opens the colour palette)<br>screen: As the company admin, clicked Edit on a product: the code and name inputs opened with a &quot;Colour&quot; palette row (swatches, native picker and hex) inside the same edit panel.</td>
+  <td class="fine">vitest · <code>src/test/productsPanel.test.tsx</code> T2b (palette in Edit), T2c (staged, not written until Save), T2d (Cancel discards), T2e (rename then colour)<br>screen: As the company admin, opened Edit: the code and name inputs showed a &quot;Colour&quot; palette row (swatches, native picker and hex). Picking a chip left the row's own swatch on its old colour until Save, and the write fired on Save, not on the click.</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr></tbody></table></div>
 </section>
@@ -2857,6 +2857,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 24</b> · 2026-09-02 · A product's colour waits for Save <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>A follow-up to session 23's Edit work: colour picked inside the product Edit panel was writing on the click, so picking one and then cancelling had already saved it — out of step with the code and name. Colour now stages into the edit draft and applies on Save, Cancel discards it. It stays a separate write from the rename (products.ts keeps the two apart on purpose), so Save orders them: the rename, which can be refused, first; the colour once it is in. The standalone swatch shortcut still writes at once, having no Save to wait for. Three tests pin the staging, the discard and the ordered writes; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p>
+    <p class="fine">1609 app tests in 45 files · tsc 0 · eslint 0 · commits 599e365 · shipped <a href="#S21">S21</a></p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 23</b> · 2026-09-02 · &quot;Edit&quot; opens the whole thing on shifts and products <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer reported two edit buttons that named more than they did: a shift pattern's Edit only renamed it, with the shifts behind a separate click, and a product's Edit did not reach the colour. Both had been scoped narrow by earlier decisions (D106, D115). Reversed at his request: a pattern's Edit now also expands the pattern so name, owner, shifts and breaks all open together, and a product's Edit shows the colour palette inside the edit panel with the swatch kept as a shortcut. One shift test drove the pattern open with a click that now toggles it shut, so that step was removed; what it defends is unchanged. Both driven in the browser as the company admin. Counts read from the session's own <code>npm run test</code> run.</p>
