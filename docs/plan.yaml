@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-02'
-  tip: 4703a3b
+  tip: 94bfe98
   baseline:
-    app_tests: 1611
+    app_tests: 1615
     app_test_files: 45
     tsc: 0
     eslint: 0
     db_checks: 522
-    migrations: 35
+    migrations: 36
     mutations: 509 of 536
 tracks:
 - id: core
@@ -5039,6 +5039,39 @@ requirements:
       native picker and hex). Picking a chip left the row's own swatch on its old colour until Save, and
       the write fired on Save, not on the click.
   status: covered
+- id: R-308
+  title: A site admin makes, and wholly owns, a product at their own plant (D116)
+  source:
+  - the maintainer, 2 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    A site admin may add a part — the maintainer, 2 Sept: "a product is going to have unique part number,
+    there is little to no risk to let a site admin add a new product." Because create is the birth of a
+    company-wide identity, the whole lifecycle crosses together, bounded to a part the admin actually owns
+    (labelled D116 in the code, migration 0036). CREATE: a site admin creates AT a plant they administer
+    and the part is assigned to it in one transaction (the RPC create_product_at_node, gated on
+    app_is_admin_for(node)); no company-wide orphan is left if the assignment is refused. RENAME, RECOLOUR,
+    DELETE: allowed to a site admin only while EVERY plant that makes the part is one they administer
+    (app_can_edit_product_record) — the moment a second plant adopts it, its identity is company property
+    again. A company admin keeps the plant-less create and may change any record. This reopens the D115
+    Split, which had made the whole shared record company-only; the products UPDATE/DELETE policies and the
+    delete_owned_row product branch widen from app_is_admin() to the shared predicate, and the client
+    mirrors it (canEditProduct takes the row's makers and the reader's admin scope) as a fail-open hint
+    with the server's WriteRefused as the backstop.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/62_product_lifecycle_test.sql
+    cases: Q1 (create at own plant, assigned + readable), Q2 (foreign plant refused PT403, nothing created), Q3 (company admin creates anywhere), Q4 (a second plant adopting flips rename to 0 and delete to PT403)
+  - kind: sql
+    file: supabase/tests/61_product_places_test.sql
+    cases: P5 (site admin renames a wholly-made part (1) not a shared one (0); plain insert still 42501), P6 (site admin deletes a wholly-made part, refused PT403 a shared one, company admin deletes it)
+  - kind: vitest
+    file: src/test/products.test.ts
+    cases: W1-W3 canEditProduct (company any; site admin only a part wholly in their plants; orphan is company property), W8-W9b editRefusalNote
+  - kind: vitest
+    file: src/test/productsPanel.test.tsx
+    cases: T10 (a plant admin sees the create card with a "Made at" picker and Edit on parts made only in their plant), T10b (create routes through the plant RPC with the chosen node)
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6822,6 +6855,37 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 27
+  date: 2026-09-02
+  title: A site admin makes, and wholly owns, a product at their own plant (D116)
+  commits:
+  - 94bfe98
+  numbers:
+    app_tests: 1615
+    app_test_files: 45
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer reopened the D115 Split on products: "a product is going to have unique part number,
+    there is little to no risk to let a site admin add a new product." Reservation raised and taken — create
+    is the birth of a company-wide identity, so letting it cross alone would let a site admin mint a part
+    they could not then fix or remove. The maintainer chose the fuller shape (D116): a site admin creates
+    AT a plant they administer, assigned in one act, and owns the whole lifecycle (rename, recolour, delete)
+    WHILE only their plant makes it; a second plant adopting it hands the identity back to the company.
+    Migration 0036 adds app_can_edit_product_record (the shared "do I administer every maker" predicate),
+    widens the products UPDATE/DELETE policies and the delete_owned_row product branch onto it, and adds the
+    create_product_at_node RPC (create + assign in one transaction, gated on app_is_admin_for(node), because
+    an INSERT WITH CHECK cannot see the plant and app_is_admin_anywhere is visibility-only). The client
+    grows createProductAtNode + a hook, a "Made at" plant picker on the create card for a site admin, and
+    canEditProduct/editRefusalNote now decide per row from the makers and the reader's admin scope, a
+    fail-open hint with WriteRefused as the backstop. Four committed SQL cases that had pinned the old Split
+    (61 P5/P6, 51 Q20, 53 R15, 56 D27/D28) were updated to the new contract, and a new 62_product_lifecycle
+    file pins create (Q1-Q4). The SQL suite was run green on a scratch DB stood up in the local container
+    (harness + all 36 migrations + seed); the canonical verify-db.sh db_checks recount is owed on CI. App
+    counts read from the session's own `npm run test` run.
+  shipped:
+  - S21
 - id: 26
   date: 2026-09-02
   title: One door on shifts — the name stops being a second opener
