@@ -28,20 +28,15 @@ import {
   resolveSelectedOperator,
   rootIdFor,
   summarisePlaces,
+  formatDay,
   validateOperatorDraft,
   workPlacesFor,
   type OperatorLike,
   type PlaceVerdict,
 } from "../lib/operators";
-import { buildColumns, buildOperatorMatrix, type CellState } from "../lib/matrix";
-import {
-  EXPIRING_WINDOW_DAYS,
-  MatrixChip,
-  MatrixLegend,
-  RecordPopover,
-  STATE_LABEL,
-  type RecordFields,
-} from "./matrixCells";
+import { buildColumns, trainingApplies, type CellState } from "../lib/matrix";
+import { MatrixChip, RecordPopover, type RecordFields } from "./matrixCells";
+import cellStyles from "./matrixCells.module.css";
 import type { OperatorSkillRecord } from "@/lib/api";
 // ⚠️ THE SCOPE HELPERS ARE IMPORTED HERE AND NOT INTO `../lib/operators`. That
 // module is dependency-free by design — its header says so, and that is what
@@ -255,14 +250,20 @@ export function OperatorsPanel() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   /* ---------------------------------------------------------------------
-   * ⭐⭐ RECORD-IN-PLACE, THE SAME GESTURE THE TEAM MATRIX USES. The trainings
-   * a person holds are now a row of matrix cells; clicking one opens the shared
-   * `RecordPopover`, which records the same three facts a held row always showed
-   * — certified on, expires, signed off by — kept optional and independent (0032
-   * / D114 writes no CHECK tying them). This state is only WHICH cell's popover
-   * is open and where; the popover owns the three fields, keyed by the cell so a
-   * fresh one never inherits the last cell's text.
+   * ⭐⭐ TWO POPOVERS, ONE MATRIX. Clicking a PLACE cell opens the chooser
+   * (`editingPlace`) — the trainings that gate that cell, each with a Record or
+   * Renew. Choosing one opens the shared `RecordPopover` (`editingCell`), which
+   * records the same three facts a held row always showed — certified on,
+   * expires, signed off by — kept optional and independent (0032 / D114 writes no
+   * CHECK tying them). Each state is only WHICH popover is open and where; the
+   * record popover owns its three fields, keyed by the training so a fresh one
+   * never inherits the last one's text.
    * ------------------------------------------------------------------- */
+  const [editingPlace, setEditingPlace] = useState<{
+    nodeId: string;
+    top: number;
+    left: number;
+  } | null>(null);
   const [editingCell, setEditingCell] = useState<{
     skillId: string;
     top: number;
@@ -405,33 +406,23 @@ export function OperatorsPanel() {
     [visiblePlaces],
   );
 
-  // ⭐ THE TRAININGS FOR THE PERSON ON SCREEN, AS A MATRIX — the same visual the
-  // team matrix draws, for one person. Columns are the trainings that apply to
-  // them (owner an ancestor-or-self of their node) plus any they already hold,
-  // and the header climbs their own branch DOWN TO WHERE THEY WORK. All of that
-  // shaping is the pure `../lib/matrix`, tested by `src/test/matrix.test.ts`.
-  //
-  // ⚠️ `data.skills` / `data.operatorSkills`, NOT a plant-filtered set. The apply
-  // test already narrows to this person's own branch, and a held training is
-  // never dropped for the plant filter reaching past a view into the record.
-  //
-  // ⚠️ NON-APPLICABLE TRAININGS ARE NO LONGER OFFERED. The old "Add a training"
-  // picker let you attach any training in the plant, including one owned by a
-  // branch this person is not on; the matrix shows only what genuinely applies
-  // (plus what they already hold), so a cross is always a gap you can fill and
-  // the server would accept — the §19.72 rule, drawn.
-  const operatorMatrix = useMemo(() => {
-    if (selected === null || data === undefined) return null;
-    return buildOperatorMatrix({
-      nodes: data.nodes,
-      levels: data.levels,
-      skills: data.skills,
-      operatorSkills: data.operatorSkills,
-      operator: selected,
-      today: todayIso(),
-      windowDays: EXPIRING_WINDOW_DAYS,
-    });
-  }, [selected, data]);
+  // ⭐⭐ ONE MATRIX, NOT TWO. The maintainer, 2 September: *"combine those two…
+  // an operator cannot work in an area unless they're trained on it."* So the
+  // trainings are no longer a matrix of their own — a training is how you fix a
+  // cross on the places matrix above. Clicking a cell that needs a training opens
+  // a small chooser of the trainings that gate it, and recording one there grants
+  // it in place (the §19.72 rule still holds: only a training that APPLIES to the
+  // person — owner an ancestor-or-self of their node — is offered, since the
+  // server refuses a grant off their branch).
+  const skillById = useMemo(
+    () => new Map((data?.skills ?? []).map((s) => [s.id, s] as const)),
+    [data],
+  );
+  const trainingApplic = (skillId: string): boolean => {
+    const ownerPath = nodesById.get(skillById.get(skillId)?.siteNodeId ?? "")?.path;
+    const opPath = selected === null ? undefined : nodesById.get(selected.siteNodeId)?.path;
+    return ownerPath !== undefined && opPath !== undefined && trainingApplies(ownerPath, opPath);
+  };
 
   // The selected person's holdings, keyed by training id, for the popover.
   const opHoldings = useMemo(() => {
@@ -612,9 +603,17 @@ export function OperatorsPanel() {
    * surfaces it. `closeCell` resets the mutation so a stale error never trails
    * onto the next cell opened.
    */
-  const openCell = (skillId: string, target: HTMLElement) => {
+  // Clicking a place cell opens the chooser of the trainings that gate it.
+  const openPlace = (nodeId: string, target: HTMLElement) => {
     const r = target.getBoundingClientRect();
-    setEditingCell({ skillId, top: r.bottom + 4, left: r.left });
+    setEditingCell(null);
+    setEditingPlace({ nodeId, top: r.bottom + 4, left: r.left });
+  };
+  // Choosing a training in that chooser opens the record popover in its place.
+  const recordFromPlace = (skillId: string) => {
+    if (editingPlace === null) return;
+    setEditingCell({ skillId, top: editingPlace.top, left: editingPlace.left });
+    setEditingPlace(null);
   };
   const closeCell = () => {
     setEditingCell(null);
@@ -641,8 +640,8 @@ export function OperatorsPanel() {
   };
   const matrixSaving = grantSkill.isPending || updateRecord.isPending || revokeSkill.isPending;
   const matrixError = grantSkill.error ?? updateRecord.error ?? revokeSkill.error ?? null;
-  const editingSkill =
-    editingCell === null ? null : (operatorMatrix?.columns.cols.find((c) => c.id === editingCell.skillId) ?? null);
+  const editingSkill = editingCell === null ? null : (skillById.get(editingCell.skillId) ?? null);
+  const editingPlaceRow = editingPlace === null ? null : (placeByNode.get(editingPlace.nodeId) ?? null);
 
   if (loading) {
     return (
@@ -1001,7 +1000,9 @@ export function OperatorsPanel() {
                 The scheduler checks this again when work is assigned; this is what today&rsquo;s
                 trainings, requirements and areas imply. A place marked &ldquo;⚠&rdquo; is outside
                 the area this person belongs to — whoever schedules there can still put them on it,
-                but has to record a reason for it.
+                but has to record a reason for it. <b>Click a cell to see what a cross needs and
+                record the training right there</b> — an operator cannot work a place until they hold
+                its trainings, so this grid is both questions at once.
               </p>
               {visiblePlaces.length === 0 || placesColumns.cols.length === 0 ? (
                 <p className={styles.status}>There are no schedulable places in the hierarchy yet.</p>
@@ -1063,15 +1064,17 @@ export function OperatorsPanel() {
                               verdict === "can-work" ? "can work here" : place.reasons.join(" · ");
                             return (
                               <td key={c.id} className={styles.matrixCell}>
-                                <MatrixChip
-                                  state={chip.state}
-                                  glyph={chip.glyph}
+                                <button
+                                  type="button"
+                                  className={styles.placeCellBtn}
                                   title={`${place.label} — ${why}`}
-                                  ariaHidden
-                                />
-                                <span className={styles.srHint}>
-                                  {place.label}: {why}
-                                </span>
+                                  onClick={(e) => openPlace(c.id, e.currentTarget)}
+                                >
+                                  <MatrixChip state={chip.state} glyph={chip.glyph} title="" ariaHidden />
+                                  <span className={styles.srHint}>
+                                    {place.label}: {why}
+                                  </span>
+                                </button>
                               </td>
                             );
                           })}
@@ -1099,103 +1102,83 @@ export function OperatorsPanel() {
                 </p>
               )}
 
-              {/* ⭐⭐ WHAT THEY HOLD, AND THIS HALF STAYED WHEN THE CATALOGUE
-                  LEFT. A grant is a fact about THIS PERSON — it belongs under
-                  their name, beside the list of places it just turned green.
-                  Creating, renaming and deleting the training TYPE is a
-                  company-level job and lives on the Trainings tab. */}
-              {/* ⭐⭐ THE SAME MATRIX VISUAL AS THE TEAM VIEW, FOR ONE PERSON.
-                  The maintainer, 2 September: "copy this visual in the operator
-                  tab as well instead of what we have in there right now for
-                  individual operators", and "the hierarchy level should go the
-                  lowest in this one where the operator works". So the header
-                  climbs this person's own branch down to their line, each column
-                  is a training they can hold, and a cell click records it. The
-                  three facts a held row always showed — certified on, expires,
-                  signed off by — live in the shared `RecordPopover` now, kept
-                  optional and independent exactly as before (0032 / D114). */}
-              <h3 className={styles.h3}>Trainings</h3>
-              <p className={styles.footnote}>
-                A training is what changes the answer above — requirements sit on places and inherit
-                downward, so recording one can turn several crosses green at once. Each column is a
-                training {selected.displayName} can hold; click a cell to record it, change its
-                dates, or remove it. Who signed somebody off and when are optional.
-              </p>
-              {operatorMatrix === null || operatorMatrix.columns.cols.length === 0 ? (
-                <p className={styles.status}>No trainings apply to {selected.displayName} yet.</p>
-              ) : (
+              {/* ⭐⭐ THE CHOOSER BEHIND A CELL. Clicking a place cell above opens
+                  this: the trainings that gate that cell and are not yet
+                  satisfied, each with a Record (grant) or Renew (edit). Choosing
+                  one hands off to the shared `RecordPopover` in the same spot.
+                  ⚠️ ONLY AN APPLICABLE TRAINING IS OFFERED — owner an
+                  ancestor-or-self of this person (§19.72) — because the server
+                  refuses a grant off their branch; one owned elsewhere is named
+                  but not offered. New training TYPES are still created on the
+                  Trainings tab; this only gives one to the person on screen. */}
+              {editingPlace !== null && editingPlaceRow !== null && (
                 <>
-                  <MatrixLegend />
-                  <div className={styles.matrixScroll}>
-                    <table className={styles.matrix}>
-                      <thead>
-                        {operatorMatrix.columns.bands.map((band, b) => (
-                          <tr key={b}>
-                            {band.map((cell, i) => (
-                              <th
-                                key={i}
-                                className={styles.matrixOwner}
-                                colSpan={cell.colspan}
-                                rowSpan={cell.rowspan}
+                  <div className={cellStyles.scrim} onClick={() => setEditingPlace(null)} aria-hidden="true" />
+                  <div
+                    className={cellStyles.pop}
+                    role="dialog"
+                    aria-label={`Trainings for ${editingPlaceRow.name}`}
+                    style={{ top: editingPlace.top, left: editingPlace.left }}
+                  >
+                    <div className={cellStyles.popHead}>
+                      <span className={cellStyles.popWho}>{editingPlaceRow.name}</span>
+                      <span className={cellStyles.popWhat}>{PLACE_CHIP[placeVerdict(editingPlaceRow)].label}</span>
+                    </div>
+                    {placeVerdict(editingPlaceRow) === "outside-area" && (
+                      <p className={styles.placePopNote}>
+                        {editingPlaceRow.reasons.join(" · ")}
+                      </p>
+                    )}
+                    {editingPlaceRow.missing.length === 0 && editingPlaceRow.expiring.length === 0 ? (
+                      <p className={styles.placePopNote}>
+                        {placeVerdict(editingPlaceRow) === "outside-area"
+                          ? "Their trainings are in order for this cell."
+                          : "Trained for this cell."}
+                      </p>
+                    ) : (
+                      <ul className={styles.placePopList}>
+                        {editingPlaceRow.missing.map((m) => (
+                          <li key={m.skillId} className={styles.placePopItem}>
+                            <span>
+                              {m.name} — <b className={styles.matrixGap}>not trained</b>
+                            </span>
+                            {trainingApplic(m.skillId) ? (
+                              <button
+                                type="button"
+                                className={styles.small}
+                                onClick={() => recordFromPlace(m.skillId)}
                               >
-                                {cell.label}
-                              </th>
-                            ))}
-                          </tr>
+                                Record
+                              </button>
+                            ) : (
+                              <span className={styles.placePopElsewhere}>owned elsewhere</span>
+                            )}
+                          </li>
                         ))}
-                        <tr>
-                          {operatorMatrix.columns.cols.map((t) => (
-                            <th key={t.id} className={styles.matrixColName} scope="col">
-                              {t.name}
-                              {t.externalId && <span className={styles.matrixDoc}>{t.externalId}</span>}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          {operatorMatrix.columns.cols.map((t) => {
-                            const st = operatorMatrix.cellState(t.id);
-                            return (
-                              <td key={t.id} className={styles.matrixCell}>
-                                <MatrixChip
-                                  state={st}
-                                  title={`${t.name}: ${STATE_LABEL[st]} (click to record)`}
-                                  ariaLabel={`${t.name}: ${STATE_LABEL[st]} — record`}
-                                  onClick={(e) => openCell(t.id, e.currentTarget)}
-                                />
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      </tbody>
-                    </table>
+                        {editingPlaceRow.expiring.map((e) => (
+                          <li key={e.skillId} className={styles.placePopItem}>
+                            <span>
+                              {e.name} — <b className={styles.matrixWarn}>expires {formatDay(e.expiresAt)}</b>
+                            </span>
+                            <button
+                              type="button"
+                              className={styles.small}
+                              onClick={() => recordFromPlace(e.skillId)}
+                            >
+                              Renew
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  <p className={styles.matrixCount}>
-                    {operatorMatrix.counts.held} of {operatorMatrix.counts.trainings} held
-                    {operatorMatrix.counts.gaps > 0 && (
-                      <>
-                        {" · "}
-                        <b className={styles.matrixGap}>{operatorMatrix.counts.gaps} not trained</b>
-                      </>
-                    )}
-                    {operatorMatrix.counts.needRenewal > 0 && (
-                      <>
-                        {" · "}
-                        <b className={styles.matrixWarn}>
-                          {operatorMatrix.counts.needRenewal} need renewal
-                        </b>
-                      </>
-                    )}
-                  </p>
                 </>
               )}
 
-              {/* ⭐ RECORD-IN-PLACE. A grant is no longer a separate "Add a
-                  training" form — a training that applies but is not held shows
-                  as a `×` cell above, and clicking it opens this same popover to
-                  record it. New training TYPES are still created on the Trainings
-                  tab; this only gives one to the person on screen. */}
+              {/* ⭐ RECORD-IN-PLACE, reached from the chooser above. The three
+                  facts — certified on, expires, signed off by — stay optional and
+                  independent (0032 / D114). Grant when nothing is held, edit when
+                  a holding exists, with a Remove that revokes. */}
               {editingCell !== null && editingSkill !== null && (
                 <RecordPopover
                   key={editingCell.skillId}

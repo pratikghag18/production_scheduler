@@ -543,3 +543,57 @@
   align-items: center;
   gap: 0.5rem;
 }
+
+/* The place cell is a button now — clicking it opens the chooser of the
+   trainings that gate it. The chip inside carries the look; this only resets
+   the button and gives it a focus ring. */
+.placeCellBtn {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 0.375rem;
+}
+
+.placeCellBtn:hover {
+  outline: 2px solid var(--axis);
+  outline-offset: 1px;
+}
+
+.placeCellBtn:focus-visible {
+  outline: 2px solid var(--ink-2);
+  outline-offset: 1px;
+}
+
+/* The chooser behind a place cell — the trainings that gate it. It shares the
+   popover shell (scrim/pop/popHead) with the record popover; these are only the
+   list inside it. */
+.placePopNote {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+
+.placePopList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.placePopItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.placePopElsewhere {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}

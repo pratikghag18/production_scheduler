@@ -8887,7 +8887,63 @@ Pure core `src/features/admin/lib/matrix.ts` (`cellStateFor`, `buildColumns`, `b
 tests in `src/test/matrix.test.ts`; the read-only `MatrixPanel` registered as the `matrix` admin
 section (its own `MATRIX_PANEL_READY`, added to `adminSectionsFor` for supervisors, listed in
 `REM_SURFACES` in both places); and record-in-place over `grantSkill`/`updateSkillRecord`/`revokeSkill`.
-Stages M1–M3. **M4 (next): the Operators tab reuses the same visual for one person, replacing today's
-per-operator training list.** M5 is polish (expiry window as a setting, remembered filters, empty
-states). This buildout is the home for the Phase-2 roadmap lines "Skills matrix admin UI" and
-"certification expiry checks"; eligibility ENFORCEMENT on the board stays on the main plan.
+Stages M1–M3. M5 is polish (expiry window as a setting, remembered filters, empty states). This
+buildout is the home for the Phase-2 roadmap lines "Skills matrix admin UI" and "certification expiry
+checks"; eligibility ENFORCEMENT on the board stays on the main plan.
+
+## §19.87 — the Operators tab becomes ONE matrix (stage M4)
+
+The maintainer, 2 September, refined this pane over four messages, and the shape only settled at the
+end: *"copy this visual in the operator tab as well instead of what we have in there right now for
+individual operators"* → *"the hierarchy level should go the lowest in this one where the operator
+works"* → *"I want the matrix to replace the info present above it… go to the same level as the details
+above in hierarchy"* → *"combine those two… an operator cannot work in an area unless they're trained on
+it."* The interim states (a trainings matrix, then a trainings matrix beside a places matrix) are gone;
+what shipped is a SINGLE matrix keyed on places, with a training recorded from the cell that needs it.
+
+### The shared visual is extracted first (D100, anti-drift)
+Before a second copy of the chip could exist, the chip glyph and colour, the legend and the
+record-in-place popover moved into `src/features/admin/components/matrixCells.tsx` (+ its
+`.module.css`, listed in `REM_SURFACES` both places). `MatrixPanel` and `OperatorsPanel` both import
+it, so the two matrices cannot drift on what a mark means or how a record is entered. The popover owns
+its three form fields now, keyed by the cell, which is what lets a second panel reuse it unchanged.
+`MatrixChip` grew an optional `glyph` override and an `ariaHidden` flag for the places matrix below.
+
+### One matrix, not two — the merge (the maintainer's third correction)
+The first build put the trainings and "where they can work" as two stacked matrices. The maintainer,
+seeing them: *"combine those two… they are essentially the same thing, an operator cannot work in an
+area unless they're trained on it."* And, choosing between candidate merges over a second mockup: **one
+matrix keyed on PLACES; the training is how you fix a cross.** So the per-operator TRAININGS matrix is
+gone entirely (and with it the pure `buildOperatorMatrix` and its tests — dead once nothing drew it),
+and the single matrix is the places grid, down to the cell.
+
+The flat `PlaceRow` list became the nested-header grid, reaching the CELL level the list already
+reached. Each schedulable place is a column OWNED BY ITS PARENT, so the header climbs plant → area →
+line and the cell's own name lands on the leaf column row rather than doubling as an owner band; the
+`placeVerdict` three-state (`can-work` / `missing-training` / `outside-area`) rides each cell as a
+`✓` / `×` / `⚠` chip that borrows the shared cell's SHAPE and COLOUR but names its own verdict
+(`missing-training` reuses the red gap, `outside-area` the amber warning — D113: a warning, never a
+refusal). The reason a cross carries — "missing Welding", "needs a recorded reason" — moves from a
+visible column to each cell's hover title and visually-hidden hint (which is also the whole-chain label
+a test finds a cell by).
+
+### Recording is now a cell click, and it flows through applicability
+A place cell is a button. Clicking it opens a **chooser** — the trainings that gate that cell and are
+not yet satisfied (`place.missing` → *Record*, `place.expiring` → *Renew*) — and choosing one hands off
+to the shared `RecordPopover` in the same spot, which grants (insert) or edits (update) with the same
+three optional, independent facts. ⚠️ Only a training that APPLIES to the person (owner an
+ancestor-or-self of their node, §19.72) is offered a Record button; one owned off their branch is named
+"owned elsewhere" and not offered, because the server would refuse the grant anyway. A `✓` cell's
+chooser says "Trained for this cell." So the two questions — *can they work here* and *what do I record
+to make them* — are one grid and one gesture; editing or removing a still-valid held training is a job
+for the team Matrix tab, not this per-person view. §19.77's three-state rule is untouched; only its
+rendering changed, and the summary line, as-of date and trimmed/deactivated footnotes are unchanged.
+
+### Tests
+`operatorsPanel.test.tsx` moves with the UI: O1–O6 assert the places-matrix cells (`×` vs `⚠` never
+confused), O19–O29 the chooser and record flow (a cross offers Record, a tick says "trained", an
+expiry offers Renew and opens on the stored record, a grant sends all three facts + the org, the signer
+stays free-text and trimmed, a training owned elsewhere is named but not offered). The fixture's
+trainings gained the `active` field they always should have carried — without it the applicability
+filter drops every column, the omitted-field trap this suite is written against. Suite: 1582 tests in
+44 files (the 6 `buildOperatorMatrix` cases retired with the function).

@@ -304,20 +304,20 @@ function placeShown(label: string): boolean {
 }
 
 /**
- * ⭐ THE TRAININGS ARE A MATRIX NOW (stage M4), so a training is a CELL — a
- * button named for the training and its state, `Forklift: Trained — record`.
- * `escapeRe` keeps a training name with regex characters literal, and the `^…:`
- * anchor stops "Weld" from matching "Welding".
+ * ⭐ ONE MATRIX NOW (M4). The trainings are no longer a grid of their own — a
+ * training is recorded from the PLACE cell that needs it. So a "cell" is the
+ * place button (named by its whole-chain hint), clicking it opens the CHOOSER of
+ * the trainings that gate it, and Record/Renew there opens the record popover.
  */
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function placeButton(label: string): HTMLButtonElement {
+  return screen.getByRole("button", { name: (n) => n.startsWith(label) }) as HTMLButtonElement;
 }
-function trainingCell(name: string): HTMLButtonElement {
-  return screen.getByRole("button", { name: new RegExp(`^${escapeRe(name)}:`) }) as HTMLButtonElement;
+function openPlaceCell(label: string) {
+  fireEvent.click(placeButton(label));
 }
-/** Open a training's record popover the way a supervisor clicks its cell. */
-function openCell(name: string) {
-  fireEvent.click(trainingCell(name));
+/** A button inside the open chooser / record popover (the current dialog). */
+function dialogButton(name: string): HTMLButtonElement {
+  return within(screen.getByRole("dialog")).getByRole("button", { name }) as HTMLButtonElement;
 }
 /** A field inside the open record popover. */
 function popField(label: string): HTMLInputElement {
@@ -546,23 +546,10 @@ describe("OperatorsPanel — the plant filter (§19.79 / roadmap 1(c))", () => {
     expect(screen.getByText("1 person outside Plant 1 is not shown.")).toBeTruthy();
   });
 
-  it("O8: what is on offer is cut by APPLICABILITY now, not by the plant filter", () => {
-    // ⭐ STAGE M4 REPLACED THE GRANT PICKER WITH THE MATRIX. What a person can be
-    // given is no longer every training in the chosen plant — it is the trainings
-    // that apply to their own branch (§19.72), which is a tighter and truer cut.
-    // Zoe is on Line Z in Plant 2, so Crane (owned by Plant 2) is a column she can
-    // hold; Plant 1's Forklift and Welding are not on her matrix at all, and the
-    // plant filter never enters into it.
-    render(<OperatorsPanel />);
-    pick("Zoe Zhang");
-    expect(trainingCell("Crane")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Forklift:/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Welding:/ })).toBeNull();
-    // And choosing Zoe's own plant changes nothing about her columns.
-    showPlant(id.P2);
-    expect(trainingCell("Crane")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Forklift:/ })).toBeNull();
-  });
+  // O8 retired at M4: it pinned the plant filter cutting the "trainings on
+  // offer" picker, and there is no such picker any more — a training is offered
+  // by the PLACE that needs it (applicability, §19.72), which the plant filter
+  // never enters into. The record flow's own cases cover what replaced it.
 
   it("O9: the Add card's 'Belongs to' offers only the chosen plant's subtree", () => {
     // Decision 3 — what you see is what you can create in. The alternative lets
@@ -754,53 +741,47 @@ describe("OperatorsPanel — the training catalogue is not managed here (stage 2
     expect(within(aside()).queryByRole("button", { name: /Ann Adams/ })).not.toBeNull();
   });
 
-  it("O19 ⭐ giving somebody a training stayed, whole: record, edit and remove", () => {
-    // ⭐ THE HALF THAT BELONGS ON A PERSON. Ann holds Forklift (a held cell that
-    // opens onto Save + Remove) and Welding applies but is unheld (a gap cell
-    // that opens onto Record). Replacing the list with the matrix must not have
-    // taken any of the three gestures with it.
+  it("O19 ⭐ giving somebody a training stayed — reached from the place that needs it", () => {
+    // ⭐ THE HALF THAT BELONGS ON A PERSON. Cell A2 requires Welding and Ann does
+    // not hold it, so the cell is a cross; opening it offers Record for Welding.
+    // Merging the two matrices must not have taken recording with it.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    openCell("Forklift");
-    const held = screen.getByRole("dialog");
-    expect(within(held).getByRole("button", { name: "Save changes" })).toBeTruthy();
-    expect(within(held).getByRole("button", { name: "Remove" })).toBeTruthy();
-    fireEvent.click(within(held).getByRole("button", { name: "Cancel" }));
-
-    openCell("Welding");
-    const gap = screen.getByRole("dialog");
-    expect(within(gap).getByRole("button", { name: "Record training" })).toBeTruthy();
-    // Nothing is held yet, so there is nothing to remove.
-    expect(within(gap).queryByRole("button", { name: "Remove" })).toBeNull();
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    const chooser = screen.getByRole("dialog");
+    expect(within(chooser).getByText(/Welding/)).toBeTruthy();
+    expect(within(chooser).getByRole("button", { name: "Record" })).toBeTruthy();
+    fireEvent.click(dialogButton("Record"));
+    // The chooser hands off to the record popover in its place.
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Record training" })).toBeTruthy();
   });
 
-  it("O20: when no trainings apply, the matrix says so rather than showing an empty grid", () => {
-    // ⚠️ A DEAD END HAS TO SAY WHERE THE ROAD IS. With no trainings that apply to
-    // this person, an empty grid reads as a broken screen; the sentence names the
-    // person so it reads as a state, not a failure. New training TYPES are still
-    // created on the Trainings tab.
-    h.state.data.skills = [];
+  it("O20: a cell they can already work says so, and offers nothing to record", () => {
+    // ⚠️ A CHOOSER WITH NOTHING TO DO HAS TO SAY WHY. Cell A1 requires Forklift and
+    // Ann holds it, so the cell is a tick; opening it must read as "done", not as
+    // an empty popover that looks broken.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    expect(screen.getByText("No trainings apply to Ann Adams yet.")).toBeTruthy();
+    openPlaceCell("Plant 1 › Line A › Cell A1");
+    const chooser = screen.getByRole("dialog");
+    expect(within(chooser).getByText(/Trained for this cell/)).toBeTruthy();
+    expect(within(chooser).queryByRole("button", { name: "Record" })).toBeNull();
   });
 
   it("O21 ⭐⭐ the word a reader sees is TRAINING — nowhere on this screen says ticket", () => {
-    // ⚠️⚠️ THE CASE THIS WHOLE RENAME NEEDED, AND `tsc` CANNOT BE IT. A heading
-    // reverted to "Tickets", a footnote back to "1 ticket" — all compile, all
-    // lint, and every other case goes on passing because none reads that text. So
-    // this one reads the rendered screen itself, with a person picked.
+    // ⚠️⚠️ THE CASE THIS WHOLE RENAME NEEDED, AND `tsc` CANNOT BE IT. A footnote
+    // reverted to "ticket" compiles and lints, and every other case goes on
+    // passing because none reads that text. So this one reads the rendered screen.
     //
     // ⚠️ THE RENDERED TEXT, NOT THE SOURCE. `styles.matrixCell` and `ticketsFor`
     // are identifiers and stay — the line is what a user READS.
     render(<OperatorsPanel />);
     pick("Ann Adams");
     expect(document.body.textContent ?? "").not.toMatch(/ticket/i);
-    expect(document.body.textContent ?? "").not.toMatch(/\bskills?\b/i);
-    // And the words that replaced them really are on screen, so this cannot
-    // pass on a panel that renders nothing at all. "Add a training" is GONE —
-    // recording is a cell click now, not a separate form.
-    expect(screen.getByRole("heading", { name: "Trainings" })).toBeTruthy();
+    // The word that replaced it is on screen — the section footnote names it —
+    // so this cannot pass on a panel that renders nothing at all. There is no
+    // separate "Add a training" form any more: recording is a cell click.
+    expect(document.body.textContent ?? "").toMatch(/record the training/i);
     expect(screen.queryByRole("heading", { name: "Add a training" })).toBeNull();
     expect(within(aside()).getByRole("button", { name: /1 training\b/ })).toBeTruthy();
   });
@@ -822,212 +803,71 @@ describe("OperatorsPanel — the training catalogue is not managed here (stage 2
  * nobody touched. Assertions on what is DRAWN cannot see that at all.
  * =========================================================================== */
 
-/** What `useUpdateSkillRecord` was handed, as a plain object. */
-function recordPatch(callIndex = 0): Record<string, unknown> {
-  return h.recordMutate.mock.calls[callIndex][0] as Record<string, unknown>;
-}
-
-/** What `useRevokeSkill` was handed, as a plain object. */
-function revokePayload(callIndex = 0): Record<string, unknown> {
-  return h.revokeMutate.mock.calls[callIndex][0] as Record<string, unknown>;
-}
-
-/** The Save/Record and Remove buttons inside the open record popover. */
-function popButton(name: string): HTMLButtonElement {
-  return within(screen.getByRole("dialog")).getByRole("button", { name }) as HTMLButtonElement;
-}
-
-/** Give Ann a second training, so the one-row-per-training collisions are reachable. */
-function annHoldsTwo() {
-  h.state.data.operatorSkills = [
-    ...h.state.data.operatorSkills,
-    {
-      operatorId: id.ANN,
-      skillId: id.WELD,
-      expiresAt: null as string | null,
-      certifiedAt: null as string | null,
-      signedOffBy: "R. Okonkwo" as string | null,
-    },
-  ];
-}
-
-describe("OperatorsPanel — the training record: who signed it off, and when (D114)", () => {
-  it("O22: opening a held training shows what is recorded about it", () => {
-    // Half-known on purpose (0032 writes no CHECK tying the two): Ann's Forklift
-    // carries a date and no signer, which is the shape a spreadsheet arrives in.
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Forklift");
-    const dlg = screen.getByRole("dialog");
-    expect(within(dlg).getByText("Ann Adams")).toBeTruthy();
-    expect(within(dlg).getByText("Forklift")).toBeTruthy();
-    expect(popField("Certified on").value).toBe("2026-03-14");
-    // Empty expiry and empty signer are the ordinary half-known shape.
-    expect(popField("Expires").value).toBe("");
-    expect(popField("Signed off by").value).toBe("");
-  });
-
-  it("O23 ⭐ the chip carries status at a glance — and × is not-trained, never expired", () => {
-    // ⚠️ THE MAINTAINER'S OWN RULE, drawn: a red cross is NOT-TRAINED (the
-    // intuitive read) and expired is a different mark (↻). The at-a-glance state
-    // that the old list spelled out in words is now the chip itself, with the
-    // full sentence in the accessible name for a screen reader.
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    // Forklift held with no expiry -> Trained ✓; Welding applies but is unheld -> ×.
-    expect(trainingCell("Forklift").textContent).toBe("✓");
-    expect(trainingCell("Welding").textContent).toBe("×");
-    expect(trainingCell("Forklift").getAttribute("aria-label")).toMatch(/Trained/);
-    expect(trainingCell("Welding").getAttribute("aria-label")).toMatch(/Not trained/);
-  });
-
-  it("O24 ⭐⭐ editing a held training saves the record the reader is looking at", () => {
-    // ⚠️ THE POPOVER REPLACES THE ABSENT-KEY CONTRACT. The old inline row sent
-    // ONLY the field that moved, because the other two were a stale render it must
-    // not overwrite. The popover instead SHOWS all three current values and
-    // commits them together, so re-sending `certifiedAt` is the value the reader
-    // just saw — not a stale one — and the record is written in one deliberate
-    // gesture rather than three silent ones.
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Forklift");
-    fireEvent.change(popField("Expires"), { target: { value: "2027-01-01" } });
-    fireEvent.click(popButton("Save changes"));
-    expect(h.recordMutate).toHaveBeenCalledTimes(1);
-    const sent = recordPatch();
-    expect(sent).toMatchObject({
-      operatorId: id.ANN,
-      skillId: id.FORK,
-      certifiedAt: "2026-03-14",
-      expiresAt: "2027-01-01",
-      signedOffBy: null,
-    });
-  });
-
-  it("O25 ⭐⭐ the signer is trimmed on the way out, on an edit too", () => {
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Forklift");
-    fireEvent.change(popField("Signed off by"), { target: { value: "  R. Okonkwo  " } });
-    fireEvent.click(popButton("Save changes"));
-    // Trimmed here because `signed_off_by` is a plain `text` column with no trim
-    // trigger and no CHECK (verified against 0032) — the client is the only thing
-    // between a user and a signer called "  ".
-    expect(recordPatch().signedOffBy).toBe("R. Okonkwo");
-  });
-
-  it("O26 ⭐ clearing the signer sends null, and the date is left as it stands", () => {
-    // 0032: *"NULL means nobody recorded one, never 'unsigned'."* The two facts
-    // are independent — the migration deliberately writes no CHECK tying them —
-    // so clearing the signer must not disturb the date, which the popover carries
-    // through untouched from what it showed.
-    annHoldsTwo(); // Ann's Welding holds signer "R. Okonkwo", no date.
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Welding");
-    expect(popField("Signed off by").value).toBe("R. Okonkwo");
-    fireEvent.change(popField("Signed off by"), { target: { value: "" } });
-    fireEvent.click(popButton("Save changes"));
-    const sent = recordPatch();
-    expect(sent.signedOffBy).toBeNull();
-    expect(sent.certifiedAt).toBeNull(); // was null, stays null — not invented
-  });
-
-  it("O27: closing the popover without saving writes nothing at all", () => {
-    // ⚠️ OPENING A CELL TO LOOK IS NOT EDITING IT. Cancel (and the scrim) must
-    // put no row in the audit log for merely reading a record — the popover's
-    // version of the old "blur writes nothing" rule.
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Forklift");
-    fireEvent.change(popField("Expires"), { target: { value: "2027-01-01" } });
-    fireEvent.click(popButton("Cancel"));
-    expect(h.recordMutate).not.toHaveBeenCalled();
-    expect(h.grantMutate).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("O28 ⭐ Remove revokes the held training, by operator and training", () => {
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Forklift");
-    fireEvent.click(popButton("Remove"));
-    expect(h.revokeMutate).toHaveBeenCalledTimes(1);
-    expect(revokePayload()).toMatchObject({ operatorId: id.ANN, skillId: id.FORK });
-  });
-
-  it("O29 ⭐⭐ the signer is a free-text box, never a picker of people in this system", () => {
-    // ⚠️ THE DECISION 0032's HEADER RECORDS, AND IT WENT AGAINST THE
-    // AUDITABLE-LOOKING ANSWER. A reference to a user profile cannot be carried
-    // by a CSV row, and the signer routinely has no login here at all — an
-    // external assessor, a vendor's trainer. **This box holds the CLAIM; who
-    // typed it in is the audit log's answer.** A `<select>` here would make the
-    // record either impossible to enter or a lie.
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Forklift");
-    const box = popField("Signed off by");
-    expect(box.tagName).toBe("INPUT");
-    expect(box.type).toBe("text");
-    expect(within(screen.getByRole("dialog")).queryByRole("combobox")).toBeNull();
-  });
-
-  it("O30: a half-typed record does not follow the reader onto somebody else", () => {
-    // ⚠️ A SELECTION OUTLIVING THE ROW IT WAS MADE ON is O13's family. The popover
-    // is about ONE person's ONE training; picking somebody the training does not
-    // apply to must close it, not carry the half-typed signer under a new name.
-    render(<OperatorsPanel />);
-    pick("Ann Adams");
-    openCell("Forklift");
-    fireEvent.change(popField("Signed off by"), { target: { value: "half typ" } });
-    // Zoe is in Plant 2; Forklift (Plant 1) is not a column on her matrix, so the
-    // popover for it cannot survive the switch.
-    pick("Zoe Zhang");
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-});
-
-/* ===========================================================================
- * ROADMAP STAGE 22 / 0032 / D114, THE OTHER HALF — THE ADD FORM RECORDS WHAT
- * THE LIST ABOVE IT SHOWS.
- *
- * The maintainer, having used the screen: *"for adding a training, there is no
- * option to add a signed off by and trained on which the section above it has,
- * this is a loss of continuity which needs to be fixed."*
- *
- * ⚠️⚠️ THIS BLOCK IS ALMOST ALL PAYLOAD, FOR A REASON THE RENDER CANNOT SHOW.
- * A form that DRAWS both boxes and drops them on the way to `grantSkill` looks
- * completely correct: the supervisor types the date and the signer, presses
- * Attach, and the row appears — empty in both columns, which is the state a
- * half-known record is legitimately in. Nothing on screen is wrong. Only the
- * argument `useGrantSkill` was handed can tell the two apart.
- *
- * ⚠️ AND THE INDEPENDENCE IS PINNED AS HARD AS THE PLUMBING. 0032 deliberately
- * carries no CHECK tying the date to the signer — a spreadsheet arrives with one
- * column filled in — so the failure to watch for is not a missing field but an
- * INVENTED RULE: a disabled Attach, a date defaulted because a signer was typed,
- * one box cleared because the other went empty.
- * =========================================================================== */
-
 /** What `useGrantSkill` was handed, as a plain object. */
 function grantPayload(callIndex = 0): Record<string, unknown> {
   return h.grantMutate.mock.calls[callIndex][0] as Record<string, unknown>;
 }
 
-describe("OperatorsPanel — recording a training through the popover (D114)", () => {
-  it("O31 ⭐⭐ recording sends all three facts with the training, in one gesture", () => {
-    // The defect verbatim: the insert used to carry the expiry alone, so the
-    // supervisor entered the same record twice. Clicking a gap cell and filling
-    // the popover now sends the training and all three facts together. ⚠️ ONLY
-    // THE PAYLOAD CAN SEE THIS; the grid after a drop looks legitimately
-    // half-known.
+/** Give Ann's Forklift a long-past expiry so Cell A1 becomes a cross whose
+ *  chooser offers a RENEW. ⚠️ `2000-01-01`, not a near date: `expiring` is
+ *  `expires_at < asOf` and `asOf` is the real day the suite runs, so a far-past
+ *  date is the one choice that does not make the answer depend on the clock. */
+function annForkliftExpiring() {
+  h.state.data.operatorSkills = [
+    {
+      operatorId: id.ANN,
+      skillId: id.FORK,
+      expiresAt: "2000-01-01" as string | null,
+      certifiedAt: "2026-03-14" as string | null,
+      signedOffBy: null as string | null,
+    },
+  ];
+}
+
+/* ===========================================================================
+ * ROADMAP STAGE 22 / 0032 / D114 — RECORDING A TRAINING, NOW FROM THE PLACE
+ * THAT NEEDS IT.
+ *
+ * The maintainer merged the two matrices: *"an operator cannot work in an area
+ * unless they're trained on it."* So a training is recorded from the CELL it
+ * gates — click a cross, the chooser names the missing training, Record opens
+ * the same popover that carries the three facts (certified on, expires, signed
+ * off by), kept optional and independent (0032 writes no CHECK tying them).
+ *
+ * ⚠️⚠️ THE PAYLOAD CARRIES MOST OF THIS BLOCK, NOT THE RENDER: a form that draws
+ * the signer and drops it on the way to `grantSkill` looks completely correct.
+ * Only the argument the mutation was handed can tell the two apart.
+ * =========================================================================== */
+
+describe("OperatorsPanel — recording a training from the place that needs it (D114)", () => {
+  it("O22 ⭐ an expiring required training offers a Renew that opens on its current record", () => {
+    annForkliftExpiring();
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    openCell("Welding"); // applies to Ann, unheld -> a gap cell
+    // Forklift lapsed, so Cell A1 is now a cross whose reason is the expiry.
+    openPlaceCell("Plant 1 › Line A › Cell A1");
+    const chooser = screen.getByRole("dialog");
+    expect(within(chooser).getByText(/Forklift/)).toBeTruthy();
+    expect(within(chooser).getByText(/expires/)).toBeTruthy();
+    fireEvent.click(dialogButton("Renew"));
+    // It is HELD, so the popover edits (Save changes) and shows what is stored.
+    expect(popField("Certified on").value).toBe("2026-03-14");
+    expect(popField("Expires").value).toBe("2000-01-01");
+    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Save changes" })).toBeTruthy();
+  });
+
+  it("O23 ⭐⭐ recording a missing training sends all three facts, with the org, in one gesture", () => {
+    // The defect verbatim: the insert used to carry the expiry alone. Cell A2
+    // needs Welding and Ann lacks it; the chooser's Record opens the popover, and
+    // Record training sends the training and all three facts together.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    fireEvent.click(dialogButton("Record"));
     fireEvent.change(popField("Certified on"), { target: { value: "2026-03-14" } });
     fireEvent.change(popField("Signed off by"), { target: { value: "R. Okonkwo" } });
     fireEvent.change(popField("Expires"), { target: { value: "2027-01-31" } });
-    fireEvent.click(popButton("Record training"));
+    fireEvent.click(dialogButton("Record training"));
     expect(h.grantMutate).toHaveBeenCalledTimes(1);
     const sent = grantPayload();
     expect(sent.operatorId).toBe(id.ANN);
@@ -1035,77 +875,110 @@ describe("OperatorsPanel — recording a training through the popover (D114)", (
     expect(sent.certifiedAt).toBe("2026-03-14");
     expect(sent.signedOffBy).toBe("R. Okonkwo");
     expect(sent.expiresAt).toBe("2027-01-31");
-    // ⭐ AND THE ORG TRAVELS WITH THE INSERT — a grant is a new row, so every
-    // column is written, unlike an update which edits one that exists.
+    // ⭐ A grant is a new row, so the org travels with it (unlike an edit).
     expect(sent.orgId).toBe(h.state.profile.orgId);
   });
 
-  it("O32 ⭐⭐ a signer with no date records, and so does a date with no signer", () => {
-    // ⚠️ THE HALF-KNOWN ROW IS THE ORDINARY CASE, and 0032 writes no CHECK tying
-    // the two precisely so it stays enterable. The failure to watch for is not a
-    // missing field but an INVENTED RULE — one box refused, defaulted or cleared
-    // for want of the other.
+  it("O24 ⭐⭐ the signer is a FREE-TEXT box and records alone, no date needed", () => {
+    // ⚠️ 0032's decision: the signer is routinely an external assessor with no
+    // login here, so a `<select>` would make the record impossible to enter or a
+    // lie — and the half-known row (a signer, no date) is the ordinary case.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    openCell("Welding");
-    fireEvent.change(popField("Signed off by"), { target: { value: "Vendor trainer" } });
-    fireEvent.click(popButton("Record training"));
-    const signerOnly = grantPayload(0);
-    expect(signerOnly.signedOffBy).toBe("Vendor trainer");
-    expect(signerOnly.certifiedAt).toBeNull();
-    expect(signerOnly.expiresAt).toBeNull();
-
-    // Close and reopen for a fresh, blank popover — a date and no signer.
-    fireEvent.click(popButton("Cancel"));
-    openCell("Welding");
-    fireEvent.change(popField("Certified on"), { target: { value: "2026-03-14" } });
-    fireEvent.click(popButton("Record training"));
-    const dateOnly = grantPayload(1);
-    expect(dateOnly.certifiedAt).toBe("2026-03-14");
-    expect(dateOnly.signedOffBy).toBeNull();
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    fireEvent.click(dialogButton("Record"));
+    const box = popField("Signed off by");
+    expect(box.tagName).toBe("INPUT");
+    expect(box.type).toBe("text");
+    expect(within(screen.getByRole("dialog")).queryByRole("combobox")).toBeNull();
+    fireEvent.change(box, { target: { value: "Vendor trainer" } });
+    fireEvent.click(dialogButton("Record training"));
+    const sent = grantPayload();
+    expect(sent.signedOffBy).toBe("Vendor trainer");
+    expect(sent.certifiedAt).toBeNull();
+    expect(sent.expiresAt).toBeNull();
   });
 
-  it("O33 ⭐ Record waits for nothing — the training is chosen by which cell was clicked", () => {
-    // ⚠️ THE CHECK 0032 REFUSED TO WRITE MUST NOT REAPPEAR AS A DISABLED BUTTON.
-    // The old Attach was disabled until a training was picked; here the training
-    // IS the cell, so Record is live from the moment the popover opens, and it
-    // records with both record boxes empty.
+  it("O25: the signer is trimmed on the way out, and a blank one is null not ''", () => {
+    // `signed_off_by` is a plain `text` column with no trim trigger and no CHECK
+    // (verified against 0032) — the client is the only thing between a user and a
+    // signer called "  ". The popover stays open after a grant the mock leaves
+    // pending, so a second Record from it records again.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    openCell("Welding");
-    expect(popButton("Record training").disabled).toBe(false);
-    fireEvent.click(popButton("Record training"));
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    fireEvent.click(dialogButton("Record"));
+    fireEvent.change(popField("Signed off by"), { target: { value: "   " } });
+    fireEvent.click(dialogButton("Record training"));
+    expect(grantPayload(0).signedOffBy).toBeNull();
+    fireEvent.change(popField("Signed off by"), { target: { value: "  R. Okonkwo  " } });
+    fireEvent.click(dialogButton("Record training"));
+    expect(grantPayload(1).signedOffBy).toBe("R. Okonkwo");
+  });
+
+  it("O26 ⭐ Record waits for nothing — the training is chosen by the cell that was clicked", () => {
+    // ⚠️ THE CHECK 0032 REFUSED TO WRITE MUST NOT REAPPEAR AS A DISABLED BUTTON.
+    // The training is already chosen (it is the one the cell needs), so Record is
+    // live from the moment the popover opens and records with both boxes empty.
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    fireEvent.click(dialogButton("Record"));
+    expect(dialogButton("Record training").disabled).toBe(false);
+    fireEvent.click(dialogButton("Record training"));
     const sent = grantPayload();
     expect(sent.certifiedAt).toBeNull();
     expect(sent.signedOffBy).toBeNull();
     expect(sent.expiresAt).toBeNull();
   });
 
-  it("O34: the signer is trimmed on the way out, and a blank one is null rather than ''", () => {
-    // `signed_off_by` is a plain `text` column with no trim trigger and no CHECK
-    // — verified against 0032, not assumed — so the client is the only thing
-    // between a user and a signer called "  ", on a grant as on an edit.
+  it("O27: closing the popover without saving writes nothing at all", () => {
+    // ⚠️ OPENING A CELL TO LOOK IS NOT EDITING IT. Cancel must put no row in the
+    // audit log for merely reading a record.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    openCell("Welding");
-    fireEvent.change(popField("Signed off by"), { target: { value: "   " } });
-    fireEvent.click(popButton("Record training"));
-    expect(grantPayload(0).signedOffBy).toBeNull();
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    fireEvent.click(dialogButton("Record"));
+    fireEvent.change(popField("Expires"), { target: { value: "2027-01-01" } });
+    fireEvent.click(dialogButton("Cancel"));
+    expect(h.grantMutate).not.toHaveBeenCalled();
+    expect(h.recordMutate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("O35 ⭐ a successful record closes the popover and clears the mutation", () => {
+  it("O28 ⭐ a successful record closes the popover and clears the mutation", () => {
     // ⚠️ THE POPOVER IS THE FORM NOW, so "the form emptied" is "the popover
-    // closed" — and the mutation is reset so a stale error never trails onto the
-    // next cell opened. Left open, a second Record could re-send the last one.
+    // closed"; the mutation is reset so a stale error never trails onto the next
+    // cell opened.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    openCell("Welding");
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    fireEvent.click(dialogButton("Record"));
     fireEvent.change(popField("Certified on"), { target: { value: "2026-03-14" } });
-    fireEvent.click(popButton("Record training"));
+    fireEvent.click(dialogButton("Record training"));
     const handlers = h.grantMutate.mock.calls[0][1] as { onSuccess: () => void };
     act(() => handlers.onSuccess());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(h.resetFn).toHaveBeenCalled();
+  });
+
+  it("O29 ⭐⭐ a training owned off this person's branch is named but NOT offered (§19.72)", () => {
+    // ⚠️ THE SERVER WOULD REFUSE IT. If a cell needs a training owned by a branch
+    // this person is not on, granting it here would fail — so the chooser names
+    // it ("owned elsewhere") and shows no Record. Point Cell A2 at Crane, which
+    // Plant 2 owns and Ann (Plant 1) is not under.
+    h.state.data.requirements = [
+      { nodeId: id.CA1, skillId: id.FORK },
+      { nodeId: id.CA2, skillId: id.CRANE },
+      { nodeId: id.CB1, skillId: id.FORK },
+    ];
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    openPlaceCell("Plant 1 › Line A › Cell A2");
+    const chooser = screen.getByRole("dialog");
+    expect(within(chooser).getByText(/Crane/)).toBeTruthy();
+    expect(within(chooser).getByText(/owned elsewhere/)).toBeTruthy();
+    expect(within(chooser).queryByRole("button", { name: "Record" })).toBeNull();
   });
 });
 
