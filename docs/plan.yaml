@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-02'
-  tip: 3509bc2
+  tip: 4703a3b
   baseline:
-    app_tests: 1610
+    app_tests: 1611
     app_test_files: 45
     tsc: 0
     eslint: 0
@@ -4994,7 +4994,7 @@ requirements:
       until a plant is picked.
   status: covered
 - id: R-306
-  title: A shift pattern's Edit opens the whole pattern, and Cancel closes it
+  title: A shift pattern's Edit is the one door — it opens the whole pattern and Cancel closes it
   source:
   - the maintainer, 2 Sept (in session)
   stated_by: maintainer
@@ -5002,16 +5002,20 @@ requirements:
     Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button
     that reveals everything editable about the pattern, not a rename that leaves the times behind a
     separate click. Cancel closes everything Edit opened — the name/owner editor AND the shifts — since
-    Edit is one door in. Reverses D106's narrow-Edit scoping at the maintainer's request; the name button
-    still expands the shifts on its own for a reader who only wants to look.
+    Edit is one door in. Reverses D106's narrow-Edit scoping at the maintainer's request. And it is the
+    ONLY door: the pattern name is plain text, not a second toggle. It used to expand the shifts on its
+    own, which left the Edit button reading "Edit" over an already-open row — two controls disagreeing
+    about one row (the maintainer, 2 Sept). So the disclosure now lives on the Edit button alone, which
+    carries aria-expanded; the name opens nothing.
   verified_by:
   - kind: vitest
     file: src/test/shiftsPanel.test.tsx
-    cases: S13 (Edit opens name + shifts), S13b (Cancel closes both)
+    cases: S13 (Edit opens name + shifts), S13b (Cancel closes both), S13c (name is plain text; Edit is the sole opener, carrying aria-expanded)
   - kind: screen
     steps: >-
       As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern
-      expanded to its shifts and breaks. Cancel then collapsed both back.
+      expanded to its shifts and breaks. Cancel then collapsed both back. The pattern name no longer
+      responded to a click — only Edit opened the row.
   status: covered
 - id: R-307
   title: A product's Edit reaches its colour, and colour waits for Save
@@ -6818,6 +6822,29 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 26
+  date: 2026-09-02
+  title: One door on shifts — the name stops being a second opener
+  commits:
+  - 4703a3b
+  numbers:
+    app_tests: 1611
+    app_test_files: 45
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer reported the last edge of session 23's Edit work: clicking a pattern's name expanded
+    the shifts, but the Edit button still read "Edit" over the now-open row — two controls disagreeing
+    about one row. Given the choice to flip the button or drop the name-opener, the maintainer chose one
+    door: the pattern name is plain text now, and Edit is the only way in and out. The disclosure moved
+    onto the Edit button, which carries aria-expanded; the caret, the hover underline and the "show
+    shifts" hint are gone with the button they belonged to. The test helpers that enumerated patterns by
+    their opener now read the name from the row and the open state from Edit; S13c pins the new contract
+    (name not a control, Edit the sole opener). R-306 updated to record the one-door rule. Counts read
+    from the session's own `npm run test` run.
+  shipped:
+  - S22
 - id: 25
   date: 2026-09-02
   title: Cancel closes the shifts Edit opened

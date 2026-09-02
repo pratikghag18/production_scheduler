@@ -98,17 +98,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 25 · 2026-09-02 · Cancel closes the shifts Edit opened</h2>
-  <div class="lead"><p>A fix on session 23's heels: making a pattern's Edit open the whole thing left its Cancel closing only the name/owner editor, so the expanded shifts stayed open — the maintainer reported Cancel not closing the expanded options. Cancel now collapses the pattern as well, since Edit is one door in. The name button still expands the shifts on its own. Test S13b pins it; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p></div>
+  <h2>Session 26 · 2026-09-02 · One door on shifts — the name stops being a second opener</h2>
+  <div class="lead"><p>The maintainer reported the last edge of session 23's Edit work: clicking a pattern's name expanded the shifts, but the Edit button still read &quot;Edit&quot; over the now-open row — two controls disagreeing about one row. Given the choice to flip the button or drop the name-opener, the maintainer chose one door: the pattern name is plain text now, and Edit is the only way in and out. The disclosure moved onto the Edit button, which carries aria-expanded; the caret, the hover underline and the &quot;show shifts&quot; hint are gone with the button they belonged to. The test helpers that enumerated patterns by their opener now read the name from the row and the open state from Edit; S13c pins the new contract (name not a control, Edit the sole opener). R-306 updated to record the one-door rule. Counts read from the session's own <code>npm run test</code> run.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">1610</span><span class="l">app tests in 45 files — session 25, 2026-09-02</span></div>
+  <div class="stat ok"><span class="n">1611</span><span class="l">app tests in 45 files — session 26, 2026-09-02</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">522</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">35</span><span class="l">database changes (migrations)</span></div>
   <div class="stat ok"><span class="n">0</span><span class="l">open defects</span></div>
   <div class="stat "><span class="n">127 / 250</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>3509bc2</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>4703a3b</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2838,9 +2838,9 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 </tr>
 <tr class="r-covered" id="R-306">
   <td class="g-n">R-306</td>
-  <td class="reqmain"><b>A shift pattern's Edit opens the whole pattern, and Cancel closes it</b><br><span class="fine">Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button that reveals everything editable about the pattern, not a rename that leaves the times behind a separate click. Cancel closes everything Edit opened — the name/owner editor AND the shifts — since Edit is one door in. Reverses D106's narrow-Edit scoping at the maintainer's request; the name button still expands the shifts on its own for a reader who only wants to look.</span>
+  <td class="reqmain"><b>A shift pattern's Edit is the one door — it opens the whole pattern and Cancel closes it</b><br><span class="fine">Editing a shift pattern opens its name, its owner, and its shifts and breaks together — one button that reveals everything editable about the pattern, not a rename that leaves the times behind a separate click. Cancel closes everything Edit opened — the name/owner editor AND the shifts — since Edit is one door in. Reverses D106's narrow-Edit scoping at the maintainer's request. And it is the ONLY door: the pattern name is plain text, not a second toggle. It used to expand the shifts on its own, which left the Edit button reading &quot;Edit&quot; over an already-open row — two controls disagreeing about one row (the maintainer, 2 Sept). So the disclosure now lives on the Edit button alone, which carries aria-expanded; the name opens nothing.</span>
       <br><span class="fine">the maintainer, 2 Sept (in session) · maintainer</span></td>
-  <td class="fine">vitest · <code>src/test/shiftsPanel.test.tsx</code> S13 (Edit opens name + shifts), S13b (Cancel closes both)<br>screen: As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern expanded to its shifts and breaks. Cancel then collapsed both back.</td>
+  <td class="fine">vitest · <code>src/test/shiftsPanel.test.tsx</code> S13 (Edit opens name + shifts), S13b (Cancel closes both), S13c (name is plain text; Edit is the sole opener, carrying aria-expanded)<br>screen: As the company admin, clicked Edit on a pattern: the name and Owned-by fields opened and the pattern expanded to its shifts and breaks. Cancel then collapsed both back. The pattern name no longer responded to a click — only Edit opened the row.</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-307">
@@ -2857,6 +2857,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 26</b> · 2026-09-02 · One door on shifts — the name stops being a second opener <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer reported the last edge of session 23's Edit work: clicking a pattern's name expanded the shifts, but the Edit button still read &quot;Edit&quot; over the now-open row — two controls disagreeing about one row. Given the choice to flip the button or drop the name-opener, the maintainer chose one door: the pattern name is plain text now, and Edit is the only way in and out. The disclosure moved onto the Edit button, which carries aria-expanded; the caret, the hover underline and the &quot;show shifts&quot; hint are gone with the button they belonged to. The test helpers that enumerated patterns by their opener now read the name from the row and the open state from Edit; S13c pins the new contract (name not a control, Edit the sole opener). R-306 updated to record the one-door rule. Counts read from the session's own <code>npm run test</code> run.</p>
+    <p class="fine">1611 app tests in 45 files · tsc 0 · eslint 0 · commits 4703a3b · shipped <a href="#S22">S22</a></p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 25</b> · 2026-09-02 · Cancel closes the shifts Edit opened <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>A fix on session 23's heels: making a pattern's Edit open the whole thing left its Cancel closing only the name/owner editor, so the expanded shifts stayed open — the maintainer reported Cancel not closing the expanded options. Cancel now collapses the pattern as well, since Edit is one door in. The name button still expands the shifts on its own. Test S13b pins it; driven in the browser. Counts read from the session's own <code>npm run test</code> run.</p>
