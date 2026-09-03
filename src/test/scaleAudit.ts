@@ -90,7 +90,6 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/dragSurface.module.css",
   "src/features/admin/components/LevelEditor.module.css",
   "src/features/admin/components/NodeTreeEditor.module.css",
-  "src/features/admin/components/AdminPopover.module.css",
   "src/features/admin/components/ShapePicker.module.css",
   "src/features/admin/components/SiteAccessPanel.module.css",
   // §19.62 — the four queued sections, pre-seated. Listed here AND in R10's

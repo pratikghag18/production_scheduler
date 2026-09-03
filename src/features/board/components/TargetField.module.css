@@ -1,0 +1,23 @@
+/* The two-input row for the target quantity + unit. Ported from the identical
+   `.row2` blocks that CreatePopover.module.css and AssignmentPopover.module.css
+   each carried before the field was shared. Rendered inside a popover's `.body`,
+   so the inputs inherit that wrapper's `.body input` styling; this file only
+   owns the row layout. */
+.row2 {
+  display: flex;
+  gap: calc(6px * var(--chrome-scale, 1));
+  margin-top: calc(2px * var(--chrome-scale, 1));
+}
+
+.row2 input {
+  width: auto;
+  /* The quantity input takes twice the width of the unit input. Flex items
+     default to `min-width: auto` (they refuse to shrink below their content),
+     so this is set explicitly. */
+  flex: 2;
+  min-width: 0;
+}
+
+.row2 input + input {
+  flex: 1;
+}

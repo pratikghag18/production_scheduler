@@ -15,6 +15,7 @@
    --------------------------------------------------------------------------- */
 import { useState } from "react";
 import { describeSchedulerError, type SchedulerError } from "@/lib/api";
+import { Popover } from "@/components/Popover";
 import type { CellState } from "../lib/matrix";
 import styles from "./matrixCells.module.css";
 
@@ -152,58 +153,49 @@ export function RecordPopover({
     });
 
   return (
-    <>
-      <div className={styles.scrim} onClick={onClose} aria-hidden="true" />
-      <div
-        className={styles.pop}
-        role="dialog"
-        aria-label={`Record ${what} for ${who}`}
-        style={{ top: position.top, left: position.left }}
-      >
-        <div className={styles.popHead}>
-          <span className={styles.popWho}>{who}</span>
-          <span className={styles.popWhat}>
-            {what}
-            {whatRef ? ` · ${whatRef}` : ""}
-          </span>
+    <Popover anchor={{ x: position.left, y: position.top }} onClose={onClose} title={who}>
+      <div className={styles.recordBody}>
+        <div className={styles.popWhat}>
+          {what}
+          {whatRef ? ` · ${whatRef}` : ""}
         </div>
         <label className={styles.popField}>
-          <span>Certified on</span>
-          <input type="date" value={certified} disabled={saving} onChange={(e) => setCertified(e.target.value)} />
-        </label>
-        <label className={styles.popField}>
-          <span>Expires</span>
-          <input type="date" value={expires} disabled={saving} onChange={(e) => setExpires(e.target.value)} />
-        </label>
-        <label className={styles.popField}>
-          <span>Signed off by</span>
-          <input
-            type="text"
-            value={signedBy}
-            placeholder="e.g. R. Silva"
-            disabled={saving}
-            onChange={(e) => setSignedBy(e.target.value)}
-          />
-        </label>
-        {error && (
-          <p className={styles.popError} role="alert">
-            {describeSchedulerError(error)}
-          </p>
+        <span>Certified on</span>
+        <input type="date" value={certified} disabled={saving} onChange={(e) => setCertified(e.target.value)} />
+      </label>
+      <label className={styles.popField}>
+        <span>Expires</span>
+        <input type="date" value={expires} disabled={saving} onChange={(e) => setExpires(e.target.value)} />
+      </label>
+      <label className={styles.popField}>
+        <span>Signed off by</span>
+        <input
+          type="text"
+          value={signedBy}
+          placeholder="e.g. R. Silva"
+          disabled={saving}
+          onChange={(e) => setSignedBy(e.target.value)}
+        />
+      </label>
+      {error && (
+        <p className={styles.popError} role="alert">
+          {describeSchedulerError(error)}
+        </p>
+      )}
+      <div className={styles.popActions}>
+        <button type="button" className={styles.popPrimary} onClick={submit} disabled={saving}>
+          {held ? "Save changes" : "Record training"}
+        </button>
+        {held && (
+          <button type="button" className={styles.popDanger} onClick={onRemove} disabled={saving}>
+            Remove
+          </button>
         )}
-        <div className={styles.popActions}>
-          <button type="button" className={styles.popPrimary} onClick={submit} disabled={saving}>
-            {held ? "Save changes" : "Record training"}
-          </button>
-          {held && (
-            <button type="button" className={styles.popDanger} onClick={onRemove} disabled={saving}>
-              Remove
-            </button>
-          )}
-          <button type="button" className={styles.popCancel} onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
+        <button type="button" className={styles.popCancel} onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
         </div>
       </div>
-    </>
+    </Popover>
   );
 }

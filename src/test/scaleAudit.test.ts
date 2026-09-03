@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the sixteen admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the fifteen admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -228,7 +228,8 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
     expect([...REM_SURFACES].sort()).toEqual(
       [
         "src/features/admin/AdminPage.module.css",
-        "src/features/admin/components/AdminPopover.module.css",
+        // AdminPopover.module.css was removed when the admin popover became a
+        // thin alias of the shared src/components/Popover (R-313).
         "src/features/admin/components/LevelEditor.module.css",
         "src/features/admin/components/NodeTreeEditor.module.css",
         "src/features/admin/components/ShapePicker.module.css",

@@ -36,6 +36,7 @@ import {
 import { buildColumns, trainingApplies, type CellState } from "../lib/matrix";
 import { MatrixChip, RecordPopover, type RecordFields } from "./matrixCells";
 import cellStyles from "./matrixCells.module.css";
+import { Popover } from "@/components/Popover";
 import type { OperatorSkillRecord } from "@/lib/api";
 // The calendar-date display seam: the org-wide format token, and the one
 // function that renders a `YYYY-MM-DD` with it. `../lib/operators` cannot import
@@ -1117,17 +1118,13 @@ export function OperatorsPanel() {
                   but not offered. New training TYPES are still created on the
                   Trainings tab; this only gives one to the person on screen. */}
               {editingPlace !== null && editingPlaceRow !== null && (
-                <>
-                  <div className={cellStyles.scrim} onClick={() => setEditingPlace(null)} aria-hidden="true" />
-                  <div
-                    className={cellStyles.pop}
-                    role="dialog"
-                    aria-label={`Trainings for ${editingPlaceRow.name}`}
-                    style={{ top: editingPlace.top, left: editingPlace.left }}
-                  >
-                    <div className={cellStyles.popHead}>
-                      <span className={cellStyles.popWho}>{editingPlaceRow.name}</span>
-                      <span className={cellStyles.popWhat}>{PLACE_CHIP[placeVerdict(editingPlaceRow)].label}</span>
+                <Popover
+                  anchor={{ x: editingPlace.left, y: editingPlace.top }}
+                  onClose={() => setEditingPlace(null)}
+                  title={editingPlaceRow.name}
+                >
+                    <div className={cellStyles.popWhat}>
+                      {PLACE_CHIP[placeVerdict(editingPlaceRow)].label}
                     </div>
                     {placeVerdict(editingPlaceRow) === "outside-area" && (
                       <p className={styles.placePopNote}>
@@ -1176,8 +1173,7 @@ export function OperatorsPanel() {
                         ))}
                       </ul>
                     )}
-                  </div>
-                </>
+                </Popover>
               )}
 
               {/* ⭐ RECORD-IN-PLACE, reached from the chooser above. The three

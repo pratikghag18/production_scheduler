@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
+import { TargetField, normalizeTarget } from "./TargetField";
 import styles from "./CreatePopover.module.css";
 
 /** Shown in place of the product picker when nothing belongs at this cell.
@@ -61,6 +63,7 @@ export function CreatePopover({
   products,
   operators,
   windowStart,
+  dateFormat = DEFAULT_DATE_FORMAT,
   requiredSkills,
   outsideAreaOperatorIds,
   eligibilityPolicy,
@@ -77,6 +80,7 @@ export function CreatePopover({
   products: Product[];
   operators: BoardOperator[];
   windowStart: Date;
+  dateFormat?: DateFormat;
   /** D64/D65: this node's effective required skills (`skillsForNode`, an
    *  ancestor-inherited union — already resolved by `boardIndex.ts`). */
   requiredSkills: Skill[];
@@ -141,7 +145,7 @@ export function CreatePopover({
   const [operatorId, setOperatorId] = useState(presetOperatorId ?? operators[0]?.id ?? "");
   const [efficiencyPercent, setEfficiencyPercent] = useState("100");
   const [targetQty, setTargetQty] = useState("");
-  const [targetUnit, setTargetUnit] = useState("units");
+  const [targetUnit, setTargetUnit] = useState("");
   const [overrideChecked, setOverrideChecked] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
   // D113. A SECOND pair, deliberately not reusing the one above: waving through
@@ -150,7 +154,7 @@ export function CreatePopover({
   const [areaChecked, setAreaChecked] = useState(false);
   const [areaReason, setAreaReason] = useState("");
 
-  const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin))} – ${formatClock(addMinutes(windowStart, range.endMin))}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, range.endMin))}`;
 
   const missingSkillsByOperator = useMemo(() => {
     const m = new Map<string, Skill[]>();
@@ -286,25 +290,13 @@ export function CreatePopover({
               value={efficiencyPercent}
               onChange={(e) => setEfficiencyPercent(e.target.value)}
             />
-            <label htmlFor="cp-target">Target (optional)</label>
-            <div className={styles.row2}>
-              <input
-                id="cp-target"
-                type="number"
-                min={1}
-                placeholder="—"
-                value={targetQty}
-                onChange={(e) => setTargetQty(e.target.value)}
-              />
-              <input
-                id="cp-unit"
-                aria-label="Target unit"
-                type="text"
-                maxLength={8}
-                value={targetUnit}
-                onChange={(e) => setTargetUnit(e.target.value)}
-              />
-            </div>
+            <TargetField
+              idPrefix="cp"
+              qty={targetQty}
+              unit={targetUnit}
+              onQtyChange={setTargetQty}
+              onUnitChange={setTargetUnit}
+            />
 
             {selectedOutsideArea && (
               <div className={styles.eligWarn}>
@@ -387,8 +379,9 @@ export function CreatePopover({
                 onSubmitRun(nodeId, range, productId, hc);
               } else {
                 const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
-                const tRaw = targetQty.trim();
-                const qty = tRaw === "" ? undefined : Math.max(1, Number(tRaw) || 1);
+                // Shared with the edit popover so the two cannot drift again: no
+                // quantity means no unit (never the literal "units").
+                const target = normalizeTarget(targetQty, targetUnit);
                 // D64: "never send an override the user did not tick" —
                 // `needsOverride && overrideChecked` is the only path that
                 // sends `eligibilityOverride: true`; every other case
@@ -400,8 +393,8 @@ export function CreatePopover({
                   operatorId,
                   productId,
                   eff,
-                  qty,
-                  (targetUnit || "units").slice(0, 8),
+                  target.qty ?? undefined,
+                  target.unit ?? undefined,
                   needsOverride && overrideChecked,
                   needsOverride && overrideChecked ? overrideReason.trim() : undefined,
                   // D113: sent only when it actually overrode something. The

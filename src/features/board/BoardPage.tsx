@@ -518,6 +518,7 @@ export default function BoardPage() {
           outsideAreaOperatorIds={outsideAreaOperatorIds}
           eligibilityPolicy={index?.eligibilityPolicy ?? "warn"}
           presetOperatorId={popover.presetOperatorId}
+          dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
           onSubmitRun={dragApi.submitCreateRun}
           onSubmitDirect={dragApi.submitCreateDirect}
@@ -530,6 +531,7 @@ export default function BoardPage() {
           crew={popover.crew}
           anchor={popover.anchor}
           windowStart={index?.windowStart ?? from}
+          dateFormat={dateFormat}
           products={boardQuery.data?.products ?? []}
           onCancel={dragApi.closePopover}
           onSave={dragApi.saveRunFields}
@@ -598,6 +600,7 @@ export default function BoardPage() {
           products={boardQuery.data?.products ?? []}
           anchor={popover.anchor}
           windowStart={index?.windowStart ?? from}
+          dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
           onSave={dragApi.saveAssignmentFields}
           onDelete={dragApi.removeAssignment}

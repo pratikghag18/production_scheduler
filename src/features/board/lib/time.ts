@@ -119,9 +119,11 @@ export function formatDayLabel(d: Date, fmt: DateFormat = "d_mon_yyyy"): string 
   }
 }
 
-/** "Mon Aug 17 06:00" — the mockup's `fmtFull`. */
-export function formatFull(d: Date): string {
-  return `${formatDayLabel(d)} ${formatClock(d)}`;
+/** "Mon Aug 17 06:00" — the mockup's `fmtFull`. Takes the org date-format token
+ *  (R-309) so a popover's date reads in the chosen format, like the board's day
+ *  labels; the default is byte-identical to before. */
+export function formatFull(d: Date, fmt: DateFormat = "d_mon_yyyy"): string {
+  return `${formatDayLabel(d, fmt)} ${formatClock(d)}`;
 }
 
 export function startOfUtcDay(d: Date): Date {

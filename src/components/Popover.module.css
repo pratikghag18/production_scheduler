@@ -1,0 +1,27 @@
+/* THE ONE POP-UP LOOK, shared by every popover in the app (board + admin).
+
+   This reconciles the two shells that used to diverge — the board popover
+   (z-index 90, 272px·chrome-scale width, light shadow) and the admin popover
+   (z-index 60, 17rem, heavy shadow, max-height+scroll). One set of values now:
+   the higher z-index so a popover always sits over board content; the rem width
+   (17rem = 272px at the default root size, scaling through the root font-size,
+   D84); the admin shell's max-height+scroll, which is the safer default for a
+   tall form; and the board shell's lighter shadow. Sized in rem; hairline border
+   and shadow offsets stay in px. */
+.pop {
+  position: fixed;
+  z-index: 90;
+  width: 17rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  box-shadow: 0 6px 24px rgba(11, 11, 11, 0.18);
+  padding: 0.75rem 0.875rem;
+}
+
+.h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+}
