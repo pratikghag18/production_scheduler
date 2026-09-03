@@ -122,11 +122,13 @@ export function CreatePopover({
     anchor: { x: number; y: number },
   ) => void;
   /**
-   * R-316: the standard this cell's cycle time implies for a candidate part,
-   * time span and efficiency — or null when the cell has no cycle time for it.
+   * R-316: the TARGET a candidate part, time span and efficiency work out to
+   * from this cell's standard cycle time — or null when the cell has no cycle
+   * time for that part. A target, not a standard: the standard is the seconds
+   * per unit, set once on the Cycle times screen.
    *
-   * All three move while this form is open (the product select, the shift
-   * chips and the drag handles, the efficiency box), so this is asked per
+   * All three inputs move while this form is open (the product select, the
+   * shift chips and the drag handles, the efficiency box), so this is asked per
    * render rather than passed as a number.
    */
   defaultTargetFor?: (
@@ -173,7 +175,7 @@ export function CreatePopover({
   // R-316: recomputed as the part, the span or the efficiency changes. Only
   // meaningful in direct mode — a run carries no target of its own.
   const typedEfficiency = Number(efficiencyPercent);
-  const standardQty =
+  const derivedQty =
     productId === ""
       ? null
       : (defaultTargetFor?.(
@@ -322,7 +324,7 @@ export function CreatePopover({
               unit={targetUnit}
               onQtyChange={setTargetQty}
               onUnitChange={setTargetUnit}
-              standardQty={standardQty}
+              derivedQty={derivedQty}
             />
 
             {selectedOutsideArea && (

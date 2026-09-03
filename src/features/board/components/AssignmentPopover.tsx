@@ -63,11 +63,13 @@ export function AssignmentPopover({
   ) => void;
   onDelete: (assignmentId: string) => void;
   /**
-   * R-316: the standard for this assignment AT A GIVEN EFFICIENCY, or null when
-   * its cell has no cycle time for the part.
+   * R-316: the TARGET this assignment works out to at a given efficiency, from
+   * its cell's standard cycle time — or null when that cell has no cycle time
+   * for the part. A target, not a standard: the standard is the seconds per
+   * unit and does not move; this number does.
    *
-   * A function rather than a number because efficiency is editable right here,
-   * and efficiency scales the standard. Passing the already-computed
+   * A function rather than a number because efficiency is editable right here
+   * and scales the result. Passing the already-computed
    * `assignment.defaultTargetQty` would show the figure for the SAVED
    * efficiency while the user is typing a different one.
    */
@@ -88,7 +90,7 @@ export function AssignmentPopover({
   // box falls back to the saved efficiency rather than to 100, so a
   // half-deleted number never makes the standard jump.
   const typedEfficiency = Number(efficiencyPercent);
-  const standardQty =
+  const derivedQty =
     defaultTargetFor?.(
       Number.isFinite(typedEfficiency) && typedEfficiency > 0
         ? typedEfficiency
@@ -119,7 +121,7 @@ export function AssignmentPopover({
           unit={targetUnit}
           onQtyChange={setTargetQty}
           onUnitChange={setTargetUnit}
-          standardQty={standardQty}
+          derivedQty={derivedQty}
         />
 
         <label htmlFor="ap-status">Status</label>

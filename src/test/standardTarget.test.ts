@@ -280,10 +280,21 @@ describe("T17: a block reads its typed target, else the standard, else NA", () =
     });
   });
 
-  it("T17c: with nothing typed, the standard shows and is MARKED as the standard", () => {
+  it("T17c: with nothing typed, the derived target shows and says WHERE it came from", () => {
     const shown = targetDisplay({ targetQty: null, targetUnit: null, defaultTargetQty: 280 });
     expect(shown.suffix).toBe(" ⌖280");
-    expect(shown.tip).toBe(" · ⌖ 280 (standard)");
+    expect(shown.tip).toBe(" · ⌖ 280 (from cycle time)");
+  });
+
+  it("⭐ T17f: a derived target is never CALLED a standard — it is one computed FROM one", () => {
+    // The maintainer, on the edit popover reading "Standard for this cell: 12":
+    // "it is not a standard, it is the target based on the standard. It is very
+    // misleading." The standard is the seconds per unit and does not move; this
+    // number changes with the window and the efficiency. Naming both the same
+    // thing is how someone ends up typing a cycle time into a target box.
+    const shown = targetDisplay({ targetQty: null, targetUnit: null, defaultTargetQty: 12 });
+    expect(shown.tip).not.toMatch(/\bstandard\b/i);
+    expect(shown.tip).toContain("cycle time");
   });
 
   it("T17d: a derived target never invents a unit — R-313's whole point", () => {

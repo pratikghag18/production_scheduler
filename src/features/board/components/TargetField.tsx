@@ -34,7 +34,7 @@ export function TargetField({
   unit,
   onQtyChange,
   onUnitChange,
-  standardQty = null,
+  derivedQty = null,
 }: {
   /** e.g. "cp" or "ap", so the create and edit forms keep distinct input ids. */
   idPrefix: string;
@@ -43,15 +43,23 @@ export function TargetField({
   onQtyChange: (v: string) => void;
   onUnitChange: (v: string) => void;
   /**
-   * R-316: what the cell's standard cycle time makes of this window, or null
-   * when the cell has no cycle time for this part — the normal case.
+   * R-316: the TARGET this window works out to from the cell's standard cycle
+   * time, or null when the cell has no cycle time for this part.
    *
-   * It is shown as the PLACEHOLDER, never as a value. Typing nothing must go on
+   * ⚠️ IT IS A TARGET, NOT A STANDARD, AND THE WORDING MATTERS. This read
+   * "Standard for this cell: 12" and the maintainer called it out: *"it is not
+   * a standard, it is the target based on the standard. It is very
+   * misleading."* The standard is the cycle time — seconds per unit, set once
+   * on the Cycle times screen. Twelve is what that standard implies for THIS
+   * window, and it moves when the block is resized or its efficiency changes.
+   * Naming the two the same thing invites someone to type a cycle time here.
+   *
+   * Shown as the PLACEHOLDER, never as a value. Typing nothing must go on
    * meaning "no target of my own" so the field saves null and the board keeps
-   * deriving; pre-filling the input would silently turn the standard into an
-   * explicit override that then stopped following a resize.
+   * deriving; pre-filling the input would silently turn it into an explicit
+   * override that then stopped following a resize.
    */
-  standardQty?: number | null;
+  derivedQty?: number | null;
 }) {
   return (
     <>
@@ -61,7 +69,7 @@ export function TargetField({
           id={`${idPrefix}-target`}
           type="number"
           min={1}
-          placeholder={standardQty == null ? "—" : String(standardQty)}
+          placeholder={derivedQty == null ? "—" : String(derivedQty)}
           value={qty}
           onChange={(e) => onQtyChange(e.target.value)}
         />
@@ -75,8 +83,10 @@ export function TargetField({
           onChange={(e) => onUnitChange(e.target.value)}
         />
       </div>
-      {standardQty != null && (
-        <p className={styles.hint}>Standard for this cell: {standardQty}. Leave blank to use it.</p>
+      {derivedQty != null && (
+        <p className={styles.hint}>
+          Target from this cell&rsquo;s cycle time: {derivedQty}. Leave blank to use it.
+        </p>
       )}
     </>
   );

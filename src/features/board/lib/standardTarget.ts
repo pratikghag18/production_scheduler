@@ -171,9 +171,17 @@ export function standardTargetQty(input: {
  * list that appears twice is a bug with a delay on it". Adding a third state
  * (the derived default) to two copies would have been the same bet again.
  *
- * A derived value is marked "(standard)" and carries NO unit. Units live only
- * beside a typed quantity (R-313/R-314), and inventing one here would put back
- * the exact "units" bug those two requirements exist to prevent.
+ * A derived value is marked "from cycle time" and carries NO unit. Units live
+ * only beside a typed quantity (R-313/R-314), and inventing one here would put
+ * back the exact "units" bug those two requirements exist to prevent.
+ *
+ * ⚠️ THE MARK SAYS WHERE THE NUMBER CAME FROM, NOT WHAT IT IS. It read
+ * "(standard)", and the maintainer called that out: *"it is not a standard, it
+ * is the target based on the standard. It is very misleading."* The standard is
+ * the cycle time — seconds per unit, set once per cell. This is a target, and
+ * it changes whenever the block is resized or its efficiency is edited while
+ * the standard behind it stays put. Calling both "the standard" is how someone
+ * ends up typing 90 into a target box.
  */
 export function targetDisplay(assignment: {
   targetQty: number | null;
@@ -190,7 +198,7 @@ export function targetDisplay(assignment: {
   if (assignment.defaultTargetQty != null) {
     return {
       suffix: ` ⌖${assignment.defaultTargetQty}`,
-      tip: ` · ⌖ ${assignment.defaultTargetQty} (standard)`,
+      tip: ` · ⌖ ${assignment.defaultTargetQty} (from cycle time)`,
     };
   }
   return { suffix: "", tip: " · target: NA" };

@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: 7eef5e3
+  tip: 98011bd
   baseline:
-    app_tests: 1733
-    app_test_files: 55
+    app_tests: 1738
+    app_test_files: 56
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -5325,6 +5325,9 @@ requirements:
   - kind: vitest
     file: src/test/shapes.test.ts
     cases: cycle_times parses to camelCase, a non-numeric seconds_per_unit is rejected, a payload missing the key entirely is rejected (loud beats silently empty), an empty list is accepted
+  - kind: vitest
+    file: src/test/targetFieldHint.test.tsx
+    cases: the hint calls the number a TARGET from the cycle time and never "Standard for this cell" (F-077), it says leaving the box blank is what uses it, the number is the placeholder and never a filled-in value, with no cycle time there is no hint and no placeholder number
   status: covered
   note: >-
     Qualifies R-031 ("unset renders NA" becomes "unset renders the standard, else NA") and narrows R-042:
@@ -5388,6 +5391,41 @@ requirements:
     the open editor was stretching its column so the whole grid reflowed on a click, and the summed rows were
     three times the height of the rows they total.
 findings:
+- id: F-077
+  title: A target computed from the standard is not the standard
+  tag: Words matter
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-316
+  - R-318
+  story: >-
+    The edit pop-up read **"Standard for this cell: 12"** under the target box. The maintainer: *"it is not a
+    standard, it is the target based on the standard. It is very misleading."*
+
+
+    They are two different quantities and this feature introduced both. The **standard** is the cycle time —
+    seconds to make one unit at one cell, set once on the Cycle times screen, and it does not move. The
+    **target** is what that standard works out to for one assignment's window, and it changes every time the
+    block is resized or its efficiency is edited. Twelve was the second thing wearing the first thing's name.
+
+
+    Left alone it invites a specific mistake: somebody reads "standard for this cell" over a target box, and
+    types the cycle time into it. That saves silently — 90 is a perfectly legal target — and the assignment
+    then carries an explicit target of 90 units that no longer follows a resize, which looks like the
+    derivation quietly breaking.
+
+
+    The pop-up now says "Target from this cell's cycle time: 12", and the chip's tooltip says "(from cycle
+    time)" instead of "(standard)". The prop behind both was called `standardQty` and is now `derivedQty`,
+    because the name that misled the reader was also misleading the code. Two tests pin the wording, since a
+    string is exactly what the type checker cannot see: one asserts the pop-up hint never opens with
+    "Standard for this cell", the other that a derived tooltip never uses the word "standard" at all.
+
+
+    Worth noting the shape rather than just the fix: nothing was broken. Every number was right, every test
+    was green, and the defect existed entirely in what the screen called things. It took someone reading the
+    words to find it.
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
   tag: Worth remembering
@@ -7170,14 +7208,42 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 39
+  date: 2026-09-03
+  title: A target computed from the standard is not the standard (F-077)
+  commits:
+  - pending
+  numbers:
+    app_tests: 1738
+    app_test_files: 56
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer opened an assignment and read the line under the target box: "Standard for this cell: 12."
+    Their words: "it is not a standard, it is the target based on the standard. It is very misleading." Exactly
+    right, and the confusion was one this feature introduced by shipping both quantities at once — the standard
+    is the cycle time, seconds per unit, set once per cell and unmoving; the target is what that standard works
+    out to for one window, and it changes with every resize and every efficiency edit. The pop-up hint now
+    reads "Target from this cell's cycle time: 12" and the chip tooltip says "(from cycle time)" rather than
+    "(standard)". The prop behind both was `standardQty` and is now `derivedQty`, since the name that misled
+    the reader was misleading the code too. Two tests pin the wording because a string is what tsc cannot see.
+    Nothing was computed wrongly and nothing was failing — the whole defect lived in what the screen called
+    things, which is the kind only a person reading the words will find. Verified in the browser on the day the
+    seeded assignments fall: a chip reading ⌖300 and the pop-up naming it a target from the cycle time. While
+    driving it, one alarm turned out to be my own instrumentation rather than the product — a script that
+    retyped 90 into a box which had reseeded to minutes, then to hours, leaving 90 hours behind; from a clean
+    table one save writes exactly one correct row, checked three times. Suite 1738 in 56 files, up from 1733 in
+    55.
+  shipped: []
 - id: 38
   date: 2026-09-03
   title: One shared editable box, after the cycle-times grid shipped the browser's own (R-318)
   commits:
   - eff559d
   numbers:
-    app_tests: 1733
-    app_test_files: 55
+    app_tests: 1738
+    app_test_files: 56
     tsc: 0
     eslint: 0
   confirmed: true
