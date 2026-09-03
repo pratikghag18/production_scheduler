@@ -7212,7 +7212,7 @@ sessions:
   date: 2026-09-03
   title: A target computed from the standard is not the standard (F-077)
   commits:
-  - pending
+  - 08f8440
   numbers:
     app_tests: 1738
     app_test_files: 56
