@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { ZOOMS } from "../lib/geometry";
 import { minutesToPx } from "../lib/geometry";
 import { formatClock, formatDayLabel, addMinutes } from "../lib/time";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import styles from "./BoardHeader.module.css";
 
 /**
@@ -16,6 +17,7 @@ export function BoardHeader({
   zoomIndex,
   railWidth,
   visibleMinRange,
+  dateFormat = DEFAULT_DATE_FORMAT,
 }: {
   windowStart: Date;
   dayCount: number;
@@ -23,6 +25,7 @@ export function BoardHeader({
   zoomIndex: 0 | 1 | 2;
   railWidth: number;
   visibleMinRange: [number, number];
+  dateFormat?: DateFormat;
 }) {
   const pxPerHour = ZOOMS[zoomIndex].pxPerHour;
   const compact = ZOOMS[zoomIndex].name === "Compact";
@@ -33,11 +36,11 @@ export function BoardHeader({
     for (let day = 0; day < dayCount; day++) {
       const left = minutesToPx(day * 1440, pxPerHour);
       const width = minutesToPx((day + 1) * 1440, pxPerHour) - left;
-      const label = formatDayLabel(addMinutes(windowStart, day * 1440));
+      const label = formatDayLabel(addMinutes(windowStart, day * 1440), dateFormat);
       boxes.push({ key: day, left, width, label });
     }
     return boxes;
-  }, [dayCount, pxPerHour, windowStart]);
+  }, [dayCount, pxPerHour, windowStart, dateFormat]);
 
   const dayBoundaries = useMemo(() => {
     const out: number[] = [];

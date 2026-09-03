@@ -15,6 +15,7 @@ import {
 } from "../lib/geometry";
 import { resolveDropRow } from "../lib/interaction";
 import { MS_PER_MINUTE } from "../lib/time";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardHeader } from "./BoardHeader";
 import { GroupRow } from "./GroupRow";
 import { TrackRow, type TrackRowDragApi } from "./TrackRow";
@@ -106,6 +107,7 @@ export function BoardGrid({
   dragApi,
   setDropRowResolver,
   onFitScaleChange,
+  dateFormat = DEFAULT_DATE_FORMAT,
 }: {
   index: BoardIndex;
   levelById: Map<string, HierarchyLevel>;
@@ -114,6 +116,8 @@ export function BoardGrid({
   zoomIndex: 0 | 1 | 2;
   productById: Map<string, Product>;
   operatorById: Map<string, BoardOperator>;
+  /** R-309: the org-wide date format, threaded to the day header. */
+  dateFormat?: DateFormat;
   /** Bumped by the store to request that "now" be scrolled into view. */
   scrollToNowNonce: number;
   /** P1-4b: the single `useDragGesture` instance, threaded down to every
@@ -541,6 +545,7 @@ export function BoardGrid({
           zoomIndex={zoomIndex}
           railWidth={railWidth}
           visibleMinRange={visibleMinRange}
+          dateFormat={dateFormat}
         />
         <div
           className={styles.spacer}

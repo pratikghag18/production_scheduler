@@ -34,6 +34,23 @@ describe("time.ts", () => {
     expect(formatDayLabel(new Date("2026-08-17T00:00:00Z"))).toBe("Mon Aug 17");
   });
 
+  it("formatDayLabel keeps the weekday and reformats the date per token (R-309)", () => {
+    const d = new Date("2026-08-17T00:00:00Z");
+    // Default is byte-identical to v1, so an untouched board reads the same.
+    expect(formatDayLabel(d, "d_mon_yyyy")).toBe("Mon Aug 17");
+    expect(formatDayLabel(d, "dmy_slash")).toBe("Mon 17/08");
+    expect(formatDayLabel(d, "mdy_slash")).toBe("Mon 08/17");
+    expect(formatDayLabel(d, "iso")).toBe("Mon 2026-08-17");
+  });
+
+  it("formatDayLabel resolves the day in BOARD_ZONE, not local time (R-309)", () => {
+    // Late-UTC instant: in UTC it is still the 17th, which the label must show
+    // whatever token is chosen — the format changes the writing, not the day.
+    const late = new Date("2026-08-17T23:30:00Z");
+    expect(formatDayLabel(late, "iso")).toBe("Mon 2026-08-17");
+    expect(formatDayLabel(late, "dmy_slash")).toBe("Mon 17/08");
+  });
+
   it("formatFull composes day label and clock", () => {
     expect(formatFull(new Date("2026-08-17T06:00:00Z"))).toBe("Mon Aug 17 06:00");
   });

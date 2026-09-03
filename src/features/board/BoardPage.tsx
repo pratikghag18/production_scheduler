@@ -5,6 +5,7 @@ import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { offeredHere, productsOfferedHere } from "@/features/admin/lib/scope";
+import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useRootPath } from "./hooks/useRootPath";
@@ -112,6 +113,10 @@ export default function BoardPage() {
   // Do not query as nobody: until the session resolves, an RLS-scoped read can
   // only come back 401. One shared predicate, never re-derived inline (§19.8).
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  // R-309: the org-wide date format for the board's day labels. Same shared
+  // React Query cache as the Settings screen, so a change there re-renders the
+  // board without a board refetch. Gated on `canQuery` (D91).
+  const dateFormat = useDateFormat(canQuery);
   // ⚠️ AND NOT UNTIL WE KNOW WHERE. `rootPath` is null while the places read is
   // in flight and stays null for someone with no access to any of them; asking
   // `board_window` for `""` would be the old hardcoded constant with extra
@@ -406,6 +411,7 @@ export default function BoardPage() {
         onGoToToday={goToToday}
         products={boardQuery.data?.products ?? []}
         isFetching={boardQuery.isFetching && hasData}
+        dateFormat={dateFormat}
       />
 
       {boardQuery.status === "pending" && !hasData && (
@@ -466,6 +472,7 @@ export default function BoardPage() {
                 dragApi={dragApi}
                 setDropRowResolver={dragApi.setDropRowResolver}
                 onFitScaleChange={handleFitScaleChange}
+                dateFormat={dateFormat}
               />
             </div>
           )}

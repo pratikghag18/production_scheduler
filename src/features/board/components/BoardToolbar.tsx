@@ -3,6 +3,7 @@ import { productColorCss } from "@/lib/productColor";
 import { ZOOMS, type ZoomIndex } from "../lib/geometry";
 import { formatDayLabel, addMinutes } from "../lib/time";
 import { shouldOfferRootPicker, type BoardRoot } from "../lib/rootSelection";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import styles from "./BoardToolbar.module.css";
 
 /** 92-day cap: `board_window` raises `invalid_argument` past it (T6, docs/api.md §2). */
@@ -28,6 +29,7 @@ export function BoardToolbar({
   onGoToToday,
   products,
   isFetching,
+  dateFormat = DEFAULT_DATE_FORMAT,
 }: {
   roots: BoardRoot[];
   rootPath: string | null;
@@ -41,6 +43,7 @@ export function BoardToolbar({
   onGoToToday: () => void;
   products: Product[];
   isFetching: boolean;
+  dateFormat?: DateFormat;
 }) {
   const startInputValue = windowStartDate.toISOString().slice(0, 10);
   const windowEnd = addMinutes(windowStartDate, windowDayCount * 1440);
@@ -77,7 +80,8 @@ export function BoardToolbar({
         roots.length === 1 && <span className={styles.rootName}>{roots[0].name}</span>
       )}
       <span className={styles.date}>
-        {formatDayLabel(windowStartDate)} – {formatDayLabel(addMinutes(windowEnd, -1440))}
+        {formatDayLabel(windowStartDate, dateFormat)} –{" "}
+        {formatDayLabel(addMinutes(windowEnd, -1440), dateFormat)}
       </span>
 
       {/* Day navigation, ported from the mockup's `.daynav`. Without it the
