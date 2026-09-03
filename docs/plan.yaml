@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: 11e6fc1
+  tip: 7eef5e3
   baseline:
-    app_tests: 1715
-    app_test_files: 53
+    app_tests: 1733
+    app_test_files: 55
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -5349,6 +5349,44 @@ requirements:
     file: src/test/cycleTimes.test.ts
     cases: G2 a line shows the sum of its cells and the plant sees the same total, G3 an unmeasured cell contributes nothing and the row says how many did, G4/G4b a part attached to one line is editable there only and a line is never typed into, G6 Line 10 is not inside Line 1 (a prefix test would merge them), G9 a summed row formats in the same friendly units, G10 the plant filter and the measured count
   status: covered
+- id: R-318
+  title: One shared editable box, enforced — a field looks and behaves the same everywhere
+  source:
+  - the maintainer, 3 Sept (in session, on the cycle-times grid, "does this save button and font seem like it is different than what we're using for the rest of the app... instead of showing dashes, what if show editable boxes... if I open a box to enter a value and don't want to enter it anymore, there is no way to close the box... we should make the editable boxes a standard for the app")
+  stated_by: maintainer
+  claim: >-
+    The cycle-times grid shipped with browser-default controls because the app's field look was never in one
+    place: the same block (1px --axis border, 0.375rem radius, --page background, 0.8125rem) was hand-copied
+    into eleven admin stylesheets, so a twelfth screen had nothing to import and silently got the user agent's
+    own. This is R-313's shape one layer down — there it was the pop-up SHELL, here it is the field inside it.
+    The fix is the same: ONE shared module. `src/components/Field.module.css` is now the single definition of
+    the box, the select and the button, and `src/components/InlineEdit.tsx` is the single edit-in-place
+    behaviour — a resting box that LOOKS editable rather than a dash (so an empty cell reads as somewhere to
+    type, not as missing data), and an open editor that can always be left without saving, by a visible Cancel
+    as well as Escape. Every editable cell keeps the same box geometry as its neighbours, so a row of them does
+    not appear indented against the read-only cells beside it. An audit stops a thirteenth hand-rolled field:
+    the stylesheets that predate the standard are listed as legacy, and a file not on that list which declares
+    its own field border is a build failure.
+  verified_by:
+  - kind: vitest
+    file: src/test/fieldStandard.test.ts
+    cases: a synthetic stylesheet hand-rolling a field border outside the shared module is flagged, the legacy list is exactly the stylesheets that predate the standard, a file added to the admin tree without using the shared module fails, the shared module defines the box exactly once
+  - kind: vitest
+    file: src/test/inlineEdit.test.tsx
+    cases: an empty cell renders a box and not a dash, a filled one shows its value, the box opens with the NUMBER only where the resting text carries a unit, Cancel is visible and closes without saving, Escape does the same, Save and Enter commit the typed value, an emptied box saves the empty string (clearing is a real act), a disabled cell offers no editor, onOpen fires so an adornment can be seeded, an error shows in both states
+  status: covered
+  note: >-
+    ⚠️ THE AUDIT FOUND THE PROBLEM IS BIGGER THAN THE REPORT. The maintainer named one screen and the eleven
+    admin stylesheets were the obvious suspects; running the matcher over the whole tree turned up fourteen
+    more, in the board, the shell and the auth screens. THIRTY files hand-declare the same control skin. All
+    thirty are named in the audit's legacy list, which may only ever shrink — so the debt is written down and
+    bounded instead of growing quietly. The standard is established and the new screen adopts it; migrating the
+    other thirty is queued, not done.
+    Driven in a real browser as the company admin (dev sign-in): sixty editable cells, Save and Cancel both
+    visible, 90 seconds saved and read back as "1.5 min", the roll-up rows showing the partial count, and the
+    measured line moving from 0 to 1 of 22. Two things that only the screenshot could show were fixed there:
+    the open editor was stretching its column so the whole grid reflowed on a click, and the summed rows were
+    three times the height of the rows they total.
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -7132,6 +7170,37 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 38
+  date: 2026-09-03
+  title: One shared editable box, after the cycle-times grid shipped the browser's own (R-318)
+  commits:
+  - pending
+  numbers:
+    app_tests: 1733
+    app_test_files: 55
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer opened the new Cycle times screen and reported four things in one breath: the Save button
+    and font did not match the rest of the app, the empty cells showed dashes where boxes would invite a value,
+    the editable cells looked indented against the read-only ones, and an opened box could not be closed
+    without saving. Then the fifth, which is the actual work: "we should make the editable boxes a standard for
+    the app." The cause was structural rather than careless. The app HAD a field look, but only as a block
+    hand-copied into eleven admin stylesheets, so a twelfth screen had nothing to import and got the user
+    agent's controls. That is R-313's shape one layer down — there the duplicated thing was the pop-up shell,
+    here the field inside it — so it got R-313's answer: `src/components/Field.module.css` is now the one
+    definition, `InlineEdit.tsx` the one edit-in-place behaviour, and `fieldStandard.test.ts` fails the build on
+    a new hand-rolled field. The audit then made the report bigger: sweeping the whole tree found fourteen more
+    files beyond the admin eleven, thirty in all, each named in a legacy list that may only shrink. The
+    alignment complaint had a real cause — the editable cell was a padded button and the read-only cell a bare
+    span — so read-only values now wear the box's geometry with none of its skin, which makes them line up by
+    construction. Cancel is a visible button beside Save, because Escape alone was a way out nobody could see.
+    Driven in a real browser through the dev sign-in, which caught two more things no unit test would: the open
+    editor was stretching its column so the grid reflowed on every click, and summed rows were three times the
+    height of the rows they total. Both fixed; the partial-sum note is now an inline "1/6". JS suite 1733 green
+    in 55 files, up from 1715 in 53.
+  shipped: []
 - id: 37
   date: 2026-09-03
   title: A standard cycle time per cell per part, and the target the board derives from it (R-315..R-317)
@@ -7965,6 +8034,14 @@ next:
     HALF DELIVERED by R-315..R-317 (session 37): standard cycle times are entered per cell per part and the
     board derives every unset target from them. What is left is the two halves that need outside data —
     importing the standards from routing/MES rather than typing them, and comparing them against actuals.
+- text: Move the thirty legacy stylesheets onto the shared field (R-318)
+  why: >-
+    The editable-box standard exists and the Cycle times screen uses it, but thirty stylesheets still carry
+    their own hand-declared copy of the control skin — the eleven admin ones the report implicated, plus
+    fourteen more across the board, the shell and the auth screens that the audit turned up. They are named in
+    FIELD_LEGACY in `src/test/fieldStandard.test.ts`; the list may only shrink, so this is bounded work that
+    can be done a file at a time. Each migration is a visual change to a shipped screen, which is why it is not
+    bundled with the screen that prompted the standard.
 - text: Phase 3 — Operator mobile read-only view
   why: Unchecked Phase 3 item; open question 7.
 backlog:

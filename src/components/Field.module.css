@@ -1,0 +1,139 @@
+/* THE ONE PLACE THE APP'S EDITABLE BOX IS DEFINED (R-318).
+
+   The maintainer, 3 Sept, on the cycle-times grid: *"does this save button and
+   font seem like it is different than what we're using for the rest of the
+   app... we should make the editable boxes a standard for the app."* They were
+   right, and the cause was structural rather than careless. The app HAD a field
+   look — a 1px `--axis` border, a 0.375rem radius, a `--page` background,
+   0.8125rem text — but it existed only as a block hand-copied into eleven admin
+   stylesheets. A twelfth screen had nothing to import, so it got the user
+   agent's own controls, which is exactly what the screenshot showed.
+
+   This is R-313 one layer down. There the duplicated thing was the pop-up
+   SHELL; here it is the field inside it. The answer is the same: one module,
+   and an audit (`src/test/fieldStandard.test.ts`) that fails the build when a
+   thirteenth copy appears.
+
+   Sized in `rem` (D84): the root font-size scales with `--chrome-scale`, so
+   these follow the viewport. Hairline borders stay in px on purpose — a 1px
+   rule scaled up renders blurry. `global.css` already declares `font: inherit`
+   for input/button/select/textarea (D89), so the FAMILY is inherited and only
+   the size is set here.
+
+   ⚠️ THE BOX AND THE RESTING BOX MUST STAY THE SAME SIZE. `.box` is a real
+   input; `.resting` is a button that impersonates one so a cell reads as
+   somewhere to type before it is opened. If their border, padding and font
+   drift apart, a cell will visibly jump on click and a column of them will look
+   indented against the read-only cells beside it — the second thing the
+   maintainer reported. They share `.field` for exactly that reason. */
+
+.field {
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink);
+  min-width: 0;
+}
+
+.field:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.field:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* A select is a field that happens to have a list behind it. */
+.select {
+  composes: field;
+}
+
+/* The resting state of an editable cell: looks like the box it becomes, so an
+   empty one invites typing instead of reading as missing data. Left-aligned
+   because the value it will hold is. */
+.resting {
+  composes: field;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  /* An EMPTY box must still be a box. Without this, a resting cell with no
+     value has no content to give it height and collapses to a line, so a grid
+     of unset cells would show a row of slivers instead of somewhere to type.
+     In `em`, so it follows the field's own size rather than a fixed number. */
+  min-height: 1.5em;
+}
+
+.resting:hover:not(:disabled) {
+  border-color: var(--ink-2);
+}
+
+/* An empty cell is an ordinary state, not a warning: muted, never coloured. */
+.restingEmpty {
+  color: var(--muted);
+}
+
+/* A value that cannot be edited, sitting in a grid beside ones that can.
+
+   ⚠️ IT KEEPS THE BOX'S GEOMETRY AND GIVES UP ONLY ITS SKIN. Same padding, same
+   border WIDTH, same font size — transparent border, no background. That is
+   what makes a column of read-only cells line up with the editable ones instead
+   of sitting a border-plus-padding to their left, which is the "do they have
+   indentations because only they can be edited?" the maintainer reported.
+   Aligning by arithmetic instead would be a number to keep in step by hand. */
+.readonly {
+  composes: field;
+  border-color: transparent;
+  background: none;
+  cursor: default;
+}
+
+.btn {
+  flex: none;
+  font-size: 0.7188rem;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 0.4375rem;
+  border: 1px solid var(--axis);
+  background: var(--page);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--ink-2);
+}
+
+.btn:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.primaryBtn {
+  composes: btn;
+  background: var(--surface);
+  font-weight: 600;
+}
+
+/* ---- the inline editor's own layout ---- */
+
+.editor {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.editorInput {
+  composes: field;
+  width: 4.5rem;
+}
+
+.error {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+  max-width: 14rem;
+}

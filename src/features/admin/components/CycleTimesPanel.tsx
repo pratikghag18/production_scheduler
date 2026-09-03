@@ -33,6 +33,8 @@ import { useAdminProducts } from "../hooks/useProducts";
 import { useCycleTimes, useSetCycleTime, useClearCycleTime } from "../hooks/useCycleTimes";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { isAtOrBelow, scopeIndex } from "../lib/scope";
+import { InlineEdit } from "@/components/InlineEdit";
+import fieldStyles from "@/components/Field.module.css";
 import {
   buildCycleGrid,
   countMeasured,
@@ -48,13 +50,6 @@ import styles from "./CycleTimesPanel.module.css";
 export const CYCLE_TIMES_PANEL_READY = true;
 
 const UNIT_LABEL: Record<CycleUnit, string> = { s: "sec", min: "min", h: "hr" };
-
-interface EditState {
-  nodeId: string;
-  productId: string;
-  value: string;
-  unit: CycleUnit;
-}
 
 export function CycleTimesPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
@@ -73,7 +68,10 @@ export function CycleTimesPanel() {
   const setMutation = useSetCycleTime();
   const clearMutation = useClearCycleTime();
 
-  const [edit, setEdit] = useState<EditState | null>(null);
+  // The unit the OPEN editor is using. One value, not one per cell: only one
+  // cell is ever open, and `InlineEdit`'s `onOpen` seeds this from the stored
+  // value so a box opens in the unit its number reads best in.
+  const [unit, setUnit] = useState<CycleUnit>("s");
   const [cellError, setCellError] = useState<{ key: string; message: string } | null>(null);
 
   const isCompanyAdmin = profile?.role === "admin";
@@ -136,31 +134,26 @@ export function CycleTimesPanel() {
 
   const cellKey = (nodeId: string, productId: string) => `${nodeId}|${productId}`;
 
-  function beginEdit(nodeId: string, productId: string, seconds: number | null) {
-    const shown = seconds === null ? { value: "", unit: "s" as CycleUnit } : displayCycle(seconds);
-    setCellError(null);
-    setEdit({
-      nodeId,
-      productId,
-      value: seconds === null ? "" : String(shown.value),
-      unit: shown.unit,
-    });
-  }
+  async function commitEdit(
+    nodeId: string,
+    productId: string,
+    draft: string,
+    stored: number | null,
+  ) {
+    const key = cellKey(nodeId, productId);
 
-  async function commitEdit(current: EditState, stored: number | null) {
-    const key = cellKey(current.nodeId, current.productId);
-    const trimmed = current.value.trim();
+    // ⚠️ THE DRAFT IS WHAT WAS TYPED, WHICH MAY BE A UNIT-CARRYING STRING. The
+    // resting box shows "1.5 min", so re-opening it and saving unchanged hands
+    // back "1.5 min", not "1.5". Stripping the unit word here means an
+    // untouched save is a no-op rather than a hundred-fold error.
+    const typed = draft.trim().replace(/\s*(s|sec|min|h|hr)$/i, "");
 
     // An emptied box CLEARS the cell — a real act, not a validation failure.
     // Its assignments go back to showing no target.
-    if (trimmed === "") {
-      setEdit(null);
+    if (typed === "") {
       if (stored === null) return;
       try {
-        await clearMutation.mutateAsync({
-          nodeId: current.nodeId,
-          productId: current.productId,
-        });
+        await clearMutation.mutateAsync({ nodeId, productId });
         setCellError(null);
       } catch (err) {
         setCellError({ key, message: describe(err) });
@@ -168,21 +161,17 @@ export function CycleTimesPanel() {
       return;
     }
 
-    const seconds = validateCycleEntry(current.value, current.unit);
+    const seconds = validateCycleEntry(typed, unit);
     if (typeof seconds === "string") {
       setCellError({ key, message: seconds });
       return;
     }
-    if (seconds === stored) {
-      setEdit(null);
-      return;
-    }
-    setEdit(null);
+    if (seconds === stored) return;
     try {
       await setMutation.mutateAsync({
         orgId: profile?.orgId ?? "",
-        nodeId: current.nodeId,
-        productId: current.productId,
+        nodeId,
+        productId,
         secondsPerUnit: seconds,
       });
       setCellError(null);
@@ -263,15 +252,14 @@ export function CycleTimesPanel() {
                         {row.cells.map((cell, i) => {
                           const product = block.columns[i]!;
                           const key = cellKey(row.node.id, product.id);
-                          const editing =
-                            edit !== null &&
-                            edit.nodeId === row.node.id &&
-                            edit.productId === product.id;
 
+                          // Read-only cells wear the box's geometry with none
+                          // of its skin, so they line up with the editable ones
+                          // rather than sitting a border-and-padding to the left.
                           if (cell.kind === "na") {
                             return (
                               <td key={product.id} className={styles.na} aria-label="not made here">
-                                —
+                                <span className={`${fieldStyles.readonly} ${styles.dash}`}>—</span>
                               </td>
                             );
                           }
@@ -279,51 +267,81 @@ export function CycleTimesPanel() {
                           if (cell.kind === "sum") {
                             return (
                               <td key={product.id} className={styles.sum}>
-                                {cell.contributors === 0 ? (
-                                  <span className={styles.muted}>—</span>
-                                ) : (
-                                  <>
-                                    <span className={styles.sumValue}>
+                                <span
+                                  className={fieldStyles.readonly}
+                                  // Spelled out here rather than on screen: the
+                                  // cell is 9.5rem wide and the sentence would
+                                  // not fit without wrapping every summed row
+                                  // to twice the height of the others.
+                                  title={
+                                    cell.contributors === 0
+                                      ? `No cycle time set at any of the ${cell.total} places below`
+                                      : `Standard time per unit, summed over ${cell.contributors} of ${cell.total} places below`
+                                  }
+                                >
+                                  {cell.contributors === 0 ? (
+                                    <span className={styles.dash}>—</span>
+                                  ) : (
+                                    <>
                                       {formatCycle(cell.seconds)}
-                                    </span>
-                                    <span className={styles.sumNote}>
-                                      sum of {cell.contributors}
-                                    </span>
-                                  </>
-                                )}
+                                      {/* Shown ONLY when the sum is partial.
+                                          A complete total needs no annotation;
+                                          an incomplete one must not be mistaken
+                                          for the line's full labour content. */}
+                                      {cell.contributors < cell.total && (
+                                        <span className={styles.sumNote}>
+                                          {" "}
+                                          {cell.contributors}/{cell.total}
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                </span>
                               </td>
                             );
                           }
 
                           const mayEdit = isAdminAt(row.node.id);
+                          const shown = cell.seconds === null ? "" : formatCycle(cell.seconds);
+                          // The box holds the NUMBER; the select beside it
+                          // holds the unit. Seeding the box with "1.5 min"
+                          // would state the unit twice and make clearing it to
+                          // type a bare number quietly change what it means.
+                          const editable =
+                            cell.seconds === null ? "" : String(displayCycle(cell.seconds).value);
                           return (
                             <td key={product.id} className={styles.cell}>
-                              {editing ? (
-                                <div className={styles.editor}>
-                                  <input
-                                    className={styles.input}
-                                    type="number"
-                                    min={0}
-                                    step="any"
-                                    autoFocus
-                                    aria-label={`Cycle time for ${product.sku} at ${row.node.name}`}
-                                    value={edit.value}
-                                    onChange={(e) => setEdit({ ...edit, value: e.target.value })}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") void commitEdit(edit, cell.seconds);
-                                      if (e.key === "Escape") {
-                                        setEdit(null);
-                                        setCellError(null);
-                                      }
-                                    }}
-                                  />
+                              <InlineEdit
+                                value={shown}
+                                editValue={editable}
+                                ariaLabel={`Cycle time for ${product.sku} at ${row.node.name}`}
+                                placeholder="0"
+                                disabled={!mayEdit}
+                                title={
+                                  mayEdit
+                                    ? "Set the standard cycle time"
+                                    : "You do not administer this part of the structure"
+                                }
+                                error={cellError?.key === key ? cellError.message : null}
+                                // The stored value decides which unit the box
+                                // opens in, so 90 s opens as "1.5 min" and
+                                // saving it untouched writes 90 s back.
+                                onOpen={() => {
+                                  setUnit(
+                                    cell.seconds === null ? "s" : displayCycle(cell.seconds).unit,
+                                  );
+                                  setCellError(null);
+                                }}
+                                onCancel={() => setCellError(null)}
+                                onSave={(draft) =>
+                                  void commitEdit(row.node.id, product.id, draft, cell.seconds)
+                                }
+                                adornment={
                                   <select
-                                    className={styles.unit}
+                                    className={fieldStyles.select}
                                     aria-label="Unit"
-                                    value={edit.unit}
-                                    onChange={(e) =>
-                                      setEdit({ ...edit, unit: e.target.value as CycleUnit })
-                                    }
+                                    value={unit}
+                                    onChange={(e) => setUnit(e.target.value as CycleUnit)}
                                   >
                                     {CYCLE_UNITS.map((u) => (
                                       <option key={u} value={u}>
@@ -331,32 +349,8 @@ export function CycleTimesPanel() {
                                       </option>
                                     ))}
                                   </select>
-                                  <button
-                                    type="button"
-                                    className={styles.save}
-                                    onClick={() => void commitEdit(edit, cell.seconds)}
-                                  >
-                                    Save
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className={cell.seconds === null ? styles.empty : styles.value}
-                                  disabled={!mayEdit}
-                                  title={
-                                    mayEdit
-                                      ? "Set the standard cycle time"
-                                      : "You do not administer this part of the structure"
-                                  }
-                                  onClick={() => beginEdit(row.node.id, product.id, cell.seconds)}
-                                >
-                                  {cell.seconds === null ? "—" : formatCycle(cell.seconds)}
-                                </button>
-                              )}
-                              {cellError?.key === key && (
-                                <p className={styles.cellError}>{cellError.message}</p>
-                              )}
+                                }
+                              />
                             </td>
                           );
                         })}

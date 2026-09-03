@@ -134,8 +134,15 @@ export interface CycleGridValue {
 export type CycleGridCell =
   /** A place work is booked and this part is made: the number lives here. */
   | { kind: "editable"; seconds: number | null }
-  /** An ancestor row: the labour content of the cells beneath it. */
-  | { kind: "sum"; seconds: number; contributors: number }
+  /**
+   * An ancestor row: the labour content of the cells beneath it.
+   *
+   * `contributors` and `total` are both here so the screen can say when a sum
+   * is only part of the picture. A total over 3 of 5 measured cells is not
+   * wrong, but it is not the line's full labour content either, and a reader
+   * who cannot tell the two apart will plan against the smaller number.
+   */
+  | { kind: "sum"; seconds: number; contributors: number; total: number }
   /** Neither — this part is not made anywhere at or below this row. */
   | { kind: "na" };
 
@@ -217,23 +224,22 @@ export function buildCycleGrid(input: {
         // number contribute nothing rather than a zero — an unmeasured station
         // is unknown work, not free work — and `contributors` lets the screen
         // say so when the total is only part of the picture.
-        let total = 0;
+        let sum = 0;
         let contributors = 0;
-        let anyEditable = false;
+        let total = 0;
         for (const descendant of inPlant) {
           if (!schedulableLevels.has(descendant.levelId)) continue;
           if (!isAtOrBelow(descendant.path, node.path)) continue;
           if (!offeredIn(product, descendant)) continue;
-          anyEditable = true;
+          total += 1;
           const seconds = valueByKey.get(`${descendant.id}|${product.id}`);
           if (seconds !== undefined) {
-            total += seconds;
+            sum += seconds;
             contributors += 1;
           }
         }
-        if (!anyEditable) return { kind: "na" };
-        if (contributors === 0) return { kind: "sum", seconds: 0, contributors: 0 };
-        return { kind: "sum", seconds: total, contributors };
+        if (total === 0) return { kind: "na" };
+        return { kind: "sum", seconds: sum, contributors, total };
       });
       return {
         node,

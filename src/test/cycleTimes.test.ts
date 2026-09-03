@@ -139,23 +139,40 @@ describe("G1-G4: what a plant's grid offers, and what it rolls up", () => {
       kind: "sum",
       seconds: 150,
       contributors: 2,
+      total: 2,
     });
-    // And it keeps rolling up: the plant sees the same 150.
+    // And it keeps rolling up: the plant sees the same 150, over the three
+    // cells that make WX anywhere in it.
     expect(cellFor(plant1!, "plant1", "WX")).toEqual({
       kind: "sum",
       seconds: 150,
       contributors: 2,
+      total: 3,
     });
   });
 
-  it("G3: an unmeasured cell contributes nothing, and the row says how many did", () => {
+  it("G3: an unmeasured cell contributes nothing, and the row says how partial it is", () => {
     const [plant1] = grid([{ nodeId: "cell1", productId: "wx", secondsPerUnit: 60 }]);
+    // 1 of the line's 2 cells is measured. Both numbers are carried so the
+    // screen can distinguish a complete total from a partial one — a reader who
+    // cannot tell will plan against the smaller number.
     expect(cellFor(plant1!, "line1", "WX")).toEqual({
       kind: "sum",
       seconds: 60,
       contributors: 1,
+      total: 2,
     });
     expect(cellFor(plant1!, "cell2", "WX")).toEqual({ kind: "editable", seconds: null });
+  });
+
+  it("G3b: a row with nothing measured below it still knows how many places there are", () => {
+    const [plant1] = grid();
+    expect(cellFor(plant1!, "line1", "WX")).toEqual({
+      kind: "sum",
+      seconds: 0,
+      contributors: 0,
+      total: 2,
+    });
   });
 
   it("G4: a part attached to one line is editable there and blank on a sibling line", () => {
@@ -193,17 +210,20 @@ describe("G5-G6: entry validation, and the ancestry trap", () => {
       { nodeId: "cell1", productId: "wx", secondsPerUnit: 60 },
       { nodeId: "cell10", productId: "wx", secondsPerUnit: 999 },
     ]);
-    // Line 1's roll-up must see ONLY Cell 1's 60, never Cell 10's 999.
+    // Line 1's roll-up must see ONLY Cell 1's 60, never Cell 10's 999 — and
+    // its total must be 2 (its own cells), not 3.
     expect(cellFor(plant1!, "line1", "WX")).toEqual({
       kind: "sum",
       seconds: 60,
       contributors: 1,
+      total: 2,
     });
     // The plant above both sees the pair.
     expect(cellFor(plant1!, "plant1", "WX")).toEqual({
       kind: "sum",
       seconds: 1059,
       contributors: 2,
+      total: 3,
     });
   });
 });

@@ -91,10 +91,16 @@
   min-width: 11rem;
 }
 
+/* ⚠️ EVERY VALUE COLUMN IS THE SAME WIDTH, AND WIDE ENOUGH FOR AN OPEN EDITOR.
+   Left to itself the table gave the column holding the open cell whatever the
+   input, the unit select and the two buttons needed, so clicking a cell made
+   the whole grid reflow around it and the boxes came out ragged. Fixing the
+   width means opening a cell changes nothing but that cell; the editor wraps
+   onto a second line inside it (`.editor` is a wrapping flex row). */
 .colHead {
   background: var(--page);
   white-space: nowrap;
-  min-width: 7.5rem;
+  width: 9.5rem;
 }
 
 .sku {
@@ -110,7 +116,7 @@
 }
 
 .cell {
-  min-width: 7.5rem;
+  width: 9.5rem;
 }
 
 /* A place this part is not made — not a gap to be filled. */
@@ -125,70 +131,23 @@
   background: var(--page);
 }
 
-.sumValue {
-  display: block;
-  color: var(--ink-2);
+.dash {
+  color: var(--muted);
 }
 
+/* Inline, never a second line: a summed row has to keep the same height as the
+   cells it totals, or the grid reads as though the ancestor rows were the
+   important ones. */
 .sumNote {
-  display: block;
   font-size: 0.6875rem;
   color: var(--muted);
 }
 
-/* A measured cell, and an unmeasured one. An empty cell is an ordinary state,
-   so it is quiet -- no warning colour, no "not set" badge. */
-.value,
-.empty {
-  appearance: none;
-  border: 1px solid transparent;
-  border-radius: 0.25rem;
-  background: none;
-  padding: 0.125rem 0.375rem;
-  font: inherit;
-  cursor: pointer;
-  color: var(--ink);
-}
-
-.empty {
-  color: var(--muted);
-}
-
-.value:hover:not(:disabled),
-.empty:hover:not(:disabled) {
-  border-color: var(--axis);
-}
-
-.value:disabled,
-.empty:disabled {
-  cursor: default;
-  opacity: 0.7;
-}
-
-.editor {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-}
-
-.input {
-  width: 4.5rem;
-  min-width: 0;
-  font: inherit;
-}
-
-.unit {
-  font: inherit;
-}
-
-.save {
-  font: inherit;
-  cursor: pointer;
-}
-
-.cellError {
-  margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  color: var(--crit);
-  max-width: 12rem;
-}
+/* ⚠️ THE EDITABLE CELL IS NOT STYLED HERE, ON PURPOSE (R-318). The box, the
+   unit select, the Save/Cancel buttons and the error line all come from
+   `src/components/Field.module.css` through `InlineEdit`. This file styled its
+   own once, which is how the grid shipped with the browser's default controls
+   while every other screen had the app's — the maintainer's "does this save
+   button and font seem like it is different than what we're using for the rest
+   of the app". A field rule added back here would be that again, and
+   `fieldStandard.test.ts` fails the build if one is. */
