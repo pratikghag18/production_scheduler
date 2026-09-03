@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: 4ca2791
+  tip: 9e058b1
   baseline:
-    app_tests: 1637
+    app_tests: 1642
     app_test_files: 47
     tsc: 0
     eslint: 0
     db_checks: 522
-    migrations: 37
+    migrations: 38
     mutations: 509 of 536
 tracks:
 - id: core
@@ -5120,6 +5120,8 @@ requirements:
     required ISO INPUT format for the CSV, which must stay deterministic. Board chip tooltips (formatFull)
     keep the default for now. First cut wired only the Operators popover line, which was invisible in normal
     use — the board labels were added the same day after the maintainer showed nothing had changed on screen.
+    The closed enum is EIGHT presets as of 0038: d_mon_yyyy, dmy_slash, mdy_slash, iso, dmy_dash_mon
+    (03-Sep-2026), d_month_yyyy (3 September 2026), month_d_yyyy (September 3, 2026), ymd_slash (2026/09/03).
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6903,6 +6905,31 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 30
+  date: 2026-09-03
+  title: Four more date-format presets (R-309)
+  commits:
+  - 9e058b1
+  numbers:
+    app_tests: 1642
+    app_test_files: 47
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer asked for a handful more presets over the four 0037 shipped. Added dmy_dash_mon
+    (03-Sep-2026), d_month_yyyy (3 September 2026), month_d_yyyy (September 3, 2026) and ymd_slash
+    (2026/09/03), taking the closed enum to eight. The token list is duplicated across layers on purpose, so
+    every layer moved together: the DateFormat union, DATE_FORMATS and the formatCalendarDay switch in the
+    seam (with a MONTHS_FULL array added there, the one place a month array is allowed); a label per token on
+    the Settings screen, which draws a row and a live sample for each on its own; and formatDayLabel on the
+    board, which keeps the weekday first and reaches month names through Intl in BOARD_ZONE rather than a
+    month array, so the day-seam audit stays green. Migration 0038 replaces set_org_date_format with the same
+    body and only the IN list widened — the signature is unchanged, so db:types came back identical. App suite
+    1642 green (was 1637: four seam cases, one board case). tsc and eslint clean. The seven SQL cases in
+    63_org_date_format_test.sql run green on a fresh-seed database (X6 sets an added preset); the canonical
+    verify-db.sh db_checks recount is owed on CI, so baseline db_checks is left at 522.
+  shipped: []
 - id: 29
   date: 2026-09-03
   title: The date format reaches the board's day labels (R-309 follow-up)
