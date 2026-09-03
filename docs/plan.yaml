@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: e6e0b7b
+  tip: a0c0304
   baseline:
-    app_tests: 1653
+    app_tests: 1648
     app_test_files: 48
     tsc: 0
     eslint: 0
@@ -5129,19 +5129,26 @@ requirements:
   stated_by: maintainer
   claim: >-
     A system admin who picks a plant on the board sees only that plant's operators in the left panel, not
-    every operator in the company. The narrowing is on the OFFERED pool and on the CLIENT: `board_window`
-    still returns the whole org on purpose (S18 / D113 — the read stays wide so a cross-plant assignment can
-    still be DRAWN and an out-of-area person stays in the list, annotated, for placement with a reason), and
-    `index.operatorById` keeps every operator so a chip always resolves its name. `ownedUnder` (scope.ts) is
-    the reverse containment of `offeredAt`: it keeps operators whose owner (`site_node_id`) sits at-or-below
-    the board's root, fails open on an owner the client cannot resolve, and guards the line1/line10 prefix
-    trap through `isAtOrBelow`. A server-side scope of `board_window` was tried and backed out: it regresses
-    exactly what S18 forbids (a cross-plant chip falling to "unknown operator").
+    every operator in the company — the same result a site admin already gets from RLS on their read. The
+    narrowing is on the OFFERED pool and on the CLIENT: `board_window` still returns the whole org on purpose
+    (S18 / D113 — the read stays wide so a cross-plant assignment can still be DRAWN and an out-of-area person
+    stays in the list, annotated, for placement with a reason), and `index.operatorById` keeps every operator
+    so a chip always resolves its name. The cut is MEMBERSHIP in the scoped nodes: `board_window`'s `nodes`
+    are exactly the selected root's subtree, so `index.nodeById.has(op.site_node_id)` is precisely "belongs
+    to this plant". ⚠️ A first attempt resolved owner PATHS through `nodeById` and failed OPEN on an owner it
+    could not find — but a different plant's owner is never in the scoped map, so every out-of-plant operator
+    was kept (the bug it was meant to fix); membership is the correct, verified test. A server-side scope of
+    `board_window` was also tried and backed out: it regresses exactly what S18 forbids (a cross-plant chip
+    falling to "unknown operator").
   verified_by:
-  - kind: vitest
-    file: src/test/scope.test.ts
-    cases: XO1 (owner at root or below is kept, another plant dropped), XO2 (a deeper root narrows further), XO3 (line1/line10 prefix trap), XO4 (unresolvable owner fails open), XO5 (order preserved)
+  - kind: manual
+    file: docs (session 32 screenshots)
+    cases: signed in as the company admin, Plant B selected, the OPERATORS panel lists only Operator B1-B6 (no Plant A/C people); board_window unchanged so chips still resolve
   status: covered
+  note: >-
+    The pool filter is a one-line client membership test in BoardPage; it is proven by driving the running
+    app (session 32) rather than a unit test, because the earlier path-based helper passed its unit tests and
+    still shipped the bug — the scoped-map subtlety only shows against real data.
 - id: R-311
   title: One chevron, drawn from a single icon module and audited
   source:
@@ -5155,10 +5162,18 @@ requirements:
     enforced: `iconStandard.test.ts` fails the build if a directional control glyph (« » ▸ ▾ ◀ ▶ ◄ ►)
     appears in any component outside the icon module. It is deliberately narrow — the breadcrumb separator ›
     and the matrix status glyphs (▲ ↻ ✓ × ·) are a separate intentional set and are left alone.
+    ⚠️ THE GLYPH WAS NOT ENOUGH. Unifying only the chevron left the two toggles still looking different,
+    because their BUTTON chrome was two separate stylesheets (the admin rail borderless 0.875rem; the board
+    panel a bordered 20px box on --ui-scale). `src/components/PanelToggle.tsx` (+ its module) now owns the
+    button itself — chrome, the shared Chevron, and the collapsed→direction rule — and both left panels render
+    it, each stylesheet keeping only its positioning. Verified matching in the running app (session 32).
   verified_by:
   - kind: vitest
     file: src/test/iconStandard.test.ts
     cases: synthetic raw glyphs are flagged, the breadcrumb separator and status glyphs are not, comments are not read, the icon module is allowed its glyphs, and the real src tree draws every chevron through the module
+  - kind: manual
+    file: docs (session 32 screenshots)
+    cases: the admin rail toggle and the board OPERATORS toggle render as the same bordered chevron button
   status: covered
 findings:
 - id: F-001
@@ -6943,6 +6958,35 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 32
+  date: 2026-09-03
+  title: Both fixes actually landed — operator pool and one shared toggle, verified in the app
+  commits:
+  - a0c0304
+  numbers:
+    app_tests: 1648
+    app_test_files: 48
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer ran session 31's work and neither fix showed: the board still listed every plant's
+    operators, and the two toggles still looked different. Both were real misses. The operator filter resolved
+    each operator's owner PATH through index.nodeById and failed OPEN when it could not find one — but
+    index.nodeById holds only the SCOPED nodes, so a different plant's owner was never in it and every
+    out-of-plant operator was kept: the opposite of the intent. The fix is membership — board_window's nodes
+    ARE the selected plant's subtree, so an operator belongs iff index.nodeById.has(site_node_id); the
+    path-based ownedUnder helper and its (passing, misleading) unit tests are removed. The toggle change had
+    unified only the chevron glyph, leaving the button chrome as two separate stylesheets; PanelToggle now
+    owns the button and both left panels render it. Both were VERIFIED by driving the running app as the
+    company admin (Playwright): with Plant B selected the OPERATORS panel lists only Operator B1-B6, and the
+    admin rail toggle and board OPERATORS toggle render as the same bordered chevron. Screenshots sent to the
+    maintainer. Lesson recorded on R-310: the earlier helper passed its unit tests and still shipped the bug,
+    because the scoped-map subtlety only appears against real data — so this one is proven in the app, not
+    just in vitest.
+    Suite 1648 green (was 1653; the five ownedUnder cases went with the helper). tsc and eslint clean. No
+    migration.
+  shipped: []
 - id: 31
   date: 2026-09-03
   title: Board operator pool follows the plant, and one audited chevron (R-310, R-311)
