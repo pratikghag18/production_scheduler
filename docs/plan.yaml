@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: 1f64248
+  tip: '159e094'
   baseline:
-    app_tests: 1653
-    app_test_files: 48
+    app_tests: 1663
+    app_test_files: 50
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -5199,6 +5199,35 @@ requirements:
     file: src/test/matrix.test.ts
     cases: "plants are ROOTS with no company node — plants read alphabetically even against a higher root sortOrder, columns contiguous by plant, the plant band spans its columns, and an Area 2 training sits under its plant (plus the existing single-plant and two-plant-under-a-company-root cases, unchanged)"
   status: covered
+- id: R-313
+  title: One shared pop-up shell, enforced, and the target unit no longer defaults to "units"
+  source:
+  - the maintainer, 3 Sept (in session, "create a standard for pop ups so this does not happen ever again")
+  stated_by: maintainer
+  claim: >-
+    Every pop-up in the app renders through ONE shell, `src/components/Popover.tsx` (portal, role="dialog",
+    aria-modal, focus trap, Escape, outside-pointerdown close, `resolvePopoverPlacement`, self-measurement),
+    and a build audit forbids any other. Before this there was no standard: three parallel floating-panel
+    implementations — the board's `BoardPopover`, a line-for-line clone `AdminPopover`, and a hand-rolled
+    `RecordPopover`/place-chooser that lacked a focus trap and Escape. `BoardPopover` and `AdminPopover` are
+    now thin aliases of the shared shell (their duplicated CSS deleted; AdminPopover.module.css left
+    REM_SURFACES in both scaleAudit copies), and the matrix record popover and the Operators place-chooser
+    compose it. `popoverStandard.test.ts` fails the build if `role="dialog"` appears outside the shared
+    module — the shared-primitive-plus-audit pattern, as for icons and the date seam. The recurring "units"
+    bug is fixed at its cause: the Target quantity+unit field was hand-duplicated in the create and edit
+    popovers and both coerced `targetUnit || "units"`, so a unit was written with no target. The field and
+    its normaliser now live once in `TargetField.tsx` (`normalizeTarget`): no quantity means no unit (never
+    the literal "units"), a unit is kept only beside a quantity (trimmed, 8-capped, blank -> null), and
+    "units" is only a placeholder. Pop-up dates honor R-309: `formatFull` takes the org date-format token,
+    threaded from BoardPage into the create/edit/run popovers.
+  verified_by:
+  - kind: vitest
+    file: src/test/popoverStandard.test.ts
+    cases: a synthetic role="dialog" outside the shared module is flagged, a component composing <Popover> is not, comments are not read, the shared module is allowed, and the real src tree has no role="dialog" outside src/components/Popover.tsx
+  - kind: vitest
+    file: src/test/targetField.test.ts
+    cases: no quantity -> null unit (never "units"); a unit is kept only with a quantity; a set quantity with a blank unit is null; quantity clamps to >=1 and the unit trims/caps to 8
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6982,6 +7011,35 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 35
+  date: 2026-09-03
+  title: One shared pop-up shell, an audit, and the "units" fix (R-313)
+  commits:
+  - '159e094'
+  numbers:
+    app_tests: 1663
+    app_test_files: 50
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer, again on the recurring "units" bug: an assignment kept getting the literal unit "units"
+    with no target, and they had asked before for a pop-up standard so this stops. A fresh audit confirmed
+    there was none — three parallel floating-panel implementations (the board's BoardPopover, a line-for-line
+    clone AdminPopover, and a hand-rolled RecordPopover/place-chooser missing focus trap and Escape), no
+    shared shell, no test. Full standard built: src/components/Popover.tsx is the one shell; BoardPopover and
+    AdminPopover become thin aliases (duplicated CSS deleted, AdminPopover.module.css removed from
+    REM_SURFACES in both scaleAudit copies), and the matrix record popover and the Operators place-chooser
+    now compose it, gaining the focus trap and Escape they lacked. popoverStandard.test.ts fails the build if
+    role="dialog" appears outside the shared module — the same shared-primitive-plus-audit shape as the icon
+    and date-seam standards. The units bug is fixed at its cause: the Target quantity+unit field was
+    hand-duplicated across the create and edit popovers, so it is now one component, TargetField, with one
+    normalizeTarget rule — no quantity means no unit, never the literal "units". Pop-up dates honor R-309 via
+    a formatFull token threaded from BoardPage. A no-op ResizeObserver stub in the test setup lets any popover
+    render under jsdom. Suite 1663 green (was 1653: targetField and popoverStandard cases). tsc and eslint
+    clean. No migration. NOT yet driven in the app — the parent will verify the assignment/record popovers
+    and the units field there.
+  shipped: []
 - id: 34
   date: 2026-09-03
   title: Matrix plants read alphabetically (R-312 follow-up)

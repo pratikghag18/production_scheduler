@@ -98,17 +98,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 34 · 2026-09-03 · Matrix plants read alphabetically (R-312 follow-up)</h2>
-  <div class="lead"><p>The maintainer's call after the grouping fix: order the plants A, B, C, D rather than by their root sortOrder (which nobody arranges and often ties at 0, giving the confusing A, D, B, C). The column comparator now sorts ROOT nodes by name; areas, lines and cells keep their deliberate sortOrder, which is both the admin's drag order and what stops a raw name sort putting Line 10 before Line 2. Verified in the app — the header reads Plant A, Plant B, Plant C, Plant D; screenshot sent. The multi-root test gives a plant a higher sortOrder than its alphabetical predecessor to pin that the name wins. Suite 1653 green. tsc and eslint clean.</p></div>
+  <h2>Session 35 · 2026-09-03 · One shared pop-up shell, an audit, and the &quot;units&quot; fix (R-313)</h2>
+  <div class="lead"><p>The maintainer, again on the recurring &quot;units&quot; bug: an assignment kept getting the literal unit &quot;units&quot; with no target, and they had asked before for a pop-up standard so this stops. A fresh audit confirmed there was none — three parallel floating-panel implementations (the board's BoardPopover, a line-for-line clone AdminPopover, and a hand-rolled RecordPopover/place-chooser missing focus trap and Escape), no shared shell, no test. Full standard built: src/components/Popover.tsx is the one shell; BoardPopover and AdminPopover become thin aliases (duplicated CSS deleted, AdminPopover.module.css removed from REM_SURFACES in both scaleAudit copies), and the matrix record popover and the Operators place-chooser now compose it, gaining the focus trap and Escape they lacked. popoverStandard.test.ts fails the build if role=&quot;dialog&quot; appears outside the shared module — the same shared-primitive-plus-audit shape as the icon and date-seam standards. The units bug is fixed at its cause: the Target quantity+unit field was hand-duplicated across the create and edit popovers, so it is now one component, TargetField, with one normalizeTarget rule — no quantity means no unit, never the literal &quot;units&quot;. Pop-up dates honor R-309 via a formatFull token threaded from BoardPage. A no-op ResizeObserver stub in the test setup lets any popover render under jsdom. Suite 1663 green (was 1653: targetField and popoverStandard cases). tsc and eslint clean. No migration. NOT yet driven in the app — the parent will verify the assignment/record popovers and the units field there.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">1653</span><span class="l">app tests in 48 files — session 34, 2026-09-03</span></div>
+  <div class="stat ok"><span class="n">1663</span><span class="l">app tests in 50 files — session 35, 2026-09-03</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">522</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">38</span><span class="l">database changes (migrations)</span></div>
   <div class="stat ok"><span class="n">0</span><span class="l">open defects</span></div>
-  <div class="stat "><span class="n">132 / 255</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">133 / 256</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>1f64248</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>159e094</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -1099,7 +1099,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>255 requirements · 132 covered · 109 uncovered · 0 contradicted · 14 superseded</caption>
+<caption>256 requirements · 133 covered · 109 uncovered · 0 contradicted · 14 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -2884,6 +2884,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
       <br><span class="fine">the maintainer, 3 Sept (in session) · maintainer</span></td>
   <td class="fine">vitest · <code>src/test/matrix.test.ts</code> plants are ROOTS with no company node — plants read alphabetically even against a higher root sortOrder, columns contiguous by plant, the plant band spans its columns, and an Area 2 training sits under its plant (plus the existing single-plant and two-plant-under-a-company-root cases, unchanged)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-covered" id="R-313">
+  <td class="g-n">R-313</td>
+  <td class="reqmain"><b>One shared pop-up shell, enforced, and the target unit no longer defaults to &quot;units&quot;</b><br><span class="fine">Every pop-up in the app renders through ONE shell, <code>src/components/Popover.tsx</code> (portal, role=&quot;dialog&quot;, aria-modal, focus trap, Escape, outside-pointerdown close, <code>resolvePopoverPlacement</code>, self-measurement), and a build audit forbids any other. Before this there was no standard: three parallel floating-panel implementations — the board's <code>BoardPopover</code>, a line-for-line clone <code>AdminPopover</code>, and a hand-rolled <code>RecordPopover</code>/place-chooser that lacked a focus trap and Escape. <code>BoardPopover</code> and <code>AdminPopover</code> are now thin aliases of the shared shell (their duplicated CSS deleted; AdminPopover.module.css left REM_SURFACES in both scaleAudit copies), and the matrix record popover and the Operators place-chooser compose it. <code>popoverStandard.test.ts</code> fails the build if <code>role=&quot;dialog&quot;</code> appears outside the shared module — the shared-primitive-plus-audit pattern, as for icons and the date seam. The recurring &quot;units&quot; bug is fixed at its cause: the Target quantity+unit field was hand-duplicated in the create and edit popovers and both coerced <code>targetUnit || &quot;units&quot;</code>, so a unit was written with no target. The field and its normaliser now live once in <code>TargetField.tsx</code> (<code>normalizeTarget</code>): no quantity means no unit (never the literal &quot;units&quot;), a unit is kept only beside a quantity (trimmed, 8-capped, blank -&gt; null), and &quot;units&quot; is only a placeholder. Pop-up dates honor R-309: <code>formatFull</code> takes the org date-format token, threaded from BoardPage into the create/edit/run popovers.</span>
+      <br><span class="fine">the maintainer, 3 Sept (in session, &quot;create a standard for pop ups so this does not happen ever again&quot;) · maintainer</span></td>
+  <td class="fine">vitest · <code>src/test/popoverStandard.test.ts</code> a synthetic role=&quot;dialog&quot; outside the shared module is flagged, a component composing &lt;Popover&gt; is not, comments are not read, the shared module is allowed, and the real src tree has no role=&quot;dialog&quot; outside src/components/Popover.tsx<br>vitest · <code>src/test/targetField.test.ts</code> no quantity -&gt; null unit (never &quot;units&quot;); a unit is kept only with a quantity; a set quantity with a blank unit is null; quantity clamps to &gt;=1 and the unit trims/caps to 8</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr></tbody></table></div>
 </section>
 
@@ -2892,6 +2899,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 35</b> · 2026-09-03 · One shared pop-up shell, an audit, and the &quot;units&quot; fix (R-313) <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer, again on the recurring &quot;units&quot; bug: an assignment kept getting the literal unit &quot;units&quot; with no target, and they had asked before for a pop-up standard so this stops. A fresh audit confirmed there was none — three parallel floating-panel implementations (the board's BoardPopover, a line-for-line clone AdminPopover, and a hand-rolled RecordPopover/place-chooser missing focus trap and Escape), no shared shell, no test. Full standard built: src/components/Popover.tsx is the one shell; BoardPopover and AdminPopover become thin aliases (duplicated CSS deleted, AdminPopover.module.css removed from REM_SURFACES in both scaleAudit copies), and the matrix record popover and the Operators place-chooser now compose it, gaining the focus trap and Escape they lacked. popoverStandard.test.ts fails the build if role=&quot;dialog&quot; appears outside the shared module — the same shared-primitive-plus-audit shape as the icon and date-seam standards. The units bug is fixed at its cause: the Target quantity+unit field was hand-duplicated across the create and edit popovers, so it is now one component, TargetField, with one normalizeTarget rule — no quantity means no unit, never the literal &quot;units&quot;. Pop-up dates honor R-309 via a formatFull token threaded from BoardPage. A no-op ResizeObserver stub in the test setup lets any popover render under jsdom. Suite 1663 green (was 1653: targetField and popoverStandard cases). tsc and eslint clean. No migration. NOT yet driven in the app — the parent will verify the assignment/record popovers and the units field there.</p>
+    <p class="fine">1663 app tests in 50 files · tsc 0 · eslint 0 · commits 159e094</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 34</b> · 2026-09-03 · Matrix plants read alphabetically (R-312 follow-up) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer's call after the grouping fix: order the plants A, B, C, D rather than by their root sortOrder (which nobody arranges and often ties at 0, giving the confusing A, D, B, C). The column comparator now sorts ROOT nodes by name; areas, lines and cells keep their deliberate sortOrder, which is both the admin's drag order and what stops a raw name sort putting Line 10 before Line 2. Verified in the app — the header reads Plant A, Plant B, Plant C, Plant D; screenshot sent. The multi-root test gives a plant a higher sortOrder than its alphabetical predecessor to pin that the name wins. Suite 1653 green. tsc and eslint clean.</p>
