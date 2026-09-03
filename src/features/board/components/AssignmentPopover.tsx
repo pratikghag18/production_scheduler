@@ -44,6 +44,7 @@ export function AssignmentPopover({
   onCancel,
   onSave,
   onDelete,
+  defaultTargetFor,
 }: {
   assignment: IndexedAssignment;
   homeRun: IndexedRun | null;
@@ -61,6 +62,16 @@ export function AssignmentPopover({
     status: string,
   ) => void;
   onDelete: (assignmentId: string) => void;
+  /**
+   * R-316: the standard for this assignment AT A GIVEN EFFICIENCY, or null when
+   * its cell has no cycle time for the part.
+   *
+   * A function rather than a number because efficiency is editable right here,
+   * and efficiency scales the standard. Passing the already-computed
+   * `assignment.defaultTargetQty` would show the figure for the SAVED
+   * efficiency while the user is typing a different one.
+   */
+  defaultTargetFor?: (efficiencyPercent: number) => number | null;
 }) {
   const isDirect = homeRun === null;
   const currentProductId = isDirect ? (assignment.productId ?? "") : homeRun.productId;
@@ -72,6 +83,17 @@ export function AssignmentPopover({
   const [status, setStatus] = useState(
     STATUS_OPTIONS.includes(assignment.status) ? assignment.status : "planned",
   );
+
+  // R-316: follows the efficiency box as it is typed. An unparseable or empty
+  // box falls back to the saved efficiency rather than to 100, so a
+  // half-deleted number never makes the standard jump.
+  const typedEfficiency = Number(efficiencyPercent);
+  const standardQty =
+    defaultTargetFor?.(
+      Number.isFinite(typedEfficiency) && typedEfficiency > 0
+        ? typedEfficiency
+        : assignment.efficiencyPercent,
+    ) ?? assignment.defaultTargetQty;
 
   const product = products.find((p) => p.id === currentProductId);
   const name = operator?.displayName ?? "(unknown operator)";
@@ -97,6 +119,7 @@ export function AssignmentPopover({
           unit={targetUnit}
           onQtyChange={setTargetQty}
           onUnitChange={setTargetUnit}
+          standardQty={standardQty}
         />
 
         <label htmlFor="ap-status">Status</label>

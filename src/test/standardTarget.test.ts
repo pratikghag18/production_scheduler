@@ -21,6 +21,7 @@ import {
   overlapMinutes,
   roundTarget,
   standardTargetQty,
+  targetDisplay,
 } from "@/features/board/lib/standardTarget";
 
 const SEED_TEMPLATE: ShiftTemplate = {
@@ -256,5 +257,46 @@ describe("T13-T16: a part slower than the shift still shows progress", () => {
     expect(overlapMinutes(MORNING, [])).toBe(0);
     expect(overlapMinutes(MORNING, [{ startMin: 500, endMin: 500 }])).toBe(0);
     expect(overlapMinutes(MORNING, [{ startMin: 500, endMin: 400 }])).toBe(0);
+  });
+});
+
+/**
+ * How a target reads on a block. One function for both block shapes — the
+ * chip and the direct block previously carried this line for line, which is
+ * the shape of the R-313 duplication that wrote a unit with no quantity.
+ */
+describe("T17: a block reads its typed target, else the standard, else NA", () => {
+  it("T17a: a typed target wins and keeps its unit", () => {
+    expect(targetDisplay({ targetQty: 500, targetUnit: "boxes", defaultTargetQty: 280 })).toEqual({
+      suffix: " ⌖500",
+      tip: " · ⌖ 500 boxes",
+    });
+  });
+
+  it("T17b: a typed target with no unit carries no stray trailing space", () => {
+    expect(targetDisplay({ targetQty: 500, targetUnit: null, defaultTargetQty: null })).toEqual({
+      suffix: " ⌖500",
+      tip: " · ⌖ 500",
+    });
+  });
+
+  it("T17c: with nothing typed, the standard shows and is MARKED as the standard", () => {
+    const shown = targetDisplay({ targetQty: null, targetUnit: null, defaultTargetQty: 280 });
+    expect(shown.suffix).toBe(" ⌖280");
+    expect(shown.tip).toBe(" · ⌖ 280 (standard)");
+  });
+
+  it("T17d: a derived target never invents a unit — R-313's whole point", () => {
+    // targetUnit cannot be set without targetQty (R-314 is a CHECK), but even
+    // if a stale row carried one, a derived reading must not borrow it.
+    const shown = targetDisplay({ targetQty: null, targetUnit: "units", defaultTargetQty: 280 });
+    expect(shown.tip).not.toContain("units");
+  });
+
+  it("T17e: neither typed nor derived still reads NA, exactly as before", () => {
+    expect(targetDisplay({ targetQty: null, targetUnit: null, defaultTargetQty: null })).toEqual({
+      suffix: "",
+      tip: " · target: NA",
+    });
   });
 });

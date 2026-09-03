@@ -2,6 +2,7 @@ import type { Product, BoardOperator, ShiftTemplate } from "@/lib/api";
 import type { IndexedAssignment } from "../lib/boardIndex";
 import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import { targetDisplay } from "../lib/standardTarget";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import styles from "./DirectBlock.module.css";
 
@@ -72,11 +73,9 @@ export function DirectBlock({
   const left = minutesToPx(range.startMin, pxPerHour);
   const width = Math.max(46, minutesToPx(range.endMin, pxPerHour) - left);
   const effSfx = assignment.efficiencyPercent !== 100 ? ` · ${assignment.efficiencyPercent}%` : "";
-  const tgtSfx = assignment.targetQty != null ? ` ⌖${assignment.targetQty}` : "";
-  const tgtTip =
-    assignment.targetQty != null
-      ? ` · ⌖ ${assignment.targetQty} ${assignment.targetUnit ?? ""}`
-      : " · target: NA";
+  // R-316: one shared reading for both block shapes — a typed target, else the
+  // cell's standard, else NA. See `targetDisplay` for why this is not inlined.
+  const { suffix: tgtSfx, tip: tgtTip } = targetDisplay(assignment);
 
   const title =
     `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin))}` +

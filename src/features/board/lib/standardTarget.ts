@@ -161,6 +161,41 @@ export function standardTargetQty(input: {
   return roundTarget((net * 60 * efficiency) / secondsPerUnit);
 }
 
+/**
+ * HOW A TARGET READS ON A BLOCK — the one place, for both shapes.
+ *
+ * `AssignmentChip` and `DirectBlock` had this arithmetic and this wording
+ * duplicated line for line. That is exactly the shape of R-313, where the
+ * target FIELD was hand-duplicated across two popovers and the two drifted into
+ * writing a unit with no quantity; CLAUDE.md §4 records the lesson as "a column
+ * list that appears twice is a bug with a delay on it". Adding a third state
+ * (the derived default) to two copies would have been the same bet again.
+ *
+ * A derived value is marked "(standard)" and carries NO unit. Units live only
+ * beside a typed quantity (R-313/R-314), and inventing one here would put back
+ * the exact "units" bug those two requirements exist to prevent.
+ */
+export function targetDisplay(assignment: {
+  targetQty: number | null;
+  targetUnit: string | null;
+  defaultTargetQty: number | null;
+}): { suffix: string; tip: string } {
+  if (assignment.targetQty != null) {
+    const unit = assignment.targetUnit ?? "";
+    return {
+      suffix: ` ⌖${assignment.targetQty}`,
+      tip: ` · ⌖ ${assignment.targetQty}${unit === "" ? "" : ` ${unit}`}`,
+    };
+  }
+  if (assignment.defaultTargetQty != null) {
+    return {
+      suffix: ` ⌖${assignment.defaultTargetQty}`,
+      tip: ` · ⌖ ${assignment.defaultTargetQty} (standard)`,
+    };
+  }
+  return { suffix: "", tip: " · target: NA" };
+}
+
 /** The (node, product) key both the board index and the popovers look up by. */
 export function cycleTimeKey(nodeId: string, productId: string): string {
   return `${nodeId}|${productId}`;

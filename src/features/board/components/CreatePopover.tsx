@@ -71,6 +71,7 @@ export function CreatePopover({
   onCancel,
   onSubmitRun,
   onSubmitDirect,
+  defaultTargetFor,
 }: {
   nodeId: string;
   anchor: { x: number; y: number };
@@ -120,6 +121,19 @@ export function CreatePopover({
     areaOverrideReason: string | undefined,
     anchor: { x: number; y: number },
   ) => void;
+  /**
+   * R-316: the standard this cell's cycle time implies for a candidate part,
+   * time span and efficiency — or null when the cell has no cycle time for it.
+   *
+   * All three move while this form is open (the product select, the shift
+   * chips and the drag handles, the efficiency box), so this is asked per
+   * render rather than passed as a number.
+   */
+  defaultTargetFor?: (
+    productId: string,
+    range: { startMin: number; endMin: number },
+    efficiencyPercent: number,
+  ) => number | null;
 }) {
   const [mode, setMode] = useState<"run" | "direct">(
     presetOperatorId ? "direct" : defaultCreateMode,
@@ -155,6 +169,18 @@ export function CreatePopover({
   const [areaReason, setAreaReason] = useState("");
 
   const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, range.endMin))}`;
+
+  // R-316: recomputed as the part, the span or the efficiency changes. Only
+  // meaningful in direct mode — a run carries no target of its own.
+  const typedEfficiency = Number(efficiencyPercent);
+  const standardQty =
+    productId === ""
+      ? null
+      : (defaultTargetFor?.(
+          productId,
+          range,
+          Number.isFinite(typedEfficiency) && typedEfficiency > 0 ? typedEfficiency : 100,
+        ) ?? null);
 
   const missingSkillsByOperator = useMemo(() => {
     const m = new Map<string, Skill[]>();
@@ -296,6 +322,7 @@ export function CreatePopover({
               unit={targetUnit}
               onQtyChange={setTargetQty}
               onUnitChange={setTargetUnit}
+              standardQty={standardQty}
             />
 
             {selectedOutsideArea && (

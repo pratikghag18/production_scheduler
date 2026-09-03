@@ -15,6 +15,7 @@ import { useDragGesture } from "./hooks/useDragGesture";
 import { buildBoardIndex, type BoardIndex } from "./lib/boardIndex";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
 import { splitFits } from "./lib/interaction";
+import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
 import { addMinutes, MINUTES_PER_DAY } from "./lib/time";
 import { BoardToolbar } from "./components/BoardToolbar";
 import { BoardGrid } from "./components/BoardGrid";
@@ -329,6 +330,31 @@ export default function BoardPage() {
   }, [boardQuery.data, index, createNodeId]);
 
   /**
+   * R-316: what the cell's standard cycle time makes of a span, for the two
+   * popovers. Null whenever there is no cycle time for that (cell, part) —
+   * which is the normal case, and renders as no placeholder at all.
+   *
+   * The popovers hold no rule: they render one, exactly as they do for
+   * `requiredSkills` and `outsideAreaOperatorIds` above. The arithmetic lives
+   * in `standardTarget.ts` and is shared with the board index, so a chip and
+   * the form that edits it can never disagree.
+   */
+  function standardFor(
+    nodeId: string,
+    productId: string | null,
+    range: { startMin: number; endMin: number },
+    efficiencyPercent: number,
+  ): number | null {
+    if (index === null || productId === null || productId === "") return null;
+    return standardTargetQty({
+      range,
+      template: index.templateForNode.get(nodeId) ?? null,
+      efficiencyPercent,
+      secondsPerUnit: index.cycleTimeByKey.get(cycleTimeKey(nodeId, productId)),
+    });
+  }
+
+  /**
    * ⭐ THE ASSIGNABLE POOL, CUT TO THE CHOSEN PLANT. Reported from the app: a
    * system admin who picks one plant still saw every plant's operators in the
    * left panel. A site admin already sees only their plant's people (RLS scopes
@@ -523,6 +549,9 @@ export default function BoardPage() {
           onCancel={dragApi.closePopover}
           onSubmitRun={dragApi.submitCreateRun}
           onSubmitDirect={dragApi.submitCreateDirect}
+          defaultTargetFor={(productId, range, efficiencyPercent) =>
+            standardFor(popover.nodeId, productId, range, efficiencyPercent)
+          }
         />
       )}
 
@@ -605,6 +634,15 @@ export default function BoardPage() {
           onCancel={dragApi.closePopover}
           onSave={dragApi.saveAssignmentFields}
           onDelete={dragApi.removeAssignment}
+          defaultTargetFor={(efficiencyPercent) =>
+            standardFor(
+              popover.assignment.nodeId,
+              // D5: a run-attached chip carries no product of its own.
+              popover.assignment.productId ?? popover.homeRun?.productId ?? null,
+              { startMin: popover.assignment.startMin, endMin: popover.assignment.endMin },
+              efficiencyPercent,
+            )
+          }
         />
       )}
     </div>
