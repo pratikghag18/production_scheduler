@@ -118,6 +118,10 @@ export const REM_SURFACES: readonly string[] = [
   // it is listed here AND in R10's copy in `scaleAudit.test.ts`, the two-place
   // edit `missingRemSurfaces` exists to force.
   "src/features/admin/components/SettingsPanel.module.css",
+  // 0040 / R-315, the Cycle times section. Another surface the §19.62 pre-seat
+  // did not predict, so it is listed here AND in R10's copy in
+  // `scaleAudit.test.ts` — the two-place edit `missingRemSurfaces` forces.
+  "src/features/admin/components/CycleTimesPanel.module.css",
 ];
 
 /**

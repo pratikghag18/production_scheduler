@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the fifteen admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the sixteen admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -256,6 +256,9 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // 0037: the Settings section (org-wide date format). Sixteenth surface,
         // same two-place edit.
         "src/features/admin/components/SettingsPanel.module.css",
+        // 0040 / R-315: the Cycle times section. Seventeenth surface, same
+        // two-place edit.
+        "src/features/admin/components/CycleTimesPanel.module.css",
       ].sort(),
     );
   });
@@ -482,6 +485,9 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       // trainings data, so it sits beside the two screens it draws from.
       "matrix",
       "products",
+      // 0040 / R-315: standard cycle times per cell per part. Beside Products
+      // because a cycle time is a fact about a part at a place.
+      "cycletimes",
       "import",
       // 0037: org-wide Settings (date format). System-admin only, filtered on
       // `profile.role` in AdminPage — the id is still in SECTIONS, so it is

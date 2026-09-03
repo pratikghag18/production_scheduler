@@ -24,6 +24,7 @@ import { OperatorsPanel, OPERATORS_PANEL_READY } from "./components/OperatorsPan
 import { TrainingsPanel, TRAININGS_PANEL_READY } from "./components/TrainingsPanel";
 import { MatrixPanel, MATRIX_PANEL_READY } from "./components/MatrixPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
+import { CycleTimesPanel, CYCLE_TIMES_PANEL_READY } from "./components/CycleTimesPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import { SettingsPanel, SETTINGS_PANEL_READY } from "./components/SettingsPanel";
 import { PanelToggle } from "@/components/PanelToggle";
@@ -53,6 +54,7 @@ type SectionId =
   | "trainings"
   | "matrix"
   | "products"
+  | "cycletimes"
   | "import"
   | "settings";
 
@@ -97,6 +99,14 @@ const SECTIONS: ReadonlyArray<{
   // trainings data. `MATRIX_PANEL_READY` lives in the panel, like the others.
   { id: "matrix", label: "Matrix", enabled: MATRIX_PANEL_READY },
   { id: "products", label: "Products", enabled: PRODUCTS_PANEL_READY },
+  // ⭐ CYCLE TIMES SIT BESIDE PRODUCTS BECAUSE A CYCLE TIME IS A FACT ABOUT A
+  // PART AT A PLACE, and both halves of that are managed on the screens either
+  // side of it: which plants make a part is on Products, where the places are
+  // is on Hierarchy. It is a section of its own rather than a panel inside
+  // Products because the grid is hierarchy-shaped across every part at once —
+  // inside a product row the tree would be repeated once per part, with nowhere
+  // to show a line's roll-up (R-317).
+  { id: "cycletimes", label: "Cycle times", enabled: CYCLE_TIMES_PANEL_READY },
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
   // System-admin only (see `companyAdminOnly` note above). Org-wide preferences,
   // the first being the date-display format (0037 / `src/lib/format/dates.ts`).
@@ -216,6 +226,13 @@ function sectionIconBody(id: SectionId) {
         <>
           <path d="M8 1.9 2.6 5v6L8 14.1 13.4 11V5Z" />
           <path d="M2.6 5 8 8.05 13.4 5M8 8.05V14.1" />
+        </>
+      );
+    case "cycletimes": // a stopwatch: crown, stem and a hand at the quarter
+      return (
+        <>
+          <circle cx="8" cy="9.1" r="5.15" />
+          <path d="M6.35 1.75h3.3M8 1.75v2.2M8 9.1V6.5M8 9.1h2.1" />
         </>
       );
     case "import": // a down-arrow into a tray
@@ -663,6 +680,13 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Products</h1>
             <ProductsPanel />
+          </>
+        )}
+
+        {activeSection === "cycletimes" && (
+          <>
+            <h1 className={styles.h1}>Cycle times</h1>
+            <CycleTimesPanel />
           </>
         )}
 

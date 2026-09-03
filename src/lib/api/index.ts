@@ -21,6 +21,10 @@ export * from "./operators";
 export * from "./products";
 export * from "./imports";
 
+// 0040 / R-315. Not pre-seated either: standard cycle times are a section of
+// their own, added after the four above were laid out.
+export * from "./cycleTimes";
+
 // 0029 / D110. Not pre-seated — the delete that keeps the past did not exist
 // when §19.62 laid the four admin sections out, and it belongs to none of
 // them: one dialog serves products, people, trainings and shift patterns.
