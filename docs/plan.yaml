@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: a2d86c3
+  tip: 4ca2791
   baseline:
-    app_tests: 1635
+    app_tests: 1637
     app_test_files: 47
     tsc: 0
     eslint: 0
@@ -5108,7 +5108,18 @@ requirements:
   - kind: vitest
     file: src/test/dateSeam.test.ts
     cases: synthetic bypasses (Intl, toLocale*, month array) are flagged, the seams are allowed their tools, comments are not read, and the real src tree formats no date outside the seams
+  - kind: vitest
+    file: src/test/boardTime.test.ts
+    cases: formatDayLabel keeps the weekday and reformats the date per token (default byte-identical to v1), and resolves the day in BOARD_ZONE not local time
   status: covered
+  note: >-
+    Where it shows and where it cannot. WIRED: the board's day labels (range + column headers, weekday
+    kept, format-only, still BOARD_ZONE) and the Operators expiry line. IMMOVABLE by nature, recorded not
+    owed: a native `<input type="date">` (the board From picker, the Matrix/Operators certified/expires
+    fields) is drawn by the browser in its own locale, and the certification import legend states the
+    required ISO INPUT format for the CSV, which must stay deterministic. Board chip tooltips (formatFull)
+    keep the default for now. First cut wired only the Operators popover line, which was invisible in normal
+    use — the board labels were added the same day after the maintainer showed nothing had changed on screen.
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6892,6 +6903,34 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 29
+  date: 2026-09-03
+  title: The date format reaches the board's day labels (R-309 follow-up)
+  commits:
+  - 4ca2791
+  numbers:
+    app_tests: 1637
+    app_test_files: 47
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer set a format and reported nothing changed anywhere on screen. Right: session 28 had
+    wired only one text surface, an Operators expiry popover line that shows only when a training is
+    expiring, so browsing the board and the tabs showed no difference. The board's day labels are where
+    dates are actually read, and they had been left on the fixed v1 shape because they were tied to the
+    deferred timezone work (R-D88) -- too conservative, because the FORMAT of a label is independent of the
+    timezone question (which instant falls on which day). formatDayLabel now takes the org token and
+    reformats the date while KEEPING the weekday (the maintainer's call from three previews): "Mon Aug 17"
+    stays the default, the others read "Mon 17/08", "Mon 08/17", "Mon 2026-08-17". Every part stays in
+    BOARD_ZONE, so only the writing changes, never which day an instant lands on. The token threads from
+    BoardPage (useDateFormat, the same cache the Settings screen writes, so a save re-renders the board with
+    no refetch) to the toolbar range and, through BoardGrid, to the day-column headers; the prop is optional
+    and defaults to v1, so nothing else changed. Two surfaces genuinely cannot follow the setting and were
+    recorded as immovable rather than owed: a native date input (browser locale) and the certification
+    import legend (the required ISO input format for the CSV). Suite 1637 green (was 1635: two boardTime
+    cases). tsc and eslint clean.
+  shipped: []
 - id: 28
   date: 2026-09-03
   title: A system admin sets one date format for the whole company (R-309)
