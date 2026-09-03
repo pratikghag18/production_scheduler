@@ -190,6 +190,7 @@ UPGRADE_CHECKS="
 20260831000032_training_record_and_supervisors.sql|upgrade_0032_training_record.sql|6
 20260831000033_import_identity.sql|upgrade_0033_import_identity.sql|7
 20260901000034_product_belongs_to_plants.sql|upgrade_0034_product_places.sql|4
+20260903000039_unit_needs_qty.sql|upgrade_0039_unit_needs_qty.sql|4
 "
 
 run_upgrade_check() {
