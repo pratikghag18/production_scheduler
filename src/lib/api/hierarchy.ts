@@ -31,7 +31,7 @@
  */
 import { supabase } from "@/lib/supabase";
 import type { Json } from "@/lib/database.types";
-import { shapeMismatch, toSchedulerError } from "./errors";
+import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
 import type { BoardNode, HierarchyLevel } from "./shapes";
 import type { BoardRoot } from "@/features/board/lib/rootSelection";
 
@@ -683,6 +683,21 @@ export async function fetchHierarchyTree(): Promise<{
    * The map keeps both honest and leaves `buildShapeSummaries` untouched.
    */
   siteNodeIds: Record<string, string | null>;
+  /**
+   * R-319: does each node ADD UP its children's standard cycle times, keyed by
+   * node id? `true` when a unit passes through every child (a line's sequential
+   * cells), `false` when they are alternative routes (an area's parallel
+   * lines), and `null` when nobody has said — resolved on read by
+   * `resolveSumsChildren`, never guessed by the column.
+   *
+   * ⚠️ A SEPARATE MAP RATHER THAN A FIELD ON `BoardNode`, for the same reason
+   * `siteNodeIds` is one, stated above: `BoardNode` is SHARED with
+   * `board_window`, whose `nodes` payload carries no such column. A required
+   * field would make that parser reject every response it has ever received,
+   * and an optional one would make "absent" and "unset" the same value — which
+   * is the exact distinction this feature turns on.
+   */
+  sumsChildren: Record<string, boolean | null>;
 }> {
   const [templatesRes, levelsRes, nodesRes, editableRes] = await Promise.all([
     supabase.from("hierarchy_templates").select("id, name, site_node_id").order("name"),
@@ -692,7 +707,7 @@ export async function fetchHierarchyTree(): Promise<{
       .order("position"),
     supabase
       .from("nodes")
-      .select("id, parent_id, level_id, name, path, sort_order, active")
+      .select("id, parent_id, level_id, name, path, sort_order, active, sums_children")
       .order("sort_order"),
     // ⭐ IN THE SAME `Promise.all`, DELIBERATELY, AND NOT A SECOND `useQuery`.
     // §19.47 settled this one level up: a second unresolved window is a second
@@ -745,7 +760,46 @@ export async function fetchHierarchyTree(): Promise<{
     siteNodeIds[r.id] = r.site_node_id ?? null;
   }
 
-  return { templates, levels, nodes, editableShapeIds, siteNodeIds };
+  // R-319. `?? null` rather than `|| null`: `false` is a real, chosen answer
+  // here ("do not add these up") and must not collapse into "nobody has said".
+  const sumsChildren: Record<string, boolean | null> = {};
+  for (const r of nodesRes.data ?? []) {
+    sumsChildren[r.id] = r.sums_children ?? null;
+  }
+
+  return { templates, levels, nodes, editableShapeIds, siteNodeIds, sumsChildren };
+}
+
+export interface SetSumsChildrenInput {
+  nodeId: string;
+  /** `true` adds the children up, `false` does not, `null` returns the node to
+   *  the resolved default (`resolveSumsChildren`). */
+  sumsChildren: boolean | null;
+}
+
+/**
+ * R-319: choose whether a node adds up its children's standard cycle times.
+ *
+ * A PLAIN TABLE UPDATE, not an RPC, because `nodes_update` (0020) already gates
+ * every column of this table on `app_is_admin() or app_is_admin_on_path(path)`
+ * — the same authority that renames a node — and this column needs no rule of
+ * its own. The path-cascade trigger fires on `update of name, parent_id` only,
+ * so this rewrites no paths and touches no descendant.
+ *
+ * ⚠️ `.select()` + `requireWritten` IS NOT OPTIONAL. A policy's `USING` clause
+ * FILTERS rather than raising, so an update the caller may not make succeeds
+ * and changes nothing — the silent no-op pinned as C7 in the cycle-times SQL
+ * test. Without this a plant admin toggling another plant's line is told it
+ * saved.
+ */
+export async function setNodeSumsChildren(input: SetSumsChildrenInput): Promise<void> {
+  const { data, error } = await supabase
+    .from("nodes")
+    .update({ sums_children: input.sumsChildren })
+    .eq("id", input.nodeId)
+    .select("id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data);
 }
 
 /**

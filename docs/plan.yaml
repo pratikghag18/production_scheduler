@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: 98011bd
+  tip: e0c20b2
   baseline:
-    app_tests: 1738
+    app_tests: 1746
     app_test_files: 56
     tsc: 0
     eslint: 0
     db_checks: 522
-    migrations: 40
+    migrations: 41
     mutations: 509 of 536
 tracks:
 - id: core
@@ -5350,8 +5350,52 @@ requirements:
   verified_by:
   - kind: vitest
     file: src/test/cycleTimes.test.ts
-    cases: G2 a line shows the sum of its cells and the plant sees the same total, G3 an unmeasured cell contributes nothing and the row says how many did, G4/G4b a part attached to one line is editable there only and a line is never typed into, G6 Line 10 is not inside Line 1 (a prefix test would merge them), G9 a summed row formats in the same friendly units, G10 the plant filter and the measured count
+    cases: G2 a line shows the sum of its cells, G3 an unmeasured cell contributes nothing and the row says how many did, G4/G4b a part attached to one line is editable there only and a line is never typed into, G6 Line 10 is not inside Line 1 (a prefix test would merge them), G9 a summed row formats in the same friendly units, G10 the plant filter and the measured count
   status: covered
+  note: >-
+    ⚠️ QUALIFIED BY R-319, and the maintainer's objection was sharper than the caveat written here. This row
+    said a sum is right as LABOUR CONTENT even though it is not an output rate. That is true only where a unit
+    passes through every child. For two parallel lines a unit goes down one or the other, so the sum is not
+    labour content either — it describes nothing. A node now chooses, and the default only adds up where the
+    children are the schedulable level. Everything else in this row still holds: where a row does add up, the
+    number is labour content per unit, it is computed on read, and it never derives a target.
+- id: R-319
+  title: A node chooses whether it adds up its children's cycle times
+  source:
+  - the maintainer, 3 Sept (in session, "if two lines are working the same products but are parallel jobs, then adding them to the higher hierarchy does not make sense and is wrong... Some lines could be in continution of one another and some could be parallel to one another")
+  - the maintainer, 3 Sept (in session, "I want to be able to choose to add or not to add")
+  stated_by: maintainer
+  claim: >-
+    R-317's roll-up added every measured place below a row, on the reading that a sum is the LABOUR CONTENT of
+    one unit. That reading holds only where a unit passes through EVERY child. Two cells in a line are
+    sequential stations, so a unit really does cost 60 s + 90 s; two lines under an area are ALTERNATIVE
+    ROUTES, and no unit ever costs both, so adding them produced a number describing nothing — not a rate and
+    not labour content either. Migration 0041 adds `nodes.sums_children boolean`, NULLABLE: true adds the
+    places below up, false does not, and NULL means nobody has said. An unset node RESOLVES on read
+    (`resolveSumsChildren`) rather than the column guessing: true only for a node whose own children are the
+    schedulable level — a line over its cells, the one place summing is reliably right — and false for
+    anything higher. Asked of a node's actual children, not of level positions, so an unevenly shaped tree
+    answers by fact. A row that adds up totals every measured place BELOW it rather than composing its
+    children's values, so one level declining cannot blank a row two levels up. A row that does not says "not
+    added" with the counts behind it, never a bare dash. Display only: no target, capacity or write reads it
+    (R-316 takes the cell's own cycle time), so a wrong setting misleads a reader and corrupts nothing. NOT a
+    routing model — it cannot express one line feeding another while a third runs independently; that needs
+    real routing data and stays the Phase 3 queue item. Editing it is a plain `nodes` UPDATE under the
+    existing `nodes_update` policy, the same authority that renames a node.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/64_cycle_times_test.sql
+    cases: C11 a plant admin sets sums_children on their own line and it reads back, C12 the other plant's admin changes zero rows and raises nothing (the silent no-op, so nodes_update really does cover the new column), C13 the column starts unset so "nobody has said" stays distinguishable from "chosen false"
+  - kind: vitest
+    file: src/test/cycleTimes.test.ts
+    cases: G2 a line adds its cells and the plant above does not, G11a the resolved defaults per level, G11b the default is asked of a node's own children not its depth, G11c turning it on makes an area add its lines, G11d turning it off stops a line adding its cells, G11e a stored false is a choice and never collapses into unset, G11f a row with nothing measurable below stays "na", G11g resolveSumsChildren falsifiable on its own, G11h a row that adds up totals every place below rather than composing its children
+  status: covered
+  note: >-
+    Driven in the browser as the company admin: lines defaulted to adding up and showed 30 min / 45 min /
+    15 min from their cells, the areas above them read "not added", and ticking Plant A turned it into 1.5 h
+    over all six cells. The default was mine to choose — the maintainer left it — and it is stated plainly
+    because it is a guess about plant shape, not a fact: cells within a line are almost always sequential,
+    lines within an area almost never are. Every node is one click from the other answer.
 - id: R-318
   title: One shared editable box, enforced — a field looks and behaves the same everywhere
   source:
@@ -7208,13 +7252,46 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 40
+  date: 2026-09-03
+  title: A node chooses whether it adds its children up (R-319)
+  commits:
+  - pending
+  numbers:
+    app_tests: 1746
+    app_test_files: 56
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer, looking at the roll-up: "if two lines are working the same products but are parallel jobs,
+    then adding them to the higher hierarchy does not make sense and is wrong. Some lines could be in
+    continuation of one another and some could be parallel to one another." This is a sharper objection than
+    the caveat R-317 already carried. That caveat said a sum is not an output RATE but is still labour content
+    per unit. True only where a unit passes through every child: two cells in a line are sequential stations,
+    so a unit really does cost both, but two lines under an area are alternative routes and no unit ever costs
+    both — so for parallel lines the sum is not labour content either, it describes nothing. Offered three
+    designs, the maintainer cut it short: "I want to be able to choose to add or not to add." So it is one
+    nullable boolean per node and no more. NULL means nobody has said and resolves on read rather than the
+    column guessing, which keeps a chosen "false" distinguishable from an unset one and leaves nodes created
+    later working without touching create_node. The default was mine to pick since they left it: add up only
+    where a node's own children are the schedulable level, asked of the actual children rather than of level
+    depths, which is right for a line over its cells and wrong nowhere it is not one click from fixing. A row
+    that adds up totals every measured place below it rather than composing its children's values, so one
+    level declining cannot blank a row two levels above. A row that does not says "not added" with the counts
+    behind it. No new RLS: the existing nodes_update policy already covers every column, which C11-C13 are
+    what actually establish rather than assume. Display only throughout — no target reads it, so a wrong
+    setting misleads a reader and corrupts nothing, which is why a plain toggle is proportionate and a routing
+    model is not. Driven in the browser: lines defaulted to adding and showed 30/45/15 min, the areas above
+    read "not added", ticking Plant A totalled 1.5 h over six cells. Suite 1746 in 56 files, up from 1738.
+  shipped: []
 - id: 39
   date: 2026-09-03
   title: A target computed from the standard is not the standard (F-077)
   commits:
   - 08f8440
   numbers:
-    app_tests: 1738
+    app_tests: 1746
     app_test_files: 56
     tsc: 0
     eslint: 0
@@ -7242,7 +7319,7 @@ sessions:
   commits:
   - eff559d
   numbers:
-    app_tests: 1738
+    app_tests: 1746
     app_test_files: 56
     tsc: 0
     eslint: 0

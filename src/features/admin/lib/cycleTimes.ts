@@ -131,6 +131,33 @@ export interface CycleGridValue {
   secondsPerUnit: number;
 }
 
+/**
+ * R-319: does this node add up its children, when nobody has said?
+ *
+ * ⭐ TRUE ONLY WHERE SUMMING IS RELIABLY RIGHT: a node whose OWN children are
+ * the places work is booked. Those are a line's cells, sequential stations that
+ * every unit passes through, so their times really do add. Anything higher —
+ * an area over its lines, a plant over its areas — is treated as alternative
+ * routes, because a unit goes down one line or the other and no unit ever costs
+ * both. That was the maintainer's objection to the original blanket sum and it
+ * is correct.
+ *
+ * Asked of the node's actual children rather than of level positions, so an
+ * unevenly shaped tree answers honestly instead of by arithmetic on depths.
+ *
+ * A default, never a verdict: `sums_children` overrides it in either direction,
+ * and a plant whose cells run in parallel is one toggle away from right.
+ */
+export function resolveSumsChildren(
+  node: CycleGridNode,
+  stored: boolean | null | undefined,
+  nodes: readonly CycleGridNode[],
+  schedulableLevelIds: ReadonlySet<string>,
+): boolean {
+  if (stored !== null && stored !== undefined) return stored;
+  return nodes.some((n) => n.parentId === node.id && schedulableLevelIds.has(n.levelId));
+}
+
 export type CycleGridCell =
   /** A place work is booked and this part is made: the number lives here. */
   | { kind: "editable"; seconds: number | null }
@@ -143,6 +170,12 @@ export type CycleGridCell =
    * who cannot tell the two apart will plan against the smaller number.
    */
   | { kind: "sum"; seconds: number; contributors: number; total: number }
+  /**
+   * R-319: an ancestor whose children are ALTERNATIVE ROUTES, so their times
+   * are deliberately not added. `total` still says how many measured places sit
+   * below, so the row reads as "not added up" rather than as "nothing here".
+   */
+  | { kind: "notsummed"; contributors: number; total: number }
   /** Neither — this part is not made anywhere at or below this row. */
   | { kind: "na" };
 
@@ -151,6 +184,11 @@ export interface CycleGridRow {
   /** Depth relative to the plant root, for indenting. */
   depth: number;
   isSchedulable: boolean;
+  /** R-319: the effective answer for this row, stored or resolved. */
+  sumsChildren: boolean;
+  /** R-319: true when that answer came from `nodes.sums_children` rather than
+   *  from the default, so the screen can show a chosen setting as chosen. */
+  sumsChildrenIsSet: boolean;
   /** Parallel to the block's `columns`. */
   cells: CycleGridCell[];
 }
@@ -173,10 +211,12 @@ export function buildCycleGrid(input: {
   levels: readonly CycleGridLevel[];
   products: readonly CycleGridProduct[];
   values: readonly CycleGridValue[];
+  /** R-319: `nodes.sums_children` by node id. Missing or null resolves. */
+  sumsChildren?: Readonly<Record<string, boolean | null>>;
   /** null means "all plants". */
   choice: string | null;
 }): CycleGridBlock[] {
-  const { nodes, levels, products, values, choice } = input;
+  const { nodes, levels, products, values, choice, sumsChildren = {} } = input;
 
   const schedulableLevels = new Set(levels.filter((l) => l.isSchedulable).map((l) => l.id));
   const nodesById = new Map(nodes.map((n) => [n.id, n] as const));
@@ -215,6 +255,8 @@ export function buildCycleGrid(input: {
 
     const rows: CycleGridRow[] = inPlant.map((node) => {
       const isSchedulable = schedulableLevels.has(node.levelId);
+      const stored = sumsChildren[node.id] ?? null;
+      const sums = resolveSumsChildren(node, stored, nodes, schedulableLevels);
       const cells: CycleGridCell[] = columns.map((product) => {
         if (isSchedulable) {
           if (!offeredIn(product, node)) return { kind: "na" };
@@ -224,6 +266,14 @@ export function buildCycleGrid(input: {
         // number contribute nothing rather than a zero — an unmeasured station
         // is unknown work, not free work — and `contributors` lets the screen
         // say so when the total is only part of the picture.
+        //
+        // ⭐ A ROW THAT ADDS UP TOTALS EVERY MEASURED PLACE BELOW IT, not the
+        // values of its immediate children. So a plant set to add up gives the
+        // same figure whether or not the areas between say they add up
+        // themselves. The alternative — composing each level from the one under
+        // it — makes a parent blank whenever any child declines, which is a
+        // number disappearing for a reason two levels away. Ticking a row is a
+        // statement about that row: "units pass through everything under me."
         let sum = 0;
         let contributors = 0;
         let total = 0;
@@ -239,12 +289,18 @@ export function buildCycleGrid(input: {
           }
         }
         if (total === 0) return { kind: "na" };
+        // R-319: the children are alternative routes, so there is nothing to
+        // add. The counts still travel, so the row can say it is not adding up
+        // rather than looking like a place nothing was ever entered.
+        if (!sums) return { kind: "notsummed", contributors, total };
         return { kind: "sum", seconds: sum, contributors, total };
       });
       return {
         node,
         depth: node.path.split(".").length - plantDepth,
         isSchedulable,
+        sumsChildren: sums,
+        sumsChildrenIsSet: stored !== null,
         cells,
       };
     });

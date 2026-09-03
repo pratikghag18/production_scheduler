@@ -418,6 +418,7 @@ export type Database = {
           path: unknown
           sort_order: number
           source: string
+          sums_children: boolean | null
           updated_at: string
         }
         Insert: {
@@ -432,6 +433,7 @@ export type Database = {
           path: unknown
           sort_order?: number
           source?: string
+          sums_children?: boolean | null
           updated_at?: string
         }
         Update: {
@@ -446,6 +448,7 @@ export type Database = {
           path?: unknown
           sort_order?: number
           source?: string
+          sums_children?: boolean | null
           updated_at?: string
         }
         Relationships: [

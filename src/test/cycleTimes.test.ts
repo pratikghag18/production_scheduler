@@ -13,6 +13,7 @@ import {
   countMeasured,
   displayCycle,
   formatCycle,
+  resolveSumsChildren,
   toSeconds,
   validateCycleEntry,
   type CycleGridLevel,
@@ -105,12 +106,16 @@ const PRODUCTS: CycleGridProduct[] = [
   { id: "old", sku: "OLD", name: "Retired", active: false, siteNodeIds: ["plant1"] },
 ];
 
-function grid(values: { nodeId: string; productId: string; secondsPerUnit: number }[] = []) {
+function grid(
+  values: { nodeId: string; productId: string; secondsPerUnit: number }[] = [],
+  sumsChildren: Record<string, boolean | null> = {},
+) {
   return buildCycleGrid({
     nodes: NODES,
     levels: LEVELS,
     products: PRODUCTS,
     values,
+    sumsChildren,
     choice: null,
   });
 }
@@ -141,11 +146,11 @@ describe("G1-G4: what a plant's grid offers, and what it rolls up", () => {
       contributors: 2,
       total: 2,
     });
-    // And it keeps rolling up: the plant sees the same 150, over the three
-    // cells that make WX anywhere in it.
+    // ⭐ AND IT STOPS THERE, BY DEFAULT. The plant's children are lines, which
+    // are alternative routes: a unit goes down one or the other and none ever
+    // costs both, so 150 + 999 would describe nothing (R-319).
     expect(cellFor(plant1!, "plant1", "WX")).toEqual({
-      kind: "sum",
-      seconds: 150,
+      kind: "notsummed",
       contributors: 2,
       total: 3,
     });
@@ -218,10 +223,9 @@ describe("G5-G6: entry validation, and the ancestry trap", () => {
       contributors: 1,
       total: 2,
     });
-    // The plant above both sees the pair.
+    // The plant above both does not add them at all — they are separate lines.
     expect(cellFor(plant1!, "plant1", "WX")).toEqual({
-      kind: "sum",
-      seconds: 1059,
+      kind: "notsummed",
       contributors: 2,
       total: 3,
     });
@@ -257,6 +261,124 @@ describe("G7-G9: seconds are stored, friendlier units are shown", () => {
     expect(formatCycle(150)).toBe("2.5 min");
     expect(formatCycle(45)).toBe("45 s");
     expect(formatCycle(43200)).toBe("12 h");
+  });
+});
+
+/**
+ * R-319. The maintainer, seeing the first roll-up: "if two lines are working
+ * the same products but are parallel jobs, then adding them to the higher
+ * hierarchy does not make sense and is wrong... I want to be able to choose to
+ * add or not to add."
+ *
+ * A unit passes through every cell of a line, so those add. A unit passes down
+ * ONE of an area's lines, so those do not. The default says so, and the choice
+ * overrides it either way.
+ */
+describe("G11: a node chooses whether to add its children up", () => {
+  it("G11a: by default a line adds its cells and anything above it does not", () => {
+    const [plant1] = grid();
+    const rowOf = (id: string) => plant1!.rows.find((r) => r.node.id === id);
+    expect(rowOf("line1")?.sumsChildren).toBe(true);
+    expect(rowOf("assembly")?.sumsChildren).toBe(false);
+    expect(rowOf("plant1")?.sumsChildren).toBe(false);
+    // Nothing is stored yet — these are resolved defaults, and the screen can
+    // tell the difference.
+    expect(rowOf("line1")?.sumsChildrenIsSet).toBe(false);
+  });
+
+  it("G11b: the default is asked of a node's own children, not of its depth", () => {
+    // `assembly` sits at the same depth as a line but its children are lines,
+    // so it does not add up. Were this computed from level positions, an
+    // unevenly shaped tree would answer by arithmetic instead of by fact.
+    const [plant1] = grid();
+    expect(plant1!.rows.find((r) => r.node.id === "assembly")?.sumsChildren).toBe(false);
+  });
+
+  it("G11c: turning it ON makes an area add its lines up", () => {
+    const [plant1] = grid(
+      [
+        { nodeId: "cell1", productId: "wx", secondsPerUnit: 60 },
+        { nodeId: "cell2", productId: "wx", secondsPerUnit: 90 },
+        { nodeId: "cell10", productId: "wx", secondsPerUnit: 30 },
+      ],
+      { assembly: true },
+    );
+    expect(cellFor(plant1!, "assembly", "WX")).toEqual({
+      kind: "sum",
+      seconds: 180,
+      contributors: 3,
+      total: 3,
+    });
+    expect(plant1!.rows.find((r) => r.node.id === "assembly")?.sumsChildrenIsSet).toBe(true);
+  });
+
+  it("G11d: turning it OFF stops a line adding its cells up", () => {
+    const [plant1] = grid(
+      [
+        { nodeId: "cell1", productId: "wx", secondsPerUnit: 60 },
+        { nodeId: "cell2", productId: "wx", secondsPerUnit: 90 },
+      ],
+      { line1: false },
+    );
+    // Two parallel benches rather than two stations: no unit costs both.
+    expect(cellFor(plant1!, "line1", "WX")).toEqual({
+      kind: "notsummed",
+      contributors: 2,
+      total: 2,
+    });
+  });
+
+  it("G11e: false is a CHOICE and never collapses into unset", () => {
+    // `?? null` rather than `|| null` on the read path; here the pure module's
+    // half of that. A stored false must not fall back to the default, which
+    // for a line would be true and would silently re-add the numbers.
+    const [plant1] = grid([], { line1: false });
+    const row = plant1!.rows.find((r) => r.node.id === "line1");
+    expect(row?.sumsChildren).toBe(false);
+    expect(row?.sumsChildrenIsSet).toBe(true);
+  });
+
+  it("G11f: a row with nothing measurable below it is still 'na', not 'not added'", () => {
+    // LN is made only on line10, so line1 has no places for it either way.
+    const [plant1] = grid([], { line1: false });
+    expect(cellFor(plant1!, "line1", "LN")).toEqual({ kind: "na" });
+  });
+
+  it("G11h: a row that adds up totals every measured place below, not its children's values", () => {
+    // Plant 1 adds up while Assembly between them does not. The plant still
+    // totals all three cells: composing level by level would blank the plant
+    // because of a setting two rows away.
+    const [plant1] = grid(
+      [
+        { nodeId: "cell1", productId: "wx", secondsPerUnit: 60 },
+        { nodeId: "cell2", productId: "wx", secondsPerUnit: 90 },
+        { nodeId: "cell10", productId: "wx", secondsPerUnit: 30 },
+      ],
+      { plant1: true, assembly: false },
+    );
+    expect(cellFor(plant1!, "plant1", "WX")).toEqual({
+      kind: "sum",
+      seconds: 180,
+      contributors: 3,
+      total: 3,
+    });
+    expect(cellFor(plant1!, "assembly", "WX")).toEqual({
+      kind: "notsummed",
+      contributors: 3,
+      total: 3,
+    });
+  });
+
+  it("G11g: resolveSumsChildren is falsifiable on its own", () => {
+    const nodes = NODES;
+    const schedulable = new Set(["lvl-cell"]);
+    const line1 = nodes.find((n) => n.id === "line1")!;
+    const assembly = nodes.find((n) => n.id === "assembly")!;
+    expect(resolveSumsChildren(line1, null, nodes, schedulable)).toBe(true);
+    expect(resolveSumsChildren(assembly, null, nodes, schedulable)).toBe(false);
+    // A stored answer wins in both directions.
+    expect(resolveSumsChildren(line1, false, nodes, schedulable)).toBe(false);
+    expect(resolveSumsChildren(assembly, true, nodes, schedulable)).toBe(true);
   });
 });
 

@@ -135,6 +135,20 @@
   color: var(--muted);
 }
 
+/* R-319: the add-up choice, on the row whose number it decides. Small and
+   secondary — it is a property of the structure, not an action, and it must not
+   compete with the place name beside it. */
+.rollup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 /* Inline, never a second line: a summed row has to keep the same height as the
    cells it totals, or the grid reads as though the ancestor rows were the
    important ones. */

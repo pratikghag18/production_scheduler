@@ -433,4 +433,63 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_C10;
 
+-- ---------------------------------------------------------------------------
+-- C11/C12 — R-319: the add-up choice is a column on `nodes`, carrying the same
+-- authority as renaming one. No new policy was written for it, so these two
+-- cases are what say that `nodes_update` actually covers it — an untested
+-- assumption there would mean either a setting nobody can change or one that
+-- any plant can change on another's structure.
+-- ---------------------------------------------------------------------------
+\echo 'C11: a plant admin sets sums_children on their OWN line, and it reads back'
+SAVEPOINT sp_C11;
+DO $$
+DECLARE v_line uuid; v_err text := 'no error'; v_after boolean;
+BEGIN
+  -- Line 1 in the seed: not schedulable, and it owns Cells 1-3.
+  v_line := '30000000-0000-0000-0000-000000000004';
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000064a1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    UPDATE nodes SET sums_children = false WHERE id = v_line;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM; END;
+  RESET ROLE;
+  SELECT sums_children INTO v_after FROM nodes WHERE id = v_line;
+  IF v_err = 'no error' AND v_after IS FALSE THEN RAISE NOTICE 'PASS C11';
+  ELSE RAISE NOTICE 'FAIL C11: err=% stored=% (want no error, false)', v_err, v_after; END IF;
+END $$;
+ROLLBACK TO SAVEPOINT sp_C11;
+
+\echo 'C12 ⭐: the OTHER plant''s admin changes zero rows and raises nothing — the silent no-op again'
+SAVEPOINT sp_C12;
+DO $$
+DECLARE v_line uuid; v_err text := 'no error'; v_rows int; v_after boolean;
+BEGIN
+  v_line := '30000000-0000-0000-0000-000000000004';
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000064a2', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    UPDATE nodes SET sums_children = true WHERE id = v_line;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE; END;
+  RESET ROLE;
+  SELECT sums_children INTO v_after FROM nodes WHERE id = v_line;
+  -- Unset before and unset after: the write was filtered away, not applied.
+  IF v_err = 'no error' AND v_rows = 0 AND v_after IS NULL THEN RAISE NOTICE 'PASS C12';
+  ELSE RAISE NOTICE 'FAIL C12: err=% rows=% stored=% (want no error, 0, NULL)',
+    v_err, v_rows, v_after; END IF;
+END $$;
+ROLLBACK TO SAVEPOINT sp_C12;
+
+\echo 'C13: the column starts unset, so "nobody has said" is distinguishable from "chosen false"'
+SAVEPOINT sp_C13;
+DO $$
+DECLARE v_unset int;
+BEGIN
+  SELECT count(*) INTO v_unset FROM nodes
+   WHERE org_id = '10000000-0000-0000-0000-000000000001' AND sums_children IS NULL;
+  IF v_unset > 0 THEN RAISE NOTICE 'PASS C13';
+  ELSE RAISE NOTICE 'FAIL C13: no node is unset, so the migration backfilled a guess'; END IF;
+END $$;
+ROLLBACK TO SAVEPOINT sp_C13;
+
 ROLLBACK;

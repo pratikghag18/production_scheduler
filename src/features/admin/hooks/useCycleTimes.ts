@@ -19,12 +19,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteCycleTime,
   fetchCycleTimes,
+  setNodeSumsChildren,
   upsertCycleTime,
   type AdminCycleTime,
   type CycleTimeInput,
   type RemoveCycleTimeInput,
   type SchedulerError,
+  type SetSumsChildrenInput,
 } from "@/lib/api";
+import { hierarchyKeys } from "./useHierarchyMutations";
 
 export const cycleTimeKeys = {
   all: ["admin-cycle-times"] as const,
@@ -57,6 +60,25 @@ export function useSetCycleTime() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: cycleTimeKeys.all });
       void queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+  });
+}
+
+/**
+ * R-319: choose whether a node adds up its children's cycle times.
+ *
+ * Invalidates the HIERARCHY tree, not the cycle-time list: the setting lives on
+ * `nodes` and the tree read is what carries it. The board is deliberately left
+ * alone — a roll-up is display only and no derived target reads it (R-316), so
+ * refetching the whole board here would be work for nothing.
+ */
+export function useSetNodeRollup() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, SetSumsChildrenInput>({
+    mutationFn: (input) => setNodeSumsChildren(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
     },
   });
 }

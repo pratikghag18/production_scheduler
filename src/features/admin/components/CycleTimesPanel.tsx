@@ -30,7 +30,12 @@ import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import { useAdminProducts } from "../hooks/useProducts";
-import { useCycleTimes, useSetCycleTime, useClearCycleTime } from "../hooks/useCycleTimes";
+import {
+  useCycleTimes,
+  useSetCycleTime,
+  useClearCycleTime,
+  useSetNodeRollup,
+} from "../hooks/useCycleTimes";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { isAtOrBelow, scopeIndex } from "../lib/scope";
 import { InlineEdit } from "@/components/InlineEdit";
@@ -67,12 +72,14 @@ export function CycleTimesPanel() {
 
   const setMutation = useSetCycleTime();
   const clearMutation = useClearCycleTime();
+  const rollupMutation = useSetNodeRollup();
 
   // The unit the OPEN editor is using. One value, not one per cell: only one
   // cell is ever open, and `InlineEdit`'s `onOpen` seeds this from the stored
   // value so a box opens in the unit its number reads best in.
   const [unit, setUnit] = useState<CycleUnit>("s");
   const [cellError, setCellError] = useState<{ key: string; message: string } | null>(null);
+  const [rowError, setRowError] = useState<{ nodeId: string; message: string } | null>(null);
 
   const isCompanyAdmin = profile?.role === "admin";
   const allNodes = treeQuery.data?.nodes ?? [];
@@ -129,10 +136,22 @@ export function CycleTimesPanel() {
       productId: v.productId,
       secondsPerUnit: v.secondsPerUnit,
     })),
+    sumsChildren: treeQuery.data?.sumsChildren ?? {},
     choice: plant.choice,
   });
 
   const cellKey = (nodeId: string, productId: string) => `${nodeId}|${productId}`;
+
+  // R-319. The refusal lands on the row rather than a cell, because the choice
+  // is the row's; `rowError` is keyed by node id for that reason.
+  async function toggleRollup(nodeId: string, sumsChildren: boolean) {
+    setRowError(null);
+    try {
+      await rollupMutation.mutateAsync({ nodeId, sumsChildren });
+    } catch (err) {
+      setRowError({ nodeId, message: describe(err) });
+    }
+  }
 
   async function commitEdit(
     nodeId: string,
@@ -248,6 +267,25 @@ export function CycleTimesPanel() {
                           <span style={{ paddingLeft: `${row.depth * 0.85}rem` }}>
                             {row.node.name}
                           </span>
+                          {/* R-319: the choice sits on the row whose number it
+                              decides. Only where there is something to add up —
+                              a cell has no children, and a row with no measured
+                              places below has nothing to decide about. */}
+                          {!row.isSchedulable &&
+                            row.cells.some((c) => c.kind === "sum" || c.kind === "notsummed") && (
+                              <label className={styles.rollup}>
+                                <input
+                                  type="checkbox"
+                                  checked={row.sumsChildren}
+                                  disabled={!isAdminAt(row.node.id)}
+                                  onChange={(e) => void toggleRollup(row.node.id, e.target.checked)}
+                                />
+                                adds up
+                              </label>
+                            )}
+                          {rowError?.nodeId === row.node.id && (
+                            <p className={styles.cellError}>{rowError.message}</p>
+                          )}
                         </th>
                         {row.cells.map((cell, i) => {
                           const product = block.columns[i]!;
@@ -260,6 +298,22 @@ export function CycleTimesPanel() {
                             return (
                               <td key={product.id} className={styles.na} aria-label="not made here">
                                 <span className={`${fieldStyles.readonly} ${styles.dash}`}>—</span>
+                              </td>
+                            );
+                          }
+
+                          // R-319: children that are alternative routes are
+                          // deliberately not added. Said in words, because a
+                          // bare dash here would read as "nothing entered".
+                          if (cell.kind === "notsummed") {
+                            return (
+                              <td key={product.id} className={styles.sum}>
+                                <span
+                                  className={fieldStyles.readonly}
+                                  title={`Not added up: the places under ${row.node.name} are alternatives, so a unit passes through one of them, not all. ${cell.contributors} of ${cell.total} below are measured.`}
+                                >
+                                  <span className={styles.dash}>not added</span>
+                                </span>
                               </td>
                             );
                           }
