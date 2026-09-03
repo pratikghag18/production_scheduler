@@ -7174,7 +7174,7 @@ sessions:
   date: 2026-09-03
   title: One shared editable box, after the cycle-times grid shipped the browser's own (R-318)
   commits:
-  - pending
+  - eff559d
   numbers:
     app_tests: 1733
     app_test_files: 55
