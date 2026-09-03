@@ -524,6 +524,24 @@ function parseNodeSkillRequirement(v: Json): NodeSkillRequirement | null {
   return { nodeId: node_id, skillId: skill_id };
 }
 
+/**
+ * R-315: the standard cycle time for one product at one schedulable node.
+ * ALWAYS SECONDS — the admin screen offers seconds/minutes/hours and converts
+ * before it writes, so nothing downstream has to ask which unit this is.
+ */
+export interface CycleTime {
+  nodeId: string;
+  productId: string;
+  secondsPerUnit: number;
+}
+
+function parseCycleTime(v: Json): CycleTime | null {
+  if (!isJsonObject(v)) return null;
+  const { node_id, product_id, seconds_per_unit } = v;
+  if (!isStr(node_id) || !isStr(product_id) || !isNum(seconds_per_unit)) return null;
+  return { nodeId: node_id, productId: product_id, secondsPerUnit: seconds_per_unit };
+}
+
 export interface ShiftBreak {
   id: string;
   name: string;
@@ -598,6 +616,9 @@ export interface BoardWindow {
   nodeSkillRequirements: NodeSkillRequirement[];
   shiftTemplates: ShiftTemplate[];
   nodeShiftMap: NodeShiftMapEntry[];
+  /** R-315: standard seconds-per-unit for the scoped nodes. Empty is normal —
+   *  a cycle time is optional everywhere, and most orgs will set none. */
+  cycleTimes: CycleTime[];
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -614,6 +635,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     node_skill_requirements,
     shift_templates,
     node_shift_map,
+    cycle_times,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -630,6 +652,11 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   );
   const parsedShiftTemplates = parseArrayOf(shift_templates, parseShiftTemplate);
   const parsedNodeShiftMap = parseArrayOf(node_shift_map, parseNodeShiftMapEntry);
+  // Strict like every sibling key, deliberately: board_window COALESCEs this to
+  // '[]', so it is missing only against a database that has not run migration
+  // 0040. Defaulting to [] there would leave every derived target silently
+  // absent and the board otherwise working — the `silent-empty` defect class.
+  const parsedCycleTimes = parseArrayOf(cycle_times, parseCycleTime);
 
   if (
     parsedOrg === null ||
@@ -642,7 +669,8 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     parsedSkills === null ||
     parsedNodeSkillRequirements === null ||
     parsedShiftTemplates === null ||
-    parsedNodeShiftMap === null
+    parsedNodeShiftMap === null ||
+    parsedCycleTimes === null
   ) {
     return null;
   }
@@ -659,6 +687,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     nodeSkillRequirements: parsedNodeSkillRequirements,
     shiftTemplates: parsedShiftTemplates,
     nodeShiftMap: parsedNodeShiftMap,
+    cycleTimes: parsedCycleTimes,
   };
 }
 

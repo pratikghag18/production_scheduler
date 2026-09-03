@@ -92,6 +92,7 @@ function crewFixture(): IndexedAssignment {
     endMin: 600,
     efficiencyPercent: 100,
     lane: 0,
+    defaultTargetQty: null,
   };
 }
 
@@ -112,6 +113,7 @@ function buildIndex(crew: IndexedAssignment[]): BoardIndex {
     assignmentsByRun,
     assignmentsByOperator: new Map(),
     templateForNode: new Map([["cell-1", null]]),
+    cycleTimeByKey: new Map(),
     skillsForNode: new Map([["cell-1", []]]),
     productById: new Map(),
     operatorById: new Map(),

@@ -148,6 +148,13 @@ const boardWindowJson: Json = {
       template_id: "70000000-0000-0000-0000-000000000001",
     },
   ],
+  cycle_times: [
+    {
+      node_id: "30000000-0000-0000-0000-000000000007",
+      product_id: "60000000-0000-0000-0000-000000000001",
+      seconds_per_unit: 90,
+    },
+  ],
 };
 
 describe("parseBoardWindow", () => {
@@ -566,6 +573,42 @@ describe("an assignment whose operator has been deleted", () => {
     };
     delete raw.assignments[0].area_override;
     expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+describe("R-315: board_window hands over the standard cycle times", () => {
+  it("parses cycle_times to camelCase", () => {
+    expect(parseBoardWindow(boardWindowJson)?.cycleTimes).toEqual([
+      {
+        nodeId: "30000000-0000-0000-0000-000000000007",
+        productId: "60000000-0000-0000-0000-000000000001",
+        secondsPerUnit: 90,
+      },
+    ]);
+  });
+
+  it("rejects a cycle time whose seconds are not a number", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      cycle_times: Record<string, unknown>[];
+    };
+    raw.cycle_times[0]!.seconds_per_unit = "90";
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("rejects a payload with no cycle_times key at all", () => {
+    // board_window COALESCEs the key to '[]', so it is absent only against a
+    // database that has not run migration 0040. Defaulting to [] there would
+    // leave every derived target silently missing and the board otherwise
+    // working — loud is better than silently empty.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as Record<string, unknown>;
+    delete raw.cycle_times;
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("accepts an empty list — a cycle time is optional everywhere", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as Record<string, unknown>;
+    raw.cycle_times = [];
+    expect(parseBoardWindow(raw as never)?.cycleTimes).toEqual([]);
   });
 });
 

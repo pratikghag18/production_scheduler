@@ -170,6 +170,7 @@ export default function BoardPage() {
         assignmentsByRun: new Map(),
         assignmentsByOperator: new Map(),
         templateForNode: new Map(),
+        cycleTimeByKey: new Map(),
         skillsForNode: new Map(),
         productById: new Map(),
         operatorById: new Map(),
