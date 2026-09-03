@@ -7256,7 +7256,7 @@ sessions:
   date: 2026-09-03
   title: A node chooses whether it adds its children up (R-319)
   commits:
-  - pending
+  - cef0c6b
   numbers:
     app_tests: 1746
     app_test_files: 56
