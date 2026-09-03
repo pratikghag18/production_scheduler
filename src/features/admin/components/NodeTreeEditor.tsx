@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DRAG_THRESHOLD_PX } from "@/lib/interaction";
+import { Chevron } from "@/components/icons";
 import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/lib/api";
 import {
   useCopyPlantStructure,
@@ -689,7 +690,7 @@ export function NodeTreeEditor({
                       }
                       onClick={() => toggleCollapsed(row.node.id)}
                     >
-                      {row.collapsed ? "▸" : "▾"}
+                      <Chevron direction={row.collapsed ? "right" : "down"} />
                     </button>
                   ) : (
                     <span className={styles.disclosureSpacer} />

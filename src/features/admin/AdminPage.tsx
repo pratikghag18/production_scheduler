@@ -26,6 +26,7 @@ import { MatrixPanel, MATRIX_PANEL_READY } from "./components/MatrixPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import { SettingsPanel, SETTINGS_PANEL_READY } from "./components/SettingsPanel";
+import { Chevron } from "@/components/icons";
 import styles from "./AdminPage.module.css";
 
 /**
@@ -465,7 +466,7 @@ export default function AdminPage() {
           title={railCollapsed ? "Show sections" : "Hide sections"}
           onClick={toggleRail}
         >
-          {railCollapsed ? "»" : "«"}
+          <Chevron direction={railCollapsed ? "right" : "left"} />
         </button>
         {/* ⭐ ICON-ONLY WHILE COLLAPSED, NOT HIDDEN. Each section keeps its
             button in the thin strip, shown as its icon, so a reader can still

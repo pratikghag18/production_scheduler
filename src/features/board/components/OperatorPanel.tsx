@@ -3,6 +3,7 @@ import type { BoardOperator, Skill, BoardNode } from "@/lib/api";
 import type { IndexedAssignment } from "../lib/boardIndex";
 import { isFullyAllocated } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import { Chevron } from "@/components/icons";
 import styles from "./OperatorPanel.module.css";
 
 function initials(name: string): string {
@@ -73,7 +74,7 @@ export function OperatorPanel({
           onClick={onToggleOpen}
           title={open ? "Collapse panel" : "Expand panel"}
         >
-          {open ? "«" : "»"}
+          <Chevron direction={open ? "left" : "right"} />
         </button>
       </div>
       <div className={styles.list}>
