@@ -267,6 +267,55 @@ export type Database = {
           },
         ]
       }
+      node_product_cycle_times: {
+        Row: {
+          created_at: string
+          node_id: string
+          org_id: string
+          product_id: string
+          seconds_per_unit: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          node_id: string
+          org_id: string
+          product_id: string
+          seconds_per_unit: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          node_id?: string
+          org_id?: string
+          product_id?: string
+          seconds_per_unit?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "node_product_cycle_times_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "node_product_cycle_times_org_id_node_id_fkey"
+            columns: ["org_id", "node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "node_product_cycle_times_org_id_product_id_fkey"
+            columns: ["org_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
       node_shift_templates: {
         Row: {
           node_id: string
