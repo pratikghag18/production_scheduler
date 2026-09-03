@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: 9e058b1
+  tip: e6e0b7b
   baseline:
-    app_tests: 1642
-    app_test_files: 47
+    app_tests: 1653
+    app_test_files: 48
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -5122,6 +5122,44 @@ requirements:
     use — the board labels were added the same day after the maintainer showed nothing had changed on screen.
     The closed enum is EIGHT presets as of 0038: d_mon_yyyy, dmy_slash, mdy_slash, iso, dmy_dash_mon
     (03-Sep-2026), d_month_yyyy (3 September 2026), month_d_yyyy (September 3, 2026), ymd_slash (2026/09/03).
+- id: R-310
+  title: The board's assignable operator pool follows the selected plant
+  source:
+  - the maintainer, 3 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    A system admin who picks a plant on the board sees only that plant's operators in the left panel, not
+    every operator in the company. The narrowing is on the OFFERED pool and on the CLIENT: `board_window`
+    still returns the whole org on purpose (S18 / D113 — the read stays wide so a cross-plant assignment can
+    still be DRAWN and an out-of-area person stays in the list, annotated, for placement with a reason), and
+    `index.operatorById` keeps every operator so a chip always resolves its name. `ownedUnder` (scope.ts) is
+    the reverse containment of `offeredAt`: it keeps operators whose owner (`site_node_id`) sits at-or-below
+    the board's root, fails open on an owner the client cannot resolve, and guards the line1/line10 prefix
+    trap through `isAtOrBelow`. A server-side scope of `board_window` was tried and backed out: it regresses
+    exactly what S18 forbids (a cross-plant chip falling to "unknown operator").
+  verified_by:
+  - kind: vitest
+    file: src/test/scope.test.ts
+    cases: XO1 (owner at root or below is kept, another plant dropped), XO2 (a deeper root narrows further), XO3 (line1/line10 prefix trap), XO4 (unresolvable owner fails open), XO5 (order preserved)
+  status: covered
+- id: R-311
+  title: One chevron, drawn from a single icon module and audited
+  source:
+  - the maintainer, 3 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    Every collapse/expand and directional control draws ONE chevron from `src/components/icons.tsx`
+    (`Chevron`, a currentColor SVG sized in em), not a per-surface raw glyph — the maintainer noticed the
+    chevron looked different on the board and the admin pages because four affordances each drew their own
+    (`«`/`»` panel toggles, `▸`/`▾` tree carets, `◀`/`▶` day-nav). All were migrated. The standard is
+    enforced: `iconStandard.test.ts` fails the build if a directional control glyph (« » ▸ ▾ ◀ ▶ ◄ ►)
+    appears in any component outside the icon module. It is deliberately narrow — the breadcrumb separator ›
+    and the matrix status glyphs (▲ ↻ ✓ × ·) are a separate intentional set and are left alone.
+  verified_by:
+  - kind: vitest
+    file: src/test/iconStandard.test.ts
+    cases: synthetic raw glyphs are flagged, the breadcrumb separator and status glyphs are not, comments are not read, the icon module is allowed its glyphs, and the real src tree draws every chevron through the module
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6905,6 +6943,36 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 31
+  date: 2026-09-03
+  title: Board operator pool follows the plant, and one audited chevron (R-310, R-311)
+  commits:
+  - e023420
+  - e6e0b7b
+  numbers:
+    app_tests: 1653
+    app_test_files: 48
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Two things the maintainer raised. FIRST: a system admin picking a plant on the board still saw every
+    operator in the company in the left panel. board_window returns all operators on purpose — S18
+    (52_scope_and_colour) pins the read wide so a cross-plant assignment can still be DRAWN, and D113 keeps an
+    out-of-area person in the list, annotated, because cross-placement with a reason is a feature. So the cut
+    belongs on the OFFERED pool, on the client: `ownedUnder` (scope.ts, the reverse containment of
+    `offeredAt`) keeps only operators whose owner sits under the board's root, while `index.operatorById`
+    stays whole so every chip still resolves its name. I first tried scoping inside board_window and backed it
+    out — it regresses exactly what S18 forbids. SECOND: the collapse chevron looked different on the board and
+    the admin pages, because four affordances each drew their own raw glyph (« » panel toggles, ▸ ▾ tree
+    carets, ◀ ▶ day-nav). A single `Chevron` in a new `src/components/icons.tsx` replaces all of them, and
+    `iconStandard.test.ts` fails the build if a directional control glyph appears in a component outside that
+    module — narrow on purpose, leaving the breadcrumb `›` and the matrix status glyphs alone. Both answer the
+    maintainer's meta-question — "how do we define a standard so these things don't happen" — the same way the
+    date seam did: a shared primitive plus an audit that forbids bypassing it.
+    Suite 1653 green (was 1642: five ownedUnder cases, six iconStandard cases). tsc and eslint clean. No
+    migration and no db:types — board_window is unchanged; the operators fix is entirely client-side.
+  shipped: []
 - id: 30
   date: 2026-09-03
   title: Four more date-format presets (R-309)
