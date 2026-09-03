@@ -142,7 +142,21 @@ function chainOf(nodeId: string, byId: ReadonlyMap<string, BoardNode>): string[]
   return chain;
 }
 
-/** Deepest node common to every chain — the top of the header tree. */
+/**
+ * Deepest node common to every chain — the top of the header tree.
+ *
+ * ⚠️ RETURNS "" WHEN THERE IS NO COMMON ANCESTOR, and that is the whole fix for
+ * the multi-plant matrix. In this schema a plant IS a root (`parentId` null);
+ * there is no company node above the plants (the org is not a node). So a matrix
+ * that spans plants has NO shared ancestor, `common` filters down to empty, and
+ * the old `?? ownerIds[0]` fallback picked an ARBITRARY owner as the "root" —
+ * `pathFromRoot` then cut every chain at that node, so the training owned there
+ * lost its plant, the sort scattered the rest, and the same plant showed up in
+ * two places with an area orphaned from its plant. "" is in no chain, so nothing
+ * is cut: every column keeps its full plant→owner path and groups under its own
+ * plant. When a real common ancestor exists (a scoped, single-plant view) it is
+ * still returned and the header trims to it as before.
+ */
 function lowestCommonAncestor(
   ownerIds: readonly string[],
   byId: ReadonlyMap<string, BoardNode>,
@@ -153,7 +167,7 @@ function lowestCommonAncestor(
     const set = new Set(chainOf(ownerIds[i], byId));
     common = common.filter((id) => set.has(id));
   }
-  return common[0] ?? ownerIds[0];
+  return common[0] ?? "";
 }
 
 /** The "…-wide" word for a node's own trainings, from its level name. */
@@ -230,10 +244,22 @@ export function buildColumns(
 
   // Depth-first order by sortOrder; own-trainings (shorter path) before deeper
   // children; then by training name for a stable order within one owner.
+  //
+  // ⚠️ WHEN SIBLINGS TIE ON sortOrder, TIEBREAK BY NAME AT THAT LEVEL — never
+  // fall straight through to the training name. Root nodes (the plants) often
+  // share sortOrder 0, and without this the comparator returned 0 for two
+  // different plants and the sort dropped to `a.t.name`, interleaving plants by
+  // training name (the "Forklift, Forklift, Line 1…" jumble, Plant D split in
+  // two). Comparing the node name keeps each plant — and each area/line —
+  // contiguous; the training name only decides order WITHIN one owner.
   ann.sort((a, b) => {
     const n = Math.min(a.p.length, b.p.length);
     for (let i = 0; i < n; i++) {
-      if (a.p[i] !== b.p[i]) return orderOf(a.p[i]) - orderOf(b.p[i]);
+      if (a.p[i] !== b.p[i]) {
+        const byOrder = orderOf(a.p[i]) - orderOf(b.p[i]);
+        if (byOrder !== 0) return byOrder;
+        return nameOf(a.p[i]).localeCompare(nameOf(b.p[i]));
+      }
     }
     if (a.p.length !== b.p.length) return a.p.length - b.p.length;
     return a.t.name.localeCompare(b.t.name);
