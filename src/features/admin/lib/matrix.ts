@@ -245,17 +245,23 @@ export function buildColumns(
   // Depth-first order by sortOrder; own-trainings (shorter path) before deeper
   // children; then by training name for a stable order within one owner.
   //
-  // ⚠️ WHEN SIBLINGS TIE ON sortOrder, TIEBREAK BY NAME AT THAT LEVEL — never
-  // fall straight through to the training name. Root nodes (the plants) often
-  // share sortOrder 0, and without this the comparator returned 0 for two
-  // different plants and the sort dropped to `a.t.name`, interleaving plants by
-  // training name (the "Forklift, Forklift, Line 1…" jumble, Plant D split in
-  // two). Comparing the node name keeps each plant — and each area/line —
-  // contiguous; the training name only decides order WITHIN one owner.
+  // ⭐ PLANTS (ROOTS) READ ALPHABETICALLY — the maintainer's call — while areas,
+  // lines and cells keep their DELIBERATE sortOrder. A root's own sortOrder is
+  // not something anyone arranges (and often ties at 0), so ordering plants by
+  // name is the predictable read; deeper levels keep the admin's drag order,
+  // which also dodges the "Line 10 before Line 2" trap a raw name sort would hit.
+  //
+  // ⚠️ AND A NAME TIEBREAK AT EVERY LEVEL — never fall straight through to the
+  // training name. Without it the comparator returned 0 for two different plants
+  // and the sort dropped to `a.t.name`, interleaving plants by training name (the
+  // "Forklift, Forklift, Line 1…" jumble, one plant split in two).
   ann.sort((a, b) => {
     const n = Math.min(a.p.length, b.p.length);
     for (let i = 0; i < n; i++) {
       if (a.p[i] !== b.p[i]) {
+        const aRoot = byId.get(a.p[i])?.parentId == null;
+        const bRoot = byId.get(b.p[i])?.parentId == null;
+        if (aRoot && bRoot) return nameOf(a.p[i]).localeCompare(nameOf(b.p[i]));
         const byOrder = orderOf(a.p[i]) - orderOf(b.p[i]);
         if (byOrder !== 0) return byOrder;
         return nameOf(a.p[i]).localeCompare(nameOf(b.p[i]));

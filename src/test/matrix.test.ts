@@ -179,33 +179,33 @@ describe("buildColumns — nested hierarchy header", () => {
     expect(buildColumns([], byId, levelsById)).toEqual({ cols: [], bands: [], maxBands: 0 });
   });
 
-  it("⭐ plants are ROOTS with no company node above them (the real schema): each column keeps its plant, groups stay contiguous, and an area training shows its plant", () => {
+  it("⭐ plants are ROOTS with no company node above them (the real schema): plants read ALPHABETICALLY, groups stay contiguous, and an area training shows its plant", () => {
     // Reported from the app: with four plants (each a root, parentId null) the
     // header split one plant across two places and orphaned an Area 2 column from
-    // its plant. Reproduce with two roots and the deeper training the maintainer
-    // assigned. `byId` here has NO shared ancestor.
+    // its plant. `byId` here has NO shared ancestor. PA carries a HIGHER sortOrder
+    // than PZ on purpose: plants sort by NAME (PA before PZ), not sortOrder.
     const rootById = new Map<string, BoardNode>([
-      ["px", node("px", null, "px", "L1", 0)], // Plant X, root
-      ["pd", node("pd", null, "pd", "L1", 1)], // Plant D, root
-      ["pd_a2", node("pd_a2", "pd", "pd.pd_a2", "L2", 1)], // Area 2 under Plant D
+      ["pa", node("pa", null, "pa", "L1", 5)], // Plant A, root, high sortOrder
+      ["pz", node("pz", null, "pz", "L1", 0)], // Plant Z, root, low sortOrder
+      ["pz_a2", node("pz_a2", "pz", "pz.pz_a2", "L2", 1)], // Area 2 under Plant Z
     ]);
-    const pxWide = skill("px_w", "Zeta training", "px"); // name sorts LAST on purpose
-    const pdWide = skill("pd_w", "Alpha training", "pd"); // name sorts FIRST on purpose
-    const pdArea = skill("pd_a", "Area 2 training", "pd_a2");
+    // PA's training name sorts AFTER PZ's, to prove the PLANT name orders the
+    // columns, not the training name (the old bug) nor the root sortOrder.
+    const paTrain = skill("pa_t", "Zzz training", "pa");
+    const pzWide = skill("pz_w", "Mmm training", "pz");
+    const pzArea = skill("pz_a", "Area X training", "pz_a2");
 
-    // Feed them in a deliberately jumbled order; the plant grouping must win over
-    // the training name (the old bug sorted by name across plants).
-    const { cols, bands } = buildColumns([pxWide, pdArea, pdWide], rootById, levelsById);
+    const { cols, bands } = buildColumns([pzWide, pzArea, paTrain], rootById, levelsById);
 
-    // Contiguous by plant, ordered by root sortOrder (px=0 before pd=1). No stray
-    // company band, no plant appearing twice.
-    expect(cols.map((c) => c.id)).toEqual(["px_w", "pd_w", "pd_a"]);
-    expect(bands[0].map((c) => c.label)).toEqual(["PX", "PD"]);
-    const pdTop = bands[0].find((c) => c.label === "PD")!;
-    expect(pdTop.colspan).toBe(2); // Plant D spans BOTH its columns (site-wide + Area 2)
-    // The Area 2 column sits under Plant D — its area band (node name PD_A2)
-    // exists beneath PD rather than floating with no plant.
-    expect(bands.some((row) => row.some((c) => c.label === "PD_A2"))).toBe(true);
+    // Plant A (name) before Plant Z despite PA's higher sortOrder; each plant once,
+    // contiguous; no stray company band.
+    expect(cols.map((c) => c.id)).toEqual(["pa_t", "pz_w", "pz_a"]);
+    expect(bands[0].map((c) => c.label)).toEqual(["PA", "PZ"]);
+    const pzTop = bands[0].find((c) => c.label === "PZ")!;
+    expect(pzTop.colspan).toBe(2); // Plant Z spans BOTH its columns (site-wide + Area 2)
+    // The Area 2 column sits under Plant Z — its area band (node name PZ_A2)
+    // exists beneath PZ rather than floating with no plant.
+    expect(bands.some((row) => row.some((c) => c.label === "PZ_A2"))).toBe(true);
   });
 });
 
