@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { offeredHere, productsOfferedHere } from "@/features/admin/lib/scope";
+import { offeredHere, ownedInScope, productsOfferedHere } from "@/features/admin/lib/scope";
 import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
@@ -347,7 +347,7 @@ export default function BoardPage() {
   const operatorPool = useMemo(() => {
     const all = boardQuery.data?.operators ?? [];
     if (index === null) return all;
-    return all.filter((o) => index.nodeById.has(o.siteNodeId));
+    return ownedInScope(all, new Set(index.nodeById.keys()));
   }, [boardQuery.data, index]);
 
   if (sessionLoading) {

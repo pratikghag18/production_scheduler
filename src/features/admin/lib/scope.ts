@@ -119,6 +119,30 @@ export function offeredHere<T extends { siteNodeId: string }>(
   return items.filter((i) => offeredAt(i.siteNodeId, targetPath, nodesById));
 }
 
+/**
+ * Everything in `items` OWNED by one of `scopedNodeIds` — the board's per-plant
+ * assignable pool.
+ *
+ * ⭐ MEMBERSHIP, NOT A PATH COMPARE, AND THAT IS THE WHOLE FIX. `board_window`'s
+ * `nodes` are already scoped to the selected root's subtree, so the set of node
+ * ids the board knows about IS this plant. An operator belongs here exactly when
+ * its owner is one of them. An earlier version resolved owner PATHS and "failed
+ * open" on an owner it could not find — but a different plant's owner is never in
+ * the scoped set, so every out-of-plant operator was kept: the exact bug this
+ * exists to fix. There is no fail-open here on purpose: an owner outside the
+ * scoped set is a real "not this plant", not an "I cannot tell".
+ *
+ * ⚠️ A POOL FILTER, NOT A DRAW FILTER. `board_window` still returns every
+ * operator (S18) and `index.operatorById` keeps them all, so a chip for a
+ * cross-plant assignment still renders its name; only the OFFERED pool is cut.
+ */
+export function ownedInScope<T extends { siteNodeId: string }>(
+  items: readonly T[],
+  scopedNodeIds: ReadonlySet<string>,
+): T[] {
+  return items.filter((i) => scopedNodeIds.has(i.siteNodeId));
+}
+
 /* ---------------------------------------------------------------------------
  * ⭐ D115 / migration 0034: A PRODUCT IS OFFERED FROM A LIST OF PLACES.
  *

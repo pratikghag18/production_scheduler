@@ -18,6 +18,7 @@ import {
   isAtOrBelow,
   offeredAt,
   offeredHere,
+  ownedInScope,
   productOfferedAt,
   productsOfferedHere,
   scopeIndex,
@@ -146,6 +147,49 @@ describe("scope: what is offered where", () => {
       { siteNodeId: PLANT.id, sku: "A" },
     ];
     expect(offeredHere(items, CELL1.path, BY_ID).map((i) => i.sku)).toEqual(["B", "A"]);
+  });
+});
+
+describe("scope: the board pool is membership in the scoped nodes (ownedInScope)", () => {
+  const PEOPLE = [
+    { siteNodeId: PLANT.id, name: "B at the plant root" },
+    { siteNodeId: LINE1.id, name: "B at a line" },
+    { siteNodeId: CELL1.id, name: "B at a cell" },
+    { siteNodeId: PLANT2.id, name: "another plant" },
+    { siteNodeId: "n-hidden", name: "owner not in this board's nodes" },
+  ];
+  // board_window's `nodes` are the selected root's subtree — Plant 1 here.
+  const plant1Scope = new Set([PLANT.id, ASSY.id, LINE1.id, LINE10.id, CELL1.id, CELL10.id]);
+
+  it("XO1: keeps everyone owned by a scoped node, drops another plant", () => {
+    // The reported bug: a system admin on Plant 1 must stop seeing Plant 2's B.
+    expect(ownedInScope(PEOPLE, plant1Scope).map((p) => p.name)).toEqual([
+      "B at the plant root",
+      "B at a line",
+      "B at a cell",
+    ]);
+  });
+
+  it("XO2: ⚠️ an owner NOT in the scoped set is dropped, NOT fail-open — this is the exact bug the path version shipped", () => {
+    // The old path-resolve failed open when it could not find the owner node, so
+    // every out-of-plant owner (never in the scoped map) was kept. Membership
+    // treats "not in scope" as the real answer: not this plant.
+    const names = ownedInScope(PEOPLE, plant1Scope).map((p) => p.name);
+    expect(names).not.toContain("another plant");
+    expect(names).not.toContain("owner not in this board's nodes");
+  });
+
+  it("XO3: a narrower scope keeps fewer", () => {
+    const line1Scope = new Set([LINE1.id, CELL1.id]);
+    expect(ownedInScope(PEOPLE, line1Scope).map((p) => p.name)).toEqual(["B at a line", "B at a cell"]);
+  });
+
+  it("XO4: preserves the order it was given", () => {
+    expect(ownedInScope(PEOPLE, plant1Scope).map((p) => p.name)).toEqual([
+      "B at the plant root",
+      "B at a line",
+      "B at a cell",
+    ]);
   });
 });
 
