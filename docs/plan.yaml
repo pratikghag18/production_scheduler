@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: '159e094'
+  tip: 1eacb11
   baseline:
     app_tests: 1663
     app_test_files: 50
     tsc: 0
     eslint: 0
     db_checks: 522
-    migrations: 38
+    migrations: 39
     mutations: 509 of 536
 tracks:
 - id: core
@@ -5228,6 +5228,29 @@ requirements:
     file: src/test/targetField.test.ts
     cases: no quantity -> null unit (never "units"); a unit is kept only with a quantity; a set quantity with a blank unit is null; quantity clamps to >=1 and the unit trims/caps to 8
   status: covered
+- id: R-314
+  title: The unit-needs-a-quantity rule holds for old data and is enforced by the database
+  source:
+  - the maintainer, 3 Sept (in session, "a rule is a rule, be it new or old")
+  stated_by: maintainer
+  claim: >-
+    R-313's client fix stopped NEW assignments getting a stray target_unit, but a code change only decides
+    the next write — rows the old code already stored still carried a unit with no target_qty. The maintainer:
+    "a rule is a rule, be it new or old." Migration 0039 makes it hold for every row and every future write:
+    a BACKFILL nulls target_unit wherever target_qty is null, and a CHECK constraint
+    (`target_unit IS NULL OR target_qty IS NOT NULL`) then refuses a unit without a quantity from ANY code
+    path — old client, new client, an RPC, a hand-run UPDATE — so the invariant is a fact of the schema (the
+    twin of target_qty's own `check(>0)`), not a convention the UI remembers. Data-transforming, so it carries
+    an upgrade check over a pre-0039 database.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/upgrade_0039_unit_needs_qty.sql
+    cases: U39-0 (pre-0039 - no constraint, a dirty unit-without-qty row present), U39-1 (backfill nulled it), U39-2 (the CHECK refuses a new unit with no quantity), U39-3 (a unit WITH a quantity still saves)
+  status: covered
+  note: >-
+    Validated on a scratch DB built to 0038 (all four cases PASS) and applied to the dev DB — one dirty row
+    backfilled to zero, a bad write refused. The canonical verify-db.sh db_checks recount (now +4) is owed on
+    CI, as with the other data migrations; the baseline db_checks stays 522 until then.
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -7011,6 +7034,30 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 36
+  date: 2026-09-03
+  title: The unit rule holds for old data too, enforced by a CHECK (R-314)
+  commits:
+  - 1eacb11
+  numbers:
+    app_tests: 1663
+    app_test_files: 50
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    On the client-side units fix the maintainer said "a rule is a rule, be it new or old" — the old rows the
+    previous code wrote still carried a unit with no quantity, and a code change does not reach back to rewrite
+    stored rows. Migration 0039 makes the rule hold everywhere: a backfill nulls target_unit wherever
+    target_qty is null, then a CHECK (`target_unit IS NULL OR target_qty IS NOT NULL`) refuses a unit without
+    a quantity from any code path — the invariant becomes a fact of the schema, the twin of target_qty's
+    check(>0), rather than something the UI remembers. Data-transforming, so it carries an upgrade check
+    (upgrade_0039, 4 cases) run over a pre-0039 database: plant the dirty row, apply, assert the backfill,
+    the refusal, and that a unit WITH a quantity still saves. Validated on a scratch DB built to 0038 (all
+    four PASS) and applied to the dev DB — one dirty row backfilled to zero, a bad write refused. No column or
+    RPC changed, so db:types is unaffected; JS suite 1663 green. The canonical verify-db.sh db_checks recount
+    (+4) is owed on CI.
+  shipped: []
 - id: 35
   date: 2026-09-03
   title: One shared pop-up shell, an audit, and the "units" fix (R-313)
