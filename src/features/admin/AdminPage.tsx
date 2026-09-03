@@ -26,7 +26,7 @@ import { MatrixPanel, MATRIX_PANEL_READY } from "./components/MatrixPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import { SettingsPanel, SETTINGS_PANEL_READY } from "./components/SettingsPanel";
-import { Chevron } from "@/components/icons";
+import { PanelToggle } from "@/components/PanelToggle";
 import styles from "./AdminPage.module.css";
 
 /**
@@ -458,16 +458,12 @@ export default function AdminPage() {
             is the only thing in it, so it must always be reachable — the section
             buttons are the thing being hidden, never this. `aria-expanded` names
             the state a chevron only hints at. */}
-        <button
-          type="button"
+        <PanelToggle
+          collapsed={railCollapsed}
+          onToggle={toggleRail}
+          label="admin sections"
           className={styles.railToggle}
-          aria-label={railCollapsed ? "Show the admin sections" : "Hide the admin sections"}
-          aria-expanded={!railCollapsed}
-          title={railCollapsed ? "Show sections" : "Hide sections"}
-          onClick={toggleRail}
-        >
-          <Chevron direction={railCollapsed ? "right" : "left"} />
-        </button>
+        />
         {/* ⭐ ICON-ONLY WHILE COLLAPSED, NOT HIDDEN. Each section keeps its
             button in the thin strip, shown as its icon, so a reader can still
             switch section without reopening the rail — the icons are what make

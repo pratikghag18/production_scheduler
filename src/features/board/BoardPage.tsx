@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { offeredHere, ownedUnder, productsOfferedHere } from "@/features/admin/lib/scope";
+import { offeredHere, productsOfferedHere } from "@/features/admin/lib/scope";
 import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
@@ -330,18 +330,25 @@ export default function BoardPage() {
   /**
    * ⭐ THE ASSIGNABLE POOL, CUT TO THE CHOSEN PLANT. Reported from the app: a
    * system admin who picks one plant still saw every plant's operators in the
-   * left panel, because `board_window` returns the whole org (S18 — it must, so
-   * a cross-plant assignment can still be DRAWN). The cut belongs on the client
-   * and on the POOL alone: `ownedUnder` keeps only people who belong under the
-   * board's root, while `index.operatorById` keeps every operator so a chip for
-   * an out-of-plant assignment still renders its name. Fails open until the root
-   * and the index resolve.
+   * left panel. A site admin already sees only their plant's people (RLS scopes
+   * their read); this makes a system admin's chosen plant behave the same.
+   *
+   * ⭐⭐ THE CUT IS MEMBERSHIP IN THE SCOPED NODES, not a path comparison.
+   * `board_window` returns EVERY operator on purpose (S18 — so a cross-plant
+   * assignment can still be DRAWN) but its `nodes` are scoped to the selected
+   * root, so `index.nodeById` IS exactly this plant's subtree. An operator
+   * belongs here iff its owner is one of those nodes. (An earlier version
+   * resolved owner PATHS through `nodeById` and "failed open" on an owner it
+   * could not find — but a different plant's owner is never in the scoped map,
+   * so every out-of-plant operator was kept: the bug this replaces.)
+   * `index.operatorById` still holds every operator, so an out-of-plant
+   * assignment's chip still resolves its name.
    */
   const operatorPool = useMemo(() => {
     const all = boardQuery.data?.operators ?? [];
-    if (index === null || rootPath === null) return all;
-    return ownedUnder(all, rootPath, index.nodeById);
-  }, [boardQuery.data, index, rootPath]);
+    if (index === null) return all;
+    return all.filter((o) => index.nodeById.has(o.siteNodeId));
+  }, [boardQuery.data, index]);
 
   if (sessionLoading) {
     return <p>Loading session…</p>;
