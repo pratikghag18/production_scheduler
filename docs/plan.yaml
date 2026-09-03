@@ -6687,6 +6687,35 @@ findings:
     a person holds. **A column list that appears twice is a bug with a delay on it.** The new check builds
     its test data *from* the list itself, so the two cannot drift apart again.
 sessions:
+- id: 23
+  date: 2026-09-03
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1582
+    app_test_files: 44
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Second tester run, judging 51c3d04..7de7859. Every commit in that range is the tester's own
+    (the role's formation, the baseline run, and DEF-0001); no product code, no migration and no
+    src/ file changed, so R-304 — the requirement DEF-0001 already contradicts — is the only one in
+    scope, and it is already contradicted. I confirmed the baseline: `npm run test` reports 1582
+    tests in 44 files, exactly session 22's count. Every SQL check passed (26 files, from
+    45_acting_scope through 90_hierarchy_template). typecheck and lint are clean; format:check is red
+    across 236 committed files, which is a Prettier gate and not one of the tracked baseline numbers.
+    The Playwright smoke run failed again — all three cases — reproducing DEF-0001 against the live
+    stack: a signed-out visitor is sent to /sign-in (RequireAuth.tsx:39-45), not the removed
+    signed-out Board shell the test still asserts. The app is correct; the test is stale; DEF-0001
+    stays open. No fix-claimed defects existed to re-verify. One correction to session 22: the
+    db:types WARN is not CRLF. Regenerating from the local database adds three real RPC signatures —
+    create_product_at_node, app_can_edit_product_record, set_org_date_format — that no committed
+    migration creates and no src/ file reads. That is the local dev database sitting ahead of the
+    committed migrations with uncommitted work, not a defect in committed code, so nothing is filed;
+    the committed database.types.ts matches the committed migrations. The four audit_log dark columns
+    are consistent with the unchecked Phase 1 audit-log item. Filed nothing new.
+  shipped: []
 - id: 22
   date: 2026-09-02
   title: Tester run
