@@ -1244,6 +1244,7 @@ export type Database = {
         Args: { p_levels: Json; p_template_id: string }
         Returns: Json
       }
+      set_org_date_format: { Args: { p_format: string }; Returns: Json }
       set_site_member: {
         Args: { p_node_id: string; p_profile_id: string; p_role: string }
         Returns: Json

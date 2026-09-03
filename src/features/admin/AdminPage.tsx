@@ -25,6 +25,7 @@ import { TrainingsPanel, TRAININGS_PANEL_READY } from "./components/TrainingsPan
 import { MatrixPanel, MATRIX_PANEL_READY } from "./components/MatrixPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
+import { SettingsPanel, SETTINGS_PANEL_READY } from "./components/SettingsPanel";
 import styles from "./AdminPage.module.css";
 
 /**
@@ -51,7 +52,8 @@ type SectionId =
   | "trainings"
   | "matrix"
   | "products"
-  | "import";
+  | "import"
+  | "settings";
 
 /*
  * ⭐ §19.62 — `enabled` IS NOT A LITERAL FOR THE QUEUED SECTIONS, AND THAT IS
@@ -61,7 +63,18 @@ type SectionId =
  * never edits this array. Group H in `scaleAudit.test.ts` guards the other
  * direction: every id below has a branch rendering it.
  */
-const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }> = [
+// ⚠️ `companyAdminOnly` IS A SEPARATE AXIS FROM `adminSectionsFor`. That helper
+// returns "all" for a site admin too (adminAnywhere), so it cannot express
+// "system admin ONLY" — and Settings is exactly that: an org-wide preference set
+// once for the whole company (0037). The flag is filtered on `profile.role`
+// below, and the server RPC refuses a non-admin regardless, so this only hides a
+// tab that could tell a site admin nothing but no.
+const SECTIONS: ReadonlyArray<{
+  id: SectionId;
+  label: string;
+  enabled: boolean;
+  companyAdminOnly?: boolean;
+}> = [
   { id: "hierarchy", label: "Hierarchy", enabled: true },
   { id: "access", label: "Access", enabled: true },
   { id: "shifts", label: "Shifts", enabled: SHIFTS_PANEL_READY },
@@ -84,6 +97,9 @@ const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; enabled: boolean }
   { id: "matrix", label: "Matrix", enabled: MATRIX_PANEL_READY },
   { id: "products", label: "Products", enabled: PRODUCTS_PANEL_READY },
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
+  // System-admin only (see `companyAdminOnly` note above). Org-wide preferences,
+  // the first being the date-display format (0037 / `src/lib/format/dates.ts`).
+  { id: "settings", label: "Settings", enabled: SETTINGS_PANEL_READY, companyAdminOnly: true },
 ];
 
 /**
@@ -209,6 +225,13 @@ function sectionIconBody(id: SectionId) {
           <path d="M2.75 10.6v1.9c0 .66.5 1.2 1.15 1.2h8.2c.65 0 1.15-.54 1.15-1.2v-1.9" />
         </>
       );
+    case "settings": // a gear
+      return (
+        <>
+          <circle cx="8" cy="8" r="2.1" />
+          <path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6 3.5 3.5" />
+        </>
+      );
   }
 }
 
@@ -248,8 +271,15 @@ export default function AdminPage() {
   // refuses on its own terms. This only stops somebody being offered a tab that
   // could never do anything but tell them no.
   const allowedSections = adminSectionsFor(profile?.role, profile?.adminAnywhere);
+  // ⚠️ `companyAdminOnly` is the SECOND gate, and it is NOT redundant with
+  // `allowedSections`: that returns "all" for a site admin (adminAnywhere), so
+  // without this a site admin would be offered Settings — an org-wide screen the
+  // server then refuses. Only the org-wide role 'admin' is a system admin.
+  const isCompanyAdmin = profile?.role === "admin";
   const visibleSections = SECTIONS.filter(
-    (s) => allowedSections === "all" || allowedSections.includes(s.id),
+    (s) =>
+      (allowedSections === "all" || allowedSections.includes(s.id)) &&
+      (s.companyAdminOnly !== true || isCompanyAdmin),
   );
   // ⚠️ RESOLVED, not merely filtered. The screen opens on "hierarchy", which a
   // supervisor cannot see — without this they would land on a heading with no
@@ -643,6 +673,13 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Import</h1>
             <ImportPanel />
+          </>
+        )}
+
+        {activeSection === "settings" && (
+          <>
+            <h1 className={styles.h1}>Settings</h1>
+            <SettingsPanel />
           </>
         )}
       </div>

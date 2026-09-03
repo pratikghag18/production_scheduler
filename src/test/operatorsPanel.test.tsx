@@ -228,6 +228,15 @@ vi.mock("@/lib/api", () => ({
   describeSchedulerError: (e: unknown) => String(e),
 }));
 
+// The date-display seam's client hook. The panel reads only `useDateFormat` (for
+// the expiry line); returning the default keeps its rendering "3 Sep 2026" and
+// spares this test a React Query round trip it does not care about. Mocked at
+// the hook, not through `@/lib/api`, so the api factory stays down to the one
+// name this screen uses (same reasoning as the `useDeletion` mock below).
+vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
+  useDateFormat: () => "d_mon_yyyy",
+}));
+
 /**
  * ⚠️ THE ONE MOCK THAT COULD SILENTLY PICK A BRANCH, so every field it returns
  * is here because the panel reads it, and none is here for decoration:

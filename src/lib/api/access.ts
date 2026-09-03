@@ -28,6 +28,8 @@
  * `eslint` do cover it.
  */
 import { supabase } from "@/lib/supabase";
+import type { Json } from "@/lib/database.types";
+import type { DateFormat } from "@/lib/format/dates";
 import { toSchedulerError } from "./errors";
 
 export async function fetchAdminAnywhere(): Promise<boolean> {
@@ -193,4 +195,49 @@ export async function fetchGrantPaths(): Promise<GrantPaths> {
     adminPaths: parseGrantPaths(admin.data),
     writablePaths: parseGrantPaths(writable.data),
   };
+}
+
+/* ===========================================================================
+ * The org-wide settings bag — read for everyone, written by the system admin.
+ *
+ * `orgs.settings` (0001) is the flat jsonb that already carries `capacity_cap`
+ * and `eligibility_policy`; migration 0037 added the ONE write function it never
+ * had, for `date_format`. `orgs_select` (0008) returns the caller's own org row
+ * to everyone, so the READ is a plain PostgREST select; the WRITE is an RPC
+ * because a non-admin UPDATE is a silent zero-row no-op under `orgs_update`
+ * (0037's header / api.md §4).
+ *
+ * ⚠️ THE READ THROWS, like `fetchSitePeople` and unlike `fetchAdminAnywhere`:
+ * the format decides how every date on the screen reads, and a read that could
+ * not happen must reach the caller as an error, not as a wrong default silently
+ * applied. The DEFENSIVE fallback lives one layer up, in `coerceDateFormat`
+ * (`src/lib/format/dates.ts`), which turns an absent or unknown key into the
+ * default -- so a settings bag that has never had `date_format` set reads as the
+ * default without this throwing.
+ *
+ * AUTHOR-ONLY — imports `@/lib/supabase`, so not runnable under
+ * `node --experimental-strip-types`. `tsc`/`eslint` cover it.
+ * ======================================================================== */
+
+/** The caller's org settings bag (`orgs.settings`). Throws if the read fails. */
+export async function fetchOrgSettings(): Promise<Json> {
+  // `.single()` is right: `orgs_select` returns exactly the caller's own org.
+  const { data, error } = await supabase.from("orgs").select("settings").single();
+  if (error) throw toSchedulerError(error);
+  return data.settings;
+}
+
+/**
+ * `set_org_date_format(p_format)`. Sets the org-wide date-display format.
+ * Raises: `not_permitted` (not a system admin), `invalid_argument` (unknown or
+ * null token, carrying `field: "date_format"`).
+ *
+ * ⚠️ The returned settings are DISCARDED: the caller (`useOrgSettings`)
+ * invalidates and refetches, and the loudness of a refusal comes from the
+ * server RAISE, not from anything this wrapper could inspect — the same shape as
+ * `setSiteMember`.
+ */
+export async function setOrgDateFormat(format: DateFormat): Promise<void> {
+  const { error } = await supabase.rpc("set_org_date_format", { p_format: format });
+  if (error) throw toSchedulerError(error);
 }

@@ -28,7 +28,6 @@ import {
   resolveSelectedOperator,
   rootIdFor,
   summarisePlaces,
-  formatDay,
   validateOperatorDraft,
   workPlacesFor,
   type OperatorLike,
@@ -38,6 +37,11 @@ import { buildColumns, trainingApplies, type CellState } from "../lib/matrix";
 import { MatrixChip, RecordPopover, type RecordFields } from "./matrixCells";
 import cellStyles from "./matrixCells.module.css";
 import type { OperatorSkillRecord } from "@/lib/api";
+// The calendar-date display seam: the org-wide format token, and the one
+// function that renders a `YYYY-MM-DD` with it. `../lib/operators` cannot import
+// these (it is dependency-free, see below), so the token is applied here.
+import { formatCalendarDay } from "@/lib/format/dates";
+import { useDateFormat } from "../hooks/useOrgSettings";
 // ⚠️ THE SCOPE HELPERS ARE IMPORTED HERE AND NOT INTO `../lib/operators`. That
 // module is dependency-free by design — its header says so, and that is what
 // lets `operators.test.ts` run it under `node --experimental-strip-types`. An
@@ -226,6 +230,7 @@ const PLACE_CHIP: Record<PlaceVerdict, { state: CellState; glyph: string; label:
 export function OperatorsPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  const dateFormat = useDateFormat(canQuery);
   const orgId = profile?.orgId ?? null;
 
   const { data, isLoading, isError } = useOperatorsAdmin(canQuery);
@@ -1158,7 +1163,7 @@ export function OperatorsPanel() {
                         {editingPlaceRow.expiring.map((e) => (
                           <li key={e.skillId} className={styles.placePopItem}>
                             <span>
-                              {e.name} — <b className={styles.matrixWarn}>expires {formatDay(e.expiresAt)}</b>
+                              {e.name} — <b className={styles.matrixWarn}>expires {formatCalendarDay(e.expiresAt, dateFormat)}</b>
                             </span>
                             <button
                               type="button"

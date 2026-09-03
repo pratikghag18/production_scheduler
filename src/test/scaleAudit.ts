@@ -115,6 +115,10 @@ export const REM_SURFACES: readonly string[] = [
   // file under src/features/admin means editing this list and R10's copy in
   // the same commit.**
   "src/features/admin/components/DeleteDialog.module.css",
+  // 0037 / the Settings section (org-wide date format). A new admin surface, so
+  // it is listed here AND in R10's copy in `scaleAudit.test.ts`, the two-place
+  // edit `missingRemSurfaces` exists to force.
+  "src/features/admin/components/SettingsPanel.module.css",
 ];
 
 /**

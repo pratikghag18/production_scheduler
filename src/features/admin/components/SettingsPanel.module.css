@@ -1,0 +1,89 @@
+/* Settings (the system-admin, org-wide preferences section).
+
+   Sized in `rem`, not px (D84, design plan §19.16): the root font-size scales
+   with `--chrome-scale` (global.css), so this whole surface follows the viewport
+   with nothing to remember per-property. Same convention, tokens and spacing as
+   `TrainingsPanel.module.css`, which this section is a peer of. Hairline borders
+   stay in px on purpose -- a 1px rule scaled up renders blurry, and
+   `unscaledPxLengths` exempts a border/outline WIDTH of <=2px and nothing else.
+   No `--ui-scale` anywhere (that token is fitted board content only, D84/D76).
+   `global.css` already declares `font: inherit` for input/button/select/textarea
+   (D89) -- not restated here.
+
+   ⚠️ THIS FILE MUST BE LISTED IN `REM_SURFACES` IN BOTH `src/test/scaleAudit.ts`
+   AND `src/test/scaleAudit.test.ts`'s R10 copy. `missingRemSurfaces` walks the
+   admin directory, so a stylesheet that exists and is not listed is a test
+   failure -- which is how `DeleteDialog.module.css` was caught.
+
+   NOTHING HERE IS A DRAG SURFACE. No `cursor: grab`, no `user-select: none`, no
+   `touch-action: none`: this screen has no gesture. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.card {
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  padding: 0.875rem 1rem;
+}
+
+.h2 {
+  margin: 0 0 0.375rem;
+  font-size: 0.875rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+/* One row per format: a radio-style choice showing the token's name and a live
+   sample of today's date, so the reader picks by what they will actually see. */
+.option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: left;
+  border-radius: 0.375rem;
+  border: 1px solid var(--axis);
+  padding: 0.5rem 0.625rem;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.optionSelected {
+  border-color: var(--ink-2);
+  background: var(--page);
+}
+
+.option:disabled {
+  opacity: 0.6;
+}
+
+.sample {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+}
+
+.status {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  margin: 0.625rem 0 0;
+}
+
+.error {
+  color: var(--crit);
+  font-size: 0.75rem;
+  margin: 0.625rem 0 0;
+}
