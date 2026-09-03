@@ -3,15 +3,15 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-02'
-  tip: 94bfe98
+  updated: '2026-09-03'
+  tip: a2d86c3
   baseline:
-    app_tests: 1615
-    app_test_files: 45
+    app_tests: 1635
+    app_test_files: 47
     tsc: 0
     eslint: 0
     db_checks: 522
-    migrations: 36
+    migrations: 37
     mutations: 509 of 536
 tracks:
 - id: core
@@ -5072,6 +5072,43 @@ requirements:
     file: src/test/productsPanel.test.tsx
     cases: T10 (a plant admin sees the create card with a "Made at" picker and Edit on parts made only in their plant), T10b (create routes through the plant RPC with the chosen node)
   status: covered
+- id: R-309
+  title: A system admin sets one date-display format for the whole company
+  source:
+  - the maintainer, 3 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    A system admin picks one date-display format for the company and every calendar date the app shows
+    as TEXT reads that way, while the data stays stored in its native ISO form. The maintainer, 3 Sept:
+    "set the date format... the whole app should display dates in that format throughout." Settled org-wide
+    (set by the system admin), not per-site: a plant is only a root node, and a per-site format would need
+    the node-scoped nearest-ancestor resolution that per-site timezone (R-D88 / D88) reserves for Phase 2,
+    which this does not touch. The choice is a CLOSED enum stored as a token in orgs.settings.date_format --
+    d_mon_yyyy (default; the shape the app shipped with), dmy_slash, mdy_slash, iso. TIMEZONE is out of
+    scope by the same decision: the surfaces named show Postgres `date` columns, timezone-less by
+    construction, so only the format changes what they read. Rendering goes through ONE seam
+    (src/lib/format/dates.ts, formatCalendarDay) that is pure string work -- no Date, no Intl, no timezone,
+    because parsing a `date` through `new Date` would move it a day west of Greenwich. The setting governs
+    displayed text only: a native date input and CSV import parsing stay ISO. The write is an RPC
+    (set_org_date_format, migration 0037) because a plain UPDATE is a silent zero-row no-op for a non-admin
+    under orgs_update; it pre-checks app_is_admin, validates the token, and merges the one key so the rest
+    of the settings bag survives. The Settings section is system-admin only, filtered on profile.role in
+    AdminPage (adminSectionsFor returns "all" for a site admin too), with the RPC as the real gate. And so
+    that a future date adopts the format automatically, dateSeam.test.ts fails the build when a date is
+    formatted with Intl.DateTimeFormat, toLocaleDateString/toLocaleTimeString or a hand-rolled month array
+    anywhere but the two allowlisted seams (dates.ts and board/lib/time.ts, plus operators.ts for the
+    dependency-free default renderer).
+  verified_by:
+  - kind: sql
+    file: supabase/tests/63_org_date_format_test.sql
+    cases: X1 (admin sets a format, capacity_cap/eligibility_policy survive the merge), X2 (the write persists), X3 (unknown token refused invalid_argument, nothing written), X4 (a supervisor refused not_permitted, setting untouched), X5 (null refused)
+  - kind: vitest
+    file: src/test/dateFormat.test.ts
+    cases: each token renders correctly, unknown/absent -> default, a non-YYYY-MM-DD string passes through, and the seam default equals operators.formatDay so the two cannot drift
+  - kind: vitest
+    file: src/test/dateSeam.test.ts
+    cases: synthetic bypasses (Intl, toLocale*, month array) are flagged, the seams are allowed their tools, comments are not read, and the real src tree formats no date outside the seams
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6855,6 +6892,44 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 28
+  date: 2026-09-03
+  title: A system admin sets one date format for the whole company (R-309)
+  commits:
+  - a2d86c3
+  numbers:
+    app_tests: 1635
+    app_test_files: 47
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer asked for a Settings tab where a system admin sets the date format for the site, so dates
+    read the same way throughout the app (Operators, Trainings, Import were named) while the data stays
+    stored in its native form. Talked through, two decisions settled up front: org-wide (set by the system
+    admin), not per-site -- a plant is only a root node, and a per-site format would need the node-scoped
+    resolution per-site timezone (D88) reserves for Phase 2; and format now, timezone deferred to R-D88 --
+    the named surfaces show Postgres `date` columns, timezone-less by construction, so a timezone toggle
+    would change nothing there. Then the maintainer asked to make sure any date shown in future adopts the
+    format automatically, which became the guardrail below.
+    Migration 0037 adds set_org_date_format, an RPC because a plain UPDATE on orgs.settings is a silent
+    zero-row no-op for a non-admin under orgs_update: it pre-checks app_is_admin, validates a closed token
+    enum (d_mon_yyyy default / dmy_slash / mdy_slash / iso), and merges the one key so capacity_cap and the
+    rest survive. Rendering goes through one pure seam, src/lib/format/dates.ts (formatCalendarDay) -- no
+    Date, no Intl, no timezone, because parsing a `date` through new Date moves it a day west of Greenwich;
+    operators.ts stays dependency-free and keeps its own DEFAULT renderer for the reason strings it builds,
+    with a test pinning the two defaults equal. useOrgSettings/useDateFormat carry the token to the
+    components (gated on canQueryAsUser, D91), and a new system-admin-only Settings section (filtered on
+    profile.role, since adminSectionsFor returns "all" for a site admin too) offers the four formats with a
+    live sample. The guardrail is dateSeam.test.ts, a file audit in scaleAudit's shape: the build fails if a
+    date is formatted with Intl.DateTimeFormat, toLocaleDateString/toLocaleTimeString or a hand-rolled month
+    array anywhere but the two allowlisted seams -- so new code must go through the seam, which already reads
+    the org format.
+    App suite 1635 green (was 1615: dateFormat and dateSeam). tsc and eslint clean. The 6 SQL cases in
+    63_org_date_format_test.sql were run green against the local container (harness + migrations + seed) and
+    db:types regenerated (one added line, the RPC -- the committed types were in sync); the canonical
+    verify-db.sh db_checks recount is owed on CI, so the baseline db_checks is left at 522.
+  shipped: []
 - id: 27
   date: 2026-09-02
   title: A site admin makes, and wholly owns, a product at their own plant (D116)
