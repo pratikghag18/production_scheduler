@@ -18,6 +18,7 @@ import {
   isAtOrBelow,
   offeredAt,
   offeredHere,
+  ownedUnder,
   productOfferedAt,
   productsOfferedHere,
   scopeIndex,
@@ -146,6 +147,56 @@ describe("scope: what is offered where", () => {
       { siteNodeId: PLANT.id, sku: "A" },
     ];
     expect(offeredHere(items, CELL1.path, BY_ID).map((i) => i.sku)).toEqual(["B", "A"]);
+  });
+});
+
+describe("scope: the assignable pool is cut to a chosen root (ownedUnder)", () => {
+  const PEOPLE = [
+    { siteNodeId: PLANT.id, name: "owned at the plant root" },
+    { siteNodeId: LINE1.id, name: "owned at a line inside the plant" },
+    { siteNodeId: CELL1.id, name: "owned at a cell inside the plant" },
+    { siteNodeId: PLANT2.id, name: "owned by another plant" },
+  ];
+
+  it("XO1: keeps everyone whose owner is the root or below it, drops other plants", () => {
+    // The reported bug: a system admin picks Plant 1 and must stop seeing Plant 2's
+    // people. Owner AT the root, and owner at a line/cell UNDER it, all belong.
+    expect(ownedUnder(PEOPLE, PLANT.path, BY_ID).map((p) => p.name)).toEqual([
+      "owned at the plant root",
+      "owned at a line inside the plant",
+      "owned at a cell inside the plant",
+    ]);
+  });
+
+  it("XO2: ⚠️ the reverse of offeredAt — a root does NOT pull in a deeper owner's people at a shallower root, but a deeper root narrows further", () => {
+    // Rooted at Line 1: only the cell under Line 1 and Line 1 itself belong; the
+    // plant-root owner is ABOVE Line 1, so they are not under it.
+    expect(ownedUnder(PEOPLE, LINE1.path, BY_ID).map((p) => p.name)).toEqual([
+      "owned at a line inside the plant",
+      "owned at a cell inside the plant",
+    ]);
+  });
+
+  it("XO3: the line1/line10 prefix trap is not a false match", () => {
+    // Owner at line10; rooted at line1. `startsWith` on the raw string would pass
+    // ("line1" is a prefix of "line10"); `isAtOrBelow` guards it with the dot.
+    const atLine10 = [{ siteNodeId: LINE10.id, name: "line 10 person" }];
+    expect(ownedUnder(atLine10, LINE1.path, BY_ID)).toEqual([]);
+  });
+
+  it("XO4: an owner this client cannot resolve FAILS OPEN — kept in the pool", () => {
+    // Same rule as offeredAt: hiding is silent and permanent, so "cannot tell"
+    // keeps the person and lets the board (and the server) decide.
+    const unknown = [{ siteNodeId: "n-hidden", name: "unresolved owner" }];
+    expect(ownedUnder(unknown, PLANT.path, BY_ID).map((p) => p.name)).toEqual(["unresolved owner"]);
+  });
+
+  it("XO5: preserves the order it was given", () => {
+    expect(ownedUnder(PEOPLE, PLANT.path, BY_ID).map((p) => p.name)).toEqual([
+      "owned at the plant root",
+      "owned at a line inside the plant",
+      "owned at a cell inside the plant",
+    ]);
   });
 });
 

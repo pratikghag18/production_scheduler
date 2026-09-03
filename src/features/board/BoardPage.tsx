@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { offeredHere, productsOfferedHere } from "@/features/admin/lib/scope";
+import { offeredHere, ownedUnder, productsOfferedHere } from "@/features/admin/lib/scope";
 import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
@@ -327,6 +327,22 @@ export default function BoardPage() {
     return out;
   }, [boardQuery.data, index, createNodeId]);
 
+  /**
+   * ⭐ THE ASSIGNABLE POOL, CUT TO THE CHOSEN PLANT. Reported from the app: a
+   * system admin who picks one plant still saw every plant's operators in the
+   * left panel, because `board_window` returns the whole org (S18 — it must, so
+   * a cross-plant assignment can still be DRAWN). The cut belongs on the client
+   * and on the POOL alone: `ownedUnder` keeps only people who belong under the
+   * board's root, while `index.operatorById` keeps every operator so a chip for
+   * an out-of-plant assignment still renders its name. Fails open until the root
+   * and the index resolve.
+   */
+  const operatorPool = useMemo(() => {
+    const all = boardQuery.data?.operators ?? [];
+    if (index === null || rootPath === null) return all;
+    return ownedUnder(all, rootPath, index.nodeById);
+  }, [boardQuery.data, index, rootPath]);
+
   if (sessionLoading) {
     return <p>Loading session…</p>;
   }
@@ -439,7 +455,7 @@ export default function BoardPage() {
           ) : (
             <div className={styles.body}>
               <OperatorPanel
-                operators={boardQuery.data.operators}
+                operators={operatorPool}
                 skillById={index.skillById}
                 nodeById={index.nodeById}
                 assignmentsByOperator={index.assignmentsByOperator}

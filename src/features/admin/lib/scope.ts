@@ -119,6 +119,36 @@ export function offeredHere<T extends { siteNodeId: string }>(
   return items.filter((i) => offeredAt(i.siteNodeId, targetPath, nodesById));
 }
 
+/**
+ * Every item whose OWNER (`siteNodeId`) sits inside `rootPath`'s subtree — i.e.
+ * the thing BELONGS under the chosen root. The reverse containment from
+ * `offeredAt`: that asks whether a target cell is under an owner (offering
+ * downward); this asks whether the OWNER is under a chosen root.
+ *
+ * ⭐ A POOL FILTER, NOT A DRAW FILTER — the distinction is why it is on the
+ * client. `board_window` returns the WHOLE org on purpose so the board can still
+ * DRAW an assignment whose operator belongs to another plant (S18 in
+ * `52_scope_and_colour_test`; and D113 keeps an out-of-area person in the list,
+ * annotated, because cross-placement with a reason is a feature). So the index
+ * keeps every operator for the chips, and ONLY the left panel's assignable pool
+ * is cut with this — a system admin who picks one plant stops seeing other
+ * plants' people to drag, without changing what any chip can render.
+ *
+ * FAILS OPEN on an owner this client cannot resolve — the file header's rule:
+ * "cannot tell" keeps it in the pool rather than hiding it silently.
+ */
+export function ownedUnder<T extends { siteNodeId: string }>(
+  items: readonly T[],
+  rootPath: string,
+  nodesById: ReadonlyMap<string, ScopeNode>,
+): T[] {
+  return items.filter((i) => {
+    const owner = nodesById.get(i.siteNodeId);
+    if (owner === undefined) return true; // cannot tell -> keep it, let the board decide
+    return isAtOrBelow(owner.path, rootPath);
+  });
+}
+
 /* ---------------------------------------------------------------------------
  * ⭐ D115 / migration 0034: A PRODUCT IS OFFERED FROM A LIST OF PLACES.
  *
