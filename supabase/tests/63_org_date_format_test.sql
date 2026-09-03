@@ -140,6 +140,25 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_X5;
 
+\echo 'X6: a preset added in 0038 is accepted and read back'
+SAVEPOINT sp_X6;
+DO $$
+DECLARE v_stored text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  PERFORM set_org_date_format('ymd_slash');
+  RESET ROLE;
+  SELECT settings->>'date_format' INTO v_stored
+    FROM orgs WHERE id = '10000000-0000-0000-0000-000000000001';
+  IF v_stored = 'ymd_slash'
+  THEN RAISE NOTICE 'PASS X6';
+  ELSE RAISE NOTICE 'FAIL X6: stored=%', v_stored; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL X6: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_X6;
+
 ROLLBACK;
 
-\echo '63_org_date_format_test.sql complete (6 cases: X0-X5)'
+\echo '63_org_date_format_test.sql complete (7 cases: X0-X6)'

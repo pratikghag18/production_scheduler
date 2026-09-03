@@ -32,18 +32,39 @@
  * `orgs.settings.date_format` — never a free-form pattern, so the server can
  * validate it and the client can map it exhaustively. Sample day `2026-09-03`:
  *
- *   d_mon_yyyy -> "3 Sep 2026"   (default; the shape the app shipped with)
- *   dmy_slash  -> "03/09/2026"
- *   mdy_slash  -> "09/03/2026"
- *   iso        -> "2026-09-03"
+ *   d_mon_yyyy   -> "3 Sep 2026"      (default; the shape the app shipped with)
+ *   dmy_slash    -> "03/09/2026"
+ *   mdy_slash    -> "09/03/2026"
+ *   iso          -> "2026-09-03"
+ *   dmy_dash_mon -> "03-Sep-2026"
+ *   d_month_yyyy -> "3 September 2026"
+ *   month_d_yyyy -> "September 3, 2026"
+ *   ymd_slash    -> "2026/09/03"
  */
-export type DateFormat = "d_mon_yyyy" | "dmy_slash" | "mdy_slash" | "iso";
+export type DateFormat =
+  | "d_mon_yyyy"
+  | "dmy_slash"
+  | "mdy_slash"
+  | "iso"
+  | "dmy_dash_mon"
+  | "d_month_yyyy"
+  | "month_d_yyyy"
+  | "ymd_slash";
 
 /** Absent or unrecognised setting resolves to this — the pre-setting behaviour. */
 export const DEFAULT_DATE_FORMAT: DateFormat = "d_mon_yyyy";
 
 /** Every token, in the order the settings screen offers them. */
-export const DATE_FORMATS: readonly DateFormat[] = ["d_mon_yyyy", "dmy_slash", "mdy_slash", "iso"];
+export const DATE_FORMATS: readonly DateFormat[] = [
+  "d_mon_yyyy",
+  "dmy_slash",
+  "mdy_slash",
+  "iso",
+  "dmy_dash_mon",
+  "d_month_yyyy",
+  "month_d_yyyy",
+  "ymd_slash",
+];
 
 const MONTHS: readonly string[] = [
   "Jan",
@@ -58,6 +79,21 @@ const MONTHS: readonly string[] = [
   "Oct",
   "Nov",
   "Dec",
+];
+
+const MONTHS_FULL: readonly string[] = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 /**
@@ -79,6 +115,8 @@ export function formatCalendarDay(day: string, fmt: DateFormat = DEFAULT_DATE_FO
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (m === null) return day;
   const [, yyyy, mm, dd] = m;
+  const monShort = MONTHS[Number(mm) - 1];
+  const monFull = MONTHS_FULL[Number(mm) - 1];
   switch (fmt) {
     case "dmy_slash":
       return `${dd}/${mm}/${yyyy}`;
@@ -86,11 +124,21 @@ export function formatCalendarDay(day: string, fmt: DateFormat = DEFAULT_DATE_FO
       return `${mm}/${dd}/${yyyy}`;
     case "iso":
       return `${yyyy}-${mm}-${dd}`;
+    case "ymd_slash":
+      return `${yyyy}/${mm}/${dd}`;
+    case "dmy_dash_mon":
+      if (monShort === undefined) return day;
+      return `${dd}-${monShort}-${yyyy}`;
+    case "d_month_yyyy":
+      if (monFull === undefined) return day;
+      return `${Number(dd)} ${monFull} ${yyyy}`;
+    case "month_d_yyyy":
+      if (monFull === undefined) return day;
+      return `${monFull} ${Number(dd)}, ${yyyy}`;
     case "d_mon_yyyy":
     default: {
-      const month = MONTHS[Number(mm) - 1];
-      if (month === undefined) return day;
-      return `${Number(dd)} ${month} ${yyyy}`;
+      if (monShort === undefined) return day;
+      return `${Number(dd)} ${monShort} ${yyyy}`;
     }
   }
 }

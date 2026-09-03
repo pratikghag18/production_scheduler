@@ -22,6 +22,10 @@ describe("formatCalendarDay renders each token", () => {
     ["dmy_slash", "03/09/2026"],
     ["mdy_slash", "09/03/2026"],
     ["iso", "2026-09-03"],
+    ["dmy_dash_mon", "03-Sep-2026"],
+    ["d_month_yyyy", "3 September 2026"],
+    ["month_d_yyyy", "September 3, 2026"],
+    ["ymd_slash", "2026/09/03"],
   ];
   for (const [fmt, want] of cases) {
     it(`${fmt} -> ${want}`, () => {

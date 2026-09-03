@@ -43,6 +43,14 @@ describe("time.ts", () => {
     expect(formatDayLabel(d, "iso")).toBe("Mon 2026-08-17");
   });
 
+  it("formatDayLabel renders the added presets, weekday first (0038)", () => {
+    const d = new Date("2026-08-17T00:00:00Z");
+    expect(formatDayLabel(d, "ymd_slash")).toBe("Mon 2026/08/17");
+    expect(formatDayLabel(d, "dmy_dash_mon")).toBe("Mon 17-Aug-2026");
+    expect(formatDayLabel(d, "d_month_yyyy")).toBe("Mon 17 August 2026");
+    expect(formatDayLabel(d, "month_d_yyyy")).toBe("Mon August 17, 2026");
+  });
+
   it("formatDayLabel resolves the day in BOARD_ZONE, not local time (R-309)", () => {
     // Late-UTC instant: in UTC it is still the 17th, which the label must show
     // whatever token is chosen — the format changes the writing, not the day.

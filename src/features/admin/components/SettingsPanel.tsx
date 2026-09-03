@@ -38,6 +38,10 @@ const FORMAT_LABEL: Record<DateFormat, string> = {
   dmy_slash: "Day/Month/Year",
   mdy_slash: "Month/Day/Year",
   iso: "ISO (Year-Month-Day)",
+  dmy_dash_mon: "Day-Mon-Year",
+  d_month_yyyy: "Day Month Year (full)",
+  month_d_yyyy: "Month Day, Year",
+  ymd_slash: "Year/Month/Day",
 };
 
 /** Today as `YYYY-MM-DD` in LOCAL time — the same reasoning as OperatorsPanel's
