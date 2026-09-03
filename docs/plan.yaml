@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: 1eacb11
+  tip: 11e6fc1
   baseline:
-    app_tests: 1663
-    app_test_files: 50
+    app_tests: 1715
+    app_test_files: 53
     tsc: 0
     eslint: 0
     db_checks: 522
-    migrations: 39
+    migrations: 40
     mutations: 509 of 536
 tracks:
 - id: core
@@ -2832,6 +2832,12 @@ requirements:
     that carries a target prompts keep-total or scale-proportionally.
   verified_by: []
   status: uncovered
+  note: >-
+    QUALIFIED BY R-316 (0040). "Unset renders NA" now reads "unset renders the standard the cell's cycle time
+    implies, and NA only when there is no cycle time". target_qty itself is unchanged — still a window total,
+    still the human's explicit override, still null when nothing was typed. The keep-total-or-scale prompt on
+    resize is still unbuilt and still queued; note that it only ever applied to a TYPED target, and a derived
+    one already follows a resize by being recomputed.
 - id: R-032
   title: The timeline is continuous and past edits are allowed and audited
   source:
@@ -2958,6 +2964,12 @@ requirements:
   claim: Breaks do not block assignments and are not subtracted from targets or capacity.
   verified_by: []
   status: uncovered
+  note: >-
+    NARROWED BY R-316 (0040). Breaks ARE now subtracted from the DERIVED default target — that is the
+    maintainer's own formula, "(how much time a person is assigned - breaks) / standard cycle time". Everything
+    else in this row still holds: breaks do not block an assignment, are not subtracted from capacity, and are
+    not subtracted from a target a human typed. The subtraction is a display computation over the cell's
+    resolved shift pattern (standardTarget.ts), not a stored or enforced quantity.
 - id: R-043
   title: Compact zoom snaps to shift boundaries and offers full-shift quick actions
   source:
@@ -5251,6 +5263,92 @@ requirements:
     Validated on a scratch DB built to 0038 (all four cases PASS) and applied to the dev DB — one dirty row
     backfilled to zero, a bad write refused. The canonical verify-db.sh db_checks recount (now +4) is owed on
     CI, as with the other data migrations; the baseline db_checks stays 522 until then.
+- id: R-315
+  title: A standard cycle time may be set per schedulable node per product, in seconds
+  source:
+  - the maintainer, 3 Sept (in session, "at each point in the lowest hierarchy where we actually do the assignment I want to assign a standard cycle time for each product which can be made in that hierarchy")
+  - the maintainer, 3 Sept (in session, "this should not be mandatory... give the user ability to enter cycle time in seconds/minutes/hours but as a standard store it in the database in seconds so it is consistent")
+  stated_by: maintainer
+  claim: >-
+    Migration 0040 adds node_product_cycle_times (node_id, product_id, seconds_per_unit numeric check(>0)),
+    the standard seconds of work per one unit at one place. WHERE it may live is enforced by
+    app_guard_cycle_time_scope, not remembered by the UI: the node's OWN level must be the schedulable one
+    (asked off the node, never "the org's schedulable level" — since 0014 that index is per template, so an
+    org with two structures has two right answers), and the product must be offered there by
+    app_product_offered_at_in_org, the same predicate the run and assignment guards ask, so a cycle time can
+    never exist where the part could not be scheduled. It is OPTIONAL everywhere and no write consults it.
+    ALWAYS SECONDS: the admin grid offers seconds/minutes/hours and converts before writing, and displayCycle
+    only offers a larger unit when the conversion is EXACT, so re-saving an untouched row cannot round 100 s
+    into 1.7 min and back into 102 s. Reading is RLS-scoped downward (app_can_read_node); writing needs an
+    admin grant on an ancestor-or-self (app_is_admin_for) with the company-admin escape. Both FKs cascade —
+    delete_node deletes the two other per-node tables BY NAME and cannot know about this one, so without the
+    cascade deleting any cell ever measured would fail with a foreign-key error.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/64_cycle_times_test.sql
+    cases: C0 fixture, C1 saves and reads back at a cell, C2 refused one level up (not_schedulable), C3 refused for a part no plant offers here (not_offered_here), C4 zero and negative refused by CHECK (23514), C5 a plant admin writes their own cells and another plant's is 42501, C6 reading is scoped per plant, C7 an RLS-filtered UPDATE changes zero rows and raises nothing, C8 board_window emits cycle_times scoped to the caller, C9 a cross-tenant row is the composite FK's refusal (23503), C10 delete_node still works on a measured cell and deleting a product removes its cycle times
+  - kind: vitest
+    file: src/test/cycleTimes.test.ts
+    cases: G5 blank/zero/negative/nonsense refused in every unit, G7 entry converts to seconds, G8 display picks the largest EXACT unit and never a lossy one, G8b a round trip through display and entry never changes the value
+  - kind: vitest
+    file: src/test/apiCycleTimeShape.test.ts
+    cases: the read's column list and its parser are held against each other, so the two halves cannot drift and blank the grid silently
+  status: covered
+  note: >-
+    Applied to the dev DB and round-tripped there as the real company-admin persona through RLS, including the
+    client's exact upsert path (create then replace). The canonical verify-db.sh db_checks recount (+11) is
+    owed on CI, as with the other new test files; the baseline db_checks stays 522 until then.
+- id: R-316
+  title: An assignment with no typed target shows what its cell's cycle time implies
+  source:
+  - the maintainer, 3 Sept (in session, "how much product can be made based on (how much time a person is assigned - breaks) / standard cycle time. This will become the default target for that assignment. This however can be overwritten by the already present mechanism")
+  - the maintainer, 3 Sept (in session, "when no cycle time are defined, the target for the assignment is null")
+  stated_by: maintainer
+  claim: >-
+    An assignment carrying no explicit target_qty displays a DERIVED default: the minutes it covers, less the
+    breaks of the shift pattern its cell resolves to, scaled by its efficiency, over the cell's seconds per
+    unit. Whole units once one is achievable, one decimal below that — a 12 h cycle in an 8 h shift reads 0.7
+    rather than flooring to 0, because reporting nothing would read as impossible rather than as progress.
+    NOTHING IS STORED: the value is recomputed on render, so a drag, a resize, a break edit or a re-pointed
+    shift pattern is already right, and target_qty keeps its exact meaning as the human's override (R-031,
+    R-313). No cycle time yields null, never zero, and the chip reads "target: NA" exactly as before. The
+    derived value carries NO unit — units belong only beside a typed quantity, and inventing one would put back
+    the bug R-313/R-314 exist to prevent. The two block shapes and both popovers share one reading and one
+    computation, so a chip and the form that edits it cannot disagree.
+  verified_by:
+  - kind: vitest
+    file: src/test/standardTarget.test.ts
+    cases: T1-T5 net minutes are the assigned time less the breaks inside it, T6-T10 optional cycle time and per-day break tiling (T9/T9b a block before the window and a late overnight break — the cases breakInstances cannot answer because it clips to the window), T11 overlapping breaks merge instead of double-subtracting, T12 the lookup, T13-T16 a part slower than the shift shows 0.7 not 0 and a tiny fraction never rounds to nothing, T17 the shared reading (typed target wins with its unit, a derived one is marked "(standard)" and never borrows a unit, neither still reads NA)
+  - kind: vitest
+    file: src/test/boardIndex.test.ts
+    cases: B-CT1 a direct assignment is measured by its own product at its own cell, B-CT2 a run-attached chip takes the run's product, B-CT3 an explicit target does not disturb the derived one, B-CT4 no cycle time means no derived target, B-CT5 another cell's cycle time is never borrowed
+  - kind: vitest
+    file: src/test/shapes.test.ts
+    cases: cycle_times parses to camelCase, a non-numeric seconds_per_unit is rejected, a payload missing the key entirely is rejected (loud beats silently empty), an empty list is accepted
+  status: covered
+  note: >-
+    Qualifies R-031 ("unset renders NA" becomes "unset renders the standard, else NA") and narrows R-042:
+    breaks are now subtracted from the DERIVED default. They still do not block assignments and are still not
+    subtracted from capacity, so R-042 holds everywhere else.
+- id: R-317
+  title: The level above shows the sum of the cells below, and it never derives a target
+  source:
+  - the maintainer, 3 Sept (in session, "my thinking is for the same product the standard time at a hierarchy 1 level above is the summation of standard cycle time in the level below")
+  stated_by: maintainer
+  claim: >-
+    A line or plant row in the cycle-times grid shows the SUM of the measured cells at or below it for that
+    part, computed on read and rendered as standard time per unit. That is the right reading as LABOUR
+    CONTENT: two cells at 60 s and 90 s put 150 s of work into each unit. It is NOT the line's output rate —
+    sequential stations ship a unit every 90 s and parallel ones every 36 s, neither of which is 150 — so the
+    sum is display only and is never fed to the derived target, which always reads the cell's own number
+    (R-316). Cells with no number contribute nothing rather than a zero (unmeasured work is unknown, not free)
+    and the row reports how many contributed. Ancestry is the label-wise isAtOrBelow, so Line 10's cells never
+    roll up into Line 1's total.
+  verified_by:
+  - kind: vitest
+    file: src/test/cycleTimes.test.ts
+    cases: G2 a line shows the sum of its cells and the plant sees the same total, G3 an unmeasured cell contributes nothing and the row says how many did, G4/G4b a part attached to one line is editable there only and a line is never typed into, G6 Line 10 is not inside Line 1 (a prefix test would merge them), G9 a summed row formats in the same friendly units, G10 the plant filter and the measured count
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -7034,6 +7132,47 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 37
+  date: 2026-09-03
+  title: A standard cycle time per cell per part, and the target the board derives from it (R-315..R-317)
+  commits:
+  - 8a81e25
+  - bce8987
+  - be4bb74
+  - 11e6fc1
+  numbers:
+    app_tests: 1715
+    app_test_files: 53
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer asked for a standard cycle time at each place work is actually booked, per part, so an
+    assignment can say how much can be made in the time a person is there — "(how much time a person is
+    assigned - breaks) / standard cycle time" — as a DEFAULT the existing target field still overrides. On
+    their model for the level above, the sum, this agreed with a distinction: summing cells is right as labour
+    content per unit, but it is not a line's output rate (sequential stations are limited by the slowest cell,
+    parallel ones make more than either), so the roll-up is display only and never derives a target. Four
+    commits. Migration 0040 stores the fact — seconds only, so a sum across cells cannot become a
+    unit-conversion bug — and enforces WHERE it may live in the database rather than in the UI: the node's own
+    level must be schedulable (read off the node, since 0014 made that index per template) and the part must be
+    offered there by the same predicate the run and assignment guards ask. Both FKs cascade, which is
+    load-bearing: delete_node deletes the two other per-node tables by name and cannot know about this one.
+    board_window gains one key, scoped by the CTE already there. The derived target is computed, never stored,
+    so a drag or a break edit is already right; it tiles breaks itself rather than reusing the board's
+    breakInstances, which clips to the window and so cannot answer a block starting before it. A part slower
+    than the shift shows one decimal instead of flooring to zero, at the maintainer's request. The chip and the
+    direct block had the target reading duplicated line for line — the shape of the R-313 "units" bug — so it
+    was extracted to one function before a third state was added to two copies. The admin grid is a new
+    section: rows are the plant's tree, columns the parts it makes, entry in seconds/minutes/hours converted on
+    the way in, and the display only offers a larger unit when the conversion is exact so re-saving an
+    untouched row cannot change it. Nothing is mandatory anywhere; a blank cell is the ordinary state and its
+    assignments simply read NA. Eleven SQL checks (64_cycle_times_test.sql) cover the two refusals, the CHECK,
+    per-plant reading and writing, the RLS-filtered update that changes nothing and says nothing, the board
+    payload, the cross-tenant FK and the cascade. JS suite 1715 green, up from 1663. Applied to the dev DB and
+    round-tripped there as the real admin persona, including the client's exact upsert path. The verify-db.sh
+    db_checks recount (+11) is owed on CI.
+  shipped: []
 - id: 36
   date: 2026-09-03
   title: The unit rule holds for old data too, enforced by a CHECK (R-314)
@@ -7822,7 +7961,10 @@ next:
 - text: Phase 3 — Mid-hierarchy level-insertion migration tool
   why: Unchecked Phase 3 item.
 - text: Phase 3 — Standard targets from routing data; efficiency vs actuals
-  why: Unchecked Phase 3 item; needs MES data.
+  why: >-
+    HALF DELIVERED by R-315..R-317 (session 37): standard cycle times are entered per cell per part and the
+    board derives every unset target from them. What is left is the two halves that need outside data —
+    importing the standards from routing/MES rather than typing them, and comparing them against actuals.
 - text: Phase 3 — Operator mobile read-only view
   why: Unchecked Phase 3 item; open question 7.
 backlog:
