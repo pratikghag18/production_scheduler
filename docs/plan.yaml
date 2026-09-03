@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: a0c0304
+  tip: a94ff1f
   baseline:
-    app_tests: 1648
+    app_tests: 1652
     app_test_files: 48
     tsc: 0
     eslint: 0
@@ -5141,14 +5141,15 @@ requirements:
     `board_window` was also tried and backed out: it regresses exactly what S18 forbids (a cross-plant chip
     falling to "unknown operator").
   verified_by:
-  - kind: manual
-    file: docs (session 32 screenshots)
-    cases: signed in as the company admin, Plant B selected, the OPERATORS panel lists only Operator B1-B6 (no Plant A/C people); board_window unchanged so chips still resolve
+  - kind: vitest
+    file: src/test/scope.test.ts
+    cases: XO1 (owner in a scoped node kept, another plant dropped), XO2 (an owner NOT in the scoped set is dropped, not fail-open — the exact bug the path version shipped), XO3 (a narrower scope keeps fewer), XO4 (order preserved)
   status: covered
   note: >-
-    The pool filter is a one-line client membership test in BoardPage; it is proven by driving the running
-    app (session 32) rather than a unit test, because the earlier path-based helper passed its unit tests and
-    still shipped the bug — the scoped-map subtlety only shows against real data.
+    Also verified in the running app (session 32 screenshots): as the company admin with Plant B selected the
+    OPERATORS panel lists only Operator B1-B6. This is proven in the app AND in vitest deliberately — the
+    earlier path-based helper passed its unit tests and still shipped the bug, because the scoped-map subtlety
+    only shows against real data.
 - id: R-311
   title: One chevron, drawn from a single icon module and audited
   source:
@@ -5171,10 +5172,10 @@ requirements:
   - kind: vitest
     file: src/test/iconStandard.test.ts
     cases: synthetic raw glyphs are flagged, the breadcrumb separator and status glyphs are not, comments are not read, the icon module is allowed its glyphs, and the real src tree draws every chevron through the module
-  - kind: manual
-    file: docs (session 32 screenshots)
-    cases: the admin rail toggle and the board OPERATORS toggle render as the same bordered chevron button
   status: covered
+  note: >-
+    Also verified in the running app (session 32): the admin rail toggle and the board OPERATORS toggle render
+    as the same bordered chevron button once PanelToggle owns the chrome.
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6963,8 +6964,9 @@ sessions:
   title: Both fixes actually landed — operator pool and one shared toggle, verified in the app
   commits:
   - a0c0304
+  - a94ff1f
   numbers:
-    app_tests: 1648
+    app_tests: 1652
     app_test_files: 48
     tsc: 0
     eslint: 0
@@ -6984,8 +6986,8 @@ sessions:
     maintainer. Lesson recorded on R-310: the earlier helper passed its unit tests and still shipped the bug,
     because the scoped-map subtlety only appears against real data — so this one is proven in the app, not
     just in vitest.
-    Suite 1648 green (was 1653; the five ownedUnder cases went with the helper). tsc and eslint clean. No
-    migration.
+    Suite 1652 green (was 1653; the five path-based ownedUnder cases were replaced by four membership
+    ownedInScope cases). tsc and eslint clean. No migration.
   shipped: []
 - id: 31
   date: 2026-09-03
