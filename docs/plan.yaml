@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: b46565b
+  tip: 1f64248
   baseline:
     app_tests: 1653
     app_test_files: 48
@@ -5183,19 +5183,21 @@ requirements:
   stated_by: maintainer
   claim: >-
     The training-matrix column header groups each training under its full plant→area→line ancestry, with
-    every plant appearing once and its columns contiguous, even across multiple plants. In this schema a
-    plant IS a root (`parentId` null) and there is no company node above the plants, so a matrix that spans
-    plants has NO common ancestor. `buildColumns` therefore must NOT trim to a single common root:
-    `lowestCommonAncestor` returns "" when nothing is shared (a sentinel in no chain, so no column's path is
-    cut and each keeps its plant), and the column sort tiebreaks by node name at each level before the
-    training name, so plants/areas/lines stay contiguous when their sortOrder ties. A single-plant (scoped)
-    view still has a real common ancestor and trims to it. The reported break: with four plants the header
-    split one plant across two places (the old `?? ownerIds[0]` fallback picked an arbitrary owner as the
-    root) and floated an Area 2 column with no plant above it.
+    every plant appearing once, its columns contiguous, and PLANTS ORDERED ALPHABETICALLY (the maintainer's
+    call). In this schema a plant IS a root (`parentId` null) and there is no company node above the plants,
+    so a matrix that spans plants has NO common ancestor. `buildColumns` therefore must NOT trim to a single
+    common root: `lowestCommonAncestor` returns "" when nothing is shared (a sentinel in no chain, so no
+    column's path is cut and each keeps its plant). The column sort orders ROOT nodes by name (plants read
+    A, B, C, D, not by a root sortOrder nobody arranges), while areas/lines/cells keep their deliberate
+    sortOrder — which is the admin's drag order and also avoids a raw name sort putting "Line 10" before
+    "Line 2" — with a name tiebreak so a level never falls through to the training name. A single-plant
+    (scoped) view still has a real common ancestor and trims to it. The reported break: with four plants the
+    header split one plant across two places (the old `?? ownerIds[0]` fallback picked an arbitrary owner as
+    the root) and floated an Area 2 column with no plant above it.
   verified_by:
   - kind: vitest
     file: src/test/matrix.test.ts
-    cases: "plants are ROOTS with no company node: columns contiguous by plant, the plant band spans its columns, and an Area 2 training sits under its plant (plus the existing single-plant and two-plant-under-a-company-root cases, unchanged)"
+    cases: "plants are ROOTS with no company node — plants read alphabetically even against a higher root sortOrder, columns contiguous by plant, the plant band spans its columns, and an Area 2 training sits under its plant (plus the existing single-plant and two-plant-under-a-company-root cases, unchanged)"
   status: covered
 findings:
 - id: F-001
@@ -6980,6 +6982,26 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 34
+  date: 2026-09-03
+  title: Matrix plants read alphabetically (R-312 follow-up)
+  commits:
+  - 1f64248
+  numbers:
+    app_tests: 1653
+    app_test_files: 48
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer's call after the grouping fix: order the plants A, B, C, D rather than by their root
+    sortOrder (which nobody arranges and often ties at 0, giving the confusing A, D, B, C). The column
+    comparator now sorts ROOT nodes by name; areas, lines and cells keep their deliberate sortOrder, which is
+    both the admin's drag order and what stops a raw name sort putting Line 10 before Line 2. Verified in the
+    app — the header reads Plant A, Plant B, Plant C, Plant D; screenshot sent. The multi-root test gives a
+    plant a higher sortOrder than its alphabetical predecessor to pin that the name wins. Suite 1653 green.
+    tsc and eslint clean.
+  shipped: []
 - id: 33
   date: 2026-09-03
   title: The training matrix header groups by plant (R-312)
