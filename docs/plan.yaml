@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: a94ff1f
+  tip: b46565b
   baseline:
-    app_tests: 1652
+    app_tests: 1653
     app_test_files: 48
     tsc: 0
     eslint: 0
@@ -5176,6 +5176,27 @@ requirements:
   note: >-
     Also verified in the running app (session 32): the admin rail toggle and the board OPERATORS toggle render
     as the same bordered chevron button once PanelToggle owns the chrome.
+- id: R-312
+  title: The training matrix header groups by plant when the plants are roots
+  source:
+  - the maintainer, 3 Sept (in session)
+  stated_by: maintainer
+  claim: >-
+    The training-matrix column header groups each training under its full plant→area→line ancestry, with
+    every plant appearing once and its columns contiguous, even across multiple plants. In this schema a
+    plant IS a root (`parentId` null) and there is no company node above the plants, so a matrix that spans
+    plants has NO common ancestor. `buildColumns` therefore must NOT trim to a single common root:
+    `lowestCommonAncestor` returns "" when nothing is shared (a sentinel in no chain, so no column's path is
+    cut and each keeps its plant), and the column sort tiebreaks by node name at each level before the
+    training name, so plants/areas/lines stay contiguous when their sortOrder ties. A single-plant (scoped)
+    view still has a real common ancestor and trims to it. The reported break: with four plants the header
+    split one plant across two places (the old `?? ownerIds[0]` fallback picked an arbitrary owner as the
+    root) and floated an Area 2 column with no plant above it.
+  verified_by:
+  - kind: vitest
+    file: src/test/matrix.test.ts
+    cases: "plants are ROOTS with no company node: columns contiguous by plant, the plant band spans its columns, and an Area 2 training sits under its plant (plus the existing single-plant and two-plant-under-a-company-root cases, unchanged)"
+  status: covered
 findings:
 - id: F-001
   title: The rule refusing that rename wasn't the one I was looking at
@@ -6959,6 +6980,33 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 33
+  date: 2026-09-03
+  title: The training matrix header groups by plant (R-312)
+  commits:
+  - b46565b
+  numbers:
+    app_tests: 1653
+    app_test_files: 48
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer showed the training matrix with four plants: one plant split across two header groups, the
+    plant order jumbled, and an Area 2 column floating with no plant above it. buildColumns trims every column
+    to one common root via lowestCommonAncestor — fine for a single tree, wrong here, because a plant IS a
+    root (parentId null) and there is no company node above the plants, so a multi-plant matrix has no shared
+    ancestor. The old fallback chose an arbitrary owner as the root, pathFromRoot cut every chain at it (the
+    training owned there lost its plant), and the sort, tying on root sortOrder, dropped to the training name
+    and interleaved the plants. Fix: lowestCommonAncestor returns "" when nothing is common (in no chain, so
+    no path is cut and each column keeps its full plant→owner ancestry), and the sort tiebreaks by node name
+    at each level before the training name, keeping plants/areas/lines contiguous. Verified in the app as the
+    company admin — the header now reads Plant A, Plant D, Plant B, Plant C, each once, with Area 2 under
+    Plant D; screenshot sent. Also confirmed the wide table scrolls horizontally within its own .scroll
+    container (overflow-x: auto), so ten plants get a scrollbar rather than overflowing the page. A new test
+    builds plants as true roots and pins the grouping; the single-plant and company-root cases are unchanged.
+    Suite 1653 green. tsc and eslint clean. No migration.
+  shipped: []
 - id: 32
   date: 2026-09-03
   title: Both fixes actually landed — operator pool and one shared toggle, verified in the app
