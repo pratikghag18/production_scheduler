@@ -297,7 +297,7 @@ export function CycleTimesPanel() {
                           if (cell.kind === "na") {
                             return (
                               <td key={product.id} className={styles.na} aria-label="not made here">
-                                <span className={`${fieldStyles.readonly} ${styles.dash}`}>—</span>
+                                <span className={`${fieldStyles.readonly} ${styles.quiet}`}>—</span>
                               </td>
                             );
                           }
@@ -306,35 +306,76 @@ export function CycleTimesPanel() {
                           // deliberately not added. Said in words, because a
                           // bare dash here would read as "nothing entered".
                           if (cell.kind === "notsummed") {
+                            // ⚠️ AND IT CARRIES THE COUNT IN ITS NAME TOO. The
+                            // counts sat only in the `title` above, which a
+                            // screen reader does not speak, so this row said
+                            // "not added" and never how much of it is measured
+                            // — the same half-told story DEF-0004 is about, one
+                            // state over. Same wording as the sum cell below,
+                            // so the two rows are read in the same terms.
                             return (
-                              <td key={product.id} className={styles.sum}>
+                              <td
+                                key={product.id}
+                                className={styles.sum}
+                                aria-label={`Not added up: ${cell.contributors} of ${cell.total} places below are measured`}
+                              >
                                 <span
                                   className={fieldStyles.readonly}
                                   title={`Not added up: the places under ${row.node.name} are alternatives, so a unit passes through one of them, not all. ${cell.contributors} of ${cell.total} below are measured.`}
                                 >
-                                  <span className={styles.dash}>not added</span>
+                                  <span className={styles.quiet}>not added</span>
                                 </span>
                               </td>
                             );
                           }
 
                           if (cell.kind === "sum") {
+                            // R-317: THREE STATES MUST READ AS THREE THINGS —
+                            // the part is not made here, it is made here and
+                            // nothing is timed yet, it is made here and some or
+                            // all of it is timed. The middle one used to draw
+                            // the same bare dash as the `na` cell above, so the
+                            // row with the most to report said nothing at all
+                            // and a supervisor scanning the line rows for work
+                            // that still needs timing saw nothing to do. It is
+                            // said in WORDS now, the idiom R-319 already chose
+                            // for the row beside it, because a bare dash here
+                            // reads as "nothing entered".
+                            const untimed = cell.contributors === 0;
+                            // Spelled out on hover rather than on screen: the
+                            // cell is 9.5rem wide and the sentence would not fit
+                            // without wrapping every summed row to twice the
+                            // height of the others.
+                            const hint = untimed
+                              ? `No cycle time set at any of the ${cell.total} places below`
+                              : `Standard time per unit, summed over ${cell.contributors} of ${cell.total} places below`;
+                            // ⚠️ THE ACCESSIBLE NAME IS THE OTHER HALF OF THIS.
+                            // The `na` cell is named "not made here" and this
+                            // one was named by its own contents — one dash
+                            // against another, one state to a screen reader in
+                            // both directions. The name REPLACES the contents,
+                            // so it has to carry the number as well; saying
+                            // "3 of 5" also spares a reader "three slash five",
+                            // which is what the on-screen annotation is spoken
+                            // as and is not a count.
+                            const label = untimed
+                              ? `Nothing measured yet: 0 of ${cell.total} places below have a cycle time`
+                              : `${formatCycle(cell.seconds)}, summed over ${cell.contributors} of ${cell.total} places below`;
                             return (
-                              <td key={product.id} className={styles.sum}>
-                                <span
-                                  className={fieldStyles.readonly}
-                                  // Spelled out here rather than on screen: the
-                                  // cell is 9.5rem wide and the sentence would
-                                  // not fit without wrapping every summed row
-                                  // to twice the height of the others.
-                                  title={
-                                    cell.contributors === 0
-                                      ? `No cycle time set at any of the ${cell.total} places below`
-                                      : `Standard time per unit, summed over ${cell.contributors} of ${cell.total} places below`
-                                  }
-                                >
-                                  {cell.contributors === 0 ? (
-                                    <span className={styles.dash}>—</span>
+                              <td key={product.id} className={styles.sum} aria-label={label}>
+                                <span className={fieldStyles.readonly} title={hint}>
+                                  {untimed ? (
+                                    // Quiet, not a warning: an untimed line is
+                                    // the ordinary state of a grid nobody has
+                                    // filled in yet (the panel's own header:
+                                    // nothing here is required), so this is the
+                                    // muted register the dash used, not a colour
+                                    // that reads as an alarm. The wording is the
+                                    // count line's own — "6 of 22 places
+                                    // measured" — so the two agree.
+                                    <span className={styles.quiet}>
+                                      {cell.contributors} of {cell.total} measured
+                                    </span>
                                   ) : (
                                     <>
                                       {formatCycle(cell.seconds)}

@@ -131,8 +131,25 @@
   background: var(--page);
 }
 
-.dash {
+/* The muted register for a cell holding no number of its own. Named for what it
+   is rather than for a glyph, because only ONE of the three states it dresses is
+   a dash: the part is not made here (—), it is made here and nothing is timed
+   yet ("0 of 2 measured", R-317), the children are alternative routes so nothing
+   is added ("not added", R-319). The last two are words on purpose — a bare dash
+   in either place reads as "nothing entered", and the row that has the most to
+   report would be the one saying least.
+
+   ⚠️ QUIET IS THE POINT, AND NO WARNING COLOUR BELONGS HERE. An untimed line is
+   the ordinary state of a grid nobody has filled in yet; this panel's own header
+   records that nothing on it is required, so `--muted` is the register, never
+   `--crit`.
+
+   `nowrap` keeps the sentence on one line: a summed row that wrapped would stand
+   taller than the cells it totals and read as though the ancestor rows were the
+   important ones. */
+.quiet {
   color: var(--muted);
+  white-space: nowrap;
 }
 
 /* R-319: the add-up choice, on the row whose number it decides. Small and
