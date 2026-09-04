@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 33280cb
+  tip: b11f7aa
   baseline:
     app_tests: 1788
     app_test_files: 60
@@ -5539,8 +5539,17 @@ requirements:
     housekeeping but a precondition, since an unconditional exclusion constraint cannot be created at all
     over rows that violate it, and a cancelled run overlapping a live one is exactly the shape the old
     exception permitted.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/67_no_run_status_test.sql
+    cases: "X1 the column is gone and the constraint is no longer partial; X2 an overlapping run on the same cell is REFUSED; X3 the case that used to be ALLOWED (the cancelled-run exemption) is refused now, which is the whole change; X4 the same window on another cell is still accepted and X5 an adjacent window on the same cell is still accepted, because a rule that refused everything would pass X2 and X3 and be worse than the one it replaced; X6 create_run and move_run work with no status to write, and neither payload carries the key"
+  - kind: sql
+    file: supabase/tests/10_constraints_test.sql
+    cases: "case 7c, INVERTED: it asserted that an overlapping run with status=cancelled is accepted, which was true until 0044 and is now impossible to even express"
+  - kind: vitest
+    file: src/test/boardIndex.test.ts
+    cases: "every run in the window reaches a map — the positive form of the deleted case 17, since 'nothing is filtered' cannot be seen by removing an assertion"
+  status: covered
 - id: R-323
   title: Deleting an assignment deletes it — assignments carry no status at all
   source:
@@ -7545,6 +7554,41 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 54
+  date: 2026-09-04
+  title: No run carries a status either, and the overlap rule loses its exception (R-324)
+  commits:
+  - b11f7aa
+  numbers:
+    app_tests: 1788
+    app_test_files: 60
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The other half, taken deliberately rather than smuggled in with the first: *"Let's go ahead and remove
+    it from runs as well."* `runs.status` was write-once 'planned' — 0029 had already established that
+    nothing ever advanced a run and used the clock instead — and runs have always been hard-deleted, so
+    'cancelled' was a state no run could reach and the exception that read it could never fire.
+    ⭐ THE EXCEPTION IS WHY THIS WAS ITS OWN PIECE OF WORK. `runs_no_overlap_on_node` is not a function that
+    can be edited in place; it is a constraint on the table, and its definition carried
+    `where (status <> 'cancelled')`. Removing the column means DROPPING the rule that stops two jobs sharing
+    a cell and adding it back — and a replacement written slightly wrong raises nothing at all, it just
+    starts accepting overlaps. So `67_no_run_status_test.sql` asks the rule rather than reading it: an
+    overlap is refused, the same window on ANOTHER cell is still accepted, and an ADJACENT window on the
+    same cell is still accepted. Without those last two, a constraint that refused everything would pass.
+    ⚠️ AND ONE OF THEM CAUGHT MY OWN TEST BEFORE IT COULD PASS FOR THE WRONG REASON. The adjacency case
+    first hung a run off the end of a SEEDED one and was refused — because the seed puts consecutive shifts
+    on the same cell, so "just after this ends" was already occupied. The constraint was right and the case
+    was wrong. It builds its own pair now, in a window nothing else touches.
+    Case 7c in `10_constraints_test.sql` asserted "an overlapping run with status=cancelled is accepted" and
+    was right until today; it is INVERTED rather than deleted, because the contract changing is the
+    deliverable and a quietly missing case would hide it. Two other SQL files listed the column in their run
+    inserts and no longer do. On the client, `boardIndex` now filters nothing at all — both status lines are
+    gone, replaced by positive cases asserting every run and every assignment reaches a map.
+    Suite 1788 in 60 files, tsc 0 with `db:types` regenerated, every SQL file green. Driven in the browser:
+    the board draws its runs and a run's pop-up still opens, edits and deletes.
+  shipped: []
 - id: 53
   date: 2026-09-04
   title: A deleted assignment is deleted (R-323)
