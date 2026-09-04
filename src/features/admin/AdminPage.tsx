@@ -324,6 +324,49 @@ export default function AdminPage() {
   const hierarchyLoading = !canQuery || isLoading;
 
   /* ---------------------------------------------------------------------
+   * ⭐⭐ THE SERVER HAS ALREADY DECIDED THIS, AND THE SCREEN ONLY HAS TO SAY IT.
+   *
+   * `adminAccess` lets a supervisor in on purpose (D114) and its own comment
+   * admits the cost: *"this admits a supervisor with no grants at all, who will
+   * find two empty lists."* What nobody wrote down is what those empty lists
+   * LOOK LIKE to the person in front of them — a search box, "Nobody matches
+   * that.", and an "Add someone" form the database refuses. **The app is
+   * broken / my data failed to load / nobody has given me anything yet are
+   * three different facts and the screen said none of them.**
+   *
+   * ⚠️ NO NEW CLIENT PERMISSION RULE IS INVENTED HERE. `nodes_select`
+   * (migration 0019 §6) is
+   *
+   *     org_id = app_current_org()
+   *     AND (app_is_admin() OR nodes.path <@ any of app_grant_paths(false))
+   *
+   * so the rows in `data.nodes` ARE the server's answer to "what may you
+   * read", already computed by the same predicate `app_can_read_node` uses.
+   * For anybody who is not a system admin the first term is false, which
+   * leaves exactly one reason for an EMPTY, SUCCESSFUL read: no grant of
+   * theirs covers anything. That is the sentence below, and it is the
+   * server's sentence, not this file's.
+   *
+   * ⚠️ AND IT IS THE WHOLE SCREEN, not one tab. `app_can_read_owned` (0028)
+   * hangs off the same `app_grant_paths(false)`, so an operator, a training, a
+   * product and a shift pattern are all unreadable for exactly the same
+   * person. One explanation here beats four empty panels.
+   *
+   * ⚠️⚠️ A SYSTEM ADMIN IS EXEMPT, AND THE EXEMPTION IS THE POLICY'S OWN FIRST
+   * TERM. `app_is_admin()` is `user_profiles.role = 'admin'` (0018), which is
+   * `profile.role` here — the mirror `isCompanyAdmin` above already draws. For
+   * them zero nodes means the COMPANY has no places yet, not that they lack
+   * access; telling them otherwise would be false and would hide the Hierarchy
+   * tab where the first plant gets created.
+   *
+   * ⚠️ `data !== undefined` IS LOAD-BEARING. A failed read and an empty one are
+   * the two states this whole block exists to separate, and `isError` renders
+   * its own line below. Nothing is claimed about access until the answer is in.
+   * ------------------------------------------------------------------- */
+  const nothingShared =
+    data !== undefined && profile != null && !isCompanyAdmin && data.nodes.length === 0;
+
+  /* ---------------------------------------------------------------------
    * ⭐⭐ WHICH PLANT THIS SCREEN IS SHOWING — roadmap 1(c).
    *
    * The maintainer, 31 Aug: *"for the system admin, may be we need a filter
@@ -472,6 +515,45 @@ export default function AdminPage() {
   // second way for the list to shrink.
   const resolvedShapeId = resolveSelectedShape(plantSummaries, selectedShapeId);
 
+  /**
+   * ⭐ THE RAIL GOES TOO, AND THAT IS THE POINT. Every section a person in this
+   * state can reach reads through `app_grant_paths(false)` (see the block
+   * above), so three rail buttons onto three empty panels is the defect wearing
+   * navigation. There is nothing to choose between, so there is no chooser —
+   * the same rule `plantControlVisible` applies one level down.
+   *
+   * ⚠️ THE WORDS DO TWO JOBS AND BOTH ARE DELIBERATE. The heading names the
+   * fact ("nothing has been shared"), and the first line rules out the two
+   * things a reader would otherwise suspect first — that the app is broken, or
+   * that a read failed. Saying only "No operators" leaves all three
+   * possibilities open, which is where this screen started.
+   *
+   * ⚠️ It also says WHO can change it and WHERE, because "you have no access"
+   * with no next step is a dead end. Access is granted on the Access tab
+   * (`SiteAccessPanel`), which only an administrator can see.
+   */
+  if (nothingShared) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.content}>
+          <div className={styles.emptyScope}>
+            <h1 className={styles.h1}>Nothing has been shared with you yet</h1>
+            <p className={styles.emptyLead}>
+              This screen loaded correctly and nothing failed to load. Your account simply has not
+              been given access to any part of the company yet, so there are no places, people or
+              trainings here for you to manage.
+            </p>
+            <p className={styles.emptyNote}>
+              An administrator grants access on the Access tab, by naming the plant, line or cell
+              you look after. Ask whoever set up your account; this screen fills in as soon as they
+              do, with no further sign-in.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <nav
@@ -519,6 +601,26 @@ export default function AdminPage() {
       </nav>
 
       <div className={styles.content}>
+        {/* ⭐⭐ THE READ THAT FAILED IS THE WHOLE SCREEN'S READ, SO IT IS SAID ON
+            EVERY TAB. This line used to live inside the Hierarchy branch alone —
+            which was fine while everyone who could open this screen could see
+            that tab, and stopped being fine at D114: a supervisor lands on
+            Operators, so the one read every section is scoped by could fail and
+            leave them looking at a screen with nothing on it and no alert
+            anywhere. That is the same "is it broken or am I not allowed?"
+            question the empty-scope branch above exists to answer, arriving by
+            the other road — and it MUST NOT share that branch's wording, because
+            this one is worth refreshing and that one is not.
+            ⚠️ It names the SCOPE rather than the hierarchy: on the Operators tab
+            "couldn't load the hierarchy" would sound like somebody else's
+            problem, when what is missing is the list of places this whole screen
+            is filtered by. */}
+        {isError && (
+          <p className={styles.status} role="alert">
+            Couldn&rsquo;t load which parts of the company you can see, so this screen may be
+            showing less than it should. Try refreshing the page.
+          </p>
+        )}
         {/* ⭐ SPELLED OUT, ALWAYS, WHENEVER IT APPLIES — see the block above.
             The `<select>` IS the chip: it names the plant in the header of
             every section rather than hiding the state behind a menu.
@@ -562,11 +664,10 @@ export default function AdminPage() {
                 That is §19.8's exact mistake — guarding the cache but not the
                 loading flag — and it is why `decideSessionUpdate` exists. */}
             {(!canQuery || isLoading) && <p className={styles.status}>Loading…</p>}
-            {isError && (
-              <p className={styles.status} role="alert">
-                Couldn't load the hierarchy. Try refreshing the page.
-              </p>
-            )}
+            {/* The failure line moved UP, to `.content`, so it reaches every
+                section rather than this one — see its comment there. It is not
+                repeated here: two alerts for one failed read is two things to
+                keep in step and one of them would drift. */}
             {data && (
               // `ShapePicker` renders above `LevelEditor` in the left
               // column (§7.3); `NodeTreeEditor` still spans the full right
