@@ -666,15 +666,13 @@ export async function setSkillDocumentNumber(
   return firstOrThrow(data, parseSkillRecord, "setSkillDocumentNumber");
 }
 
-export async function renameSkill(input: { id: string; name: string }): Promise<SkillRecord> {
-  const { data, error } = await supabase
-    .from("skills")
-    .update({ name: input.name })
-    .eq("id", input.id)
-    .select(SKILL_COLUMNS);
-  if (error) throw toSchedulerError(error);
-  return firstOrThrow(data, parseSkillRecord, "renameSkill");
-}
+// ⚠️ `renameSkill` USED TO SIT HERE AND IS GONE (D105). It patched `name`
+// alone, which is why a training's owner was settable once at creation and
+// never again — the limitation the Trainings hint used to admit to.
+// `updateSkill` below replaced it: an ABSENT key means "leave it alone", so a
+// rename still sends only a name, and the owner became editable in the same
+// write. Nothing had called it since; removed so the next reader does not pick
+// the narrower of two functions that look interchangeable.
 
 export interface UpdateSkillInput {
   id: string;

@@ -384,15 +384,22 @@ export default function BoardPage() {
     return <p>Loading session…</p>;
   }
 
-  if (!session) {
-    return (
-      <div className={styles.panel}>
-        <h1>Board</h1>
-        <p>Sign in with a dev profile to see schedule data.</p>
-        <DevProfileSwitcher />
-      </div>
-    );
-  }
+  // ⚠️ THERE IS NO `if (!session)` BRANCH HERE ANY MORE, AND ITS ABSENCE IS THE
+  // POINT. It used to render "Sign in with a dev profile to see schedule data"
+  // with a `DevProfileSwitcher` under it — the whole signed-out door, from
+  // before P1-6b gave the app a real one. `RequireAuth` now wraps every route
+  // below the shell and renders `<Outlet />` ONLY for `screen === "app"`, which
+  // is `!loading && hasSession && hasProfile`; a signed-out visitor is
+  // redirected to `/sign-in` and never mounts this component at all. So the
+  // branch could not be reached, and a second signed-out screen that disagreed
+  // with the real one was the failure waiting in it.
+  //
+  // ⭐ `sessionLoading` ABOVE IS NOT DEAD AND STAYS. `useSession` keeps its
+  // `session`/`loading` in per-instance `useState` (only `lastUserId` is at
+  // module scope), so this component mounts with `loading: true` and repeats
+  // the `getSession()` round trip `RequireAuth` has already made. That flash is
+  // real, it is the "five duplicated getSession() round trips" debt the queue
+  // records under `SessionProvider`, and it is not this change's to fix.
 
   // ⭐ NOWHERE TO OPEN IS A REAL STATE, NOT AN ERROR. An org member with no
   // grant on any node has no board — pinned server-side by 0027's case V8 —
