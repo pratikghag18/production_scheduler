@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: b4b31cc
+  tip: 23e18f0
   baseline:
     app_tests: 1788
     app_test_files: 60
@@ -2426,6 +2426,22 @@ requirements:
     file: supabase/tests/upgrade_0031_ (full name not given)
     cases: 'U31-1–U31-7 (U31-6: depends on NOT NULL)'
   status: covered
+- id: R-325
+  title: A reader the server has granted nothing is told that, not shown empty panels
+  source:
+  - NEXT 4
+  stated_by: agent
+  claim: >-
+    When the hierarchy read comes back with NO nodes for somebody who is not a company admin -- the same
+    answer `nodes_select` gives, `app_is_admin()` or a path under `app_grant_paths(false)` -- the admin
+    screen says so in words and renders no rail and no panels. A read that FAILED says something
+    different and refuses to be mistaken for a permission, and that alert is reachable from every
+    section rather than only from the Hierarchy tab.
+  verified_by:
+  - kind: vitest
+    file: src/test/adminNoGrants.test.tsx
+    cases: N1-N5 (N1 the empty scope, N2 a failed read is not a permission, N5 no flash before the answer)
+  status: covered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
   source:
@@ -4416,6 +4432,11 @@ requirements:
   - kind: vitest
     file: src/test/productsPanel.test.tsx
     cases: T8
+  - kind: vitest
+    file: src/test/trainingsPanel.test.tsx
+    cases: >-
+      N1-N4 (N1 the two-plant collision, N2 a sweep for any name something else carries -- at rest and
+      with a row open, N3 the Add card keeps plain names, N4 an unambiguous leaf is left short)
   status: covered
 - id: R-259
   title: No member of one plant sees another plant's information
@@ -5667,6 +5688,35 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-083
+  title: The comment said it was a known edge, and it was the ordinary case
+  tag: A limitation nobody re-read
+  status: fixed
+  found_by: agent
+  refs:
+  - R-258
+  violates:
+  - R-258
+  story: >-
+    The Trainings list named every row control after the owner's LEAF name -- "Retire Forklift at Line
+    A" -- and `trainings.ts` recorded the consequence in its own header, in as many words: *"it is the
+    LEAF name, so two 'Line 1's in different plants still collide here."* Filed as a known edge and read
+    past ever since.
+    ⭐ IT IS NOT AN EDGE, AND THE SCHEMA SAYS SO. `nodes` carries `unique (org_id, parent_id, name)`:
+    SIBLING names are unique and names across the tree are not. So two plants each naming their first
+    line "Line A" is legal and unremarkable -- it is what people do -- and `skills_owner_name_unique`
+    then lets each of those lines own a "Forklift". Both rows are permanent, and with one row's edit
+    open four separate controls read identically, including two "Retire Forklift at Line A" buttons of
+    which one retires the wrong plant's course. A screen-reader user has no way to tell them apart.
+    ⚠️ WHAT MAKES THIS WORTH A CARD IS THE SHAPE, NOT THE FIX. The defect was not hidden; it was
+    documented, in the file that caused it, in the words of somebody who had understood it. What was
+    wrong was the label "edge" -- a judgement about how OFTEN it happens, attached to a fact about what
+    the database permits, and never revisited once the product grew a second plant. A comment that
+    excuses a limitation is a place to check, not a place to stop reading.
+    Fixed by naming rows with the owner's full path where the leaf is shared and the leaf alone where it
+    is not -- sibling uniqueness per parent is exactly what makes a whole path unique. The old comment's
+    other half, that a three-level name read out on every button is a cure worse than the disease, was
+    right and is why the short form survives wherever it is unambiguous.
 - id: F-082
   title: The fixture the browser sees was the one file no runner ever built
   tag: A guard that sits below the place things break
@@ -7597,6 +7647,66 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 57
+  date: 2026-09-04
+  title: Three lanes off the small/known queue, and a leaf name that was never unique
+  commits:
+  - 27e05d1
+  - e3f0af4
+  - 23e18f0
+  numbers:
+    app_tests: 1800
+    app_test_files: 62
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Three parallel lanes off `next`, each owning named files, each reviewed by somebody other than its
+    author before being called done. 1791 in 61 files to 1800 in 62: four cases on the trainings panel,
+    five in a new admin file, and the arithmetic checks out rather than merely looking plausible.
+    ⭐ THE TRAININGS FIND IS THE ONE WORTH READING, BECAUSE THE BUG WAS ALREADY WRITTEN DOWN AS NOT A
+    BUG. `trainings.ts` named rows by the owner's LEAF name and its own header recorded the consequence
+    as a known edge: *"it is the LEAF name, so two 'Line 1's in different plants still collide here."*
+    That is not an edge. `nodes` carries `unique (org_id, parent_id, name)`, which makes SIBLING names
+    unique and says nothing across the tree, so two plants each naming their first line "Line A" is the
+    ordinary shape of a company -- and `skills_owner_name_unique` then lets each own a "Forklift". Four
+    controls per pair read identically, including a Retire button that retires the other plant's course.
+    Rows are named by the owner's full PATH now, and only where the leaf is shared, because the same old
+    comment's objection -- a name three levels deep read out on every button -- was also right.
+    ⚠️ A COMMENT THAT CALLS SOMETHING A KNOWN EDGE IS THE PLACE TO LOOK, NOT THE PLACE TO STOP. This
+    one had been read past for as long as it had been there.
+    The admin lane found a worse half underneath the one it was sent for. A grantless supervisor got
+    three rail buttons onto three empty panels -- "Nobody matches that" and an Add form the server
+    refuses -- so "the app is broken", "the read failed" and "nobody has given you anything" all looked
+    identical. And the read-failure alert lived INSIDE the Hierarchy branch, a tab a supervisor cannot
+    reach, so a failed read showed them nothing at all. Hoisted out, worded to be unmistakable for a
+    permission, and the empty-scope page names who can fix it and where. The condition is the server's
+    own predicate rather than a second rule invented client-side, which is CLAUDE.md section 4's rule
+    about screens that disagree with the server.
+    ⭐ TWO DELETIONS, BOTH VERIFIED DEAD RATHER THAN ASSUMED DEAD, AND ONE DELIBERATELY NOT MADE.
+    `BoardPage`'s `if (!session)` branch rendered a whole second signed-out screen from before P1-6b
+    built a real one; `RequireAuth` now renders the outlet only for a loaded session with a profile, so
+    it could not be reached. The `sessionLoading` branch directly above it looks equally dead and is
+    NOT: `useSession` keeps `session` and `loading` in per-instance `useState`, so the component mounts
+    believing nobody is signed in and repeats the `getSession()` round trip `RequireAuth` already made.
+    Removing the branch that flash lands in would have hidden a live cost behind a dead one. That flash
+    is the duplicated-`getSession` debt the queue already records under `SessionProvider`.
+    `renameSkill` and `useRenameSkill` had no caller: `updateSkill` replaced them by treating an absent
+    key as "leave it alone", so a rename still sends only a name while the owner became editable. Two
+    functions that looked interchangeable where one was strictly narrower.
+    ⚠️ THE MAINTAINER ASKED WHAT `app_guard_skill_rehome` ACTUALLY BREAKS AND THE FIRST ANSWER GIVEN
+    WAS OVERSTATED. Corrected against the database: `app_guard_operator_skill_scope` DOES refuse to
+    create a cross-plant holder row ("That training belongs to a different part of the structure than
+    this person"), so the isolation is real and there are zero mismatched rows today. The hole is that
+    the same invariant is not re-checked when either END moves -- `app_guard_skill_rehome` looks only at
+    `node_skill_requirements` and `app_guard_operator_rehome` only at `assignments`, and neither looks
+    at `operator_skills`. Nothing on `operators` clears a certification when somebody changes plant, so
+    the rows travel with the person. Left OPEN pending the maintainer's decision, with the recommendation
+    to refuse both rehomes so the two doors agree.
+    STILL OWED AND NOT DONE: the phantom `node_product_rollup` is a `DROP TABLE` the permission
+    classifier refused and it needs the maintainer's hand; 0044's DELETE is wider than its own header;
+    0043 carries a comment about a function it no longer introduces.
+  shipped: []
 - id: 56
   date: 2026-09-04
   title: The demo world builds again, and the fixture the browser sees is on a runner (DEF-0006)
