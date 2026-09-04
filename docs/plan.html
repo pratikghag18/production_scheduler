@@ -108,7 +108,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat act"><span class="n">1</span><span class="l">open defects</span></div>
   <div class="stat act"><span class="n">140 / 264</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
-  <p class="fine">Measured at commit <code>47a8d9c</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>14aa7df</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2996,7 +2996,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <summary><b>Session 44</b> · 2026-09-03 · The settings icon is a gear (F-078), and the tester's branch comes in <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>Two things. The maintainer, reading the admin rail: <em>&quot;it looks like a mini sun right now, wouldn't the universal gear symbol be more accurate?&quot;</em> They were right, and the code had been claiming otherwise — the case was commented &quot;a gear&quot; while drawing a hub with eight detached rays, which is a sun. It is now a real six-tooth cog: one closed path alternating a tip arc at r=5.9 with a root arc at r=4.3, six teeth rather than eight because at 16 pixels eight gaps close up into a ring. Checked in the browser at both rail widths, which is the only check that can catch this class of thing. And the tester's branch was merged for the first time since the role was created. Its worktree was cut at 21c868f, before Development reached R-304, so both branches had written that id for different requirements and both had sessions 22 and 23. Development keeps R-304; the tester's requirement about the sign-in redirect became R-321 and its two runs became sessions 42 and 43, placed below session 41 because their 1582-in-44 counts the range they judged rather than Development today. DEF-0001 comes across OPEN and reproduces here: <code>e2e/smoke.spec.ts</code> still asserts a signed-out Board shell that P1-6b removed, so the first CI run of the e2e step will be red. Reported to the maintainer, not yet fixed.</p>
-    <p class="fine">1753 app tests in 57 files · tsc 0 · eslint 0</p>
+    <p class="fine">1753 app tests in 57 files · tsc 0 · eslint 0 · commits e1443db, 14aa7df</p>
   </div>
 </details>
 <details class="donefold" >
