@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: dab0755
+  tip: 3e6e2ed
   baseline:
-    app_tests: 1781
-    app_test_files: 60
+    app_tests: 1787
+    app_test_files: 61
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -2149,7 +2149,15 @@ requirements:
     node?" rather than "admin at all?".
   verified_by: []
   status: uncovered
-  note: Step 2 (hiding the admin page) is built as R-079; the tier design is open pending §19.44+.
+  note: >-
+    Step 2 (hiding the admin page) is built as R-079; the tier design is open pending §19.44+.
+    ⚠️ ONE CLAUSE HERE IS OUT OF DATE AND WAS FOUND BY WRITING A TEST AGAINST IT: "a supervisor ... has no
+    access to the admin page" stopped being true at D114. Migration 0032 made a supervisor's grant enough to
+    keep a training record — the maintainer's reason was the job, "the supervisor will be the one who enters
+    or uploads the training information" — so `adminAccess` admits them and `adminSectionsFor` decides which
+    rooms they get. The row is left as the maintainer stated it rather than quietly edited; the correction
+    lives here, and `requireAdmin.test.tsx` G3b pins the current behaviour so nobody restores a refusal the
+    server would contradict.
 - id: R-D98
   title: A role belongs to a (person, scope) pair
   source:
@@ -3446,7 +3454,17 @@ requirements:
   - kind: vitest
     file: src/test/session.test.ts
     cases: A1–A11
+  - kind: vitest
+    file: src/test/requireAdmin.test.tsx
+    cases: "G1 a system admin is let through, G2 an admin-anywhere is too, G3 a viewer is refused in place with a way back and the children ABSENT rather than hidden, G3b a supervisor is admitted on purpose (D114), G4 an unknown role is refused rather than admitted by accident, G5 a loading session shows neither the screen nor the refusal"
   status: covered
+  note: >-
+    ⚠️ A1–A11 ARE ABOUT THE PREDICATE; THE GUARD HAD NO TEST until DEF-0001's lead pointed at the hole from
+    the other side (the rewritten smoke test can no longer reach the refusal, because that needs a signed-in
+    non-admin). The model tested and the screen not — the same shape as DEF-0004. One clause here is still
+    only half-covered on purpose: "a non-admin never downloads the admin chunk" is a claim about `routes.tsx`
+    putting the guard OUTSIDE the `lazy`/`Suspense` boundary, and no component test can watch a bundler. What
+    G3 proves is the half underneath — the guarded children never render, so nothing below the guard runs.
 - id: R-080
   title: Admin-ness and org are derived from one deterministic acting profile
   source:
@@ -5498,9 +5516,20 @@ requirements:
     smoke test (`e2e/smoke.spec.ts`) must therefore pin the app as it is — the sign-in redirect — and
     `npm run e2e` must be green on `main`, because `.github/workflows/ci.yml` now runs it on every
     push to `main`/`Development` and every pull request.
-  verified_by: []
+  verified_by:
+  - kind: e2e
+    file: e2e/smoke.spec.ts
+    cases: "the gate sends / to the sign-in screen and the real form is there, the sign-in screen carries no shell so neither a Board nor an Admin link exists to follow, /admin redirects instead of rendering D97's refusal (which asserts the ORDER of the two gates), the redirect param carries pathname AND search so a deep link's section is not lost, an unknown route is gated rather than 404'd to a visitor who has not identified themselves"
   status: contradicted
   note: >-
+    ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0001, fix 3e6e2ed). Run five-for-five against a dummy-backend server on
+    its own port — the defect's own reproduction — and `npm run e2e` is green.
+    ⚠️ AND HALF OF THIS ROW IS STILL UNREACHABLE HERE, said plainly rather than faked. Following the redirect
+    after a successful sign-in, and D97's refusal for a signed-in NON-admin, both need a session, and the
+    smoke run has no backend to hold one. The open-redirect guard and the four-way decision table are covered
+    in unit form (`src/test/authFlow.test.ts` R1–R10, D1–D4), and the admin guard's own rendering is covered
+    by `src/test/requireAdmin.test.tsx` — written for this gap. What no committed test reaches is the two of
+    them WIRED to a real session; that wants a seeded backend in CI, and is recorded, not half-built.
     ⚠️ FILED BY THE TESTER AS R-304 AND RENUMBERED ON MERGE. The tester's branch was cut before
     Development reached R-304, so both sides wrote that id for different requirements; Development's
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
@@ -7377,6 +7406,43 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 47
+  date: 2026-09-04
+  title: The smoke test pins the app as it is, and the guard it can no longer reach gets its own (DEF-0001)
+  commits:
+  - 3e6e2ed
+  numbers:
+    app_tests: 1787
+    app_test_files: 61
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The last of the tester's four. The committed smoke test asserted a signed-out visitor sees the Board and
+    is offered no Admin link; P1-6b wrapped every route in RequireAuth and deleted that shell a week ago, so
+    all three cases were red and the next push would have been the first time CI ever ran that step. Five
+    cases now, all reachable with no backend — which is the state CI has and, since the gate wraps the whole
+    shell, the state that decides the entire app. Two of them are new ground rather than translations of the
+    old: the redirect param carries pathname AND search, so a deep link's section is not lost on the way to
+    the door; and /admin redirects rather than rendering D97's refusal, which is really an assertion about
+    the ORDER of the two gates and would silently invert if the route tree were rearranged.
+    The defect's lead named the consequence and it was worth taking seriously: once the signed-out cases
+    assert the redirect, NO e2e reaches D97's refusal, because that needs a signed-in non-admin and the smoke
+    run has no backend to hold a session. Faking a session in Playwright would have been the wrong answer.
+    `requireAdmin.test.tsx` covers the guard where it can be covered for real, six cases — R-079 had been
+    standing on `adminAccess`'s own unit cases, which is the model tested and the screen not, the same gap
+    DEF-0004 turned out to be. What no test reaches is the two wired to a real session; that wants a seeded
+    backend in CI and is recorded on R-321, not half-built.
+    Writing it turned up a stale sentence rather than a bug, which is the kind of thing only writing a test
+    against a requirement finds: R-D97 still says a supervisor has no access to the admin page, and D114
+    deliberately admits them — 0032 made a supervisor's grant enough to keep a training record, and the
+    screen was turning away people the database had already said yes to. The row is left as the maintainer
+    stated it, with the correction in its note, and G3b pins the admission so nobody restores a refusal the
+    server would contradict.
+    All four defects are now fix-claimed with their shas and none verified — the tester re-runs its own
+    reproductions, and DEF-0001's is a browser run. Suite 1787 in 61 files; e2e 5 of 5, both against a
+    dummy-backend server on its own port (the defect's own reproduction) and through `npm run e2e`.
+  shipped: []
 - id: 46
   date: 2026-09-04
   title: Three defects fixed in three lanes, and a fourth door closed on the way (DEF-0002/3/4)
