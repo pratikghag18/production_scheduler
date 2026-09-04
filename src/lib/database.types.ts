@@ -316,6 +316,55 @@ export type Database = {
           },
         ]
       }
+      node_product_rollup: {
+        Row: {
+          created_at: string
+          node_id: string
+          org_id: string
+          product_id: string
+          sums_children: boolean
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          node_id: string
+          org_id: string
+          product_id: string
+          sums_children: boolean
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          node_id?: string
+          org_id?: string
+          product_id?: string
+          sums_children?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "node_product_rollup_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "node_product_rollup_org_id_node_id_fkey"
+            columns: ["org_id", "node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "node_product_rollup_org_id_product_id_fkey"
+            columns: ["org_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
       node_shift_templates: {
         Row: {
           node_id: string
@@ -1110,6 +1159,13 @@ export type Database = {
       }
       app_is_admin_on_path: { Args: { p_path: unknown }; Returns: boolean }
       app_node_exists_in_org: { Args: { p_node_id: string }; Returns: boolean }
+      app_offered_product_nodes: {
+        Args: { p_root_path: unknown }
+        Returns: {
+          node_id: string
+          product_id: string
+        }[]
+      }
       app_owner_covers: {
         Args: { p_node: string; p_owner: string }
         Returns: boolean
