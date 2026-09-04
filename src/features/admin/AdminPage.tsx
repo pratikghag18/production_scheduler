@@ -243,11 +243,18 @@ function sectionIconBody(id: SectionId) {
           <path d="M2.75 10.6v1.9c0 .66.5 1.2 1.15 1.2h8.2c.65 0 1.15-.54 1.15-1.2v-1.9" />
         </>
       );
-    case "settings": // a gear
+    // ⚠️ A GEAR HAS TEETH ON ITS RIM; EIGHT DETACHED RAYS AROUND A CIRCLE IS A
+    // SUN. This case was commented "a gear" and drew the second one — the
+    // maintainer read it off the rail as a mini sun, which is a weather or a
+    // brightness control, not settings. The outline below is a real six-tooth
+    // cog: one closed path alternating a tip arc at r=5.9 with a root arc at
+    // r=4.3, and a hub. Six teeth, not eight — at 16px eight tips and their
+    // gaps fall below a stroke's width apart and silt up into a ring.
+    case "settings": // a gear: six teeth on the rim, and a hub
       return (
         <>
-          <circle cx="8" cy="8" r="2.1" />
-          <path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6 3.5 3.5" />
+          <path d="M13.77 6.77 A5.90 5.90 0 0 1 13.77 9.23 L12.04 9.47 A4.30 4.30 0 0 1 11.29 10.76 L11.95 12.38 A5.90 5.90 0 0 1 9.82 13.61 L8.75 12.23 A4.30 4.30 0 0 1 7.25 12.23 L6.18 13.61 A5.90 5.90 0 0 1 4.05 12.38 L4.71 10.76 A4.30 4.30 0 0 1 3.96 9.47 L2.23 9.23 A5.90 5.90 0 0 1 2.23 6.77 L3.96 6.53 A4.30 4.30 0 0 1 4.71 5.24 L4.05 3.62 A5.90 5.90 0 0 1 6.18 2.39 L7.25 3.77 A4.30 4.30 0 0 1 8.75 3.77 L9.82 2.39 A5.90 5.90 0 0 1 11.95 3.62 L11.29 5.24 A4.30 4.30 0 0 1 12.04 6.53 L13.77 6.77 Z" />
+          <circle cx="8" cy="8" r="1.85" />
         </>
       );
   }

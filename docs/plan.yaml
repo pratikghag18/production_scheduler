@@ -5481,6 +5481,26 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-078
+  title: The settings icon was a sun
+  tag: Words matter
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-320
+  story: >-
+    The Settings entry in the admin rail drew a circle with eight straight rays radiating out of it. The
+    code even called it a gear — `case "settings": // a gear` — and it was not one: a gear's teeth are ON
+    its rim, and eight detached spokes around a hub is the universal drawing of a sun. The maintainer read
+    it off the rail exactly that way: *"it looks like a mini sun right now, wouldn't the universal gear
+    symbol be more accurate?"* It matters most in the COLLAPSED strip, where the icon is the only thing
+    left — a sun there says brightness or weather, and the one section a person hunts for by its
+    conventional symbol is settings. Replaced with a real six-tooth cog outline (one closed path
+    alternating a tip arc with a root arc, plus a hub). Six teeth and not eight because at 16 pixels eight
+    tips and their gaps fall closer together than the stroke is wide and silt up into a plain ring.
+    ⚠️ NO TEST PINS THE SHAPE, deliberately. A path string can be asserted, but what went wrong here was
+    not a wrong string — it was a drawing that did not look like the thing its own comment named, and only
+    a person looking at it can catch that. The evidence is the screenshot, at both rail widths.
 - id: F-077
   title: A target computed from the standard is not the standard
   tag: Words matter
@@ -7298,6 +7318,31 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 44
+  date: 2026-09-03
+  title: The settings icon is a gear (F-078), and the tester's branch comes in
+  commits: []
+  numbers:
+    app_tests: 1753
+    app_test_files: 57
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Two things. The maintainer, reading the admin rail: *"it looks like a mini sun right now, wouldn't the
+    universal gear symbol be more accurate?"* They were right, and the code had been claiming otherwise —
+    the case was commented "a gear" while drawing a hub with eight detached rays, which is a sun. It is now
+    a real six-tooth cog: one closed path alternating a tip arc at r=5.9 with a root arc at r=4.3, six teeth
+    rather than eight because at 16 pixels eight gaps close up into a ring. Checked in the browser at both
+    rail widths, which is the only check that can catch this class of thing.
+    And the tester's branch was merged for the first time since the role was created. Its worktree was cut
+    at 21c868f, before Development reached R-304, so both branches had written that id for different
+    requirements and both had sessions 22 and 23. Development keeps R-304; the tester's requirement about
+    the sign-in redirect became R-321 and its two runs became sessions 42 and 43, placed below session 41
+    because their 1582-in-44 counts the range they judged rather than Development today. DEF-0001 comes
+    across OPEN and reproduces here: `e2e/smoke.spec.ts` still asserts a signed-out Board shell that P1-6b
+    removed, so the first CI run of the e2e step will be red. Reported to the maintainer, not yet fixed.
+  shipped: []
 - id: 41
   date: 2026-09-03
   title: The settings tab is one row per setting (R-320)
