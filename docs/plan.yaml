@@ -3029,7 +3029,7 @@ requirements:
   - kind: vitest
     file: src/test/errors.test.ts
     cases: "Group N (added for DEF-0003): the product refusal, which sends no owner node, classifies as NotOfferedHere and produces the real sentence; the operator refusal still classifies with all four fields and its sentence is unchanged; the two sentences differ, which is why kind stays required; a detail missing kind, id or node_id is still Unknown; a non-string owner is dropped rather than carried"
-  status: contradicted
+  status: covered
   note: >-
     ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0003, fix 3c58d13). The clause "clients read the JSON error field" was
     true of the code and false in effect: the parser demanded a key the two product guards stopped sending in
@@ -4597,7 +4597,7 @@ requirements:
   - kind: vitest
     file: src/test/dragGesture.test.ts
     cases: "DEF-0002's second door: changing the selected place closes the popover it was opened over, so a stale cell cannot fall back to the whole catalogue"
-  status: contradicted
+  status: covered
   note: >-
     ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0002, fix 30aff5f). "Offers only products that belong at the cell" was
     false for every part of every other plant: the offering predicate failed OPEN on a place it could not
@@ -5394,7 +5394,7 @@ requirements:
   - kind: vitest
     file: src/test/cycleTimesPanel.test.tsx
     cases: "the row half of the same clause, which had no test at all (DEF-0004): a place that does not make the part shows a dash named 'not made here', a line that makes it with nothing timed says '0 of 2 measured' in words rather than the same dash, the three states are three different accessible names, a partial sum is named as a count rather than as a fraction, a fully measured line shows the total alone, and the not-added row carries its counts in its name too"
-  status: contradicted
+  status: covered
   note: >-
     ⚠️ QUALIFIED BY R-319, and the maintainer's objection was sharper than the caveat written here. This row
     said a sum is right as LABOUR CONTENT even though it is not an output rate. That is true only where a unit
@@ -5520,7 +5520,7 @@ requirements:
   - kind: e2e
     file: e2e/smoke.spec.ts
     cases: "the gate sends / to the sign-in screen and the real form is there, the sign-in screen carries no shell so neither a Board nor an Admin link exists to follow, /admin redirects instead of rendering D97's refusal (which asserts the ORDER of the two gates), the redirect param carries pathname AND search so a deep link's section is not lost, an unknown route is gated rather than 404'd to a visitor who has not identified themselves"
-  status: contradicted
+  status: covered
   note: >-
     ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0001, fix 3e6e2ed). Run five-for-five against a dummy-backend server on
     its own port — the defect's own reproduction — and `npm run e2e` is green.
@@ -7406,6 +7406,54 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 48
+  date: 2026-09-04
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1787
+    app_test_files: 61
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Re-verification run over b32ead3..75b5aac. ALL FOUR DEFECTS ARE VERIFIED, each by re-running my own
+    reproduction cold rather than by reading the fix. `npm run test` reports "1787 passed (1787)" in 61
+    files, exactly the plan's baseline; every SQL file passes; typecheck and lint clean.
+    DEF-0001: `npm run e2e` is green for the first time in this repository's life. DEF-0003: the pin
+    passes cold, three of three, operator control included, so the parser was widened rather than
+    loosened. DEF-0004: the screen reads right — Plant A's PN-1003 column now says "0 of 2 measured" on
+    Line 1 and keeps the bare dash on Line 2, which are the two rows the defect was about, and PN-1004 /
+    Line 3 moved with them. DEF-0002: the pin passes and the click path gives four parts where it gave
+    twelve. I also mutated that fix back to `return true` and ran the suite: five named cases go red
+    (scope XP4, XP6, XP8, XP9 and the pin), so it is genuinely held. R-321, R-272, R-046 and R-317 go
+    back to covered.
+    ONE NEW DEFECT, AND IT IS THE SAME RULE FROM THE OTHER SIDE. DEF-0005: Ana, the supervisor granted
+    Line 1, has four parts in her board legend and is offered exactly one of them in the New popover.
+    The server accepts all four — I asked `app_product_offered_at` over her own session at her own Cell
+    1 and it returned true four times out of four. Marco reproduces it identically from an area grant,
+    so it is not her fixture. The cause is upstream of everything DEF-0002 touched: `board_window` is
+    SECURITY INVOKER, `product_sites_select` is downward-only, so a plant-wide part's only place row is
+    dropped before it reaches a supervisor and the list arrives EMPTY — and an empty list means two
+    different things, "assigned to no plant" and "its places are above your grant", which the payload
+    cannot tell apart. This is NOT a regression from 30aff5f: `[].some(...)` was false before it too,
+    and it dates to 0034, when an always-present column became an RLS-filtered list.
+    WHAT I WANT THE DEVELOPER TO READ TWICE. scope.ts's new header concludes "nothing legitimately
+    offerable disappears", and scope.test.ts XP9 carries that sentence as its own name and then asserts
+    `expect(offered).not.toContain("Housing A")`. The argument above it is right about the change and
+    then generalises to the picker as a whole, which it never examined — so the case is green while
+    asserting the opposite of what the server answers. XP9's third assertion and the header's conclusion
+    both have to move with the fix. F-080's rule, "ask what narrowed the map", is right for the board's
+    map and is not enough here: for a supervisor the map is narrowed by a view choice AND the place list
+    was already narrowed by permission one layer up. No pin is filed, deliberately — the obvious one
+    (`productOfferedAt([], ...) === true`) would break the honest zero that XP2 and history.ts depend
+    on. The module cannot be fixed from inside itself.
+    STILL TRUE FROM LAST RUN, NEITHER A DEFECT. `format:check` is red across 269 files because the
+    working tree is CRLF and Prettier defaults to LF; it is green on Linux, so CI is unaffected. And
+    `npm run db:types` still rewrites database.types.ts with `node_product_rollup`, a table no committed
+    migration creates — the same 49-line diff as yesterday, so the live dev database still carries the
+    pre-0041 draft. The committed types remain the correct ones.
+  shipped: []
 - id: 47
   date: 2026-09-04
   title: The smoke test pins the app as it is, and the guard it can no longer reach gets its own (DEF-0001)
