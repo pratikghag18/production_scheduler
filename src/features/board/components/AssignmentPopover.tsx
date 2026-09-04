@@ -7,8 +7,6 @@ import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
 import styles from "./AssignmentPopover.module.css";
 
-const STATUS_OPTIONS = ["planned", "active", "done"];
-
 /**
  * Port of the mockup's `openChipPop` (run-attached) / `openDirectPop`
  * (direct) — brief §5.4 combines both into one component keyed on whether
@@ -24,14 +22,21 @@ const STATUS_OPTIONS = ["planned", "active", "done"];
  *   run-attached chip and a direct assignment, same reasoning as
  *   `RunPopover`'s read-only product field — see that file's header
  *   comment.
- * - `status` is a brief-only addition (§5.4 lists it; neither
- *   `openChipPop` nor `openDirectPop` has a status control in the mockup)
- *   — flagged, not silently ported. Values are the three non-terminal
- *   states from `docs/design-plan.md`'s `status text ... -- planned |
- *   active | done | cancelled`; `cancelled` is reached only via the
- *   Delete button (rule 17 of `boardIndex.ts` already drops cancelled
- *   rows everywhere), not offered as a fourth option here to avoid a
- *   second, redundant path to the same effect as Delete.
+ * - ⭐ THERE IS NO STATUS CONTROL, AND ITS REMOVAL IS THE MAINTAINER'S
+ *   DECISION (R-322). It was here once: a planned / active / done picker,
+ *   which this comment already recorded as "a brief-only addition —
+ *   neither `openChipPop` nor `openDirectPop` has a status control in the
+ *   mockup". Nothing read the value. No rule fired on it, no screen showed
+ *   it, and nothing obliged a supervisor to touch it — so in practice it
+ *   would sit at "planned" on work that had long finished, and a label
+ *   nobody maintains is worse than no label, because it reads as fact.
+ *   The maintainer, 4 Sept: *"the supervisor will be like I'll just delete
+ *   the assignment or modify it if there is a change."*
+ *   ⚠️ `cancelled` IS UNAFFECTED AND IS NOT A LABEL. It is the soft delete
+ *   — it frees the cell's slot past the overlap constraint, returns the
+ *   operator's hours to the capacity guard, and drops the row from every
+ *   board map (`boardIndex.ts` rule 17) while keeping it in history. It
+ *   was never offered here anyway: Delete is the one path to it.
  */
 export function AssignmentPopover({
   assignment,
@@ -59,7 +64,6 @@ export function AssignmentPopover({
     efficiencyPercent: number,
     targetQty: number | null,
     targetUnit: string | null,
-    status: string,
   ) => void;
   onDelete: (assignmentId: string) => void;
   /**
@@ -82,10 +86,6 @@ export function AssignmentPopover({
     assignment.targetQty == null ? "" : String(assignment.targetQty),
   );
   const [targetUnit, setTargetUnit] = useState(assignment.targetUnit ?? "");
-  const [status, setStatus] = useState(
-    STATUS_OPTIONS.includes(assignment.status) ? assignment.status : "planned",
-  );
-
   // R-316: follows the efficiency box as it is typed. An unparseable or empty
   // box falls back to the saved efficiency rather than to 100, so a
   // half-deleted number never makes the standard jump.
@@ -124,15 +124,6 @@ export function AssignmentPopover({
           derivedQty={derivedQty}
         />
 
-        <label htmlFor="ap-status">Status</label>
-        <select id="ap-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-
         <div className={styles.time}>{timeLabel}</div>
 
         <div className={styles.row}>
@@ -148,7 +139,7 @@ export function AssignmentPopover({
             onClick={() => {
               const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
               const { qty, unit } = normalizeTarget(targetQty, targetUnit);
-              onSave(assignment.id, eff, qty, unit, status);
+              onSave(assignment.id, eff, qty, unit);
             }}
           >
             Save

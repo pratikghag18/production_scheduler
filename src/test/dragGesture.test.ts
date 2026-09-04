@@ -336,4 +336,46 @@ describe("useDragGesture", () => {
     expect(result.current.popover).toBe(null);
     expect(result.current.activeDrag).toBe(null);
   });
+
+  /**
+   * R-322 — THE PROGRESS LABEL IS GONE AND THE SOFT DELETE IS NOT.
+   *
+   * ⭐ TWO THINGS THAT LOOK LIKE ONE FIELD. The pop-up used to offer planned /
+   * active / done, and `saveAssignmentFields` carried the chosen value down.
+   * The maintainer removed the picker: nothing read the value, nothing obliged
+   * anyone to set it, so it could only ever say "planned" about finished work.
+   * But `cancelled` writes through the SAME field and is not a label — it is
+   * the soft delete, and the overlap constraint, the capacity guard and
+   * `boardIndex`'s rule 17 all key on it.
+   *
+   * ⚠️ tsc CANNOT SEE THE HALF THAT MATTERS HERE. It stops a status being
+   * TYPED into a field edit (the interface takes the literal "cancelled" only),
+   * but nothing in the type system says the save path stopped SENDING one, and
+   * nothing says Delete still does. Both are asserted, because the failure this
+   * guards against is a status quietly reappearing on the save path and going
+   * stale in the database where no screen shows it.
+   */
+  it("R-322: saving an assignment sends no status, and Delete still cancels", async () => {
+    const api = await import("@/lib/api");
+    const index = buildIndex([]);
+    const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+    act(() => {
+      result.current.saveAssignmentFields("a-1", 110, 12, "pieces");
+    });
+    // The write is a mutation, so the api call lands a tick later — waited for
+    // rather than assumed, the same way the move cases above do.
+    await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+    const saved = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+    expect(saved).toEqual({ efficiencyPercent: 110, targetQty: 12, targetUnit: "pieces" });
+    expect(saved && "status" in saved).toBe(false);
+
+    act(() => {
+      result.current.removeAssignment("a-1");
+    });
+    await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.updateAssignmentFields).mock.calls[1]?.[1]).toEqual({
+      status: "cancelled",
+    });
+  });
 });

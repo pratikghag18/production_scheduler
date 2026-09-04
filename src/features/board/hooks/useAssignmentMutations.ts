@@ -162,7 +162,6 @@ export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date
                     : {}),
                   ...("targetQty" in edit ? { targetQty: edit.targetQty ?? null } : {}),
                   ...("targetUnit" in edit ? { targetUnit: edit.targetUnit ?? null } : {}),
-                  ...(edit.status !== undefined ? { status: edit.status } : {}),
                   ...(edit.timerange
                     ? { timerange: toTstzRange(edit.timerange.start, edit.timerange.end) }
                     : {}),

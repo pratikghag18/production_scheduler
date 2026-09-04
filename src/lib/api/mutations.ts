@@ -331,7 +331,27 @@ export interface AssignmentFieldEdit {
   efficiencyPercent?: number;
   targetQty?: number | null;
   targetUnit?: string | null;
-  status?: string;
+  /**
+   * ⭐ ONLY `"cancelled"`, AND THE NARROW TYPE IS THE POINT (R-322). This was
+   * `status?: string`, which let the pop-up write planned / active / done. That
+   * picker is gone: nothing read the value, no rule fired on it, and nothing
+   * obliged a supervisor to touch it, so it could only ever sit at "planned" on
+   * work that had finished — and a label nobody maintains is worse than no
+   * label, because it reads as fact.
+   *
+   * ⚠️ THE FIELD ITSELF CANNOT GO, because `cancelled` is not a label: it is the
+   * SOFT DELETE. `removeAssignment` writes it here (there is no
+   * delete_assignment RPC, §5.4/§5.3), and it is what frees the cell's slot past
+   * the overlap constraint, returns the operator's hours to the capacity guard,
+   * and drops the row from every board map (`boardIndex.ts` rule 17) while
+   * keeping it in history. So the field stays and the TYPE says what it is for:
+   * a literal, so an attempt to set a progress label here does not compile
+   * rather than reaching the database and going stale there.
+   *
+   * A future "the job actually started" belongs to shop-floor feedback, not to a
+   * field edit, and would be designed then rather than left as an open string.
+   */
+  status?: "cancelled";
   /** A resize that does not change node (docs/api.md §4). */
   timerange?: { start: Date; end: Date };
   /**

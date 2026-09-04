@@ -5516,6 +5516,34 @@ requirements:
     measured line moving from 0 to 1 of 22. Two things that only the screenshot could show were fixed there:
     the open editor was stretching its column so the whole grid reflowed on a click, and the summed rows were
     three times the height of the rows they total.
+- id: R-322
+  title: An assignment has no progress label — only the soft delete that actually does something
+  source:
+  - the maintainer, 4 Sept (in session, "No one is going to use the status option to change it to active in practice, it is added work with no returns, the supervisor will be like I'll just delete the assignment or modify it if there is a change. It doesn't serve a purpose plus there is nothing making it mandatory for a supervisor to do")
+  stated_by: maintainer
+  claim: >-
+    The assignment pop-up offers no status control. It used to offer planned / active / done, and this
+    file's own header had already flagged it as "a brief-only addition — neither `openChipPop` nor
+    `openDirectPop` has a status control in the mockup". Nothing read the value: no rule fired on it, no
+    screen displayed it, and nothing obliged a supervisor to set it. A field that is optional, invisible and
+    consequence-free does not stay accurate — it sits at "planned" on work that finished last week — and a
+    label nobody maintains is worse than no label, because a reader takes it for fact.
+    ⚠️ `cancelled` IS UNTOUCHED AND IS NOT A LABEL. It is the soft delete: it frees the cell's slot past
+    `runs_no_overlap_on_node`, returns the operator's hours to the capacity guard, and drops the row from
+    every board map (`boardIndex.ts` rule 17) while keeping it in history for the deleted-product path. It
+    is written by Delete, was never offered in the picker, and reaches the database through the same
+    `AssignmentFieldEdit.status` field — which is now typed as the literal `"cancelled"` rather than
+    `string`, so a progress label cannot be typed back in without failing to compile.
+    The COLUMN stays as it is, with its default and its four permitted values, because history holds rows
+    that carry them and the runs table uses the same vocabulary. What is removed is the control, the save
+    path that carried it, and the open string type that invited it back.
+    A future "the job actually started" is a shop-floor feedback problem — a scan, a line signal — not a
+    dropdown a supervisor is trusted to remember, and it would be designed then.
+  verified_by:
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "R-322: saving an assignment sends no status at all, and Delete still writes cancelled — the half tsc cannot see, since the type stops a status being TYPED but says nothing about whether the save path still SENDS one"
+  status: covered
 - id: R-321
   title: A signed-out visitor is sent to the sign-in screen, and the smoke test pins the app as it is
   source:
@@ -7449,6 +7477,36 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 52
+  date: 2026-09-04
+  title: The assignment status picker is removed (R-322)
+  commits:
+  - PENDING
+  numbers:
+    app_tests: 1787
+    app_test_files: 60
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer, on the planned / active / done picker in the assignment pop-up: *"No one is going to use
+    the status option to change it to active in practice ... It doesn't serve a purpose plus there is
+    nothing making it mandatory for a supervisor to do."* They asked to be convinced otherwise and there was
+    no honest case to make. Nothing read the value — no rule, no screen, no report — and nothing obliged
+    anyone to set it, so its only possible destiny was to say "planned" about work that finished last week.
+    That is worse than an absent field: a reader takes a label for fact. The pop-up's own header had already
+    recorded it as a brief-only addition that neither mockup contained, which is the same observation made
+    at build time and not acted on.
+    ⭐ THE INTERESTING PART IS WHAT COULD NOT BE REMOVED. `cancelled` writes through the same field and is
+    not a label at all — it is the soft delete, and the overlap constraint, the capacity guard and
+    `boardIndex`'s rule 17 all key on it. Deleting the field outright would have taken Delete with it. So
+    the field stays and its TYPE narrowed from `string` to the literal `"cancelled"`, which says what it is
+    for and makes a progress label fail to compile rather than reach the database and go stale there.
+    The pin is at the seam rather than in the pop-up, because tsc covers only half of this: the type stops a
+    status being TYPED into a field edit, and nothing in the type system says the save path stopped SENDING
+    one or that Delete still does. Both are asserted. Driven in the browser: the pop-up shows efficiency,
+    target and the time band, with Delete still removing the block.
+  shipped: []
 - id: 51
   date: 2026-09-04
   title: Tester run

@@ -1434,10 +1434,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       efficiencyPercent: number,
       targetQty: number | null,
       targetUnit: string | null,
-      status: string,
     ) => {
+      // R-322: no `status` here any more. The picker that set it is gone, and
+      // `cancelled` never came through this path — Delete is what writes it.
       updateAssignmentFields.mutate(
-        { assignmentId, edit: { efficiencyPercent, targetQty, targetUnit, status } },
+        { assignmentId, edit: { efficiencyPercent, targetQty, targetUnit } },
         { onError: (err) => failWith(err, assignmentLabelById(assignmentId)) },
       );
       setPopover(null);
