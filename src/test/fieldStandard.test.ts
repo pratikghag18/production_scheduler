@@ -50,7 +50,6 @@ export const FIELD_LEGACY: readonly string[] = [
   "src/features/admin/components/NodeTreeEditor.module.css",
   "src/features/admin/components/OperatorsPanel.module.css",
   "src/features/admin/components/ProductsPanel.module.css",
-  "src/features/admin/components/SettingsPanel.module.css",
   "src/features/admin/components/ShapePicker.module.css",
   "src/features/admin/components/ShiftsPanel.module.css",
   "src/features/admin/components/SiteAccessPanel.module.css",

@@ -6,8 +6,8 @@ meta:
   updated: '2026-09-03'
   tip: e0c20b2
   baseline:
-    app_tests: 1746
-    app_test_files: 56
+    app_tests: 1753
+    app_test_files: 57
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -5396,6 +5396,32 @@ requirements:
     over all six cells. The default was mine to choose — the maintainer left it — and it is stated plainly
     because it is a guess about plant shape, not a fact: cells within a line are almost always sequential,
     lines within an area almost never are. Every node is one click from the other answer.
+- id: R-320
+  title: The settings tab is one row per setting, not a screenful per setting
+  source:
+  - the maintainer, 3 Sept (in session, "the date format should be a dropdown option, any objections? I think we're going to fill up the settings tab with more options and this could get crowded")
+  stated_by: maintainer
+  claim: >-
+    Settings shipped with the eight date formats as eight radio rows -- most of a pane spent on one
+    preference, so the second setting to land would have been pushed below the first one's options. A setting
+    is now ONE ROW: its name and hint on the left, one control on the right, and the next setting is another
+    row rather than another screenful. The date format picks with a `<select>`, which is the right control for
+    a closed enum of eight; a toggle or a number would sit in the same slot. THE SAMPLES CAME WITH IT -- the
+    radio list showed a live sample of today's date beside every format, which is how a person picks one (by
+    what they will actually see, not by a token's name), so each option reads "Day/Month/Year -- 03/09/2026"
+    and the closed control therefore shows the sample for the current choice. The picker is the SHARED field
+    (`Field.module.css`, R-318), not another copy of the skin, so this stylesheet came off that audit's legacy
+    list in the same commit -- the list may only shrink, and this is the first entry to leave it. A site admin
+    still SEES the setting, disabled with the reason in words, and the client refuses the write itself rather
+    than leaning on `disabled` alone; the RPC (`set_org_date_format`, 0037) refuses them regardless.
+  verified_by:
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: the eight formats are one dropdown and no radio rows survive, every option carries that format's rendering of TODAY (computed through the real seam, so the suite cannot rot when the month turns), the control shows the org's stored format, choosing one saves that token, the picker disables while the write is in flight, a refused write is shown rather than left looking saved, a site admin gets the picker disabled with the reason and a change event reaching it writes nothing
+  - kind: vitest
+    file: src/test/fieldStandard.test.ts
+    cases: SettingsPanel.module.css is off the legacy list and the audit now holds it to the shared field
+  status: covered
 - id: R-318
   title: One shared editable box, enforced — a field looks and behaves the same everywhere
   source:
@@ -7252,6 +7278,32 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 41
+  date: 2026-09-03
+  title: The settings tab is one row per setting (R-320)
+  commits: []
+  numbers:
+    app_tests: 1753
+    app_test_files: 57
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer, looking at Settings: *"the date format should be a dropdown option, any objections? I
+    think we're going to fill up the settings tab with more options and this could get crowded."* No
+    objection, and the crowding was already there -- eight formats as eight radio rows is most of a pane
+    spent on one preference, and the next setting to land would have arrived below the fold. The one thing
+    worth protecting was the SAMPLE: the radio list showed today's date rendered in every format, which is
+    how a person picks one, so each option now reads "Day/Month/Year -- 03/09/2026" and the closed control
+    shows the sample for the current choice. Nothing is lost by collapsing. The row itself is the reusable
+    part -- name and hint left, one control right -- so the second setting is another row.
+    Two things came free with it. The picker uses the SHARED field module (R-318) instead of the copy of the
+    skin the radio rows carried, so `SettingsPanel.module.css` came off `FIELD_LEGACY` -- the first entry to
+    leave a list that may only shrink, and twenty-nine remain. And the panel had no test of its own; it has
+    one now, with the samples computed through the real seam so it cannot rot when the month turns. The site
+    admin's case is pinned there too: the picker disabled with the reason in words, and the client refusing
+    the write rather than trusting `disabled` to be the only "no". Suite 1753 in 57 files, up from 1746 in 56.
+  shipped: []
 - id: 40
   date: 2026-09-03
   title: A node chooses whether it adds its children up (R-319)
