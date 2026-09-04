@@ -211,6 +211,70 @@ export function TrainingsPanel() {
   const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const operatorsById = useMemo(() => new Map(operators.map((o) => [o.id, o])), [operators]);
 
+  /* -- what names a row, when the owner's own name is not enough (R-258) --- */
+
+  // ⭐⭐ THE LEAF NAME IS NOT A DISAMBIGUATOR AND `trainings.ts` SAYS SO OUT
+  // LOUD: *"it is the LEAF name, so two 'Line 1's in different plants still
+  // collide here."* That was recorded as a known edge and it is not one — it is
+  // the ordinary shape of a company. `nodes` carries `unique (org_id,
+  // parent_id, name)` (0001), which makes SIBLING names unique and says nothing
+  // about names across the tree, so two plants each calling their first line
+  // "Line A" is legal; `skills_owner_name_unique` (0031) then lets each of them
+  // own a "Forklift". Both rows are legal, permanent, and — named by the leaf —
+  // present a screen-reader user with two "Retire Forklift at Line A" buttons.
+  //
+  // ⭐ SO THE OWNER IS NAMED BY WHAT IS ACTUALLY UNIQUE: its PATH of names.
+  // Sibling names being unique per parent is exactly what makes the whole path
+  // unique within the org, which is the property `trainingHandle` needs of the
+  // label it is handed — and handing it in is what that function's header asks
+  // for ("THE OWNER LABEL IS PASSED IN, NEVER RESOLVED HERE"), so this fix is a
+  // choice of label rather than a second naming rule in the pure module.
+  //
+  // ⚠️ AND ONLY WHERE IT BUYS SOMETHING. `trainings.ts`'s objection to the path
+  // — "read out in full on every button" — is right, so a leaf nothing else
+  // answers to stays short and only an ambiguous one is spelled out. Ambiguity
+  // is measured over EVERY READABLE NODE, not over the rows on screen: a name
+  // that grew a path because the search box was typed in would be an accessible
+  // name that moves under the reader, and the plant filter is a reversible view
+  // choice that must not change what a control is called.
+  //
+  // ⚠️ CASE-FOLDED, because "Line A" and "line A" are two rows to the database
+  // and one sound to a screen reader.
+  //
+  // ⚠️⚠️ IT CAN STILL COLLIDE IN ONE PLACE: an owner this client cannot resolve.
+  // `scopeLabel` and `scopePathLabel` both answer "Somewhere else" for it, so
+  // two same-named trainings owned by two DIFFERENT unreadable nodes remain
+  // indistinguishable. There is nothing truthful left to say about a node we
+  // cannot see, and inventing an id would name it after nothing; recorded here
+  // rather than papered over.
+  const ownerHandleLabels = useMemo(() => {
+    const perName = new Map<string, number>();
+    for (const n of nodes) {
+      const key = n.name.trim().toLowerCase();
+      perName.set(key, (perName.get(key) ?? 0) + 1);
+    }
+    return new Map(
+      nodes.map((n) => [
+        n.id,
+        (perName.get(n.name.trim().toLowerCase()) ?? 0) > 1
+          ? scopePathLabel(n.id, nodesById)
+          : n.name,
+      ]),
+    );
+  }, [nodes, nodesById]);
+
+  /**
+   * How a row's OWNER is spelled inside an accessible name — the leaf on its
+   * own where that is unambiguous, the full path where it is not.
+   *
+   * ⚠️ FALLS BACK TO `scopeLabel`, which answers "Somewhere else" for a node
+   * this client never received. Same string, same fail-open reading as
+   * everywhere else on this screen.
+   */
+  function ownerHandleLabel(nodeId: string): string {
+    return ownerHandleLabels.get(nodeId) ?? scopeLabel(nodeId, nodesById);
+  }
+
   /* -- which plant this screen is showing (roadmap 1(c)) ------------------ */
 
   // ⭐ THE CHOICE IS MADE ONE SCREEN UP AND THIS PANEL ONLY READS IT. The
@@ -531,7 +595,12 @@ export function TrainingsPanel() {
     // real "Belongs to" defect in a list where the ambiguity is guaranteed
     // rather than accidental. The visible label stays the plain verb, so the
     // accessible name still contains it.
-    const handle = trainingHandle(row.name, owner);
+    //
+    // ⚠️ NAMED WITH `ownerHandleLabel`, NOT `owner`. The COLUMN shows the leaf
+    // (with the path as its tooltip) because a sighted reader has the column
+    // beside it to compare; a spoken name has nothing beside it, so where the
+    // leaf is shared it is spelled out in full. See `ownerHandleLabels`.
+    const handle = trainingHandle(row.name, ownerHandleLabel(row.siteNodeId));
     // ⭐⭐ THE PREVIEW, AND IT IS ASKED WITH THE OWNER'S **PATH**, never its id.
     // `app_can_edit_node` compares `n.path <@ gp`, and the path is the same
     // value the server compares — walking parents to rebuild it would be a
@@ -1064,7 +1133,9 @@ export function TrainingsPanel() {
                  still contains it. */
               aria-label={`Bring back ${trainingHandle(
                 clashRow.name,
-                scopeLabel(clashRow.siteNodeId, nodesById),
+                // The SAME label the row's own controls use, so this button and
+                // that row name one thing in one way.
+                ownerHandleLabel(clashRow.siteNodeId),
               )} instead of creating a second`}
               onClick={() => toggleActive(clashRow)}
             >

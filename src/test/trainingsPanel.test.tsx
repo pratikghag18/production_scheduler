@@ -44,6 +44,8 @@ const PLANT2 = "30000000-0000-0000-0000-000000000002";
 const LINE_A = "40000000-0000-0000-0000-00000000000a";
 const LINE_B = "40000000-0000-0000-0000-00000000000b";
 const LINE_9 = "40000000-0000-0000-0000-000000000009";
+/** ⚠️ A SECOND LINE CALLED "Line A", under the OTHER plant — see `withTwoLineAs`. */
+const LINE_A2 = "40000000-0000-0000-0000-00000000000c";
 const ORG = "10000000-0000-0000-0000-000000000001";
 
 const h = vi.hoisted(() => {
@@ -228,6 +230,32 @@ function withTwoPlants() {
       h.node(LINE_9, "Line 9", PLANT2, "plant_2.line_9"),
     ],
     skills: [...h.baseSkills(), h.skill("s4", "Rigging", PLANT2)],
+  };
+}
+
+/**
+ * ⭐⭐ THE WORLD R-258 IS ACTUALLY ABOUT, and it is the ordinary one: two plants
+ * that each call their first line "Line A", each running its own forklift
+ * course.
+ *
+ *   Forklift   Plant 1 › Line A   (s1, from the base fixture)
+ *   Forklift   Plant 2 › Line A   (s6)
+ *
+ * `unique (org_id, parent_id, name)` on `nodes` (0001) permits it — sibling
+ * names are unique, names across the tree are not — and `skills_owner_name_
+ * unique` (0031) permits the pair of trainings, because their OWNERS differ.
+ * So both rows are legal, permanent, and indistinguishable to anyone who names
+ * them by the leaf.
+ */
+function withTwoLineAs() {
+  h.state.data = {
+    ...h.state.data,
+    nodes: [
+      ...h.baseNodes(),
+      h.node(PLANT2, "Plant 2", null, "plant_2"),
+      h.node(LINE_A2, "Line A", PLANT2, "plant_2.line_a"),
+    ],
+    skills: [...h.baseSkills(), h.skill("s6", "Forklift", LINE_A2)],
   };
 }
 
@@ -1081,5 +1109,97 @@ describe("TrainingsPanel — the document number (D115)", () => {
     expect(
       screen.getByRole("button", { name: "Edit the document number for Forklift at Line A" }),
     ).toBeTruthy();
+  });
+});
+
+/* ===========================================================================
+ * R-258 — a row's controls are named for THAT row, and no other.
+ *
+ * ⭐⭐ WHY THIS NEEDS ITS OWN BLOCK RATHER THAN RIDING ON T4. T4 asks the
+ * question with a fixture where the leaf names happen to differ (Line A, Line
+ * B), so it passes on a screen that names rows by the leaf alone. The pair that
+ * breaks that screen is two plants that each call a line "Line A" — permitted by
+ * `unique (org_id, parent_id, name)`, which makes SIBLING names unique and says
+ * nothing about names across the tree. A product could be named by its sku,
+ * which is unique company-wide (`ProductsPanel` T8); a training has no such
+ * field, so what tells two rows apart is its OWNER, and the owner has to be
+ * named by something unique too.
+ * ======================================================================== */
+
+describe("TrainingsPanel — one control, one name (R-258)", () => {
+  it("N1 ⭐⭐ two plants with a 'Line A' each: the rows are still told apart", () => {
+    withTwoLineAs();
+    render(<TrainingsPanel />);
+    // The full path of a node IS unique — sibling names are unique per parent —
+    // so it is what the ambiguous rows are named by.
+    expect(
+      screen.getByRole("button", { name: "Retire Forklift at Plant 1 › Line A" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Retire Forklift at Plant 2 › Line A" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Delete Forklift at Plant 1 › Line A" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Delete Forklift at Plant 2 › Line A" }),
+    ).toBeTruthy();
+    // ⚠️ AND THE VISIBLE LABEL IS STILL THE PLAIN VERB (WCAG 2.5.3).
+    expect(
+      screen.getByRole("button", { name: "Retire Forklift at Plant 2 › Line A" }).textContent,
+    ).toBe("Retire");
+  });
+
+  it("N2 ⭐⭐ nothing on the screen carries a name something else carries too", () => {
+    // Every control that names itself, grouped by the name it gives. A name in
+    // two places is a screen-reader user choosing blind, which is the whole of
+    // R-258.
+    const sharedNames = () => {
+      const byName = new Map<string, number>();
+      for (const el of document.querySelectorAll("[aria-label]")) {
+        const name = el.getAttribute("aria-label") ?? "";
+        byName.set(name, (byName.get(name) ?? 0) + 1);
+      }
+      return [...byName.entries()].filter(([, n]) => n > 1).map(([name]) => name);
+    };
+
+    withTwoLineAs();
+    render(<TrainingsPanel />);
+    // The list at rest: four Retire/Edit/Delete/document-number sets.
+    expect(sharedNames()).toEqual([]);
+
+    // And with a row open, which is the only moment the row's own boxes and the
+    // Add card's are on screen together. ⚠️ OPENED BY REGEX, so this case asks
+    // its question without first assuming the answer: before the fix both rows
+    // match, and `getAllByRole` is the only way to reach either of them at all.
+    fireEvent.click(screen.getAllByRole("button", { name: /^Edit Forklift/ })[0]);
+    expect(sharedNames()).toEqual([]);
+  });
+
+  it("N3 the Add card keeps its plain names — its labels are visible text", () => {
+    // The second half of R-258: the card's fields are named "Name", "Belongs to"
+    // and "Document number" because a sighted reader can see those labels, and
+    // a row's boxes are named for their row so they never take those names.
+    // ⚠️ ASKED WITH A ROW OPEN, because that is the only moment the two sets of
+    // boxes are on screen together.
+    withTwoLineAs();
+    render(<TrainingsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Edit Forklift/ })[0]);
+    // `getByRole` throws on ambiguity, so each of these three IS the assertion.
+    expect(screen.getByRole("textbox", { name: "Name" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Belongs to" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Document number" })).toBeTruthy();
+    expect(
+      screen.getByRole("textbox", { name: "Name for Forklift at Plant 1 › Line A" }),
+    ).toBeTruthy();
+  });
+
+  it("N4 ⚠️ a leaf name nothing else answers to is left short", () => {
+    // The cost of the fix is spoken length, so it is paid only where it buys
+    // something. One "Line B" in the company means "Forklift at Line B" — three
+    // levels read out on every button, everywhere, would be the cure being worse.
+    withTwoLineAs();
+    render(<TrainingsPanel />);
+    expect(screen.getByRole("button", { name: "Retire Forklift at Line B" })).toBeTruthy();
   });
 });
