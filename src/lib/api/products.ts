@@ -234,9 +234,7 @@ export interface CreateProductAtNodeInput {
  * they administer. The RPC returns the bare products row — no `product_sites`
  * embed — so the one place we KNOW, the node just assigned, is folded back in.
  */
-export async function createProductAtNode(
-  input: CreateProductAtNodeInput,
-): Promise<AdminProduct> {
+export async function createProductAtNode(input: CreateProductAtNodeInput): Promise<AdminProduct> {
   const { data, error } = await supabase.rpc("create_product_at_node", {
     p_sku: input.sku,
     p_name: input.name,

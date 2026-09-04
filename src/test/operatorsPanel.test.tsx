@@ -263,8 +263,18 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
   useUpdateOperator: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetOperatorActive: () => ({ mutate: vi.fn(), isPending: false }),
   useGrantSkill: () => ({ mutate: h.grantMutate, isPending: false, error: null, reset: h.resetFn }),
-  useUpdateSkillRecord: () => ({ mutate: h.recordMutate, isPending: false, error: null, reset: h.resetFn }),
-  useRevokeSkill: () => ({ mutate: h.revokeMutate, isPending: false, error: null, reset: h.resetFn }),
+  useUpdateSkillRecord: () => ({
+    mutate: h.recordMutate,
+    isPending: false,
+    error: null,
+    reset: h.resetFn,
+  }),
+  useRevokeSkill: () => ({
+    mutate: h.revokeMutate,
+    isPending: false,
+    error: null,
+    reset: h.resetFn,
+  }),
 }));
 
 /**
@@ -532,8 +542,12 @@ describe("OperatorsPanel — the count line names what it counts (§19.77)", () 
     expect(countLine()).not.toContain(" of 4");
     // And the denominator is a real claim about two visible cells, not a number
     // the reader has no way to reconcile with the matrix under it.
-    expect(within(placeCell("Plant 1 › Line A › Cell A1")).getByText(/missing Forklift/)).toBeTruthy();
-    expect(within(placeCell("Plant 1 › Line A › Cell A2")).getByText(/missing Welding/)).toBeTruthy();
+    expect(
+      within(placeCell("Plant 1 › Line A › Cell A1")).getByText(/missing Forklift/),
+    ).toBeTruthy();
+    expect(
+      within(placeCell("Plant 1 › Line A › Cell A2")).getByText(/missing Welding/),
+    ).toBeTruthy();
   });
 });
 
@@ -762,7 +776,9 @@ describe("OperatorsPanel — the training catalogue is not managed here (stage 2
     expect(within(chooser).getByRole("button", { name: "Record" })).toBeTruthy();
     fireEvent.click(dialogButton("Record"));
     // The chooser hands off to the record popover in its place.
-    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Record training" })).toBeTruthy();
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Record training" }),
+    ).toBeTruthy();
   });
 
   it("O20: a cell they can already work says so, and offers nothing to record", () => {
@@ -862,7 +878,9 @@ describe("OperatorsPanel — recording a training from the place that needs it (
     // It is HELD, so the popover edits (Save changes) and shows what is stored.
     expect(popField("Certified on").value).toBe("2026-03-14");
     expect(popField("Expires").value).toBe("2000-01-01");
-    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Save changes" })).toBeTruthy();
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save changes" }),
+    ).toBeTruthy();
   });
 
   it("O23 ⭐⭐ recording a missing training sends all three facts, with the org, in one gesture", () => {

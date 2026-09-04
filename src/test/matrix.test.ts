@@ -12,7 +12,13 @@ import type { OperatorRecord, OperatorSkillRecord, SkillRecord } from "@/lib/api
 
 /* ----------------------------- fixture builders ----------------------------- */
 
-function node(id: string, parentId: string | null, path: string, levelId: string, sortOrder = 0): BoardNode {
+function node(
+  id: string,
+  parentId: string | null,
+  path: string,
+  levelId: string,
+  sortOrder = 0,
+): BoardNode {
   return { id, parentId, levelId, name: id.toUpperCase(), path, sortOrder, active: true };
 }
 function level(id: string, name: string, position: number): HierarchyLevel {
@@ -22,7 +28,15 @@ function skill(id: string, name: string, siteNodeId: string, active = true): Ski
   return { id, name, siteNodeId, active, externalId: null };
 }
 function op(id: string, displayName: string, siteNodeId: string, active = true): OperatorRecord {
-  return { id, displayName, employeeRef: null, active, siteNodeId, source: "manual", externalId: null };
+  return {
+    id,
+    displayName,
+    employeeRef: null,
+    active,
+    siteNodeId,
+    source: "manual",
+    externalId: null,
+  };
 }
 function osk(operatorId: string, skillId: string, expiresAt: string | null): OperatorSkillRecord {
   return { operatorId, skillId, expiresAt, certifiedAt: null, signedOffBy: null };

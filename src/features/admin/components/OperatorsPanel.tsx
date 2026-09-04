@@ -642,12 +642,16 @@ export function OperatorsPanel() {
   const matrixRemove = () => {
     if (selected === null || editingCell === null) return;
     setNotice(null);
-    revokeSkill.mutate({ operatorId: selected.id, skillId: editingCell.skillId }, { onSuccess: closeCell });
+    revokeSkill.mutate(
+      { operatorId: selected.id, skillId: editingCell.skillId },
+      { onSuccess: closeCell },
+    );
   };
   const matrixSaving = grantSkill.isPending || updateRecord.isPending || revokeSkill.isPending;
   const matrixError = grantSkill.error ?? updateRecord.error ?? revokeSkill.error ?? null;
   const editingSkill = editingCell === null ? null : (skillById.get(editingCell.skillId) ?? null);
-  const editingPlaceRow = editingPlace === null ? null : (placeByNode.get(editingPlace.nodeId) ?? null);
+  const editingPlaceRow =
+    editingPlace === null ? null : (placeByNode.get(editingPlace.nodeId) ?? null);
 
   if (loading) {
     return (
@@ -1006,12 +1010,15 @@ export function OperatorsPanel() {
                 The scheduler checks this again when work is assigned; this is what today&rsquo;s
                 trainings, requirements and areas imply. A place marked &ldquo;⚠&rdquo; is outside
                 the area this person belongs to — whoever schedules there can still put them on it,
-                but has to record a reason for it. <b>Click a cell to see what a cross needs and
-                record the training right there</b> — an operator cannot work a place until they hold
-                its trainings, so this grid is both questions at once.
+                but has to record a reason for it.{" "}
+                <b>Click a cell to see what a cross needs and record the training right there</b> —
+                an operator cannot work a place until they hold its trainings, so this grid is both
+                questions at once.
               </p>
               {visiblePlaces.length === 0 || placesColumns.cols.length === 0 ? (
-                <p className={styles.status}>There are no schedulable places in the hierarchy yet.</p>
+                <p className={styles.status}>
+                  There are no schedulable places in the hierarchy yet.
+                </p>
               ) : (
                 <>
                   <div className={styles.placeLegend}>
@@ -1076,7 +1083,12 @@ export function OperatorsPanel() {
                                   title={`${place.label} — ${why}`}
                                   onClick={(e) => openPlace(c.id, e.currentTarget)}
                                 >
-                                  <MatrixChip state={chip.state} glyph={chip.glyph} title="" ariaHidden />
+                                  <MatrixChip
+                                    state={chip.state}
+                                    glyph={chip.glyph}
+                                    title=""
+                                    ariaHidden
+                                  />
                                   <span className={styles.srHint}>
                                     {place.label}: {why}
                                   </span>
@@ -1123,56 +1135,57 @@ export function OperatorsPanel() {
                   onClose={() => setEditingPlace(null)}
                   title={editingPlaceRow.name}
                 >
-                    <div className={cellStyles.popWhat}>
-                      {PLACE_CHIP[placeVerdict(editingPlaceRow)].label}
-                    </div>
-                    {placeVerdict(editingPlaceRow) === "outside-area" && (
-                      <p className={styles.placePopNote}>
-                        {editingPlaceRow.reasons.join(" · ")}
-                      </p>
-                    )}
-                    {editingPlaceRow.missing.length === 0 && editingPlaceRow.expiring.length === 0 ? (
-                      <p className={styles.placePopNote}>
-                        {placeVerdict(editingPlaceRow) === "outside-area"
-                          ? "Their trainings are in order for this cell."
-                          : "Trained for this cell."}
-                      </p>
-                    ) : (
-                      <ul className={styles.placePopList}>
-                        {editingPlaceRow.missing.map((m) => (
-                          <li key={m.skillId} className={styles.placePopItem}>
-                            <span>
-                              {m.name} — <b className={styles.matrixGap}>not trained</b>
-                            </span>
-                            {trainingApplic(m.skillId) ? (
-                              <button
-                                type="button"
-                                className={styles.small}
-                                onClick={() => recordFromPlace(m.skillId)}
-                              >
-                                Record
-                              </button>
-                            ) : (
-                              <span className={styles.placePopElsewhere}>owned elsewhere</span>
-                            )}
-                          </li>
-                        ))}
-                        {editingPlaceRow.expiring.map((e) => (
-                          <li key={e.skillId} className={styles.placePopItem}>
-                            <span>
-                              {e.name} — <b className={styles.matrixWarn}>expires {formatCalendarDay(e.expiresAt, dateFormat)}</b>
-                            </span>
+                  <div className={cellStyles.popWhat}>
+                    {PLACE_CHIP[placeVerdict(editingPlaceRow)].label}
+                  </div>
+                  {placeVerdict(editingPlaceRow) === "outside-area" && (
+                    <p className={styles.placePopNote}>{editingPlaceRow.reasons.join(" · ")}</p>
+                  )}
+                  {editingPlaceRow.missing.length === 0 && editingPlaceRow.expiring.length === 0 ? (
+                    <p className={styles.placePopNote}>
+                      {placeVerdict(editingPlaceRow) === "outside-area"
+                        ? "Their trainings are in order for this cell."
+                        : "Trained for this cell."}
+                    </p>
+                  ) : (
+                    <ul className={styles.placePopList}>
+                      {editingPlaceRow.missing.map((m) => (
+                        <li key={m.skillId} className={styles.placePopItem}>
+                          <span>
+                            {m.name} — <b className={styles.matrixGap}>not trained</b>
+                          </span>
+                          {trainingApplic(m.skillId) ? (
                             <button
                               type="button"
                               className={styles.small}
-                              onClick={() => recordFromPlace(e.skillId)}
+                              onClick={() => recordFromPlace(m.skillId)}
                             >
-                              Renew
+                              Record
                             </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                          ) : (
+                            <span className={styles.placePopElsewhere}>owned elsewhere</span>
+                          )}
+                        </li>
+                      ))}
+                      {editingPlaceRow.expiring.map((e) => (
+                        <li key={e.skillId} className={styles.placePopItem}>
+                          <span>
+                            {e.name} —{" "}
+                            <b className={styles.matrixWarn}>
+                              expires {formatCalendarDay(e.expiresAt, dateFormat)}
+                            </b>
+                          </span>
+                          <button
+                            type="button"
+                            className={styles.small}
+                            onClick={() => recordFromPlace(e.skillId)}
+                          >
+                            Renew
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </Popover>
               )}
 

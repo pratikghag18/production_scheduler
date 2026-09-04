@@ -603,7 +603,9 @@ describe("ShiftsPanel — nothing is left holding an id the filter removed", () 
     fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
     expect(screen.getByRole("heading", { name: "Shifts in this pattern" })).toBeTruthy();
     expect(
-      within(patternRow("Zulu")).getByRole("button", { name: "Cancel" }).getAttribute("aria-expanded"),
+      within(patternRow("Zulu"))
+        .getByRole("button", { name: "Cancel" })
+        .getAttribute("aria-expanded"),
     ).toBe("true");
   });
 

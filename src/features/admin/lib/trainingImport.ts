@@ -316,7 +316,8 @@ export function planTrainingImport(
       // row gives one that DIFFERS from what the training already carries. A blank
       // row, or an unchanged number, is a pure no-op (documentNumber: null), the
       // same way an update never re-assigns a plant the training already owns.
-      const setDoc = docNumber !== null && docNumber !== existingSkill.externalId ? docNumber : null;
+      const setDoc =
+        docNumber !== null && docNumber !== existingSkill.externalId ? docNumber : null;
       rows.push({
         line,
         values,

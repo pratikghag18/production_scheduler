@@ -20,7 +20,13 @@ import type { CellState } from "../lib/matrix";
 import styles from "./matrixCells.module.css";
 
 /** Legend order — worst-to-clear so a reader scans the problems first. */
-export const STATE_ORDER: readonly CellState[] = ["trained", "expiring", "expired", "missing", "na"];
+export const STATE_ORDER: readonly CellState[] = [
+  "trained",
+  "expiring",
+  "expired",
+  "missing",
+  "na",
+];
 
 /** ⚠️ THE GLYPHS ARE THE MAINTAINER'S DECISION. `×` = not trained (the intuitive
  *  read), `↻` = expired (renewal overdue). The two must never be confused. */
@@ -66,7 +72,13 @@ export function MatrixChip({
   const mark = glyph ?? STATE_GLYPH[state];
   if (onClick) {
     return (
-      <button type="button" className={`${cls} ${styles.cellBtn}`} title={title} aria-label={ariaLabel} onClick={onClick}>
+      <button
+        type="button"
+        className={`${cls} ${styles.cellBtn}`}
+        title={title}
+        aria-label={ariaLabel}
+        onClick={onClick}
+      >
         {mark}
       </button>
     );
@@ -160,40 +172,50 @@ export function RecordPopover({
           {whatRef ? ` · ${whatRef}` : ""}
         </div>
         <label className={styles.popField}>
-        <span>Certified on</span>
-        <input type="date" value={certified} disabled={saving} onChange={(e) => setCertified(e.target.value)} />
-      </label>
-      <label className={styles.popField}>
-        <span>Expires</span>
-        <input type="date" value={expires} disabled={saving} onChange={(e) => setExpires(e.target.value)} />
-      </label>
-      <label className={styles.popField}>
-        <span>Signed off by</span>
-        <input
-          type="text"
-          value={signedBy}
-          placeholder="e.g. R. Silva"
-          disabled={saving}
-          onChange={(e) => setSignedBy(e.target.value)}
-        />
-      </label>
-      {error && (
-        <p className={styles.popError} role="alert">
-          {describeSchedulerError(error)}
-        </p>
-      )}
-      <div className={styles.popActions}>
-        <button type="button" className={styles.popPrimary} onClick={submit} disabled={saving}>
-          {held ? "Save changes" : "Record training"}
-        </button>
-        {held && (
-          <button type="button" className={styles.popDanger} onClick={onRemove} disabled={saving}>
-            Remove
-          </button>
+          <span>Certified on</span>
+          <input
+            type="date"
+            value={certified}
+            disabled={saving}
+            onChange={(e) => setCertified(e.target.value)}
+          />
+        </label>
+        <label className={styles.popField}>
+          <span>Expires</span>
+          <input
+            type="date"
+            value={expires}
+            disabled={saving}
+            onChange={(e) => setExpires(e.target.value)}
+          />
+        </label>
+        <label className={styles.popField}>
+          <span>Signed off by</span>
+          <input
+            type="text"
+            value={signedBy}
+            placeholder="e.g. R. Silva"
+            disabled={saving}
+            onChange={(e) => setSignedBy(e.target.value)}
+          />
+        </label>
+        {error && (
+          <p className={styles.popError} role="alert">
+            {describeSchedulerError(error)}
+          </p>
         )}
-        <button type="button" className={styles.popCancel} onClick={onClose} disabled={saving}>
-          Cancel
-        </button>
+        <div className={styles.popActions}>
+          <button type="button" className={styles.popPrimary} onClick={submit} disabled={saving}>
+            {held ? "Save changes" : "Record training"}
+          </button>
+          {held && (
+            <button type="button" className={styles.popDanger} onClick={onRemove} disabled={saving}>
+              Remove
+            </button>
+          )}
+          <button type="button" className={styles.popCancel} onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
         </div>
       </div>
     </Popover>

@@ -91,7 +91,10 @@ it("MP7: no org yet (the profile has not loaded) reads and writes nothing", () =
 });
 
 it("MP8 ⭐: a window stored out of range folds back onto the default on load", () => {
-  window.localStorage.setItem("ps.admin.matrix." + ORG, JSON.stringify({ window: 45, areaId: AREA }));
+  window.localStorage.setItem(
+    "ps.admin.matrix." + ORG,
+    JSON.stringify({ window: 45, areaId: AREA }),
+  );
   const view = loadMatrixView(ORG);
   expect(view.window).toBe(DEFAULT_EXPIRY_WINDOW);
   expect(view.areaId).toBe(AREA);

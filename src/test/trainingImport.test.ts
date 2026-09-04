@@ -286,11 +286,7 @@ describe("the document number column", () => {
   });
 
   it("D4: a blank document number leaves an insert's at null", () => {
-    const plan = planFrom(
-      "training name,plant,document number\nWelding,Plant A,",
-      [],
-      [PLANT_A],
-    );
+    const plan = planFrom("training name,plant,document number\nWelding,Plant A,", [], [PLANT_A]);
     expect(only(plan)).toEqual({
       kind: "insert",
       name: "Welding",

@@ -115,7 +115,11 @@ export function MatrixPanel() {
 
   // Write the whole remembered view through on any change; a caller passes only
   // the field it changed and the rest read from the current render's state.
-  const persist = (next: { window?: ExpiryWindow; areaId?: string | null; lineId?: string | null }) => {
+  const persist = (next: {
+    window?: ExpiryWindow;
+    areaId?: string | null;
+    lineId?: string | null;
+  }) => {
     saveMatrixView(orgId, {
       window: next.window ?? windowDays,
       areaId: next.areaId !== undefined ? next.areaId : areaId,
@@ -193,7 +197,9 @@ export function MatrixPanel() {
 
   // Every operator in scope, for the multi-select checklist.
   const opsInScope = model?.operators ?? [];
-  const pickedCount = pickedOps ? opsInScope.filter((o) => pickedOps.has(o.id)).length : opsInScope.length;
+  const pickedCount = pickedOps
+    ? opsInScope.filter((o) => pickedOps.has(o.id)).length
+    : opsInScope.length;
   const allPicked = pickedOps === null || pickedCount === opsInScope.length;
 
   const isPicked = (id: string) => pickedOps === null || pickedOps.has(id);
@@ -234,7 +240,9 @@ export function MatrixPanel() {
   const areaLabel = areas.length > 0 ? (levelNameByNode.get(areas[0].id) ?? "Area") : "Area";
   const lineLabel = lines.length > 0 ? (levelNameByNode.get(lines[0].id) ?? "Line") : "Line";
 
-  const scopeName = scopeNodeId ? (nodes.find((n) => n.id === scopeNodeId)?.name ?? "") : "everything you can see";
+  const scopeName = scopeNodeId
+    ? (nodes.find((n) => n.id === scopeNodeId)?.name ?? "")
+    : "everything you can see";
 
   // ---- record-in-place ----
   const operatorEditable = (o: OperatorRecord) =>
@@ -258,12 +266,17 @@ export function MatrixPanel() {
   };
   const doRevoke = () => {
     if (editing === null) return;
-    revoke.mutate({ operatorId: editing.operatorId, skillId: editing.skillId }, { onSuccess: closeEditor });
+    revoke.mutate(
+      { operatorId: editing.operatorId, skillId: editing.skillId },
+      { onSuccess: closeEditor },
+    );
   };
   const saving = grant.isPending || updateRecord.isPending || revoke.isPending;
   const saveError = grant.error ?? updateRecord.error ?? revoke.error ?? null;
-  const editingOp = editing !== null ? (opsInScope.find((o) => o.id === editing.operatorId) ?? null) : null;
-  const editingSkill = editing !== null ? (columns.cols.find((c) => c.id === editing.skillId) ?? null) : null;
+  const editingOp =
+    editing !== null ? (opsInScope.find((o) => o.id === editing.operatorId) ?? null) : null;
+  const editingSkill =
+    editing !== null ? (columns.cols.find((c) => c.id === editing.skillId) ?? null) : null;
 
   return (
     <div className={styles.panel}>
@@ -381,7 +394,12 @@ export function MatrixPanel() {
                     </th>
                   )}
                   {band.map((cell, i) => (
-                    <th key={i} className={styles.owner} colSpan={cell.colspan} rowSpan={cell.rowspan}>
+                    <th
+                      key={i}
+                      className={styles.owner}
+                      colSpan={cell.colspan}
+                      rowSpan={cell.rowspan}
+                    >
                       {cell.label}
                     </th>
                   ))}
@@ -425,7 +443,9 @@ export function MatrixPanel() {
                               <MatrixChip
                                 state={st}
                                 title={title}
-                                onClick={clickable ? (e) => openEditor(o, t, e.currentTarget) : undefined}
+                                onClick={
+                                  clickable ? (e) => openEditor(o, t, e.currentTarget) : undefined
+                                }
                               />
                             </td>
                           );
@@ -454,9 +474,11 @@ export function MatrixPanel() {
           whatRef={editingSkill.externalId}
           held={held}
           initial={{
-            certifiedAt: holdings.get(`${editing.operatorId}:${editing.skillId}`)?.certifiedAt ?? null,
+            certifiedAt:
+              holdings.get(`${editing.operatorId}:${editing.skillId}`)?.certifiedAt ?? null,
             expiresAt: holdings.get(`${editing.operatorId}:${editing.skillId}`)?.expiresAt ?? null,
-            signedOffBy: holdings.get(`${editing.operatorId}:${editing.skillId}`)?.signedOffBy ?? null,
+            signedOffBy:
+              holdings.get(`${editing.operatorId}:${editing.skillId}`)?.signedOffBy ?? null,
           }}
           position={{ top: editing.top, left: editing.left }}
           saving={saving}

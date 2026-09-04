@@ -391,7 +391,8 @@ export function ProductsPanel() {
   // ⭐ D116: the plant a site admin's create lands in. `newDraft.nodeId` once
   // chosen, else the sole admin plant (so a one-plant admin never has to pick),
   // else empty — which `submitNew` refuses before it writes.
-  const chosenCreateNode = newDraft.nodeId || (adminPlantOptions.length === 1 ? adminPlantOptions[0].value : "");
+  const chosenCreateNode =
+    newDraft.nodeId || (adminPlantOptions.length === 1 ? adminPlantOptions[0].value : "");
 
   function submitNew() {
     if (profile === null) return;

@@ -299,7 +299,11 @@ export function buildColumns(
         j++;
       }
       const allTerminal = ann.slice(i, j).every((a) => a.bp.length === b + 1);
-      row.push({ label: ann[i].bp[b].label, colspan: j - i, rowspan: allTerminal ? maxBands - b : 1 });
+      row.push({
+        label: ann[i].bp[b].label,
+        colspan: j - i,
+        rowspan: allTerminal ? maxBands - b : 1,
+      });
       i = j;
     }
     bands.push(row);
@@ -387,12 +391,23 @@ export function buildMatrix(input: MatrixInput): MatrixModel {
     const ownerPath = pathOf(skill.siteNodeId);
     if (ownerPath === undefined) return "na";
     const applies = trainingApplies(ownerPath, op.path);
-    return cellStateFor(holdings.get(`${operatorId}:${skillId}`), applies, input.today, input.windowDays);
+    return cellStateFor(
+      holdings.get(`${operatorId}:${skillId}`),
+      applies,
+      input.today,
+      input.windowDays,
+    );
   };
 
   // Group operators into teams by their branch node, ordered by the branch's
   // path, and label each by its ancestor names UNDER the header root.
-  const root = columns.cols.length > 0 ? lowestCommonAncestor(skills.map((s) => s.siteNodeId), byId) : null;
+  const root =
+    columns.cols.length > 0
+      ? lowestCommonAncestor(
+          skills.map((s) => s.siteNodeId),
+          byId,
+        )
+      : null;
   const teamLabel = (branchId: string): string => {
     if (root === null) return byId.get(branchId)?.name ?? "";
     const chain = chainOf(branchId, byId); // branch..root
