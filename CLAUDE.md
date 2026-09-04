@@ -11,8 +11,21 @@ blur: the developer builds and fixes, the tester judges and files. A personal, g
    stand, `next` is the queue, `requirements` is what the product must do and what proves it,
    `findings` is everything that went wrong before. `docs/plan-format.md` explains the fields.
    `docs/plan.html` is generated from it — open it to read, never edit it.
-2. **`docs/defects/` — read every file whose `status` is `open` or `reopened` BEFORE starting new
-   work.** A filed defect outranks the next queue item unless the maintainer says otherwise.
+2. **The defects inbox runs by itself at session start** (`scripts/defects-inbox.mjs`, a
+   SessionStart hook in `.claude/settings.json`): it merges the `tester` branch into this one and
+   prints every defect in `docs/defects/` whose `status` is `open`, `reopened` or `fix-claimed`.
+   Read its output; it is the first thing in your context. If it says the merge was skipped
+   (dirty tree) or aborted (conflict), do that merge by hand before anything else — a conflict
+   is almost always both sides adding a session entry at the top of `docs/plan.yaml`: keep both,
+   newest first, then `npm run plan -- --check`. A filed defect outranks the next queue item
+   unless the maintainer says otherwise.
+   **Then, before touching any code, tell the maintainer what you found — every time, without
+   being asked.** For each open defect, three short lines in plain language: what a person using
+   the app would see go wrong, which rule it breaks (the requirement's title, not its id), and
+   what the tester suspects the cause is, marked as a suspicion. Then say whether you agree with
+   the tester's call. If the folder is empty after the merge, one line: "Merged tester; no open
+   defects." Do not start fixing until this has been said; the maintainer is the tiebreaker when
+   you and the tester disagree.
 3. `docs/design-plan.md` is the archive of _why_. Open it at the `§` or `D` number a plan entry
    cites; do not read it from the top.
 4. **Confirm the baseline before touching code:** `npm run test` must report exactly the count
