@@ -2439,7 +2439,7 @@ requirements:
     root, no run using a product owned outside it, and one supervisor (Ana) granted a single line. The
     empty "Standard Plant" structure is kept as what a new root copies.
   verified_by: []
-  status: uncovered
+  status: contradicted
   note: >-
     A development fixture rather than product behaviour; its own file ends in ten assertions, which are
     not a suite case.
@@ -7554,6 +7554,67 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 55
+  date: 2026-09-04
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1791
+    app_test_files: 61
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Judged 2a2b6cd — the status removals (R-322, R-323, R-324) and migrations 0043 and 0044. The
+    runners are clean: `npm run test` reported "1788 passed (1788)" in 60 files, exactly the plan,
+    before my pin and 1791 in 61 after it; all 29 SQL files pass including 66 and 67; e2e green;
+    typecheck and lint clean.
+    ONE DEFECT, AND IT IS OUTSIDE THE MIGRATION SET. DEF-0006: `supabase/dev_demo.sql` still writes
+    `runs.status`, which 0044 dropped, so the demo world stops building. Run against the throwaway
+    scratch database it dies at line 431 with "column status of relation runs does not exist" — after
+    the plants, structures, operators and products are in, and before the runs and their assignments.
+    That leaves a HALF-BUILT world rather than a clean refusal: the app comes up, the five demo
+    sign-ins work, and the board is simply empty, which reads as a product with no data. The live dev
+    database is already showing 0 runs across all three plants, and dev_demo is the only thing that
+    creates them. Nothing went red because that file is on no runner's path — the SQL harness builds
+    from migrations and `seed.sql`, vitest never touches SQL, and R-D112 had `verified_by: []`. 0044
+    was careful about the four functions and the constraint that named the column, and the fixture
+    outside the migration set was the copy nobody grepped. A pin is filed as a text audit, in the
+    shape `scaleAudit` and `dateSeam` already use.
+    I CHECKED THE DANGEROUS PARTS AND THEY HOLD. The rebuilt `runs_no_overlap_on_node` is the 0003
+    original with only the `where (status <> 'cancelled')` predicate gone — same name, columns and
+    operators, extracted and compared rather than read from the comment. `operator_peak_load` differs
+    from its 0009 definition by exactly two deleted lines, both the status clause, and
+    `check_operator_capacity` by exactly one; neither was retyped. 0043 deletes cancelled ASSIGNMENT
+    rows before dropping the column, so a soft-deleted assignment cannot come back as a live one
+    counting against capacity — that was the failure I went looking for and it is closed. R-322 is
+    right on the screen: the assignment pop-up shows Efficiency, Target, the derived-target hint,
+    Delete, Close and Save, no status control, and none of the status vocabulary anywhere in it.
+    ⚠️ ONE PLACE WHERE 0044'S SQL IS WIDER THAN ITS OWN PROSE. The header says any CANCELLED run is
+    deleted before the constraint is rebuilt; the statement is `DELETE FROM runs WHERE status <>
+    'planned'`, which also takes 'active' and 'done'. Harmless if 0029's finding still holds that
+    nothing ever advanced a run — and it did here — but the comment and the code should say the same
+    thing, because the next reader checks the premise against the wrong sentence. Not filed; the
+    developer decides. Also cosmetic: 0043 carried the "LATENT SHORT-CIRCUIT" comment about
+    `app_guard_assignment_scope` across without the function, where it now reads as if it introduces
+    `capacity_probe`.
+    ⭐ I WAS WRONG ABOUT format:check AND THE DEVELOPER WAS RIGHT. I called it "a Prettier gate, not
+    one of the tracked baseline numbers" twice, which was true of the numbers and the wrong conclusion
+    about the workflow: it exits non-zero two steps before `test`, so every CI run died there and
+    never reached the e2e fix. Thirteen committed files had real violations. I asserted CI was
+    unaffected without measuring it. I have measured it now — cloned the tip with
+    `core.autocrlf=false`, which is what a Linux runner checks out, and ran Prettier there: "All
+    matched files use Prettier code style!" So CI is green and the 270 files this run still reports
+    locally are the CRLF working-tree artifact only. That measurement is what the earlier claim should
+    have rested on.
+    AND THE db:types WARNING IS NOW BACKWARDS. The regenerated file and the committed one differ by
+    nothing but line endings, so the drift is gone — but the phantom `node_product_rollup` was
+    regenerated INTO the committed types rather than dropped from the database. The types now describe
+    a table no migration creates, so a clean `db:reset` will make `db:types` produce a DELETION and the
+    warning will fire on the correct state. The action is the same as it was two runs ago and now has
+    a concrete form: drop the table (a migration if it could exist anywhere else, otherwise just
+    locally) and regenerate.
+  shipped: []
 - id: 54
   date: 2026-09-04
   title: No run carries a status either, and the overlap rule loses its exception (R-324)
