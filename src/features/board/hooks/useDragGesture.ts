@@ -340,6 +340,29 @@ export function useDragGesture(args: UseDragGestureArgs) {
     }
   }, [args.sessionUserId]);
 
+  // --- DEF-0002 second door: the ROOT changed, so every popover is stale. ---
+  // ⭐ EVERY KIND, not just "split", which is where this differs from T25
+  // above. A popover names a `nodeId` in the board window it was opened over;
+  // change the selected place and that node is not on the screen any more —
+  // its lane, its shift times and its cell are all from somewhere else.
+  //
+  // ⚠️ THIS IS THE HALF OF DEF-0002 THE PICKER FIX DID NOT REACH, and it was
+  // found by driving it rather than by reading it: with the create popover
+  // open on Plant A, switching the picker to Plant B left the popover up, and
+  // its Product dropdown went from Plant A's four parts to ALL THIRTEEN in the
+  // company — because `BoardPage`'s `offeredProducts` cannot resolve a Plant A
+  // node in Plant B's map and fell back to the whole catalogue. Scoping the
+  // predicate fixed the reported path; this closes the one three clicks away.
+  // Nothing is sent: an open popover has written nothing yet.
+  const lastRootPathRef = useRef(args.rootPath);
+  useEffect(() => {
+    if (lastRootPathRef.current !== args.rootPath) {
+      lastRootPathRef.current = args.rootPath;
+      if (dragRef.current) setActiveDrag(null);
+      setPopover(null);
+    }
+  }, [args.rootPath]);
+
   const revertLabel = useCallback(
     (subject: DragSubject): string => {
       if (subject.kind === "run") {

@@ -292,14 +292,29 @@ export default function BoardPage() {
     const active = boardQuery.data.products.filter((p) => p.active);
     // D115: a product is offered where ANY of its plants covers this cell, so
     // this uses `productsOfferedHere` (the list) rather than `offeredHere` (a
-    // single owner, still right for operators below). FAILS OPEN per place on a
-    // node this client cannot resolve a path for, matching `offeredAt`'s default
-    // (scope.ts's header): "I cannot tell" offers and lets the server decide,
-    // because hiding is silent and permanent while a refusal is loud and lands
-    // on the write-error contract. A part with no places is offered nowhere.
-    if (index === null) return active;
+    // single owner, still right for operators below).
+    //
+    // ⭐⭐ THE MAP HANDED IN IS THIS PLANT'S SUBTREE, AND THAT IS WHY THIS DOES
+    // NOT FAIL OPEN (DEF-0002). `index.nodeById` is `board_window`'s `nodes`,
+    // scoped to the selected root — the same set `operatorPool` below treats as
+    // "this plant". `productOfferedAt` used to offer any part whose place it
+    // could not resolve, on `offeredAt`'s "I cannot tell" reasoning; but a
+    // different plant's node is NEVER in this map, so on Plant A's board every
+    // Plant B and Plant C part was offered and every one of them was refused by
+    // the database with `not_offered_here`. A place outside this map is a real
+    // "not this plant", exactly as an operator's owner outside it is. A part
+    // with no places at all is still offered nowhere.
+    //
+    // ⚠️ AND THE TWO FALLBACKS BELOW RETURN NOTHING, NOT EVERYTHING. They used
+    // to hand back the whole catalogue when the board index was missing or the
+    // popover's cell could not be found in it — which is the defect above by
+    // another route, since "I cannot locate this cell" is exactly when the
+    // offer is least trustworthy. A popover whose node has left the map is
+    // closed by `useDragGesture` now, so these are a net under that; an empty
+    // list refuses what the server would refuse anyway.
+    if (index === null) return [];
     const path = index.nodeById.get(createNodeId)?.path;
-    if (path === undefined) return active;
+    if (path === undefined) return [];
     return productsOfferedHere(active, path, index.nodeById);
   }, [boardQuery.data, index, createNodeId]);
 

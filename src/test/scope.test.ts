@@ -181,7 +181,10 @@ describe("scope: the board pool is membership in the scoped nodes (ownedInScope)
 
   it("XO3: a narrower scope keeps fewer", () => {
     const line1Scope = new Set([LINE1.id, CELL1.id]);
-    expect(ownedInScope(PEOPLE, line1Scope).map((p) => p.name)).toEqual(["B at a line", "B at a cell"]);
+    expect(ownedInScope(PEOPLE, line1Scope).map((p) => p.name)).toEqual([
+      "B at a line",
+      "B at a cell",
+    ]);
   });
 
   it("XO4: preserves the order it was given", () => {
@@ -204,10 +207,11 @@ describe("scope: a product is offered from a LIST of places (D115)", () => {
     expect(productOfferedAt(places, CELL10.path, BY_ID)).toBe(false);
   });
 
-  it("XP2: ⭐ an EMPTY list is offered NOWHERE — the honest zero, not fail-open", () => {
+  it("XP2: ⭐ an EMPTY list is offered NOWHERE — the honest zero", () => {
     // A part assigned to no plant is a legitimate state and must be offered at no
-    // cell. `some` over `[]` is false, which is exactly right — contrast a single
-    // UNREADABLE owner, which fails OPEN (XP4). Emptiness is known, not unknown.
+    // cell. `some` over `[]` is false, which is exactly right. (This used to be
+    // written as the contrast with an unreadable place, which "failed open"; that
+    // half is gone — see XP4 — and emptiness is simply still known, not unknown.)
     expect(productOfferedAt([], CELL1.path, BY_ID)).toBe(false);
     expect(productOfferedAt([], PLANT.path, BY_ID)).toBe(false);
   });
@@ -218,12 +222,21 @@ describe("scope: a product is offered from a LIST of places (D115)", () => {
     expect(productOfferedAt([LINE10.id, PLANT.id], CELL1.path, BY_ID)).toBe(true);
   });
 
-  it("XP4: a place this client cannot resolve FAILS OPEN, per place", () => {
-    // Same direction as offeredAt (X11): "I cannot tell" offers and lets the
-    // server decide. One unreadable place is enough to offer, since it might cover.
-    expect(productOfferedAt(["n-hidden"], CELL1.path, BY_ID)).toBe(true);
-    // ...but a resolvable place that does NOT cover, alongside no others, hides.
+  it("XP4: ⚠ (inverted by DEF-0002) a place NOT IN THE MAP is NOT offered — it fails CLOSED", () => {
+    // ⭐ THIS CASE USED TO ASSERT THE OPPOSITE, AND IT WAS PINNING THE BUG. It
+    // read `productOfferedAt(["n-hidden"], CELL1.path, BY_ID)).toBe(true)` on
+    // `offeredAt`'s reasoning: an unresolvable owner means "I cannot tell", so
+    // offer it and let the server refuse. That reasoning is about a map narrowed
+    // by PERMISSION. The only caller of this function is the board's create
+    // popover, whose map is `board_window`'s nodes — the plant the reader PICKED
+    // — so "not in the map" there means "made in another plant", which is an
+    // answer and not an absence of one. The contract changed; the old case was
+    // not describing a behaviour anyone wanted, it was describing the defect.
+    expect(productOfferedAt(["n-hidden"], CELL1.path, BY_ID)).toBe(false);
+    // A resolvable place that does not cover is unchanged: still not offered.
     expect(productOfferedAt([PLANT2.id], CELL1.path, BY_ID)).toBe(false);
+    // And one unresolvable place does not spoil a good one beside it.
+    expect(productOfferedAt(["n-hidden", LINE1.id], CELL1.path, BY_ID)).toBe(true);
   });
 
   it("XP5: productsOfferedHere filters the catalogue and preserves order", () => {
@@ -234,6 +247,91 @@ describe("scope: a product is offered from a LIST of places (D115)", () => {
       { sku: "D", siteNodeIds: [] }, // offered nowhere
     ];
     expect(productsOfferedHere(items, CELL1.path, BY_ID).map((i) => i.sku)).toEqual(["A", "C"]);
+  });
+});
+
+/**
+ * DEF-0002 — the board's picker asks this question against ONE PLANT'S MAP.
+ *
+ * ⭐⭐ THE MAP BELOW IS THE POINT OF THIS WHOLE BLOCK. Everything above uses
+ * `BY_ID`, which holds the entire org including Plant 2 — the shape an ADMIN
+ * screen has. The board does not: `board_window` returns `nodes` scoped to the
+ * selected root, so while Plant 1 is picked the map holds Plant 1's subtree and
+ * nothing else. Asked against that map, "I could not resolve this place" does
+ * not mean "I cannot tell", it means "another plant" — and the version that
+ * offered it anyway put eight parts belonging to Plant B and Plant C into Plant
+ * A's Product dropdown, each of which the database refused with
+ * `not_offered_here` the moment Create was pressed.
+ *
+ * The assertions are written as what a person sees in that dropdown, because
+ * that is where the defect was reported from.
+ */
+describe("scope: the board's product picker is scoped to the plant on screen (DEF-0002)", () => {
+  /** Exactly what `board_window` returns while Plant 1 is the selected root. */
+  const PLANT1_BOARD = scopeIndex([PLANT, ASSY, LINE1, LINE10, CELL1, CELL10]);
+
+  const CATALOGUE = [
+    { sku: "Housing A", siteNodeIds: [PLANT.id] },
+    { sku: "Line 1 Sub A", siteNodeIds: [LINE1.id] },
+    { sku: "Line 10 Frame A", siteNodeIds: [LINE10.id] },
+    { sku: "Housing B", siteNodeIds: [PLANT2.id] },
+    { sku: "Common Fastener", siteNodeIds: [PLANT.id, PLANT2.id] },
+  ];
+
+  const dropdownAtCell1 = () =>
+    productsOfferedHere(CATALOGUE, CELL1.path, PLANT1_BOARD).map((i) => i.sku);
+
+  it("XP6 ⭐ a part made only at ANOTHER plant is not in the dropdown", () => {
+    // The filed reproduction: on Plant A's board, Cell 1, the picker listed
+    // Housing B among twelve entries and Create returned HTTP 409
+    // `not_offered_here`. Plant 2's node is not in this map at all, which is the
+    // whole reason the old code offered it.
+    expect(dropdownAtCell1()).not.toContain("Housing B");
+  });
+
+  it("XP7 ⭐ a part made at THIS plant is still in the dropdown — the fix cuts, it does not empty", () => {
+    // Both the plant-root part and the line part must survive, or the fix has
+    // traded a picker full of refusals for a picker with nothing in it. A part
+    // made in several plants, one of which is this one, stays too: the union
+    // still holds, and Common Fastener is the part the tester saw correctly
+    // listed on every plant's board.
+    expect(dropdownAtCell1()).toContain("Housing A");
+    expect(dropdownAtCell1()).toContain("Line 1 Sub A");
+    expect(dropdownAtCell1()).toContain("Common Fastener");
+  });
+
+  it("XP8 ⚠ a part made at this plant but on ANOTHER line is still correctly absent", () => {
+    // ⭐ THE HALF THAT MEMBERSHIP ALONE WOULD GET WRONG. Line 10 IS in this
+    // board's map, so a test that only asked "is the place one of my nodes?"
+    // would offer Line 10's part at a Line 1 cell. The tester recorded that this
+    // half was already right — "Area 2 Frame A" was correctly absent from Plant
+    // A's list — and it must stay right: the predicate is membership AND the
+    // path compare, never one of them.
+    expect(dropdownAtCell1()).not.toContain("Line 10 Frame A");
+    // Said the other way round, so the case cannot pass on an empty dropdown:
+    expect(dropdownAtCell1()).toEqual(["Housing A", "Line 1 Sub A", "Common Fastener"]);
+  });
+
+  it("XP9 ⚠ a board rooted BELOW a plant still offers its own parts — nothing legitimately offerable disappears", () => {
+    // ⭐ THE QUESTION TO ANSWER BEFORE TURNING A FAIL-OPEN INTO A FAIL-CLOSED:
+    // is there a part the server WOULD accept that now vanishes? A supervisor's
+    // board opens on their department, not a plant (`visible_board_roots` is
+    // "every node you can read whose parent you cannot"), so their map is the
+    // department's subtree and the plant ABOVE it is missing — missing for a
+    // PERMISSION reason, the one case the file header's fail-open was written
+    // for. It still cannot bite here: the place rows above a reader's grant are
+    // dropped by `product_sites_select` (`app_can_read_node`, downward only)
+    // before they reach this client, so such a part arrives with an EMPTY places
+    // list and was already offered nowhere (XP2) — this change does not move it.
+    // What must keep working is the department's own parts, and they do.
+    const ASSY_BOARD = scopeIndex([ASSY, LINE1, LINE10, CELL1, CELL10]);
+    const offered = productsOfferedHere(CATALOGUE, CELL1.path, ASSY_BOARD).map((i) => i.sku);
+    expect(offered).toContain("Line 1 Sub A");
+    expect(offered).not.toContain("Housing B");
+    // The plant-owned parts are the ones whose place sits above this root. They
+    // read as absent HERE because this fixture hands over a place the client
+    // could not have read; the app never sees that pair, per the note above.
+    expect(offered).not.toContain("Housing A");
   });
 });
 

@@ -145,9 +145,13 @@ function fakePointerEvent(clientX: number, clientY = 0, altKey = false) {
   } as unknown as ReactPointerEvent;
 }
 
-function baseArgs(index: BoardIndex, sessionUserId: string | null = "user-1"): UseDragGestureArgs {
+function baseArgs(
+  index: BoardIndex,
+  sessionUserId: string | null = "user-1",
+  rootPath = "plant_1",
+): UseDragGestureArgs {
   return {
-    rootPath: "plant_1",
+    rootPath,
     from: WINDOW_START,
     to: new Date(WINDOW_START.getTime() + WINDOW_MINUTES * 60_000),
     index,
@@ -289,5 +293,47 @@ describe("useDragGesture", () => {
     expect(result.current.activeDrag).toBe(null);
     expect(api.updateRunFields).not.toHaveBeenCalled();
     expect(api.createRun).not.toHaveBeenCalled();
+  });
+
+  /**
+   * DEF-0002, the half the picker fix did not reach.
+   *
+   * ⭐ FOUND BY DRIVING IT, NOT BY READING IT. `productOfferedAt` now scopes the
+   * create popover's Product list to the plant on screen, which fixed the
+   * reported path. But the popover itself survived a change of place: opened
+   * over Plant A and then switching the picker to Plant B left it up, and its
+   * dropdown went from Plant A's four parts to all thirteen in the company —
+   * `BoardPage` cannot resolve a Plant A node inside Plant B's map, and its
+   * fallback handed back the whole catalogue. Every one of the nine strangers
+   * would have been refused by the database.
+   *
+   * ⚠️ EVERY KIND OF POPOVER, WHICH IS WHERE THIS DIFFERS FROM T13/T25 ABOVE.
+   * An identity change closes only a "split", by that case's own literal text.
+   * A ROOT change invalidates them all: a popover names a node in the window it
+   * was opened over, and after the switch that node is not on the screen at all.
+   */
+  it("DEF-0002: changing the selected place closes the popover it was opened over", () => {
+    const index = buildIndex([]);
+    const { result, rerender } = renderHook(
+      (props: { rootPath: string }) => useDragGesture(baseArgs(index, "user-1", props.rootPath)),
+      { wrapper, initialProps: { rootPath: "plant_1" } },
+    );
+
+    // A click with no movement opens the edit popover over this run's cell —
+    // the same path the case above uses. Any kind but "split" proves the
+    // widening; "split" was already closed by T25 for a different reason.
+    act(() => {
+      result.current.beginBlockDrag(runDescriptor([runFixture], []), fakePointerEvent(500, 300));
+    });
+    act(() => {
+      result.current.endBlockDrag(fakePointerEvent(500, 300));
+    });
+    expect(result.current.popover?.kind).toBe("run");
+
+    // The reader picks a different place while it is open.
+    rerender({ rootPath: "plant_2" });
+
+    expect(result.current.popover).toBe(null);
+    expect(result.current.activeDrag).toBe(null);
   });
 });
