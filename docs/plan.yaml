@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: df1acfc
+  tip: 8d092ec
   baseline:
     app_tests: 1788
     app_test_files: 60
     tsc: 0
     eslint: 0
-    db_checks: 532
-    migrations: 44
+    db_checks: 540
+    migrations: 45
     mutations: 509 of 536
 tracks:
 - id: core
@@ -2441,6 +2441,28 @@ requirements:
   - kind: vitest
     file: src/test/adminNoGrants.test.tsx
     cases: N1-N5 (N1 the empty scope, N2 a failed read is not a permission, N5 no flash before the answer)
+  status: covered
+- id: R-326
+  title: A certification cannot outlive the plant it was earned in
+  source:
+  - session 58 conversation
+  stated_by: maintainer
+  claim: >-
+    The maintainer, asked whether cross-plant certifications should be possible at all: *"I do not want
+    cross-plant certifications."* `app_guard_operator_skill_scope` already refuses to CREATE a holder row
+    whose training and person sit on different branches; the same test must be applied when either END
+    moves. Moving a training to an owner that no longer covers one of its holders is refused, and so is
+    moving a person away from a training they hold. ⚠️ The test is the INSERT guard's own -- containment
+    in EITHER direction -- and not `app_owner_covers_in_org`, which is one-directional: a person owned by
+    a whole plant may legitimately hold a training owned by one of its lines, and a rehome guard using
+    the narrower test would refuse a move that leaves a pairing the insert guard permits.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/68_no_cross_plant_certification_test.sql
+    cases: >-
+      C0-C7 (C1/C2 the two refusals, C3 the case the shared predicate exists for -- a training moved
+      DOWN inside the plant while its holder owns the plant, which `app_owner_covers_in_org` would
+      wrongly refuse -- C4 its mirror, C5/C7 moves with nobody in the way, C6 the grant guard unchanged)
   status: covered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
@@ -5688,6 +5710,34 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-084
+  title: Nine migrations the database has but its own ledger does not
+  tag: A command nobody should run
+  status: open
+  found_by: agent
+  refs:
+  - R-326
+  story: >-
+    `npx supabase migration list --local` reports 0037 through 0045 with an empty `remote` column: the
+    local database's `supabase_migrations` ledger does not record them as applied. The schema plainly
+    HAS them -- 0044 dropped `runs.status`, which is exactly why the demo world stopped building
+    (DEF-0006). They were applied by hand rather than through the CLI, and the ledger was never told.
+    ⛔ THE HAZARD IS A COMMAND THAT LOOKS ROUTINE. `supabase migration up` reads that ledger and would
+    re-run all nine, in order, against a database that already has them. Most are `CREATE OR REPLACE`
+    and would merely be redundant. 0043 and 0044 are not: they carry `ALTER TABLE ... DROP COLUMN` and,
+    worse, `DELETE FROM assignments WHERE run_id IN (SELECT id FROM runs WHERE status <> 'planned')` --
+    a statement written to run ONCE, before the column went, and now referring to a column that does not
+    exist. The run would fail partway through, and what it did before failing depends on where it got to.
+    ⚠️ WHAT WAS DONE ABOUT IT HERE: nothing, deliberately, beyond not running the command. 0045 was
+    applied by hand the way its neighbours were, which keeps the machine consistent with itself and does
+    not pretend to fix the ledger. Reconciling it properly means deciding whether to mark the nine as
+    applied (`supabase migration repair`) or to rebuild the database from the migration set, and that is
+    a maintainer's call about their own working database, not something to slip into a session about
+    certifications.
+    ⭐ WHY IT IS FILED RATHER THAN MENTIONED. This is the third time in three sessions that a fact
+    about THIS MACHINE rather than about the code has cost something: the demo fixture on no runner, the
+    phantom table no migration created, and now a ledger that disagrees with the schema. None of them
+    could go red in CI, because none of them exist in a fresh checkout.
 - id: F-083
   title: The comment said it was a known edge, and it was the ordinary case
   tag: A limitation nobody re-read
@@ -7647,6 +7697,60 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 59
+  date: 2026-09-04
+  title: A certification cannot outlive the plant it was earned in (R-326, migration 0045)
+  commits: []
+  numbers:
+    app_tests: 1800
+    app_test_files: 62
+    tsc: 0
+    eslint: 0
+    db_checks: 540
+    migrations: 45
+  confirmed: true
+  summary: >-
+    *"I do not want cross-plant certifications."* Written into `requirements` as R-326 before any code,
+    which is what a decision made in conversation is owed.
+    Most of the rule already existed: 0028's `app_guard_operator_skill_scope` refuses to CREATE a holder
+    row whose training and person sit on different branches. What was missing was the other half of the
+    same sentence -- the invariant was checked when the pairing was MADE and never again when either END
+    moved. So the state the insert guard forbids was reachable sideways, by moving the training or the
+    person afterwards. 0045 gives both rehome guards the check.
+    ⛔ THE ONLY SUBTLE THING IN IT, AND IT WOULD HAVE BEEN AN EASY WRONG ANSWER. The two rehome guards
+    already had `app_owner_covers_in_org`, which is ONE-directional. The grant guard asks a DIFFERENT
+    question -- containment in EITHER direction -- and that is deliberate: a person owned by a whole
+    plant may legitimately hold a training owned by one of that plant's lines. Reusing the narrower
+    helper would have refused moves that leave a pairing the app is perfectly happy to grant, which is a
+    server refusing what the server allows. The predicate is extracted into ONE function,
+    `app_owner_overlaps_in_org`, and called from all three sites, so the guards agree by construction
+    rather than by everyone remembering. C3 is the case that proves it: it fails against the old helper
+    and passes against the new one.
+    ⭐ THE TEST'S FIRST RUN WAS RED FOR THE WRONG REASON AND THAT WAS THE USEFUL PART. Six of eight
+    cases failed, none of them because of 0045. The file had reused the seed's Maria and its "CNC"
+    training; `node_skill_requirements` already demands CNC inside Plant 1, so the OLDER half of
+    `app_guard_skill_rehome` refused every training move first, and Maria's `home_node_id` made
+    `app_guard_operator_home` refuse every person move. Two guards standing in front of the one under
+    test, returning confident red. Rewritten onto purpose-built subjects that own nothing and are owed
+    nothing. C6 was worse: it had reached for an ORG 2 training, where the composite FK
+    `(org_id, skill_id)` refuses the insert long before any trigger runs -- a green case pinning
+    nothing. It now uses a Plant 2 training in the same org.
+    ⚠️ NO BACKFILL, AND THAT IS A CHOICE RATHER THAN AN OMISSION. These are triggers, not a
+    constraint, so unlike 0044 nothing had to be deleted to install them. There are no offending rows
+    here; on a database that has some, quietly deleting somebody's certification history to tidy a guard
+    would be the wrong trade, since the rows are invisible rather than dangerous.
+    WARN⚠️ A HAZARD FOUND ON THE WAY, AND IT IS THE MOST IMPORTANT LINE IN THIS ENTRY.
+    `supabase migration list --local` reports migrations 0037 THROUGH 0045 with an empty `remote`
+    column -- the local ledger does not record them as applied -- while the schema plainly HAS them
+    (0044's dropped column is exactly why the demo world broke). They were applied by hand. The
+    consequence is live: `supabase migration up` would try to re-run all nine, including 0044's
+    `DELETE FROM runs WHERE status <> 'planned'` against a column that no longer exists. It was not run.
+    0045 was applied the way the others evidently were, by `psql -f`, and `db:types` regenerated
+    (4 insertions, exactly `app_owner_overlaps_in_org`) so the drift closed in session 58 stayed closed.
+    Recorded as F-084; somebody should reconcile that ledger deliberately.
+    35 numbered SQL files at 529 passed, 0 failed, 0 hard-errors, plus the demo mode's 11. 1800 tests in
+    62 files. `tsc` conclusive rather than inconclusive, because `db:types` ran after the migration.
+  shipped: []
 - id: 58
   date: 2026-09-04
   title: The phantom table is gone and the generated types describe the migrations again
@@ -9251,77 +9355,30 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
-- text: Dark theme — app-wide colour tokens first, then the matrix
-  why: >-
-    Split out of M5 with the maintainer (session 22): the app has NO theming today — no colour variables,
-    no prefers-color-scheme, no toggle anywhere in src/ — so a matrix-only dark mode would read as a bug
-    beside the light admin tabs. It is its own stage: introduce colour tokens across the admin screens
-    and a toggle, then apply to the matrix.
-- stage: S24
-  text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
-  why: >-
-    TABLED BY THE MAINTAINER, session 22, until the app's capability meets the required standard — do not
-    pick this up without a fresh go-ahead. The gate on a second human using the product; needs the
-    project's first server-side code.
-- stage: S24
-  text: P1-6d password reset and change-password
-  why: >-
-    Same browser-only shape as the sign-in screen. Sits behind invitations, which the maintainer tabled
-    in session 22.
-- text: app_guard_skill_rehome is blind to holders — refuse / warn-and-record / leave
-  why: Moving a training strands its holders silently; a decision, not a patch (NEXT 1(g)(b)).
-- text: >-
-    Small/known: renameSkill unused; same-name trainings collide by accessible name; supervisor with no
-    grants reaches an empty admin screen; dead if (!session) branch in BoardPage
-  why: Session 19's item 4 — small follow-ups written down, not owed.
-- text: assignments.status has no CHECK
-  why: Still open per session 19's item 5.
-- text: Per-site timezone (D10 / D88)
-  why: >-
-    DECIDED Aug 25 (D88, §19.21): site-local axis, wall-clock across DST, Phase 2. Do not re-ask; the
-    cost is in board/lib/time.ts and geometry.ts.
-  decided: true
-- stage: S22
-  text: A training's plant cannot be moved after creation (1(f)(a))
-  why: >-
-    Needs updateSkill({id, siteNodeId}) plus a decision about stranded holders; D105 forbids the freeze.
-- stage: S22
-  text: No permission preview on the Trainings tab (1(f)(b))
-  why: >-
-    Parity with ProductsPanel would mean a second read; today the server refuses through §19.63's contract.
+# ---------------------------------------------------------------------------
+# TASKS, most likely first. Everything below the PARKED marker is deliberately
+# not next: tabled by the maintainer, already decided, or a standing note
+# rather than a piece of work.
+#
+# Removed on 4 Sept as done or overtaken, each checked against the code rather
+# than assumed: the four "small/known" items (session 57); "assignments.status
+# has no CHECK" (0043 dropped the column -- `information_schema` reports zero);
+# S22's "a training's plant cannot be moved after creation" (`UpdateSkillInput`
+# takes `siteNodeId` and its own doc says supplying it MOVES the training); and
+# S22's "no permission preview on the Trainings tab" (`useEditRights` +
+# `canEdit`, asked with the owner's PATH).
+# ---------------------------------------------------------------------------
 - stage: S21
   text: A control for shift_templates.active (NEXT item 5)
   why: >-
     skills.active got Retire in session 18; shift patterns still have the column with no control.
-- text: The 1000-row ceiling — page every read to exhaustion; refuse to compute on a short read
-  why: >-
-    DECIDED, NOT OPEN. Do not put this back to the maintainer as a choice. max_rows = 1000 and no .range(
-    anywhere in src/lib/api/.
-  decided: true
-- stage: S23
-  text: Tree CSV importer
-  why: >-
-    DROPPED by agreement — the starter library copies structure and the visual editor beats a parents/children
-    CSV. Not deferred; do not re-ask.
-  decided: true
-- text: >-
-    Open and flagged: X46 direct DELETE on profile_grants; site_people unbounded; department admin gets
-    no-place; .eligible means adoption parent only; touch acceptance pass on both drags
-  why: The roadmap's standing list so none of it goes quiet.
-- text: >-
-    Not driven in a browser: the reworked Products panel (plant chips, add-picker, per-plant remove) and
-    the document-number surfaces
-  why: Five of the last six defects came from the maintainer using a screen, not a green suite.
-- stage: S24
-  text: 'Debt: useSession() called in five components; one SessionProvider at the root'
-  why: >-
-    The flicker half was fixed in session 18; the five-way duplication is still listed under the auth
-    bullet.
 - text: >-
     Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
-  why: Unchecked Phase 1 item.
+  why: Unchecked Phase 1 item. Large — its own stage, not an afternoon.
 - text: Phase 1 — Audit log on all schedule mutations
-  why: Unchecked Phase 1 item.
+  why: >-
+    Unchecked Phase 1 item. `write_audit_log()` and the `audit_log` table exist and the node/operator
+    tables already fire it; the schedule mutations are the gap.
 - text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: Unchecked Phase 1 item.
 - text: Phase 2 — Eligibility ENFORCEMENT on the board (warn/block org policy)
@@ -9331,37 +9388,57 @@ next:
   why: The matrix surfaces expiry; checking it against assignment dates is the remaining half.
 - text: Phase 2 — Copy Week with dry-run conflict preview
   why: Unchecked Phase 2 item.
-- text: Phase 2 — Named templates (relative-time placements)
-  why: Unchecked Phase 2 item.
-- text: Phase 2 — Shift admin UI in product + target keep-or-scale prompt on resize
+# ------------------------------- PARKED ------------------------------------
+- text: Dark theme — app-wide colour tokens first, then the matrix
   why: >-
-    Unchecked Phase 2 item (the Shifts admin section landed Aug 27; the resize prompt has not).
-- text: Phase 2 — PTO/absence source decision + conflict surfacing
-  why: Unchecked Phase 2 item; open question 4.
-- text: Phase 3 — ERP/MES connector framework + first adapter (SAP) over the CSV upsert pipeline
-  why: Unchecked Phase 3 item.
-- text: 'Phase 3 — Multi-site hardening: archive job, channel fan-out review, load tests'
-  why: Unchecked Phase 3 item.
-- text: Phase 3 — Subtree permission grants admin UI
+    MOVED TO THE END BY THE MAINTAINER, 4 Sept: *"this is going to be much bigger and different than
+    what you have right, I'm still thinking over it."* Do not start it without a fresh go-ahead, and
+    expect the shape to change. Originally split out of M5 (session 22): the app has NO theming today —
+    no colour variables, no prefers-color-scheme, no toggle anywhere in `src/`.
+  decided: true
+- stage: S24
+  text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
   why: >-
-    Unchecked Phase 3 item (the site access panel covers site membership, not arbitrary subtree grants).
-- text: Phase 3 — Mid-hierarchy level-insertion migration tool
-  why: Unchecked Phase 3 item.
-- text: Phase 3 — Standard targets from routing data; efficiency vs actuals
+    TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept — do not pick this up without a
+    fresh go-ahead. The gate on a second human using the product; needs the project's first server-side
+    code. ⚠️ S24 is still `status: now` in `stages` while its whole queue is parked here.
+  decided: true
+- stage: S24
+  text: P1-6d password reset and change-password
   why: >-
-    HALF DELIVERED by R-315..R-317 (session 37): standard cycle times are entered per cell per part and the
-    board derives every unset target from them. What is left is the two halves that need outside data —
-    importing the standards from routing/MES rather than typing them, and comparing them against actuals.
-- text: Move the thirty legacy stylesheets onto the shared field (R-318)
+    Same browser-only shape as the sign-in screen. Sits behind invitations, which is tabled.
+  decided: true
+- stage: S24
+  text: 'Debt: useSession() called in five components; one SessionProvider at the root'
   why: >-
-    The editable-box standard exists and the Cycle times screen uses it, but thirty stylesheets still carry
-    their own hand-declared copy of the control skin — the eleven admin ones the report implicated, plus
-    fourteen more across the board, the shell and the auth screens that the audit turned up. They are named in
-    FIELD_LEGACY in `src/test/fieldStandard.test.ts`; the list may only shrink, so this is bounded work that
-    can be done a file at a time. Each migration is a visual change to a shipped screen, which is why it is not
-    bundled with the screen that prompted the standard.
-- text: Phase 3 — Operator mobile read-only view
-  why: Unchecked Phase 3 item; open question 7.
+    Parked with the rest of S24. The flicker half was fixed in session 18 and the identity half in
+    §19.79; what is left is five duplicated `getSession()` round trips — one of which is the "Loading
+    session…" flash on the board, deliberately left in place in session 57.
+- text: Per-site timezone (D10 / D88)
+  why: >-
+    DECIDED Aug 25 (D88, §19.21): site-local axis, wall-clock across DST, Phase 2. Do not re-ask; the
+    cost is in board/lib/time.ts and geometry.ts.
+  decided: true
+- text: The 1000-row ceiling — page every read to exhaustion; refuse to compute on a short read
+  why: >-
+    DECIDED, NOT OPEN. Do not put this back to the maintainer as a choice. max_rows = 1000 and no
+    `.range(` anywhere in src/lib/api/.
+  decided: true
+- stage: S23
+  text: Tree CSV importer
+  why: >-
+    DROPPED by agreement — the starter library copies structure and the visual editor beats a
+    parents/children CSV. Not deferred; do not re-ask.
+  decided: true
+- text: >-
+    STANDING NOTE, not a task — open and flagged: X46 direct DELETE on profile_grants; site_people
+    unbounded; department admin gets no-place; .eligible means adoption parent only; touch acceptance
+    pass on both drags
+  why: The roadmap's standing list so none of it goes quiet.
+- text: >-
+    STANDING NOTE, not a task — not driven in a browser: the reworked Products panel (plant chips,
+    add-picker, per-plant remove) and the document-number surfaces
+  why: Five of the last six defects came from the maintainer using a screen, not a green suite.
 backlog:
 - phase: 0
   text: 'Core brainstorm: hierarchy, data model, real-time, cost posture (Aug 18)'

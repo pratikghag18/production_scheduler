@@ -1119,6 +1119,10 @@ export type Database = {
         Args: { p_node: string; p_org: string; p_owner: string }
         Returns: boolean
       }
+      app_owner_overlaps_in_org: {
+        Args: { p_a: string; p_b: string; p_org: string }
+        Returns: boolean
+      }
       app_pick_product_color: { Args: { p_org_id: string }; Returns: string }
       app_product_offered_at: {
         Args: { p_node: string; p_product: string }
