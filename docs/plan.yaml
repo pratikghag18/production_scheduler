@@ -9375,10 +9375,13 @@ next:
 - text: >-
     Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
   why: Unchecked Phase 1 item. Large — its own stage, not an afternoon.
-- text: Phase 1 — Audit log on all schedule mutations
+- text: Phase 1 — A way to READ the audit log (the recording half is already done)
   why: >-
-    Unchecked Phase 1 item. `write_audit_log()` and the `audit_log` table exist and the node/operator
-    tables already fire it; the schedule mutations are the gap.
+    ⚠️ MEASURED, AND THE ITEM AS WRITTEN WAS WRONG. It said the schedule mutations were the gap. They
+    are not: `runs` and `assignments` both fire `write_audit_log`, and the table already holds inserts,
+    updates and deletes for both, with `before`/`after` and an actor. What is missing is anything that
+    READS it — no API function, no screen, no export; `audit_log` appears in `src/` only as a generated
+    type. So this is a client piece, not a migration, and it is bigger than the old line implied.
 - text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: Unchecked Phase 1 item.
 - text: Phase 2 — Eligibility ENFORCEMENT on the board (warn/block org policy)
