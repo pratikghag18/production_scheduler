@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Product } from "@/lib/api";
 import type { IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { formatClock, formatFull, formatNumber, addMinutes } from "../lib/time";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
 import styles from "./RunPopover.module.css";
 
@@ -34,6 +35,7 @@ export function RunPopover({
   crew,
   anchor,
   windowStart,
+  dateFormat = DEFAULT_DATE_FORMAT,
   products,
   onCancel,
   onSave,
@@ -43,6 +45,7 @@ export function RunPopover({
   crew: IndexedAssignment[];
   anchor: { x: number; y: number };
   windowStart: Date;
+  dateFormat?: DateFormat;
   products: Product[];
   onCancel: () => void;
   onSave: (runId: string, notes: string | null, plannedHeadcount: number | null) => void;
@@ -55,7 +58,7 @@ export function RunPopover({
 
   const staffedHc = crew.reduce((sum, a) => sum + a.efficiencyPercent / 100, 0);
   const product = products.find((p) => p.id === productId);
-  const timeLabel = `${formatFull(addMinutes(windowStart, run.startMin))} – ${formatClock(addMinutes(windowStart, run.endMin))} · staffed ${formatNumber(staffedHc)}/${run.plannedHeadcount ?? "—"}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, run.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, run.endMin))} · staffed ${formatNumber(staffedHc)}/${run.plannedHeadcount ?? "—"}`;
 
   return (
     <BoardPopover anchor={anchor} onClose={onCancel} title={`Run — ${product?.name ?? productId}`}>

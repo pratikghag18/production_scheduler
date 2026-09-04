@@ -1,0 +1,82 @@
+/* The delete confirmation (D110, migration 0029).
+
+   Tokens only — `--crit`, `--surface`, `--ink`, `--ink-2`, `--axis` — the same
+   set ProductsPanel.module.css uses, so the box inherits every theme without
+   knowing one exists. */
+
+.box {
+  grid-column: 1 / -1;
+  margin: 0.5rem 0 0;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--crit);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.headline {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.error {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}
+
+.list {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.listHead {
+  margin: 0 0 0.125rem;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.list ul {
+  margin: 0;
+  padding-left: 1.125rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.primary,
+.quiet,
+.danger {
+  border-radius: 0.375rem;
+  border: 1px solid var(--axis);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.primary {
+  border-color: var(--ink-2);
+}
+
+.quiet {
+  color: var(--ink-2);
+}
+
+.danger {
+  border-color: var(--crit);
+  color: var(--crit);
+}
+
+.primary:disabled,
+.quiet:disabled,
+.danger:disabled {
+  opacity: 0.45;
+}

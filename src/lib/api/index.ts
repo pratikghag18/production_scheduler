@@ -21,6 +21,15 @@ export * from "./operators";
 export * from "./products";
 export * from "./imports";
 
+// 0040 / R-315. Not pre-seated either: standard cycle times are a section of
+// their own, added after the four above were laid out.
+export * from "./cycleTimes";
+
+// 0029 / D110. Not pre-seated — the delete that keeps the past did not exist
+// when §19.62 laid the four admin sections out, and it belongs to none of
+// them: one dialog serves products, people, trainings and shift patterns.
+export * from "./deletion";
+
 // Re-exported so callers that need the raw `Json` type (e.g. shapes.test.ts
 // building RPC-payload fixtures) never have to import database.types.ts
 // themselves (self-review §9 item 5: nothing outside src/lib imports it).

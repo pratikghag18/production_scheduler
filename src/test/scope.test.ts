@@ -18,6 +18,8 @@ import {
   isAtOrBelow,
   offeredAt,
   offeredHere,
+  ownedInScope,
+  productsOfferedAtNode,
   scopeIndex,
   scopeLabel,
   scopeOptions,
@@ -147,6 +149,166 @@ describe("scope: what is offered where", () => {
   });
 });
 
+describe("scope: the board pool is membership in the scoped nodes (ownedInScope)", () => {
+  const PEOPLE = [
+    { siteNodeId: PLANT.id, name: "B at the plant root" },
+    { siteNodeId: LINE1.id, name: "B at a line" },
+    { siteNodeId: CELL1.id, name: "B at a cell" },
+    { siteNodeId: PLANT2.id, name: "another plant" },
+    { siteNodeId: "n-hidden", name: "owner not in this board's nodes" },
+  ];
+  // board_window's `nodes` are the selected root's subtree — Plant 1 here.
+  const plant1Scope = new Set([PLANT.id, ASSY.id, LINE1.id, LINE10.id, CELL1.id, CELL10.id]);
+
+  it("XO1: keeps everyone owned by a scoped node, drops another plant", () => {
+    // The reported bug: a system admin on Plant 1 must stop seeing Plant 2's B.
+    expect(ownedInScope(PEOPLE, plant1Scope).map((p) => p.name)).toEqual([
+      "B at the plant root",
+      "B at a line",
+      "B at a cell",
+    ]);
+  });
+
+  it("XO2: ⚠️ an owner NOT in the scoped set is dropped, NOT fail-open — this is the exact bug the path version shipped", () => {
+    // The old path-resolve failed open when it could not find the owner node, so
+    // every out-of-plant owner (never in the scoped map) was kept. Membership
+    // treats "not in scope" as the real answer: not this plant.
+    const names = ownedInScope(PEOPLE, plant1Scope).map((p) => p.name);
+    expect(names).not.toContain("another plant");
+    expect(names).not.toContain("owner not in this board's nodes");
+  });
+
+  it("XO3: a narrower scope keeps fewer", () => {
+    const line1Scope = new Set([LINE1.id, CELL1.id]);
+    expect(ownedInScope(PEOPLE, line1Scope).map((p) => p.name)).toEqual([
+      "B at a line",
+      "B at a cell",
+    ]);
+  });
+
+  it("XO4: preserves the order it was given", () => {
+    expect(ownedInScope(PEOPLE, plant1Scope).map((p) => p.name)).toEqual([
+      "B at the plant root",
+      "B at a line",
+      "B at a cell",
+    ]);
+  });
+});
+
+/**
+ * THE PRODUCT PICKER, AFTER THE DECISION MOVED TO THE SERVER (DEF-0005).
+ *
+ * ⭐⭐ THIS BLOCK REPLACED TWO OTHERS, AND WHAT IT DROPPED IS THE POINT. It used
+ * to test `productOfferedAt(siteNodeIds, targetPath, nodesById)` — the product's
+ * places, resolved in the board's node map, compared with `isAtOrBelow`. Nine
+ * cases of path logic, all of them asking the right RULE of the wrong MATERIAL:
+ * `site_node_ids` is RLS-filtered, so for a supervisor granted a LINE a
+ * plant-wide part arrives with NO places, and every one of those cases said
+ * "offered nowhere" — correctly, for a list that had been emptied on the way.
+ *
+ * ⚠️ ONE OF THEM WAS GREEN WHILE ASSERTING THE OPPOSITE OF WHAT THE SERVER SAYS.
+ * XP9 was called "a board rooted BELOW a plant still offers its own parts —
+ * nothing legitimately offerable disappears" and ended with
+ * `expect(offered).not.toContain("Housing A")`, with a comment explaining that
+ * such a part "was already offered nowhere ... this change does not move it".
+ * True, and beside the point: it was already WRONG, and the case wrote the
+ * wrongness down as expected. CLAUDE.md §4's "a green case can be pinning the
+ * bug", in its literal form.
+ *
+ * So the client no longer derives an offer at all. `board_window` sends
+ * `offered_node_ids` per product (migration 0042) — the nodes in this window
+ * where the server would ACCEPT a run, from the same predicate the write guard
+ * runs — and the only client-side question left is membership. These cases are
+ * fewer and duller than the ones they replace, which is the right direction: the
+ * interesting half is now a SQL test (`supabase/tests/65_offered_in_window_test
+ * .sql`), where the authority is.
+ */
+describe("scope: the picker offers what the server says it may (DEF-0005)", () => {
+  /**
+   * ⭐ THE FIXTURE IS ANA'S BOARD, off the wire. She is a supervisor granted
+   * Line 1: `site_node_ids` comes back EMPTY for the three parts made at the
+   * plant above her, because she cannot read that plant, and `offered_node_ids`
+   * carries her own two cells and her line for all four — which is what the
+   * server answers when asked about her cells directly.
+   */
+  const CELL_1 = "n-cell-1";
+  const CELL_2 = "n-cell-2";
+  const OTHER_LINE_CELL = "n-cell-10";
+
+  const ANAS_BOARD = [
+    { sku: "Housing A", siteNodeIds: [], offeredNodeIds: [CELL_1, CELL_2] },
+    { sku: "Bracket A", siteNodeIds: [], offeredNodeIds: [CELL_1, CELL_2] },
+    { sku: "Line 1 Sub A", siteNodeIds: ["n-line-1"], offeredNodeIds: [CELL_1, CELL_2] },
+    { sku: "Common Fastener", siteNodeIds: [], offeredNodeIds: [CELL_1, CELL_2] },
+  ];
+
+  const skus = (items: readonly { sku: string }[]) => items.map((i) => i.sku);
+
+  it("XP1 ⭐ the filed defect: a part whose places were filtered away is still offered", () => {
+    // Ana was offered ONE part of the four on her own legend, and the server
+    // accepted all four. Three of them have NO readable places at all — the
+    // exact state the old predicate read as "made nowhere".
+    expect(skus(productsOfferedAtNode(ANAS_BOARD, CELL_1))).toEqual([
+      "Housing A",
+      "Bracket A",
+      "Line 1 Sub A",
+      "Common Fastener",
+    ]);
+  });
+
+  it("XP2 ⚠ an empty places list is NOT the question any more", () => {
+    // Said on its own, because it is the assumption the whole defect rested on:
+    // `siteNodeIds: []` no longer decides anything. Only the server's answer does.
+    const hidden = [{ sku: "Housing A", siteNodeIds: [], offeredNodeIds: [CELL_1] }];
+    expect(skus(productsOfferedAtNode(hidden, CELL_1))).toEqual(["Housing A"]);
+  });
+
+  it("XP3 ⭐ an empty OFFERED list is offered nowhere — the honest zero, now an answer", () => {
+    // A part assigned to no plant, and `history.ts`'s synthesised deleted
+    // product, both arrive this way. Before, an empty list was a filtered list
+    // that might mean anything; now it is the server saying "nowhere here".
+    const nowhere = [{ sku: "Orphan", siteNodeIds: [], offeredNodeIds: [] }];
+    expect(productsOfferedAtNode(nowhere, CELL_1)).toEqual([]);
+  });
+
+  it("XP4 ⭐ (promoted from DEF-0002's pin) a part made only at another plant is absent", () => {
+    // The first defect this picker produced, kept as a case now that its pin is
+    // verified and deleted. On Plant A's board the dropdown listed twelve parts,
+    // eight of them made in Plant B and Plant C, and Create returned HTTP 409
+    // `not_offered_here` on every one. It cannot recur through this path: a part
+    // the server does not offer here carries none of this window's nodes.
+    const withStranger = [
+      ...ANAS_BOARD,
+      { sku: "Housing B", siteNodeIds: ["n-plant-2"], offeredNodeIds: [] },
+    ];
+    expect(skus(productsOfferedAtNode(withStranger, CELL_1))).not.toContain("Housing B");
+  });
+
+  it("XP5 ⚠ a part made at this plant but on ANOTHER line is still absent", () => {
+    // The half that was already right and must stay right. Line 10's cell is in
+    // this window, so a test that asked "is this part offered ANYWHERE in the
+    // window?" would list it at a Line 1 cell. The question is per node.
+    const lineTen = [{ sku: "Line 10 Frame", siteNodeIds: [], offeredNodeIds: [OTHER_LINE_CELL] }];
+    expect(productsOfferedAtNode(lineTen, CELL_1)).toEqual([]);
+    expect(skus(productsOfferedAtNode(lineTen, OTHER_LINE_CELL))).toEqual(["Line 10 Frame"]);
+  });
+
+  it("XP6: the answer is per node, not per board", () => {
+    const oneCellOnly = [{ sku: "Cell 2 only", siteNodeIds: [], offeredNodeIds: [CELL_2] }];
+    expect(productsOfferedAtNode(oneCellOnly, CELL_1)).toEqual([]);
+    expect(skus(productsOfferedAtNode(oneCellOnly, CELL_2))).toEqual(["Cell 2 only"]);
+  });
+
+  it("XP7: order is preserved, because the picker shows it in the order it was given", () => {
+    expect(skus(productsOfferedAtNode(ANAS_BOARD, CELL_2))).toEqual([
+      "Housing A",
+      "Bracket A",
+      "Line 1 Sub A",
+      "Common Fastener",
+    ]);
+  });
+});
+
 describe("scope: the picker", () => {
   it("X13 ⭐ (inverted by 0028): there is NO company-wide option — the list is exactly the nodes", () => {
     // It used to assert the opposite: a `null`-valued entry first, and
@@ -181,12 +343,31 @@ describe("scope: the picker", () => {
     ]);
   });
 
-  it("X16: with an edit set, only nodes in it are offered — and nothing else at all", () => {
-    // ⭐ 0028: the title read "— plus company-wide", and that entry was the one
-    // thing the edit set could not filter out. It no longer exists, so the list
-    // is now exactly the set.
-    const opts = scopeOptions(NODES, new Set([LINE1.id, CELL1.id]));
-    expect(opts.map((o) => o.name)).toEqual(["Line 1", "Cell 1"]);
+  it("X16 ⭐: every node handed in is offered — narrowing is the CALLER's job, not this one's", () => {
+    // ⚠⚠ THIS CASE USED TO ASSERT THE OPPOSITE, and it went with the parameter.
+    // `scopeOptions(nodes, canEdit?)` took a permission set and dropped
+    // everything outside it. That parameter was DEAD — no caller ever passed it
+    // — and its doc comment argued for a narrowing that had already been tried
+    // and reverted: `ProductsPanel` measured that `adminSiteIds` is derived from
+    // STRUCTURE ownership and is not the question the insert policy asks, so a
+    // site admin whose root had no claimed structure was offered nothing at all.
+    //
+    // ⚠️ There is no honest set to pass today: the server exposes
+    // `editable_shape_ids()` (structures) and `app_is_admin_anywhere()` (a
+    // boolean), and nothing that returns the NODES a caller may administer.
+    // So this offers what it is given and the write error is the answer
+    // (§19.63's contract exists for exactly that).
+    //
+    // ⭐ The plant filter narrows the ARRAY before it arrives, which is a view
+    // choice the reader made and can undo — a different kind of thing entirely,
+    // and the distinction §19.77 is about.
+    // Membership, not order — the list is sorted by PATH (tree order), which is
+    // X14's job to pin, not this one's.
+    expect(
+      scopeOptions(NODES)
+        .map((o) => o.value)
+        .sort(),
+    ).toEqual(NODES.map((n) => n.id).sort());
   });
 
   it("X17: a node whose parent is unreadable is still offered, at its own depth", () => {

@@ -1,0 +1,325 @@
+/* Trainings (roadmap stage 22).
+
+   Sized in `rem`, not px (D84, design plan §19.16): the root font-size scales
+   with `--chrome-scale` (global.css), so this whole surface follows the
+   viewport with nothing to remember per-property. Same convention, tokens and
+   spacing scale as `ProductsPanel.module.css`, which this section is a peer of.
+   Hairline borders stay in px on purpose -- a 1px rule scaled up renders
+   blurry, and `unscaledPxLengths` exempts a border/outline WIDTH of <=2px and
+   nothing else. No `--ui-scale` anywhere in this file (that token is fitted
+   board content only, per D84/D76). `global.css` already declares
+   `font: inherit` for input/button/select/textarea (D89) -- not restated here.
+
+   ⚠️ THIS FILE MUST BE LISTED IN `REM_SURFACES` IN BOTH `src/test/scaleAudit.ts`
+   AND `src/test/scaleAudit.test.ts`'s R10 copy. `missingRemSurfaces` walks the
+   admin directory, so a stylesheet that exists and is not listed is a test
+   failure -- which is how `DeleteDialog.module.css` was caught. That audit
+   exists because a stylesheet once shipped unaudited.
+
+   NOTHING HERE IS A DRAG SURFACE. No `cursor: grab`, no `user-select: none`,
+   no `touch-action: none`: this screen has no gesture, and D100's audit exists
+   because those three declarations were copied into files that then drifted.
+   Reordering a list of trainings is not a thing this panel does. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.card {
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  padding: 0.875rem 1rem;
+}
+
+.h2 {
+  margin: 0 0 0.625rem;
+  font-size: 0.875rem;
+}
+
+.h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+
+.status {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  margin: 0.25rem 0;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0.625rem 0 0;
+}
+
+.error {
+  color: var(--crit);
+  font-size: 0.75rem;
+  margin: 0.25rem 0 0;
+}
+
+.skippedLine {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.search {
+  width: 100%;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+}
+
+/* --- the add form ---------------------------------------------------------
+   Two fields and a button wrap rather than aligning to the table below: they
+   have different columns, and pretending otherwise is what makes a form look
+   like a broken row of the list under it. */
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.625rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 9rem;
+  flex: 1 1 9rem;
+}
+
+.fieldLabel {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------------
+   ONE GRID, SHARED BY THE HEADER AND EVERY ROW.
+
+   The call `ProductsPanel.module.css` and `SiteAccessPanel.module.css` both
+   record: a list of flex rows sizes its columns from its own content, so the
+   owner and the actions land at a different x on every line and the panel reads
+   as ragged text rather than as data.
+
+   ⭐ FOUR TRACKS — a name, its DOCUMENT NUMBER, its owner, and the actions, in
+   that order (the maintainer, 1 Sept). The document number moved OUT of a
+   full-width line under the name and into a column of its own ("could get messy
+   and long very easily") and sits SECOND, beside the name a reader scans it with.
+   The owner track stays WIDER than on the products grid on purpose: since 0031 it
+   is the only thing telling two same-named rows apart, so it is a column a reader
+   actually scans rather than a footnote to the name.
+
+   The action column is FIXED, because a button strip that changes width with
+   its labels is what makes the right-hand edge zig-zag -- and "Retire" and
+   "Bring back" are different widths, so this list would zig-zag by state.
+
+   Anything that cannot fit a column -- the retired tag, an error, the delete
+   dialog -- takes its own full-width line underneath via `1 / -1`.
+   --------------------------------------------------------------------------- */
+.list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.head,
+.row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.8fr) minmax(5rem, 0.9fr) minmax(8rem, 1.2fr) 15rem;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.375rem;
+  padding: 0.5rem 0.625rem;
+}
+
+.head {
+  padding-top: 0;
+  padding-bottom: 0.25rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.row {
+  border: 1px solid var(--grid);
+  border-radius: 0.5rem;
+  background: var(--page);
+  font-size: 0.8125rem;
+}
+
+/* A retired training is still a real row -- dimmed, never hidden. Everyone who
+   holds it still holds it, and bringing it back is one click. */
+.retired {
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.name {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.owner {
+  min-width: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* The document number, in its own column since it outgrew a stacked line (the
+   maintainer, 1 Sept). It WRAPS its own editor rather than cramping it onto one
+   line: the input takes the cell width and Save/Cancel fall beneath it, so only
+   the row being edited grows and the columns above never re-flow. */
+.docCell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.375rem;
+}
+
+.primary,
+.quiet {
+  border-radius: 0.375rem;
+  border: 1px solid var(--axis);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.primary {
+  border-color: var(--ink-2);
+}
+
+.quiet {
+  color: var(--ink-2);
+}
+
+.primary:disabled,
+.quiet:disabled {
+  opacity: 0.45;
+}
+
+/* The full-width lines. `1 / -1` rather than a fourth track, so adding one
+   never re-flows the columns above it. */
+.tag,
+.note,
+.readOnly,
+.error {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+}
+
+.tag {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.6875rem;
+}
+
+.note {
+  color: var(--ink-2);
+}
+
+/* The line a row carries in place of its buttons, when the reader may see it
+   and not change it (V14 / `../lib/editRights.ts`).
+
+   ⭐ `--muted`, THE HINT COLOUR, AND NOT `--crit`. Nothing has gone wrong: the
+   row belongs to a place somebody else runs, which is an ordinary fact about a
+   list that reaches upward. Styling it as an error would make a normal screen
+   look broken for every supervisor who has a plant above them.
+
+   ⚠️ IT TAKES A FULL-WIDTH LINE RATHER THAN SITTING IN THE ACTION COLUMN. That
+   track is 15rem and fixed, so a sentence in it would wrap to three lines and
+   make this row twice the height of its neighbours -- and the column is fixed
+   precisely so the right-hand edge does not move from row to row. */
+.readOnly {
+  color: var(--muted);
+}
+
+/* The move confirmation (D105).
+
+   ⚠️ A FULL-WIDTH ROW LINE, exactly like `.readOnly` above and for the same
+   reason: the action track is a fixed 15rem so this box cannot live in it
+   without wrapping into a column-width ribbon, and that track is fixed
+   precisely so the right-hand edge does not move from row to row. `1 / -1`
+   rather than a fourth track, so adding it never re-flows the columns.
+
+   ⭐ IT IS TINTED, NOT ALARMED. `--warn` on a hairline and nothing else: what
+   the box says is that a move costs something, not that anything has gone
+   wrong. `--crit` here would put a screen full of red in front of an ordinary
+   administrative act, and a warning styled like a failure is one people learn
+   to dismiss without reading -- which is the entire thing this box exists to
+   avoid. Same call `.readOnly` makes one block up. */
+.confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--warn);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.headline {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.cost {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+/* ⚠️ CAPPED IN THE MODULE, NOT HERE. `listStrandedHolders` returns at most
+   `NAMES_SHOWN` names plus an "and N more" line, so this list never needs a
+   scroller or a max-height -- and a CSS clip would hide names the confirmation
+   has already counted, which is the one thing this box may not do. */
+.names {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}

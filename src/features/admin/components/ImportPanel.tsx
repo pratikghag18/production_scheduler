@@ -1,31 +1,60 @@
 /* ---------------------------------------------------------------------------
-   CSV import — PRE-SEATED PLACEHOLDER (§19.62).
+   Import — the admin section that picks WHAT to import and hands off to the
+   generic wizard.
 
-   This file exists before the section is built, and that is the whole point.
-   Four admin sections are queued and every one of them would otherwise edit the
-   same five shared files: `AdminPage.tsx`'s `SECTIONS` array AND its JSX child
-   list, `REM_SURFACES`, R10's hardcoded copy of that list, and
-   `src/lib/api/index.ts`. Measured across four concurrent surveys (§19.57):
-   the collisions are all mechanical and all knowable in advance. So they are
-   made ONCE, here, and after this commit each section's lane creates and edits
-   only its own files.
+   ⭐ `IMPORT_PANEL_READY` LIVES HERE (§19.62): turning the section on is a
+   one-line edit to this file, and Group H in `scaleAudit.test.ts` asserts every
+   rail id has a panel.
 
-   ⭐ `IMPORT_PANEL_READY` LIVES HERE, NOT IN `AdminPage.tsx`. The nav entry
-   reads it, so turning this section on is a one-line edit to THIS file — the
-   lane that builds the panel is the lane that flips it, and a section cannot be
-   switched on without a panel behind it because the switch is part of the
-   panel. Group H in `scaleAudit.test.ts` asserts the other half: every id in
-   `SECTIONS` has a branch rendering it.
+   TAKES NO PROPS and DECIDES NOTHING. Each entity (products, people) is a thin
+   container that feeds the entity-agnostic `ImportWizard`; this file only chooses
+   between them. The wizard chrome — choose a file, template, map, preview, apply
+   — is written once (`ImportWizard.tsx`), not per entity.
    --------------------------------------------------------------------------- */
+import { useState } from "react";
+import { ProductsImport } from "./ProductsImport";
+import { OperatorsImport } from "./OperatorsImport";
+import { TrainingsImport } from "./TrainingsImport";
+import { CertificationsImport } from "./CertificationsImport";
 import styles from "./ImportPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
-export const IMPORT_PANEL_READY = false;
+export const IMPORT_PANEL_READY = true;
+
+type ImportEntity = "products" | "operators" | "trainings" | "certifications";
+
+const TABS: { key: ImportEntity; label: string }[] = [
+  { key: "products", label: "Products" },
+  { key: "operators", label: "People" },
+  { key: "trainings", label: "Trainings" },
+  { key: "certifications", label: "Certifications" },
+];
 
 export function ImportPanel() {
+  const [entity, setEntity] = useState<ImportEntity>("products");
+
   return (
     <div className={styles.panel}>
-      <p>Not built yet.</p>
+      <div className={styles.entityTabs} role="tablist" aria-label="What to import">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={entity === t.key}
+            className={
+              entity === t.key ? `${styles.entityTab} ${styles.entityTabOn}` : styles.entityTab
+            }
+            onClick={() => setEntity(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {entity === "products" && <ProductsImport />}
+      {entity === "operators" && <OperatorsImport />}
+      {entity === "trainings" && <TrainingsImport />}
+      {entity === "certifications" && <CertificationsImport />}
     </div>
   );
 }

@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the eleven admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the sixteen admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -228,7 +228,8 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
     expect([...REM_SURFACES].sort()).toEqual(
       [
         "src/features/admin/AdminPage.module.css",
-        "src/features/admin/components/AdminPopover.module.css",
+        // AdminPopover.module.css was removed when the admin popover became a
+        // thin alias of the shared src/components/Popover (R-313).
         "src/features/admin/components/LevelEditor.module.css",
         "src/features/admin/components/NodeTreeEditor.module.css",
         "src/features/admin/components/ShapePicker.module.css",
@@ -241,8 +242,23 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // update one place of the two.
         "src/features/admin/components/ShiftsPanel.module.css",
         "src/features/admin/components/OperatorsPanel.module.css",
+        "src/features/admin/components/TrainingsPanel.module.css",
         "src/features/admin/components/ProductsPanel.module.css",
         "src/features/admin/components/ImportPanel.module.css",
+        // 0029: the delete confirmation, shared by all four admin lists. The
+        // two-place edit landed late — this case is what said so.
+        "src/features/admin/components/DeleteDialog.module.css",
+        // The Operator Training Matrix, its own buildout (stage M2).
+        "src/features/admin/components/MatrixPanel.module.css",
+        // The shared matrix cell visual (stage M4) — one source for the chip,
+        // legend and record popover, used by both matrices.
+        "src/features/admin/components/matrixCells.module.css",
+        // 0037: the Settings section (org-wide date format). Sixteenth surface,
+        // same two-place edit.
+        "src/features/admin/components/SettingsPanel.module.css",
+        // 0040 / R-315: the Cycle times section. Seventeenth surface, same
+        // two-place edit.
+        "src/features/admin/components/CycleTimesPanel.module.css",
       ].sort(),
     );
   });
@@ -449,18 +465,34 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
     expect(auditAdminSections(repoRoot)).toEqual([]);
   });
 
-  it("H2: the six ids are exactly these, in rail order", () => {
+  it("H2: the nine ids are exactly these, in rail order", () => {
     // The list that drives H1 is itself untested unless something asserts it —
     // deleting an entry from SECTIONS makes H1 *greener*, which is the shape
     // R10 and G12 both exist to close.
+    //
+    // ⭐ `trainings` joined in stage 22 and this case is what noticed. Trainings
+    // were a "Ticket types" toggle INSIDE the Operators panel, so managing the
+    // catalogue meant picking an arbitrary person first; they are their own
+    // section now, beside Operators because that is where they came from.
     const tsx = readFileSync(`${repoRoot}/${ADMIN_PAGE}`, "utf8");
     expect(parseSectionIds(tsx)).toEqual([
       "hierarchy",
       "access",
       "shifts",
       "operators",
+      "trainings",
+      // The Operator Training Matrix — a third view of the same operators-and-
+      // trainings data, so it sits beside the two screens it draws from.
+      "matrix",
       "products",
+      // 0040 / R-315: standard cycle times per cell per part. Beside Products
+      // because a cycle time is a fact about a part at a place.
+      "cycletimes",
       "import",
+      // 0037: org-wide Settings (date format). System-admin only, filtered on
+      // `profile.role` in AdminPage — the id is still in SECTIONS, so it is
+      // still here and still has a render branch (which is what H2 guards).
+      "settings",
     ]);
   });
 
@@ -546,9 +578,10 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
   it("J2: and the audit names all three surfaces, so none can be quietly dropped", () => {
     // The list that drives a test is itself untested unless something asserts
     // the list — three times over, on this project. A sorted literal.
+    // ⭐ D115 REMOVED PRODUCTS: its "where it belongs" is the product_sites list,
+    // not a single column, so the create/edit-parity hazard cannot arise there.
     expect(SCOPED_WRITE_SURFACES.map((s) => `${s.file}|${s.table}`).sort()).toEqual([
       "src/lib/api/operators.ts|operators",
-      "src/lib/api/products.ts|products",
       "src/lib/api/shifts.ts|shift_templates",
     ]);
   });
@@ -566,16 +599,19 @@ describe("scaleAudit: what you can set once, you must be able to change (D105)",
     // source by string match and does not check that the match happened is a
     // test that quietly measures nothing the day somebody rewords the line, and
     // this one only failed loudly because it expected a non-empty result.
+    // ⭐ D115 removed products from the audit, so J3 now targets OPERATORS, which
+    // still carries the single-owner column. `expect(cut).not.toBe(src)` makes a
+    // reworded line fail loudly instead of quietly measuring nothing.
     const frozen = new Map(sources);
-    const src = sources.get("src/lib/api/products.ts")!;
+    const src = sources.get("src/lib/api/operators.ts")!;
     const cut = src.replace(
       "if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;",
       "",
     );
     expect(cut).not.toBe(src);
-    frozen.set("src/lib/api/products.ts", cut);
+    frozen.set("src/lib/api/operators.ts", cut);
     expect(scopeParityOffences(frozen)).toEqual([
-      "src/lib/api/products.ts: nothing can CHANGE products.site_node_id after creation",
+      "src/lib/api/operators.ts: nothing can CHANGE operators.site_node_id after creation",
     ]);
   });
 

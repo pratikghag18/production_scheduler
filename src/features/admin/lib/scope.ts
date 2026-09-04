@@ -56,13 +56,33 @@
  * to be a separator or the end of the string.
  *
  * ---------------------------------------------------------------------------
- * ⭐ EVERYTHING HERE FAILS OPEN. If a scope names a node this client cannot
- * read — outside the reader's grant, or dropped by a truncated response — the
- * honest answer is "I cannot tell", and the choice is to OFFER it rather than
+ * ⭐ THE SINGLE-OWNER PREDICATES FAIL OPEN. If a scope names a node this client
+ * cannot read — outside the reader's grant, or dropped by a truncated response —
+ * the honest answer is "I cannot tell", and the choice is to OFFER it rather than
  * hide it. Hiding is invisible and permanent: a product that silently stops
  * being offered looks exactly like a product nobody created. Offering something
  * the server then refuses is loud, recoverable, and lands on the write-error
  * contract (§19.63), which was built for exactly this.
+ *
+ * ⚠⚠ THIS IS NOT "everything here", AND THE EXCEPTION COST A DEFECT (DEF-0002).
+ * The argument above is about a map narrowed by PERMISSION. `ownedInScope` is
+ * handed the board's `index.nodeById`, which is narrowed by a VIEW CHOICE — the
+ * plant the reader picked — and there "I cannot resolve it" means "it is in
+ * another plant", which is knowledge, not ignorance. It fails CLOSED, says so at
+ * its own definition, and the rule for telling the two apart is the one §19.79
+ * states below: ask what narrowed the map.
+ *
+ * ⚠⚠⚠ AND THAT RULE HAS A LIMIT, WHICH COST A SECOND DEFECT (DEF-0005). It can
+ * only be applied by someone who knows what narrowed the map — and for a
+ * supervisor the board's map is narrowed by a view choice while the product's
+ * PLACE LIST was already narrowed by permission, one layer up, before it
+ * arrived. By the time a predicate here sees an empty array the two are
+ * indistinguishable, and no amount of care inside this file recovers it. That
+ * is why the product half of this module no longer decides anything: the server
+ * answers it (`board_window`'s `offered_node_ids`, migration 0042) and
+ * `productsOfferedAtNode` below only reads the answer. When a question turns
+ * out to need information the client was never given, the fix is to move the
+ * question, not to sharpen the guess.
  *
  * ⚠️ Note this is the OPPOSITE default from `ProductsPanel`'s edit rights, and
  * deliberately so ([[verification-standard]] rule 8b): that decides whether to
@@ -119,6 +139,92 @@ export function offeredHere<T extends { siteNodeId: string }>(
   return items.filter((i) => offeredAt(i.siteNodeId, targetPath, nodesById));
 }
 
+/**
+ * Everything in `items` OWNED by one of `scopedNodeIds` — the board's per-plant
+ * assignable pool.
+ *
+ * ⭐ MEMBERSHIP, NOT A PATH COMPARE, AND THAT IS THE WHOLE FIX. `board_window`'s
+ * `nodes` are already scoped to the selected root's subtree, so the set of node
+ * ids the board knows about IS this plant. An operator belongs here exactly when
+ * its owner is one of them. An earlier version resolved owner PATHS and "failed
+ * open" on an owner it could not find — but a different plant's owner is never in
+ * the scoped set, so every out-of-plant operator was kept: the exact bug this
+ * exists to fix. There is no fail-open here on purpose: an owner outside the
+ * scoped set is a real "not this plant", not an "I cannot tell".
+ *
+ * ⚠️ A POOL FILTER, NOT A DRAW FILTER. `board_window` still returns every
+ * operator (S18) and `index.operatorById` keeps them all, so a chip for a
+ * cross-plant assignment still renders its name; only the OFFERED pool is cut.
+ */
+export function ownedInScope<T extends { siteNodeId: string }>(
+  items: readonly T[],
+  scopedNodeIds: ReadonlySet<string>,
+): T[] {
+  return items.filter((i) => scopedNodeIds.has(i.siteNodeId));
+}
+
+/* ---------------------------------------------------------------------------
+ * ⭐ D115 / migration 0034: A PRODUCT IS OFFERED FROM A LIST OF PLACES.
+ *
+ * Operators, trainings and shift patterns keep a single owner and use
+ * `offeredAt` above. A product is made in one, several or all plants, so it is
+ * offered where ANY of its places covers the cell — the union, not one owner.
+ * This is a SECOND function rather than a widening of `offeredAt`, because
+ * folding a list into the single-owner path would make every caller carry an
+ * array it does not have (operators do not) and would blur the one place the
+ * cardinalities differ. `app_product_offered_at` (0034 §3) is the server twin.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Which products are offered at `nodeId`, ACCORDING TO THE SERVER.
+ *
+ * ⭐⭐ THIS FUNCTION USED TO DERIVE THE ANSWER AND NOW ONLY READS IT, AND THAT
+ * IS THE WHOLE OF DEF-0005. It was `productOfferedAt(siteNodeIds, targetPath,
+ * nodesById)`: take the product's places, resolve each one in the board's node
+ * map, and ask `isAtOrBelow`. That is the right RULE — it is the rule the
+ * server's `app_product_offered_at` runs — asked of the wrong MATERIAL.
+ * `product_sites` is RLS-filtered on read and reading is downward from a grant,
+ * so a supervisor granted a LINE cannot read the PLANT, and a plant-wide part
+ * reached this client with `siteNodeIds: []`. Every version of this function
+ * answered "offered nowhere", correctly, for a list that had been emptied on
+ * the way. One supervisor was offered ONE part out of the four on her own
+ * legend while the server accepted all four.
+ *
+ * ⚠️ AND THE PREVIOUS FIX'S OWN PROOF SAID THIS COULD NOT HAPPEN. DEF-0002
+ * turned a fail-open into a fail-closed here and argued, in this comment, that
+ * "nothing legitimately offerable disappears" — reasoning that was sound about
+ * the CHANGE (an empty list short-circuits before either branch, so the change
+ * moved nothing) and then generalised to the picker as a whole, which it never
+ * examined. `scope.test.ts` case XP9 was green while asserting the opposite of
+ * what the server answers. A green case can be pinning the bug; a proof that
+ * quietly widens its own scope is how one gets written.
+ *
+ * ⭐ SO THE CLIENT STOPPED DERIVING AND STARTED ASKING. `board_window` now
+ * carries `offered_node_ids` per product (migration 0042) — the nodes in this
+ * window where the server would ACCEPT a run — computed by
+ * `app_offered_product_nodes` under SECURITY DEFINER, the set form of the same
+ * predicate the write guard runs. Membership is the entire test, and there is
+ * no path logic left here to disagree with the server about. CLAUDE.md §4:
+ * whatever a client hides or offers must be decided by the same test the server
+ * runs.
+ *
+ * ⚠️ AN EMPTY LIST IS STILL A REAL "NOWHERE", but for a better reason than
+ * before: it is now an ANSWER rather than a filtered list implying one.
+ * `history.ts`'s synthesised deleted product carries an empty one deliberately.
+ *
+ * ⚠️ NO NODE MAP, NO PATHS, NO `isAtOrBelow` — deliberately. Handing this
+ * function the board's node map again would reintroduce the question "what
+ * narrowed this map", which is exactly the question that cannot be answered
+ * from inside this module: for a supervisor the map is narrowed by a view
+ * choice AND the place list was already narrowed by permission one layer up.
+ */
+export function productsOfferedAtNode<T extends { offeredNodeIds: readonly string[] }>(
+  items: readonly T[],
+  nodeId: string,
+): T[] {
+  return items.filter((i) => i.offeredNodeIds.includes(nodeId));
+}
+
 /* ===========================================================================
  * The picker.
  * ======================================================================== */
@@ -146,17 +252,46 @@ export interface ScopeOption {
  * the right trade: an admin of a department who cannot read the plant above it
  * must still be able to scope things to their own department.
  *
- * @param canEdit ids the caller may scope TO. When given, everything else is
- *   dropped — a picker that offers a node the server will refuse is a control
- *   whose only outcome is an error message. When omitted, every node is
- *   offered, which is right for a company admin.
+ * ⚠⚠ THIS TOOK A `canEdit` SET AND IT HAS BEEN REMOVED. IT WAS DEAD, AND ITS
+ * DOC COMMENT ARGUED AGAINST A DECISION THAT HAD ALREADY BEEN MEASURED.
+ *
+ * The comment read: *"ids the caller may scope TO — a picker that offers a node
+ * the server will refuse is a control whose only outcome is an error message"*.
+ * Persuasive, D106-shaped, and **wrong for every caller this project has.**
+ *
+ *  1. **Nothing ever passed it.** All three callers — `OperatorsPanel`,
+ *     `ProductsPanel`, `ShiftsPanel` — called this with one argument.
+ *  2. **The one attempt was reverted after being measured.** `ProductsPanel`
+ *     narrowed its owner list to `adminSiteIds` and the comment it left behind
+ *     is the record: that set is derived from STRUCTURE ownership and *is not
+ *     the question the insert policy asks*, so **a site admin whose root has no
+ *     claimed structure was offered nothing at all.** Its verdict stands —
+ *     *"offering a node the server then refuses costs one clear sentence now
+ *     that §19.63's contract exists; offering nothing costs the whole
+ *     feature."*
+ *  3. **No correct set is derivable on the client today.** The server exposes
+ *     `editable_shape_ids()` (STRUCTURES, not nodes) and
+ *     `app_is_admin_anywhere()` (a BOOLEAN). There is no read that returns the
+ *     nodes a caller may administer, so there is nothing honest to pass.
+ *
+ * ⭐⭐ AND IT COST SOMETHING BEFORE IT WAS REMOVED: the parameter's own doc was
+ * read, believed, and filed as a live defect against all three panels — without
+ * the call site where the opposite had been measured. **A dead parameter with a
+ * persuasive comment is not neutral; it is a trap that argues for itself.** It
+ * is deleted rather than left unused, the same way §19.74 deleted
+ * `deletePrecheck` instead of relaxing it.
+ *
+ * ⚠️ WHAT WOULD BRING IT BACK: a server read returning the node ids the caller
+ * may administer (`app_is_admin_for` per node, or a set-returning twin of it).
+ * Until that exists, this function offers every node it is given and the write
+ * error is the honest answer — §19.63's contract was built for exactly that.
+ *
+ * ⚠️ NOT TO BE CONFUSED WITH THE PLANT FILTER (§19.79), which DOES narrow the
+ * `nodes` handed in. That is a VIEW CHOICE the reader made and can undo; this
+ * was a PERMISSION. Passing one as the other is the confusion §19.77 is about.
  */
-export function scopeOptions(
-  nodes: readonly ScopeNode[],
-  canEdit?: ReadonlySet<string>,
-): ScopeOption[] {
-  const usable = canEdit === undefined ? nodes : nodes.filter((n) => canEdit.has(n.id));
-  const sorted = [...usable].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+export function scopeOptions(nodes: readonly ScopeNode[]): ScopeOption[] {
+  const sorted = [...nodes].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   // ⭐ 0028: the list used to open with an "Everywhere (company-wide)" entry.
   // It is not filtered out here, it is not built — a picker that can emit a
   // value the database refuses is D106's defect with a different label on it.

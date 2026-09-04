@@ -138,7 +138,7 @@
 .head,
 .row {
   display: grid;
-  grid-template-columns: minmax(9rem, 1.4fr) minmax(9rem, 2fr) minmax(7rem, 1fr) 17rem;
+  grid-template-columns: minmax(9rem, 1.3fr) minmax(9rem, 1.6fr) minmax(11rem, 1.6fr) 15rem;
   align-items: center;
   column-gap: 0.75rem;
   row-gap: 0.375rem;
@@ -220,6 +220,15 @@
   padding-top: 0.125rem;
 }
 
+/* The word "Colour" in front of the swatches when the palette rides inside the
+   Edit panel, so it reads as one of the things Edit changes rather than a loose
+   strip of colours. */
+.paletteLabel {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  margin-right: 0.125rem;
+}
+
 .paletteChip {
   width: 1.25rem;
   height: 1.25rem;
@@ -286,13 +295,96 @@
   overflow-wrap: anywhere;
 }
 
-.name,
-.owner {
+.name {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.owner {
+/* --- "Made in": the LIST of plants a product is made in (D115) -------------
+   A column of its own — a wrap of chips (each a plant, some with a remove
+   control) and, under them, the add picker. Sits in the third grid track and
+   aligns to the top of the row rather than centring, so a product made in
+   several plants grows downward without pushing the code and name off-centre. */
+.madeIn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  align-self: center;
+}
+
+.unassigned {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.plantChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3125rem;
+}
+
+/* A chip is the plant name, with a remove × when this reader may manage it. */
+.plantChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--grid);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  padding: 0.0625rem 0.25rem 0.0625rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  max-width: 100%;
+}
+
+.plantName {
+  overflow-wrap: anywhere;
+}
+
+/* ⚠️ The × is a real button, not a glyph on the chip: it has its own accessible
+   name ("Remove <plant> from <sku>") and its own disabled state while the
+   un-assign is in flight. */
+.plantRemove {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 0.75rem;
+  background: none;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.plantRemove:hover:not(:disabled),
+.plantRemove:focus-visible {
+  background: var(--grid);
+  color: var(--crit);
+}
+
+.plantRemove:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Sized to sit under the chips as a quiet, secondary control. Its first option
+   is the placeholder ("Add a plant…"); choosing a node fires the assign and the
+   control snaps back to the placeholder. */
+.addPlant {
+  align-self: flex-start;
+  max-width: 100%;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.1875rem 0.375rem;
+  font-size: 0.75rem;
   color: var(--ink-2);
 }
 

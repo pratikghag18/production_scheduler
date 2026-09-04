@@ -1,6 +1,6 @@
 /**
  * Acceptance suite for `src/features/admin/lib/products.ts` — the client half
- * of migration 0023's `products` (D102, §19.62).
+ * of the products catalogue (D102 §19.62; D115 §19.81, migration 0034).
  *
  * A VITEST suite, because `npm run test` is what guards this permanently and
  * vitest collects every `src/test/*.test.ts`. One plain `it()` per case, never
@@ -10,24 +10,25 @@
  * ⭐ WHAT IS UNDER TEST IS THE PURE MODULE, NOT THE PANEL. `ProductsPanel.tsx`
  * renders what these functions return and decides nothing itself; the api
  * layer (`src/lib/api/products.ts`) imports `@/lib/supabase` and is covered by
- * `tsc`/`eslint` rather than here. That split is the same one `siteAccess.ts`
- * and `siteAccess.test.ts` already draw.
+ * `tsc`/`eslint` rather than here.
  *
- * THE FIXTURE:
+ * ⭐⭐ D115 / migration 0034 RESHAPED THIS FILE. A product no longer has a single
+ * owner: `site_node_id` became a LIST, `AdminProduct.siteNodeIds`. So:
+ *   - `productRows` no longer takes a `sites` list and has no "elsewhere" drop:
+ *     the read policy now admits only products that legitimately belong to this
+ *     reader's world (see the lib header). Owner-name resolution moved to the
+ *     PANEL (`scope.ts`'s `scopeLabel`), so `ownerLabel`/`ProductSite` are gone.
+ *   - The write preview is the SPLIT decision: the shared record is company-admin
+ *     only (`canEditProduct(isCompanyAdmin)`), and a plant admin manages their own
+ *     plant's membership (`canManagePlace`). `canOwnProduct` is gone.
+ *   - `validateProductDraft` no longer has an owner field or an ownerError.
+ * Every case that turned on the single owner was rewritten or removed with a
+ * note; grep for "D115".
  *
- *   Plant 1  — the site the viewer administers, in most cases
- *   Plant 2  — a site they do not
- *
- * ⭐ THERE IS NO THIRD ENTRY ANY MORE. It read "(null) — company-wide, which
- * is a VALUE and not an absence", and migration 0028 / D108 removed the state:
- * `site_node_id` is NOT NULL on all four shared lists. Every case that turned
- * on it was rewritten rather than deleted, each with a note saying what it used
- * to assert — grep this file for "0028".
- *
- *   WX  Plant 1        product-1   active
- *   WY  Plant 1        product-2   active
- *   GZ  Plant 2        product-3   inactive
- *   RW  Plant 1        product-9   active     <- a token tokens.css never defines
+ *   WX  product-1   active
+ *   WY  product-2   active
+ *   GZ  product-3   inactive
+ *   RW  product-9   active     <- a token tokens.css never defines
  */
 import { describe, expect, it } from "vitest";
 import type { AdminProduct, SchedulerError } from "@/lib/api";
@@ -36,32 +37,24 @@ import {
   NAME_MAX_LENGTH,
   PRODUCT_PALETTE,
   SKU_MAX_LENGTH,
-  UNKNOWN_SITE_LABEL,
   canEditProduct,
-  canOwnProduct,
-  describeDeleteRefusal,
+  canManagePlace,
   describeWriteRefusal,
   editRefusalNote,
   isHexColor,
   isPaletteToken,
   matchesProductQuery,
   normaliseHexInput,
-  ownerLabel,
   partitionProducts,
   productColorVar,
   productRows,
   validateProductDraft,
   type ProductRow,
-  type ProductSite,
 } from "../features/admin/lib/products.ts";
 
 const PLANT_1 = "30000000-0000-0000-0000-000000000001";
 const PLANT_2 = "30000000-0000-0000-0000-000000000002";
-
-const SITES: readonly ProductSite[] = [
-  { id: PLANT_1, name: "Plant 1" },
-  { id: PLANT_2, name: "Plant 2" },
-];
+const LINE_1 = "30000000-0000-0000-0000-00000000000a";
 
 function product(over: Partial<AdminProduct> = {}): AdminProduct {
   return {
@@ -71,40 +64,28 @@ function product(over: Partial<AdminProduct> = {}): AdminProduct {
     active: true,
     source: "manual",
     externalId: null,
-    siteNodeId: PLANT_1,
+    siteNodeIds: [PLANT_1],
     colorToken: "product-1",
     ...over,
   };
 }
 
 const WX = product();
-const WY = product({
-  id: "p-wy",
-  sku: "WY",
-  name: "Widget Y",
-  siteNodeId: PLANT_1,
-  colorToken: "product-2",
-});
+const WY = product({ id: "p-wy", sku: "WY", name: "Widget Y", colorToken: "product-2" });
 const GZ = product({
   id: "p-gz",
   sku: "GZ",
   name: "Gadget Z",
-  siteNodeId: PLANT_2,
+  siteNodeIds: [PLANT_2],
   colorToken: "product-3",
   active: false,
 });
-const RW = product({
-  id: "p-rw",
-  sku: "RW",
-  name: "Rework",
-  siteNodeId: PLANT_1,
-  colorToken: "product-9",
-});
+const RW = product({ id: "p-rw", sku: "RW", name: "Rework", colorToken: "product-9" });
 
 const ALL = [WX, WY, GZ, RW];
 
 function rowsOf(parsed: ReadonlyArray<AdminProduct | null> = ALL): readonly ProductRow[] {
-  return productRows(parsed, SITES).rows;
+  return productRows(parsed).rows;
 }
 
 function rowFor(sku: string): ProductRow {
@@ -176,105 +157,71 @@ describe("the palette", () => {
   });
 });
 
-/* ===========================================================================
- * Group O — owners. `site_node_id` is NOT NULL since 0028 / D108: there is no
- * company-wide product, so the only question left is whether the reader can
- * NAME the owner.
- * ======================================================================== */
-
-describe("owner labelling", () => {
-  // O1 — was "a null owner is company-wide, not blank". D108 deleted the
-  // state and `ownerLabel`'s null branch with it, so the case that replaces it
-  // is the one the null branch used to hide: an owner the reader CAN name.
-  it("O1: an owner that is in the sites list is named", () => {
-    expect(ownerLabel(PLANT_2, SITES)).toBe("Plant 2");
-  });
-
-  it("O2: a known site is named", () => {
-    expect(ownerLabel(PLANT_1, SITES)).toBe("Plant 1");
-  });
-
-  // O3 — reads on `products` are org-wide; `nodes_select` is not. A site admin
-  // sees Plant 2's products and cannot name Plant 2.
-  it("O3: an owner outside the visible nodes is named as another site", () => {
-    expect(ownerLabel(PLANT_2, [{ id: PLANT_1, name: "Plant 1" }])).toBe(UNKNOWN_SITE_LABEL);
-  });
-
-  it("O4: an unresolved owner never leaks the raw uuid", () => {
-    expect(ownerLabel(PLANT_2, []).includes(PLANT_2)).toBe(false);
-  });
-
-  // O5 — was "a company-wide owner is still company-wide with no sites
-  // loaded". What is worth pinning now is the OTHER null: `sites === null`
-  // means the structure read did not land, and that must not be reported as
-  // though the owner were elsewhere — it is the same fail-closed-honestly rule
-  // as rule 8d.
-  it("O5: a failed structure read reads as another site, not as blank", () => {
-    expect(ownerLabel(PLANT_1, null)).toBe(UNKNOWN_SITE_LABEL);
-  });
-});
+/* ⭐ GROUP O — owner labelling (O1–O5) WENT WITH `ownerLabel` IN D115.
+ *
+ * A product had a single owner and this module resolved its NAME. Now a product
+ * has a LIST of places, and resolving a place id to a name is the panel's job
+ * (`scope.ts`'s `scopeLabel`, exercised by `scope.test.ts` and the panel suite).
+ * There is nothing left in this module to label.
+ */
 
 /* ===========================================================================
  * Group L — the list. Skip and count; never blank, never silent.
+ *
+ * ⭐ D115 REMOVED THE `sites` ARGUMENT AND THE "elsewhere" DROP. Before 0034 a
+ * product could arrive owned by a site the reader could not see (the board's
+ * history read exception leaking into the catalogue) and this function filtered
+ * and counted it. 0034's `products_select` admits a product only when the reader
+ * is a company admin or one of its plants is on their own branch, so every
+ * product that arrives here belongs here. What remains is skip-and-count.
  * ======================================================================== */
 
 describe("productRows", () => {
   it("L1: keeps every readable row", () => {
-    expect(productRows(ALL, SITES).rows.length).toBe(4);
+    expect(productRows(ALL).rows.length).toBe(4);
   });
 
   it("L2: counts nothing skipped when every row parsed", () => {
-    expect(productRows(ALL, SITES).skipped).toBe(0);
+    expect(productRows(ALL).skipped).toBe(0);
   });
 
   // L3/L4 — the pair that matters: a malformed row must not blank the panel,
   // and must not vanish without a trace either.
   it("L3: a malformed row does not remove the readable ones", () => {
-    expect(productRows([WX, null, WY], SITES).rows.map((r) => r.sku)).toEqual(["WX", "WY"]);
+    expect(productRows([WX, null, WY]).rows.map((r) => r.sku)).toEqual(["WX", "WY"]);
   });
 
   it("L4: a malformed row is counted", () => {
-    expect(productRows([WX, null, WY], SITES).skipped).toBe(1);
+    expect(productRows([WX, null, WY]).skipped).toBe(1);
   });
 
   it("L5: counts every malformed row, not just the first", () => {
-    expect(productRows([null, WX, null, null], SITES).skipped).toBe(3);
+    expect(productRows([null, WX, null, null]).skipped).toBe(3);
   });
 
   it("L6: an all-malformed payload yields no rows and a full count", () => {
-    expect(productRows([null, null], SITES)).toEqual({ rows: [], skipped: 2, elsewhere: 0 });
+    expect(productRows([null, null])).toEqual({ rows: [], skipped: 2 });
   });
 
   it("L7: an empty payload is not an error", () => {
-    expect(productRows([], SITES)).toEqual({ rows: [], skipped: 0, elsewhere: 0 });
+    expect(productRows([])).toEqual({ rows: [], skipped: 0 });
   });
 
   it("L8: preserves the server's sku ordering rather than re-sorting", () => {
     expect(rowsOf().map((r) => r.sku)).toEqual(["WX", "WY", "GZ", "RW"]);
   });
 
-  it("L9: resolves each row's owner label", () => {
-    expect(rowFor("WY").owner).toBe("Plant 1");
-  });
+  // L9 (owner label) went with the single owner — see the Group O note.
 
-  // L10 — was "resolves a company-wide row's owner label". D108 deleted that
-  // state; the label that still needs pinning is the one for an owner the
-  // reader cannot name, because it is the only remaining answer that is not a
-  // node name and the one a reader must never mistake for "everyone's".
-  // L10 — was "resolves a company-wide row's owner label". D108 deleted that
-  // state. ⚠️ AND MY FIRST REPLACEMENT WAS WRONG IN A WAY WORTH KEEPING A NOTE
-  // OF: it built a foreign-owned row and read `view.rows[0].owner`, but
-  // `productRows` FILTERS foreign-owned rows into `elsewhere` (§19.71) — so
-  // there is no row 0. The probe I ran beside it asserted `rows.length === 0`
-  // and passed, and I did not notice the two disagreed. `ownerLabel` is where
-  // the label is decided and O3/O4 already test it directly; what belongs here
-  // is the LIST's behaviour, which is to drop the row and count it.
-  it("L10: a row whose owner is outside the sites list is dropped from the list and counted", () => {
-    const view = productRows(
-      [product({ sku: "ZZ", siteNodeId: PLANT_2 })],
-      [{ id: PLANT_1, name: "Plant 1" }],
-    );
-    expect([view.rows.length, view.elsewhere]).toEqual([0, 1]);
+  it("L10 ⭐ (D115): a product assigned to NO plant is still shown — it is a real state", () => {
+    // An empty places list is a legitimate catalogue entry (a part not yet
+    // assigned to any plant), never a reason to hide it. `productRows` no longer
+    // drops anything for where it belongs; that is the board's offering, not the
+    // catalogue's listing.
+    const placeless = product({ sku: "PL", siteNodeIds: [] });
+    const view = productRows([WX, placeless]);
+    expect(view.rows.map((r) => r.sku)).toEqual(["WX", "PL"]);
+    expect(view.skipped).toBe(0);
   });
 
   it("L11: resolves each row's colour to a CSS value", () => {
@@ -293,8 +240,9 @@ describe("productRows", () => {
     expect(rowFor("WX").colorUnknown).toBe(false);
   });
 
-  it("L15: carries the underlying row through unchanged", () => {
+  it("L15: carries the underlying row through unchanged, places and all", () => {
     expect(rowFor("GZ").id).toBe("p-gz");
+    expect(rowFor("GZ").siteNodeIds).toEqual([PLANT_2]);
   });
 });
 
@@ -334,169 +282,103 @@ describe("matchesProductQuery", () => {
     expect(matchesProductQuery(rowFor("GZ"), "widget")).toBe(false);
   });
 
-  /* ---------------------------------------------------------------------
-   * L24-L29 - a product owned by a site you cannot see is not your catalogue.
-   *
-   * ⭐ WHY THESE EXIST. Migration 0026 narrowed the read to "company-wide, or
-   * the same branch as one of your grants", and then admitted ONE more thing
-   * on purpose: a row already on a run you can see, so the board can name its
-   * own history instead of drawing "(unknown product)". The maintainer, signed in as
-   * the Plant 1 admin, saw `Rework - Another site` in his catalogue. Measured
-   * on a live database, that row scored `app_can_read_owned = false` and
-   * `app_product_on_visible_schedule = true` — admitted purely by the history
-   * clause. The exception belongs to the BOARD; this is where it stops
-   * leaking into the list.
-   * ------------------------------------------------------------------- */
-  const FOREIGN = product({
-    id: "p-fx",
-    sku: "FX",
-    name: "Foreign Widget",
-    siteNodeId: "30000000-0000-0000-0000-0000000000ff", // a site not in SITES
-  });
-
-  it("L24: a product owned by a site you cannot see is not in the catalogue", () => {
-    expect(productRows([WX, FOREIGN], SITES).rows.map((r) => r.sku)).toEqual(["WX"]);
-  });
-
-  it("L25: and it is counted, so its absence can be explained", () => {
-    expect(productRows([WX, FOREIGN], SITES).elsewhere).toBe(1);
-  });
-
-  it("L26: a product owned by a site you CAN see is never counted as elsewhere", () => {
-    // ⚠️ WAS "a company-wide product is never counted as elsewhere", and its
-    // comment said "WX has `siteNodeId: null`" — true until 0028 and false
-    // after it, while the case went on passing. **A stale comment on a green
-    // test is how the next reader learns the wrong rule.** WX is owned by
-    // Plant 1 now, which is in SITES, so this is the negative half of L24 and
-    // it still needs a fixture that is not uniformly foreign (rule 3g).
-    expect(productRows([WX], SITES).elsewhere).toBe(0);
-    expect(productRows([WX], SITES).rows.map((r) => r.sku)).toEqual(["WX"]);
-  });
-
-  it("L27: a product owned by a site you CAN see stays", () => {
-    expect(productRows([WY], SITES).rows.map((r) => r.sku)).toEqual(["WY"]);
-    expect(productRows([WY], SITES).elsewhere).toBe(0);
-  });
-
-  it("L28 ⭐: when the structure read FAILED, nothing is filtered", () => {
-    // `null` means "we could not find out", which is NOT the same as "you can
-    // see no sites". Filtering on a failed read would empty the catalogue of
-    // every owned product and blame it on ownership - §19.64 rule 8d, a
-    // fail-closed branch that tells a lie. Every row is kept, and the owner
-    // reads "Another site" because that is the honest label for an owner we
-    // cannot name.
-    const view = productRows([WX, WY, FOREIGN], null);
-    expect(view.rows.map((r) => r.sku)).toEqual(["WX", "WY", "FX"]);
-    expect(view.elsewhere).toBe(0);
-    expect(view.rows.find((r) => r.sku === "WY")?.owner).toBe("Another site");
-  });
-
-  it("L29: counts EVERY foreign row, not just the first", () => {
-    // L5 already establishes this shape for `skipped`. Without it, `elsewhere`
-    // assigned rather than incremented passes every other case in this group.
-    const OTHER = product({
-      id: "p-fy",
-      sku: "FY",
-      siteNodeId: "30000000-0000-0000-0000-0000000000fe",
-    });
-    expect(productRows([FOREIGN, WX, OTHER], SITES).elsewhere).toBe(2);
-  });
+  /* ⭐ L24–L29 (the "foreign product is not your catalogue" filter) WENT WITH
+   * the "elsewhere" drop in D115 — see the Group L header. There is no foreign
+   * product in a reader's catalogue any more: the read policy does not admit
+   * one, so there is nothing for this module to filter. */
 });
 
 /* ===========================================================================
- * Group W — who may write. A mirror of the three policies in 0023 §5.
+ * Group W — who may write. The SPLIT (D115) as reopened by D116 (2 Sept).
+ *
+ * D115 made the shared record (create/rename/recolour/delete) COMPANY property
+ * and the list of makers per-plant. D116 hands a site admin the WHOLE lifecycle
+ * of a part made only within their own plants: they may create it (at a plant
+ * they administer) and rename/recolour/delete it while no other plant makes it.
+ * The moment a second plant adopts it, its identity is company property again.
  * ======================================================================== */
 
-describe("canOwnProduct / canEditProduct", () => {
-  it("W1: a company admin may edit a product, with no grants at all", () => {
-    expect(canEditProduct(WX, true, [])).toBe(true);
+describe("canEditProduct — a part wholly made in your own plants (D116)", () => {
+  // The reader administers Plant 1 and, by ancestor walk, the line under it.
+  const adminOfPlant1 = (nodeId: string) => nodeId === PLANT_1 || nodeId === LINE_1;
+
+  it("W1: a company admin may change any shared record, whatever its makers", () => {
+    expect(canEditProduct(true, [PLANT_2], () => false)).toBe(true);
+    expect(canEditProduct(true, [], () => false)).toBe(true);
   });
 
-  it("W2: a company admin may edit any site's product, with no grants at all", () => {
-    expect(canEditProduct(GZ, true, [])).toBe(true);
+  // W2 ⭐ (D116): the headline change. A site admin MAY rename/recolour/delete a
+  // part — but only one made entirely within plants they administer (the client
+  // mirror of the server's app_can_edit_product_record).
+  it("W2 ⭐: a site admin may change a part made only in plants they administer", () => {
+    expect(canEditProduct(false, [PLANT_1], adminOfPlant1)).toBe(true);
+    expect(canEditProduct(false, [PLANT_1, LINE_1], adminOfPlant1)).toBe(true);
   });
 
-  // W3 — the headline of 0023 §5: a site admin owns their own site's list.
-  it("W3: a site admin may edit their own site's product", () => {
-    expect(canEditProduct(WY, false, [PLANT_1])).toBe(true);
+  it("W2b ⭐: but NOT once another plant also makes it — company property again", () => {
+    expect(canEditProduct(false, [PLANT_1, PLANT_2], adminOfPlant1)).toBe(false);
   });
 
-  // W4 ⭐ REWRITTEN BY 0028, AND IT NOW RECORDS A KNOWN COARSENESS RATHER THAN
-  // A REFUSAL. It used to be "a site admin may NOT edit a company-wide
-  // product"; D108 deleted the row type. What took its place is the gap D109
-  // opened: ownership may now name ANY node, but `canOwnProduct` tests flat
-  // membership in `adminSiteIds`, not ancestry — so a product owned by a LINE
-  // inside a plant this person administers is not recognised, and the answer
-  // comes from the fail-open path instead of from the rule. The server gets it
-  // right (`app_is_admin_for` walks ancestors); the preview is coarser, and
-  // both halves are asserted so nobody "fixes" one without the other.
-  it("W4: a product owned BELOW a site you administer is not matched by the preview, and falls open", () => {
-    const lineOwned = product({ sku: "LN", siteNodeId: "n-line-1-inside-plant-1" });
-    expect(canOwnProduct(lineOwned.siteNodeId, false, [PLANT_1])).toBe(false);
-    expect(canEditProduct(lineOwned, false, [PLANT_1], true)).toBe(true);
+  it("W2c: nor a part they make none of", () => {
+    expect(canEditProduct(false, [PLANT_2], adminOfPlant1)).toBe(false);
   });
 
-  it("W5: a site admin may NOT edit another site's product", () => {
-    expect(canEditProduct(GZ, false, [PLANT_1])).toBe(false);
-  });
-
-  it("W6: somebody who administers no site may edit nothing", () => {
-    expect(canEditProduct(WY, false, [])).toBe(false);
-  });
-
-  it("W7: a site admin of two sites may edit either", () => {
-    expect(canEditProduct(GZ, false, [PLANT_1, PLANT_2])).toBe(true);
-  });
-
-  // W8/W9 — both used to pass `null` for company-wide: refused to a site
-  // admin, allowed to a company admin. D108 removed the argument. What is left
-  // to pin is the pair that still differs: a site admin is refused a site they
-  // do not administer, and a company admin is refused nothing.
-  it("W8: canOwnProduct refuses a site admin a site they do not administer", () => {
-    expect(canOwnProduct(PLANT_2, false, [PLANT_1])).toBe(false);
-  });
-
-  it("W9: canOwnProduct allows a company admin any site, with no grants at all", () => {
-    expect(canOwnProduct(PLANT_2, true, [])).toBe(true);
+  // W3 ⭐ — an orphan part (assigned to no plant, or all its plants foreign to
+  // this reader) is company property, matching the server's "at least one maker
+  // AND I administer every one". A company admin is unaffected.
+  it("W3 ⭐: an orphan part (no visible makers) is company property to a site admin", () => {
+    expect(canEditProduct(false, [], adminOfPlant1)).toBe(false);
+    expect(canEditProduct(true, [], adminOfPlant1)).toBe(true);
   });
 });
 
-describe("editRefusalNote", () => {
-  it("W10: says nothing when the row is editable", () => {
-    expect(editRefusalNote(WY, false, [PLANT_1])).toBe(null);
+describe("canManagePlace — a plant admin manages their own plant's membership", () => {
+  it("W4: a company admin may manage any plant, with no grants at all", () => {
+    expect(canManagePlace(PLANT_2, true, [])).toBe(true);
   });
 
-  /* ⭐ W11 WAS DELETED BY 0028, AND SO WAS W12c BELOW. Both asserted the
-   * "Company-wide — only a company admin can change this." note, and D108
-   * deleted the state that produced it. There is nothing to put in their place
-   * that W12 does not already say: with `canEditProduct` failing open for
-   * anyone who administers somewhere, ONE refusal note remains.
-   *
-   * ⚠️ THAT IS A REAL WIDENING AND IT IS WORTH SAYING OUT LOUD. W12c existed to
-   * stop the 27-Aug fail-open flip handing every site admin the company's
-   * shared rows; the certain refusal it relied on no longer exists, so the
-   * preview now says "yes" to strictly more than it did. The server is
-   * unchanged and still decides — see §19.72.
-   */
-
-  it("W12: someone who administers NOWHERE is told exactly that", () => {
-    // ⚠️ RULE 1b-ii: THIS CASE WAS RIGHT AND THE CONTRACT CHANGED. It used to
-    // assert the note said "another site", which was correct while
-    // `canEditProduct` decided from `adminSiteIds` alone. The 27-Aug review
-    // measured that `adminSiteIds` (derived from STRUCTURE ownership) is not
-    // the question the policy asks (node GRANTS), so a site admin could be
-    // locked out of their own products — a wrong "no", which is invisible and
-    // permanent. With §19.63's contract in place a wrong "yes" is one clear
-    // sentence, so the default flipped. The note that remains is the one that
-    // needs no grant read to be certain of.
-    expect(editRefusalNote(GZ, false, [PLANT_1], false)).toContain("administer anywhere");
+  it("W5: a plant admin may manage a plant they administer", () => {
+    expect(canManagePlace(PLANT_1, false, [PLANT_1])).toBe(true);
   });
 
-  it("W12b: and someone who administers SOMEWHERE is no longer refused on a guess", () => {
-    // The half W12 cannot see. Without this, flipping the default back to
-    // fail-closed would leave the whole group green.
-    expect(editRefusalNote(GZ, false, [PLANT_1], true)).toBe(null);
-    expect(canEditProduct(GZ, false, [PLANT_1], true)).toBe(true);
+  it("W6: and is not CERTAIN about a plant they do not administer", () => {
+    expect(canManagePlace(PLANT_2, false, [PLANT_1])).toBe(false);
+  });
+
+  // W7 ⭐ — the `canEdit` lesson pinned. A `false` here is "not certain from
+  // here", NEVER "refused": `adminNodeIds` is the coarse set (roots), so a LINE
+  // inside an administered plant is theirs to the server and false here. The
+  // panel must still OFFER place-adding and let the server decide — reading this
+  // false as "hide it" is exactly the fail-closed trap §19.72a records.
+  it("W7 ⭐: a line inside an administered plant is not CERTAIN from the coarse set", () => {
+    expect(canManagePlace(LINE_1, false, [PLANT_1])).toBe(false);
+    // ...and a company admin is certain regardless.
+    expect(canManagePlace(LINE_1, true, [])).toBe(true);
+  });
+});
+
+describe("editRefusalNote (D116)", () => {
+  const adminOfPlant1 = (nodeId: string) => nodeId === PLANT_1;
+
+  it("W8: says nothing when the reader may change the record", () => {
+    expect(editRefusalNote(true, [PLANT_2], () => false)).toBe(null);
+    expect(editRefusalNote(false, [PLANT_1], adminOfPlant1)).toBe(null);
+  });
+
+  it("W9 ⭐: a part another plant shares is company-owned, and points at what they CAN do", () => {
+    const note = editRefusalNote(false, [PLANT_1, PLANT_2], adminOfPlant1);
+    expect(note).not.toBe(null);
+    expect(note).toContain("Another plant");
+    // ⭐ names the way through — a note that only refuses invites a support
+    // ticket; this one says "you can add or remove your own plant".
+    expect(note).toContain("plant");
+  });
+
+  it("W9b: a part they make none of is company-admin only, still pointing the way", () => {
+    const note = editRefusalNote(false, [PLANT_2], adminOfPlant1);
+    expect(note).not.toBe(null);
+    expect(note).toContain("company admin");
+    expect(note).toContain("plant");
   });
 });
 
@@ -568,33 +450,24 @@ describe("colour: a token or a hex (0025 §2)", () => {
     // drawable — warning about it would be the screen complaining about a value
     // it just helped somebody choose. Nothing asserted the flag for a hex row,
     // so reverting it to `!isPaletteToken(...)` alone was invisible.
-    const view = productRows(
-      [
-        { ...WY, colorToken: "#1baf7a" },
-        { ...WX, colorToken: "product-5" },
-      ],
-      SITES,
-    );
+    const view = productRows([
+      { ...WY, colorToken: "#1baf7a" },
+      { ...WX, colorToken: "product-5" },
+    ]);
     expect(view.rows.map((r) => r.colorUnknown)).toEqual([false, true]);
   });
 });
 
-/* ⭐ THE `ownerOptions` GROUP (W13-W17) WENT WITH THE FUNCTION IN 0028.
- *
- * All five cases were about a company-wide entry and a flat list of site
- * ROOTS. D108 removed the entry and D109 removed the "roots only" premise: a
- * product can belong to Line 1. The screen has used `scopeOptions` from
- * `scope.ts` since 0025, and its own cases (X13-X19 in `scope.test.ts`) carry
- * the picker's contract, including the inverted X13 that pins the absence of
- * the company-wide entry.
- */
-
 /* ===========================================================================
  * Group V — the draft. `unique (org_id, sku)` makes a typo permanent.
+ *
+ * ⭐ D115 REMOVED THE OWNER FIELD. A product is the company-wide record — sku
+ * and name — and which plants make it is managed separately through
+ * `product_sites`, so there is no place to choose on the create form.
  * ======================================================================== */
 
-function draft(over: Partial<{ sku: string; name: string; siteNodeId: string }> = {}) {
-  return { sku: "WX-1", name: "Widget X", siteNodeId: PLANT_1, ...over };
+function draft(over: Partial<{ sku: string; name: string }> = {}) {
+  return { sku: "WX-1", name: "Widget X", ...over };
 }
 
 describe("validateProductDraft", () => {
@@ -612,22 +485,15 @@ describe("validateProductDraft", () => {
     expect(result.ok === true && result.value.name).toBe("Widget X");
   });
 
-  it("V4: carries the owner through untouched", () => {
-    const result = validateProductDraft(draft({ siteNodeId: PLANT_1 }));
-    expect(result.ok === true && result.value.siteNodeId).toBe(PLANT_1);
-  });
+  // V4/V5 (the owner field, and "no owner chosen is a refusal") WENT WITH the
+  // owner in D115: there is no owner on the create form to carry or to refuse.
 
-  // V5 — was "carries a null owner through as null, not as a blank string",
-  // back when `null` meant company-wide and had to survive the round trip
-  // distinct from `""`. D108 removed the value, and the empty string changed
-  // meaning from "nothing typed" to "nothing chosen" — which is now a
-  // REFUSAL with its own message, beside its own control.
-  it("V5 ⭐: refuses a draft with no owner chosen, and says so about the owner", () => {
-    const result = validateProductDraft(draft({ siteNodeId: "" }));
-    expect(result.ok).toBe(false);
-    expect(result.ok === false && result.ownerError).toBe("Choose where this product belongs.");
-    // and it does not blame the sku or the name for it
-    expect(result.ok === false && [result.skuError, result.nameError]).toEqual([null, null]);
+  it("V4 ⭐ (D115): a draft is valid with sku and name alone — no place required", () => {
+    // The create form makes the company-wide record; a just-created part offered
+    // nowhere is a legitimate state, not an incomplete form.
+    const result = validateProductDraft({ sku: "NEW-1", name: "New Part" });
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.value).toEqual({ sku: "NEW-1", name: "New Part" });
   });
 
   it("V6: refuses a blank sku", () => {
@@ -708,57 +574,14 @@ describe("validateProductDraft", () => {
 
 /* ===========================================================================
  * Group R — saying what is in the way.
- *
- * `describeSchedulerError` is passed IN rather than imported: the module under
- * test has no runtime imports. These cases use its real sentences so the two
- * halves cannot drift into repeating each other.
  * ======================================================================== */
 
-const STILL_IN_USE: SchedulerError = { kind: "StillInUse", usedBy: "runs" };
-const STILL_IN_USE_TEXT = "It's still used by runs, so it can't be deleted.";
 const REFUSED: SchedulerError = { kind: "WriteRefused" };
 const REFUSED_TEXT = "You don't have permission to change that.";
 const DUPLICATE: SchedulerError = { kind: "DuplicateValue", constraint: "products_org_id_sku_key" };
 const DUPLICATE_TEXT = "Something here already uses that name or code.";
 const UNKNOWN: SchedulerError = { kind: "Unknown", raw: new Error("boom") };
 const UNKNOWN_TEXT = "Something went wrong. Please try again.";
-
-describe("describeDeleteRefusal", () => {
-  // R1 — the referencing TABLE, already lifted from the 23503 detail line, is
-  // what makes this different from "something went wrong".
-  it("R1: keeps the table that is in the way", () => {
-    expect(describeDeleteRefusal(STILL_IN_USE, STILL_IN_USE_TEXT)).toContain("runs");
-  });
-
-  // R2 — `runs`/`assignments` reference (org_id, product_id) with NO ON
-  // DELETE, so a scheduled product can NEVER be deleted. Saying only that it
-  // failed leaves somebody clicking it again.
-  it("R2: offers deactivate as the way out", () => {
-    expect(describeDeleteRefusal(STILL_IN_USE, STILL_IN_USE_TEXT)).toContain("Deactivate");
-  });
-
-  it("R3: says the work already done is kept", () => {
-    expect(describeDeleteRefusal(STILL_IN_USE, STILL_IN_USE_TEXT)).toContain("already on");
-  });
-
-  it("R4: explains a refused delete as an ownership question", () => {
-    expect(describeDeleteRefusal(REFUSED, REFUSED_TEXT)).toContain("company admin");
-  });
-
-  it("R5: keeps the underlying sentence for a refusal", () => {
-    expect(describeDeleteRefusal(REFUSED, REFUSED_TEXT)).toContain(REFUSED_TEXT);
-  });
-
-  it("R6: passes an unrecognised failure through unchanged", () => {
-    expect(describeDeleteRefusal(UNKNOWN, UNKNOWN_TEXT)).toBe(UNKNOWN_TEXT);
-  });
-
-  it("R7: never invents a table when the error names none", () => {
-    const bare: SchedulerError = { kind: "StillInUse" };
-    const text = "Something else still uses this, so it can't be deleted.";
-    expect(describeDeleteRefusal(bare, text)).toContain(text);
-  });
-});
 
 describe("describeWriteRefusal", () => {
   // R8 — the generic sentence does not say WHICH field, and the sku is the one

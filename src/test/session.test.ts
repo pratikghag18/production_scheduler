@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { adminAccess, canQueryAsUser, decideSessionUpdate } from "@/features/auth/session";
 import type { AuthEvent } from "@/features/auth/session";
 
@@ -167,8 +168,19 @@ describe("session.ts: adminAccess", () => {
     expect(adminAccess("admin", false, false)).toBe("granted");
   });
 
-  it("A4: a resolved supervisor is denied", () => {
-    expect(adminAccess("supervisor", false, false)).toBe("denied");
+  it("A4 ⭐⭐: a supervisor is GRANTED — this case asserted the opposite until D114", () => {
+    // ⚠️ The rule changed, so the case changed with it rather than being
+    // deleted. 0032 made a supervisor's grant enough to keep the training
+    // record, and the maintainer's reason is the job: *"the supervisor will be
+    // the one who enters or uploads the training information."* Until this,
+    // the database said yes and the screen still turned them away at the door.
+    expect(adminAccess("supervisor", false, false)).toBe("granted");
+  });
+
+  it("A4b: and a viewer is still denied — the widening is one role, not the gate", () => {
+    // ⭐ Without this, A4's flip could have been achieved by deleting the whole
+    // check, and every case above would still pass.
+    expect(adminAccess("viewer", false, false)).toBe("denied");
   });
 
   it("A5: a resolved viewer is denied", () => {
@@ -261,5 +273,58 @@ describe("session.ts: adminAccess", () => {
     expect(adminAccess("viewer", 1 as unknown as boolean, false)).toBe("denied");
     expect(adminAccess("viewer", "yes" as unknown as boolean, false)).toBe("denied");
     expect(adminAccess("viewer", {} as unknown as boolean, false)).toBe("denied");
+  });
+});
+
+/* ===========================================================================
+ * WHO GETS TO DECLARE AN IDENTITY CHANGE.
+ *
+ * ⭐⭐ `decideSessionUpdate` is pure and every case above passes whatever
+ * `lastUserId` is threaded into it — which is exactly why none of them noticed
+ * that the value lived in a `useRef`, one copy per hook instance, each starting
+ * at `null`. `useSession` is called in six components now, so **every newly
+ * mounted one compared `null` against the real user, concluded the person had
+ * just signed in, and called `queryClient.resetQueries()`**, emptying the cache
+ * for everybody.
+ *
+ * ⚠⚠ IT WAS FOUND IN A BROWSER, NOT HERE, and only because it became visible:
+ * switching admin tabs mounts a panel, the reset blanked the hierarchy read,
+ * and the plant filter row unmounted and came back. Sampled per animation
+ * frame, its height went **42 → 0 → 42 on every tab switch**. Anybody with one
+ * readable plant has no row at all (§19.79), so for them the cache was thrown
+ * away silently and paid for in refetches.
+ *
+ * ⚠️ SO THIS IS A SOURCE-LEVEL GUARD, in `scaleAudit`'s idiom, and it is here
+ * because a behavioural one would need an auth mock this project does not have.
+ * It pins the one thing that regressed: WHERE the identity is kept. If that
+ * matters more later, the honest upgrade is the `SessionProvider` P1-6b already
+ * records as debt — not a bigger regex.
+ * =========================================================================== */
+
+describe("useSession.ts: the signed-in identity is app-wide, not per hook instance", () => {
+  const src = readFileSync(`${process.cwd()}/src/features/auth/useSession.ts`, "utf8");
+
+  it("S13 ⭐⭐: `lastUserId` is declared at module scope", () => {
+    // `let lastUserId: string | null = null;` with no leading indentation —
+    // module scope is exactly what "no indentation" means in this file.
+    expect(/^let lastUserId: string \| null = null;$/m.test(src)).toBe(true);
+  });
+
+  it("S14: and it is NOT a ref inside the hook, which is what it used to be", () => {
+    expect(src).not.toMatch(/lastUserId\s*=\s*useRef/);
+    expect(src).not.toMatch(/lastUserId\.current/);
+  });
+
+  it("S15: the guard can fail — it is matching this file and not passing vacuously", () => {
+    // ⚠️ Rule 3: a matcher that only ever reads a clean repo says nothing about
+    // whether it can fail. Both patterns are run against the shape they exist
+    // to reject, so a typo that made them match nothing would surface here.
+    const asRef = src.replace(
+      /^let lastUserId: string \| null = null;$/m,
+      "  const lastUserId = useRef<string | null>(null);",
+    );
+    expect(asRef).not.toBe(src);
+    expect(/^let lastUserId: string \| null = null;$/m.test(asRef)).toBe(false);
+    expect(asRef).toMatch(/lastUserId\s*=\s*useRef/);
   });
 });

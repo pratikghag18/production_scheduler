@@ -652,3 +652,12 @@
    `.eligible` hint, both of which paint on the row itself. Nothing here sets a
    background, so the row treatment underneath is untouched — the caret is
    additive, exactly as `.dropTick` is. */
+
+/* Roadmap 1(c): what the plant filter trimmed, and the one form it cannot
+   narrow. Quiet chrome at the weight of the surrounding notes — this is the
+   ordinary state of a filtered screen, not a warning about one. */
+.plantNote {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}

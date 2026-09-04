@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { DRAG_THRESHOLD_PX } from "@/lib/interaction";
+import { Chevron } from "@/components/icons";
 import { describeSchedulerError, type BoardNode, type HierarchyLevel } from "@/lib/api";
 import {
+  useCopyPlantStructure,
   useCreateNode,
   useDeleteNode,
   useDemoteNode,
@@ -61,6 +63,8 @@ export function NodeTreeEditor({
   levels,
   shapeSummaries,
   selectedTemplateId,
+  visibleNodeIds = null,
+  plantLabel = null,
 }: {
   nodes: BoardNode[];
   levels: HierarchyLevel[];
@@ -68,6 +72,34 @@ export function NodeTreeEditor({
   shapeSummaries: readonly ShapeSummary[];
   /** The shape currently selected in `ShapePicker`, used as the add-root default. */
   selectedTemplateId: string | null;
+  /**
+   * Roadmap 1(c) — which nodes the plant filter is SHOWING. `null` means no
+   * filter is applied and everything is drawn.
+   *
+   * ⚠⚠ **DISPLAY ONLY, AND THAT IS THE WHOLE CONTRACT OF THIS PROP.** `nodes`
+   * above stays the COMPLETE array and every rule keeps reading it —
+   * `eligibleTargetIds`, `canDropOn`, `legalParentsFor`, `demoteTargets`,
+   * `groupDropState`. This component's standing invariant is that it must
+   * never refuse client-side a move the server would accept, and answering a
+   * legality question from a filtered tree would do exactly that: a node would
+   * stop being a legal parent because somebody narrowed a view.
+   *
+   * ⭐ Filtering the ROWS rather than the nodes is also the seam that was
+   * already here. The comment above `buildTreeRows` says sibling ORDER comes
+   * from "the rows the admin is actually looking at, never from re-sorting
+   * `nodes`", so that the index handed to `place_node` means what they just
+   * saw — which stays true of a filtered list and would stop being true if the
+   * filter were pushed any deeper.
+   *
+   * ⚠️ A plant is a whole subtree, so this set never removes a node while
+   * keeping its children: every kept node's ancestors are kept with it, and
+   * the tree stays a tree. `reseatRootGuides` (inside `groupRowsByShape`)
+   * redraws the guides afterwards, so the survivors do not keep the indent
+   * furniture of rows that are gone.
+   */
+  visibleNodeIds?: ReadonlySet<string> | null;
+  /** What the plant filter is showing, for the footnote. `null` when unfiltered. */
+  plantLabel?: string | null;
 }) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [popover, setPopover] = useState<PopoverState | null>(null);
@@ -80,8 +112,20 @@ export function NodeTreeEditor({
   const [addRootTemplateId, setAddRootTemplateId] = useState<string | null>(selectedTemplateId);
   const requiresShapeChoice = shapeSummaries.length > 1;
 
+  // Starter library (0035): a new root can either start EMPTY from a shape (the
+  // path above) or COPY an existing plant's whole node tree. `addRootMode`
+  // defaults to "empty" so the established behaviour is untouched until the
+  // admin opts in. `addRootSourceId` is the ROOT node being copied.
+  const [addRootMode, setAddRootMode] = useState<"empty" | "copy">("empty");
+  const [addRootSourceId, setAddRootSourceId] = useState<string | null>(null);
+  // The existing plants offered as copy sources: every ROOT node, in the order
+  // `nodes` already carries (the same stable order the tree is drawn from).
+  const rootNodes = nodes.filter((n) => n.parentId === null);
+  const canCopyPlant = rootNodes.length > 0;
+
   const renameMutation = useRenameNode();
   const createMutation = useCreateNode();
+  const copyMutation = useCopyPlantStructure();
   const moveMutation = useMoveNode();
   const placeMutation = usePlaceNode();
   const promoteMutation = usePromoteNode();
@@ -103,7 +147,13 @@ export function NodeTreeEditor({
   // needs them: sibling ORDER comes from the rows the admin is actually looking
   // at, never from re-sorting `nodes`, so the index handed to `place_node`
   // means the same thing they just saw.
-  const rows = buildTreeRows(nodes, levels, collapsedIds);
+  const allRows = buildTreeRows(nodes, levels, collapsedIds);
+  // ⭐ The plant filter, applied at the ONE place it may be applied — see
+  // `visibleNodeIds` above. Everything from here down is presentation; every
+  // legality question below still asks `nodes`.
+  const rows =
+    visibleNodeIds === null ? allRows : allRows.filter((r) => visibleNodeIds.has(r.node.id));
+  const hiddenByPlant = allRows.length - rows.length;
 
   type DragLive = {
     /** computed ONCE at drag start -- legalParentsFor is O(n) in canDropOn calls */
@@ -411,7 +461,11 @@ export function NodeTreeEditor({
           type="button"
           className={styles.addRootBtn}
           onClick={() => {
-            if (!addRootOpen) setAddRootTemplateId(selectedTemplateId);
+            if (!addRootOpen) {
+              setAddRootTemplateId(selectedTemplateId);
+              setAddRootMode("empty");
+              setAddRootSourceId(null);
+            }
             setAddRootOpen((v) => !v);
           }}
         >
@@ -425,6 +479,22 @@ export function NodeTreeEditor({
           onSubmit={(e) => {
             e.preventDefault();
             if (addRootName.trim() === "") return;
+            const closeOnSuccess = () => {
+              setAddRootName("");
+              setAddRootSourceId(null);
+              setAddRootMode("empty");
+              setAddRootOpen(false);
+            };
+            if (addRootMode === "copy") {
+              // Starter library: copy an existing plant's structure (0035). The
+              // source plant carries its own template, so no shape is chosen here.
+              if (addRootSourceId === null) return;
+              copyMutation.mutate(
+                { sourceRootId: addRootSourceId, newName: addRootName },
+                { onSuccess: closeOnSuccess },
+              );
+              return;
+            }
             if (requiresShapeChoice && addRootTemplateId === null) return;
             createMutation.mutate(
               {
@@ -434,12 +504,7 @@ export function NodeTreeEditor({
                 // so the RPC's own single-template inference runs (§7.5).
                 templateId: requiresShapeChoice ? (addRootTemplateId ?? undefined) : undefined,
               },
-              {
-                onSuccess: () => {
-                  setAddRootName("");
-                  setAddRootOpen(false);
-                },
-              },
+              { onSuccess: closeOnSuccess },
             );
           }}
         >
@@ -450,7 +515,37 @@ export function NodeTreeEditor({
             placeholder="Root node name"
             onChange={(e) => setAddRootName(e.target.value)}
           />
-          {requiresShapeChoice && (
+          {/* Starter library (0035): how the new plant starts. Offered only when
+              there is at least one existing plant to copy — a brand-new org has
+              nothing to copy from, so the toggle would be a choice with one real
+              answer. Default "empty" keeps the established behaviour. */}
+          {canCopyPlant && (
+            <select
+              aria-label="How the new root node starts"
+              value={addRootMode}
+              onChange={(e) => setAddRootMode(e.target.value === "copy" ? "copy" : "empty")}
+            >
+              <option value="empty">Start: Empty structure</option>
+              <option value="copy">Start: Copy an existing plant</option>
+            </select>
+          )}
+          {addRootMode === "copy" && canCopyPlant && (
+            <select
+              aria-label="Plant to copy the structure from"
+              value={addRootSourceId ?? ""}
+              onChange={(e) => setAddRootSourceId(e.target.value === "" ? null : e.target.value)}
+            >
+              <option value="" disabled>
+                Choose a plant to copy…
+              </option>
+              {rootNodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {requiresShapeChoice && addRootMode === "empty" && (
             <select
               aria-label="Site structure for the new root node"
               value={addRootTemplateId ?? ""}
@@ -471,10 +566,26 @@ export function NodeTreeEditor({
               ))}
             </select>
           )}
+          {/* ⚠️ THE ONE PLACE THE FILTER CANNOT NARROW A FORM, AND IT SAYS SO.
+              Everywhere else on these screens "what you see is what you can
+              create in" (decision 3, roadmap 1(c)); here the thing being
+              created IS a new root, so it belongs to no existing plant by
+              construction and cannot be offered "inside" the one on screen.
+              Left working and annotated rather than disabled: a disabled
+              control reads as a permission the reader does not have, and this
+              is a view choice they can undo in one click. */}
+          {plantLabel !== null && (
+            <span className={styles.plantNote}>
+              A new root starts its own place — it will not appear until you switch back to All
+              plants.
+            </span>
+          )}
           <button
             type="submit"
             disabled={
-              createMutation.isPending || (requiresShapeChoice && addRootTemplateId === null)
+              addRootMode === "copy"
+                ? copyMutation.isPending || addRootSourceId === null || addRootName.trim() === ""
+                : createMutation.isPending || (requiresShapeChoice && addRootTemplateId === null)
             }
           >
             Add
@@ -487,6 +598,11 @@ export function NodeTreeEditor({
       {createMutation.isError && !popover && (
         <p className={styles.errorLine} role="alert">
           {describeSchedulerError(createMutation.error)}
+        </p>
+      )}
+      {copyMutation.isError && !popover && (
+        <p className={styles.errorLine} role="alert">
+          {describeSchedulerError(copyMutation.error)}
         </p>
       )}
 
@@ -574,7 +690,7 @@ export function NodeTreeEditor({
                       }
                       onClick={() => toggleCollapsed(row.node.id)}
                     >
-                      {row.collapsed ? "▸" : "▾"}
+                      <Chevron direction={row.collapsed ? "right" : "down"} />
                     </button>
                   ) : (
                     <span className={styles.disclosureSpacer} />
@@ -619,6 +735,19 @@ export function NodeTreeEditor({
           </div>
         );
       })}
+
+      {/* ⚠️ COUNTED, NEVER SILENT. `scope.ts`'s header is the reason: hiding is
+          invisible and permanent, and a tree that quietly shrank looks exactly
+          like a company with fewer places in it than it has. Named by the
+          filter's own label rather than by a level word — the hierarchy is
+          user-defined and "plant" is only this company's name for its top. */}
+      {hiddenByPlant > 0 && plantLabel !== null && (
+        <p className={styles.plantNote}>
+          {hiddenByPlant === 1
+            ? `1 place outside ${plantLabel} is not shown.`
+            : `${hiddenByPlant} places outside ${plantLabel} are not shown.`}
+        </p>
+      )}
 
       {live && (
         <div

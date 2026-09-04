@@ -28,6 +28,7 @@ import type {
 } from "@/lib/api";
 import { parseTstzRange, fromEfficiency } from "@/lib/api";
 import { packLanes, trackRowHeight, type Density } from "./geometry";
+import { buildCycleTimeIndex, cycleTimeKey, standardTargetQty } from "./standardTarget";
 
 export interface BoardRow {
   node: BoardNode;
@@ -48,6 +49,16 @@ export type IndexedAssignment = Assignment & {
   efficiencyPercent: number;
   /** Lane index within the packed lanes of its own node's track (rule 3). */
   lane: number;
+  /**
+   * R-316: what the cell's standard cycle time says this window is worth, or
+   * null when the cell has no cycle time for this product — which is the normal
+   * case, since cycle times are optional everywhere.
+   *
+   * This NEVER overrides `targetQty`. It is what the chip shows when the human
+   * typed no target, and it is computed even when they did, so that clearing
+   * the field falls straight back to the standard.
+   */
+  defaultTargetQty: number | null;
 };
 
 export interface BoardIndex {
@@ -67,6 +78,9 @@ export interface BoardIndex {
   runById: Map<string, IndexedRun>;
   assignmentById: Map<string, IndexedAssignment>;
   templateForNode: Map<string, ShiftTemplate | null>;
+  /** R-315: standard seconds-per-unit, keyed by `cycleTimeKey(nodeId, productId)`.
+   *  The popovers derive a candidate range's target from this. */
+  cycleTimeByKey: Map<string, number>;
   skillsForNode: Map<string, Skill[]>;
   productById: Map<string, Product>;
   operatorById: Map<string, BoardOperator>;
@@ -177,6 +191,36 @@ export function buildBoardIndex(
     runById.set(ir.id, ir);
   }
 
+  // Rule 4: nearest-ancestor template resolution over ltree paths, never parentId.
+  //
+  // ⚠️ This block runs BEFORE the assignment loop below, where it used to run
+  // after. R-316's derived target needs each cell's resolved shift pattern to
+  // know which breaks fall inside an assignment, and the assignment loop is
+  // where that is computed. Nothing here reads the assignment maps, so the move
+  // is order-only.
+  const pathToTemplateId = new Map<string, string>();
+  for (const entry of data.nodeShiftMap) {
+    if (entry.templateId === null) continue;
+    const node = nodeById.get(entry.nodeId);
+    if (!node) continue;
+    pathToTemplateId.set(node.path, entry.templateId);
+  }
+  function resolveTemplateForPath(path: string): ShiftTemplate | null {
+    for (const p of ancestorPaths(path)) {
+      const tid = pathToTemplateId.get(p);
+      if (tid) return templateById.get(tid) ?? null;
+    }
+    return null;
+  }
+  const templateForNode = new Map<string, ShiftTemplate | null>();
+  for (const n of data.nodes) {
+    templateForNode.set(n.id, resolveTemplateForPath(n.path));
+  }
+
+  // R-315: the standard seconds-per-unit for each (cell, product) in scope.
+  // Usually empty — a cycle time is optional everywhere.
+  const cycleTimeByKey = buildCycleTimeIndex(data.cycleTimes);
+
   // Rule 2: an assignment belongs to the row named by `assignment.nodeId`,
   // never by its run's node.
   const rawByNode = new Map<string, Assignment[]>();
@@ -204,11 +248,33 @@ export function buildBoardIndex(
     const { laneOf, laneCount } = packLanes(withRanges);
     laneCountByNode.set(nodeId, laneCount);
 
-    const indexed: IndexedAssignment[] = withRanges.map((w) => ({
-      ...w,
-      efficiencyPercent: fromEfficiency(w.efficiency),
-      lane: laneOf.get(w) ?? 0,
-    }));
+    const template = templateForNode.get(nodeId) ?? null;
+
+    const indexed: IndexedAssignment[] = withRanges.map((w) => {
+      const efficiencyPercent = fromEfficiency(w.efficiency);
+      // R-316: a run-attached chip carries no product of its own (D5 — exactly
+      // one of run_id and product_id), so its part is the run's.
+      const productId = w.productId ?? (w.runId ? (runById.get(w.runId)?.productId ?? null) : null);
+      // The derived default is computed for EVERY row, including one that
+      // already carries an explicit target. `targetQty` still wins wherever it
+      // is displayed; keeping both means clearing the field falls straight back
+      // to the standard without a refetch.
+      const defaultTargetQty =
+        productId === null
+          ? null
+          : standardTargetQty({
+              range: { startMin: w.startMin, endMin: w.endMin },
+              template,
+              efficiencyPercent,
+              secondsPerUnit: cycleTimeByKey.get(cycleTimeKey(nodeId, productId)),
+            });
+      return {
+        ...w,
+        efficiencyPercent,
+        lane: laneOf.get(w) ?? 0,
+        defaultTargetQty,
+      };
+    });
     assignmentsByNode.set(nodeId, indexed);
 
     for (const ia of indexed) {
@@ -218,30 +284,16 @@ export function buildBoardIndex(
         rl.push(ia);
         assignmentsByRun.set(ia.runId, rl);
       }
-      const ol = assignmentsByOperator.get(ia.operatorId) ?? [];
-      ol.push(ia);
-      assignmentsByOperator.set(ia.operatorId, ol);
+      // D110: a row whose person has been deleted has no operator to index by.
+      // It is still drawn — `operatorViewFor` names them from the snapshot —
+      // but it belongs in nobody's roster, and an `""` key would collect every
+      // departed person into one imaginary operator.
+      if (ia.operatorId !== null) {
+        const ol = assignmentsByOperator.get(ia.operatorId) ?? [];
+        ol.push(ia);
+        assignmentsByOperator.set(ia.operatorId, ol);
+      }
     }
-  }
-
-  // Rule 4: nearest-ancestor template resolution over ltree paths, never parentId.
-  const pathToTemplateId = new Map<string, string>();
-  for (const entry of data.nodeShiftMap) {
-    if (entry.templateId === null) continue;
-    const node = nodeById.get(entry.nodeId);
-    if (!node) continue;
-    pathToTemplateId.set(node.path, entry.templateId);
-  }
-  function resolveTemplateForPath(path: string): ShiftTemplate | null {
-    for (const p of ancestorPaths(path)) {
-      const tid = pathToTemplateId.get(p);
-      if (tid) return templateById.get(tid) ?? null;
-    }
-    return null;
-  }
-  const templateForNode = new Map<string, ShiftTemplate | null>();
-  for (const n of data.nodes) {
-    templateForNode.set(n.id, resolveTemplateForPath(n.path));
   }
 
   // Rule 5: skillsForNode unions ancestor-attached requirements, deduped, ordered by name.
@@ -307,6 +359,7 @@ export function buildBoardIndex(
     runById,
     assignmentById,
     templateForNode,
+    cycleTimeByKey,
     skillsForNode,
     productById,
     operatorById,

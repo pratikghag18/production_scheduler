@@ -287,6 +287,13 @@ function makeFixture(): BoardWindow {
 
   const shiftTemplates = [t38, t210];
 
+  // R-315/R-316: cell_6 makes p1 in 90 seconds, otherx in 120. Neither template
+  // above carries breaks, so a derived target here is the whole assigned span.
+  const cycleTimes = [
+    { nodeId: "n-cell6", productId: "p1", secondsPerUnit: 90 },
+    { nodeId: "n-otherx", productId: "p1", secondsPerUnit: 120 },
+  ];
+
   // case 14: template at plant_1.assembly resolves for line_1.cell_1;
   // cnc_line (nearer) overrides machining (the department, also set).
   const nodeShiftMap = [
@@ -315,6 +322,7 @@ function makeFixture(): BoardWindow {
     nodeSkillRequirements,
     shiftTemplates,
     nodeShiftMap,
+    cycleTimes,
   } as unknown as BoardWindow;
 }
 
@@ -431,5 +439,58 @@ describe("boardIndex.ts", () => {
       const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, d);
       expect(idx.density).toBe(d);
     }
+  });
+});
+
+/**
+ * R-316: the derived default target, as the board index computes it. The
+ * arithmetic itself is pinned in `standardTarget.test.ts`; these cases pin the
+ * WIRING — which product a chip is measured against, which cell's cycle time is
+ * read, and that an explicit target never disturbs it.
+ */
+describe("R-316: an assignment carries the target its cell's cycle time implies", () => {
+  it("B-CT1: a direct assignment is measured by its own product at its own cell", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    const a = idx.assignmentById.get("a-ok");
+    // 06:00-10:00 is 240 minutes, no breaks in this template, 120 s a unit.
+    expect(a?.defaultTargetQty).toBe(120);
+  });
+
+  it("B-CT2: a run-attached chip carries no product of its own and takes the run's", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    const a = idx.assignmentById.get("a1");
+    expect(a?.productId).toBeNull();
+    // 480 minutes at 50% efficiency, 90 s a unit for the run's p1 at cell_6.
+    expect(a?.defaultTargetQty).toBe(160);
+  });
+
+  it("B-CT3: an explicit target does not disturb the derived one", () => {
+    const data = makeFixture();
+    const explicit = data.assignments.find((a) => a.id === "a-ok");
+    if (explicit) explicit.targetQty = 500;
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    const a = idx.assignmentById.get("a-ok");
+    // Both are present: the chip prefers targetQty, and clearing the field
+    // falls straight back to the standard without a refetch.
+    expect(a?.targetQty).toBe(500);
+    expect(a?.defaultTargetQty).toBe(120);
+  });
+
+  it("B-CT4: no cycle time anywhere means no derived target anywhere", () => {
+    const data = makeFixture();
+    data.cycleTimes = [];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(idx.assignmentById.get("a-ok")?.defaultTargetQty).toBeNull();
+    expect(idx.assignmentById.get("a1")?.defaultTargetQty).toBeNull();
+    expect(idx.cycleTimeByKey.size).toBe(0);
+  });
+
+  it("B-CT5: the cycle time of a DIFFERENT cell is never borrowed", () => {
+    const data = makeFixture();
+    // Only cell_6 is measured; otherx makes the same part and is not.
+    data.cycleTimes = [{ nodeId: "n-cell6", productId: "p1", secondsPerUnit: 90 }];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(idx.assignmentById.get("a1")?.defaultTargetQty).toBe(160);
+    expect(idx.assignmentById.get("a-ok")?.defaultTargetQty).toBeNull();
   });
 });

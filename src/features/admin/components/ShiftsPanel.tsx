@@ -44,6 +44,33 @@
    broken screen.
 
    ---------------------------------------------------------------------------
+   ⭐⭐ WHICH PLANT THIS PANEL IS SHOWING — roadmap 1(c).
+
+   The maintainer, 31 Aug: *"for the system admin, may be we need a filter for
+   plants in all the sub tabs."* The CONTROL is `AdminPage`'s and there is
+   exactly one of it; this panel only reads the choice through `usePlantFilter`
+   and applies it. It therefore still TAKES NO PROPS, which is the invariant
+   the top of this header states.
+
+   ⚠️⚠️ AND THE FILTER RUNS ON `path`, WHICH IS NOT A STYLE PREFERENCE HERE —
+   IT IS THE ONLY THING THAT WORKS IN THIS FILE. `patternRows` reshapes nodes
+   into `NodeAttachmentView`, which has no `parentId` at all (see
+   `shiftDraft.ts`), so a parent-walking filter cannot run over `view.nodes`.
+   The ROOTS therefore come from the RAW `ShiftNodeRow[]` the query returned,
+   which still carries the column `readablePlants` needs, and the trimming is
+   done by `nodesInPlant` / `rowsInPlant`, which need only `path`.
+
+   ⭐ IT NARROWS THE FORMS TOO, not only the lists (`plantFilter.ts` decision
+   3): both scope pickers offer the chosen plant's subtree and nothing else.
+   What you see is what you can create in — the alternative lets somebody
+   create a pattern into a plant they have filtered away and then watch it not
+   appear, which is silent hiding in a new costume.
+
+   ⚠️ EVERYTHING TRIMMED IS COUNTED UNDERNEATH IT. `scope.ts`'s header records
+   why: hiding is invisible and permanent, and a list that quietly shrank looks
+   exactly like a list of things nobody created.
+
+   ---------------------------------------------------------------------------
    NO OPTIMISTIC UPDATES: every mutation invalidates and the refetch redraws
    (see `useShifts.ts` for why this one genuinely cannot be faked).
 
@@ -69,7 +96,9 @@ import {
   type ShiftDraft,
   type ShiftView,
 } from "../lib/shiftDraft";
-import { indentedLabel, scopeOptions } from "../lib/scope";
+import { indentedLabel, scopeIndex, scopeOptions } from "../lib/scope";
+import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
+import { usePlantFilter } from "../hooks/usePlantFilter";
 import {
   useAttachPattern,
   useCreateBreak,
@@ -77,13 +106,13 @@ import {
   useCreateShift,
   useDeleteBreak,
   useUpdateBreak,
-  useDeletePattern,
   useDeleteShift,
   useDetachPattern,
   useRenamePattern,
   useShiftPatterns,
   useUpdateShift,
 } from "../hooks/useShifts";
+import { DeleteDialog } from "./DeleteDialog";
 import styles from "./ShiftsPanel.module.css";
 
 /** Flipped in the same commit that gave this panel a real body (§19.62). */
@@ -208,7 +237,6 @@ export function ShiftsPanel() {
 
   const createPattern = useCreatePattern();
   const renamePattern = useRenamePattern();
-  const deletePattern = useDeletePattern();
   const createShift = useCreateShift();
   const updateShift = useUpdateShift();
   const deleteShift = useDeleteShift();
@@ -241,15 +269,103 @@ export function ShiftsPanel() {
 
   const view = patternRows(query.data);
   const pending = !canQuery || query.isLoading;
+
+  /* -- which plant this panel is showing (roadmap 1(c); see the header) ----- */
+
+  // ⚠️ THE RAW ROWS, NOT `view.nodes`. `ShiftNodeRow` carries `parentId`, and
+  // `readablePlants` needs that column to tell a root from a line whose parent
+  // this reader simply cannot see. `patternRows` throws it away a few lines
+  // below and there is no way to get it back from what it returns.
+  //
+  // ⚠️ The `null`s are the rows `parseShiftNodeRow` refused. `fetchShiftPatterns`
+  // leaves them in the array on purpose so `patternRows` can COUNT them into
+  // `view.skipped` — the line at the bottom of the first card. They are dropped
+  // here rather than coerced: a node that could not be read is not a plant, and
+  // it must not become a filter option or an owner in `nodesById`.
+  const readableNodes = (query.data?.nodes ?? []).filter((n) => n !== null);
+  const plant = usePlantFilter(readableNodes);
+  // Rebuilt every render, like `view` and `scopeChoices` around it — a Map over
+  // a couple of dozen nodes, and memoising it here would only claim a stability
+  // nothing in this component depends on.
+  const nodesById = scopeIndex(readableNodes);
+
+  // The nodes are trimmed BY PATH because they have nothing else left to trim
+  // by; the patterns by their owner, which is what `rowsInPlant` resolves
+  // through `nodesById`. Both counts are rendered underneath their own list.
+  const visibleNodes = nodesInPlant(view.nodes, plant.choice, plant.plants);
+  const hiddenNodes = view.nodes.length - visibleNodes.length;
+  const visiblePatterns = rowsInPlant(view.patterns, plant.choice, plant.plants, nodesById);
+  const hiddenPatterns = view.patterns.length - visiblePatterns.length;
+
   // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). `patternRows` already returns
   // every node with its depth and path for the attachment card below, so the
   // owner picker and the attachment picker now offer the same tree — which is
   // the point: a pattern owned by Assembly and attached to a cell under
   // Assembly is the ordinary case, and until 0025 the first half of that
   // sentence could not be said.
+  //
+  // ⭐ AND `visibleNodes`, NOT `view.nodes`, SINCE 1(c) — decision 3: the
+  // filter narrows the FORMS too. ⚠️ This is a VIEW narrowing sitting on top of
+  // a PERMISSION one and the two must stay distinguishable: `scopeOptions`'
+  // `canEdit` says what the server will accept and is not reversible, while the
+  // cut below is a preference the reader can undo in the header. Collapsing
+  // them would make widening the filter silently widen what the form claims
+  // this person may write.
+  //
+  // ⚠️ The fabricated `parentId: null` is the shape trap this panel is named
+  // for in `plantFilter.ts` — it is a lie `scopeOptions` never reads (it sorts
+  // and counts `path`), and it is exactly why the plant cut above had to be
+  // taken from the raw rows instead of from here.
   const scopeChoices = scopeOptions(
-    view.nodes.map((n) => ({ id: n.nodeId, name: n.nodeName, parentId: null, path: n.path })),
+    visibleNodes.map((n) => ({ id: n.nodeId, name: n.nodeName, parentId: null, path: n.path })),
   );
+
+  // ⭐ RESOLVE-OR-FALL-BACK, THE HOUSE IDIOM (`ownerValue` in `ProductsPanel`,
+  // `resolveSelectedShape` in `lib/shapePicker`): the picker's value is kept
+  // legal by construction rather than by an effect that repairs it afterwards.
+  // Without this, choosing an owner and then changing the plant left `newOwner`
+  // naming a node with no `<option>` behind it — the control goes blank while
+  // the state still holds the old id, and Create sends a site the reader can no
+  // longer see. `""` survives only when the list itself is empty (the structure
+  // read did not land), and `submitNewPattern` already refuses that.
+  const ownerValue = scopeChoices.some((o) => o.value === newOwner)
+    ? newOwner
+    : (scopeChoices[0]?.value ?? "");
+
+  /* ⭐⭐ EVERY OPEN EDITOR IS RESOLVED AGAINST THE VISIBLE LIST, NOT PRUNED BY
+     AN EFFECT. All three of these hold a PATTERN id, and the filter can take
+     that pattern off screen between two renders — which would leave a rename
+     box, or worse an armed delete dialog, open over a row nobody can see.
+
+     ⚠️ RESOLVED, NOT CLEARED, AND THAT IS THE DIFFERENCE THAT MATTERS. The
+     plant choice is a VIEW choice and reversible (`plantFilter.ts`); throwing
+     away what somebody had typed because they glanced at another plant would
+     make a reversible control destructive. The editor goes away while its row
+     is hidden and comes back with the row.
+
+     `shiftEdit`, `breakFor` and `breakEdit` need no line of their own: they
+     render only inside the open pattern's detail, so resolving `openPatternId`
+     takes them off screen with it. Shift and break ids are unique across
+     patterns, so nothing of theirs can land on a different row. */
+  const visiblePatternIds = new Set(visiblePatterns.map((p) => p.id));
+  const openPatternId = openId !== null && visiblePatternIds.has(openId) ? openId : null;
+  const activeRename =
+    renameDraft !== null && visiblePatternIds.has(renameDraft.id) ? renameDraft : null;
+  const activeConfirmId = confirmId !== null && visiblePatternIds.has(confirmId) ? confirmId : null;
+
+  // ⚠️ THE RENAME DRAFT CARRIES A NODE ID TOO, and the "Owned by" picker it
+  // feeds is now narrowed. A visible pattern's owner is inside the chosen plant
+  // by construction — that is what `rowsInPlant` selected on — so this should
+  // only bite when that function FAILS OPEN on an owner this reader cannot
+  // resolve. It is resolved anyway, and it is resolved to the value the
+  // `<select>` will actually display: the control and the write have to agree,
+  // or Save quietly stores an owner different from the one on screen.
+  const renameOwnerValue =
+    activeRename === null
+      ? ""
+      : scopeChoices.some((o) => o.value === activeRename.siteNodeId)
+        ? activeRename.siteNodeId
+        : (scopeChoices[0]?.value ?? "");
 
   function fail(key: string, e: unknown) {
     setRowError({ key, message: errorText(e) });
@@ -265,6 +381,8 @@ export function ShiftsPanel() {
     if (orgId === null) return;
     clear("new");
     const draft: PatternDraft = { id: null, name: newName, shifts: [] };
+    // ⚠️ `view.patterns`, NOT `visiblePatterns` — uniqueness is a fact about
+    // the company, not about what the plant filter happens to be showing.
     const named = validatePatternDraft(
       draft,
       view.patterns.map((p) => p.name),
@@ -277,7 +395,10 @@ export function ShiftsPanel() {
       // ⭐ 0028: `""` was company-wide and is now "nothing chosen"; the picker
       // has no empty entry to select, so this can only be empty when the
       // structure read did not land, and the server refuses it with a sentence.
-      { orgId, name: newName.trim(), siteNodeId: newOwner },
+      //
+      // ⚠️ `ownerValue`, NOT `newOwner`: what the `<select>` is showing, which
+      // after a plant change is not always what the state still holds.
+      { orgId, name: newName.trim(), siteNodeId: ownerValue },
       {
         onSuccess: () => setNewName(""),
         onError: (e) => fail("new", e),
@@ -419,11 +540,18 @@ export function ShiftsPanel() {
     );
   }
 
-  function applyAttachment(nodeId: string, current: string | null) {
+  /**
+   * @param chosen what the row's `<select>` is SHOWING — resolved by the row
+   *   itself, not re-read from `attachDraft` here. ⚠️ It used to be re-read,
+   *   and that is precisely how a draft naming a pattern the plant filter has
+   *   since removed would get sent: the control had already fallen back to
+   *   something else, and Apply sent the invisible id anyway. One resolution,
+   *   at the place that renders it.
+   */
+  function applyAttachment(nodeId: string, current: string | null, chosen: string) {
     if (orgId === null) return;
     const key = `node-${nodeId}`;
     clear(key);
-    const chosen = attachDraft[nodeId] ?? current ?? "";
     if (chosen === current || (chosen === "" && current === null)) return;
     const done = () => setAttachDraft((cur) => ({ ...cur, [nodeId]: chosen }));
     if (chosen === "") {
@@ -704,32 +832,29 @@ export function ShiftsPanel() {
   }
 
   function renderPattern(pattern: PatternView) {
-    const open = openId === pattern.id;
-    const renaming = renameDraft !== null && renameDraft.id === pattern.id;
-    const confirming = confirmId === pattern.id;
+    // The RESOLVED ids, not the raw state — see where they are derived. A
+    // pattern the plant filter has hidden never reaches this function anyway;
+    // resolving here is what stops the editor re-appearing over the wrong row
+    // if the filter and the list ever disagree for a render.
+    const open = openPatternId === pattern.id;
+    const renaming = activeRename !== null && activeRename.id === pattern.id;
+    const confirming = activeConfirmId === pattern.id;
     return (
       <li
         className={open ? `${styles.patternRow} ${styles.patternRowOpen}` : styles.patternRow}
         key={pattern.id}
       >
-        {/* ⚠️ IT HAS TO LOOK LIKE IT OPENS. This was a bare <button> styled with
-            `border:0; background:none`, i.e. indistinguishable from the text in
-            the column beside it — and the whole shift list of a pattern sits
-            behind it. The maintainer found it by clicking on the off-chance. A caret
-            that turns, and a name that underlines on hover and focus, is the
-            smallest thing that says "there is more under here". */}
-        <button
-          type="button"
-          className={styles.patternName}
-          aria-expanded={open}
-          onClick={() => setOpenId(open ? null : pattern.id)}
-        >
-          <span className={styles.caret} aria-hidden="true">
-            {open ? "\u25be" : "\u25b8"}
-          </span>
+        {/* ⭐ ONE DOOR (the maintainer, 2 Sept). The name USED to be a button that
+            toggled the shift list on its own. Opening it that way left the Edit
+            button still reading "Edit" over an already-open row — the name said
+            one thing, the button another. So the name is plain text now, and Edit
+            is the only way in and out: Edit carries `aria-expanded`, because it is
+            the control that actually opens the disclosure. Its earlier life as a
+            near-invisible caret button is why the row had to look like it opens;
+            that job now falls to the Edit button, which unmistakably is one. */}
+        <span className={styles.patternName}>
           <span className={styles.patternNameText}>{pattern.name}</span>
-          <span className={styles.openHint}>{open ? "hide shifts" : "show shifts"}</span>
-        </button>
+        </span>
         <span className={styles.owner}>{pattern.ownerLabel}</span>
         <span className={styles.meta}>
           {pattern.shifts.length === 1 ? "1 shift" : `${pattern.shifts.length} shifts`}
@@ -741,43 +866,60 @@ export function ShiftsPanel() {
           <button
             type="button"
             className={styles.btn}
-            title="Change its name or where it belongs"
-            onClick={() =>
-              setRenameDraft(
-                renaming
-                  ? null
-                  : {
-                      id: pattern.id,
-                      name: pattern.name,
-                      siteNodeId: pattern.siteNodeId ?? "",
-                    },
-              )
-            }
+            aria-expanded={open}
+            title="Edit this pattern — its name, owner and shifts"
+            onClick={() => {
+              if (renaming) {
+                // ⭐ Cancel closes EVERYTHING Edit opened — the name/owner editor
+                // AND the shifts (the maintainer, 2 Sept: Cancel was leaving the
+                // expanded options open). Edit is one door in, so its Cancel is
+                // one door out. The name button still expands the shifts on its
+                // own for a reader who only wants to look.
+                setRenameDraft(null);
+                setOpenId(null);
+              } else {
+                setRenameDraft({
+                  id: pattern.id,
+                  name: pattern.name,
+                  siteNodeId: pattern.siteNodeId ?? "",
+                });
+                // ⭐ EDIT OPENS THE WHOLE PATTERN. The maintainer, 2 Sept: an
+                // Edit that only renamed, with the shifts behind a separate
+                // click on the name, "feels wrong and non-intuitive". So Edit
+                // now also expands the pattern, putting name, owner and every
+                // shift and break in reach at once. The name button still
+                // expands on its own; this makes Edit the door to all of it.
+                setOpenId(pattern.id);
+              }
+            }}
           >
-            {/* ⭐ "Edit", not "Rename" — D106. The draft this opens carries
-                the pattern's name AND its "Owned by" scope, so the old label
-                named half of it. Same defect as the products row, same fix. */}
+            {/* "Edit", not "Rename" (D106): the draft carries the name AND the
+                "Owned by" scope, and Edit now also opens the shifts. */}
             {renaming ? "Cancel" : "Edit"}
           </button>
         </div>
 
-        {renaming && renameDraft !== null && (
+        {renaming && activeRename !== null && (
           <div className={styles.confirm}>
             <input
               className={styles.input}
               aria-label="Pattern name"
-              value={renameDraft.name}
-              onChange={(e) => setRenameDraft({ ...renameDraft, name: e.target.value })}
+              value={activeRename.name}
+              onChange={(e) => setRenameDraft({ ...activeRename, name: e.target.value })}
             />
             {/* ⭐ AND WHERE IT BELONGS. Same gap as products and operators had:
                 a picker on the create form and nothing on the edit, so the
                 value was frozen at birth. Added here before it had to be
                 reported a fourth time. */}
+            {/* ⚠️ `renameOwnerValue`, not the draft's own field: the list this
+                picker offers is now narrowed to the chosen plant, and a value
+                with no option behind it displays as something else while the
+                state still holds the old id. See where it is resolved. */}
             <select
               className={styles.select}
               aria-label="Owned by"
-              value={renameDraft.siteNodeId}
-              onChange={(e) => setRenameDraft({ ...renameDraft, siteNodeId: e.target.value })}
+              value={renameOwnerValue}
+              onChange={(e) => setRenameDraft({ ...activeRename, siteNodeId: e.target.value })}
             >
               {scopeChoices.map((o) => (
                 <option key={o.value ?? "company"} value={o.value ?? ""}>
@@ -792,9 +934,15 @@ export function ShiftsPanel() {
               onClick={() => {
                 const key = `rename-${pattern.id}`;
                 clear(key);
+                // ⚠️ `view.patterns`, NOT `visiblePatterns`. This is the
+                // uniqueness check, and a name is taken whether or not the
+                // filter is currently showing the pattern that took it.
+                // Checking the trimmed list would let two patterns be given
+                // the same name from two different plant views and leave the
+                // server to refuse it with a less useful sentence.
                 const others = view.patterns.filter((p) => p.id !== pattern.id).map((p) => p.name);
                 const named = validatePatternDraft(
-                  { id: pattern.id, name: renameDraft.name, shifts: [] },
+                  { id: pattern.id, name: activeRename.name, shifts: [] },
                   others,
                 ).problems.filter((p) => p.field === "pattern-name");
                 if (named.length > 0) {
@@ -804,8 +952,8 @@ export function ShiftsPanel() {
                 renamePattern.mutate(
                   {
                     templateId: pattern.id,
-                    name: renameDraft.name.trim(),
-                    siteNodeId: renameDraft.siteNodeId,
+                    name: activeRename.name.trim(),
+                    siteNodeId: renameOwnerValue,
                   },
                   { onSuccess: () => setRenameDraft(null), onError: (e) => fail(key, e) },
                 );
@@ -819,67 +967,50 @@ export function ShiftsPanel() {
           <p className={styles.rowError}>{errorFor(`rename-${pattern.id}`)}</p>
         )}
 
-        {/* ⚠️ DELETE IS THE ONLY REMOVAL THERE IS. The maintainer's standing decision is
-            that deactivating is the main action wherever a thing has an on/off
-            flag — `shift_templates` has none, so there is nothing to deactivate
-            here and this is the whole of it.
+        {/* ⚠️ 0029 MADE THE SENTENCE THAT USED TO BE HERE FALSE. It read
+            "detach it below before deleting it", because `node_shift_templates`'
+            FK carried no `ON DELETE` and a pattern in use raised 23503.
+            Migration 0029 gives that FK `ON DELETE CASCADE`: deleting a pattern
+            now takes its attachments with it, and telling somebody to do work
+            the database no longer needs is worse than saying nothing. The
+            COUNT stays — it is this panel's own read of
+            `node_shift_templates` and it is useful before the dialog opens —
+            and the confirmation names the same number from the server.
 
-            ⭐ IT IS STILL OFFERED WHEN THE PATTERN IS ATTACHED, and the note
-            below is a warning rather than a locked door. The server is the one
-            that decides: `node_shift_templates`' FK carries no `ON DELETE`, so
-            Postgres raises 23503 → `{kind:"StillInUse"}`. Hiding the button
-            would mean this screen was guessing, and a guess that says "you
-            can't" when the server would have said yes is a feature nobody can
-            reach. The COUNT comes from this panel's own read of
-            `node_shift_templates`, which is what lets the refusal say how many
-            places are in the way instead of only that something is. */}
+            ⚠️ AND THERE IS STILL NO DEACTIVATE HERE. 0029 gives
+            `shift_templates` an `active` column so all four owned lists mean
+            the same thing, but nothing reads or writes it yet: the column is
+            in the schema and the control is owed. Offering a Deactivate button
+            that changed a flag no screen renders would be worse than the gap.
+            See docs/roadmap.md. */}
         {pattern.attachedCount > 0 && (
           <p className={styles.rowNote}>
             {`Attached to ${pattern.attachedCount} ${
               pattern.attachedCount === 1 ? "place" : "places"
-            } — detach it below before deleting it.`}
+            }.`}
           </p>
         )}
         {confirming ? (
-          <div className={styles.confirm}>
-            <span>{`Delete "${pattern.name}" and its shifts?`}</span>
-            <button
-              type="button"
-              className={styles.dangerBtn}
-              disabled={deletePattern.isPending}
-              onClick={() => {
-                const key = `delete-${pattern.id}`;
-                clear(key);
-                deletePattern.mutate(
-                  { templateId: pattern.id },
-                  {
-                    onSuccess: () => setConfirmId(null),
-                    onError: (e) =>
-                      setRowError({
-                        key,
-                        message:
-                          isSchedulerError(e) && e.kind === "StillInUse"
-                            ? `${pattern.attachedCount} ${
-                                pattern.attachedCount === 1 ? "place uses" : "places use"
-                              } this pattern, so it can't be deleted. Detach it below first.`
-                            : errorText(e),
-                      }),
-                  },
-                );
-              }}
-            >
-              Delete
-            </button>
-            <button type="button" className={styles.btn} onClick={() => setConfirmId(null)}>
-              Keep
-            </button>
-          </div>
+          <DeleteDialog
+            kind="shift_template"
+            id={pattern.id}
+            name={pattern.name}
+            onCancel={() => setConfirmId(null)}
+            onDeleted={(message) => {
+              setConfirmId(null);
+              setRowError({ key: `delete-${pattern.id}`, message });
+            }}
+            onFailed={(message) => setRowError({ key: `delete-${pattern.id}`, message })}
+          />
         ) : (
           <div className={styles.confirm}>
             <button
               type="button"
               className={styles.linkBtn}
-              onClick={() => setConfirmId(pattern.id)}
+              onClick={() => {
+                clear(`delete-${pattern.id}`);
+                setConfirmId(pattern.id);
+              }}
             >
               Delete this pattern
             </button>
@@ -985,10 +1116,13 @@ export function ShiftsPanel() {
                     app_is_admin_for(site_node_id))`). Only ROOT nodes are
                     offered, because the `shift_templates_check_site` trigger
                     refuses anything else. */}
+                {/* ⚠️ `ownerValue`, not `newOwner`: the list is narrowed to the
+                    chosen plant (decision 3), so the raw state can name a node
+                    that is no longer on offer. See where it is resolved. */}
                 <select
                   className={styles.select}
                   aria-label="Owning site"
-                  value={newOwner}
+                  value={ownerValue}
                   onChange={(e) => setNewOwner(e.target.value)}
                 >
                   {scopeChoices.map((o) => (
@@ -1009,8 +1143,17 @@ export function ShiftsPanel() {
             </div>
             {errorFor("new") !== null && <p className={styles.errorLine}>{errorFor("new")}</p>}
 
-            {view.patterns.length === 0 ? (
-              <p className={styles.status}>No shift patterns yet.</p>
+            {visiblePatterns.length === 0 ? (
+              // ⚠️ TWO DIFFERENT EMPTY LISTS AND TWO DIFFERENT SENTENCES.
+              // "No shift patterns yet." over a list the filter emptied is a
+              // false statement about the company, and it is the exact failure
+              // `scope.ts` names — a list that quietly shrank reading as a list
+              // of things nobody created. The count underneath says how many.
+              <p className={styles.status}>
+                {view.patterns.length === 0
+                  ? "No shift patterns yet."
+                  : `No shift patterns in ${plant.label}.`}
+              </p>
             ) : (
               <>
                 <div className={styles.listHead}>
@@ -1027,8 +1170,22 @@ export function ShiftsPanel() {
                   <span>Attached to</span>
                   <span />
                 </div>
-                <ul className={styles.list}>{view.patterns.map(renderPattern)}</ul>
+                <ul className={styles.list}>{visiblePatterns.map(renderPattern)}</ul>
               </>
+            )}
+
+            {/* ⚠️ TRIMMED, NOT SILENT — and named by `plant.label` rather than
+                by the word "plant". The top level of the hierarchy is whatever
+                this company called it, and `OperatorsPanel`'s own footnote
+                makes the same point: another org's tree may say "Site" or
+                "Works". The label is never blank, "All plants" included, and
+                in that state this count is zero and the line does not render. */}
+            {hiddenPatterns > 0 && (
+              <p className={styles.footnote}>
+                {hiddenPatterns === 1
+                  ? `1 pattern outside ${plant.label} is not shown.`
+                  : `${hiddenPatterns} patterns outside ${plant.label} are not shown.`}
+              </p>
             )}
 
             {/* Reported rather than swallowed: a silently shortened list is
@@ -1059,8 +1216,34 @@ export function ShiftsPanel() {
             nearest place above it.
           </p>
           <ul className={styles.nodeList}>
-            {view.nodes.map((n) => {
-              const chosen = attachDraft[n.nodeId] ?? n.templateId ?? "";
+            {visibleNodes.map((n) => {
+              /* ⭐ THE OPTIONS ARE THE VISIBLE PATTERNS PLUS, IF IT IS NOT
+                 AMONG THEM, THE ONE THIS PLACE IS ACTUALLY RUNNING. A row that
+                 dropped its own attachment from the list would render as
+                 "Inherit from above" — a positive claim about this place that
+                 is simply false, and one click from becoming true. Attaching
+                 needs `app_is_admin_for(node_id)` and says nothing about who
+                 owns the pattern, so a company admin can and does put one
+                 plant's pattern on another's node; this is that case. */
+              const options =
+                n.templateId === null || visiblePatternIds.has(n.templateId)
+                  ? visiblePatterns
+                  : [...visiblePatterns, ...view.patterns.filter((p) => p.id === n.templateId)];
+
+              /* ⚠️⚠️ THE DRAFT IS RESOLVED AGAINST THOSE OPTIONS, NOT TRUSTED.
+                 `attachDraft` is keyed by node id and holds a PATTERN id, and
+                 the filter can remove that pattern while the draft survives.
+                 A `<select>` whose value matches no option shows the first one
+                 instead — so the row would read "Inherit from above" while the
+                 state still said "Nights", `changed` would be true, and Apply
+                 would send the pattern nobody could see. Falling back to what
+                 is attached today makes the control, the state and the write
+                 the same answer. */
+              const drafted = attachDraft[n.nodeId];
+              const chosen =
+                drafted !== undefined && (drafted === "" || options.some((p) => p.id === drafted))
+                  ? drafted
+                  : (n.templateId ?? "");
               const changed = chosen !== (n.templateId ?? "");
               return (
                 <li className={styles.nodeRow} key={n.nodeId}>
@@ -1076,7 +1259,7 @@ export function ShiftsPanel() {
                     }
                   >
                     <option value="">Inherit from above</option>
-                    {view.patterns.map((p) => (
+                    {options.map((p) => (
                       <option value={p.id} key={p.id}>
                         {p.name}
                       </option>
@@ -1087,7 +1270,7 @@ export function ShiftsPanel() {
                       type="button"
                       className={styles.btn}
                       disabled={!changed || attachPattern.isPending || detachPattern.isPending}
-                      onClick={() => applyAttachment(n.nodeId, n.templateId)}
+                      onClick={() => applyAttachment(n.nodeId, n.templateId, chosen)}
                     >
                       Apply
                     </button>
@@ -1099,6 +1282,18 @@ export function ShiftsPanel() {
               );
             })}
           </ul>
+          {/* ⚠️ TRIMMED, NOT SILENT. This is the largest node-derived table on
+              the admin screen and the one a system admin most wants cut down,
+              which is exactly why it is also the one where a quiet cut would be
+              hardest to notice. "Places" rather than "nodes" — the word the
+              rest of this panel uses ("Attached to 3 places"). */}
+          {hiddenNodes > 0 && (
+            <p className={styles.footnote}>
+              {hiddenNodes === 1
+                ? `1 place outside ${plant.label} is not shown.`
+                : `${hiddenNodes} places outside ${plant.label} are not shown.`}
+            </p>
+          )}
         </section>
       )}
     </div>

@@ -13,7 +13,7 @@
 | `nodes` | Every unit at every level, self-referencing tree. `path` (ltree) is trigger-maintained from `parent_id`/`name` — never supplied by callers. |
 | `operators` | The roster. `site_node_id` = the owning site (NULL = company-wide, 0023). ⚠️ NOT the same as `home_node_id`, which is an unenforced roster-filter default that may point at any node and is read by nothing. |
 | `products` | The catalog. `site_node_id` = the owning site (NULL = company-wide, 0023). `color_token` = the palette token this product renders in, e.g. `product-3` — NOT NULL, filled on insert, never a hex. |
-| `skills` | Named certifications. |
+| `skills` | Named certifications — what the screen calls trainings. **A name is unique per OWNER, not per org (0031 / D111a):** two plants may each hold “Forklift”, one plant may not hold it twice. |
 | `operator_skills` | Who holds which skill, with optional expiry. |
 | `node_skill_requirements` | A skill required at a node; inherits down the subtree (ancestor union query). |
 | `runs` | "This cell produces this product during this window." No two active runs may overlap on the same node (`runs_no_overlap_on_node`). |
@@ -228,9 +228,9 @@ Access method: heap
 
 ```
 \d+ operators
-                                                                                                                                                                        Table "public.operators"
-    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                Description                                                                                                                 
---------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                 Table "public.operators"
+    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                         Description                                         
+--------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+---------------------------------------------------------------------------------------------
  id           | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
  org_id       | uuid                     |           | not null |                   | plain    |             |              | 
  home_node_id | uuid                     |           |          |                   | plain    |             |              | 
@@ -241,7 +241,7 @@ Access method: heap
  active       | boolean                  |           | not null | true              | plain    |             |              | 
  created_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this person BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: in 0025 this filters the roster and nothing else. Whether an assignment OUTSIDE it is refused is a separate migration; see this file header.
+ site_node_id | uuid                     |           | not null |                   | plain    |             |              | D108/D109: the node this operator belongs to. NOT NULL - there is no company-wide operator.
 Indexes:
     "operators_pkey" PRIMARY KEY, btree (id)
     "operators_org_home_node_idx" btree (org_id, home_node_id)
@@ -255,19 +255,22 @@ Foreign-key constraints:
     "operators_org_id_site_node_id_fkey" FOREIGN KEY (org_id, site_node_id) REFERENCES nodes(org_id, id)
 Referenced by:
     TABLE "assignments" CONSTRAINT "assignments_org_id_operator_id_fkey" FOREIGN KEY (org_id, operator_id) REFERENCES operators(org_id, id)
-    TABLE "operator_skills" CONSTRAINT "operator_skills_org_id_operator_id_fkey" FOREIGN KEY (org_id, operator_id) REFERENCES operators(org_id, id)
+    TABLE "operator_skills" CONSTRAINT "operator_skills_org_id_operator_id_fkey" FOREIGN KEY (org_id, operator_id) REFERENCES operators(org_id, id) ON DELETE CASCADE
 Policies:
     POLICY "operators_delete" FOR DELETE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "operators_insert" FOR INSERT
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "operators_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_owned(site_node_id)))
     POLICY "operators_update" FOR UPDATE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
 Triggers:
+    operators_audit AFTER INSERT OR DELETE OR UPDATE ON operators FOR EACH ROW EXECUTE FUNCTION write_audit_log()
     operators_check_site BEFORE INSERT OR UPDATE OF site_node_id, org_id ON operators FOR EACH ROW EXECUTE FUNCTION app_check_site_owner()
+    operators_home_scope_guard BEFORE INSERT OR UPDATE OF home_node_id, site_node_id ON operators FOR EACH ROW EXECUTE FUNCTION app_guard_operator_home()
+    operators_rehome_guard AFTER UPDATE OF site_node_id ON operators FOR EACH ROW WHEN (old.site_node_id IS DISTINCT FROM new.site_node_id) EXECUTE FUNCTION app_guard_operator_rehome()
     operators_set_updated_at BEFORE UPDATE ON operators FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 
@@ -287,7 +290,7 @@ Access method: heap
  active       | boolean                  |           | not null | true              | plain    |             |              | 
  created_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this product BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. Not merely who may edit it: everything at or below this node may use the product and nothing outside it may. Resolution is target.path <@ scope.path, the same shape as resolve_shift_template.
+ site_node_id | uuid                     |           | not null |                   | plain    |             |              | D108/D109: the node this product belongs to. NOT NULL - there is no company-wide product. May be any node, not only a root: a product owned by Line 1 is offered on Line 1 and nowhere else.
  color_token  | text                     |           | not null |                   | extended |             |              | How this product is drawn on the board. EITHER a palette token name (product-1 .. product-4, defined in tokens.css and chosen automatically at INSERT by products_set_color_token) OR a literal lower-case six-digit hex (#1baf7a) set by hand. NOT NULL. WARNING: a token follows the stylesheet, a hex does not. The trigger only ever writes tokens, so a hex is always a deliberate human choice.
 Indexes:
     "products_pkey" PRIMARY KEY, btree (id)
@@ -304,16 +307,18 @@ Referenced by:
     TABLE "runs" CONSTRAINT "runs_org_id_product_id_fkey" FOREIGN KEY (org_id, product_id) REFERENCES products(org_id, id)
 Policies:
     POLICY "products_delete" FOR DELETE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "products_insert" FOR INSERT
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "products_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_owned(site_node_id)))
     POLICY "products_update" FOR UPDATE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
 Triggers:
+    products_audit AFTER INSERT OR DELETE OR UPDATE ON products FOR EACH ROW EXECUTE FUNCTION write_audit_log()
     products_check_site BEFORE INSERT OR UPDATE OF site_node_id, org_id ON products FOR EACH ROW EXECUTE FUNCTION app_check_site_owner()
+    products_rehome_guard AFTER UPDATE OF site_node_id ON products FOR EACH ROW WHEN (old.site_node_id IS DISTINCT FROM new.site_node_id) EXECUTE FUNCTION app_guard_product_rehome()
     products_set_color_token BEFORE INSERT ON products FOR EACH ROW EXECUTE FUNCTION products_set_color_token()
     products_set_updated_at BEFORE UPDATE ON products FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
@@ -322,38 +327,41 @@ Access method: heap
 
 ```
 \d+ skills
-                                                                                                                                                                         Table "public.skills"
-    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                Description                                                                                                                
---------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                             Table "public.skills"
+    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                                   Description                                                                                                                                    
+--------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  id           | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
  org_id       | uuid                     |           | not null |                   | plain    |             |              | 
  name         | text                     |           | not null |                   | extended |             |              | 
  created_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this training BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: training NAMES remain unique per ORG (the maintainer, Aug 27) -- the scope says where it is offered, never that two sites may hold the same name.
+ site_node_id | uuid                     |           | not null |                   | plain    |             |              | D108/D109: the node this training belongs to. NOT NULL.
+ active       | boolean                  |           | not null | true              | plain    |             |              | False = retired: not offered when qualifying a person or requiring a training on a cell. ADVISORY — the database does not refuse an existing holding, and nothing here starts refusing one (see §1 of migration 0029). The same meaning as products.active and operators.active.
 Indexes:
     "skills_pkey" PRIMARY KEY, btree (id)
     "skills_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
-    "skills_org_id_name_key" UNIQUE CONSTRAINT, btree (org_id, name)
     "skills_org_site_idx" btree (org_id, site_node_id)
+    "skills_owner_name_unique" UNIQUE CONSTRAINT, btree (org_id, site_node_id, name)
 Foreign-key constraints:
     "skills_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "skills_org_id_site_node_id_fkey" FOREIGN KEY (org_id, site_node_id) REFERENCES nodes(org_id, id)
 Referenced by:
-    TABLE "node_skill_requirements" CONSTRAINT "node_skill_requirements_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id)
-    TABLE "operator_skills" CONSTRAINT "operator_skills_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id)
+    TABLE "node_skill_requirements" CONSTRAINT "node_skill_requirements_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id) ON DELETE CASCADE
+    TABLE "operator_skills" CONSTRAINT "operator_skills_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id) ON DELETE CASCADE
 Policies:
     POLICY "skills_delete" FOR DELETE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "skills_insert" FOR INSERT
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "skills_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_owned(site_node_id)))
     POLICY "skills_update" FOR UPDATE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
 Triggers:
+    skills_audit AFTER INSERT OR DELETE OR UPDATE ON skills FOR EACH ROW EXECUTE FUNCTION write_audit_log()
     skills_check_site BEFORE INSERT OR UPDATE OF site_node_id, org_id ON skills FOR EACH ROW EXECUTE FUNCTION app_check_site_owner()
+    skills_rehome_guard AFTER UPDATE OF site_node_id ON skills FOR EACH ROW WHEN (old.site_node_id IS DISTINCT FROM new.site_node_id) EXECUTE FUNCTION app_guard_skill_rehome()
     skills_set_updated_at BEFORE UPDATE ON skills FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 
@@ -375,19 +383,20 @@ Indexes:
     "operator_skills_pkey" PRIMARY KEY, btree (operator_id, skill_id)
 Foreign-key constraints:
     "operator_skills_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
-    "operator_skills_org_id_operator_id_fkey" FOREIGN KEY (org_id, operator_id) REFERENCES operators(org_id, id)
-    "operator_skills_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id)
+    "operator_skills_org_id_operator_id_fkey" FOREIGN KEY (org_id, operator_id) REFERENCES operators(org_id, id) ON DELETE CASCADE
+    "operator_skills_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id) ON DELETE CASCADE
 Policies:
     POLICY "operator_skills_delete" FOR DELETE
       USING (((org_id = app_current_org()) AND app_is_admin_for_operator(operator_id)))
     POLICY "operator_skills_insert" FOR INSERT
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_operator(operator_id)))
     POLICY "operator_skills_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_operator(operator_id)))
     POLICY "operator_skills_update" FOR UPDATE
       USING (((org_id = app_current_org()) AND app_is_admin_for_operator(operator_id)))
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_operator(operator_id)))
 Triggers:
+    operator_skills_scope_guard BEFORE INSERT OR UPDATE OF operator_id, skill_id ON operator_skills FOR EACH ROW EXECUTE FUNCTION app_guard_operator_skill_scope()
     operator_skills_set_updated_at BEFORE UPDATE ON operator_skills FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 
@@ -408,18 +417,19 @@ Indexes:
 Foreign-key constraints:
     "node_skill_requirements_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "node_skill_requirements_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
-    "node_skill_requirements_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id)
+    "node_skill_requirements_org_id_skill_id_fkey" FOREIGN KEY (org_id, skill_id) REFERENCES skills(org_id, id) ON DELETE CASCADE
 Policies:
     POLICY "node_skill_requirements_delete" FOR DELETE
       USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_skill_requirements_insert" FOR INSERT
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_skill_requirements_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_node(node_id)))
     POLICY "node_skill_requirements_update" FOR UPDATE
       USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
 Triggers:
+    node_skill_requirements_scope_guard BEFORE INSERT OR UPDATE OF node_id, skill_id ON node_skill_requirements FOR EACH ROW EXECUTE FUNCTION app_guard_node_skill_scope()
     node_skill_requirements_set_updated_at BEFORE UPDATE ON node_skill_requirements FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 
@@ -427,26 +437,30 @@ Access method: heap
 
 ```
 \d+ runs
-                                                              Table "public.runs"
-      Column       |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target | Description 
--------------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+-------------
- id                | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
- org_id            | uuid                     |           | not null |                   | plain    |             |              | 
- node_id           | uuid                     |           | not null |                   | plain    |             |              | 
- product_id        | uuid                     |           | not null |                   | plain    |             |              | 
- timerange         | tstzrange                |           | not null |                   | extended |             |              | 
- planned_headcount | integer                  |           |          |                   | plain    |             |              | 
- status            | text                     |           | not null | 'planned'::text   | extended |             |              | 
- notes             | text                     |           |          |                   | extended |             |              | 
- created_by        | uuid                     |           |          |                   | plain    |             |              | 
- created_at        | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- updated_at        | timestamp with time zone |           | not null | now()             | plain    |             |              | 
+                                                                                                                                                                              Table "public.runs"
+       Column        |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                Description                                                                                                                 
+---------------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ id                  | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
+ org_id              | uuid                     |           | not null |                   | plain    |             |              | 
+ node_id             | uuid                     |           | not null |                   | plain    |             |              | 
+ product_id          | uuid                     |           |          |                   | plain    |             |              | 
+ timerange           | tstzrange                |           | not null |                   | extended |             |              | 
+ planned_headcount   | integer                  |           |          |                   | plain    |             |              | 
+ status              | text                     |           | not null | 'planned'::text   | extended |             |              | 
+ notes               | text                     |           |          |                   | extended |             |              | 
+ created_by          | uuid                     |           |          |                   | plain    |             |              | 
+ created_at          | timestamp with time zone |           | not null | now()             | plain    |             |              | 
+ updated_at          | timestamp with time zone |           | not null | now()             | plain    |             |              | 
+ product_sku         | text                     |           |          |                   | extended |             |              | D110 history snapshot. NULL while the product exists; set from products.sku at the moment the product is deleted, when product_id is released to NULL. Exactly one of product_id / product_sku is ever non-null (runs_product_identified).
+ product_name        | text                     |           |          |                   | extended |             |              | 
+ product_color_token | text                     |           |          |                   | extended |             |              | 
 Indexes:
     "runs_pkey" PRIMARY KEY, btree (id)
     "runs_no_overlap_on_node" EXCLUDE USING gist (node_id WITH =, timerange WITH &&) WHERE (status <> 'cancelled'::text)
     "runs_node_time_idx" gist (node_id, timerange)
     "runs_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
 Check constraints:
+    "runs_product_identified" CHECK (num_nonnulls(product_id, product_sku) = 1)
     "runs_status_check" CHECK (status = ANY (ARRAY['planned'::text, 'active'::text, 'done'::text, 'cancelled'::text]))
 Foreign-key constraints:
     "runs_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
@@ -466,6 +480,7 @@ Policies:
       WITH CHECK (app_can_edit_node(node_id))
 Triggers:
     runs_audit AFTER INSERT OR DELETE OR UPDATE ON runs FOR EACH ROW EXECUTE FUNCTION write_audit_log()
+    runs_scope_guard BEFORE INSERT OR UPDATE OF node_id, product_id ON runs FOR EACH ROW EXECUTE FUNCTION app_guard_run_scope()
     runs_set_updated_at BEFORE UPDATE ON runs FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 
@@ -473,34 +488,42 @@ Access method: heap
 
 ```
 \d+ assignments
-                                                            Table "public.assignments"
-        Column        |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target | Description 
-----------------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+-------------
- id                   | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
- org_id               | uuid                     |           | not null |                   | plain    |             |              | 
- node_id              | uuid                     |           | not null |                   | plain    |             |              | 
- operator_id          | uuid                     |           | not null |                   | plain    |             |              | 
- run_id               | uuid                     |           |          |                   | plain    |             |              | 
- product_id           | uuid                     |           |          |                   | plain    |             |              | 
- timerange            | tstzrange                |           | not null |                   | extended |             |              | 
- status               | text                     |           | not null | 'planned'::text   | extended |             |              | 
- efficiency           | numeric(4,3)             |           | not null | 1.000             | main     |             |              | 
- target_qty           | numeric                  |           |          |                   | main     |             |              | 
- target_unit          | text                     |           |          |                   | extended |             |              | 
- eligibility_override | boolean                  |           | not null | false             | plain    |             |              | 
- override_reason      | text                     |           |          |                   | extended |             |              | 
- created_by           | uuid                     |           |          |                   | plain    |             |              | 
- created_at           | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- updated_at           | timestamp with time zone |           | not null | now()             | plain    |             |              | 
+                                                                                                                                                                                                                                           Table "public.assignments"
+        Column         |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                                                                               Description                                                                                                                                                                                
+-----------------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ id                    | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
+ org_id                | uuid                     |           | not null |                   | plain    |             |              | 
+ node_id               | uuid                     |           | not null |                   | plain    |             |              | 
+ operator_id           | uuid                     |           |          |                   | plain    |             |              | 
+ run_id                | uuid                     |           |          |                   | plain    |             |              | 
+ product_id            | uuid                     |           |          |                   | plain    |             |              | 
+ timerange             | tstzrange                |           | not null |                   | extended |             |              | 
+ status                | text                     |           | not null | 'planned'::text   | extended |             |              | 
+ efficiency            | numeric(4,3)             |           | not null | 1.000             | main     |             |              | 
+ target_qty            | numeric                  |           |          |                   | main     |             |              | 
+ target_unit           | text                     |           |          |                   | extended |             |              | 
+ eligibility_override  | boolean                  |           | not null | false             | plain    |             |              | 
+ override_reason       | text                     |           |          |                   | extended |             |              | 
+ created_by            | uuid                     |           |          |                   | plain    |             |              | 
+ created_at            | timestamp with time zone |           | not null | now()             | plain    |             |              | 
+ updated_at            | timestamp with time zone |           | not null | now()             | plain    |             |              | 
+ product_sku           | text                     |           |          |                   | extended |             |              | 
+ product_name          | text                     |           |          |                   | extended |             |              | 
+ product_color_token   | text                     |           |          |                   | extended |             |              | 
+ operator_display_name | text                     |           |          |                   | extended |             |              | D110 history snapshot. NULL while the person exists; set from operators.display_name at the moment they are deleted, when operator_id is released to NULL. Exactly one of operator_id / operator_display_name is ever non-null (assignments_operator_identified).
+ area_override         | boolean                  |           | not null | false             | plain    |             |              | D113: this assignment deliberately places somebody outside the part of the structure they belong to. Set by the writer; NORMALISED BACK TO FALSE by app_guard_assignment_scope when the row did not actually need it, so the flag always means "this really did override something". Never set automatically — see migration 0030 §3 of "what is deliberately not done".
+ area_override_reason  | text                     |           |          |                   | extended |             |              | D113: why. Required exactly when area_override is true (assignments_area_override_reasoned). NOT the same field as override_reason, which belongs to the training check.
 Indexes:
     "assignments_pkey" PRIMARY KEY, btree (id)
     "assignments_node_time_idx" gist (node_id, timerange)
     "assignments_operator_idx" btree (org_id, operator_id)
     "assignments_run_idx" btree (run_id) WHERE run_id IS NOT NULL
 Check constraints:
-    "assignments_check" CHECK (num_nonnulls(run_id, product_id) = 1)
+    "assignments_area_override_reasoned" CHECK (area_override = (area_override_reason IS NOT NULL))
     "assignments_efficiency_check" CHECK (efficiency > 0::numeric AND efficiency <= 2::numeric)
+    "assignments_operator_identified" CHECK (num_nonnulls(operator_id, operator_display_name) = 1)
     "assignments_target_qty_check" CHECK (target_qty > 0::numeric)
+    "assignments_work_identified" CHECK (num_nonnulls(run_id, product_id, product_sku) = 1)
 Foreign-key constraints:
     "assignments_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "assignments_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
@@ -521,6 +544,7 @@ Triggers:
     assignments_audit AFTER INSERT OR DELETE OR UPDATE ON assignments FOR EACH ROW EXECUTE FUNCTION write_audit_log()
     assignments_capacity BEFORE INSERT OR UPDATE OF timerange, efficiency, status, operator_id ON assignments FOR EACH ROW EXECUTE FUNCTION check_operator_capacity()
     assignments_run_consistency BEFORE INSERT OR UPDATE OF run_id, node_id ON assignments FOR EACH ROW EXECUTE FUNCTION assignments_check_run_consistency()
+    assignments_scope_guard BEFORE INSERT OR UPDATE OF node_id, operator_id, product_id ON assignments FOR EACH ROW EXECUTE FUNCTION app_guard_assignment_scope()
     assignments_set_updated_at BEFORE UPDATE ON assignments FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 
@@ -528,14 +552,15 @@ Access method: heap
 
 ```
 \d+ shift_templates
-                                                                                                                                                                                 Table "public.shift_templates"
-    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                                                                            Description                                                                                                                             
---------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                         Table "public.shift_templates"
+    Column    |           Type           | Collation | Nullable |      Default      | Storage  | Compression | Stats target |                                                                    Description                                                                     
+--------------+--------------------------+-----------+----------+-------------------+----------+-------------+--------------+----------------------------------------------------------------------------------------------------------------------------------------------------
  id           | uuid                     |           | not null | gen_random_uuid() | plain    |             |              | 
  org_id       | uuid                     |           | not null |                   | plain    |             |              | 
  name         | text                     |           | not null |                   | extended |             |              | 
  updated_at   | timestamp with time zone |           | not null | now()             | plain    |             |              | 
- site_node_id | uuid                     |           |          |                   | plain    |             |              | The node this pattern BELONGS TO (0023, redefined by 0025/D103). NULL = company-wide. WARNING: distinct from ATTACHMENT -- node_shift_templates says which node RUNS a pattern and needs app_is_admin_for(node_id); this says who owns it and where it is offered.
+ site_node_id | uuid                     |           | not null |                   | plain    |             |              | D108/D109: the node this shift pattern belongs to. NOT NULL.
+ active       | boolean                  |           | not null | true              | plain    |             |              | False = retired: not offered when attaching a pattern to a node. ADVISORY, exactly as skills.active — nodes already attached keep resolving to it.
 Indexes:
     "shift_templates_pkey" PRIMARY KEY, btree (id)
     "shift_templates_org_id_id_key" UNIQUE CONSTRAINT, btree (org_id, id)
@@ -545,20 +570,22 @@ Foreign-key constraints:
     "shift_templates_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "shift_templates_org_id_site_node_id_fkey" FOREIGN KEY (org_id, site_node_id) REFERENCES nodes(org_id, id)
 Referenced by:
-    TABLE "node_shift_templates" CONSTRAINT "node_shift_templates_org_id_template_id_fkey" FOREIGN KEY (org_id, template_id) REFERENCES shift_templates(org_id, id)
+    TABLE "node_shift_templates" CONSTRAINT "node_shift_templates_org_id_template_id_fkey" FOREIGN KEY (org_id, template_id) REFERENCES shift_templates(org_id, id) ON DELETE CASCADE
     TABLE "shifts" CONSTRAINT "shifts_org_id_template_id_fkey" FOREIGN KEY (org_id, template_id) REFERENCES shift_templates(org_id, id) ON DELETE CASCADE
 Policies:
     POLICY "shift_templates_delete" FOR DELETE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "shift_templates_insert" FOR INSERT
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
     POLICY "shift_templates_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_owned(site_node_id)))
     POLICY "shift_templates_update" FOR UPDATE
-      USING (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
-      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR ((site_node_id IS NOT NULL) AND app_is_admin_for(site_node_id)))))
+      USING (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
+      WITH CHECK (((org_id = app_current_org()) AND (app_is_admin() OR app_is_admin_for(site_node_id))))
 Triggers:
+    shift_templates_audit AFTER INSERT OR DELETE OR UPDATE ON shift_templates FOR EACH ROW EXECUTE FUNCTION write_audit_log()
     shift_templates_check_site BEFORE INSERT OR UPDATE OF site_node_id, org_id ON shift_templates FOR EACH ROW EXECUTE FUNCTION app_check_site_owner()
+    shift_templates_rehome_guard AFTER UPDATE OF site_node_id ON shift_templates FOR EACH ROW WHEN (old.site_node_id IS DISTINCT FROM new.site_node_id) EXECUTE FUNCTION app_guard_template_rehome()
     shift_templates_set_updated_at BEFORE UPDATE ON shift_templates FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 
@@ -594,7 +621,7 @@ Policies:
     POLICY "shifts_insert" FOR INSERT
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_shift_template(template_id)))
     POLICY "shifts_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_shift_template(template_id)))
     POLICY "shifts_update" FOR UPDATE
       USING (((org_id = app_current_org()) AND app_is_admin_for_shift_template(template_id)))
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_shift_template(template_id)))
@@ -629,7 +656,7 @@ Policies:
     POLICY "shift_breaks_insert" FOR INSERT
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_shift(shift_id)))
     POLICY "shift_breaks_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_shift(shift_id)))
     POLICY "shift_breaks_update" FOR UPDATE
       USING (((org_id = app_current_org()) AND app_is_admin_for_shift(shift_id)))
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for_shift(shift_id)))
@@ -653,18 +680,19 @@ Indexes:
 Foreign-key constraints:
     "node_shift_templates_org_id_fkey" FOREIGN KEY (org_id) REFERENCES orgs(id)
     "node_shift_templates_org_id_node_id_fkey" FOREIGN KEY (org_id, node_id) REFERENCES nodes(org_id, id)
-    "node_shift_templates_org_id_template_id_fkey" FOREIGN KEY (org_id, template_id) REFERENCES shift_templates(org_id, id)
+    "node_shift_templates_org_id_template_id_fkey" FOREIGN KEY (org_id, template_id) REFERENCES shift_templates(org_id, id) ON DELETE CASCADE
 Policies:
     POLICY "node_shift_templates_delete" FOR DELETE
       USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_shift_templates_insert" FOR INSERT
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
     POLICY "node_shift_templates_select" FOR SELECT
-      USING ((org_id = app_current_org()))
+      USING (((org_id = app_current_org()) AND app_can_read_node(node_id)))
     POLICY "node_shift_templates_update" FOR UPDATE
       USING (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
       WITH CHECK (((org_id = app_current_org()) AND app_is_admin_for(node_id)))
 Triggers:
+    node_shift_templates_scope_guard BEFORE INSERT OR UPDATE OF node_id, template_id ON node_shift_templates FOR EACH ROW EXECUTE FUNCTION app_guard_node_template_scope()
     node_shift_templates_set_updated_at BEFORE UPDATE ON node_shift_templates FOR EACH ROW EXECUTE FUNCTION set_updated_at()
 Access method: heap
 

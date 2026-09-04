@@ -60,6 +60,18 @@
   color: var(--ink-2);
 }
 
+/* What the plant filter trimmed off a list, counted underneath it (roadmap
+   1(c)). Deliberately the same weight and colour as `.skippedLine`: both say
+   "the list above is shorter than the data behind it", and a reader should not
+   have to work out which kind of shortening they are looking at from the
+   styling. --ink-2, not --muted, for the same contrast reason `.rowNote`
+   records — --muted is 3.50:1 on --surface and this is 12px text. */
+.footnote {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
 /* A saved row the database allows but the application does not: a break
    outside its shift, two shifts that would now collide. Amber, not red —
    nothing is broken, something needs looking at. Full width wherever it lands
@@ -214,61 +226,22 @@
   background: var(--page);
 }
 
-/* A button that reads as the row's title: it opens the pattern, it does not
-   write anything. Reset to text, because the UA's button chrome in a data grid
-   makes every row look like a control. */
-/* ⚠️ A DISCLOSURE, AND IT HAS TO READ AS ONE. With `border:0; background:none`
-   this was pixel-identical to the plain text in the next column, and the entire
-   shift list of a pattern is behind it -- nothing on screen said so. The caret,
-   the hover/focus underline and the "show shifts" hint are all one affordance;
-   removing any of them puts it back to guesswork. */
+/* The row's title, plain text. It used to be a disclosure button that opened
+   the pattern on its own (a caret, a hover underline and a "show shifts" hint,
+   all one affordance). One-door, 2 Sept: Edit is the only opener now, so the
+   name carries no affordance of its own -- it is just the label of the row. */
 .patternName {
   grid-column: 1;
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: 0.375rem;
-  padding: 0;
-  border: 0;
-  background: none;
   color: var(--ink);
   font-size: 0.8125rem;
   overflow-wrap: anywhere;
-  text-align: left;
-  cursor: pointer;
-}
-
-.caret {
-  flex: none;
-  font-size: 0.625rem;
-  color: var(--ink-2);
-  line-height: 1;
 }
 
 .patternNameText {
   min-width: 0;
-  text-decoration: underline;
-  text-decoration-color: var(--axis);
-  text-underline-offset: 0.1875rem;
-}
-
-.patternName:hover .patternNameText,
-.patternName:focus-visible .patternNameText {
-  text-decoration-color: var(--ink-2);
-}
-
-/* Shown only on hover/focus so the list is not shouting at rest -- but it is a
-   real element in the flow at all times, so nothing reflows when it appears. */
-.openHint {
-  flex: none;
-  font-size: 0.6875rem;
-  color: var(--ink-2);
-  visibility: hidden;
-}
-
-.patternName:hover .openHint,
-.patternName:focus-visible .openHint {
-  visibility: visible;
 }
 
 .owner {

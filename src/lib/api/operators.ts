@@ -56,7 +56,16 @@ export interface OperatorRecord {
   displayName: string;
   employeeRef: string | null;
   active: boolean;
-  /** `null` = company-wide (0023). Otherwise the ROOT node that owns this person. */
+  /**
+   * The node this person belongs to.
+   *
+   * ⚠️ SAME DRIFT AS `CreateSkillInput.siteNodeId` BELOW, FOUND WHILE FIXING
+   * IT: this read `"null = company-wide (0023). Otherwise the ROOT node…"` on a
+   * field typed `string`, and BOTH halves had expired. D108 made the column NOT
+   * NULL (`parseOperatorRecord` rejects a null here and says so), and 0025 /
+   * D103 stopped `app_check_site_owner` requiring a root — somebody can belong
+   * to a line, which is the fact `workPlacesFor`'s whole area rule turns on.
+   */
   siteNodeId: string;
   /** `'manual'` by default; an imported person carries their source here. */
   source: string;
@@ -67,6 +76,35 @@ export interface SkillRecord {
   id: string;
   name: string;
   siteNodeId: string;
+  /**
+   * `false` = retired: still held by whoever holds it, still on every record it
+   * has ever been part of, and no longer offered for new work.
+   *
+   * ⭐ THE COLUMN SHIPPED IN 0029 WITH DELIBERATELY NO UI, and §19.74 named
+   * that as owed rather than half-building it: *"no screen reads or writes
+   * them, so `DeleteDialog` offers no 'Deactivate instead' for those two
+   * kinds."* The Trainings screen is where it finally gets read, which is what
+   * makes retiring the primary action there and deleting the secondary one —
+   * the same shape Products already has.
+   *
+   * ⚠️ ADVISORY, exactly as on products and operators: the database does not
+   * refuse a person who already holds a retired training, and 0029 does not
+   * start refusing one. Retiring answers "stop offering this", never "revoke
+   * what people have".
+   */
+  active: boolean;
+  /**
+   * The training's DOCUMENT NUMBER — `skills.external_id` from 0032, nullable
+   * and unique per owner.
+   *
+   * ⭐ THE MAINTAINER, 1 Sept: most trainings at a company carry a document
+   * number, and it must NOT be folded into the `name`. The name is what people
+   * read on the board, in the eligibility list, and match on in the
+   * certifications import; the document number churns on revision. They are two
+   * distinct facts — the same split products already draw between `name` and
+   * `sku`. This is the field that finally reads it: `null` = none recorded.
+   */
+  externalId: string | null;
 }
 
 export interface OperatorSkillRecord {
@@ -74,6 +112,27 @@ export interface OperatorSkillRecord {
   skillId: string;
   /** `YYYY-MM-DD`, or `null` for "no expiry". */
   expiresAt: string | null;
+  /**
+   * When the training was done, `YYYY-MM-DD`, or `null` if nobody recorded one.
+   *
+   * ⭐ THE COLUMN IS OLDER THAN EVERY SCREEN THAT COULD HAVE SHOWN IT. It has
+   * been on `operator_skills` since the table was created, and the comment
+   * three hundred lines down said, correctly, *"`certified_at` is deliberately
+   * not written: nothing in this app reads it."* D114 is what finally gave it
+   * one. ⚠️ Distinct from `created_at`, which is when the ROW was made — a
+   * training entered today may have been done last March.
+   */
+  certifiedAt: string | null;
+  /**
+   * Who signed this person off, as recorded. `null` means nobody wrote one down.
+   *
+   * ⚠⚠ FREE TEXT, AND DELIBERATELY NOT A PERSON IN THIS SYSTEM (D114). The
+   * signer is routinely an external assessor or a vendor's trainer with no
+   * login, and a CSV row cannot carry a profile id. **This is the CLAIM; who
+   * TYPED it is the audit log's answer**, and one column cannot hold both
+   * without making the second one a lie.
+   */
+  signedOffBy: string | null;
 }
 
 export interface NodeSkillRequirementRecord {
@@ -132,8 +191,22 @@ export function parseSkillRecord(v: unknown): SkillRecord | null {
   const id = str(v.id);
   const name = str(v.name);
   const siteNodeId = str(v.site_node_id);
-  if (id === null || name === null || siteNodeId === null) return null;
-  return { id, name, siteNodeId };
+  // ⚠️ A MISSING OR NON-BOOLEAN `active` REJECTS THE ROW rather than defaulting
+  // to `true`. The column is NOT NULL with a default, so absent here means the
+  // select forgot to ask for it — and a silent `true` would render every
+  // retired training as live, on the one screen whose job is to tell them
+  // apart. §19.76's lesson: a hand-written guard is the only thing between a
+  // shape change and a screen that quietly says the wrong thing.
+  const externalId = strOrNull(v.external_id);
+  if (id === null || name === null || siteNodeId === null || typeof v.active !== "boolean") {
+    return null;
+  }
+  // ⚠️ `undefined` (never `null`) means the SELECT forgot to ask for the column
+  // — REJECT it, the same guard `parseOperatorRecord` keeps on its own
+  // `external_id`. This is why `apiSkillShape` builds its fixture from
+  // `SKILL_COLUMNS` itself: the read and this guard must never drift.
+  if (externalId === undefined) return null;
+  return { id, name, siteNodeId, active: v.active, externalId };
 }
 
 export function parseOperatorSkillRecord(v: unknown): OperatorSkillRecord | null {
@@ -141,8 +214,23 @@ export function parseOperatorSkillRecord(v: unknown): OperatorSkillRecord | null
   const operatorId = str(v.operator_id);
   const skillId = str(v.skill_id);
   const expiresAt = strOrNull(v.expires_at);
-  if (operatorId === null || skillId === null || expiresAt === undefined) return null;
-  return { operatorId, skillId, expiresAt };
+  const certifiedAt = strOrNull(v.certified_at);
+  const signedOffBy = strOrNull(v.signed_off_by);
+  // ⚠️ `strOrNull` returns `undefined` for a key that is absent or the wrong
+  // type, and `null` for a real SQL NULL — the two are different answers and
+  // only the first is a reason to reject the row. Checking `=== undefined`
+  // rather than falsiness is what keeps an unrecorded sign-off (a legitimate
+  // `null`) from being read as a broken read.
+  if (
+    operatorId === null ||
+    skillId === null ||
+    expiresAt === undefined ||
+    certifiedAt === undefined ||
+    signedOffBy === undefined
+  ) {
+    return null;
+  }
+  return { operatorId, skillId, expiresAt, certifiedAt, signedOffBy };
 }
 
 export function parseNodeSkillRequirementRecord(v: unknown): NodeSkillRequirementRecord | null {
@@ -215,8 +303,26 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
         .from("operators")
         .select("id, display_name, employee_ref, active, site_node_id, source, external_id")
         .order("display_name"),
-      supabase.from("skills").select("id, name, site_node_id").order("name"),
-      supabase.from("operator_skills").select("operator_id, skill_id, expires_at"),
+      // ⚠⚠ `SKILL_COLUMNS`, NEVER A SECOND COPY OF THE SAME LIST. This read
+      // spelled the columns out inline, so when `active` was added to the
+      // constant and `parseSkillRecord` began REQUIRING it, this call kept
+      // asking for three columns and every row it returned was rejected —
+      // silently, into `skipped`, leaving the Trainings screen empty and the
+      // Operators screen with nothing to grant. §19.76's rule with the
+      // arrow reversed: there, a nullable COLUMN broke a hand-written guard;
+      // here, a stricter GUARD broke a hand-written column list.
+      supabase.from("skills").select(SKILL_COLUMNS).order("name"),
+      // ⚠⚠ `OPERATOR_SKILL_COLUMNS`, AND THIS IS THE SAME BUG TWICE IN ONE
+      // FILE. The `skills` read a few lines up spelled its columns out inline
+      // too; when `active` was added to the constant and the parser began
+      // requiring it, that copy kept asking for the old three and **every row
+      // was silently rejected into `skipped`** — an empty screen, no error,
+      // 1276 green tests. Adding the sign-off here would have done it again to
+      // held trainings, and it was caught only by grepping for the pattern
+      // rather than by anything the suite could see.
+      // ⭐ **A column list that appears twice is a bug with a delay on it.**
+      // `apiSkillShape.test.ts` now holds both pairs to each other.
+      supabase.from("operator_skills").select(OPERATOR_SKILL_COLUMNS),
       supabase.from("node_skill_requirements").select("node_id, skill_id"),
       supabase
         .from("nodes")
@@ -290,11 +396,14 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
  * be a second query whose answer could disagree with the session's.
  *
  * The errors these raise, mapped by `toSchedulerError`:
- *   23505 -> `{kind:"DuplicateValue"}`  — `unique (org_id, name)` on skills
- *                                         (ORG-WIDE), `unique (org_id,
- *                                         external_id)` on operators, and the
- *                                         `(operator_id, skill_id)` primary
- *                                         key on a re-grant.
+ *   23505 -> `{kind:"DuplicateValue"}`  — `skills_owner_name_unique`,
+ *                                         `unique (org_id, site_node_id,
+ *                                         name)` on skills since 0031 (PER
+ *                                         OWNER; it was org-wide up to 0002's
+ *                                         `unique (org_id, name)`), `unique
+ *                                         (org_id, external_id)` on operators,
+ *                                         and the `(operator_id, skill_id)`
+ *                                         primary key on a re-grant.
  *   23503 -> `{kind:"StillInUse"}`      — deleting someone `operator_skills`
  *                                         or `assignments` still references;
  *                                         neither FK has an ON DELETE clause.
@@ -306,18 +415,40 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
 
 const OPERATOR_COLUMNS =
   "id, display_name, employee_ref, active, site_node_id, source, external_id";
-const SKILL_COLUMNS = "id, name, site_node_id";
-const OPERATOR_SKILL_COLUMNS = "operator_id, skill_id, expires_at";
+/**
+ * ⚠⚠ EXPORTED SO A TEST CAN HOLD IT AND `parseSkillRecord` TO EACH OTHER.
+ * They are two halves of one contract — what we ask the database for, and what
+ * we refuse to accept back — and they lived in two places that could drift.
+ * They did: `active` was added here and required by the parser while a second,
+ * inline copy of the column list three hundred lines up kept asking for three
+ * columns, so every training silently failed to parse. `apiSkillShape.test.ts`
+ * is what makes that a red case instead of an empty screen.
+ */
+export const SKILL_COLUMNS = "id, name, site_node_id, active, external_id";
+/**
+ * ⚠⚠ EXPORTED, AND THE PARSER IS HELD AGAINST IT BY A TEST.
+ * `apiSkillShape.test.ts` exists because `SKILL_COLUMNS` and
+ * `parseSkillRecord` drifted apart earlier today — a second, inline copy of a
+ * column list kept asking for the old columns while the guard began requiring
+ * the new one, and every row was silently rejected into `skipped`. The same
+ * pair here is now covered the same way.
+ */
+export const OPERATOR_SKILL_COLUMNS =
+  "operator_id, skill_id, expires_at, certified_at, signed_off_by";
 
 export interface CreateOperatorInput {
   orgId: string;
   displayName: string;
   employeeRef: string | null;
   /**
-   * The ROOT node that owns this person, or `null` for company-wide.
-   * A site admin MUST supply their own site: `operators_insert` refuses a
-   * `null` here for anyone who is not a company admin (0023), and the trigger
-   * `operators_check_site` refuses a node that is not a root.
+   * The node that owns this person — ANY node, at any level.
+   *
+   * ⚠️ THIS SAID "the ROOT node… or `null` for company-wide" AND BOTH CLAUSES
+   * ARE FALSE. `operators_check_site` fires `app_check_site_owner`, and 0025 /
+   * D103 deleted its not-a-root branch outright ("there are facilities where
+   * certain people can only work in certain areas"); D108 then removed
+   * company-wide and made the column NOT NULL, so there is no `null` to send.
+   * What survives is the org check: the node must exist in this org.
    */
   siteNodeId: string;
 }
@@ -407,24 +538,132 @@ export async function deleteOperator(id: string): Promise<void> {
 export interface CreateSkillInput {
   orgId: string;
   name: string;
-  /** `null` = company-wide, which is what the maintainer chose for skills by default. */
+  /**
+   * The node this training belongs to.
+   *
+   * ⚠️ THIS COMMENT SAID "`null` = company-wide, which is what the maintainer
+   * chose for skills by default" WHILE SITTING ON A FIELD TYPED `string`. D108
+   * removed company-wide from all four owned tables and made the column NOT
+   * NULL; the type was corrected and the sentence above it was not. A doc line
+   * that contradicts the type beside it is [[decision-record-drift]] rule 10 in
+   * its cheapest form — nothing fails, and the next reader believes the prose.
+   *
+   * ⭐ AND SINCE 0031 IT IS HALF OF THE UNIQUE KEY: `unique (org_id,
+   * site_node_id, name)`. Two plants may each hold a "Forklift"; one plant may
+   * not hold it twice. So this field decides whether the name below is legal,
+   * which is a much larger job than the one it used to have.
+   */
   siteNodeId: string;
+  /**
+   * The document number (`skills.external_id`). Omit, or pass `null`/`""`, for a
+   * training with none — an empty string is normalised to `null` here so it
+   * never collides on the per-owner unique index.
+   */
+  externalId?: string | null;
 }
 
 /**
- * ⚠️ `unique (org_id, name)` IS ORG-WIDE, and a 23505 from here is NOT
- * something to show the user. The screen checks
- * `findExistingSkillByName` first and offers the existing ticket in one
- * click; `{kind:"DuplicateValue"}` covers only the race where somebody else
- * created it in between.
+ * ⭐ `unique (org_id, site_node_id, name)` IS PER OWNER SINCE 0031, and a 23505
+ * from here really is the exception again — but not for the reason this comment
+ * used to give.
+ *
+ * ⚠️ IT SAID a 23505 "is NOT something to show the user", because "the screen
+ * checks `findExistingSkillByName` first… `DuplicateValue` covers only the race
+ * where somebody else created it in between". **That was true when it was
+ * written and false from the day reads were scoped (0026).** Once a caller
+ * could only read trainings on their own branch, the pre-check could no longer
+ * SEE the row that would refuse the insert — so the org-wide clash stopped
+ * being a race and became the ordinary way this call failed, with the error
+ * arriving as the first news of it.
+ *
+ * ⭐ 0031 MAKES THE OLD SENTENCE TRUE AGAIN, ON A DIFFERENT FOOTING. The only
+ * clash left is one under the SAME owner: same branch, therefore readable,
+ * therefore genuinely caught by `findExistingSkillByName` first. The pre-check
+ * is no longer asking a question it cannot see the answer to.
+ *
+ * ⭐ WHICH IS ALSO WHAT MAKES THE SHARED ERROR STRING HONEST HERE.
+ * `describeSchedulerError`'s `DuplicateValue` reads *"Something here already
+ * uses that name or code."* — it is shared with several tables and is not this
+ * file's to edit. Under 0031 its "here" is exactly right for skills: the row it
+ * refers to is in the reader's own place. Before 0031 that word named a plant
+ * they had never seen.
  */
 export async function createSkill(input: CreateSkillInput): Promise<SkillRecord> {
   const { data, error } = await supabase
     .from("skills")
-    .insert({ org_id: input.orgId, name: input.name, site_node_id: input.siteNodeId })
+    .insert({
+      org_id: input.orgId,
+      name: input.name,
+      site_node_id: input.siteNodeId,
+      // "" and undefined both mean "no document number" -> null, so a blank
+      // never trips `(org_id, site_node_id, external_id)` where several are free.
+      external_id:
+        input.externalId === undefined || input.externalId === "" ? null : input.externalId,
+    })
     .select(SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstOrThrow(data, parseSkillRecord, "createSkill");
+}
+
+export interface SetSkillActiveInput {
+  id: string;
+  active: boolean;
+}
+
+/**
+ * Retire / bring back a training — the MAIN action on the Trainings screen,
+ * mirroring `setProductActive` deliberately rather than inventing a second
+ * shape for the same idea.
+ *
+ * ⭐ RETIRING IS NOT DELETING AND THE DIFFERENCE IS THE WHOLE POINT. Deleting
+ * a training cascades it off everyone who holds it (0029 gave
+ * `operator_skills → skills` `ON DELETE CASCADE`, which is what made "delete
+ * this training" completable at all). Retiring changes nothing anybody holds;
+ * it stops the training being offered for new work. "We do not run that course
+ * any more" is the second thing, and it was unreachable until this screen.
+ */
+export async function setSkillActive(input: SetSkillActiveInput): Promise<SkillRecord> {
+  const { data, error } = await supabase
+    .from("skills")
+    .update({ active: input.active })
+    .eq("id", input.id)
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "setSkillActive");
+}
+
+export interface SetSkillDocumentNumberInput {
+  id: string;
+  /** The new document number, or `null` to clear it. */
+  externalId: string | null;
+}
+
+/**
+ * Set or clear a training's DOCUMENT NUMBER — `skills.external_id`.
+ *
+ * ⭐ ITS OWN CALL, NOT A FIELD ON `updateSkill`, ON PURPOSE. `updateSkill` guards
+ * two NOT-NULL columns with a `!== undefined` test and has no "clear it" state;
+ * this column is NULLABLE, so `null` is a real value the caller means. Folding a
+ * nullable column into that function would force `in`-vs-`undefined` on the same
+ * patch — exactly the drift `updateSkill`'s own comment warns against.
+ *
+ * ⚠️ THE CALLER NORMALISES "" TO null before this — a blank clears the number
+ * rather than storing an empty string, which would otherwise sit in the
+ * per-owner unique index as a real value.
+ *
+ * 23505 -> `{kind:"DuplicateValue"}` when another training under the same owner
+ * already carries the number.
+ */
+export async function setSkillDocumentNumber(
+  input: SetSkillDocumentNumberInput,
+): Promise<SkillRecord> {
+  const { data, error } = await supabase
+    .from("skills")
+    .update({ external_id: input.externalId })
+    .eq("id", input.id)
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "setSkillDocumentNumber");
 }
 
 export async function renameSkill(input: { id: string; name: string }): Promise<SkillRecord> {
@@ -435,6 +674,86 @@ export async function renameSkill(input: { id: string; name: string }): Promise<
     .select(SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstOrThrow(data, parseSkillRecord, "renameSkill");
+}
+
+export interface UpdateSkillInput {
+  id: string;
+  /** The new name. **Omit to leave it alone.** */
+  name?: string;
+  /**
+   * Where the training belongs. **Omit to leave it alone**; supplying it MOVES
+   * the training, which is a different act from renaming it and has to be
+   * expressible on its own.
+   *
+   * ⭐⭐ THIS IS THE WRITE D105 WAS MISSING, AND IT IS NOT A SAFE FIELD.
+   * `skills.site_node_id` is one side of `app_guard_operator_skill_scope`
+   * (0028 §4), which requires the training's owner and the HOLDER's owner to be
+   * comparable — either one an ancestor of the other. Moving the training
+   * changes that side of the comparison for everybody at once, and **the
+   * database does not re-check it**: the guard is a `BEFORE INSERT OR UPDATE OF
+   * operator_id, skill_id` trigger on `operator_skills`, so nothing fires when
+   * `skills` moves out from under those rows. Measured on the local stack, 31
+   * August: the rows SURVIVE, still count in `check_eligibility`, and are left
+   * in a state the same guard would refuse to create — a re-grant of the
+   * identical pair raises `not_offered_here`.
+   *
+   * ⚠️ SO THE SCREEN OWES A WARNING THAT THE SERVER WILL NOT RAISE.
+   * `app_guard_skill_rehome` (0028 §5) guards this column, but it counts
+   * `node_skill_requirements` ONLY — never `operator_skills` — so a move that
+   * strands holders is ALLOWED and silent, while a move that strands a
+   * requirement raises `owner_change_blocked`. `previewTrainingMove` in
+   * `features/admin/lib/trainings.ts` is the client half; it is a WARNING and
+   * not a permission, and it must never be mistaken for the guard that is not
+   * there.
+   */
+  siteNodeId?: string;
+}
+
+/**
+ * Change a training's name, where it belongs, or both.
+ *
+ * ⚠️⚠️ AN ABSENT KEY MEANS "LEAVE IT ALONE" — the same contract
+ * `updateSkillRecord` below spells out, and it is load-bearing in the other
+ * direction here. A rename that also resent `site_node_id` would be a MOVE
+ * every time somebody fixed a typo, and under 0028 that silently re-scopes the
+ * row for everyone holding it. So the panel sends the owner only when it
+ * really changed, and this function sends nothing it was not given.
+ *
+ * ⚠️ NOTE THE TEST IS `!== undefined`, NOT `in`, WHICH IS THE OPPOSITE OF
+ * `updateSkillRecord`. Both columns here are `NOT NULL`, so there is no "clear
+ * it" state for `null` to mean and no third case to keep apart — the same call
+ * `updateOperator` makes for `site_node_id`. `updateSkillRecord` guards three
+ * NULLABLE columns, where `null` is a real value and `in` is the only test that
+ * can tell it from "not supplied".
+ *
+ * ⚠️ SENDING NEITHER FIELD IS A CALLER BUG. PostgREST is handed an empty patch
+ * and there is nothing honest for this to return, so the type refuses it:
+ * `UpdateSkillInput` is intersected with a union that requires at least one.
+ *
+ * 23505 -> `{kind:"DuplicateValue"}` from `skills_owner_name_unique`, and since
+ * 0031 that key is `(org_id, site_node_id, name)` — so a MOVE can collide on a
+ * name that was free where the training used to live.
+ * `owner_change_blocked` -> `{kind:"OwnerChangeBlocked"}` when a place outside
+ * the new owner still requires it (0028 §5).
+ */
+export async function updateSkill(
+  input: UpdateSkillInput & ({ name: string } | { siteNodeId: string }),
+): Promise<SkillRecord> {
+  // ⚠️ A TYPED PATCH, not `Record<string, string>` — `updateSkillRecord`'s
+  // reason applies verbatim: the generated Update type rejects excess
+  // properties, so a loose index signature does not satisfy it, and that
+  // strictness is what would catch either column renamed out from under this.
+  const patch: { name?: string; site_node_id?: string } = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;
+
+  const { data, error } = await supabase
+    .from("skills")
+    .update(patch)
+    .eq("id", input.id)
+    .select(SKILL_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return firstOrThrow(data, parseSkillRecord, "updateSkill");
 }
 
 /** Raises 23503 -> `{kind:"StillInUse"}` while any person holds it or any place requires it. */
@@ -448,8 +767,12 @@ export interface GrantSkillInput {
   orgId: string;
   operatorId: string;
   skillId: string;
-  /** `YYYY-MM-DD`, or `null` for a ticket that never expires. */
+  /** `YYYY-MM-DD`, or `null` for a training that never expires. */
   expiresAt: string | null;
+  /** When it was done, `YYYY-MM-DD`. Optional — often not known at entry. */
+  certifiedAt?: string | null;
+  /** Who signed it off, free text (D114). Optional for the same reason. */
+  signedOffBy?: string | null;
 }
 
 /**
@@ -463,7 +786,16 @@ export interface GrantSkillInput {
  * themselves edit or delete. That is the intended asymmetry, not a bug to
  * defend against here.
  *
- * `certified_at` is deliberately not written: nothing in this app reads it.
+ * ⭐ `certified_at` AND `signed_off_by` ARE BOTH WRITTEN NOW. This comment used
+ * to read *"`certified_at` is deliberately not written: nothing in this app
+ * reads it"* — true for months, and the reason D114 needed only ONE new column
+ * rather than two. The Trainings work is what gave it a screen.
+ *
+ * ⚠️ BOTH ARE OPTIONAL AND STAY THAT WAY. A half-known record is the ordinary
+ * case: a spreadsheet arrives with a date and no signer, or a supervisor knows
+ * who signed and has to look up when. 0032 deliberately has no CHECK tying them
+ * together for exactly this reason — refusing the half-known row would send
+ * people to type something untrue into the other box.
  */
 export async function grantSkill(input: GrantSkillInput): Promise<OperatorSkillRecord> {
   const { data, error } = await supabase
@@ -473,25 +805,51 @@ export async function grantSkill(input: GrantSkillInput): Promise<OperatorSkillR
       operator_id: input.operatorId,
       skill_id: input.skillId,
       expires_at: input.expiresAt,
+      certified_at: input.certifiedAt ?? null,
+      signed_off_by: input.signedOffBy ?? null,
     })
     .select(OPERATOR_SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstOrThrow(data, parseOperatorSkillRecord, "grantSkill");
 }
 
-export async function updateSkillExpiry(input: {
+/**
+ * Change what is recorded about a training somebody holds.
+ *
+ * ⚠⚠ EVERY FIELD IS OPTIONAL AND AN ABSENT KEY MEANS "LEAVE IT ALONE", which
+ * is NOT the same as `null` ("clear it"). Collapsing the two would make it
+ * impossible to change a date without also wiping the sign-off beside it — and
+ * a screen that quietly erases a field the user did not touch is the kind of
+ * loss nobody reports, because it looks like it was never entered.
+ */
+export async function updateSkillRecord(input: {
   operatorId: string;
   skillId: string;
-  expiresAt: string | null;
+  expiresAt?: string | null;
+  certifiedAt?: string | null;
+  signedOffBy?: string | null;
 }): Promise<OperatorSkillRecord> {
+  // ⚠️ A TYPED PATCH, not `Record<string, string | null>`. The generated
+  // Update type rejects excess properties, so a loose index signature does
+  // not satisfy it — and that strictness is the point: it is what would
+  // catch a column renamed out from under this call.
+  const patch: {
+    expires_at?: string | null;
+    certified_at?: string | null;
+    signed_off_by?: string | null;
+  } = {};
+  if ("expiresAt" in input) patch.expires_at = input.expiresAt ?? null;
+  if ("certifiedAt" in input) patch.certified_at = input.certifiedAt ?? null;
+  if ("signedOffBy" in input) patch.signed_off_by = input.signedOffBy ?? null;
+
   const { data, error } = await supabase
     .from("operator_skills")
-    .update({ expires_at: input.expiresAt })
+    .update(patch)
     .eq("operator_id", input.operatorId)
     .eq("skill_id", input.skillId)
     .select(OPERATOR_SKILL_COLUMNS);
   if (error) throw toSchedulerError(error);
-  return firstOrThrow(data, parseOperatorSkillRecord, "updateSkillExpiry");
+  return firstOrThrow(data, parseOperatorSkillRecord, "updateSkillRecord");
 }
 
 export async function revokeSkill(input: { operatorId: string; skillId: string }): Promise<void> {

@@ -23,6 +23,7 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  copyPlantStructure,
   createHierarchyTemplate,
   createNode,
   deleteHierarchyTemplate,
@@ -35,6 +36,8 @@ import {
   renameNode,
   saveHierarchyLevels,
   type BoardNode,
+  type CopyPlantStructureInput,
+  type CopyPlantStructureResult,
   type CreateNodeInput,
   type DeleteNodeMode,
   type DeleteNodeResult,
@@ -154,6 +157,23 @@ export function useCreateNode() {
 
   return useMutation<BoardNode, SchedulerError, CreateNodeInput>({
     mutationFn: (input) => createNode(input),
+    onSuccess: () => {
+      void invalidateHierarchy(queryClient);
+    },
+  });
+}
+
+/**
+ * `copy_plant_structure` (0035, the starter library). Creates a new plant as a
+ * copy of an existing plant's structure. Company-admin only; raises
+ * not_permitted, invalid_argument, level_mismatch. Invalidates the hierarchy so
+ * the new plant appears.
+ */
+export function useCopyPlantStructure() {
+  const queryClient = useQueryClient();
+
+  return useMutation<CopyPlantStructureResult, SchedulerError, CopyPlantStructureInput>({
+    mutationFn: (input) => copyPlantStructure(input),
     onSuccess: () => {
       void invalidateHierarchy(queryClient);
     },

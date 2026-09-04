@@ -35,10 +35,15 @@ import {
   fetchOperatorsAdmin,
   grantSkill,
   renameSkill,
+  setSkillActive,
+  type SetSkillActiveInput,
+  setSkillDocumentNumber,
+  type SetSkillDocumentNumberInput,
   revokeSkill,
   setOperatorActive,
   updateOperator,
-  updateSkillExpiry,
+  updateSkill,
+  updateSkillRecord,
   type CreateOperatorInput,
   type CreateSkillInput,
   type GrantSkillInput,
@@ -48,6 +53,7 @@ import {
   type SchedulerError,
   type SkillRecord,
   type UpdateOperatorInput,
+  type UpdateSkillInput,
 } from "@/lib/api";
 
 export const operatorKeys = {
@@ -127,6 +133,69 @@ export function useRenameSkill() {
   });
 }
 
+/**
+ * Retire / bring back — the main action on the Trainings screen.
+ *
+ * ⭐ It invalidates the same key everything else here does, and that matters
+ * more than usual: retiring a training changes the OPERATORS screen too (a
+ * retired one stops being offered to grant), so a mutation that only refreshed
+ * its own list would leave the other screen offering something the first had
+ * just withdrawn.
+ */
+export function useSetSkillActive() {
+  const invalidate = useInvalidateOperators();
+  return useMutation<SkillRecord, SchedulerError, SetSkillActiveInput>({
+    mutationFn: (input) => setSkillActive(input),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Set, change or clear a training's DOCUMENT NUMBER.
+ *
+ * ⭐ THE SAME INVALIDATION EVERY SKILL WRITE HERE MAKES, and it matters for the
+ * same reason `useSetSkillActive`'s does: the document number rides on the
+ * `SkillRecord` the Operators screen reads too, so a mutation that refreshed
+ * only this list would leave the other screen showing a stale number. Mirrors
+ * `useSetSkillActive` exactly — one `mutationFn`, `onSuccess` invalidates the
+ * whole prefix, no optimistic update.
+ */
+export function useSetSkillDocumentNumber() {
+  const invalidate = useInvalidateOperators();
+  return useMutation<SkillRecord, SchedulerError, SetSkillDocumentNumberInput>({
+    mutationFn: (input) => setSkillDocumentNumber(input),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Rename a training, move it, or both.
+ *
+ * ⚠️⚠️ THE VARIABLES TYPE CARRIES THE API'S "AT LEAST ONE FIELD" INTERSECTION
+ * RATHER THAN WIDENING IT AWAY. A hook typed `UpdateSkillInput` alone would
+ * accept `{ id }` — a patch with nothing in it — and the refusal would arrive
+ * from PostgREST at runtime instead of from `tsc`. `useUpdateSkillRecord` below
+ * records the same mistake made in the other direction: a generic that was
+ * NARROWER than the call it wrapped, so "change one field and touch nothing
+ * else" became unsayable.
+ *
+ * ⭐ It invalidates the whole prefix, which matters more here than for a
+ * rename: moving a training changes which places offer it AND which people the
+ * Operators screen will let you grant it to, so a mutation that refreshed only
+ * this list would leave that one offering a training it can no longer reach.
+ */
+export function useUpdateSkill() {
+  const invalidate = useInvalidateOperators();
+  return useMutation<
+    SkillRecord,
+    SchedulerError,
+    UpdateSkillInput & ({ name: string } | { siteNodeId: string })
+  >({
+    mutationFn: (input) => updateSkill(input),
+    onSuccess: invalidate,
+  });
+}
+
 export function useDeleteSkill() {
   const invalidate = useInvalidateOperators();
   return useMutation<void, SchedulerError, { id: string }>({
@@ -144,14 +213,31 @@ export function useGrantSkill() {
   });
 }
 
-export function useUpdateSkillExpiry() {
+/**
+ * Change what is recorded about a training somebody holds.
+ *
+ * ⚠️⚠️ THE VARIABLES TYPE IS THE API'S, WITH EVERY FIELD OPTIONAL, AND IT WAS
+ * NARROWER THAN THE CALL IT WRAPS. `updateSkillRecord` distinguishes an ABSENT
+ * key ("leave it alone") from `null` ("clear it") — that is the whole reason it
+ * exists — and this generic pinned `expiresAt` as required while forbidding the
+ * two fields 0032 / D114 added. A hook that cannot express "change the date and
+ * touch nothing else" forces its caller to send all three every time, which is
+ * exactly how an edit to one field silently wipes another.
+ */
+export function useUpdateSkillRecord() {
   const invalidate = useInvalidateOperators();
   return useMutation<
     OperatorSkillRecord,
     SchedulerError,
-    { operatorId: string; skillId: string; expiresAt: string | null }
+    {
+      operatorId: string;
+      skillId: string;
+      expiresAt?: string | null;
+      certifiedAt?: string | null;
+      signedOffBy?: string | null;
+    }
   >({
-    mutationFn: (input) => updateSkillExpiry(input),
+    mutationFn: (input) => updateSkillRecord(input),
     onSuccess: invalidate,
   });
 }

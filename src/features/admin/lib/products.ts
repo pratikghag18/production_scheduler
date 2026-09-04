@@ -100,40 +100,15 @@ export function productColorVar(token: string | null | undefined): string {
 }
 
 /* ===========================================================================
- * §2. Owners — `site_node_id`, which since migration 0028 is NOT NULL.
+ * §2. Where a product is MADE — the list `product_sites`, D115 / migration 0034.
  *
- * ⭐ 0028 / D108. `null` used to be a value here, not an absence: it meant the
- * whole company owned the row. The maintainer removed the state on 28 Aug -- "remove
- * company-wide as an option for products and operators... a person under no
- * circumstances should be able to see data for other plants unless they are
- * system admin, period." Every `null` branch in this section went with it.
+ * ⭐ D115. The single `site_node_id` is gone. A product belongs to a LIST of
+ * places (`AdminProduct.siteNodeIds`), because a part number is company-wide and
+ * the company decides which plants make it — one, several or all. Resolving a
+ * place id to a NAME is the panel's job (it holds the node tree and uses
+ * `scope.ts`'s `scopeLabel`); this module carries the ids through and owns the
+ * skip-and-count and the permission previews.
  * ======================================================================== */
-
-/** One site a product can belong to: a ROOT node of the org (0023 §2's trigger). */
-export interface ProductSite {
-  id: string;
-  name: string;
-}
-
-/** What an owner id that is not in the sites list is called. See `productRows`. */
-export const UNKNOWN_SITE_LABEL = "Another site";
-
-/**
- * ⚠️ AN UNRESOLVED OWNER IS NOT AN ERROR, though under 0028 it should be rare.
- * Reads on `products` used to be org-wide while `nodes_select` was not, so a
- * product owned by Plant 2 arrived with an owner id the reader could not name.
- * 0028 makes that combination unreachable -- a row you can read is owned by a
- * node on one of your own branches -- but the label stays, because
- * "unreachable" is a claim about the server and this is what the user sees the
- * day it stops holding. Inventing a name or showing a raw uuid are both worse.
- */
-export function ownerLabel(siteNodeId: string, sites: readonly ProductSite[] | null): string {
-  // `null` means the structure read did not land, so we cannot NAME the owner
-  // and must not pretend the row belongs elsewhere either.
-  if (sites === null) return UNKNOWN_SITE_LABEL;
-  const site = sites.find((s) => s.id === siteNodeId);
-  return site === undefined ? UNKNOWN_SITE_LABEL : site.name;
-}
 
 /* ===========================================================================
  * §3. The list — skip and count, never blank.
@@ -141,8 +116,6 @@ export function ownerLabel(siteNodeId: string, sites: readonly ProductSite[] | n
 
 /** One product as the panel renders it: the row, plus what the screen adds. */
 export interface ProductRow extends AdminProduct {
-  /** `ownerLabel(siteNodeId, sites)`, resolved once so the JSX has no logic. */
-  owner: string;
   /** The CSS value for the swatch — already fallen back if the token is unknown. */
   colorVar: string;
   /** True when `colorToken` is not one `tokens.css` defines. Surfaced, not hidden. */
@@ -153,13 +126,6 @@ export interface ProductView {
   rows: readonly ProductRow[];
   /** How many rows arrived in a shape this client could not read. */
   skipped: number;
-  /**
-   * How many rows belong to a site this person cannot see, and are therefore
-   * NOT in the catalogue. See `productRows` — this is a count of something
-   * about THEIR OWN site (a foreign product is scheduled here), never a way to
-   * learn anything about the other site.
-   */
-  elsewhere: number;
 }
 
 /**
@@ -171,49 +137,32 @@ export interface ProductView {
  * malformed product must never blank the catalogue, and it must never vanish
  * silently either — the panel prints the count.
  *
+ * ⭐ D115 REMOVED THE "elsewhere" DROP. Before 0034 a product could arrive owned
+ * by a site the reader could not see (the board-history read exception leaking
+ * into the catalogue), and this function filtered it out and counted it. Under
+ * 0034 `products_select` admits a product only when the reader is a company
+ * admin or one of its plants is on their own branch — so every product that
+ * arrives here legitimately belongs to this reader's world, and there is nothing
+ * to drop. A part with an empty `siteNodeIds` (assigned to no plant, or all its
+ * plants outside this reader's view) is still shown: it is a real catalogue
+ * entry, and hiding it would be the silent-hiding failure `scope.ts` warns of.
+ *
  * NEVER THROWS. It is called during render.
  *
  * Order is the server's (`ORDER BY sku`), deliberately preserved: re-sorting
  * here would mean two lists that can disagree, and the DB's collation is the
  * one the SQL tests assert on.
  */
-export function productRows(
-  parsed: ReadonlyArray<AdminProduct | null>,
-  sites: readonly ProductSite[] | null,
-): ProductView {
+export function productRows(parsed: ReadonlyArray<AdminProduct | null>): ProductView {
   const rows: ProductRow[] = [];
   let skipped = 0;
-  let elsewhere = 0;
   for (const p of parsed) {
     if (p === null) {
       skipped += 1;
       continue;
     }
-    // ⭐⭐ A PRODUCT OWNED BY A SITE YOU CANNOT SEE IS NOT PART OF YOUR
-    // CATALOGUE (the maintainer, Aug 28). 0026 narrowed the READ to "company-wide, or
-    // the same branch as one of your grants" — and then admitted one more
-    // thing on purpose: a row that is already on a run you can see, so the
-    // board can NAME its own history instead of drawing "(unknown product)".
-    //
-    // That exception belongs to the BOARD and it leaked into this list. Signed
-    // in as the Plant 1 admin he saw `Rework — Another site`: measured, that
-    // row scored `app_can_read_owned = false` and
-    // `app_product_on_visible_schedule = true`, so it was admitted purely by
-    // the history clause. The design note for 0026 said "offering is not
-    // listing and listing is not naming" and then put the naming exception in
-    // the policy, which is the listing layer. This is where that gets undone.
-    //
-    // ⚠️ `sites === null` means the structure read FAILED, not that the person
-    // sees nothing. Filtering then would empty the catalogue of every owned
-    // product and blame it on ownership — §19.64's rule 8d, a fail-closed
-    // branch telling a lie. When we cannot tell, we keep the row.
-    if (p.siteNodeId !== null && sites !== null && !sites.some((s) => s.id === p.siteNodeId)) {
-      elsewhere += 1;
-      continue;
-    }
     rows.push({
       ...p,
-      owner: ownerLabel(p.siteNodeId, sites),
       colorVar: productColorVar(p.colorToken),
       // A HEX IS NOT UNKNOWN. This flag drives the "this colour is not one the
       // board defines" warning, and after 0025 a hand-set hex is both perfectly
@@ -222,7 +171,7 @@ export function productRows(
       colorUnknown: !isPaletteToken(p.colorToken) && !isHexColorToken(p.colorToken),
     });
   }
-  return { rows, skipped, elsewhere };
+  return { rows, skipped };
 }
 
 /**
@@ -251,110 +200,92 @@ export function matchesProductQuery(row: ProductRow, query: string): boolean {
 }
 
 /* ===========================================================================
- * §4. Permission previews — a mirror of the three policies in 0023 §5.
+ * §4. Permission previews — the Split decision, migration 0034 §9.
+ *
+ * ⭐⭐ THE SPLIT (the maintainer, 1 Sept). A part number is company-wide, so a
+ * rename touches every plant that makes it — that is COMPANY property. Which
+ * plants make it is per-plant. So the two are governed differently:
+ *
+ *   THE SHARED RECORD  (create, rename, recolour, delete)  -> company admin only
+ *   THE LIST OF MAKERS (add / remove a plant)              -> a plant admin may
+ *                                                             manage THEIR OWN
+ *
+ * `products_insert/update/delete` are now `app_is_admin()`; `product_sites`
+ * insert/delete are `app_is_admin() OR app_is_admin_for(node_id)`.
  * ======================================================================== */
 
 /**
- * The insert/update/delete policies are all the same predicate:
+ * May this reader change the shared record — rename, recolour, retire, delete?
  *
- *   org_id = app_current_org()
- *   AND (app_is_admin()
- *        OR (site_node_id IS NOT NULL AND app_is_admin_for(site_node_id)))
+ * ⭐ D116 (the maintainer, 2 Sept): a company admin always; otherwise a site
+ * admin who administers EVERY plant that makes this part, and only while at least
+ * one plant does. This mirrors the server's `app_can_edit_product_record` exactly
+ * — company admin, or a part wholly made within one's own plants. A part another
+ * plant also makes is company property again; an orphan (no makers) is too.
  *
- * Read plainly: **a site admin can create, edit and delete their own site's
- * products, and cannot touch a company-wide one.** The org term is not
- * mirrored here — every product this client ever sees came from an org-scoped
- * read, so a second copy of a check that always holds could not be tested
- * (gotcha 17) and would only be one more thing to keep in step.
+ * `isAdminAt(nodeId)` is the reader's own "do I administer this node" test — on
+ * the panel, path containment against the reader's admin roots, the client mirror
+ * of the server's `app_is_admin_for` ancestor walk.
  *
- * `adminSiteIds` is the set of SITE root nodes this person administers,
- * derived on screen from `editable_shape_ids()` (0021 §2) — itself a PREVIEW
- * that restricts nothing. Which is the whole point: this function answers
- * "should the button be live", never "may this write happen". The server
- * re-asks, and `requireWritten` catches the silent half of its answer.
+ * ⚠️ A POSITIVE HINT THAT CAN BE OPTIMISTIC, exactly like `canManagePlace`. The
+ * makers this sees are RLS-scoped (`row.siteNodeIds` is "as far as the reader can
+ * see"). If a part is ALSO made at a plant the reader cannot read, that maker is
+ * invisible here, so this may say yes where the server — which sees every maker —
+ * says no. That refusal arrives as `WriteRefused` with a clear sentence, the
+ * loud, recoverable backstop this file's previews lean on rather than a screen
+ * that hides what the server would allow.
  */
-export function canOwnProduct(
-  siteNodeId: string,
+export function canEditProduct(
   isCompanyAdmin: boolean,
-  adminSiteIds: readonly string[],
+  siteNodeIds: readonly string[],
+  isAdminAt: (nodeId: string) => boolean,
 ): boolean {
   if (isCompanyAdmin) return true;
-  return adminSiteIds.includes(siteNodeId);
+  if (siteNodeIds.length === 0) return false;
+  return siteNodeIds.every((nodeId) => isAdminAt(nodeId));
+}
+
+/** Why the shared-record controls on this row are absent, in the row's terms. */
+export function editRefusalNote(
+  isCompanyAdmin: boolean,
+  siteNodeIds: readonly string[],
+  isAdminAt: (nodeId: string) => boolean,
+): string | null {
+  if (canEditProduct(isCompanyAdmin, siteNodeIds, isAdminAt)) return null;
+  // Administers some makers but not all: another plant shares the part, so its
+  // identity is company-owned even though one of the reader's plants makes it.
+  if (siteNodeIds.some((nodeId) => isAdminAt(nodeId))) {
+    return "Another plant also makes this part, so its number and colour are company-owned — but you can add or remove your own plant below.";
+  }
+  return "Only a company admin can change a part your plant doesn't make — but you can add or remove your own plant below.";
 }
 
 /**
- * Whether this person may rename, deactivate or delete this exact product.
+ * Does this reader CERTAINLY administer this plant — so a place control on it is
+ * sure to be accepted? `product_sites_insert`/`_delete` = `app_is_admin() OR
+ * app_is_admin_for(node_id)` (D115, the Split).
  *
- * ⭐⭐ THIS FAILS OPEN FOR A SITE ADMIN NOW, AND THE CHANGE IS DELIBERATE.
+ * ⭐ THIS IS A POSITIVE HINT, NOT A GATE, and the distinction is the `canEdit`
+ * lesson (§19.72a) restated: `adminNodeIds` is the COARSE client set (roots this
+ * person administers) and the server's `app_is_admin_for` walks ancestors, so a
+ * LINE inside an administered plant is theirs to the server and NOT in this set.
+ * Reading a `false` here as "hide the control" is exactly the fail-closed trap
+ * that offered a site admin nothing at all. So the panel uses `true` to mark a
+ * place it can show as certainly-yours, and still OFFERS place-adding broadly,
+ * letting the server's `WriteRefused` be the answer for the uncertain rest — the
+ * fail-open default every other preview in this file keeps.
  *
- * It used to be `canOwnProduct(...)`, i.e. "is this product's scope one of the
- * sites I administer" — with `adminSiteIds` derived from which STRUCTURES this
- * person may edit (`editable_shape_ids()`). The adversarial review of 27 Aug
- * measured that those are not the same question: the product policies ask
- * `app_is_admin_for(site_node_id)`, which reads node GRANTS and never touches
- * `hierarchy_templates`. A site whose root has no claimed structure — which
- * 0020's `having count(*) = 1` backfill deliberately creates for any shared
- * shape — dropped out of `adminSiteIds` while remaining fully writable on the
- * server. The error was one-directional and it was the CLOSED direction: a
- * whole screen dead for exactly the people the feature exists for.
- *
- * ⚠️ AND 0025 MADE IT WORSE BEFORE IT MADE IT BETTER. Under D103 a scope can be
- * any node, so "is the scope one of my sites" is not even the right shape of
- * question any more — a product scoped to a line inside a site I administer is
- * mine to edit, and a root-id list cannot say so.
- *
- * ⭐ SO THE DEFAULT FLIPS, AND [[verification-standard]] RULE 8b IS WHY: ask
- * what the answer buys. When this was written a refused write said
- * *"You need to sign in to do that"* or silently did nothing, so guessing
- * wrong meant a screen that lied. §19.63's contract changed that — a refusal
- * now arrives as `WriteRefused` and reads *"You don't have permission to change
- * this."* **A wrong "yes" is now one clear sentence; a wrong "no" is still
- * invisible and permanent.**
- *
- * A company admin is unaffected. Someone who administers NOWHERE still gets
- * `false`, because that answer needs no grant read to be certain of.
+ * A `true` is a certainty (a company admin, or a node in the set); a `false` is
+ * "not certain from here", never "refused".
  */
-export function canEditProduct(
-  row: Pick<AdminProduct, "siteNodeId">,
+export function canManagePlace(
+  nodeId: string,
   isCompanyAdmin: boolean,
-  adminSiteIds: readonly string[],
-  adminAnywhere = false,
+  adminNodeIds: readonly string[],
 ): boolean {
-  if (canOwnProduct(row.siteNodeId, isCompanyAdmin, adminSiteIds)) return true;
-  // 0028 removed the company-wide branch that used to sit here and return
-  // false outright. There is no owner a company admin alone can hold now, so
-  // the fail-open answer is the only one left.
-  return adminAnywhere;
+  if (isCompanyAdmin) return true;
+  return adminNodeIds.includes(nodeId);
 }
-
-/** Why the controls on this row are dead, in the row's own terms. */
-export function editRefusalNote(
-  row: Pick<AdminProduct, "siteNodeId">,
-  isCompanyAdmin: boolean,
-  adminSiteIds: readonly string[],
-  adminAnywhere = false,
-): string | null {
-  if (canEditProduct(row, isCompanyAdmin, adminSiteIds, adminAnywhere)) return null;
-  // With `canEditProduct` failing open for anyone who administers somewhere,
-  // the only note left is the one that needs no grant read to be sure of.
-  // (0028 deleted the second note, "Company-wide - only a company admin can
-  // change this", along with the state it described.)
-  return "You don't administer anywhere, so this is read-only.";
-}
-
-/* ⭐ `ownerOptions` WAS DELETED BY 0028, NOT NARROWED.
- *
- * It offered a flat list of SITE ROOTS with a "Company-wide" entry at the top
- * for company admins. Both halves are now wrong: there is no company-wide
- * entry (D108), and ownership is a scope at ANY level, not a root (D109) --
- * a product can belong to Line 1. The screen has used `scopeOptions` from
- * `scope.ts` since 0025, which walks the whole tree, so this function had no
- * production caller and only its tests kept it alive.
- *
- * It is deleted rather than left unused for the reason `55_`'s N13 gives about
- * `app_product_on_visible_schedule`: a helper that still knows how to emit a
- * company-wide owner is a loaded gun for whoever "restores" it next.
- */
 
 /* ===========================================================================
  * §4b. COLOUR, WHEN IT IS NOT A PALETTE TOKEN (0025 §2, D102 amended).
@@ -428,18 +359,16 @@ export function colorInputValue(token: string, computedHex: string | null): stri
 export interface ProductDraft {
   sku: string;
   name: string;
-  siteNodeId: string;
 }
 
 export interface ProductDraftValues {
   sku: string;
   name: string;
-  siteNodeId: string;
 }
 
 export type ProductDraftResult =
   | { ok: true; value: ProductDraftValues }
-  | { ok: false; skuError: string | null; nameError: string | null; ownerError: string | null };
+  | { ok: false; skuError: string | null; nameError: string | null };
 
 /**
  * `products.sku` and `products.name` are both plain `text NOT NULL` with no
@@ -490,54 +419,40 @@ export function validateProductDraft(draft: ProductDraft): ProductDraftResult {
     nameError = `A name can be at most ${NAME_MAX_LENGTH} characters.`;
   }
 
-  // ⭐ 0028 / D108 MADE THIS A REQUIRED CHOICE, AND IT NEEDS ITS OWN MESSAGE.
-  // The picker used to open on "Everywhere (company-wide)", so an untouched
-  // form was already valid and there was nothing to refuse. There is no such
-  // default now, so the form can be submitted with nothing chosen -- and a
-  // form that fails with the error attached to the wrong field, or to no field
-  // at all, is the same defect as a control named after less than it does
-  // (D106). The owner gets its own error, beside its own control.
-  let ownerError: string | null = null;
-  if (draft.siteNodeId === "") {
-    ownerError = "Choose where this product belongs.";
+  // ⭐ D115 REMOVED THE OWNER REQUIREMENT (0028 had made it required). A product
+  // is the company-wide record — sku and name — and which plants make it is
+  // managed separately through `product_sites`, so there is no place to choose
+  // on the create form and nothing to refuse for its absence. A just-created
+  // part offered nowhere is a legitimate state, not an incomplete form.
+  if (skuError !== null || nameError !== null) {
+    return { ok: false, skuError, nameError };
   }
-
-  if (skuError !== null || nameError !== null || ownerError !== null) {
-    return { ok: false, skuError, nameError, ownerError };
-  }
-  return { ok: true, value: { sku, name, siteNodeId: draft.siteNodeId } };
+  return { ok: true, value: { sku, name } };
 }
 
 /* ===========================================================================
  * §6. Saying what is in the way.
  * ======================================================================== */
 
-/**
- * What the panel says when a DELETE is refused.
+/* ⚠️ `describeDeleteRefusal` LIVED HERE AND 0029 DELETED IT, rather than
+ * fixing it. It turned a delete refusal into a sentence with a way out, and
+ * both of its branches stopped being true:
  *
- * `described` is `describeSchedulerError(err)` — passed IN rather than
- * imported, because that function lives in `@/lib/api` and this module has no
- * runtime imports at all. It already names the referencing table for a
- * `StillInUse` ("It's still used by runs, so it can't be deleted."), lifted
- * from the `23503` detail line, so this function's whole job is to add the way
- * out rather than to re-describe the problem.
+ *   - `StillInUse` said "Deactivate it instead — it stays on the work it's
+ *     already on". That was the whole shape of delete before D110: anything
+ *     ever scheduled could NEVER be deleted. `delete_owned_row` now removes
+ *     what has not started and keeps what has, so the refusal it explained
+ *     does not arrive any more.
+ *   - `WriteRefused` said "Company-wide products can only be changed by a
+ *     company admin." There has been no company-wide product since D108
+ *     (0028). It compiled, it was tested, and it had been wrong for a day —
+ *     which is §19.72a lesson 2 exactly: a compiler cannot see a sentence.
  *
- * ⭐ AND THE WAY OUT IS THE POINT. `runs` and `assignments` reference
- * `(org_id, product_id)` with NO `ON DELETE`, so any product that has ever
- * been scheduled can never be deleted — which is correct, and is exactly why
- * deactivate is the main action and delete is the secondary one. Telling
- * somebody only that it failed leaves them clicking it again.
+ * Narrowing it would have left a helper that still knows how to say
+ * "company-wide", which is the argument 0028 used for deleting `ownerOptions`
+ * rather than filtering it. `DeleteDialog` asks the server what is at stake
+ * and says that instead.
  */
-export function describeDeleteRefusal(err: SchedulerError, described: string): string {
-  switch (err.kind) {
-    case "StillInUse":
-      return `${described} Deactivate it instead — it stays on the work it's already on, and stops being offered for new.`;
-    case "WriteRefused":
-      return `${described} Company-wide products can only be changed by a company admin.`;
-    default:
-      return described;
-  }
-}
 
 /**
  * The same, for a create or an edit. A duplicate sku is the one refusal a

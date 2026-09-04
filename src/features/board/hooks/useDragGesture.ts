@@ -17,7 +17,8 @@
  * bounding rect once on pointerdown" (never in pointermove) falls out of
  * the same design: every candidate is computed from a delta off the
  * ORIGIN clientX, not from a re-measured rect.
- */
+ */ import { operatorViewFor, productViewFor } from "../lib/history";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ShiftTemplate,
@@ -339,14 +340,37 @@ export function useDragGesture(args: UseDragGestureArgs) {
     }
   }, [args.sessionUserId]);
 
+  // --- DEF-0002 second door: the ROOT changed, so every popover is stale. ---
+  // ⭐ EVERY KIND, not just "split", which is where this differs from T25
+  // above. A popover names a `nodeId` in the board window it was opened over;
+  // change the selected place and that node is not on the screen any more —
+  // its lane, its shift times and its cell are all from somewhere else.
+  //
+  // ⚠️ THIS IS THE HALF OF DEF-0002 THE PICKER FIX DID NOT REACH, and it was
+  // found by driving it rather than by reading it: with the create popover
+  // open on Plant A, switching the picker to Plant B left the popover up, and
+  // its Product dropdown went from Plant A's four parts to ALL THIRTEEN in the
+  // company — because `BoardPage`'s `offeredProducts` cannot resolve a Plant A
+  // node in Plant B's map and fell back to the whole catalogue. Scoping the
+  // predicate fixed the reported path; this closes the one three clicks away.
+  // Nothing is sent: an open popover has written nothing yet.
+  const lastRootPathRef = useRef(args.rootPath);
+  useEffect(() => {
+    if (lastRootPathRef.current !== args.rootPath) {
+      lastRootPathRef.current = args.rootPath;
+      if (dragRef.current) setActiveDrag(null);
+      setPopover(null);
+    }
+  }, [args.rootPath]);
+
   const revertLabel = useCallback(
     (subject: DragSubject): string => {
       if (subject.kind === "run") {
-        const p = index.productById.get(subject.run.productId);
+        const p = productViewFor(subject.run, index.productById);
         return `${p?.name ?? "Run"} ${ctx.formatRange?.(subject.run.startMin, subject.run.endMin) ?? ""}`;
       }
       if (subject.kind === "assignment") {
-        const op = index.operatorById.get(subject.assignment.operatorId);
+        const op = operatorViewFor(subject.assignment, index.operatorById);
         return `${op?.displayName ?? "Assignment"} ${ctx.formatRange?.(subject.assignment.startMin, subject.assignment.endMin) ?? ""}`;
       }
       return "New block";
@@ -581,7 +605,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
           // index (T10), not the drag-time `dropRefused` hint alone.
           const overlap = findRunOverlap(candidate, destinationRuns, run.id);
           if (overlap) {
-            const p = index.productById.get(overlap.productId);
+            const p = productViewFor(overlap, index.productById);
             toast.reverted(
               `${index.nodeById.get(destinationNodeId)?.name ?? destinationNodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
             );
@@ -637,7 +661,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
         // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
         const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
         if (overlap) {
-          const p = index.productById.get(overlap.productId);
+          const p = productViewFor(overlap, index.productById);
           toast.reverted(
             `${index.nodeById.get(d.nodeId)?.name ?? d.nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
           );
@@ -1145,7 +1169,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     (runId: string): string => {
       const run = index.runById.get(runId);
       if (!run) return "Run";
-      const p = index.productById.get(run.productId);
+      const p = productViewFor(run, index.productById);
       return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`;
     },
     [index, ctx],
@@ -1154,7 +1178,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     (assignmentId: string): string => {
       const a = index.assignmentById.get(assignmentId);
       if (!a) return "Assignment";
-      const op = index.operatorById.get(a.operatorId);
+      const op = operatorViewFor(a, index.operatorById);
       return `${op?.displayName ?? "Assignment"} ${ctx.formatRange?.(a.startMin, a.endMin) ?? ""}`;
     },
     [index, ctx],
@@ -1164,7 +1188,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     (nodeId: string, range: Range, productId: string, plannedHeadcount: number | undefined) => {
       const overlap = findRunOverlap(range, index.runsByNode.get(nodeId) ?? [], null);
       if (overlap) {
-        const p = index.productById.get(overlap.productId);
+        const p = productViewFor(overlap, index.productById);
         toast.reverted(
           `${index.nodeById.get(nodeId)?.name ?? nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
         );
@@ -1242,6 +1266,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       targetUnit: string | undefined,
       eligibilityOverride: boolean,
       overrideReason: string | undefined,
+      // D113 / migration 0030. A SEPARATE pair from the two above: waving
+      // through a missing training must not also place somebody outside the
+      // area they are cleared for.
+      areaOverride: boolean,
+      areaOverrideReason: string | undefined,
       anchor: { x: number; y: number },
     ) => {
       const start = minuteDate(index.windowStart, range.startMin);
@@ -1257,6 +1286,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
         targetUnit,
         eligibilityOverride,
         overrideReason,
+        areaOverride,
+        areaOverrideReason,
       };
       const sendCreate = () => {
         createAssignment.mutate(input, {

@@ -1,0 +1,136 @@
+/* ---------------------------------------------------------------------------
+   Settings — the system admin's org-wide preferences.
+
+   The first setting is the DATE-DISPLAY FORMAT (R-308-adjacent, settled Sep 3):
+   one choice, made once for the whole company, that decides how every calendar
+   date the app shows as text reads. The underlying data stays ISO in the
+   database; this only changes the rendering, through the seam in
+   `src/lib/format/dates.ts`.
+
+   ⭐ ONE SETTING IS ONE ROW (R-320, settled Sep 3). The eight formats were eight
+   radio rows, which is most of a screen spent on one preference; as more
+   settings land here that layout crowds them out. Each setting is now a labelled
+   row -- name and hint on the left, one control on the right -- so a second
+   setting is another row, not another screenful. A closed enum picks with a
+   `<select>`; a toggle or a number would sit in the same slot.
+
+   ⭐ THE PICKER IS THE SHARED FIELD (R-318), `Field.module.css`'s `.select`,
+   not a copy of the skin: this stylesheet came off `FIELD_LEGACY` in the same
+   commit, because the block that put it there was the radio row this replaced.
+
+   ⭐ THE SAMPLE MOVED INTO THE OPTIONS. The radio list showed a live sample
+   beside every format at once, which is how a reader picks one -- by what they
+   will actually see, not by a token's name. Each `<option>` therefore reads
+   "Day/Month/Year -- 03/09/2026", so the closed control shows the sample for the
+   current choice and opening it shows all eight. Nothing is lost by collapsing.
+
+   ⭐ `SETTINGS_PANEL_READY` LIVES HERE, NOT IN `AdminPage.tsx`, exactly as the
+   other panels' flags do. The rail entry reads it, so a section cannot be
+   switched on without a panel behind it.
+
+   ⚠️ THIS SECTION IS SYSTEM-ADMIN ONLY, and `AdminPage.tsx` is what hides it
+   from a site admin (whose `adminSectionsFor` would otherwise return "all"). The
+   gate here is the belt to that suspenders: the server RPC `set_org_date_format`
+   refuses a non-admin regardless (migration 0037), so a site admin who reached
+   this pane by any means sees the setting DISABLED and is told why -- never a
+   control that silently does nothing.
+
+   DECIDES NOTHING ITSELF about how a date renders: every token maps to a string
+   in `src/lib/format/dates.ts`, which is pure and is what `src/test/dateFormat.
+   test.ts` tests. This file offers the choice and shows a live sample.
+   --------------------------------------------------------------------------- */
+import { describeSchedulerError } from "@/lib/api";
+import { useSession } from "@/features/auth/useSession";
+import { canQueryAsUser } from "@/features/auth/session";
+import { DATE_FORMATS, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
+import { useDateFormat, useSetDateFormat } from "../hooks/useOrgSettings";
+import fieldStyles from "@/components/Field.module.css";
+import styles from "./SettingsPanel.module.css";
+
+/** Read by `AdminPage`'s rail, the same way `TRAININGS_PANEL_READY` is. */
+export const SETTINGS_PANEL_READY = true;
+
+/** The human label for each format, shown with a live sample beside it. */
+const FORMAT_LABEL: Record<DateFormat, string> = {
+  d_mon_yyyy: "Day Month Year",
+  dmy_slash: "Day/Month/Year",
+  mdy_slash: "Month/Day/Year",
+  iso: "ISO (Year-Month-Day)",
+  dmy_dash_mon: "Day-Mon-Year",
+  d_month_yyyy: "Day Month Year (full)",
+  month_d_yyyy: "Month Day, Year",
+  ymd_slash: "Year/Month/Day",
+};
+
+/** Today as `YYYY-MM-DD` in LOCAL time — the same reasoning as OperatorsPanel's
+ *  `todayIso`: `toISOString().slice(0,10)` is the UTC day and is a day out west
+ *  of Greenwich. This is date construction, not display formatting, so it is not
+ *  a seam concern. */
+function todayIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function SettingsPanel() {
+  const { session, profile, loading: sessionLoading } = useSession();
+  const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  const isSystemAdmin = profile?.role === "admin";
+
+  const current = useDateFormat(canQuery);
+  const setFormat = useSetDateFormat();
+  const today = todayIso();
+
+  return (
+    <div className={styles.panel}>
+      <section className={styles.card}>
+        <h2 className={styles.h2}>Display</h2>
+
+        <div className={styles.setting}>
+          <div className={styles.settingText}>
+            <label className={styles.settingName} htmlFor="settings-date-format">
+              Date format
+            </label>
+            <p className={styles.hint}>
+              How dates read across the app — training expiry, records and more. Data is stored the
+              same way regardless; this only changes what is shown.
+            </p>
+          </div>
+
+          <div className={styles.settingControl}>
+            <select
+              id="settings-date-format"
+              className={`${fieldStyles.select} ${styles.formatSelect}`}
+              value={current}
+              disabled={!isSystemAdmin || setFormat.isPending}
+              onChange={(e) => {
+                // ⚠️ THE GUARD IS NOT THE `disabled` ATTRIBUTE. `disabled` is
+                // what a person meets; a change event can still arrive without
+                // one (a test, an extension, a script), and the client must
+                // refuse the write itself rather than rely on the server's
+                // refusal to be the only "no". The RPC refuses it too.
+                if (!isSystemAdmin) return;
+                setFormat.mutate(e.target.value as DateFormat);
+              }}
+            >
+              {DATE_FORMATS.map((fmt) => (
+                <option key={fmt} value={fmt}>
+                  {FORMAT_LABEL[fmt]} — {formatCalendarDay(today, fmt)}
+                </option>
+              ))}
+            </select>
+            {!isSystemAdmin && (
+              <p className={styles.status}>Only a system admin can change the date format.</p>
+            )}
+            {setFormat.isPending && <p className={styles.status}>Saving…</p>}
+            {setFormat.isError && (
+              <p className={styles.error}>{describeSchedulerError(setFormat.error)}</p>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}

@@ -1,0 +1,22 @@
+/* The real, non-DEV sign-out control. Styled to match the dev switcher's
+   `.signOut` (DevProfileSwitcher.module.css) so the two read as the same
+   control in a dev build where both are on screen. */
+.signOut {
+  font: inherit;
+  font-size: calc(11.5px * var(--chrome-scale, 1));
+  padding: 3px 10px;
+  border: 1px solid var(--axis);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.signOut:hover {
+  color: var(--ink);
+}
+
+.signOut:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

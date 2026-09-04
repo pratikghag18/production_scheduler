@@ -90,7 +90,6 @@ export const REM_SURFACES: readonly string[] = [
   "src/features/admin/components/dragSurface.module.css",
   "src/features/admin/components/LevelEditor.module.css",
   "src/features/admin/components/NodeTreeEditor.module.css",
-  "src/features/admin/components/AdminPopover.module.css",
   "src/features/admin/components/ShapePicker.module.css",
   "src/features/admin/components/SiteAccessPanel.module.css",
   // §19.62 — the four queued sections, pre-seated. Listed here AND in R10's
@@ -98,8 +97,31 @@ export const REM_SURFACES: readonly string[] = [
   // pre-seat exists to spend once instead of four times.
   "src/features/admin/components/ShiftsPanel.module.css",
   "src/features/admin/components/OperatorsPanel.module.css",
+  "src/features/admin/components/TrainingsPanel.module.css",
   "src/features/admin/components/ProductsPanel.module.css",
   "src/features/admin/components/ImportPanel.module.css",
+  // The Operator Training Matrix (its own buildout). Same two-place edit.
+  "src/features/admin/components/MatrixPanel.module.css",
+  // The shared matrix cell visual — chip, legend and record popover, drawn the
+  // same by the team matrix and the single-operator matrix (D100).
+  "src/features/admin/components/matrixCells.module.css",
+  // 0029 / D110. ⚠️ NOT PRE-SEATED, AND THAT IS HOW IT WAS MISSED: the
+  // pre-seat above covered the four sections §19.62 knew were coming, and
+  // `DeleteDialog` is a shared surface none of them predicted. The audit
+  // caught it on the maintainer's run — `missingRemSurfaces` walks the
+  // directory, so an admin stylesheet that exists and is not listed here is a
+  // test failure and not something spotted on a 4K monitor later. **Adding a
+  // file under src/features/admin means editing this list and R10's copy in
+  // the same commit.**
+  "src/features/admin/components/DeleteDialog.module.css",
+  // 0037 / the Settings section (org-wide date format). A new admin surface, so
+  // it is listed here AND in R10's copy in `scaleAudit.test.ts`, the two-place
+  // edit `missingRemSurfaces` exists to force.
+  "src/features/admin/components/SettingsPanel.module.css",
+  // 0040 / R-315, the Cycle times section. Another surface the §19.62 pre-seat
+  // did not predict, so it is listed here AND in R10's copy in
+  // `scaleAudit.test.ts` — the two-place edit `missingRemSurfaces` forces.
+  "src/features/admin/components/CycleTimesPanel.module.css",
 ];
 
 /**
@@ -166,7 +188,15 @@ export function parseSectionIds(tsx: string): string[] {
 /** Section ids with no `section === "id"` branch to render them. */
 export function sectionsWithoutPanels(tsx: string): string[] {
   const src = stripTsComments(tsx);
-  return parseSectionIds(tsx).filter((id) => !src.includes(`section === "${id}"`));
+  // ⚠⚠ MATCHES EITHER SPELLING ON PURPOSE. This looked for `section === "x"`
+  // and went blind the moment D114 renamed the render branches to
+  // `activeSection === "x"` (a supervisor cannot see every tab, so the
+  // chosen section has to be resolved against the ones they can). It
+  // reported ALL SEVEN sections as unrendered, which is the honest failure
+  // — but it is also the third time in this project a string-matching audit
+  // has gone quiet on a reword, so it now anchors on the part that carries
+  // the meaning rather than the variable that happens to hold it.
+  return parseSectionIds(tsx).filter((id) => !new RegExp(`ection === "${id}"`).test(src));
 }
 
 /** `sectionsWithoutPanels` against the file on disk. */
@@ -441,9 +471,18 @@ export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]
  * inside the chain that writes.
  * ======================================================================== */
 
-/** The API modules that own a scoped table, and the table each one writes. */
+/**
+ * The API modules that own a scoped table, and the table each one writes.
+ *
+ * ⭐ D115 / migration 0034 REMOVED PRODUCTS from this audit. A product no longer
+ * carries a single `site_node_id`; where it belongs is a LIST in `product_sites`,
+ * written by `assignProductSite` / `unassignProductSite` — which are inherently a
+ * set AND an un-set, so the "can you also change it after creation" hazard this
+ * audit exists for cannot arise there. Operators and shift patterns keep the
+ * single-owner column and the parity rule. (Adding products back here would
+ * report the honest offence "nothing sets products.site_node_id" — J5's shape.)
+ */
 export const SCOPED_WRITE_SURFACES: ReadonlyArray<{ file: string; table: string }> = [
-  { file: "src/lib/api/products.ts", table: "products" },
   { file: "src/lib/api/operators.ts", table: "operators" },
   { file: "src/lib/api/shifts.ts", table: "shift_templates" },
 ];

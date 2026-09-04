@@ -1,42 +1,30 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { ProductsPanel } from "@/features/admin/components/ProductsPanel";
+import { useAdminViewStore } from "@/features/admin/store/adminView";
 
 /**
- * ⭐ THE FIRST TEST IN THIS REPO THAT MOUNTS A COMPONENT, and the reason it
- * exists is a finding, not a preference (§19.67 / D106).
+ * ⭐ THE ONE PANEL-LEVEL SUITE, and it drives the REAL store/hook/lib on purpose
+ * (§19.67 / D106). It mocks only what has a network on the far side — the query,
+ * the mutations, `DeleteDialog`'s chain — and lets `../lib/products`,
+ * `../lib/scope` and `../lib/plantFilter` run for real, because they are what the
+ * panel renders. It asks the USER'S question: it finds a control by its
+ * accessible name and checks that what opens really carries the field, and it
+ * asserts on what the mutations RECEIVE rather than on being called.
  *
- * `scaleAudit`'s group J was written to make "you can SET it at creation and
- * never CHANGE it" impossible to ship. It passed every day the maintainer was blocked,
- * because of what it reads: `scopeParityOffences` opens three files under
- * `src/lib/api/`, slices the text around `.from("products")`, and asks whether
- * the substring `site_node_id` survives inside a window that also contains
- * `.update(`. That is a question about the DATA LAYER. Every part of the span
- * between "the API can express the change" and "a person can make the change"
- * — the hook, the panel, the permission predicate, the label on the button
- * that opens the form — was unmeasured, and the audit would still have
- * reported zero offences with `ProductsPanel.tsx` deleted from the repo.
- *
- * ⚠️ SO THIS FILE ASKS THE USER'S QUESTION, NOT THE MODULE'S: it looks for the
- * control the way a person looks for it — by accessible name — and then checks
- * that what opens really does carry the field. Written against the screen as it
- * was, T1 fails: the row's opener was named "Rename".
- *
- * ⚠️⚠️ AND "BY ACCESSIBLE NAME" IS STRICTER THAN AN ATTRIBUTE SELECTOR, WHICH IS
- * HOW THE FIRST VERSION OF THIS FILE SHIPPED BROKEN. It was verified in a browser
- * probe that found the row's boxes with `input[aria-label="Product code"]` — an
- * attribute match, so it saw one element. Testing Library computes the ACCESSIBLE
- * NAME, and the Add-a-product card's field is labelled "Product code" too, so it
- * saw two and threw. Five cases died in one helper against a screen that works.
- * **T8 is the case that pins it**, and the row's controls are now named for their
- * row — which is also the honest fix, because two identically-named boxes on one
- * screen is exactly what a screen-reader user has to disambiguate by guessing.
- *
- * Everything with a network on the far side is mocked; `../lib/products` and
- * `../lib/scope` are the REAL modules, because they are what the panel renders.
+ * ⭐⭐ REWRITTEN FOR D115 (§19.81). A product is the company-wide record (sku,
+ * name, colour) plus a SEPARATE LIST of the plants that make it — `siteNodeIds`,
+ * not a single `siteNodeId`. The Split governs the two apart:
+ *   - the shared record (create, rename, recolour, retire, delete) is COMPANY
+ *     property — company admin only;
+ *   - the list of makers (add / remove a plant) is per-plant — a plant admin may
+ *     manage a node they administer.
+ * The old owner-`<select>` cases (T4/T5/T6/T13, the "show one owner save another"
+ * bug) are gone with the picker; their place is taken by the plant-chip cases.
  */
 
 const PLANT1 = "30000000-0000-0000-0000-000000000001";
+const PLANT2 = "30000000-0000-0000-0000-000000000002";
 
 const h = vi.hoisted(() => {
   const P1 = "30000000-0000-0000-0000-000000000001";
@@ -49,8 +37,52 @@ const h = vi.hoisted(() => {
     sortOrder: 1,
     active: true,
   });
+  // ⭐ D115: `siteNodeIds` IS A LIST. A product is made in zero, one or many
+  // places, so the factory takes an array — faithful to `AdminProduct` since
+  // migration 0034, and to `product_sites` being a join table.
+  const product = (id: string, sku: string, name: string, siteNodeIds: string[]) => ({
+    id,
+    sku,
+    name,
+    active: true,
+    source: "manual",
+    externalId: null as string | null,
+    siteNodeIds,
+    colorToken: "product-1",
+  });
+  // ⭐ FACTORIES, NOT LITERALS, AND `beforeEach` RESTORES FROM THEM — a case that
+  // mutates the shared fixture must not shape its successors. Both base rows are
+  // made in Plant 1.
+  const baseProducts = () => [
+    product("p1", "WX", "Widget X", [P1]),
+    product("p2", "WY", "Widget Y", [P1]),
+  ];
+  const baseTree = () => ({
+    templates: [] as unknown[],
+    levels: [] as unknown[],
+    nodes: [
+      node(P1, "Plant 1", null, "plant_1"),
+      node("n-asm", "Assembly", P1, "plant_1.assembly"),
+    ],
+    editableShapeIds: ["tpl-1"] as string[] | null,
+    siteNodeIds: { "tpl-1": P1 } as Record<string, string | null>,
+  });
   return {
+    // ⚠️ EACH MUTATION IS MOCKED THE SAME WAY — a captured `vi.fn()` plus
+    // `isPending: false`. The panel reads `.isPending` on assign/unassign to
+    // disable the control; an omitted field would silently pick the disabled
+    // branch and the fire-events would do nothing (the bug this file's own
+    // history warns about).
     updateMutate: vi.fn(),
+    createMutate: vi.fn(),
+    createAtNodeMutate: vi.fn(),
+    colorMutate: vi.fn(),
+    assignMutate: vi.fn(),
+    unassignMutate: vi.fn(),
+    node,
+    product,
+    baseProducts,
+    baseTree,
     state: {
       profile: {
         id: "u1",
@@ -60,47 +92,21 @@ const h = vi.hoisted(() => {
         defaultCreateMode: "run",
         adminAnywhere: true,
       },
-      // ⭐ Faithful to `supabase/seed.sql`, which since migration 0028 names a
-      // `site_node_id` on every product row — the column is NOT NULL and there
-      // is no company-wide product. Both rows belong to Plant 1.
-      products: [
-        {
-          id: "p1",
-          sku: "WX",
-          name: "Widget X",
-          active: true,
-          source: "manual",
-          externalId: null,
-          siteNodeId: P1,
-          colorToken: "product-1",
-        },
-        {
-          id: "p2",
-          sku: "WY",
-          name: "Widget Y",
-          active: true,
-          source: "manual",
-          externalId: null,
-          siteNodeId: P1,
-          colorToken: "product-2",
-        },
-      ],
-      tree: {
-        templates: [],
-        levels: [],
-        nodes: [
-          node(P1, "Plant 1", null, "plant_1"),
-          node("n-asm", "Assembly", P1, "plant_1.assembly"),
-        ],
-        editableShapeIds: ["tpl-1"] as string[] | null,
-        siteNodeIds: { "tpl-1": P1 } as Record<string, string | null>,
-      },
+      products: baseProducts() as unknown[],
+      tree: baseTree(),
     },
   };
 });
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: h.state.tree, isLoading: false, isError: false, error: null }),
+  // `isSuccess` is part of the contract the panel reads; supply the full shape.
+  useQuery: () => ({
+    data: h.state.tree,
+    isLoading: false,
+    isError: false,
+    isSuccess: true,
+    error: null,
+  }),
 }));
 vi.mock("@/lib/api", () => ({
   describeSchedulerError: (e: unknown) => String(e),
@@ -123,35 +129,49 @@ vi.mock("@/features/admin/hooks/useProducts", () => ({
     isError: false,
     error: null,
   }),
-  useCreateProduct: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateProduct: () => ({ mutate: h.createMutate, isPending: false }),
+  useCreateProductAtNode: () => ({ mutate: h.createAtNodeMutate, isPending: false }),
   useUpdateProduct: () => ({ mutate: h.updateMutate, isPending: false }),
   useSetProductActive: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteProduct: () => ({ mutate: vi.fn(), isPending: false }),
-  useSetProductColor: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetProductColor: () => ({ mutate: h.colorMutate, isPending: false }),
+  // ⭐ D115: the two new writes, mocked to the EXACT shape of the others.
+  useAssignProductSite: () => ({ mutate: h.assignMutate, isPending: false }),
+  useUnassignProductSite: () => ({ mutate: h.unassignMutate, isPending: false }),
+}));
+
+/**
+ * ⚠️ `DeleteDialog`'s import chain reaches `useMutation`/`@/lib/api` names the
+ * mocks above do not list. Cutting the chain at `useDeletion` keeps those
+ * factories from having to grow a list of names this file does not test.
+ */
+vi.mock("@/features/admin/hooks/useDeletion", () => ({
+  useDeletionPreview: () => ({
+    data: undefined,
+    isPending: true,
+    isError: false,
+    error: null,
+  }),
+  useDeleteOwnedRow: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 function asCompanyAdmin() {
   h.state.profile = { ...h.state.profile, role: "admin", adminAnywhere: true };
 }
 /**
- * Somebody who administers NOWHERE: org-wide role `viewer`, no admin grant.
- *
- * ⭐ RENAMED AND CHANGED BY 0028, AND THE CHANGE IS THE CASE. This used to be
- * `asSiteAdmin` with `adminAnywhere: true` — Dana, an admin of Plant 1 — and
- * it produced a refusal because the ROW was company-wide. D108 deleted that
- * row type. `canEditProduct` fails open for anyone who administers anywhere
- * (see its header), so Dana would now correctly get a live Edit button and
- * this case would be asserting nothing. The one certain refusal left needs a
- * person with no grants at all.
+ * A PLANT admin, not a company admin: org-wide role `viewer`, but they administer
+ * a structure that resolves to Plant 1 (`editableShapeIds` -> `siteNodeIds`). So
+ * the shared record is read-only to them (no create card, no Edit), and they may
+ * add or remove Plant 1 from any part (`canManagePlace`).
+ */
+function asPlantAdmin() {
+  h.state.profile = { ...h.state.profile, role: "viewer", adminAnywhere: false };
+}
+/**
+ * Someone who administers NOWHERE: role `viewer`, no editable structure. The
+ * shared record is read-only AND there is no plant they may manage.
  */
 function asAdminOfNowhere() {
   h.state.profile = { ...h.state.profile, role: "viewer", adminAnywhere: false };
-  // ⚠️ AND NO EDITABLE STRUCTURE. Without this the fixture's `editableShapeIds`
-  // still resolves to Plant 1, which is exactly who owns both rows now, so
-  // `canOwnProduct` returns TRUE and the Edit buttons stay live — the case
-  // would assert nothing and read as a pass. Before 0028 the rows were
-  // company-wide and nothing this person held could reach them, so the profile
-  // change alone was enough.
   h.state.tree = { ...h.state.tree, editableShapeIds: [] };
 }
 /** The open editor for one row, found the way its own label reads. */
@@ -161,118 +181,342 @@ function editingRow(sku: string): HTMLElement {
   if (li === null) throw new Error("the editor is not inside a row");
   return li;
 }
-function belongsTo(row: HTMLElement, sku: string): HTMLSelectElement {
-  return within(row).getByRole("combobox", {
-    name: `Where ${sku} belongs`,
-  }) as HTMLSelectElement;
+/** The <li> for a product, found by its visible sku text. */
+function rowOf(sku: string): HTMLElement {
+  const cell = screen.getByText(sku);
+  const li = cell.closest("li");
+  if (li === null) throw new Error(`no row for ${sku}`);
+  return li;
+}
+
+/**
+ * The two-plant world the filter exists for: a system admin who can read Plant 1
+ * and Plant 2, with a product made in each.
+ */
+function withTwoPlants() {
+  h.state.tree = {
+    ...h.baseTree(),
+    nodes: [
+      h.node(PLANT1, "Plant 1", null, "plant_1"),
+      h.node("n-asm", "Assembly", PLANT1, "plant_1.assembly"),
+      h.node(PLANT2, "Plant 2", null, "plant_2"),
+      h.node("n-l9", "Line 9", PLANT2, "plant_2.line_9"),
+    ],
+  };
+  h.state.products = [...h.baseProducts(), h.product("p3", "ZZ", "Widget Z", [PLANT2])];
+}
+/** Choose a plant the way the header control does, and re-render on it. */
+function showPlant(choice: string | null) {
+  act(() => useAdminViewStore.setState({ plantChoice: choice }));
 }
 
 beforeEach(() => {
-  h.updateMutate.mockClear();
+  // ⚠️ mockReset, not mockClear — one case sets an `updateMutate` implementation
+  // (to fire its onSuccess), and mockClear would leave that leaking into the
+  // next test. Reset clears the call log AND the implementation; every other
+  // case uses these as plain spies, so a bare reset is what they expect anyway.
+  h.updateMutate.mockReset();
+  h.createMutate.mockReset();
+  h.createAtNodeMutate.mockReset();
+  h.colorMutate.mockReset();
+  h.assignMutate.mockReset();
+  h.unassignMutate.mockReset();
   asCompanyAdmin();
-  h.state.products = h.state.products.map((p) => ({ ...p, siteNodeId: PLANT1 }));
+  h.state.products = h.baseProducts();
+  h.state.tree = h.baseTree();
+  useAdminViewStore.setState({ plantChoice: null, hydratedOrgId: null });
 });
 
-describe("ProductsPanel — the row's editor is reachable (D106)", () => {
-  it("T1: every row offers a control named 'Edit' — and none named 'Rename'", () => {
+describe("ProductsPanel — the shared record (D115 / the Split)", () => {
+  it("T1: a company admin gets an 'Edit' control on every row, and none named 'Rename'", () => {
     render(<ProductsPanel />);
-    // ⚠️ BY ACCESSIBLE NAME, which is the only handle a person has. The screen
-    // that produced four rounds of "I still cannot edit a product" passed every
-    // test in the repo while failing this line: the picker was wired, and the
-    // door to it said "Rename".
     expect(screen.queryAllByRole("button", { name: "Rename" })).toHaveLength(0);
     expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(2);
   });
 
-  it("T2: the Edit control opens a form carrying the 'Belongs to' picker", () => {
-    render(<ProductsPanel />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
-    expect(belongsTo(editingRow("WX"), "WX").tagName).toBe("SELECT");
-  });
-
-  it("T3: the picker opens on the row's CURRENT scope, not on a default", () => {
-    // ⚠️ ASSEMBLY, not Plant 1. The `beforeEach` now homes every row at Plant 1
-    // (0028: there is no unowned row to start from), so re-homing this row to
-    // Plant 1 would make the case pass against a picker that ignored the row
-    // entirely and opened on its own first option — which is exactly the
-    // defect it exists to catch.
-    h.state.products = h.state.products.map((p, i) =>
-      i === 0 ? { ...p, siteNodeId: "n-asm" } : p,
-    );
-    render(<ProductsPanel />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
-    expect(belongsTo(editingRow("WX"), "WX").value).toBe("n-asm");
-  });
-
-  it("T4 ⭐ (rewritten by 0028): the picker offers every node, indented, and NO company-wide entry", () => {
-    render(<ProductsPanel />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
-    const labels = [...belongsTo(editingRow("WX"), "WX").options].map((o) => o.text);
-    // D108: it used to open with "Everywhere (company-wide)". A picker that can
-    // still emit a value the database refuses is D106 with a different label.
-    expect(labels).not.toContain("Everywhere (company-wide)");
-    expect(labels[0]).toBe("Plant 1");
-    // `indentedLabel` pads a child with two U+2007 figure spaces per level.
-    expect(labels).toContain("\u2007\u2007Assembly");
-  });
-
-  it("T5: changing the picker and saving SENDS the new scope", () => {
+  it("T2: Edit opens a form carrying the code and name fields — and NO owner picker", () => {
     render(<ProductsPanel />);
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     const row = editingRow("WX");
-    fireEvent.change(belongsTo(row, "WX"), { target: { value: PLANT1 } });
+    expect(within(row).getByRole("textbox", { name: "Product code for WX" })).toBeTruthy();
+    expect(within(row).getByRole("textbox", { name: "Name for WX" })).toBeTruthy();
+    // The single-owner `<select>` is gone with D115 — places are chips now.
+    expect(screen.queryByRole("combobox", { name: /Where WX belongs/ })).toBeNull();
+  });
+
+  it("T2b ⭐: Edit also opens the colour palette — the maintainer, 2 Sept", () => {
+    // Hitting Edit and not finding the colour "feels wrong and non-intuitive";
+    // D115 had scoped Edit to code + name with colour on the swatch alone. The
+    // palette now rides inside the Edit panel (R-307). The swatch stays a
+    // shortcut, so the group exists closed too — this asserts the "Colour" label
+    // that only the edit panel adds, and that the palette is inside THIS row.
+    render(<ProductsPanel />);
+    // Closed: no "Colour" label anywhere yet.
+    expect(screen.queryByText("Colour")).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    expect(within(row).getByRole("group", { name: "Product colour" })).toBeTruthy();
+    expect(within(row).getByText("Colour")).toBeTruthy();
+  });
+
+  it("T2c ⭐: a colour picked in Edit is STAGED — it does not write until Save", () => {
+    // The maintainer, 2 Sept: colour should wait for Save like the code and name,
+    // not apply on the click. So picking a swatch inside Edit writes nothing yet;
+    // Save is what sends it — as its own call (setProductColor is separate from
+    // updateProduct), and with sku/name unchanged there is no rename write at all.
+    render(<ProductsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    fireEvent.click(within(row).getByRole("button", { name: "product-2" }));
+    expect(h.colorMutate).not.toHaveBeenCalled();
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    expect(h.colorMutate).toHaveBeenCalledTimes(1);
+    expect(h.colorMutate.mock.calls[0][0]).toEqual({ id: "p1", colorToken: "product-2" });
+    expect(h.updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("T2d ⭐: Cancel after picking a colour writes nothing — the note that prompted this", () => {
+    render(<ProductsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    fireEvent.click(within(row).getByRole("button", { name: "product-2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(h.colorMutate).not.toHaveBeenCalled();
+    expect(h.updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("T2e ⭐: Save with a rename AND a recolour writes each on its own call, rename first", () => {
+    // The two are separate writes on purpose (products.ts). Save orders them: the
+    // rename, then the colour once the rename is in, so a rejected rename never
+    // recolours the row underneath it. The update mock invokes its onSuccess so
+    // the colour, which is chained on it, actually fires.
+    h.updateMutate.mockImplementation((_input: unknown, opts?: { onSuccess?: () => void }) =>
+      opts?.onSuccess?.(),
+    );
+    render(<ProductsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    fireEvent.change(within(row).getByRole("textbox", { name: "Name for WX" }), {
+      target: { value: "Widget X2" },
+    });
+    fireEvent.click(within(row).getByRole("button", { name: "product-2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    expect(h.updateMutate).toHaveBeenCalledTimes(1);
+    expect(h.updateMutate.mock.calls[0][0]).toEqual({ id: "p1", sku: "WX", name: "Widget X2" });
+    expect(h.colorMutate).toHaveBeenCalledTimes(1);
+    expect(h.colorMutate.mock.calls[0][0]).toEqual({ id: "p1", colorToken: "product-2" });
+  });
+
+  it("T3: editing sends only { id, sku, name } — no place travels on the rename", () => {
+    render(<ProductsPanel />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const row = editingRow("WX");
+    fireEvent.change(within(row).getByRole("textbox", { name: "Name for WX" }), {
+      target: { value: "Widget X2" },
+    });
     fireEvent.click(within(row).getByRole("button", { name: "Save" }));
     expect(h.updateMutate).toHaveBeenCalledTimes(1);
     expect(h.updateMutate.mock.calls[0][0]).toEqual({
       id: "p1",
       sku: "WX",
-      name: "Widget X",
-      siteNodeId: PLANT1,
+      name: "Widget X2",
+    });
+    expect("siteNodeId" in h.updateMutate.mock.calls[0][0]).toBe(false);
+  });
+
+  it("T4: creating a product is company-admin-only and sends { orgId, sku, name }", () => {
+    render(<ProductsPanel />);
+    fireEvent.change(screen.getByLabelText("Product code"), { target: { value: "NEW" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New Widget" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(h.createMutate).toHaveBeenCalledTimes(1);
+    expect(h.createMutate.mock.calls[0][0]).toEqual({
+      orgId: h.state.profile.orgId,
+      sku: "NEW",
+      name: "New Widget",
+    });
+    expect("siteNodeId" in h.createMutate.mock.calls[0][0]).toBe(false);
+  });
+});
+
+describe("ProductsPanel — the list of makers (D115 / the Split)", () => {
+  it("T5: a product's plants are listed by name, with the full path as a tooltip", () => {
+    render(<ProductsPanel />);
+    const row = rowOf("WX");
+    expect(within(row).getByText("Plant 1")).toBeTruthy();
+  });
+
+  it("T6: a company admin can ADD a plant — assign gets { orgId, productId, nodeId }", () => {
+    render(<ProductsPanel />);
+    const row = rowOf("WX");
+    // WX is already made in Plant 1, so the picker offers what is left: Assembly.
+    const add = within(row).getByRole("combobox", { name: "Add a plant to WX" });
+    fireEvent.change(add, { target: { value: "n-asm" } });
+    expect(h.assignMutate).toHaveBeenCalledTimes(1);
+    expect(h.assignMutate.mock.calls[0][0]).toEqual({
+      orgId: h.state.profile.orgId,
+      productId: "p1",
+      nodeId: "n-asm",
     });
   });
 
-  it("T6 ⭐ (rewritten by 0028): saving an untouched row still SENDS its owner, rather than omitting the key", () => {
-    // ⚠️ The original hazard survives D108 with a different shape. In
-    // `updateProduct`'s patch an ABSENT key means "leave it alone" — so a save
-    // that dropped the key would silently keep whatever the server had, and a
-    // re-home that looked applied on screen would not be. The old case pinned
-    // `null` (company-wide) travelling as itself rather than as `undefined`;
-    // this pins the key being present and carrying the row's real owner.
+  it("T7: the add picker excludes plants the product is already made in", () => {
     render(<ProductsPanel />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
-    fireEvent.click(within(editingRow("WX")).getByRole("button", { name: "Save" }));
-    const patch = h.updateMutate.mock.calls[0][0] as { siteNodeId: string };
-    expect("siteNodeId" in patch).toBe(true);
-    expect(patch.siteNodeId).toBe(PLANT1);
+    const add = within(rowOf("WX")).getByRole("combobox", {
+      name: "Add a plant to WX",
+    }) as HTMLSelectElement;
+    const values = [...add.options].map((o) => o.value);
+    expect(values).not.toContain(PLANT1); // already made there
+    expect(values).toContain("n-asm"); // still offerable
   });
 
-  it("T7 ⭐ (rewritten by 0028): a site admin who administers nowhere gets no Edit control, and is told why", () => {
+  it("T8: a company admin can REMOVE a plant — unassign gets { orgId, productId, nodeId }", () => {
+    render(<ProductsPanel />);
+    const row = rowOf("WX");
+    fireEvent.click(within(row).getByRole("button", { name: "Remove Plant 1 from WX" }));
+    expect(h.unassignMutate).toHaveBeenCalledTimes(1);
+    expect(h.unassignMutate.mock.calls[0][0]).toEqual({
+      orgId: h.state.profile.orgId,
+      productId: "p1",
+      nodeId: PLANT1,
+    });
+  });
+
+  it("T9: a product made in ZERO plants renders the 'not assigned' state, not a crash", () => {
+    h.state.products = [h.product("p1", "WX", "Widget X", [])];
+    render(<ProductsPanel />);
+    const row = rowOf("WX");
+    expect(within(row).getByText("Not assigned to any plant yet")).toBeTruthy();
+    // No remove control, because there is nothing to remove.
+    expect(within(row).queryByRole("button", { name: /^Remove / })).toBeNull();
+  });
+});
+
+describe("ProductsPanel — a plant admin, not a company admin (D116)", () => {
+  it("T10 ⭐ (D116): sees the create card with a plant picker, and may edit a part made only in their plant", () => {
+    asPlantAdmin();
+    render(<ProductsPanel />);
+    // The create card is here now — a site admin may add a part, born at a plant
+    // they administer via the required "Made at" picker (their one plant).
+    expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
+    expect(screen.getByLabelText("Product code")).toBeTruthy();
+    const madeAt = screen.getByRole("combobox", { name: "Made at" }) as HTMLSelectElement;
+    expect([...madeAt.options].map((o) => o.text)).toEqual(["Plant 1"]);
+    // Both fixture parts are made only in Plant 1, which they administer, so each
+    // is theirs to rename/recolour/delete — the Edit control shows on both.
+    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(2);
+  });
+
+  it("T10b ⭐ (D116): creating as a plant admin lands the part at their plant in one act", () => {
+    asPlantAdmin();
+    render(<ProductsPanel />);
+    fireEvent.change(screen.getByLabelText("Product code"), { target: { value: "NEWSKU" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New Part" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    // The site-admin create RPC, carrying the plant — NOT the plant-less company
+    // create. A one-plant admin never has to touch the picker; its sole plant is
+    // the default.
+    expect(h.createAtNodeMutate).toHaveBeenCalledTimes(1);
+    expect(h.createAtNodeMutate.mock.calls[0][0]).toEqual({
+      sku: "NEWSKU",
+      name: "New Part",
+      nodeId: PLANT1,
+    });
+    expect(h.createMutate).not.toHaveBeenCalled();
+  });
+
+  it("T11: can still REMOVE their own plant", () => {
+    asPlantAdmin();
+    render(<ProductsPanel />);
+    const row = rowOf("WX");
+    fireEvent.click(within(row).getByRole("button", { name: "Remove Plant 1 from WX" }));
+    expect(h.unassignMutate.mock.calls[0][0]).toEqual({
+      orgId: h.state.profile.orgId,
+      productId: "p1",
+      nodeId: PLANT1,
+    });
+  });
+
+  it("T12: someone who administers nowhere is offered no plant control at all", () => {
     asAdminOfNowhere();
     render(<ProductsPanel />);
-    // ⭐ The refusal this case pins CHANGED CAUSE UNDER 0028 and kept its
-    // shape. It used to be "this row is company-wide, only a company admin may
-    // touch it" — a state D108 deleted. `canEditProduct` now fails OPEN for
-    // anyone who administers anywhere, so the only certain refusal left is for
-    // someone who administers nowhere at all, and `editRefusalNote` has exactly
-    // one sentence to say. `asAdminOfNowhere()` supplies that person.
-    for (const b of screen.getAllByRole("button", { name: "Edit" })) {
-      expect((b as HTMLButtonElement).disabled).toBe(true);
-    }
-    expect(
-      screen.getAllByText("You don't administer anywhere, so this is read-only."),
-    ).toHaveLength(2);
+    expect(screen.queryAllByRole("button", { name: "Edit" })).toHaveLength(0);
+    expect(screen.queryByRole("combobox", { name: /Add a plant/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
+  });
+});
+
+describe("ProductsPanel — the catalogue guards", () => {
+  it("T13: a row that could not be read is counted, not blanked", () => {
+    h.state.products = [...h.baseProducts(), null];
+    render(<ProductsPanel />);
+    expect(screen.getByText("1 product couldn't be read and isn't shown.")).toBeTruthy();
+    // The readable rows are still there.
+    expect(screen.getByText("WX")).toBeTruthy();
+    expect(screen.getByText("WY")).toBeTruthy();
+  });
+});
+
+/**
+ * ⭐⭐ ROADMAP 1(c) — "which plant am I looking at", on this panel. These cases
+ * drive the REAL store (`usePlantFilter` / `plantFilter.ts` / `adminView.ts`),
+ * not a mock of it.
+ */
+describe("ProductsPanel — the plant filter (roadmap 1(c))", () => {
+  it("T14: the catalogue is cut to the chosen plant", () => {
+    withTwoPlants();
+    render(<ProductsPanel />);
+    expect(screen.queryByText("ZZ")).not.toBeNull();
+    showPlant(PLANT1);
+    expect(screen.queryByText("ZZ")).toBeNull();
+    expect(screen.queryByText("WX")).not.toBeNull();
+    expect(screen.queryByText("WY")).not.toBeNull();
   });
 
-  it("T8: an open row's boxes are named apart from the Add card's", () => {
-    // ⚠️ THE CASE THAT PINS THE INSTRUMENT FAILURE, not a style preference. With
-    // the row's boxes labelled plainly "Product code" / "Belongs to", opening an
-    // editor put two identically-named controls on the screen: `getByRole` threw,
-    // and a screen-reader user gets two boxes it cannot tell apart. The Add card
-    // keeps the plain names because its labels are visible text.
+  it("T15: what the filter hides is COUNTED, and named by the plant", () => {
+    withTwoPlants();
     render(<ProductsPanel />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
-    expect(screen.getAllByRole("textbox", { name: "Product code" })).toHaveLength(1);
-    expect(screen.getAllByRole("combobox", { name: "Belongs to" })).toHaveLength(1);
-    expect(screen.getAllByRole("textbox", { name: "Product code for WX" })).toHaveLength(1);
+    expect(screen.queryByText(/isn't listed|aren't listed/)).toBeNull();
+    showPlant(PLANT1);
+    expect(screen.getByText(/1 product outside Plant 1 isn't listed\./)).toBeTruthy();
+  });
+
+  it("T16: the ROW's add picker narrows to the chosen plant's subtree", () => {
+    withTwoPlants();
+    render(<ProductsPanel />);
+    showPlant(PLANT2);
+    // ZZ is made in Plant 2, so its picker offers Plant 2's subtree minus Plant
+    // 2 itself: just Line 9, indented.
+    const add = within(rowOf("ZZ")).getByRole("combobox", {
+      name: "Add a plant to ZZ",
+    }) as HTMLSelectElement;
+    const labels = [...add.options].map((o) => o.text);
+    expect(labels).toEqual(["Add a plant…", "  Line 9"]);
+  });
+
+  it("T17: an editor whose row the filter took away does not come back open", () => {
+    withTwoPlants();
+    render(<ProductsPanel />);
+    showPlant(PLANT2);
+    fireEvent.click(within(rowOf("ZZ")).getByRole("button", { name: "Edit" }));
+    expect(screen.queryAllByRole("textbox", { name: "Product code for ZZ" })).toHaveLength(1);
+    showPlant(PLANT1);
+    showPlant(null);
+    expect(screen.queryByText("ZZ")).not.toBeNull();
+    expect(screen.queryAllByRole("textbox", { name: "Product code for ZZ" })).toHaveLength(0);
+  });
+
+  it("T18: 'All plants' hides nothing and says nothing", () => {
+    withTwoPlants();
+    render(<ProductsPanel />);
+    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(3);
+    expect(screen.queryByText(/outside/)).toBeNull();
+  });
+
+  it("T19: one readable root means the filter is a no-op, whatever is remembered", () => {
+    showPlant(PLANT2);
+    render(<ProductsPanel />);
+    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(2);
+    expect(screen.queryByText(/aren't listed|isn't listed/)).toBeNull();
   });
 });

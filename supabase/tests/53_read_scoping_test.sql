@@ -23,11 +23,18 @@
 --     company-wide row" — two different answers through two branches.
 --
 -- ⭐⭐ AND ONE THING 51's FIXTURE DID NOT NEED AND THIS ONE DOES: A GRANT
--- *BELOW* AN OWNER. The rule has two directions and only one is obvious.
--- "Owner below your grant" is the site admin looking down. "Owner ABOVE your
--- grant" is a line supervisor who must still see the plant-wide product list
--- or their board is empty. g3 (admin on Assembly) and g4 (supervisor on the
--- Plant 1 root) are the two people who can tell those apart.
+-- *BELOW* AN OWNER. For OPERATORS/SKILLS/PATTERNS the read rule is
+-- bidirectional (app_can_read_owned): "owner below your grant" is the site
+-- admin looking down, "owner above your grant" is a line supervisor looking up.
+-- ⭐ FOR PRODUCTS, D115 (0034) KEEPS THAT EITHER-DIRECTION READ — but it took a
+-- SECURITY DEFINER helper to do it. A product is read through `app_can_read_product`,
+-- which reads product_sites as the owner (bypassing product_sites_select's
+-- DOWNWARD-only scope) and lets app_can_read_owned apply the bidirectional test.
+-- So R4 holds the same shape as the single-owner rule did: g3 (admin on Assembly,
+-- below the Plant 1 root) DOES see a part placed only at that root above them.
+-- R17 keeps the downward direction. g3 and g4 (supervisor on the Plant 1 root)
+-- are the two people who tell those apart. (An inline EXISTS in the policy had
+-- RLS defeat the upward read; §8 of the migration records that fix.)
 --
 -- People (all org-wide 'viewer'):
 --   g1  admin grant on plant_1        — site admin of Plant 1
@@ -79,19 +86,29 @@ BEGIN
     ('f0000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000002', v_org,'admin'),
     ('f0000000-0000-0000-0000-000000000004','30000000-0000-0000-0000-000000000001', v_org,'supervisor');
 
-  INSERT INTO products (id, org_id, sku, name, site_node_id) VALUES
-    ('60000000-0000-0000-0000-00000000ff01', v_org,'RP1','R P1 Product','30000000-0000-0000-0000-000000000001'::uuid),
-    ('60000000-0000-0000-0000-00000000ff02', v_org,'RP2','R P2 Product', v_p2),
+  -- D115 (0034): a product's place is a product_sites row, not a column. Each
+  -- product below is made in exactly ONE place, so app_can_read_owned(that place)
+  -- answers exactly as the old single owner did — every read case's polarity is
+  -- preserved by construction, and product_sites carries the owner the read rule
+  -- now consults through products_select's EXISTS.
+  INSERT INTO products (id, org_id, sku, name) VALUES
+    ('60000000-0000-0000-0000-00000000ff01', v_org,'RP1','R P1 Product'),
+    ('60000000-0000-0000-0000-00000000ff02', v_org,'RP2','R P2 Product'),
     -- ⭐ 0028/D108: THERE IS NO COMPANY-WIDE ROW ANY MORE. This row was NULL
     -- until 0028 and every case that used it asserted "everyone sees it".
-    -- It is now owned by LINE 1 -- a third scope, two levels down -- so the
-    -- same cases now assert the opposite and the file keeps a row whose owner
-    -- is neither of the two plant roots. 55_'s N1 pins that NULL is refused.
-    ('60000000-0000-0000-0000-00000000ff03', v_org,'RL1','R Line-1 Product', '30000000-0000-0000-0000-000000000004'::uuid),
-    -- ⭐ owned by ASSEMBLY, strictly BELOW the Plant 1 root: the mirror of the
+    -- It is now made in LINE 1 -- a third scope, two levels down -- so the
+    -- same cases now assert the opposite and the file keeps a row whose place
+    -- is neither of the two plant roots.
+    ('60000000-0000-0000-0000-00000000ff03', v_org,'RL1','R Line-1 Product'),
+    -- ⭐ made in ASSEMBLY, strictly BELOW the Plant 1 root: the mirror of the
     -- row g3 uses. Without it, a rule written as "owner above me only" passes
     -- every other case in this file.
-    ('60000000-0000-0000-0000-00000000ff04', v_org,'RSUB','R Sub-node Product','30000000-0000-0000-0000-000000000002'::uuid);
+    ('60000000-0000-0000-0000-00000000ff04', v_org,'RSUB','R Sub-node Product');
+  INSERT INTO product_sites (org_id, product_id, node_id) VALUES
+    (v_org,'60000000-0000-0000-0000-00000000ff01','30000000-0000-0000-0000-000000000001'),
+    (v_org,'60000000-0000-0000-0000-00000000ff02', v_p2),
+    (v_org,'60000000-0000-0000-0000-00000000ff03','30000000-0000-0000-0000-000000000004'),
+    (v_org,'60000000-0000-0000-0000-00000000ff04','30000000-0000-0000-0000-000000000002');
 
   INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES
     ('50000000-0000-0000-0000-00000000ff01', v_org,'R P1 Operator','30000000-0000-0000-0000-000000000001'::uuid),
@@ -141,10 +158,16 @@ BEGIN
   SELECT v INTO v_p2 FROM r_fix WHERE k='p2';
   SELECT count(*) INTO v_roots FROM nodes
    WHERE org_id='10000000-0000-0000-0000-000000000001' AND parent_id IS NULL;
-  SELECT count(*) INTO v_owned FROM products
-   WHERE org_id='10000000-0000-0000-0000-000000000001' AND site_node_id IS NOT NULL;
-  SELECT count(*) INTO v_unowned FROM products
-   WHERE org_id='10000000-0000-0000-0000-000000000001' AND site_node_id IS NULL;
+  -- D115: "owned" is now "has a place". Count this file's four products that
+  -- carry at least one product_sites row, and any that carry none.
+  SELECT count(*) INTO v_owned FROM products p
+   WHERE p.org_id='10000000-0000-0000-0000-000000000001'
+     AND p.id::text LIKE '60000000-0000-0000-0000-00000000ff%'
+     AND EXISTS (SELECT 1 FROM product_sites ps WHERE ps.product_id = p.id);
+  SELECT count(*) INTO v_unowned FROM products p
+   WHERE p.org_id='10000000-0000-0000-0000-000000000001'
+     AND p.id::text LIKE '60000000-0000-0000-0000-00000000ff%'
+     AND NOT EXISTS (SELECT 1 FROM product_sites ps WHERE ps.product_id = p.id);
   -- ⭐ the short-circuit check: none of the four may be an org-wide admin
   SELECT count(*) INTO v_orgadmins FROM user_profiles
    WHERE id::text LIKE 'f0000000%' AND role = 'admin';
@@ -220,20 +243,30 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_R3;
 
-\echo 'R4 ⭐: OWNER ABOVE YOUR GRANT is visible — the admin of Assembly still sees the plant-wide list'
+\echo 'R4 ⭐⭐ (D115): a product whose ONLY place is ABOVE your grant IS visible — the either-direction read of D108 survives, now over the list. The other plant is still not.'
 SAVEPOINT sp_R4;
 DO $$
 DECLARE p1 int; p2 int;
 BEGIN
+  -- ⭐⭐ THIS IS D108's EITHER-DIRECTION READ, PRESERVED ACROSS D115, AND IT COST
+  -- A REGRESSION TO GET RIGHT. products_select reads a product through
+  -- `app_can_read_product` (0034 §8), a SECURITY DEFINER function whose
+  -- `from product_sites` bypasses product_sites_select's DOWNWARD-only scope and
+  -- lets `app_can_read_owned` apply the bidirectional grant test. So g3 (admin on
+  -- Assembly, BELOW the Plant 1 root) CAN read RP1, whose sole place is the Plant
+  -- 1 ROOT above them -- a plant-wide part is offered down to their area, so they
+  -- must see it. RP2's only place is the OTHER plant, off g3's branch entirely, so
+  -- that one stays invisible. ⚠️ An earlier cut wrote the EXISTS inline in the
+  -- policy; RLS then applied to it and hid the place above the grant, so g3 saw
+  -- RP1's runs but read "(unknown product)" for the part. §8's header records the
+  -- fix; this case is what would go red if it were reverted.
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f3', true);
   SET LOCAL ROLE authenticated;
-  SELECT count(*) INTO p1 FROM products WHERE id='60000000-0000-0000-0000-00000000ff01';  -- owned by the root above them
+  SELECT count(*) INTO p1 FROM products WHERE id='60000000-0000-0000-0000-00000000ff01';  -- placed at the root ABOVE them
   SELECT count(*) INTO p2 FROM products WHERE id='60000000-0000-0000-0000-00000000ff02';  -- the other plant
   RESET ROLE;
-  -- ⚠️ BOTH HALVES. Seeing the row above you is the point; still not seeing the
-  -- other plant is what stops "either direction" from meaning "everything".
   IF p1=1 AND p2=0 THEN RAISE NOTICE 'PASS R4';
-  ELSE RAISE NOTICE 'FAIL R4: own-branch=% other-plant=% (want 1,0)', p1, p2; END IF;
+  ELSE RAISE NOTICE 'FAIL R4: place-above-grant=% other-plant=% (want 1,0 — either-direction read survives, other plant does not)', p1, p2; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R4;
 
@@ -351,9 +384,11 @@ BEGIN
   END;
   SELECT count(*) INTO v_runs FROM runs
    WHERE node_id = v_line AND product_id = '60000000-0000-0000-0000-00000000ff01';
-  IF v_err = 'PT409' AND v_runs = 0 AND v_detail = 'error,id,kind,node_id,owner_node_id'
+  -- ⭐ D115: the product refusal names kind/id/node_id, no owner_node_id — a
+  -- product has a LIST of places, not a single owner to point at.
+  IF v_err = 'PT409' AND v_runs = 0 AND v_detail = 'error,id,kind,node_id'
   THEN RAISE NOTICE 'PASS R9';
-  ELSE RAISE NOTICE 'FAIL R9: sqlstate=% runs=% detail_keys=% (want PT409, 0, error,id,kind,node_id,owner_node_id)',
+  ELSE RAISE NOTICE 'FAIL R9: sqlstate=% runs=% detail_keys=% (want PT409, 0, error,id,kind,node_id)',
     v_err, v_runs, v_detail; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R9;
@@ -514,18 +549,32 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_R14;
 
-\echo 'R15: WRITES are untouched — 0023 still decides who may edit, and it still says yes to the owner'
+\echo 'R15 ⭐ (rewritten by 0036/D116): a plant admin RENAMES a part they wholly make, and still manages their OWN plant''s makers-list — reads narrowed, both writes work'
 SAVEPOINT sp_R15;
 DO $$
-DECLARE v_rows int;
+DECLARE v_record int; v_place text := 'no error'; v_line uuid;
 BEGIN
+  -- ⚠️ Read the TEMP-table fixture value before the role change; `authenticated`
+  -- cannot select r_fix and the refusal reads exactly like RLS.
+  SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f2', true);
   SET LOCAL ROLE authenticated;
+  -- ⭐⭐ D116 (0036) HANDS THE OWNER BACK THEIR EDIT. ff02 is made only in Plant
+  -- 2, which f2 administers, so renaming it is theirs again (products_update USING
+  -- app_can_edit_product_record) — ONE row, not the zero the Split gave. The read
+  -- narrowing of 0026 is what this case still has to prove does not eat the write.
   UPDATE products SET name = 'R P2 Product (renamed)' WHERE id='60000000-0000-0000-0000-00000000ff02';
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  GET DIAGNOSTICS v_record = ROW_COUNT;
+  -- But the LIST of makers is still per-plant, so they may add a place inside
+  -- their own plant (product_sites_insert / app_is_admin_for). That is the write
+  -- 0026's read-narrowing must not have eaten.
+  BEGIN
+    INSERT INTO product_sites (org_id, product_id, node_id)
+      VALUES ('10000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-00000000ff02', v_line);
+  EXCEPTION WHEN OTHERS THEN v_place := SQLSTATE; END;
   RESET ROLE;
-  IF v_rows=1 THEN RAISE NOTICE 'PASS R15';
-  ELSE RAISE NOTICE 'FAIL R15: the owner can no longer edit their own row (% rows)', v_rows; END IF;
+  IF v_record = 1 AND v_place = 'no error' THEN RAISE NOTICE 'PASS R15';
+  ELSE RAISE NOTICE 'FAIL R15: record_rename_rows=% own_plant_place=% (want 1, no error — wholly-owned record editable, list per-plant)', v_record, v_place; END IF;
 END $$;
 ROLLBACK TO SAVEPOINT sp_R15;
 

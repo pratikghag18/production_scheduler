@@ -13,10 +13,24 @@
  *      a simple yes/no."
  *
  * So the vocabulary of this module is WHERE A PERSON CAN WORK, not a
- * catalogue of skills. `workPlacesFor` is the primary function here; tickets
+ * catalogue of skills. `workPlacesFor` is the primary function here; trainings
  * (a held skill, with or without an expiry) exist only because granting one
- * is how you CHANGE the answer. One ticket turns several crosses green at
+ * is how you CHANGE the answer. One training turns several crosses green at
  * once, and the person granting it never touches a cell.
+ *
+ * ---------------------------------------------------------------------------
+ * ⚠️ THREE WORDS FOR ONE THING, AND ONLY ONE OF THEM REACHES A READER. The
+ * database calls these rows `skills` and `operator_skills`; this module and
+ * the screen above it called them "tickets" for most of their life; **the
+ * maintainer calls them TRAININGS, and that is the word that wins.** Every
+ * sentence this file returns says training, because every one of them is
+ * rendered verbatim. The type and function names below (`Ticket`,
+ * `ticketsFor`, `MissingTicket`, `ticketCount`) still say ticket, and the
+ * ones that mirror the api (`SkillLike`, `skillId`, `findExistingSkillByName`)
+ * still say skill: what a user READS changed, what the code calls itself did
+ * not, because renaming the api's vocabulary is a much larger change than
+ * this one. So a `grep` for "ticket" here should find identifiers and nothing
+ * a person can see — that difference is the whole rule.
  *
  * ---------------------------------------------------------------------------
  * ⚠️⚠️ THIS IS A MIRROR. THE SERVER IS THE AUTHORITY. ⚠️⚠️
@@ -27,15 +41,86 @@
  * assignment time against the real shift window. Everything computed here is
  * an INDICATION: what the arrays this module was handed imply, on the date it
  * was handed. It exists so an admin can see the consequence of granting a
- * ticket without dragging a chip onto a board to find out.
+ * training without dragging a chip onto a board to find out.
  *
  * The invariant runs ONE WAY: **this must never show a tick where the server
  * would refuse.** The converse — a cross here that the server would have
  * allowed — is a worse screen but not a false promise, so every case where a
  * fact cannot be resolved from the arrays given (a parent node missing, an
  * ancestor cycle, a required skill row the caller cannot see) resolves to a
- * CROSS carrying an honest reason, never to a tick. `NodeRequirements.complete`
- * and `WorkPlace.unnamed` are the two places that honesty is recorded.
+ * CROSS carrying an honest reason, never to a tick. `NodeRequirements.complete`,
+ * `WorkPlace.unnamed` and `AreaStanding`'s `"unknown"` are the three places
+ * that honesty is recorded.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐⭐ THERE ARE TWO SERVER RULES HERE, NOT ONE, AND THIS MODULE ONCE
+ * MIRRORED ONLY THE FIRST.
+ *
+ *  1. TRAINING — `check_eligibility`: does this person hold every training this
+ *     place requires? A capability question, and the whole of what this file
+ *     used to answer.
+ *  2. AREA — `app_guard_assignment_scope` (migration 0028 §4 / D109): an
+ *     assignment is refused unless the operator's owning node is an
+ *     ancestor-or-self of the cell. It is a BEFORE ROW trigger, so it fires
+ *     ahead of the training check, for every writer, including a plain
+ *     PostgREST `PATCH` that passes through no function at all.
+ *
+ * ⚠️⚠️ `OperatorLike.siteNodeId` HAS BEEN DECLARED HERE SINCE D108 MADE IT
+ * NOT NULL, WITH A COMMENT CITING D109 — AND `workPlacesFor` DID NOT READ IT.
+ * The screen therefore ticked every cell in every plant that a person's
+ * TRAININGS covered: 12 of 18 on the maintainer's own screen, for somebody whose
+ * line holds 2, and all twelve of those ticks were cells the database refuses.
+ * The fact was present and unread; this was never missing information.
+ *
+ * ⭐⭐ AND IT IS THE DANGEROUS DIRECTION OF §19.74'S DEFECT FAMILY.
+ * `describeDeleteRefusal` and `deletePrecheck` were stale REFUSALS — they stop
+ * people doing what they may, which is quiet and annoying. This was a stale
+ * PERMISSION: the client showing what the server will not allow. That is the
+ * one that produces a screen which looks like it works, right up to the moment
+ * somebody tries to book the week they planned from it and is refused with an
+ * error that says nothing about why the screen said yes.
+ *
+ * ⚠️ AND THE ANSWER IS NOT SIMPLY A CROSS EITHER. Migration 0030 / D113 gives
+ * the area rule a door: anyone who may schedule at a cell may place somebody
+ * from outside its area there, recording a reason (`assignments.area_override`
+ * + `area_override_reason`). So the honest answer has THREE states and not two
+ * — `PlaceVerdict` below — and it mirrors the board's own deliberate asymmetry
+ * (§19.76): a PRODUCT outside its scope is filtered out of the picker, because
+ * the database refuses it with no way through; a PERSON outside their area is
+ * annotated rather than refused, because a supervisor can still say yes.
+ *
+ * ---------------------------------------------------------------------------
+ * ⭐⭐ HOW FAR THE LIST REACHES IS A SEPARATE QUESTION, AND THE MAINTAINER
+ * ANSWERED IT AFTER SEEING THE THREE STATES:
+ *
+ *     "I see all plants not just Plant A for him, it does say that he's not
+ *      from this area for other plants, but those locations should not be
+ *      visible at all is my point."   — 31 August
+ *
+ * **The list stops at the ROOT the person's own area sits under.** A system
+ * admin can read every node in the org, so before this the list was every
+ * schedulable cell in the company — eighteen of them across three plants for
+ * somebody who works on one line. Annotating them was not enough: they are
+ * noise on a screen whose whole job is "where can this person work".
+ *
+ * ⭐ AND THE CUT IS THE ROOT, NOT THE PERSON'S OWN AREA, WHICH IS THE WHOLE
+ * POINT OF KEEPING THE ⚠ STATE. Lending somebody from Line 1 to Line 2 in the
+ * same plant is a thing supervisors actually do, and D113 exists for it; the
+ * override is realistic inside a site and not across sites. Cutting at the
+ * person's own area instead would have removed the third state from this
+ * screen entirely and made D113's door invisible here.
+ *
+ * ⚠️ THIS IS A PRESENTATION RULE AND NOT A SERVER ONE. Nothing in the database
+ * knows about "the same plant" — D109 is ancestor-or-self of the OWNER, and
+ * roots have no special standing in it. So it lives in `placesUnderSameRoot`,
+ * which the panel applies, rather than inside `workPlacesFor`, which stays the
+ * complete answer about every place it was handed. ⚠️ And it is COUNTED, not
+ * silent: `scope.ts`'s header records why — hiding is invisible and permanent,
+ * and a list that quietly shrank looks exactly like a person with no options.
+ *
+ * ⚠️ NOTHING HERE MAY BE COPIED ONTO THE PRODUCT HALF, which stays absolute:
+ * §19.74's proof that `delete_owned_row` needs no escalation depends on a
+ * product never sitting outside its owner.
  *
  * The mirror is written against the SQL clause by clause; each is quoted at
  * its counterpart below. Three details are easy to get wrong and all three
@@ -45,7 +130,7 @@
  *     ltree includes the target itself. A requirement on a Line applies to
  *     every cell under it AND a requirement on the cell applies to the cell.
  *  2. `missing` is computed against `held` WITHOUT regard to expiry. An
- *     expired-but-held ticket is EXPIRING, not MISSING — it must never be
+ *     expired-but-held training is EXPIRING, not MISSING — it must never be
  *     reported twice, and `expiring` is what makes it a cross.
  *  3. `missing_skills` / `expiring_skills` join `skills` for a NAME, so a
  *     required skill whose row the caller cannot read DROPS OUT OF THE LIST
@@ -54,10 +139,10 @@
  *
  * ---------------------------------------------------------------------------
  * THE WINDOW. The server compares `expires_at < upper(p_timerange)::date`,
- * and treats an unbounded window as expiring ANY dated ticket. This screen
+ * and treats an unbounded window as expiring ANY dated training. This screen
  * has no shift to ask about, so `asOf` IS that upper bound: "can this person
  * work here, for work booked up to this date". Default it to today and it
- * answers "right now"; move it forward and tickets that lapse before then
+ * answers "right now"; move it forward and trainings that lapse before then
  * turn to crosses, which is precisely what the server will do to them.
  *
  * ---------------------------------------------------------------------------
@@ -94,15 +179,26 @@ export interface OperatorLike {
 }
 
 /**
- * A training. Names are unique per ORG (`unique (org_id, name)`), not per site
- * — which is why `describeSkillNameClash` exists at all.
+ * A training. Names are unique PER OWNER since migration 0031 / D111a
+ * (`skills_owner_name_unique`, `unique (org_id, site_node_id, name)`) — which
+ * is why `findExistingSkillByName` takes an owner and why
+ * `describeSkillNameClash` asks about THIS PLACE rather than about the company.
  *
- * ⚠️ THE NAME IS COMPANY-UNIQUE AND THE ROW IS NOT COMPANY-WIDE, AND AFTER
- * 0028 THOSE TWO FACTS PULL AGAINST EACH OTHER. Plant 2 can no longer see
- * Plant 1's "Forklift" and can no longer create one, so the clash message can
- * now name a row the reader cannot open. That is recorded rather than fixed
- * here; the fix is a per-owner uniqueness rule and it belongs with D111's
- * starter library, where "copy this into my plant" is the answer.
+ * ⭐ 0031 RESOLVED A CONTRADICTION THIS COMMENT USED TO RECORD AS UNFIXED, and
+ * it was two rules from different migrations disagreeing rather than either one
+ * being wrong: `unique (org_id, name)` (0002, company-wide) against
+ * `app_can_read_owned(site_node_id)` (0026, your branch only). Plant A created
+ * "Forklift"; Plant B's admin was refused with a 23505 naming a row they could
+ * not see, open, edit or reuse. The demo seed worked around it by hand,
+ * prefixing every training with its plant letter — `A-Welding`, `B-Welding` —
+ * and 0031 drops that prefix in the same change.
+ *
+ * ⚠️ SO TWO TRAININGS MAY NOW SHARE A NAME, AND THE SCREEN HAS TO SAY WHOSE IS
+ * WHOSE. `siteNodeId` is the fact that tells them apart, and it already sits on
+ * every row: the panel renders it beside the name with `scope.ts`'s
+ * `scopeLabel` / `scopePathLabel`. ⚠️ The plant belongs in the OWNER COLUMN and
+ * never back in the text — a name that carries its own plant letter goes stale
+ * the day the node is renamed, which is the workaround, not the fix.
  */
 export interface SkillLike {
   id: string;
@@ -110,12 +206,48 @@ export interface SkillLike {
   siteNodeId: string;
 }
 
-/** A ticket: this person holds this skill. `expiresAt === null` means no expiry. */
+/** A training: this person holds this skill. `expiresAt === null` means no expiry. */
 export interface OperatorSkillLike {
   operatorId: string;
   skillId: string;
   /** An ISO `YYYY-MM-DD` day, or `null` for "never expires". */
   expiresAt: string | null;
+}
+
+/**
+ * The same row, plus the two facts an AUDIT asks for (migration 0032 / D114).
+ *
+ * ⭐⭐ A SEPARATE TYPE, AND THE SPLIT IS THE POINT. `workPlacesFor` decides
+ * where somebody can work, and neither of these fields can change that answer —
+ * a training held is held whether or not anybody wrote down who signed it. So
+ * the eligibility half goes on asking for `OperatorSkillLike` and its fixtures
+ * stay small, while `ticketsFor` — the one function that renders the RECORD —
+ * asks for both fields and asks for them REQUIRED.
+ *
+ * ⚠️ REQUIRED RATHER THAN OPTIONAL ON PURPOSE. Optional would let a caller drop
+ * a column it forgot to select and get "not recorded" on screen for a value the
+ * database is holding — silent, plausible, and indistinguishable from the truth.
+ * That is the `SKILL_COLUMNS` drift (`src/lib/api/operators.ts`) with the arrow
+ * pointing at a person's audit trail instead of at an empty list. `tsc` catches
+ * it here; nothing catches it there.
+ */
+export interface OperatorTrainingLike extends OperatorSkillLike {
+  /**
+   * When the training was DONE, `YYYY-MM-DD`, or `null` if nobody recorded one.
+   *
+   * ⚠️ NOT `created_at`. The row may have been entered today for a course sat
+   * last March, which is the whole reason the column exists separately.
+   */
+  certifiedAt: string | null;
+  /**
+   * Who signed this person off, as recorded, or `null` if nobody wrote one down.
+   *
+   * ⚠️ FREE TEXT, DELIBERATELY (0032's header). The signer is routinely an
+   * external assessor or a vendor's trainer with no login here, and a CSV row
+   * cannot carry a user id. **This is the CLAIM; who typed it in is the audit
+   * log's answer** — two facts, and one column cannot hold both.
+   */
+  signedOffBy: string | null;
 }
 
 /** A requirement sitting on a node. Inherits DOWNWARD to every descendant. */
@@ -253,6 +385,121 @@ export function isDay(day: string): boolean {
 }
 
 /* ===========================================================================
+ * The area rule — `app_guard_assignment_scope` (migration 0028 §4 / D109).
+ *
+ * The clause this mirrors, the operator half of that trigger:
+ *
+ *     if not exists (
+ *       select 1 from nodes owner
+ *       where owner.id = op.site_node_id
+ *         and target.path <@ owner.path
+ *     ) then raise ... 'not_offered_here';
+ *
+ * ⭐ `<@` IS REFLEXIVE, so a person owned by the very cell being scheduled is
+ * inside it. `scope.ts`'s `isAtOrBelow` records the same fact and case S9 pins
+ * it on the server. An implementation that tested strict descent would agree
+ * everywhere except on the one node the user actually picked — which is the
+ * hardest disagreement of all to notice.
+ *
+ * ⭐ WALKED THROUGH `parentId`, NOT THROUGH `path`, for exactly the reason
+ * `effectiveRequirements` gives above: `nodes.path` is a Postgres `ltree` this
+ * module is never handed (`NodeLike` has no `path`), and re-deriving `<@` from
+ * a string is where `plant1.line1` becomes an ancestor of `plant1.line10`.
+ *
+ * ⚠️ THREE ANSWERS, NOT TWO. A walk that reaches a root without meeting the
+ * owner is a confident `"outside"`. A walk that runs into a missing parent or
+ * a cycle is `"unknown"` — and `"unknown"` must never be read as `"inside"`,
+ * because that is precisely the tick the server would refuse.
+ *
+ * ⭐ AND `"unknown"` IMPLIES `NodeRequirements.complete === false`, ALWAYS. It
+ * is the same walk over the same map, and the only two ways it can end early
+ * are the two that also stop `effectiveRequirements` reaching a root. That is
+ * why an unknown area adds no reason sentence of its own: *"the places above
+ * this one could not be read"* is already in the list, saying it once.
+ * ⚠️ The converse does NOT hold — an owner found BELOW a break higher up is a
+ * confident `"inside"` on an incomplete chain, and that is right.
+ * =========================================================================== */
+
+/** Where a place sits relative to the person's own area. */
+export type AreaStanding = "inside" | "outside" | "unknown";
+
+/**
+ * Is `node` at or below `ownerId`, walking the parent chain?
+ *
+ * @param ownerId `operators.site_node_id` — NOT NULL since 0028 / D108, and
+ *   not necessarily a root (D109).
+ */
+export function areaStandingFor(
+  node: NodeLike,
+  ownerId: string,
+  byId: ReadonlyMap<string, NodeLike>,
+): AreaStanding {
+  const seen = new Set<string>();
+  let cur: NodeLike | undefined = node;
+  while (cur !== undefined) {
+    // Reflexive, and tested FIRST: the owner may be this very node, and a
+    // cycle that contains the owner should still answer "inside".
+    if (cur.id === ownerId) return "inside";
+    if (seen.has(cur.id)) return "unknown"; // a cycle, and no root was reached
+    seen.add(cur.id);
+    if (cur.parentId === null) return "outside"; // a whole chain, owner not on it
+    cur = byId.get(cur.parentId);
+  }
+  return "unknown"; // a parent id with no node beside it
+}
+
+/* ===========================================================================
+ * The ROOT a place sits under — what a reader calls its plant or its site.
+ *
+ * ⚠️ "ROOT" IS NOT "SITE" IN THIS CODEBASE'S VOCABULARY, and the two are easy
+ * to confuse here. `operators.site_node_id` is the node a person BELONGS to,
+ * which since D109 need not be a root at all — Operator A1 in the demo world
+ * belongs to a LINE. The root is what that owner ultimately hangs from, and it
+ * is only ever used for presentation (see the header).
+ * =========================================================================== */
+
+/**
+ * The root `nodeId` descends from, or `null` if the chain cannot be walked to
+ * one — a missing parent, or a cycle.
+ *
+ * ⚠️ `null` MEANS "CANNOT TELL" AND NEVER "NO ROOT". Every caller below
+ * treats it as a reason to keep a place rather than to drop one.
+ */
+export function rootIdFor(nodeId: string, byId: ReadonlyMap<string, NodeLike>): string | null {
+  const seen = new Set<string>();
+  let cur: NodeLike | undefined = byId.get(nodeId);
+  while (cur !== undefined) {
+    if (seen.has(cur.id)) return null; // a cycle: nothing above it is a root
+    seen.add(cur.id);
+    if (cur.parentId === null) return cur.id;
+    cur = byId.get(cur.parentId);
+  }
+  return null; // a parent id with no node beside it
+}
+
+/**
+ * The places that sit under the same root as this person — what the screen
+ * actually lists. The rest are counted in a footnote, never dropped silently.
+ *
+ * ⭐ FAILS OPEN, TWICE, and both directions matter:
+ *
+ *  1. A place whose own root cannot be resolved is KEPT. Hiding on uncertainty
+ *     is the failure `scope.ts` warns about — invisible, permanent, and
+ *     indistinguishable from a place nobody created.
+ *  2. A person whose root cannot be resolved filters NOTHING. Showing too much
+ *     is a worse screen; showing an arbitrary subset is a wrong one.
+ */
+export function placesUnderSameRoot(
+  places: readonly WorkPlace[],
+  operatorSiteNodeId: string,
+  byId: ReadonlyMap<string, NodeLike>,
+): WorkPlace[] {
+  const ownRoot = rootIdFor(operatorSiteNodeId, byId);
+  if (ownRoot === null) return [...places];
+  return places.filter((p) => p.rootId === null || p.rootId === ownRoot);
+}
+
+/* ===========================================================================
  * workPlacesFor — the answer this screen exists to give.
  *
  * One entry per SCHEDULABLE node: a tick, or a cross with the reason for it.
@@ -265,13 +512,13 @@ export function isDay(day: string): boolean {
  *     eligible := count(missing) = 0 AND count(expiring) = 0
  * =========================================================================== */
 
-/** A required ticket this person does not hold. */
+/** A required training this person does not hold. */
 export interface MissingTicket {
   skillId: string;
   name: string;
 }
 
-/** A required ticket this person holds, but which lapses inside the window. */
+/** A required training this person holds, but which lapses inside the window. */
 export interface ExpiringTicket {
   skillId: string;
   name: string;
@@ -287,12 +534,43 @@ export interface WorkPlace {
   name: string;
   /** `nodes.active`. Requirements still inherit through an inactive ancestor. */
   active: boolean;
+  /**
+   * The root this place descends from — its plant, as a reader would say it.
+   * `null` when the chain could not be walked to one.
+   *
+   * ⚠️ PRESENTATION ONLY, and unlike `area` it mirrors no server rule at all.
+   * It exists so `placesUnderSameRoot` can trim the list to the person's own
+   * site; `workPlacesFor` itself still answers about every place it was given.
+   */
+  rootId: string | null;
+  /**
+   * Where this place sits relative to the person's own area (D109). `"outside"`
+   * is not a refusal on this screen — D113 lets whoever may schedule here place
+   * them anyway, recording a reason — but it is never a tick.
+   */
+  area: AreaStanding;
+  /**
+   * TRAININGS ALONE: every required training held, none of them lapsed inside the
+   * window, and every one of them readable. This is exactly what `eligible`
+   * meant before the area rule was mirrored, and it is kept as its own field
+   * because a place OUTSIDE somebody's area still has a training answer worth
+   * showing beside it — waving through "not from this area" must not silently
+   * also wave through "no Welding training".
+   */
+  qualified: boolean;
+  /**
+   * The whole answer, and the only thing that draws a tick: `qualified` AND
+   * inside their area.
+   *
+   * ⚠️ DO NOT LET A CALLER GO BACK TO READING `qualified` HERE. A tick on
+   * trainings alone is the defect this field was split to fix.
+   */
   eligible: boolean;
   missing: readonly MissingTicket[];
   expiring: readonly ExpiringTicket[];
   /**
-   * How many required tickets counted against this place but could NOT be
-   * named — the skill row is not readable, or a held ticket's `expires_at` is
+   * How many required trainings counted against this place but could NOT be
+   * named — the skill row is not readable, or a held training's `expires_at` is
    * not a day this module can compare. The server behaves the same way
    * (see the file header, point 3): they count, they cannot be listed.
    */
@@ -337,7 +615,7 @@ function labelFor(node: NodeLike, byId: ReadonlyMap<string, NodeLike>): string {
 
 /**
  * @param asOf The window's UPPER BOUND, `YYYY-MM-DD` — see the file header.
- *   A ticket expiring strictly before this day is a cross, exactly as
+ *   A training expiring strictly before this day is a cross, exactly as
  *   `expires_at < upper(p_timerange)::date` makes it one.
  */
 export function workPlacesFor(
@@ -355,7 +633,7 @@ export function workPlacesFor(
   for (const s of input.skills) skillName.set(s.id, s.name);
 
   // `held` — the operator's own rows and nothing else. Expiry is NOT a filter
-  // here: an expired ticket is still HELD, which is what keeps it out of
+  // here: an expired training is still HELD, which is what keeps it out of
   // `missing` and puts it in `expiring` instead (file header, point 2).
   const held = new Map<string, string | null>();
   for (const os of input.operatorSkills) {
@@ -402,7 +680,17 @@ export function workPlacesFor(
       }
     }
 
+    const qualified = complete && missing.length === 0 && expiring.length === 0 && unnamed === 0;
+    const area = areaStandingFor(node, operator.siteNodeId, byId);
+
     const reasons: string[] = [];
+    // The headline fact first — it is what decides the mark on the row, and the
+    // training sentences under it are a second, separate decision.
+    // ⚠️ Only `"outside"` speaks here. `"unknown"` is covered by the sentence
+    // below it, which is the same walk breaking; see `areaStandingFor`.
+    if (area === "outside") {
+      reasons.push("not from this area — needs a recorded reason");
+    }
     if (!complete) {
       reasons.push("the places above this one could not be read, so this is not a yes");
     }
@@ -411,8 +699,8 @@ export function workPlacesFor(
     if (unnamed > 0) {
       reasons.push(
         unnamed === 1
-          ? "1 required ticket could not be read"
-          : `${unnamed} required tickets could not be read`,
+          ? "1 required training could not be read"
+          : `${unnamed} required trainings could not be read`,
       );
     }
 
@@ -421,7 +709,10 @@ export function workPlacesFor(
       label: labelFor(node, byId),
       name: node.name,
       active: node.active,
-      eligible: complete && missing.length === 0 && expiring.length === 0 && unnamed === 0,
+      rootId: rootIdFor(node.id, byId),
+      area,
+      qualified,
+      eligible: qualified && area === "inside",
       missing,
       expiring,
       unnamed,
@@ -435,6 +726,63 @@ export function workPlacesFor(
 }
 
 /* ===========================================================================
+ * placeVerdict — the three states, in ONE place, so the screen cannot invent a
+ * fourth and every case can be pinned.
+ *
+ *   ✓ can-work         in their area AND holds the trainings
+ *   ✗ missing-training  in their area, not capable — a capability answer
+ *   ⚠ outside-area      allowed only with a recorded reason (D113)
+ *
+ * ⚠️ THE AREA IS TESTED FIRST, and an UNRESOLVED area lands on `outside-area`
+ * with it. Somebody outside their area who also lacks the training reads as
+ * `outside-area`, because the area is the fact that decides whether there is a
+ * way through at all — the missing training is still named in `reasons`, since
+ * they are two decisions and a supervisor waving one through has not waved
+ * through the other.
+ * =========================================================================== */
+
+export type PlaceVerdict = "can-work" | "missing-training" | "outside-area";
+
+export function placeVerdict(place: WorkPlace): PlaceVerdict {
+  if (place.area !== "inside") return "outside-area";
+  return place.qualified ? "can-work" : "missing-training";
+}
+
+/* ===========================================================================
+ * Which person the screen is about.
+ *
+ * ⭐ IT LIVES HERE, NOT IN THE PANEL, AND THAT IS THE POINT OF §19.77. A rule
+ * about who may appear on a screen, written inside the component that draws
+ * it, is a rule nothing can pin — which is exactly how `workPlacesFor` came to
+ * disagree with the server for a whole release. Beside `placesUnderSameRoot`
+ * it is one import away from `operators.test.ts`.
+ * =========================================================================== */
+
+/**
+ * Which person the detail pane is about. Falls back, never sticks.
+ *
+ * ⭐ RESOLVED AGAINST THE PEOPLE THIS SCREEN IS SHOWING, not against every
+ * operator the reader can read. `selectedId` outlives a plant switch, and
+ * reading it out of the unfiltered array put somebody from Plant B in the
+ * detail pane while the list beside it held only Plant A — a selection
+ * outliving the list it was made from, which is the whole reason
+ * `resolveSelectedShape` and `resolvePlace` exist.
+ *
+ * ⚠️ IT FALLS BACK TO NOBODY, NOT TO THE FIRST ROW, and that is the one place
+ * it differs from those two. "Pick someone on the left" is this screen's real
+ * opening state rather than a failure of one, so a first-row fallback would
+ * open a person nobody asked for on every visit — and on this screen that
+ * person's name, area and trainings are the entire right-hand column.
+ */
+export function resolveSelectedOperator(
+  people: readonly OperatorLike[],
+  selectedId: string | null,
+): OperatorLike | null {
+  if (selectedId === null) return null;
+  return people.find((o) => o.id === selectedId) ?? null;
+}
+
+/* ===========================================================================
  * The operator list, and the draft that adds to it.
  * =========================================================================== */
 
@@ -444,7 +792,7 @@ export interface OperatorRow {
   employeeRef: string | null;
   active: boolean;
   siteNodeId: string;
-  /** How many tickets this person holds. Not eligibility — just the count. */
+  /** How many trainings this person holds. Not eligibility — just the count. */
   ticketCount: number;
 }
 
@@ -545,7 +893,18 @@ export function validateOperatorDraft(
 }
 
 /* ===========================================================================
- * Tickets: what this person holds today.
+ * Trainings: what this person holds today, and what is RECORDED about it.
+ *
+ * ⭐⭐ THE QUESTION AN AUDIT ACTUALLY ASKS (the maintainer, raising stage 22):
+ * *"who signed this person off, and when — has no answer."* Migration 0032 /
+ * D114 settled the database half; these two fields are the screen's.
+ *
+ * ⚠️⚠️ THE TWO FACTS ARE INDEPENDENT AND EITHER MAY BE KNOWN ALONE. 0032
+ * deliberately carries NO CHECK tying them together, and its header says why: a
+ * spreadsheet arrives with a date and no signer, or a supervisor knows who
+ * signed and has to look up when. **Nothing here may invent the rule the
+ * migration refused to write** — one is never required to enable the other, and
+ * emptying one never clears the other.
  * =========================================================================== */
 
 export interface Ticket {
@@ -554,12 +913,16 @@ export interface Ticket {
   expiresAt: string | null;
   /** `expiresAt` lapses strictly before `asOf` — the same test `workPlacesFor` uses. */
   lapsed: boolean;
+  /** When it was done, `YYYY-MM-DD`, or `null`. Carried RAW; `describeCertifiedAt` reads it. */
+  certifiedAt: string | null;
+  /** Who signed it off, as recorded, or `null`. Carried RAW — see `describeSignedOffBy`. */
+  signedOffBy: string | null;
 }
 
 export function ticketsFor(
   operator: OperatorLike,
   skills: readonly SkillLike[],
-  operatorSkills: readonly OperatorSkillLike[],
+  operatorSkills: readonly OperatorTrainingLike[],
   asOf: string,
 ): Ticket[] {
   const name = new Map<string, string>();
@@ -570,135 +933,317 @@ export function ticketsFor(
     const expiresAt = os.expiresAt;
     out.push({
       skillId: os.skillId,
-      // A ticket for a skill row we cannot read is still a ticket the person
+      // A training for a skill row we cannot read is still a training the person
       // holds; it is shown, unnamed, rather than silently dropped.
-      name: name.get(os.skillId) ?? "(a ticket you can't see)",
+      name: name.get(os.skillId) ?? "(a training you can't see)",
       expiresAt,
       lapsed: expiresAt !== null && isDay(expiresAt) && isDay(asOf) ? expiresAt < asOf : false,
+      // ⚠️ PASSED THROUGH UNTOUCHED, both of them. The screen binds an editable
+      // control to each, so a value normalised on the way out would be a value
+      // the edit box disagrees with — the reader typing into a field showing
+      // something the database is not holding.
+      certifiedAt: os.certifiedAt,
+      signedOffBy: os.signedOffBy,
     });
   }
   out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return out;
 }
 
+/* ---------------------------------------------------------------------------
+ * ⭐⭐ AN UNRECORDED VALUE IS A SENTENCE, NEVER A BLANK.
+ *
+ * A date box with nothing in it and no words beside it reads as a screen that
+ * failed to load something — the reader cannot tell "nobody wrote this down"
+ * from "this did not render". Both halves of the record are OPTIONAL and a
+ * half-known row is the ORDINARY case here, so the empty state is the one the
+ * screen shows most often and it has to say what it means.
+ *
+ * ⚠️ THE SAME WORDS FOR BOTH, DELIBERATELY. Two phrasings for one fact ("not
+ * recorded" / "unknown") would read as two different facts, and this pair sits
+ * side by side on every row.
+ * ------------------------------------------------------------------------- */
+
+/** What the screen says where a fact was never written down. ONE string, used twice. */
+export const NOT_RECORDED = "not recorded";
+
+/** `"2026-03-14"` -> `"14 Mar 2026"`; `null` -> `"not recorded"`. */
+export function describeCertifiedAt(certifiedAt: string | null): string {
+  return certifiedAt === null ? NOT_RECORDED : formatDay(certifiedAt);
+}
+
+/**
+ * The signer, as recorded, or `"not recorded"`.
+ *
+ * ⚠️ BLANK-AFTER-TRIM COUNTS AS UNRECORDED, and that arm is reachable. This
+ * screen never writes `""` (`normaliseSignedOffBy` folds it to `null`), but
+ * `signed_off_by` is a plain `text` column with no trim trigger and no CHECK —
+ * verified against 0032, not assumed — and D114 exists because a CSV writes
+ * straight at it. Rendering `"   "` raw would put an invisible value on an audit
+ * line, which is the one place a blank must not pass for an answer.
+ *
+ * ⚠️ Plain `.trim()`, matching `app_trim_ws` code-point for code-point. No `\s`
+ * regex and no character class — both have been tried in this project and both
+ * were wrong (see this file's header).
+ */
+export function describeSignedOffBy(signedOffBy: string | null): string {
+  if (signedOffBy === null || signedOffBy.trim() === "") return NOT_RECORDED;
+  return signedOffBy;
+}
+
+/**
+ * What a typed signer becomes on the way to the database: trimmed, and `null`
+ * when there is nothing left.
+ *
+ * ⭐ `null`, NOT `""`, AND THE DIFFERENCE IS THE WHOLE COLUMN'S MEANING. 0032:
+ * *"NULL means nobody recorded one, never 'unsigned'."* An empty string is a
+ * recorded answer that happens to be invisible; clearing a box means the fact is
+ * gone, and only one of those two is what the person at the screen just did.
+ *
+ * ⚠️ AND `null` HERE IS "CLEAR IT", WHICH IS A REAL WRITE. The api's absent-key
+ * rule ("leave it alone") is the OTHER answer, and the caller decides between
+ * them by whether the reader touched this box at all — never by what came out
+ * of this function.
+ */
+export function normaliseSignedOffBy(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 /* ===========================================================================
- * findExistingSkillByName — the clash that is not an error.
+ * findExistingSkillByName — the clash that is not an error, and is now LOCAL.
  *
- * ⭐ THE MAINTAINER'S DECISION: SKILL NAMES STAY COMPANY-WIDE (`unique (org_id,
- * name)`, migration 0002:53). The consequence on a screen is the whole point
- * of this function: when someone types a name that already exists, they have
- * not made a mistake — they have found the ticket they were about to create.
- * The screen must say *"there is already a company-wide Forklift — use that
- * one"* and offer to attach it in one click. A raw duplicate-key error
- * reaching the user is a defect; `{kind:"DuplicateValue"}` is the fallback
- * for the race where somebody else creates it between the check and the
- * insert, not the normal path.
+ * ⭐⭐ MIGRATION 0031 / D111a MADE A TRAINING'S NAME UNIQUE PER OWNER —
+ * `unique (org_id, site_node_id, name)`, replacing 0002's `unique (org_id,
+ * name)`. So this function is asked about ONE OWNER and answers about that
+ * owner only. A same-named training under a DIFFERENT owner is not a clash at
+ * all: the insert succeeds, the database is content, and since read-scoping
+ * (0026) the reader usually cannot see the other row anyway.
  *
- * `exact` distinguishes the two cases that behave differently in Postgres:
- *  - EXACT (byte-equal to the stored name, after trimming the input): the
- *    insert WILL fail with 23505. Offer the existing skill instead; do not
- *    offer to create.
- *  - CASE-INSENSITIVE only ("forklift" vs "Forklift"): the unique index is
- *    over plain `text`, so the insert WOULD succeed and leave the company
- *    with two Forklifts. Still say so, but the user may genuinely mean a
- *    different ticket, so creating stays available.
+ * ⚠️ REPORTING IT WAS THE WORST OF BOTH, AND THAT IS WHY THE PARAMETER EXISTS.
+ * The old scan went over every readable training and refused on any name match,
+ * which meant a refusal citing a row the reader could not open, edit or reuse —
+ * and after 0031 it would also refuse a name the database would have accepted.
+ * A stale REFUSAL: it never fails loudly, it just quietly stops people doing
+ * something they are allowed to do (the §19.74 family, `deletePrecheck`'s
+ * shape).
+ *
+ * The consequence on a screen is unchanged, and it is still the point of this
+ * function: when someone types a name their own place already holds, they have
+ * not made a mistake — they have found the training they were about to create.
+ * The screen says so and attaches it in one click.
+ *
+ * ⭐ THE EXACT / LOOSE SPLIT SURVIVES 0031, AND THE REASON IS THAT THE
+ * CONSTRAINT IS CASE-SENSITIVE. It is a plain `text` unique, not `citext` and
+ * not over `lower(name)`, so under ONE owner "forklift" and "Forklift" are two
+ * storable rows. The three answers:
+ *
+ *  - EXACT (byte-equal to the stored name, after trimming the input), SAME
+ *    OWNER: the insert WILL be refused with 23505. Offer the existing one; do
+ *    not offer to create.
+ *  - CASE-ONLY, SAME OWNER: legal, and leaves this one place with two
+ *    Forklifts. Warn, but the user may genuinely mean a different training, so
+ *    creating stays available.
+ *  - EITHER, DIFFERENT OWNER: not a clash. `null`.
  * =========================================================================== */
 
 export interface SkillNameClash {
   skill: SkillLike;
-  /** `true` when the insert would actually be refused by `unique (org_id, name)`. */
+  /**
+   * `true` when the insert would actually be refused — byte-equal, under the
+   * SAME owner, which is the whole of what `unique (org_id, site_node_id,
+   * name)` forbids.
+   */
   exact: boolean;
+  /**
+   * How close the clash is, and it decides whether the screen REFUSES or merely
+   * WARNS — they are different answers and must not be collapsed.
+   *
+   * `"here"`       same owner. `skills_owner_name_unique` WILL refuse this
+   *                insert, so the screen refuses first and offers the row.
+   * `"this-plant"` same root, different owner. **Perfectly legal** — 0031's
+   *                constraint is per owner, so Line A and Line B inside one
+   *                plant may each hold a "Forklift". Confusing, though, so it
+   *                is said out loud and the create stays available.
+   *
+   * ⚠⚠ A `"this-plant"` clash MUST NOT BLOCK. Blocking it would be a client
+   * enforcing a rule the database does not have — §19.74's stale-refusal defect,
+   * which is the quiet kind that never fails and just stops people working.
+   */
+  where: "here" | "this-plant";
 }
 
+/**
+ * @param owner The `site_node_id` the new training would be created under. On
+ *   this screen that is where the person being granted it belongs, because
+ *   `createAndAttach` has no other place to put it.
+ *
+ *   ⚠️ `null` MEANS "NOTHING TO CLASH WITH", NEVER "CHECKED AND CLEAR". With
+ *   nobody selected there is no owner, so there is no insert to refuse and
+ *   nothing to warn about; the panel refuses the create separately, with a
+ *   sentence, rather than leaning on this `null`.
+ */
 export function findExistingSkillByName(
   skills: readonly SkillLike[],
   name: string,
+  owner: string | null,
+  nodesById?: ReadonlyMap<string, NodeLike>,
 ): SkillNameClash | null {
   const trimmed = name.trim();
-  if (trimmed === "") return null;
+  // ⚠️ `owner === null` HERE IS A CONTRACT MARKER, NOT A DECISION, AND NO CASE
+  // CAN TELL IT FROM ITS ABSENCE — deleting it was tried and every case stayed
+  // green. It is redundant TODAY because `SkillLike.siteNodeId` is a `string`
+  // (NOT NULL since D108), so the comparison below rejects every row against a
+  // `null` owner anyway. It is kept for the case 0031's own header flags: **if a
+  // later migration ever makes `site_node_id` nullable again**, `null !== null`
+  // is false and a company-wide row would start matching a caller who has no
+  // owner at all — silently, and in the direction that invents a clash.
+  // Recorded as unpinned rather than left looking load-bearing.
+  if (trimmed === "" || owner === null) return null;
   const lowered = trimmed.toLowerCase();
-  let loose: SkillLike | null = null;
+
+  // ⭐⭐ TWO PASSES, AND THE ORDER IS THE POINT. A clash under THIS owner is
+  // what the database will refuse, so it always wins over one merely in the
+  // same plant — reporting the softer one first would offer a warning where a
+  // refusal was owed and let the create go through to a 23505.
+  let looseHere: SkillLike | null = null;
   for (const s of skills) {
-    if (s.name === trimmed) return { skill: s, exact: true };
-    if (loose === null && s.name.trim().toLowerCase() === lowered) loose = s;
+    if (s.siteNodeId !== owner) continue;
+    if (s.name === trimmed) return { skill: s, exact: true, where: "here" };
+    if (looseHere === null && s.name.trim().toLowerCase() === lowered) looseHere = s;
   }
-  return loose === null ? null : { skill: loose, exact: false };
+  if (looseHere !== null) return { skill: looseHere, exact: false, where: "here" };
+
+  // ⭐⭐ THE PLANT-WIDE WARNING, AND IT IS WHAT PAYS FOR 0031's LOOSENING.
+  // The constraint is per OWNER, so the migration knowingly allows Line A and
+  // Line B in one plant to each hold a "TRN-4471". Its header justifies that by
+  // promising this warning — *"the database refuses per owner; the screen warns
+  // per plant"* — and the promise is only honest because a plant admin can READ
+  // their whole plant, which is exactly what was never true across plants.
+  //
+  // ⚠️ WITHOUT `nodesById` THERE IS NO PLANT PASS AT ALL, and that is silence
+  // rather than a clean bill of health. A caller that cannot resolve the tree
+  // gets the owner answer only; it must not report "nothing found" as if the
+  // wider question had been asked and answered.
+  if (nodesById === undefined) return null;
+  const ownerRoot = rootIdFor(owner, nodesById);
+  // ⚠️ An unresolvable root means "cannot tell", and the honest response is to
+  // say nothing rather than to compare against `null` and match every other
+  // row whose root is equally unresolvable.
+  if (ownerRoot === null) return null;
+
+  let loosePlant: SkillLike | null = null;
+  for (const s of skills) {
+    if (s.siteNodeId === owner) continue; // already answered above
+    if (rootIdFor(s.siteNodeId, nodesById) !== ownerRoot) continue;
+    if (s.name === trimmed) return { skill: s, exact: true, where: "this-plant" };
+    if (loosePlant === null && s.name.trim().toLowerCase() === lowered) loosePlant = s;
+  }
+  return loosePlant === null ? null : { skill: loosePlant, exact: false, where: "this-plant" };
 }
 
 /** The sentence the screen shows for a clash. Here so it is testable, not in JSX. */
-export function describeSkillNameClash(clash: SkillNameClash): string {
-  // "site-owned", not "existing". Nothing in this fixture was ever site-owned,
-  // so this arm shipped unevaluated and read "There is already a existing
-  // Welding" — ungrammatical, and it told the person nothing they did not
-  // already know from the fact that we are refusing their name. WHOSE ticket it
-  // is, is the part that decides whether they can reach it. Measured 27 Aug.
-  // ⚠️ 0028 COLLAPSED THIS TO ONE ARM. It used to read "company-wide" or
-  // "site-owned"; there is no company-wide row now, so the word that carried
-  // the information is gone and every clash is site-owned. Left as a named
-  // constant rather than inlined, because the sentence is about to need the
-  // owner's NAME instead — see the SkillLike header.
-  const scope = "site-owned";
+export function describeSkillNameClash(clash: SkillNameClash, ownerLabel?: string): string {
+  // ⭐ "THIS PLACE", NOT "SITE-OWNED", AND THE CHANGE IS AN AXIS AND NOT A
+  // WORDING PREFERENCE. "Site-owned" was the word that survived 0028: it once
+  // told a company-wide row from a site's own, and once D108 deleted
+  // company-wide it described every training equally and so described none of
+  // them. Under 0031 the question the reader is actually asking is not what
+  // KIND of row this is — it is whether the place they are creating in already
+  // holds one, because that is now the only way a name can collide.
+  //
+  // ⚠️ THE OWNER IS NOT RESOLVED HERE, ON PURPOSE. This module is
+  // dependency-free and holds node IDS, not node names, so a caller that wants
+  // the other place NAMED passes `ownerLabel` in — the panel gets it from
+  // `scope.ts`'s `scopeLabel`, which stays the one place an id becomes a name.
+  if (clash.where === "this-plant") {
+    // ⭐⭐ A WARNING, AND ITS WORDS HAVE TO SAY SO. This one is not a refusal:
+    // 0031 allows two places in one plant to hold the same name, and the create
+    // stays live underneath this sentence. So it reports a fact and hands the
+    // decision back — "already has", not "cannot" — because a sentence that
+    // sounds like a refusal in front of a working button is how people learn to
+    // ignore the ones that are.
+    //
+    // ⭐ And it NAMES THE OTHER PLACE when it can. "Somewhere else in this
+    // plant" sends a reader hunting through a list; "Line B already has one"
+    // ends the question. That is the maintainer's *"easily identify"* arriving
+    // as a sentence rather than as a prefix baked into the name.
+    const who = ownerLabel === undefined ? "Another place in this plant" : ownerLabel;
+    return clash.exact
+      ? `${who} already has a ${clash.skill.name}. Create this one only if it is a different training.`
+      : `${who} has a ${clash.skill.name}, spelled differently. Create this one only if it is a different training.`;
+  }
+  // ⚠️ "USE", NOT "ATTACH". This sentence used to say *"Attach that one"*,
+  // which was true while the only caller was the Operators screen — a person
+  // was selected there and attaching was one click. Stage 22 moved training
+  // management to its own tab, where nobody is selected and there is nothing
+  // to attach to. **A sentence naming an action the screen does not offer is
+  // D106 in prose**, so it names the one it does.
   return clash.exact
-    ? `There is already a ${scope} ${clash.skill.name} — use that one.`
-    : `There is already a ${scope} ${clash.skill.name}. Attach that one unless this is a different ticket.`;
+    ? `This place already has a ${clash.skill.name} — use that one.`
+    : `This place already has a ${clash.skill.name}. Use that one unless this is a different training.`;
 }
 
 /* ===========================================================================
- * Deleting a person.
+ * ⚠️ `DeletePrecheck` / `deletePrecheck` LIVED HERE AND 0029 DELETED THEM.
  *
- * ⭐ THE MAINTAINER'S DECISION: DEACTIVATE IS THE MAIN ACTION. Delete is secondary and
- * only when nothing is in the way, and the refusal must say WHAT is in the
- * way. `operator_skills` and `assignments` both reference `operators` with no
- * `ON DELETE` clause, so a delete that hits either fails with SQLSTATE 23503
- * -> `{kind:"StillInUse"}`, whose `usedBy` names the referencing table.
+ * They refused to delete anybody still holding a training — "Remove it first, or
+ * deactivate them instead" — because `operator_skills`' foreign key to
+ * `operators` carried no `ON DELETE` and the delete would have failed with
+ * 23503 anyway. Migration 0029 gives that key `ON DELETE CASCADE`: a person's
+ * trainings now go with them, and `deletion_preview` COUNTS them so the dialog
+ * can say how many.
  *
- * This precheck answers only for the half this screen can SEE — the tickets,
- * which it already has in memory. Assignments are not read here, so a person
- * with no tickets can still be refused; the panel maps that refusal through
- * `describeSchedulerError`, which says "It's still used by assignments".
- * Reporting `allowed: true` therefore means "nothing I can see is blocking
- * this", never "this will succeed", and the button copy says so.
+ * ⭐ THE REASON THIS HAD TO GO RATHER THAN BE RELAXED. A precheck that refuses
+ * what the server would allow is the worst kind of client rule: the way out it
+ * names ("remove them first") is work that no longer needs doing, and nobody
+ * reading this screen has any way to find that out. A stale permission check
+ * fails loudly the first time somebody tries; a stale REFUSAL never fails at
+ * all, it just quietly stops people doing something they are allowed to do.
  * =========================================================================== */
-
-export interface DeletePrecheck {
-  allowed: boolean;
-  /** What is in the way, as a sentence, or `null` when nothing visible is. */
-  blockedBy: string | null;
-}
-
-export function deletePrecheck(
-  operator: OperatorLike,
-  operatorSkills: readonly OperatorSkillLike[],
-): DeletePrecheck {
-  let tickets = 0;
-  for (const os of operatorSkills) if (os.operatorId === operator.id) tickets += 1;
-  if (tickets === 0) return { allowed: true, blockedBy: null };
-  return {
-    allowed: false,
-    blockedBy:
-      tickets === 1
-        ? "1 ticket is still attached to this person. Remove it first, or deactivate them instead."
-        : `${tickets} tickets are still attached to this person. Remove them first, or deactivate them instead.`,
-  };
-}
 
 /* ===========================================================================
  * A one-line summary of the whole answer, for the operator list.
  * =========================================================================== */
 
 export interface PlacesSummary {
+  /** Every place in the list. `ownArea + outsideArea === total`. */
   total: number;
+  /**
+   * Places inside this person's own area — the DENOMINATOR of the count line.
+   *
+   * ⭐ A COUNT LINE HAS TO NAME WHAT IT COUNTS. *"0 of 2 places in their own
+   * area"* is a true sentence about the same person this screen used to
+   * describe as *"12 of 18 places"*, where the eighteen were every cell in
+   * three plants and all twelve ticks were refusals.
+   */
+  ownArea: number;
+  /** Places they can simply work: inside their area AND qualified. */
   eligible: number;
+  /**
+   * Places outside their area — still reachable, but only by recording a
+   * reason (D113), which is why they are counted rather than hidden.
+   *
+   * ⚠️ An area this module could NOT resolve is counted here, not in
+   * `ownArea`. Same call as `placeVerdict`, same reason: an unproven "inside"
+   * is the one answer that puts a number in front of a reader which the server
+   * will not honour.
+   */
+  outsideArea: number;
   /** How many crosses this module could not fully explain. */
   unresolved: number;
 }
 
 export function summarisePlaces(places: readonly WorkPlace[]): PlacesSummary {
+  let ownArea = 0;
   let eligible = 0;
+  let outsideArea = 0;
   let unresolved = 0;
   for (const p of places) {
+    if (p.area === "inside") ownArea += 1;
+    else outsideArea += 1;
     if (p.eligible) eligible += 1;
     if (!p.complete || p.unnamed > 0) unresolved += 1;
   }
-  return { total: places.length, eligible, unresolved };
+  return { total: places.length, ownArea, eligible, outsideArea, unresolved };
 }

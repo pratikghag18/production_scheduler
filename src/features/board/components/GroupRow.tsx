@@ -3,6 +3,7 @@ import type { HierarchyLevel } from "@/lib/api";
 import type { BoardRow } from "../lib/boardIndex";
 import type { ShiftTemplate } from "@/lib/api";
 import { minutesToPx, shiftBoundaries, shiftInstances, ZOOMS, intersects } from "../lib/geometry";
+import { Chevron } from "@/components/icons";
 import styles from "./GroupRow.module.css";
 
 /**
@@ -70,7 +71,9 @@ export function GroupRow({
           if (e.key === "Enter" || e.key === " ") onToggle();
         }}
       >
-        <span className={styles.caret}>{collapsed ? "▸" : "▾"}</span>
+        <span className={styles.caret}>
+          <Chevron direction={collapsed ? "right" : "down"} />
+        </span>
         <span>{row.node.name}</span>
         <span className={styles.lvl}>{level?.name ?? ""}</span>
       </div>

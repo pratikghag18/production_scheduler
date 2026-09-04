@@ -2,7 +2,9 @@ import { useState } from "react";
 import type { Product, BoardOperator } from "@/lib/api";
 import type { IndexedAssignment, IndexedRun } from "../lib/boardIndex";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
+import { TargetField, normalizeTarget } from "./TargetField";
 import styles from "./AssignmentPopover.module.css";
 
 const STATUS_OPTIONS = ["planned", "active", "done"];
@@ -38,9 +40,11 @@ export function AssignmentPopover({
   products,
   anchor,
   windowStart,
+  dateFormat = DEFAULT_DATE_FORMAT,
   onCancel,
   onSave,
   onDelete,
+  defaultTargetFor,
 }: {
   assignment: IndexedAssignment;
   homeRun: IndexedRun | null;
@@ -48,6 +52,7 @@ export function AssignmentPopover({
   products: Product[];
   anchor: { x: number; y: number };
   windowStart: Date;
+  dateFormat?: DateFormat;
   onCancel: () => void;
   onSave: (
     assignmentId: string,
@@ -57,6 +62,18 @@ export function AssignmentPopover({
     status: string,
   ) => void;
   onDelete: (assignmentId: string) => void;
+  /**
+   * R-316: the TARGET this assignment works out to at a given efficiency, from
+   * its cell's standard cycle time — or null when that cell has no cycle time
+   * for the part. A target, not a standard: the standard is the seconds per
+   * unit and does not move; this number does.
+   *
+   * A function rather than a number because efficiency is editable right here
+   * and scales the result. Passing the already-computed
+   * `assignment.defaultTargetQty` would show the figure for the SAVED
+   * efficiency while the user is typing a different one.
+   */
+  defaultTargetFor?: (efficiencyPercent: number) => number | null;
 }) {
   const isDirect = homeRun === null;
   const currentProductId = isDirect ? (assignment.productId ?? "") : homeRun.productId;
@@ -64,14 +81,25 @@ export function AssignmentPopover({
   const [targetQty, setTargetQty] = useState(
     assignment.targetQty == null ? "" : String(assignment.targetQty),
   );
-  const [targetUnit, setTargetUnit] = useState(assignment.targetUnit ?? "units");
+  const [targetUnit, setTargetUnit] = useState(assignment.targetUnit ?? "");
   const [status, setStatus] = useState(
     STATUS_OPTIONS.includes(assignment.status) ? assignment.status : "planned",
   );
 
+  // R-316: follows the efficiency box as it is typed. An unparseable or empty
+  // box falls back to the saved efficiency rather than to 100, so a
+  // half-deleted number never makes the standard jump.
+  const typedEfficiency = Number(efficiencyPercent);
+  const derivedQty =
+    defaultTargetFor?.(
+      Number.isFinite(typedEfficiency) && typedEfficiency > 0
+        ? typedEfficiency
+        : assignment.efficiencyPercent,
+    ) ?? assignment.defaultTargetQty;
+
   const product = products.find((p) => p.id === currentProductId);
   const name = operator?.displayName ?? "(unknown operator)";
-  const timeLabel = `${formatFull(addMinutes(windowStart, assignment.startMin))} – ${formatClock(addMinutes(windowStart, assignment.endMin))}${assignment.eligibilityOverride ? " · certification override" : ""}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, assignment.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, assignment.endMin))}${assignment.eligibilityOverride ? " · certification override" : ""}`;
 
   return (
     <BoardPopover anchor={anchor} onClose={onCancel} title={`${name} — ${product?.name ?? "—"}`}>
@@ -87,25 +115,14 @@ export function AssignmentPopover({
           onChange={(e) => setEfficiencyPercent(e.target.value)}
         />
 
-        <label htmlFor="ap-target">Target (optional)</label>
-        <div className={styles.row2}>
-          <input
-            id="ap-target"
-            type="number"
-            min={1}
-            placeholder="—"
-            value={targetQty}
-            onChange={(e) => setTargetQty(e.target.value)}
-          />
-          <input
-            id="ap-unit"
-            aria-label="Target unit"
-            type="text"
-            maxLength={8}
-            value={targetUnit}
-            onChange={(e) => setTargetUnit(e.target.value)}
-          />
-        </div>
+        <TargetField
+          idPrefix="ap"
+          qty={targetQty}
+          unit={targetUnit}
+          onQtyChange={setTargetQty}
+          onUnitChange={setTargetUnit}
+          derivedQty={derivedQty}
+        />
 
         <label htmlFor="ap-status">Status</label>
         <select id="ap-status" value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -130,9 +147,8 @@ export function AssignmentPopover({
             className={styles.pri}
             onClick={() => {
               const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
-              const tRaw = targetQty.trim();
-              const qty = tRaw === "" ? null : Math.max(1, Number(tRaw) || 1);
-              onSave(assignment.id, eff, qty, (targetUnit || "units").slice(0, 8), status);
+              const { qty, unit } = normalizeTarget(targetQty, targetUnit);
+              onSave(assignment.id, eff, qty, unit, status);
             }}
           >
             Save

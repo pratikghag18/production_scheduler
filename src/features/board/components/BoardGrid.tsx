@@ -15,6 +15,7 @@ import {
 } from "../lib/geometry";
 import { resolveDropRow } from "../lib/interaction";
 import { MS_PER_MINUTE } from "../lib/time";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardHeader } from "./BoardHeader";
 import { GroupRow } from "./GroupRow";
 import { TrackRow, type TrackRowDragApi } from "./TrackRow";
@@ -106,6 +107,7 @@ export function BoardGrid({
   dragApi,
   setDropRowResolver,
   onFitScaleChange,
+  dateFormat = DEFAULT_DATE_FORMAT,
 }: {
   index: BoardIndex;
   levelById: Map<string, HierarchyLevel>;
@@ -114,6 +116,8 @@ export function BoardGrid({
   zoomIndex: 0 | 1 | 2;
   productById: Map<string, Product>;
   operatorById: Map<string, BoardOperator>;
+  /** R-309: the org-wide date format, threaded to the day header. */
+  dateFormat?: DateFormat;
   /** Bumped by the store to request that "now" be scrolled into view. */
   scrollToNowNonce: number;
   /** P1-4b: the single `useDragGesture` instance, threaded down to every
@@ -184,18 +188,20 @@ export function BoardGrid({
   // function for the admin screen. It is NOT imported here: a feature may not
   // import from another feature (docs/conventions.md), and the shared thing is
   // the DATABASE column, not this three-line lookup.
-  const productColorVar = useCallback(
-    (productId: string | null) => {
-      if (!productId) return "var(--muted)";
-      const token = productById.get(productId)?.colorToken;
-      // ⭐ ONE RULE, ONE FILE. This branch was written out here, in
-      // `BoardToolbar.tsx` and in the admin lib, with a comment claiming the
-      // three were kept in step by hand — and 0025 §2 then added a hex arm,
-      // which is the edit that makes hand-kept copies disagree. D100, again.
-      return productColorCss(token);
-    },
-    [productById],
-  );
+  // ⚠️ TAKES THE RESOLVED PRODUCT, NOT AN ID, SINCE D110. A deleted product has
+  // no id to look up and its colour lives on the run itself — passing an id
+  // here meant every snapshotted run redrew in `--muted` grey, which is the
+  // "unknown product" look the snapshot exists to prevent. The caller resolves
+  // once with `productViewFor` and passes the same object to both props.
+  const productColorVar = useCallback((product: Product | undefined) => {
+    const token = product?.colorToken;
+    if (!token) return "var(--muted)";
+    // ⭐ ONE RULE, ONE FILE. This branch was written out here, in
+    // `BoardToolbar.tsx` and in the admin lib, with a comment claiming the
+    // three were kept in step by hand — and 0025 §2 then added a hex arm,
+    // which is the edit that makes hand-kept copies disagree. D100, again.
+    return productColorCss(token);
+  }, []);
 
   // --- collapse filtering: a row is hidden if any ancestor node id is
   // collapsed. One pass over the ordered rows array (§9). ------------------
@@ -539,6 +545,7 @@ export function BoardGrid({
           zoomIndex={zoomIndex}
           railWidth={railWidth}
           visibleMinRange={visibleMinRange}
+          dateFormat={dateFormat}
         />
         <div
           className={styles.spacer}

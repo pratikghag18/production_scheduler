@@ -6,13 +6,21 @@
  * this file — the hook, the pure module, the panel — works in camelCase and
  * never learns that `site_node_id` exists.
  *
- * ⚠️ THERE IS NO RPC FOR PRODUCTS, AND THAT CHANGES THE ERROR STORY. Every
- * other write in this layer calls a function that ends in `api_raise`, so a
- * refusal arrives with a machine code in `DETAIL`. Here the writes are plain
- * PostgREST table calls and RLS is the only gate, so a refusal arrives as a
- * bare SQLSTATE — which is exactly what §19.63's five extra `SchedulerError`
- * kinds (`WriteRefused`, `DuplicateValue`, `StillInUse`, `InvalidValue`,
- * `ShiftOverlap`) were added for. `toSchedulerError` already maps them.
+ * ⚠️ ALMOST EVERY WRITE HERE IS A PLAIN TABLE CALL, AND THAT CHANGES THE ERROR
+ * STORY. Every other write in this layer calls a function that ends in
+ * `api_raise`, so a refusal arrives with a machine code in `DETAIL`. Here the
+ * writes are plain PostgREST table calls and RLS is the only gate, so a refusal
+ * arrives as a bare SQLSTATE — which is exactly what §19.63's five extra
+ * `SchedulerError` kinds (`WriteRefused`, `DuplicateValue`, `StillInUse`,
+ * `InvalidValue`, `ShiftOverlap`) were added for. `toSchedulerError` maps both.
+ *
+ * ⭐ THE ONE EXCEPTION IS `createProductAtNode` (D116, migration 0036). A site
+ * admin's create must be authorised against the plant it lands in, which an
+ * INSERT WITH CHECK on `products` cannot see, so create-at-a-plant is the RPC
+ * `create_product_at_node` — the one products write that DOES raise a machine
+ * code. Its refusal (`not_permitted`) is a plant the caller does not administer;
+ * `updateProduct` / `setProductColor` / `deleteProduct` widened to allow a site
+ * admin who administers every plant a part is made at (`app_can_edit_product_record`).
  *
  * ⭐ AND THE HALF THAT RAISES NOTHING AT ALL. A policy's `WITH CHECK` clause
  * raises 42501; its `USING` clause merely FILTERS. So a refused INSERT is an
@@ -33,15 +41,18 @@ import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
 /**
  * One `products` row as the admin screen needs it.
  *
- * `siteNodeId` is the node this product belongs to. **NOT NULLABLE since
- * migration 0028 / D108** -- there is no company-wide product, and it is not
- * restricted to roots either (D109): a product can belong to Line 1 and be
- * offered on Line 1 and nowhere else.
+ * ⭐ D115 / migration 0034: a product BELONGS TO A LIST OF PLACES, not one. The
+ * single `site_node_id` column is gone; `siteNodeIds` is the list of nodes this
+ * product is made at, read from the `product_sites` join table. The company owns
+ * the part number (`unique (org_id, sku)` is unchanged); which plants make it is
+ * this list — one, several, or all.
  *
- * ⚠️ A ROW THAT ARRIVES WITH A NULL OWNER IS REJECTED BY THE PARSER BELOW,
- * not coerced. The column is NOT NULL, so a null here means the read did not
- * come from a database this client understands; it is counted as skipped and
- * said out loud rather than rendered as though it belonged somewhere.
+ * ⚠️ `siteNodeIds` IS "AS FAR AS THIS READER CAN SEE". `product_sites` is
+ * RLS-scoped by `app_can_read_node`, so a Plant B admin reading a part made in
+ * Plant A and Plant B gets ONLY the Plant B node id back — the whole list is a
+ * company-admin view. An EMPTY list is a real, ordinary state: a company-wide
+ * part not yet assigned to any plant, or one whose plants are all outside this
+ * reader's view. It is never coerced or treated as an error.
  */
 export interface AdminProduct {
   id: string;
@@ -51,13 +62,21 @@ export interface AdminProduct {
   /** `'manual'` for anything typed on this screen; imports set their own. */
   source: string;
   externalId: string | null;
-  /** `null` = company-wide. See the interface comment. */
-  siteNodeId: string;
+  /** The nodes this product is made at (product_sites), RLS-scoped. May be empty. */
+  siteNodeIds: string[];
   colorToken: string;
 }
 
-/** The columns every read below selects, in one place so they cannot drift. */
-const PRODUCT_COLUMNS = "id, sku, name, active, source, external_id, site_node_id, color_token";
+/**
+ * The columns every read below selects, in one place so they cannot drift.
+ *
+ * ⭐ `product_sites(node_id)` is a PostgREST EMBED, not a column — the join
+ * table is reachable from `products` through its `(org_id, product_id)` foreign
+ * key, and the embed is itself RLS-filtered, which is exactly the "as far as the
+ * reader can see" the interface promises. `parseAdminProduct` reads the array.
+ */
+const PRODUCT_COLUMNS =
+  "id, sku, name, active, source, external_id, color_token, product_sites(node_id)";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -74,7 +93,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  */
 export function parseAdminProduct(row: unknown): AdminProduct | null {
   if (!isRecord(row)) return null;
-  const { id, sku, name, active, source, external_id, site_node_id, color_token } = row;
+  const { id, sku, name, active, source, external_id, color_token, product_sites } = row;
   if (
     typeof id !== "string" ||
     typeof sku !== "string" ||
@@ -82,10 +101,21 @@ export function parseAdminProduct(row: unknown): AdminProduct | null {
     typeof active !== "boolean" ||
     typeof source !== "string" ||
     !(external_id === null || typeof external_id === "string") ||
-    typeof site_node_id !== "string" ||
-    typeof color_token !== "string"
+    typeof color_token !== "string" ||
+    !Array.isArray(product_sites)
   ) {
     return null;
+  }
+  // ⭐ THE EMBED IS AN ARRAY OF `{ node_id }`, and a malformed entry REJECTS the
+  // whole row rather than being dropped. Where a product is offered is identity,
+  // not decoration (`scope.ts`'s header): a place silently missing would make
+  // the product look un-offered in a plant it is actually made in. An empty
+  // array is fine — that is a legitimate unassigned/foreign state — but a
+  // non-string node id is a shape this client does not understand.
+  const siteNodeIds: string[] = [];
+  for (const entry of product_sites) {
+    if (!isRecord(entry) || typeof entry.node_id !== "string") return null;
+    siteNodeIds.push(entry.node_id);
   }
   return {
     id,
@@ -94,7 +124,7 @@ export function parseAdminProduct(row: unknown): AdminProduct | null {
     active,
     source,
     externalId: external_id,
-    siteNodeId: site_node_id,
+    siteNodeIds,
     colorToken: color_token,
   };
 }
@@ -126,8 +156,6 @@ export interface CreateProductInput {
   orgId: string;
   sku: string;
   name: string;
-  /** `null` = company-wide, which the insert policy allows only to a company admin. */
-  siteNodeId: string;
 }
 
 /**
@@ -153,12 +181,20 @@ type ProductInsert = TablesInsert<"products">;
 type ProductInsertDraft = Omit<ProductInsert, "color_token"> &
   Partial<Pick<ProductInsert, "color_token">>;
 
+/**
+ * Creates the shared product record — sku, name, colour (trigger-picked).
+ *
+ * ⭐ D115: NO PLACES HERE. Creating a part is a company-admin act (the Split
+ * decision, migration 0034 §9): it makes the company-wide record. Which plants
+ * make it is managed separately through `assignProductSite`, so a just-created
+ * part is offered nowhere until a plant is added — a legitimate state, not an
+ * error. The returned row's `siteNodeIds` is therefore empty.
+ */
 export async function createProduct(input: CreateProductInput): Promise<AdminProduct> {
   const payload: ProductInsertDraft = {
     org_id: input.orgId,
     sku: input.sku,
     name: input.name,
-    site_node_id: input.siteNodeId,
   };
 
   const { data, error } = await supabase
@@ -169,55 +205,131 @@ export async function createProduct(input: CreateProductInput): Promise<AdminPro
   return firstProduct(requireWritten(data), "products.insert");
 }
 
+export interface CreateProductAtNodeInput {
+  sku: string;
+  name: string;
+  /**
+   * A plant — or a node under one — the caller administers. The part is created
+   * AND assigned here in one act. `org_id` is NOT passed: the RPC reads it from
+   * the session, so a caller cannot mint a part into another tenant.
+   */
+  nodeId: string;
+}
+
+/**
+ * Creates the shared product AND drops it onto one plant the caller administers,
+ * in a single server transaction — the SITE-ADMIN create path (D116, migration
+ * 0036, `create_product_at_node`).
+ *
+ * ⭐ WHY AN RPC, WHEN `createProduct` IS A PLAIN INSERT. A site admin's create
+ * has to be authorised against the plant it lands in, and that plant is not a
+ * column on `products` — it is the first `product_sites` row, written second. An
+ * `INSERT ... WITH CHECK` cannot see it, and `app_is_admin_anywhere()` is
+ * visibility-only and must never authorise a write (0019 §5). So the RPC gates on
+ * `app_is_admin_for(node)` and does both inserts in one transaction: a refused
+ * assignment can never leave a company-wide part orphaned at no plant.
+ *
+ * A company admin keeps the plant-less `createProduct` above (they choose plants
+ * afterwards); this is the plant admin's door, whose part must be born somewhere
+ * they administer. The RPC returns the bare products row — no `product_sites`
+ * embed — so the one place we KNOW, the node just assigned, is folded back in.
+ */
+export async function createProductAtNode(input: CreateProductAtNodeInput): Promise<AdminProduct> {
+  const { data, error } = await supabase.rpc("create_product_at_node", {
+    p_sku: input.sku,
+    p_name: input.name,
+    p_node_id: input.nodeId,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseAdminProduct({
+    ...(data as Record<string, unknown>),
+    product_sites: [{ node_id: input.nodeId }],
+  });
+  if (parsed === null) {
+    throw shapeMismatch("products.createAtNode", "expected a products row (see AdminProduct)");
+  }
+  return parsed;
+}
+
 export interface UpdateProductInput {
   id: string;
   sku: string;
   name: string;
-  /** Where it belongs. Omit to leave alone; `null` moves it company-wide. */
-  siteNodeId?: string;
 }
 
 /**
- * Renames / re-skus one product.
+ * Renames / re-skus one product — the shared, company-wide record.
  *
- * ⚠️ IT TOUCHES `site_node_id` NOW, AND THE OLD REASONING IS DEAD. This
- * function used to say, in writing, that "owner is set once, at creation" —
- * because moving a product between owners would leave it holding a colour token
- * drawn from the OLD owner's palette, possibly a duplicate within the new one,
- * and D102 exists to stop colours changing under people.
+ * ⭐ D115: WHERE IT BELONGS IS NOT HERE ANY MORE. A product's places are the
+ * `product_sites` list, changed through `assignProductSite` / `unassignProductSite`,
+ * because they carry their own permission (a plant admin manages their own plant)
+ * and their own refusal (removing a plant that still has work stranded). Folding
+ * them into this rename would make a rename able to fail on a strand and a place
+ * change able to fail on a duplicate sku — one write, one thing that can be wrong.
  *
- * That argument had a premise, and 0025 removed it: a colour can now be set by
- * hand, so "the palette picked this for you and it might collide" is no longer
- * a reason to freeze the owner — it is a reason to let someone change the
- * colour, which they can. [[decision-record-drift]] rule 6: when you correct a
- * premise, go back and re-examine the decision it was supporting.
- *
- * ⚠️ AND THE MAINTAINER ASKED THREE TIMES. Where something belongs is not a property of
- * its birth; a line gets reorganised and its products move with it. A create
- * form without a matching edit is the same defect as a break you could only
- * delete and retype (§19.65) — build the edit path at the same time as the
- * create path, every time.
- *
- * `siteNodeId` is OPTIONAL: omit it to leave where the product belongs alone.
- * Before 0028 it was `string | null | undefined` and all three meant something
- * different -- a value moved it, `null` made it company-wide, `undefined` left
- * it -- which is why "not supplied" could not be spelled as `null`. D108
- * removed the middle case and the type says so: `string | undefined`.
+ * ⚠️ AND UNDER THE SPLIT DECISION (0034 §9) THIS IS COMPANY-ADMIN ONLY. The
+ * `products_update` policy is now `app_is_admin()`: the part number is company
+ * property. A site admin's rename is refused by RLS and lands on `requireWritten`
+ * as `WriteRefused`, exactly the shape §19.63 was built for.
  */
 export async function updateProduct(input: UpdateProductInput): Promise<AdminProduct> {
-  const patch: { sku: string; name: string; site_node_id?: string } = {
-    sku: input.sku,
-    name: input.name,
-  };
-  if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;
-
   const { data, error } = await supabase
     .from("products")
-    .update(patch)
+    .update({ sku: input.sku, name: input.name })
     .eq("id", input.id)
     .select(PRODUCT_COLUMNS);
   if (error) throw toSchedulerError(error);
   return firstProduct(requireWritten(data), "products.update");
+}
+
+export interface ProductSiteInput {
+  /** `product_sites.org_id` has no default — supplied from the session. */
+  orgId: string;
+  productId: string;
+  /** The node (plant, line, area — any node) to add or remove. */
+  nodeId: string;
+}
+
+/**
+ * Adds a plant to a product's list of makers — one `product_sites` row.
+ *
+ * ⭐ D115 / the Split decision: a plant admin may add THEIR OWN plant
+ * (`product_sites_insert` = `app_is_admin() OR app_is_admin_for(node_id)`); a
+ * company admin may add any. A refusal is a plain RLS filter, so `.select()` +
+ * `requireWritten` turns the silent empty result into `WriteRefused` — the same
+ * backstop every write in this file relies on (see the header).
+ *
+ * Idempotent-ish: the PK is `(product_id, node_id)`, so adding a plant twice
+ * raises `23505` -> `DuplicateValue`, which the panel treats as already-there.
+ */
+export async function assignProductSite(input: ProductSiteInput): Promise<void> {
+  const { data, error } = await supabase
+    .from("product_sites")
+    .insert({ org_id: input.orgId, product_id: input.productId, node_id: input.nodeId })
+    .select("node_id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data);
+}
+
+/**
+ * Removes a plant from a product's list of makers.
+ *
+ * ⚠️ THIS CAN BE REFUSED FOR TWO DIFFERENT REASONS, and both are real. RLS
+ * refuses a plant admin removing a plant that is not theirs (empty result ->
+ * `WriteRefused`). The strand guard (`app_guard_product_site_remove`, 0034 §5)
+ * raises `owner_change_blocked` when the product is still scheduled somewhere
+ * only this plant covers — moving somebody else's schedule is not a side effect
+ * an un-assign gets to have. The panel names each.
+ */
+export async function unassignProductSite(input: ProductSiteInput): Promise<void> {
+  const { data, error } = await supabase
+    .from("product_sites")
+    .delete()
+    .eq("product_id", input.productId)
+    .eq("node_id", input.nodeId)
+    .select("node_id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data);
 }
 
 export interface SetProductColorInput {

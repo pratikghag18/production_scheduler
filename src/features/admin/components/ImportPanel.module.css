@@ -1,9 +1,262 @@
-/* CSV import — pre-seated (§19.62). One rule, so the file is real and the lane
-   that fills it never has to touch `REM_SURFACES` or R10's copy of it.
-   This is a SEED, not a shared surface: anything that ends up being shared
-   between panels belongs in one file both compose from (D100), not copied. */
+/* CSV import (§19.62). Sized in `rem` like `ProductsPanel.module.css`, the same
+   tokens and spacing; `global.css` already gives inputs/buttons/selects
+   `font: inherit` (D89). Hairline borders stay in px on purpose.
+
+   This began as a SEED with one rule; the wizard that fills it composes the
+   same idioms `ProductsPanel` uses. Anything genuinely shared between panels
+   belongs in one file both compose from (D100), not copied — but a badge and a
+   preview table are this screen's own furniture. */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* Which entity to import — Products / People. */
+.entityTabs {
+  display: flex;
+  gap: 0.25rem;
+}
+.entityTab {
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--axis);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.entityTabOn {
+  border-color: var(--ink-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.card {
+  border: 1px solid var(--axis);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  padding: 0.875rem 1rem;
+}
+
+.h2 {
+  margin: 0 0 0.625rem;
+  font-size: 0.875rem;
+}
+
+.status {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  margin: 0.25rem 0;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0 0 0.625rem;
+}
+
+.error {
+  color: var(--crit);
+  font-size: 0.75rem;
+  margin: 0.25rem 0 0;
+}
+
+.skippedLine {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+/* --- the column-mapping form ----------------------------------------------
+   A row of labelled selects that wraps, the same shape as the products add
+   form. Each field is a stacked label + control. */
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.625rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 9rem;
+  flex: 1 1 9rem;
+}
+
+.fieldLabel {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+/* The native file control sits in the same field column; nothing to align it
+   against, so it keeps its intrinsic width. */
+.file {
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.counts {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.fileErrors {
+  list-style: none;
+  margin: 0.375rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+/* --- the preview table -----------------------------------------------------
+   Scrolls in its own container so a wide file (long names, an import id column)
+   never pushes the panel's own edge sideways. */
+.tableScroll {
+  margin-top: 0.625rem;
+  max-height: 22rem;
+  overflow: auto;
+  border: 1px solid var(--grid);
+  border-radius: 0.5rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--grid);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  z-index: 1;
+}
+
+.lineCell {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* --- the per-row status badge ---------------------------------------------
+   Colour and word by `outcome.kind`. The error variant sits beside its
+   messages so the reason is read on the same line as the badge. */
+.badge {
+  display: inline-block;
+  border-radius: 0.75rem;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid var(--grid);
+}
+
+.badgeInsert {
+  color: var(--ok, #1baf7a);
+  border-color: var(--ok, #1baf7a);
+}
+
+.badgeUpdate {
+  color: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+.badgeError {
+  color: var(--crit);
+  border-color: var(--crit);
+}
+
+.rowError {
+  color: var(--crit);
+  font-size: 0.75rem;
+}
+
+.primary,
+.quiet {
+  border-radius: 0.375rem;
+  border: 1px solid var(--axis);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--surface);
+  color: var(--ink);
+  margin-right: 0.375rem;
+}
+
+.primary {
+  border-color: var(--ink-2);
+}
+
+.quiet {
+  color: var(--ink-2);
+}
+
+.primary:disabled,
+.quiet:disabled {
+  opacity: 0.45;
+}
+
+/* The legend under the file picker: what each template column means. */
+.legend {
+  margin: 0 0 0.5rem;
+  display: grid;
+  gap: 0.25rem;
+}
+.legendRow {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.legendTerm {
+  margin: 0;
+  font-weight: 600;
+}
+.legendDesc {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.9em;
+}
+
+/* An inline "Download a template" link inside the hint sentence. */
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, #2a6);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkButton:hover {
+  text-decoration: none;
 }

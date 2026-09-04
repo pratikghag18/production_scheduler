@@ -6323,12 +6323,25 @@ the larger one**: ownership decides **where a thing is offered**, not only who
 may edit it. A product scoped to Line 1 is offered on every cell at or below
 Line 1 and nowhere else; company-wide stays the everywhere fallback.
 
-**⭐ AND OPERATORS ARE DELIBERATELY NOT PART OF THAT RULE (his call).** Where a
-person may work is already answered by tickets and requirements. A second
-mechanism that can disagree with `check_eligibility` would mean two systems
-saying no for different reasons with nothing on screen able to reconcile them.
-**An operator's scope filters the roster and nothing else** — who you see and
-who you administer, never who may be assigned where.
+**⭐ AND OPERATORS ARE DELIBERATELY NOT PART OF THAT RULE (the maintainer's
+call).** Where a person may work is already answered by tickets and
+requirements. A second mechanism that can disagree with `check_eligibility`
+would mean two systems saying no for different reasons with nothing on screen
+able to reconcile them. **An operator's scope filters the roster and nothing
+else** — who you see and who you administer, never who may be assigned where.
+
+> ⚠️⚠️ **SUPERSEDED — THIS PARAGRAPH IS NO LONGER TRUE, AND IT IS THE CLEAREST
+> case of [[decision-record-drift]] rule 6 in the project: a CONCLUSION
+> outliving its premise.** Migration 0028 / **D109** made ownership decide who
+> may be assigned where after all — `app_guard_assignment_scope` refuses an
+> assignment whose operator is not owned by an ancestor-or-self of the cell —
+> and it arrived as a consequence of a different requirement, so nothing marked
+> D103 as affected (§19.75). Migration 0030 / **D113** then gave that refusal a
+> supervisor override with a recorded reason. **The two systems D103 feared are
+> exactly what shipped, and §19.77 is the screen that had to learn to say so:**
+> two rules, three states, one list. This paragraph was quoted verbatim in two
+> comments in `OperatorsPanel.tsx` and both were still there, and still false,
+> a year of decisions later.
 
 **The shape, and why it is cheaper than it looks:**
 
@@ -7670,3 +7683,1267 @@ fixture of plant admins alone will never exercise.
 ⚠️ **The original `Standard Plant` structure is deliberately kept**, emptied of nodes. It is what
 `create_node` copies when a new root is created, so deleting it would make "add a plant" fail
 from the app. It will appear in a company admin's structure list as an empty one.
+
+## §19.74 — D110: a delete that keeps the past (migration 0029)
+
+> *"When it is deleted, we give a warning to the user that all the corresponding data will be
+> deleted and encourage them deactivate to retain the data instead. This will be handled by
+> site admin so it their call in the end."* — the maintainer, 28 August
+>
+> *"the row disappears from the list and from anything not yet started; completed runs keep
+> their record of it."* — the maintainer, settling the line, 28 August
+
+### The line is the CLOCK, and `status` would have destroyed history
+
+`runs.status` exists and nothing in the product advances it: every run this system has ever
+created is still `'planned'`, including the ones that finished last month. A delete that
+trusted it would have deleted the past — the exact opposite of what D110 is for. So:
+
+> **NOT YET STARTED == `lower(timerange) > now()`.** Everything else is kept.
+
+⭐ **And note the direction of the NULL.** An unbounded lower bound makes `lower()` NULL, the
+comparison NULL, and the row falls to the **kept** side. A row whose start we cannot name is not
+a row we delete. `56_`'s D17 is that case, and nobody would have thought to write it from the
+sentence alone.
+
+### ⭐⭐ Why this can be `SECURITY INVOKER`, and why that is D109 paying for itself
+
+Deleting a product deletes runs on cells the deleter never named. **Before D109 that was a
+genuine privilege question** — a company-wide product could sit on any plant's board, so
+reaching those runs would have needed `SECURITY DEFINER` and a bespoke permission story. D109
+removes the precondition:
+
+> **Claim.** If the caller may delete owned row X, the caller may edit every run and every
+> assignment that references X.
+>
+> **Proof.** `<table>_delete` (0028 §8) admits `app_is_admin()` — then `app_can_edit_node` is
+> true everywhere in the org by its own first branch — or `app_is_admin_for(o)` for the owning
+> node `o`, i.e. a grant path `g` with `o.path <@ g`. Let `r` be the node of any run carrying X.
+> `app_guard_run_scope` admitted that run only if `o.path @> r.path`, so `r.path <@ o.path <@ g`,
+> so `app_is_admin_on_path(r.path)` and `app_can_edit_node(r)` hold. ∎
+
+So RLS stays switched on underneath the RPC as the second gate. ⚠️ **The proof is not left as an
+argument.** A refused `DELETE` removes zero rows and reports no error at all (§19.63), so every
+destructive statement counts what it means to touch and compares `ROW_COUNT` afterwards, raising
+`not_permitted` on any difference. **Mutation N15 removes that comparison and comes back NOT
+CAUGHT — correctly: it is defence in depth against a proof the fixture cannot falsify.** That
+is written down here rather than left as a number, because a NOT CAUGHT that is not explained
+is indistinguishable from a missing case.
+
+### Two mechanisms, and the line between them
+
+- **Products and people APPEAR IN HISTORY.** A finished run says which part it made; a finished
+  assignment says who worked it. So their identity is **copied onto the history that survives**
+  (`runs.product_sku/product_name/product_color_token`, `assignments.operator_display_name`) and
+  the reference is released. The copy is taken **at delete time**, so fixing a typo in a name
+  still fixes it in the past — which is what people expect a rename to do.
+- **Trainings and shift patterns are PRESENT-TENSE CONFIGURATION.** Nothing records which
+  pattern a cell ran in March, so there is no past to keep, and their join rows go by ordinary
+  `ON DELETE CASCADE`.
+
+⭐⭐ **And the cascade is not a shortcut — it is what makes the operation possible at all.**
+`app_guard_operator_skill_scope` (0028 §4) is **comparability**, not containment, so a
+plant-wide person may legitimately hold a Line 1 training. The Line 1 admin who owns that
+training is **not** admin for that person, so `operator_skills_delete` would refuse the row and
+"delete this training" would be a dead end nobody in the org could complete. `56_`'s D25 asserts
+both halves: that the line admin genuinely cannot touch the holder, and that the delete still
+finishes.
+
+### The three things a NOT NULL column being nulled broke
+
+1. **`check_operator_capacity` refused to let a person be deleted.** `operator_peak_load(NULL, …)`
+   matches no assignment, so `peak` becomes the row's own efficiency alone — and any assignment
+   above the org cap would refuse to be snapshotted. Deleting anyone who ever worked a full shift
+   would have failed, and it would have read as "delete is broken", not as a cap problem. D22.
+2. **0028's assignment guard short-circuited.** It reads the operator's owner and does
+   `if not found then return new` — right for a foreign tenant (that is the FK's refusal, not the
+   trigger's) and a RETURN that also skips the **product** half below it. With a NULL operator now
+   reachable, a direct assignment's product scope went unchecked. The two halves are separated;
+   the "not in this org" short-circuit inside the operator half is kept exactly as it was. D23.
+3. **`assignments_check` had to grow a third arm.** `num_nonnulls(run_id, product_id) = 1` becomes
+   `num_nonnulls(run_id, product_id, product_sku) = 1` — a remembered sku is simply a third way of
+   naming the one thing an assignment is for, so the rule keeps its shape.
+
+### What the client stopped saying
+
+⭐ **`describeDeleteRefusal` was DELETED, not fixed.** Both of its branches had stopped being
+true: `StillInUse` explained a refusal D110 no longer produces, and `WriteRefused` said
+*"Company-wide products can only be changed by a company admin"* — **wrong since D108, compiled
+fine, and covered by a green test (R4) that asserted the wrong sentence.** §19.72a lesson 2, one
+day later, found by grep and not by `tsc`.
+
+⭐⭐ **`deletePrecheck` was deleted for a sharper reason.** It refused to delete anybody still
+holding a ticket — *"Remove it first, or deactivate them instead"* — because the FK had no
+`ON DELETE`. 0029's cascade makes that refusal a rule **the client enforces and the database does
+not**, and the way out it names is work that no longer needs doing. A stale permission check fails
+loudly the first time somebody tries; **a stale REFUSAL never fails at all — it quietly stops
+people doing something they are allowed to do.**
+
+Also removed: two `siteNodeId === null ? "company-wide"` renderings in `OperatorsPanel`, and
+ShiftsPanel's *"detach it below before deleting it"*, which the cascade made false.
+
+### The dialog, and the one decision in it
+
+`DeleteDialog` asks `deletion_preview` **before** it asks the person, and both destructive
+buttons stay disabled until the answer arrives — a confirmation that can be clicked through
+before it knows what it is confirming is worse than none, because it looks like one.
+
+⭐⭐ **Deactivate is the primary action only when something is actually at risk.** There are
+**three** stakes, not two: `nothing` (deleting destroys nothing), `history-only` (nothing on the
+schedule changes, but finished work names it), and `destructive` (something not yet started
+goes). Pushing "Deactivate instead" every time is how a warning becomes something people learn
+to click past — and then the one that matters gets clicked past too. K8 in `deletion.test.ts` is
+that case.
+
+⭐ **D106 again: the confirm button NAMES what it destroys** — *"Delete, and remove 1 job on the
+schedule and 2 shifts for people"*. The screen this replaces said "Delete for good?" whether the
+answer was "nothing happens" or "eleven jobs disappear", because before 0029 the client had no
+way to find out which.
+
+⚠️ **An unknown `what` key is RENDERED, never dropped** (K5). Skipping a key with no phrase would
+turn "and 40 other rows go too" into a blank line in a confirmation dialog.
+
+### Numbers, and what is owed
+
+**29 migrations. 445 database checks** (408 + 31 in `56_` + 6 in `upgrade_0029_`), exit 0, run on
+a real PG16. **App tests 1118 in 27 files, from his run** — see below for why the predicted 1116
+was short. **16 deliberate breakages: 15 caught, 1 NOT CAUGHT and it is the inert control** —
+plus N15 above, which was written expecting NOT CAUGHT and says so in its own name. **N7 came back
+NOT CAUGHT on the first run and was a REAL GAP**: removing the RPC's up-front permission check left
+every case passing, because RLS refuses the final `DELETE` anyway and the `ROW_COUNT` guard turns
+that into the same `PT403`. The sqlstate could not tell "refused before anything was attempted"
+from "refused after the runs were deleted and rolled back", and the two are different products —
+one says you may not administer this site, the other says "the product itself could not be
+deleted", which is a sentence nobody can act on. D27 now asserts the **message**.
+
+### ⭐⭐ What his run found, and it is two things
+
+**1. An audit's list is a file you have edited, and the audit is what said so.** `npm run test`
+went red twice, both in `scaleAudit`'s D89 block: `DeleteDialog.module.css` is a new stylesheet
+under `src/features/admin` and was not in `REM_SURFACES`. That is exactly what D89 exists for —
+`ShapePicker.module.css` shipped unaudited once and the walker was written so it could not happen
+again — and it worked. **The rule to carry: adding a file to a directory an audit WALKS means
+editing the audit's list, in both of its places** (`scaleAudit.ts` and R10's independent copy).
+Nothing in `tsc`, `eslint` or the SQL suite can see it, and the session that adds the file cannot
+run `vitest` at all. ⚠️ **What I could have done and did not: grep for `REM_SURFACES` when adding
+the file.** The list names its own directory in a comment.
+- Measured afterwards on his machine, in place, under `--experimental-strip-types`:
+  `missingRemSurfaces` returns `[]`; removing the new entry makes it name that file again, so the
+  entry is not inert; and `unscaledPxLengths` flags nothing in the new stylesheet, which is what
+  putting it under the audit was for.
+
+**2. ⚠️ THE BASELINE COUNT IN THE ROADMAP AND IN MEMORY WAS WRONG BY TWO, AND THAT IS WORSE THAN
+IT SOUNDS.** Both recorded session 16's confirmed suite as **1105**. His 0029 run reports **1118**
+total, and the arithmetic is exact in the other direction: 1118 − 21 (`deletion.test.ts`) + 7
+(`describeDeleteRefusal`'s R1–R7) + 3 (`deletePrecheck`'s D1–D3) = **1107**. §19.72a records that
+the first 0028 handoff predicted 1107 and eight cases went red; those eight were *fixed*, not
+deleted, so the count never moved and 1105 was a transcription error at the moment of writing it
+down.
+- **The whole convention rests on the number being exact** — "if your count differs, a test file
+  did not load" only works if the baseline is right. A baseline off by two makes every future
+  prediction land two short and read as a broken suite.
+- **So: when a run confirms a count, copy the runner's own total line, not a number reasoned to.**
+  And when a prediction misses by a small amount with no red cases to explain it, **suspect the
+  baseline before suspecting the loader.**
+
+🔴 **OWED, and named rather than half-built: `skills.active` and `shift_templates.active` have no
+control.** The columns exist so all four owned lists mean the same thing (and 0030 will need
+them), but no screen reads or writes them, so `DeleteDialog` deliberately offers no "Deactivate
+instead" for those two kinds. Wiring them needs the column in each read shape, a retired
+partition in each list, and a toggle — and adding a required field to `SkillRecord` breaks every
+fixture that builds one, which is not a change to make blind.
+
+## §19.75 — D113: stage 20's area rule already ships, and it ships stricter than asked
+
+**Status finding, 28 August, from the maintainer's question — *"why is stage 20 and 21 not complete, I
+thought that was completed in the last session?"***
+
+He was half right, and the half he was right about is the interesting one.
+
+### ⭐⭐ The refusal is LIVE, and nobody built it as stage 20
+
+Stage 20 is *"certain people can only work in certain areas"*. D109's guard
+(`app_guard_assignment_scope`, migration 0028 §4) refuses any assignment whose operator is not
+owned by an ancestor-or-self of the cell — **which is that rule, exactly.** It arrived as a
+consequence of *"no product or operator can be assigned where it does not belong"* and nothing
+marked stage 20 as affected. **A stage can be delivered by a change made for another reason, and
+nothing in this project notices.**
+
+### ⭐⭐ And what shipped is STRICTER than what was asked for
+
+The request was a refusal **a supervisor can override while recording a reason**. There is no
+override, and there is no way to reach one. Measured on a real database rather than reasoned:
+
+```
+as the COMPANY ADMIN -- the one account no permission check refuses --
+create_assignment(cell in own org, operator owned by another plant,
+                  p_eligibility_override := true,
+                  p_override_reason := 'supervisor says it is fine')
+  -->  REFUSED   PT409   not_offered_here
+       "That person does not belong to this part of the structure."
+```
+
+`eligibility_override` has only ever governed the **training** check inside `create_assignment`
+(0009 §5). The scope guard is a BEFORE ROW trigger that fires ahead of it and reads nothing about
+overrides at all.
+
+⚠️ **This is the shape [[when-not-to-ask]] calls a defect rather than a question**: a stated
+requirement that the code does not meet. It went unnoticed because 0028 was reasoned about as a
+*read*-scoping and ownership change, and its scheduling half quietly answered a different stage's
+requirement in the strictest possible way.
+
+### D113 — who may override (the maintainer, 28 August)
+
+> **Anyone who can schedule there.** A supervisor with edit rights on the cell may place someone
+> outside their area, recording a reason. The area rule becomes a strong warning rather than a
+> wall, and the audit log carries who waved it through.
+
+Three things that follow, and the second is the one that can go wrong quietly:
+
+1. **It needs its OWN override, not `eligibility_override`.** A supervisor waving through *"no
+   Welding ticket"* must not silently also place someone in a plant they are not cleared for —
+   **the weaker permission would grant the stronger one.** A second flag and a second reason, or
+   one reason with a typed cause; either way two decisions, never one.
+2. ⚠️ **The gate cannot live in `create_assignment` alone.** The refusal is a trigger, so it fires
+   for a plain PostgREST `PATCH` on `assignments.node_id` too — which is how a run is moved
+   between cells (§15.2) and how `apply_split_coverage` writes. **Every path that can put an
+   assignment on a new node has to carry the override, or the feature works from one screen and
+   refuses from another.** That is D110's own lesson about a door built on one screen.
+3. **"Anyone who can schedule there" is `app_can_edit_node(node_id)`**, which is already the
+   `assignments_insert`/`assignments_update` policy — so the override adds no new permission
+   concept. It only decides whether this particular guard defers to it.
+
+⚠️ **It does NOT loosen D109 for products.** A run's product must still be owned by an
+ancestor-or-self of its node, with no override — the proof that `delete_owned_row` needs no
+escalation (§19.74) depends on exactly that, and widening the operator half leaves it intact
+because the two are separate guards. **Re-read §19.74's proof before touching the product half.**
+
+## §19.76 — D113 built (migration 0030), `offeredHere` wired, and a defect 0029 shipped
+
+Two things asked for together, and a third that had to come first.
+
+### ⭐⭐ THE THIRD ONE: 0029 WOULD HAVE STOPPED THE BOARD LOADING
+
+D110 keeps a started run after its product is deleted — `product_id` released to NULL, the sku,
+name and colour copied onto the run. **`shapes.ts` did not follow.** `Run.productId` was typed
+`string` and guarded with `isStr`, so a snapshotted run parsed as `null` — and `parseArrayOf`
+returns null for the **whole array** on the first item that fails, so `parseBoardWindow` returns
+null and `fetchBoardWindow` throws `shapeMismatch`.
+
+> **One deleted product with history and the board stops loading, for everyone, with an error
+> about a shape rather than about a product.** The same for a deleted person via
+> `assignments.operator_id`.
+
+Nothing caught it: `tsc` was clean because the generated types describe the *database*, and the
+runtime guard is hand-written; the SQL suite was green because it never parses anything; and the
+demo world has never had a delete run against it. **It was found by reading the parser while
+adding an unrelated field.**
+
+⭐ **The general rule, and it is new: A MIGRATION THAT MAKES A COLUMN NULLABLE IS A CLIENT CHANGE,
+AND IT IS THE ONE KIND `db:types` DOES NOT SURFACE.** Regenerating the types fixes what the
+compiler checks; a hand-written `isStr` guard is an assumption the compiler never sees. After any
+`DROP NOT NULL`, grep the client for the column and read every guard that mentions it.
+
+Fixed by making both columns nullable in the shapes, carrying the four snapshot fields, and adding
+`src/features/board/lib/history.ts` — `productViewFor` / `assignmentProductView` /
+`operatorViewFor`, which resolve the live row while it exists and synthesise one from the snapshot
+afterwards. ⚠️ The synthesised rows carry an **empty `id` and an empty `siteNodeId`**, and H19
+pins the reason: `offeredAt` FAILS OPEN on an owner it cannot resolve, so a synthesised row handed
+to it would read as belonging at every cell. It cannot happen by construction and the case is
+there so it stays that way.
+
+### `offeredHere` on the board — filtered, not annotated
+
+The picker now offers only what belongs at the cell being scheduled, and only what is `active`.
+Both filters live in `BoardPage`, resolved from the index and the node exactly as `requiredSkills`
+already is — the popover takes a list and holds no rule.
+
+⭐ **And the seed had to change with it.** `useState(products[0]?.id ?? "")` runs once, on mount,
+so it answered neither "the list is empty" nor "the popover stayed mounted while its node
+changed"; it would have left the popover **pre-selected on a product it was no longer offering**,
+and Create would have sent it. What is stored is now the user's *choice*, and the effective id is
+derived every render. An empty list says so in a sentence and disables Create rather than
+rendering a dead `<select>`.
+
+### D113 — the area override, and why it is a COLUMN
+
+⭐⭐ **`assignments.area_override` + `area_override_reason`, not an RPC argument.** The refusal is a
+trigger: it fires on INSERT and on UPDATE OF `node_id`, `operator_id`, `product_id`, for every
+writer — including a plain PostgREST `PATCH` that passes through no function at all, and including
+`service_role`. **An override expressed as a parameter is reachable only from the paths somebody
+remembered to plumb.** A17 in `57_` is a raw `PATCH` walking through the door; A7 is a raw INSERT.
+
+The survey that preceded this found **six** write paths to `assignments` and three that can set a
+guarded column: `create_assignment`, `move_run`, and `apply_split_coverage` through its nested
+`create_assignment` call — *"three layers, and this is the middle one"*. All three are plumbed and
+each has its own case.
+
+⭐ **`move_run` pre-checks and names every affected person**, rather than letting the trigger raise
+about whichever row it reached first: a five-person crew with three outside their area would
+otherwise refuse three times, one name per attempt. ⚠️ The pre-check calls **`app_owner_covers`**,
+not `app_owner_covers_in_org` — the trigger-side twin takes the tenant as a free parameter and 0028
+granted it to nobody, so calling it from a `SECURITY INVOKER` function is `permission denied`,
+which is what `60_api_test.sql` reported on this migration's first run. The session-scoped twin is
+provably equivalent there because `app_can_edit_node` above it already refused any caller whose
+`app_current_org()` differs from the target node's org.
+
+⭐ **The trigger NORMALISES the flag off when the row did not need it**, so "overridden" cannot come
+to mean "the client sent a flag". Without it the board badges ordinary assignments as overridden
+and the audit trail fills with reasons for things nobody overrode — and **every other case in the
+file still passes** (P3).
+
+### The two halves are treated OPPOSITELY on screen, and that is the design
+
+- A **product** outside its scope is refused with no way through, so it is **filtered out** of the
+  picker.
+- A **person** outside theirs can be placed anyway by whoever may schedule there, so they are
+  **left in the list and annotated** — *"— not from this area (override)"* — with a checkbox and a
+  required reason, mirroring the training override immediately below it.
+
+⚠️ **Two flags, two reasons, two decisions.** A supervisor waving through "no Welding ticket" must
+not silently also place somebody in a plant they are not cleared for: **the weaker permission would
+grant the stronger one.** The board already renders the old flag as "· certification override", so
+reusing it would have relabelled every area override as a certification one.
+
+⚠️ **And the product half stays absolute on purpose.** §19.74's proof that `delete_owned_row` needs
+no escalation depends on a product never sitting outside its owner; an overridable product scope
+would falsify it and the delete would start refusing for a reason nobody could see. A6 and mutation
+P4 are that boundary.
+
+### What the client had to learn on the way
+
+`BoardOperator` gained `siteNodeId` — `board_window` has sent it since 0025 and `parseOperator`
+dropped it, the same gap `Product` had, and without it the board could not tell whether a person
+belonged at the cell being scheduled.
+
+### Numbers
+
+**30 migrations. 468 database checks** (445 + 17 in `57_` + 6 in `upgrade_0030_`), exit 0, run on
+a real PG16. **15 mutations: 13 caught, and both exceptions are written down** — the inert control,
+and P14, whose kind is *"a value no case can reach"* because the composite FK refuses every row
+that takes the branch it guards. **App tests 1149 in 28 files, PREDICTED.** `tsc` 0 and eslint 0 on
+his machine's own binaries; 24 probe assertions executed in place against the real modules
+(`history.ts` ×14, `shapes.ts` ×10) plus the agent's own run on the board filter.
+
+⚠️ **Instrument failure 43, and it produced FALSE POSITIVES rather than false negatives.** The
+0030 mutation runner was `sed`-derived from 0029's, and two substitutions landed on text an earlier
+substitution had already rewritten — so it pointed at files that do not exist. The first run
+reported every mutation as an INSTRUMENT FAILURE (the "assert the match happened" rule working),
+and the second reported the two expected-inert ones as **CAUGHT**, because a missing upgrade file
+produces zero PASS lines and the runner counts PASS lines. **A CAUGHT verdict can be as false as a
+NOT CAUGHT one, and `sed` over an already-substituted string is a live way to produce it.**
+
+## §19.77 — the Operators screen answers "where can this person work" on trainings alone
+
+**Found by the maintainer, 29 August, by opening the screen** — which is now how six of the last
+seven defects have been found. He picked somebody who belongs to one line in Plant A, and the
+panel *"Where Operator A1 can work"* listed **every schedulable cell in all three plants** and
+ticked twelve of them. His words: *"I can see him across everything, is that by design? It paints
+the wrong picture."*
+
+**Measured on his screenshot:** the person belongs to *Plant A › Area 1 › Line 1*, whose subtree
+holds Cell 1 and Cell 2, and both of those are crosses (missing A-Welding). **The true answer is
+0 places. The screen said "12 of 18 places", and all twelve ticks were cells the server refuses.**
+
+### ⭐⭐ A STALE PERMISSION, WHICH IS THE DANGEROUS DIRECTION OF §19.74'S FAMILY
+
+`workPlacesFor` (`src/features/admin/lib/operators.ts`) loops
+`for (const node of input.nodes)`, skips the ones that are not schedulable, and asks **only** about
+trainings. **It never reads `operator.siteNodeId`.**
+
+⚠️ **The field was declared on `OperatorLike` thirty lines above the loop, with a comment citing
+D108 and D109 — *"it need not be a root (D109)"* — and the loop ignored it.** The fact was present
+and unread. This is not a case of missing information, and no amount of extra documentation would
+have prevented it.
+
+§19.74 deleted two client rules in this same family, and the difference between them is the whole
+point:
+
+| | what it does | how it fails |
+| --- | --- | --- |
+| `describeDeleteRefusal`, `deletePrecheck` | stale **REFUSAL** — the client refuses what the server allows | quietly stops people doing what they may. Annoying, invisible, never throws |
+| `workPlacesFor`'s missing area check | stale **PERMISSION** — the client shows what the server refuses | **produces a screen that looks like it works.** A supervisor plans a week from it and is refused at the moment of booking, with an error that says nothing about why the screen said yes |
+
+[[verification-standard]] rule 8c states the invariant one way round: **anything the client SHOWS,
+the server must ALLOW.** The module's own header already said so at length — *"this must never
+show a tick where the server would refuse"* — while mirroring only one of the two server rules
+that decide the answer.
+
+### The three states, because a cross would be wrong too
+
+D113 means a supervisor **may** place someone outside their area with a reason, so a red ✕ would
+say "no" about something the server accepts. The honest answer has **three** states, not two, and
+it mirrors §19.76's deliberate asymmetry — a PRODUCT outside its scope is filtered out of the
+picker because the database refuses it with no way through; a PERSON outside their area is
+annotated rather than refused, because somebody can still say yes:
+
+| state | mark | meaning |
+| --- | --- | --- |
+| can work here | ✓ `--signal-ok` | in their area **and** holds the trainings |
+| missing the training | ✕ `--crit` | in their area, not capable — a capability answer |
+| outside their area | ⚠ `--signal-warn` | allowed only with a recorded reason (D113) |
+
+`--signal-warn` is the board's own **override** colour, and the amber row means there what it means
+here. A red ✕ would say "no" about something the server will accept.
+
+### ⭐⭐ AND THEN THE MAINTAINER LOOKED AT IT AGAIN, AND THE REACH WAS STILL WRONG
+
+The three states shipped and he opened the screen again the same day:
+
+> *"I see all plants not just Plant A for him, it does say that he's not from this area for other
+> plants, but those locations should not be visible at all is my point."* — 31 August
+
+**Annotating them was not enough, and this is a second finding rather than a correction of the
+first.** The states answer *what* each place is; they say nothing about *which places belong on
+the screen at all*. A system admin can read every node in the org, so the list was every
+schedulable cell in the company — eighteen across three plants for somebody who works on one line.
+Twelve of them were in plants he will never staff from this row, and no amount of amber makes
+those worth scrolling past.
+
+⚠️ **The first draft of this section argued the opposite** — *"the fix is NOT to hide the other
+plants"* — reasoning from D113 by analogy with the board. **That analogy was wrong, and the reason
+is worth keeping:** on the BOARD the popover is anchored at a cell and needs every candidate
+listed, because listing them is how you place one. On the ADMIN screen nothing is being placed;
+the list is informational, and an informational list that shows the whole company to answer a
+question about one person is noise. **The same rule can be right on one screen and wrong on the
+next** — [[decision-record-drift]] rule 9, arriving from the other direction.
+
+**⭐ The cut is the ROOT the person's own area sits under, and NOT their own area.** That
+distinction is the whole reason the ⚠ state still exists on this screen:
+
+| cut at | Operator A1 sees | what it costs |
+| --- | --- | --- |
+| nothing (as first built) | 18 cells across 3 plants | the complaint |
+| **their plant** — chosen | **6**: 2 in his own area, 4 ⚠ elsewhere in Plant A | nothing; 12 counted in a footnote |
+| their own area | 2 | the third state disappears from this screen and D113's door becomes invisible |
+
+Lending somebody from Line 1 to Line 2 in the same plant is a thing supervisors do and is exactly
+what D113 was built for; lending them to another site is not. **The override is realistic inside a
+root and unrealistic across roots**, so that is where the list stops.
+
+⚠️ **AND IT APPLIES TO EVERY OPERATOR, not to the one who found it.** `placesUnderSameRoot` is
+applied to whoever is selected. Operator A1 is simply the only person in the demo world where the
+two candidate cuts give different answers: `dev_demo.sql` gives each plant six people, five owned
+by the plant and `i = 1` owned by **Line 1 only**. For A2–A6 both cuts give the same six cells,
+which is why the defect needed A1 to become visible.
+
+⚠️ **PRESENTATION, AND IT SAYS SO.** Nothing in the database knows about "the same plant" — D109
+is ancestor-or-self of the OWNER and roots have no standing in it. So the trim lives in
+`placesUnderSameRoot`, which the panel applies, and **not** inside `workPlacesFor`, which stays the
+complete answer about every place it was handed (R4 pins that). Mixing a presentation rule into
+the function that mirrors the server is how the two stop being comparable.
+
+⭐ **It fails open in both directions, and both are `scope.ts`'s rule.** A place whose own root
+cannot be resolved is KEPT (R7); a person whose root cannot be resolved filters nothing at all
+(R8). Hiding on uncertainty is invisible and permanent, and a list that quietly shrank looks
+exactly like a person with no options.
+
+⚠️ **What is trimmed is COUNTED**, in a footnote under the list — *"12 places outside Plant A are
+not shown."* Named by the **root's own name**, never by a level word: "plant" is this company's
+name for its top level and the hierarchy is user-defined.
+
+### The shape it took in the code
+
+- **`eligible` was SPLIT, not widened.** `qualified` is what `eligible` used to mean — trainings
+  alone — and `eligible` is now `qualified && area === "inside"`. ⭐ **Keeping the training answer
+  as its own field is the same "two flags, two reasons" rule §19.76 wrote for the board:** waving
+  through *"not from this area"* must not silently also wave through *"no Welding ticket"*, so an
+  outside place still carries its training verdict and still names the missing ticket.
+- **`areaStandingFor` walks `parentId`, not `path`.** `NodeLike` has no `path` — the admin read
+  does not select the ltree — and re-deriving `<@` from a string is where `plant1.line1` becomes an
+  ancestor of `plant1.line10`. ⭐ It is **reflexive**, matching `<@` and `scope.ts`'s `isAtOrBelow`:
+  a person owned by the very cell being scheduled is inside it (case S9 pins that on the server),
+  and a strict-descent implementation would agree everywhere except on the one node the user picked.
+- **Three answers, not two.** A walk that reaches a root without meeting the owner is a confident
+  `"outside"`. A walk that hits a missing parent or a cycle is `"unknown"`, and `"unknown"` is
+  never read as `"inside"` — that is precisely the tick the server would refuse. `"unknown"` is
+  counted with `outside`, because an unproven "inside" is the one answer that puts a number in
+  front of a reader that the server will not honour.
+- ⭐ **`"unknown"` implies `NodeRequirements.complete === false`, always** — same walk, same map,
+  and the only two ways it can end early are the two that stop `effectiveRequirements` reaching a
+  root. That is why an unknown area adds **no reason sentence of its own**: *"the places above this
+  one could not be read"* is already in the list, saying it once. A12 pins the invariant, so the
+  day it stops holding is the day an unknown area loses its explanation. ⚠️ The converse does not
+  hold — an owner found *below* a break higher up is a confident `"inside"` on an incomplete
+  chain, and that is right (A13).
+
+### ⭐ AND THE COUNT LINE HAD TO NAME WHAT IT COUNTS
+
+`summarisePlaces` returned `{total, eligible, unresolved}`, so the headline read **"12 of 18
+places"** with no way for a reader to know that the 18 was every cell in three plants and the 12
+was an answer to a different question. It now returns `ownArea` and `outsideArea` as well, and the
+line reads:
+
+> **0 of 2 places in their own area · 4 elsewhere, only with a recorded reason**
+
+with everything else still listed below it. `ownArea + outsideArea === total`, always.
+
+### The two comments, and why they are half the finding
+
+`OperatorsPanel.tsx` carried the D103 paragraph above almost verbatim, in **two** places: one over
+the `scopeChoices` memo and one three lines above the "Belongs to" `<select>`, saying *"It filters
+the roster and nothing else in this release — the server does not yet refuse an assignment outside
+it, and no label here may imply that it does."* **True when written, false since 0028, and
+committed again in `f7bf456` an hour before the defect was found.** Both are rewritten, and D103
+itself now carries a supersession block — [[decision-record-drift]] rule 10, and the reason a
+code-comment decision needs the same treatment a migration header gets.
+
+### Numbers
+
+**Client-only — no migration, so 30 migrations and 468 database checks stand.** **App tests 1182
+in 28 files**, copied from the runner's own total line: the 1149 baseline confirmed at the start of
+the session (the first time that prediction has ever been measured) plus 33 new cases — A1–A15 for
+the area rule, Q1–Q5 for the three states, S3–S5 for the count line, and R1–R10 for how far the
+list reaches. **Eight deliberate breakages, eight caught:**
+
+| # | the break | caught by |
+| --- | --- | --- |
+| 1 | `eligible` ignores the area again — the original defect | A3, A15 |
+| 2 | an unresolvable area reads as `"inside"` | A9, Q4, S3–S5 |
+| 3 | a non-reflexive area walk | A5, A13 |
+| 4 | the summary counts an unresolved area towards their own | S3–S5 |
+| 5 | the trim cuts at the person's own AREA rather than their root | R6–R8, R10 |
+| 6 | an unresolvable root is dropped instead of kept | R7, R10 |
+| 7 | a person with an unresolvable root gets an empty list | R8 |
+| 8 | `rootIdFor` returns the node itself instead of walking up | R1, R3, R5–R7, R10 |
+
+`tsc` 0, `eslint src` 0, prettier applied to every file touched.
+
+⚠️ **What is NOT covered: there is no test that mounts `OperatorsPanel`.** The two trims and
+their footnotes are composed there — `placesUnderSameRoot` then `.filter(active)`, in that order,
+so *"1 deactivated place is not shown"* refers to something in the reader's own plant — and that
+composition is pinned by nothing. `productsPanel.test.tsx`
+exists as the precedent for one, and §19.67 / D106 is the record of what a screen-level gap costs.
+Every rule above is pinned in the pure module; the mapping from `placeVerdict` to a mark and a
+class is pinned by nothing, which is why `placeVerdict` lives beside the rule rather than inside
+the component — the smallest thing the component can be trusted to do.
+
+## §19.79 — one plant filter for the whole admin screen (roadmap 1(c))
+
+> *"for the system admin, may be we need a filter for plants in all the sub tabs."*
+> — the maintainer, 31 August, minutes after §19.77 landed
+
+§19.77 fixed one list by deriving its cut from the row being looked at. **This is the general
+case, and it is a different kind of rule**: a system admin can read every node in the org, so
+every admin section — Hierarchy, Access, Shifts, Operators, Products — shows three plants' worth
+of everything. §19.77's cut takes no user input and holds no state. This one is a **choice the
+reader makes**, and it has to survive switching sections.
+
+### ⭐ ONE CONTROL, ON `AdminPage`, NOT SIX
+
+Six per-panel filters would be six controls that drift apart, and a reader who set one would have
+no way to know the other five were still wide open. The state lives once
+(`features/admin/store/adminView.ts`), every panel reads it through `usePlantFilter`, and no panel
+renders a control.
+
+⚠️ **The panels take NO NEW PROP for it.** `ShiftsPanel`, `OperatorsPanel` and `ProductsPanel`
+each document a "no props, owns its own read" invariant; they read the hook instead, which is the
+move `useRootPath` already makes for the board toolbar.
+
+### The three decisions, asked one at a time and answered
+
+**1. The default is THEIR LAST CHOICE, remembered across visits.**
+⚠⚠ **What makes that safe is the chip, and the two are one decision.** The chosen plant is
+spelled out in the header of every tab, always. `SiteAccessPanel`'s own header records what
+happens otherwise: it used to be scoped by the Hierarchy tab's picker, so a company admin standing
+there saw whichever plant another tab had chosen, *"with no control and nothing explaining why"* —
+**"Where is Plant 1?", reported from the running app, with no answer on the screen.** A remembered
+filter with nothing naming it is that bug again. Neither half ships without the other.
+
+**2. One readable root means NO CONTROL AND NO HEADER ROW.** Not a disabled dropdown: a greyed
+control reads as *"you lack permission"* rather than *"there is only one"*, which is D106's shape.
+⚠️ The test is `readablePlants(...).length`, **never the role** — a company admin of a one-plant
+org correctly gets none.
+
+**3. The filter narrows the FORMS too.** What you see is what you can create in. The rejected
+alternative lets somebody create a row into a plant they have filtered away and then watch it not
+appear — silent hiding in a new costume.
+
+⚠⚠ **SO THE PICKERS TAKE TWO NARROWINGS OF DIFFERENT KINDS, AND NEITHER IS IMPLEMENTED IN TERMS
+OF THE OTHER.** The filter is a VIEW CHOICE and reversible; `scopeOptions`' `canEdit` is a
+PERMISSION and is not. Collapsing them would make a reversible preference look like a permission,
+and the day somebody widened the filter they would silently widen what the form claims they may
+write. That is §19.77's lesson — the reason `placesUnderSameRoot` sits outside `workPlacesFor` —
+arriving one screen up. Every panel carries the warning at its own call site.
+
+### ⭐ IT COMPARES `path`, AND THE SURVEY IS WHY
+
+`ShiftsPanel` **throws `parentId` away** when `patternRows` reshapes its nodes — it currently
+hands `scopeOptions` a hardcoded `parentId: null` to compensate (`shiftDraft.ts`). A
+parent-walking filter, like §19.77's `rootIdFor`, **cannot run in that panel at all.** Every
+admin read keeps `path`, which is the value the server itself compares and which `isAtOrBelow`
+already tests label by label, so one rule covers all five sections and there is no second
+implementation of ancestry to disagree with the first.
+
+### ⚠️ THE HIERARCHY TAB IS FILTERED ON ITS **ROWS**, AND THAT IS THE ONLY LEGAL SEAM
+
+`NodeTreeEditor` and `LevelEditor` both document that they need the **complete** node array:
+`eligibleTargetIds`, `canDropOn`, `legalParentsFor`, `demoteTargets`, `groupDropState` and
+`findLevelOrderProblems` must see every node, because the component's standing invariant is that
+it **must never refuse client-side a move the server would accept**. A filtered `nodes` would make
+a node stop being a legal parent because somebody narrowed a view.
+
+⭐ So `visibleNodeIds` filters the **rows** and nothing else — and the seam was already there.
+The comment above `buildTreeRows` says sibling ORDER comes from *"the rows the admin is actually
+looking at, never from re-sorting `nodes`"*, so that the index handed to `place_node` means what
+they just saw. That stays true of a filtered list and stops being true one layer deeper.
+⚠️ A plant is a whole subtree, so the set never removes a node while keeping its children.
+
+⚠️ **Filtering the STRUCTURES instead would have looked right and been wrong**:
+`groupRowsByShape` buckets rows by each node's LEVEL's `templateId` and uses the summaries list
+only for the NAME, so a narrowed list leaves every group still rendered and merely unnamed.
+
+### ⭐⭐ AND THE HIERARCHY TAB THEN HAD TWO CONTROLS DOING ONE JOB
+
+Reported by the maintainer as soon as it shipped: *"the Hierarchy tab still has 2 filters, what
+are we doing about it?"* It was an inconsistency in this change rather than a new question — every
+other picker on every other tab was narrowed by the filter and this one was not.
+
+⚠️ **AND IT WAS WORSE THAN A DUPLICATE, BECAUSE THE TWO LISTS READ THE SAME.** `create_node`
+copies the structure whenever a root is created (0020 §10) so that renaming a level in one plant
+does not rename it in the others — `dev_demo.sql` puts it as *"one copied structure per plant,
+plus the original the copies came from"* — and **the copy is named after the NODE**
+(`v_copy_name := v_name`, where `v_name` is `p_name`). So the Site Structure picker was listing
+literally **"Plant A / Plant B / Plant C"** underneath a header reading **"Showing: Plant A"**.
+In practice a structure IS a plant, and the picker was a plant picker wearing structure names.
+
+The fix is the rule already applied everywhere else: **the filter narrows the structure picker
+too**, and `resolveSelectedShape` now resolves against what the picker actually offers rather than
+against every editable structure — a selection must not outlive the list it was made from, which
+is the reason that function exists (D87), now with a second way for the list to shrink.
+
+⚠️ **A STRUCTURE OWNED BY NOBODY IS KEPT AT EVERY PLANT.** `site_node_id` is still nullable on
+`hierarchy_templates`: D108 removed company-wide for products, operators, trainings and shift
+patterns and deliberately **not** for structures, because the unowned one is the seed corn every
+new root copies from. Dropping it under a filter would hide the only structure a brand-new plant
+can be built out of. This is `offeredAt`'s pre-0028 shape, and this is the one place it survives.
+
+⚠️ **The TREE still gets the complete list.** `groupRowsByShape` buckets rows by each node's
+LEVEL and uses the summaries only for the NAME, so handing it the narrowed list would leave a
+group rendered and merely unnamed.
+
+⭐ **And the default lands correctly with no extra rule.** Narrowed to Plant A the list is
+`["Plant A", "Standard Plant"]`, `buildShapeSummaries` sorts by name, and `"Plant A"` sorts first —
+so the picker opens on the plant's own structure rather than on the seed. Checked rather than
+assumed, because a first-entry fallback landing on the empty seed structure would have left
+somebody editing the levels of a structure with no nodes in it.
+
+⚠️ **One stale comment fell out of it.** `AdminPage` justified naming the access places by site
+with *"'Plant 2' is what an admin is looking for, not 'Standard Plant (copy)'"* — false since 0020
+names the copy after the node. **The rule it defends is still right for a better reason:** the two
+names coincide only at the moment of creation, and renaming either leaves the other alone, so
+reading the SITE is what keeps the list true after a rename. Corrected in place.
+
+⭐ **The one form the filter cannot narrow says so.** Adding a ROOT creates a new plant by
+construction, so it cannot be offered "inside" the one on screen. Left working and annotated
+rather than disabled — a disabled control reads as a permission the reader does not have, and
+this is a view choice they can undo in one click.
+
+### Access keeps its own selection, and that is the history working
+
+The shared filter narrows the **list of places** Access chooses from; the panel still owns **which
+one** it is showing, and `resolvePlace` already drops a selection the list no longer contains.
+Those are different decisions, and conflating them is precisely what produced "Where is Plant 1?".
+
+### ⚠️ WHAT IS TRIMMED IS COUNTED, EVERYWHERE
+
+`scope.ts`'s header is the reason: hiding is invisible and permanent, and a list that quietly
+shrank looks exactly like a list of things nobody created. Every trimmed list gained a footnote —
+people, ticket types, products, patterns, places, tree rows — and **each names the filter's own
+label rather than the word "plant"**, because the hierarchy is user-defined and "plant" is only
+this company's name for its top level.
+
+### ⭐⭐ FOUR REAL DEFECTS THE WORK UNCOVERED, NONE OF THEM THE FEATURE
+
+The filter was the reason to look; these were already broken, and three are the same shape — **a
+`<select>` whose value is not among its options renders its FIRST option and reports nothing**, so
+the control and the write silently disagree.
+
+1. **`ProductsPanel`: show one owner, save another.** The edit `<select>` read `editDraft.siteNodeId`
+   straight into `value` *and* into the patch. Re-home a product to Plant 2, filter to Plant 1, and
+   the control reads "Plant 1" while Save sends Plant 2. Pinned by T13.
+2. **`ShiftsPanel`: `attachDraft` is keyed by node id and HOLDS a pattern id.** With the pattern
+   list trimmed, a draft naming a filtered-away pattern is a value with no option behind it — the
+   row reads "Inherit from above" and Apply sends the invisible id.
+3. **`OperatorsPanel`: a cold load submitted `site_node_id: ""`.** `draftSite` starts empty and the
+   select has no placeholder, so the control displayed option one while the state held `""`.
+   ⚠️ **And the comment beside it claimed a guard that did not exist** — drift rule 10 again,
+   now made true.
+4. **`productsPanel.test.tsx` was green through the wrong branch.** Its `useQuery` mock omitted
+   `isSuccess`, so **every existing case ran the "structure read failed" path**: `sites === null`,
+   every row labelled "Another site", `elsewhere` unreachable. T1–T8 passed without ever exercising
+   the code they name. ⚠️ A mock that omits a flag does not fail — it quietly selects a branch,
+   and the suite reports the coverage it did not have.
+
+### Numbers
+
+**Client-only — no migration; 30 migrations and 468 database checks stand.** **App tests 1224 in
+29 files**, from the runner's own total line: 1182 + 42 (28 in the new `plantFilter.test.ts`, 9 in
+`productsPanel.test.tsx`, 5 for `resolveSelectedOperator`). **12 deliberate breakages, 12 caught**
+— 7 on the shared rules (an unreadable stored choice kept, a control offered at one plant, an
+unresolvable owner hidden, `startsWith` for `isAtOrBelow`, a stored sentinel for "All plants", the
+org dropped from the key, every topmost node treated as a root) and 5 on `ProductsPanel`.
+⚠️ **One inert mutation, and its kind is named**: dropping the separator from the storage key
+prefix is cosmetic — both forms still scope per org, so no case can tell them apart.
+`tsc` 0, `eslint src` 0, prettier applied throughout.
+
+⚠️ **STILL OWED. `scopeOptions` takes a `canEdit` set precisely so a picker cannot offer a node
+the server will refuse, and all three callers still pass none.** Deliberately out of this change:
+it is a permission, the filter is a view choice, and the whole of §19.77 is about not confusing
+the two. It needs each panel to derive who may administer what, and it belongs in its own commit.
+
+⚠️ **And nothing mounts `OperatorsPanel` or `ShiftsPanel`.** `productsPanel.test.tsx` is the only
+panel-level suite and it now drives the real store, hook and lib rather than mocking them — which
+is what caught two of the four defects above. The other two panels have no equivalent, so their
+trims, footnotes and de-stalings are pinned only at the library level.
+
+## §19.80 — D111a: a training's name belongs to its plant (migration 0031)
+
+> *"Just making sure, trainings can be added by individual site admins as well, but only to their
+> own sites."* — the maintainer, 31 August, stating it as a fact he expected to already hold
+
+**He was right about the permission and wrong about the outcome, and the gap between those two is
+the whole finding.** `skills_insert` has admitted `app_is_admin_for(site_node_id)` since 0028, so a
+site admin has been allowed to create a training in their own plant all along. What made it
+unusable was a rule from a different migration entirely.
+
+### ⭐⭐ TWO RULES FROM DIFFERENT MIGRATIONS, NEITHER WRONG ALONE
+
+| | rule | from |
+| --- | --- | --- |
+| naming | `unique (org_id, name)` — **company-wide** | 0002 |
+| reading | `app_can_read_owned(site_node_id)` — **your branch only** | 0026 |
+
+Plant A creates "Forklift". Plant B's admin is refused `23505` — **and cannot see, open, edit or
+reuse the row that refused them.** The refusal names something they have no way to reach.
+
+⚠️ **And the client made it worse rather than better.** The panel previews clashes with
+`findExistingSkillByName`, which searches only what the reader can SEE. Plant A's Forklift is not
+among them, so the preview reported no clash, the form looked fine, Create was enabled — and the
+insert came back as *"Something here already uses that name or code."* Nothing "here" did. **A
+screen saying yes where the server says no**, arriving through a uniqueness constraint instead of
+a scope check — §19.77's family, third instance.
+
+⭐ **THE DEMO DATA HAD BEEN WORKING AROUND IT BY HAND SINCE THE DAY IT WAS WRITTEN**, and its own
+comment said so: *"Trainings. Names are unique per ORG, so they carry the plant letter."* Every
+seeded training was `A-Welding`, `B-Welding`, `C-Welding`. A fixture prefixing its way around a
+product rule is the loudest possible signal, sitting in the repository unread.
+
+### The maintainer's proposal, and why the storage half was declined
+
+> *"It needs to be based on plant name I believe, to easily identify… if they do share the same
+> document number, a concatenation with plant name should still be good enough."*
+
+**The requirement — tell them apart easily — is right and is delivered.** The concatenation was
+declined for three reasons, and the first is one this project has already paid for:
+
+1. **It stores a derived value.** Rename Plant A and every training name is silently wrong.
+   §19.79 had just recorded the same shape: a structure is named after its node, and *"the two
+   names coincide only at the moment of creation, and renaming either one does not touch the
+   other."*
+2. **The prefix is noise exactly where it is read most.** A Plant A admin sees "Plant A —" on every
+   row of their own list. It carries information only when comparing across plants, which since
+   read-scoping only a company admin can do.
+3. **It leaves the company-wide index in place**, so every future writer — the starter library's
+   copy step, CSV import, a rename — must remember to re-apply the prefix. A rule the database
+   does not enforce and every caller must remember is the shape this project keeps deleting.
+
+**The plant is already stored, in `site_node_id`.** So it is READ, not written: the constraint
+moves to the owner and the screen shows the owner beside the name.
+
+### What shipped
+
+```sql
+alter table skills drop constraint skills_org_id_name_key;
+alter table skills add  constraint skills_owner_name_unique unique (org_id, site_node_id, name);
+```
+
+**No backfill.** The new constraint admits a strict superset of the old one, so nothing legal
+becomes illegal and no existing INSERT, RPC or screen can start failing on data it used to accept.
+`upgrade_0031_` proves it against real pre-0031 rows anyway, because rule 5b says the argument is
+not the evidence.
+
+⚠️ **IT DEPENDS ON `site_node_id` STAYING NOT NULL, and that is not paranoia.** A unique
+constraint skips any row with a NULL in it. The day the column becomes nullable again, two
+company-wide trainings could both be called "Forklift" and neither would collide — the rule would
+still exist, still read correctly in `pg_constraint`, and guard nothing. **U31-6 is that case.**
+
+⚠️ **AND IT DELIBERATELY DOES NOT ENFORCE PER-PLANT.** `site_node_id` is any node, so Line 1 and
+Line 2 inside one plant may now each hold a "TRN-4471" — a real loosening, weighed and taken:
+per-plant needs a stored root column kept by a trigger that goes stale the day a node is moved,
+while **the client can warn instead, honestly, because a plant admin reads their whole plant.**
+`findExistingSkillByName` is exactly that warning and is reliable at plant scope in a way it never
+was across plants. **Database refuses per owner; screen warns per plant.** T5 asserts the
+loosening so it stays a decision on the record rather than a surprise.
+
+### ⭐ The demo drops its prefixes, and that is the acceptance test
+
+All three plants now hold a training simply called `Welding`. ⚠️ **And three lookups in
+`dev_demo.sql` had to learn the owner** — they identified a training by name alone, which matched
+one row when names were company-unique and matches three now. **A name is no longer an identifier;
+a name plus an owner is.** Measured on the rebuilt demo: three `Welding` rows, three holders each,
+and **zero cross-plant tickets**.
+
+### Numbers
+
+**31 migrations.** **`upgrade_0031_`: 7 checks. `58_trainings_per_owner_test.sql`: 8 checks**, every
+one running as `authenticated` through RLS as a named site admin — because `upgrade_0031_` runs as
+the table owner and **a constraint that is correct behind a policy that lets nobody near it
+produces exactly the same screen as before.** All 15 pass on a real PG17 in the container, with the
+demo world rebuilt on top.
+
+**5 deliberate breakages, 4 caught, 1 inert and explained:**
+
+| # | the break | caught by |
+| --- | --- | --- |
+| 1 | the old company-wide rule never dropped | T3, T5, T7 |
+| 2 | the new rule forgets the owner | T3, T5, T7 |
+| 3 | the old rule dropped, no new rule added | T4 |
+| 4 | the new rule forgets the TENANT (`site_node_id, name`) | **NOT CAUGHT — inert** |
+| 5 | the composite FK simplified to `nodes(id)` | T8 |
+
+⚠⚠ **#4's kind is "equivalent because of a neighbouring rule"**, not "unreachable": `site_node_id`
+is a uuid primary key belonging to one org, and `skills_org_id_site_node_id_fkey` pins a skill's
+org to its owner's. **An unexplained NOT CAUGHT is a hole; an explained one is a finished result
+only if the rule it leans on is itself pinned** — so T8 pins that FK, and #5 proves T8 bites. The
+same treatment stage 12's inert breakage got.
+
+⭐ **T8 also cost a wrong assumption worth recording.** It first asserted `foreign_key_violation`
+and went red: `app_check_site_owner()` is a BEFORE trigger that gets there first and raises
+`invalid_argument` through `api_raise`, so the friendly message reaches the user and the FK never
+fires. **Two layers, and the outer one was a surprise.** The case now asserts the FK's definition
+and the refusal separately, so improving the friendlier layer cannot break it.
+
+⚠️ **And a documented gotcha was walked into anyway: there is no `min(uuid)` in Postgres.**
+U31-1 used it, died, and is fixed — `postgres_gotchas` had recorded that exact fact already.
+
+### ⭐⭐ AND THE MIGRATION'S OWN PROMISE WAS NOT KEPT UNTIL IT WAS CHECKED
+
+0031's header justifies the per-plant loosening with a sentence: *"the database refuses per owner;
+the screen warns per plant."* **The screen, as first built, warned per OWNER.** The client half was
+specified as *"any match, different owner → not a clash"*, which is right for the REFUSAL and wrong
+for the warning — and the two had been collapsed into one function with one answer.
+
+Concretely: Ann belongs to Line A; the plant's trainings belong to Plant 1. Typing "Forklift" said
+nothing at all, and she would have silently created a second Forklift one level below the one
+already there — precisely the confusion the loosening was allowed to risk *because* this warning
+was promised.
+
+⚠️ **A migration header describing behaviour the code does not have is the same drift as a stale
+comment**, and it was caught only because the work was split and the half that read the spec
+noticed it disagreed with the half that read the migration. Nothing else would have.
+
+**`findExistingSkillByName` now answers in three, not two**, and the middle one is the new part:
+
+| the row is | answer | Create |
+| --- | --- | --- |
+| under **this owner** | the database WILL refuse it — offer the existing row | disabled |
+| elsewhere in **this plant** | legal, and confusing — name the other place | **stays live** |
+| in **another plant** | nothing at all | live |
+
+⚠⚠ **The middle answer MUST NOT BLOCK.** Blocking a name the database accepts is §19.74's
+stale-refusal defect — the quiet kind that never fails and just stops people working — so the
+sentence says *"already has"*, never *"cannot"*. `where` is a separate field from `exact` for
+exactly this reason: a screen reading only `exact` would refuse a legal name.
+
+⭐ And it **names the other place** (`Line B already has a First Aid`), which is the maintainer's
+*"easily identify"* arriving as a sentence instead of as a prefix baked into the data — the same
+argument that declined the concatenation, applied one layer up.
+
+⚠️ **Without a node map there is no plant pass, and that is silence rather than a clean bill of
+health** — N14 pins it, so the day a call site drops the argument the loss shows as a behaviour
+change rather than as a warning that quietly stopped appearing.
+
+**7 more client cases (N12–N18) and O23 on the panel; 4 more breakages, 4 caught** — the pass
+deleted (N12, N17, N18), a warning reported as a refusal (N12, N18), an unresolvable root compared
+anyway (N16), and the owner scoping lost entirely (13 cases).
+
+### Still owed
+
+**The starter library itself (D111b) — the company-curated set a plant copies into its own — is
+NOT in this migration.** 0031 is its precondition and nothing more: a shared set whose whole
+purpose is "every plant copies Forklift into their own" cannot work while the second copy is
+refused. That is now possible; the curating and copying is the next piece.
+
+---
+
+## §19.81 — D115: a product belongs to a LIST of plants, not one (migration 0034)
+
+> *"Part number is company wide, no company has different part numbers for the same product… A
+> Product can be assigned to multiple plants as there can be different plants at different geo
+> locations within the company manufacturing the same part number."* — the maintainer, 31 August.
+> And on how many: *"It could be one plant, a number of plants or all plants, I don't have an
+> answer to it. The company will decide it, we need to be flexible."*
+
+### ⭐⭐ ONE COLUMN WAS DOING THREE JOBS, AND ONLY ONE OF THEM BECOMES A LIST
+
+`products.site_node_id` — a single NOT NULL node since 0028 — answered three separate questions at
+once, and the whole design is realising they are separate:
+
+| the question | who asks it | under D115 |
+| --- | --- | --- |
+| **who may READ this row** | `products_select` / `app_can_read_owned` | any plant it is made in is on your branch |
+| **where is it OFFERED** | `offeredHere` (board), `app_guard_run_scope` | any plant it is made in covers the cell |
+| **who may EDIT the shared record** | `products_insert/update/delete` | **a company admin** (see the Split decision) |
+
+D108 fused reading and offering deliberately — one owner, so "can I see it" and "is it offered
+here" had the same answer. D115 un-fuses them: **a part made in Plant A and Plant B is readable by
+both plants' admins and offered on both plants' cells, and neither of those is a single-node
+question any more.** The join table is the easy half; separating the three jobs is the design.
+
+### The shape — a join table, `node_shift_templates`' shape with the CARDINALITY FLIPPED
+
+```sql
+create table product_sites (
+  org_id     uuid not null references orgs(id),
+  product_id uuid not null,
+  node_id    uuid not null,
+  primary key (product_id, node_id),
+  foreign key (org_id, product_id) references products (org_id, id) on delete cascade,
+  foreign key (org_id, node_id)    references nodes (org_id, id)
+);
+```
+
+⚠️ **THE PRIMARY KEY IS `(product_id, node_id)`, NOT `node_id`, AND THAT IS THE TRAININGS TRAP THE
+BRIEF WARNED ABOUT.** `node_shift_templates` has `node_id` as its whole PK because **a node runs
+exactly one shift pattern** — the opposite cardinality. A product is made in *many* places, so the
+key is the pair. Reaching for `node_shift_templates`' single-node PK here would silently forbid the
+very thing D115 exists to allow. Same table shape, opposite cardinality — [[decision-record-drift]]
+rule 9, and the reason the training answer (per-plant *names*) is also the wrong analogy: parts are
+one thing made in several places, trainings are several courses that share a word.
+
+`on delete cascade` on the product FK: deleting a part takes its assignment rows with it. The node
+FK has no cascade — a plant is not deleted out from under its parts (the hierarchy has its own
+guards for that).
+
+### THE SPLIT DECISION — who may change a part several plants share (the maintainer, 1 Sept)
+
+A part number is company-wide, so a rename touches everyone who makes it. Asked which of three
+governance models to build, the maintainer chose **Split**:
+
+- **The shared record — sku, name, colour, and delete — is company property: `app_is_admin()`
+  only.** A plant admin cannot rename a part their plant happens to make, because the number is not
+  theirs to change.
+- **The list of makers is per-plant: a plant admin may add or remove THEIR OWN plant**
+  (`app_is_admin_for(node_id)` on the `product_sites` row), and a company admin may manage the whole
+  list.
+
+⭐ **This is why creating a product is a company-admin act now.** Creating a part number *is*
+creating the shared record. A plant admin no longer creates parts; they opt their plant into parts
+the company has defined. A part with **zero** plants is therefore a legitimate, ordinary state — a
+catalogue entry not yet assigned to anyone — not an error to guard against. The board simply does
+not offer it. This is the cleanest reading of "the company decides which plants make it": the
+part exists first, the assignment follows.
+
+⚠️ **`validateProductDraft`'s owner requirement (added by 0028) is DELETED, not moved.** The create
+form used to demand a single owner; there is no single owner to demand. Places are assigned
+separately, so the draft is `{ sku, name }` and nothing about a node.
+
+### Reading — the D108 proof carries, PER PLACE
+
+`products_select` becomes: readable when you are a company admin, or **any** of the part's plants is
+on one of your grant branches (either direction). `product_sites_select` is scoped by
+`app_can_read_node(node_id)`, exactly as 0028 §7 scoped the two join tables it found leaking — so a
+Plant B admin reading a part made in A and B sees the part (a company-wide fact) and the Plant B
+assignment row, but **not** the Plant A one. The full list of makers is a company-admin view.
+
+⚠️ **D108's proof that the board-history read exception is redundant STILL HOLDS, and it holds one
+place at a time.** A run at node `r` uses a part; the offering guard (below) guarantees *some* plant
+`o` of that part covers `r` (`o.path @> r.path`). If the caller can read `r`, the 0028 argument
+shows that particular `o` satisfies `app_can_read_owned(o)`, so the part's `products_select` EXISTS
+is satisfied by that row. ∎ The exception stays deleted; no plant needs the history clause.
+
+### Offering — `app_product_offered_at`, ANY place covers the cell
+
+`app_guard_run_scope` and `app_guard_assignment_scope` stop reading a single owner and ask
+`app_product_offered_at(product, node)` = *does any `product_sites` row's node cover this node*. The
+refusal is unchanged (`not_offered_here`); what changed is that a part offered in Plant A **or**
+Plant B is accepted on either, and refused only where **no** assigned plant reaches.
+
+### The strand guard MOVES from re-home to un-assign
+
+0028 §5's `products_rehome_guard` fired when the single owner changed. There is no single owner to
+change now; the equivalent hazard is **removing a plant a part is still scheduled under**. So the
+guard fires on `DELETE` from `product_sites`: a run or assignment at node `n` is *stranded* if the
+plant being removed is the last remaining maker that covers `n`. If removing this row would strand
+any live schedule, it raises `owner_change_blocked` naming the count — the same contract, the same
+sentence family, a different trigger. Adding a plant strands nothing and is unguarded.
+
+### Colour becomes company-wide
+
+`app_pick_product_color` took the owner node and balanced the palette *within that owner's* rows
+(`IS NOT DISTINCT FROM p_site_node_id`). A part has no single owner, and its colour is one value
+shown on every board it appears on, so the pick balances **across the whole org's products** now —
+`app_pick_product_color(p_org_id)`, one argument. `products_set_color_token` no longer reads
+`new.site_node_id` (there is none). Re-assignment never re-colours, as before: colour is set once at
+insert and only a deliberate hand-override changes it (0025).
+
+### The column is DROPPED, not left vestigial
+
+`products.site_node_id` is dropped at the end of the migration. A kept-but-unused owner column would
+be exactly the two-homes-for-one-fact trap this project keeps deleting (`ownerOptions`,
+`app_product_on_visible_schedule`, the dead `canEdit` param): whoever restored it would re-fuse the
+three jobs D115 spent a migration separating. Operators, skills and shift patterns keep their single
+`site_node_id` — D115 is products-only, because only parts are "one thing made in several places".
+
+⚠️ **Dropping the column is a CLIENT change `db:types` surfaces AND some it does not.** `AdminProduct`
+loses `siteNodeId` and gains `siteNodeIds: string[]`; `offeredHere` (generic over `siteNodeId`)
+still serves operators on the board but products get their own list-aware offering; `rowsInPlant`'s
+product caller becomes "any place at or below the chosen plant"; `canOwnProduct` / `canEditProduct`
+/ `editRefusalNote` and the whole owner picker in `ProductsPanel` are rebuilt around the Split
+decision. Grep `siteNodeId` in the products path, not just `tsc`.
+
+### Backfill
+
+Every existing product has exactly one `site_node_id`; the backfill inserts one `product_sites`
+row per product from it before the column is dropped. A strict widening in meaning (one plant
+becomes a one-element list), so nothing legal becomes illegal — but the transform runs on real data
+so `upgrade_0034_` exercises it against pre-0034 rows the same way 0028 and 0031 did.
+
+---
+
+## §19.82 — CSV import, products first (stage 23)
+
+The import screen that D115 was sequenced before. It reads a CSV, shows what it WOULD do, lets a
+human fix what is wrong, and applies. Products lead because D115 made them the clean case; operators
+and the hierarchy tree follow into the same wizard.
+
+### The three parts, and why they are three
+- **`csv.ts` — an RFC 4180 parser, entity-agnostic.** A split-on-comma "parser" is what this exists
+  to not be: a real spreadsheet quotes any field with a comma, a newline or a quote in it, and
+  doubles an interior quote. It tolerates LF, CRLF and a bare CR as record breaks and strips a
+  leading BOM (Excel's "CSV UTF-8" writes one, and without stripping it the first header cell is
+  `﻿sku` and no column maps — the server's `app_trim_ws` strips U+FEFF from NAMES but that is
+  downstream of column mapping). It turns bytes into a grid and knows nothing about products, which
+  is what lets operators and the tree reuse it.
+- **`productImport.ts` — the PLAN, pure.** It decides, per row, INSERT / UPDATE / ERROR, as data a
+  test checks and a screen renders. ⭐⭐ **The match key is `external_id`, and D115 is what makes
+  that possible:** a part is company-wide and (since 0034) so is its import id, so a re-upload of the
+  same export UPDATES rather than DUPLICATES. Validation REUSES `validateProductDraft`, so an import
+  cannot write a row the manual form would have refused.
+- **`imports.ts` — apply, author-only.** Row-at-a-time on purpose: the wizard's value is telling a
+  human which rows landed and which did not, which a per-row apply produces and a single bulk
+  statement cannot. An imported UPDATE is the ordinary `updateProduct`; only the INSERT is new, because
+  it must set `external_id` (the match key) and a non-'manual' `source`.
+
+### The matching rules (the order a row is judged)
+1. external_id matches an existing part → UPDATE (sku, name) — unless the new sku is already a
+   DIFFERENT part's, which no import may move.
+2. external_id matches nothing → INSERT.
+3. no external_id but the sku matches an existing part → UPDATE that part (the sku is company-wide,
+   so the same code IS the same part); a new sku → INSERT.
+4. two file rows sharing an external_id, or a sku, are BOTH errors — otherwise the outcome would
+   depend on row order.
+5. the optional `plant` column assigns a `product_sites` row after the write; a name that resolves to
+   nothing is an error (never a silent skip), a blank plant is fine (a part offered nowhere is a
+   legitimate D115 state).
+
+### Company-admin only
+Importing creates company-wide parts, so it lands on `products_insert = app_is_admin()` — the Split
+decision, unchanged. A site admin sees the preview but not the Apply button. Verified on the running
+database: an imported insert with `external_id` + `source` set lands, a plant assigns, and a second
+row with the same `external_id` is refused `23505` — which is exactly why the plan UPDATES on a match
+rather than re-inserting.
+
+---
+
+## §19.83 — the starter library, structure-only (migration 0035)
+
+> *"Let's put the hierarchy in plant A as the starter library with an option for the company system
+> admin to edit it later."* — the maintainer, 1 Sep. Asked what a new plant copies, he chose
+> **structure only**: a new plant starts as a copy of an existing plant's node tree and is empty of
+> parts and people until those are imported.
+
+### The whole feature is `copy_plant_structure`, and it is a LOOP over `create_node`
+
+There is no new "library" concept in the schema. The library is just an existing plant; editing it
+is the ordinary tree editor already on that plant. Creating a new plant from it is one RPC:
+
+```
+copy_plant_structure(p_source_root uuid, p_new_name text) returns {id, name, nodes_copied}
+```
+
+⭐ **It reuses `create_node` rather than inserting nodes, and that is the whole design.** `create_node`
+already does every hard part: a root create COPIES the source template's levels into a fresh per-site
+template (0020 §10 — the thing that makes "one site, one structure" true), a child create resolves
+its level from its parent, paths are trigger-maintained, and every step re-checks permission.
+Re-implementing that here would be a second copy of the most intricate logic in the schema. So this
+is a loop: create the new root from the source's template, then walk the source's descendants and
+recreate each under the node its source-parent maps to.
+
+- **One function is one transaction**, so a failure part-way rolls the whole new plant back — there
+  is never a half-built plant left behind.
+- **Parents before children falls out of `order by path`**: a parent's ltree path is a strict prefix
+  of each child's, and a prefix sorts first, so a parent is always created (and its id mapped) before
+  any child needs it.
+- **No RLS bypass, unlike a generic bulk import.** `create_node` is SECURITY INVOKER and each call is
+  checked as the caller, which is exactly why the `nodes_cascade_path` org-blind hazard the roadmap
+  warns bulk import about does not arise on this path. Company-admin only, because creating a plant
+  is (create_node's root branch enforces it).
+
+Verified on the running database: copying the seed's Plant 1 (13 nodes) produced a new plant with the
+same 13 nodes — same names, same levels — in one atomic call.
+
+### The client adds one choice to an existing form
+
+A new plant (a root) is already created in `NodeTreeEditor`'s add-root form. The starter library adds
+a second way to start it: **Empty (from a shape)** — the existing behaviour, unchanged — or **Copy an
+existing plant**, a picker of the org's roots wired to `copyPlantStructure`. Structure-only means the
+copy stops at the tree; parts and people arrive through the CSV import (§19.82).
+
+---
+
+## §19.84 — operators import, and the wizard goes generic
+
+Products import (§19.82) was one wizard hard-wired to products. Operators import the same way — choose a
+CSV, template, map, preview, apply — so the wizard CHROME was extracted into a generic `ImportWizard`
+driven by a per-entity descriptor (`importView.ts`: `FieldDef`, `ImportView`, `ImportTemplate`).
+`ProductsImport` and `OperatorsImport` are thin containers — each fetches what its rows are matched and
+resolved against, and hands the wizard its plan builder, apply mutation, and template. `ImportPanel` is
+now a tab picker (Products / People). Duplicating the wizard body per entity would have been the
+"written twice" defect at component scale.
+
+⭐ **Two people-specific twists.** Operators match on `external_id` only — `employee_ref` carries no
+uniqueness, so a row without an import id can only INSERT (a re-upload of such a file duplicates people;
+the template's legend says external_id is what makes it idempotent). And the SITE is **required for an
+insert** (`operators.site_node_id` is NOT NULL, unlike a product's optional `product_sites` list), so an
+insert row must resolve a plant by name and a blank one is a per-row error; an UPDATE leaves the site
+alone (re-homing a person is out of scope for import v1). Verified in the browser: three people added
+with their plants, a no-plant row refused, and the imported rows carried `external_id` + the file name
+as `source`.
+
+---
+
+## §19.85 — training import: a catalogue and a join (the fourth and fifth lanes)
+
+The maintainer, having seen the imports: *"add a similar import function for training as well… the
+supervisor will bulk upload new trainings in the training tab as well as they would want bulk update
+trainings for people."* Two importers, both on the generic `ImportWizard`:
+
+- **Trainings (the catalogue).** Bulk-add training TYPES, one per plant. Match key is (name, owner) —
+  skills are unique per (org, owner, name) since 0031 — so a supervisor's "Forklift, Plant A" resolves
+  the plant by name; a new pair inserts (`createSkill`), an existing one is a no-op "update". A blank
+  or unresolvable plant is a per-row error because `skills.site_node_id` is NOT NULL.
+- **Certifications (the records).** A JOIN import: each row records that a PERSON holds a TRAINING,
+  with a sign-off and dates. ⭐ **The match keys are what a supervisor actually has** (the maintainer
+  chose this): an EMPLOYEE REF and the TRAINING NAME — no import ids. The person is the operator with
+  that ref (ambiguous ref -> refused, since employee_ref is not unique); the training is the skill of
+  that name owned by a node ON THE PERSON'S OWN BRANCH, the same comparability
+  `app_guard_operator_skill_scope` enforces (a Plant-1 person may hold a Plant-1 or Line-1 training,
+  never a Plant-2 one). A held training updates (`updateSkillRecord`), an unheld one grants
+  (`grantSkill`); the CSV is authoritative for sign-off/certified/expiry, and a malformed date is
+  refused rather than stored. Both gate on admin-anywhere (a site admin imports their own plant), not
+  company-admin — recording a certification is an admin act on the person's branch.
+
+Driven in the browser: a training added and an existing one no-op'd; a person granted a training, a
+held one's sign-off updated, an unknown employee ref refused. Tree CSV import was DROPPED here — the
+starter library covers a new plant's structure by copying, and the visual editor beats a
+parents/children CSV.
+
+## §19.86 — the Operator Training Matrix (its own buildout)
+
+The maintainer, 2 September: *"a matrix which lets the supervisor see who on his team is trained on
+what vs reading through individual teams... very visual, status at a glance."* The plan of record for
+it is `_delivery/operator-training-matrix.html`; this section is the decision record.
+
+### The shape, settled over an interactive mockup before any code
+Every load-bearing choice was made against a live mockup, not prose:
+
+- **Layout A** — one column per training (not a rollup). The maintainer chose it for reading like the
+  paper skills matrix people already know.
+- **The header IS the hierarchy.** Each training sits under the exact node that owns it, and the header
+  climbs from the highest level in view down to that owner: an area spans the top, then splits into its
+  lines; a node that owns trainings AND has child nodes shows its own ones under a `<node> · <level>-wide`
+  bucket beside its children (so a plant-wide training lands under "Plant A · site-wide" while a line's
+  lands under "Line 1"). ⭐ The maintainer's correction that drove this: *"Area 1 and Area 2 sit under
+  Plant A, so it should naturally show that as well... it should go up to the highest possible hierarchy."*
+  Where the data has no node above the plants (roots have `parent_id NULL`), the plants sit side by side
+  at the top with no invented root — the common-ancestor walk falls back to each training's own chain.
+- **Filters at every level, scoped by what you can read.** The plant chooser is `AdminPage`'s shared one;
+  the panel adds an area then line cascade and a multi-select over operators. No per-role special-casing —
+  the node set is already RLS-scoped, so a supervisor simply has fewer nodes to filter by.
+- **Record-in-place**, not read-only-plus-jump: a cell opens a form that grants or edits the record
+  without leaving the grid.
+- **Cell states and their glyphs.** Trained `✓`, Expiring `▲`, Expired `↻`, Not trained `×`, N/A. ⚠️ The
+  maintainer's note that fixed the glyphs: people read a red cross as *not trained*, so `×` is not-trained
+  and Expired uses `↻` (renewal overdue) — the two are different problems (never trained vs lapsed) and
+  must never read alike.
+
+### Why it needed no new plumbing
+The join that says who holds which training — `operator_skills` — already comes back from
+`fetchOperatorsAdmin`, cached under `["operators","admin"]`, alongside operators, skills, nodes and
+levels. A cell is *trained* when a row exists; *expiring/expired* is read off `expires_at` against a
+"today" and a window (30 days for now, a setting at stage M5); *N/A* is when the owner is not on the
+person's branch. So v1 is pure client work: no migration, no server function, no new read.
+
+### The one rule, restated (§19.72)
+Anything the grid SHOWS as a tick, the server must ALLOW. Applicability is `isAtOrBelow` on the ltree
+`path` — the same test the server runs — and record-in-place mirrors `app_can_edit_operator` through
+`useEditRights`, failing OPEN so the write-error contract answers rather than the client hiding a cell.
+The grid never offers a cell `app_guard_operator_skill_scope` would refuse.
+
+### What shipped, and what remains
+Pure core `src/features/admin/lib/matrix.ts` (`cellStateFor`, `buildColumns`, `buildMatrix`) with 22
+tests in `src/test/matrix.test.ts`; the read-only `MatrixPanel` registered as the `matrix` admin
+section (its own `MATRIX_PANEL_READY`, added to `adminSectionsFor` for supervisors, listed in
+`REM_SURFACES` in both places); and record-in-place over `grantSkill`/`updateSkillRecord`/`revokeSkill`.
+Stages M1–M3. M5 is polish (expiry window as a setting, remembered filters, empty states). This
+buildout is the home for the Phase-2 roadmap lines "Skills matrix admin UI" and "certification expiry
+checks"; eligibility ENFORCEMENT on the board stays on the main plan.
+
+## §19.87 — the Operators tab becomes ONE matrix (stage M4)
+
+The maintainer, 2 September, refined this pane over four messages, and the shape only settled at the
+end: *"copy this visual in the operator tab as well instead of what we have in there right now for
+individual operators"* → *"the hierarchy level should go the lowest in this one where the operator
+works"* → *"I want the matrix to replace the info present above it… go to the same level as the details
+above in hierarchy"* → *"combine those two… an operator cannot work in an area unless they're trained on
+it."* The interim states (a trainings matrix, then a trainings matrix beside a places matrix) are gone;
+what shipped is a SINGLE matrix keyed on places, with a training recorded from the cell that needs it.
+
+### The shared visual is extracted first (D100, anti-drift)
+Before a second copy of the chip could exist, the chip glyph and colour, the legend and the
+record-in-place popover moved into `src/features/admin/components/matrixCells.tsx` (+ its
+`.module.css`, listed in `REM_SURFACES` both places). `MatrixPanel` and `OperatorsPanel` both import
+it, so the two matrices cannot drift on what a mark means or how a record is entered. The popover owns
+its three form fields now, keyed by the cell, which is what lets a second panel reuse it unchanged.
+`MatrixChip` grew an optional `glyph` override and an `ariaHidden` flag for the places matrix below.
+
+### One matrix, not two — the merge (the maintainer's third correction)
+The first build put the trainings and "where they can work" as two stacked matrices. The maintainer,
+seeing them: *"combine those two… they are essentially the same thing, an operator cannot work in an
+area unless they're trained on it."* And, choosing between candidate merges over a second mockup: **one
+matrix keyed on PLACES; the training is how you fix a cross.** So the per-operator TRAININGS matrix is
+gone entirely (and with it the pure `buildOperatorMatrix` and its tests — dead once nothing drew it),
+and the single matrix is the places grid, down to the cell.
+
+The flat `PlaceRow` list became the nested-header grid, reaching the CELL level the list already
+reached. Each schedulable place is a column OWNED BY ITS PARENT, so the header climbs plant → area →
+line and the cell's own name lands on the leaf column row rather than doubling as an owner band; the
+`placeVerdict` three-state (`can-work` / `missing-training` / `outside-area`) rides each cell as a
+`✓` / `×` / `⚠` chip that borrows the shared cell's SHAPE and COLOUR but names its own verdict
+(`missing-training` reuses the red gap, `outside-area` the amber warning — D113: a warning, never a
+refusal). The reason a cross carries — "missing Welding", "needs a recorded reason" — moves from a
+visible column to each cell's hover title and visually-hidden hint (which is also the whole-chain label
+a test finds a cell by).
+
+### Recording is now a cell click, and it flows through applicability
+A place cell is a button. Clicking it opens a **chooser** — the trainings that gate that cell and are
+not yet satisfied (`place.missing` → *Record*, `place.expiring` → *Renew*) — and choosing one hands off
+to the shared `RecordPopover` in the same spot, which grants (insert) or edits (update) with the same
+three optional, independent facts. ⚠️ Only a training that APPLIES to the person (owner an
+ancestor-or-self of their node, §19.72) is offered a Record button; one owned off their branch is named
+"owned elsewhere" and not offered, because the server would refuse the grant anyway. A `✓` cell's
+chooser says "Trained for this cell." So the two questions — *can they work here* and *what do I record
+to make them* — are one grid and one gesture; editing or removing a still-valid held training is a job
+for the team Matrix tab, not this per-person view. §19.77's three-state rule is untouched; only its
+rendering changed, and the summary line, as-of date and trimmed/deactivated footnotes are unchanged.
+
+### Tests
+`operatorsPanel.test.tsx` moves with the UI: O1–O6 assert the places-matrix cells (`×` vs `⚠` never
+confused), O19–O29 the chooser and record flow (a cross offers Record, a tick says "trained", an
+expiry offers Renew and opens on the stored record, a grant sends all three facts + the org, the signer
+stays free-text and trimmed, a training owned elsewhere is named but not offered). The fixture's
+trainings gained the `active` field they always should have carried — without it the applicability
+filter drops every column, the omitted-field trap this suite is written against. Suite: 1582 tests in
+44 files (the 6 `buildOperatorMatrix` cases retired with the function).

@@ -4,11 +4,17 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* In a NARROW container (the /sign-in card) the row cannot fit on one line, so
+     let the controls wrap below the label instead of squashing. On the wide
+     board header everything still fits on one line, so this is a no-op there. */
+  flex-wrap: wrap;
 }
 
 .label {
   font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--ink-2);
+  /* Keep "Viewing as:" together — never broken across two lines mid-phrase. */
+  white-space: nowrap;
 }
 
 .select {
@@ -18,6 +24,8 @@
   border: 1px solid var(--axis);
   border-radius: 6px;
   background: var(--surface);
+  /* Never overflow a narrow container; keeps its natural width on the board. */
+  max-width: 100%;
 }
 
 .scopeNote {

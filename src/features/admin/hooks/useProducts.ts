@@ -22,14 +22,19 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  assignProductSite,
   createProduct,
+  createProductAtNode,
   deleteProduct,
   fetchAdminProducts,
   setProductActive,
   setProductColor,
+  unassignProductSite,
   updateProduct,
   type AdminProduct,
+  type CreateProductAtNodeInput,
   type CreateProductInput,
+  type ProductSiteInput,
   type SchedulerError,
   type SetProductActiveInput,
   type SetProductColorInput,
@@ -72,7 +77,25 @@ export function useCreateProduct() {
   });
 }
 
-/** Rename / re-sku. Owner and colour are untouched — see `updateProduct`. */
+/**
+ * Create a part AND assign it to one plant the caller administers, in one act
+ * (D116, the site-admin create path). Invalidates the BOARD as well as the
+ * catalogue: the new part arrives already made at a plant, so where it is
+ * offered has changed — the same reason `useAssignProductSite` refreshes both.
+ */
+export function useCreateProductAtNode() {
+  const queryClient = useQueryClient();
+
+  return useMutation<AdminProduct, SchedulerError, CreateProductAtNodeInput>({
+    mutationFn: (input) => createProductAtNode(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+  });
+}
+
+/** Rename / re-sku the shared record. Places and colour are untouched. */
 export function useUpdateProduct() {
   const queryClient = useQueryClient();
 
@@ -80,6 +103,36 @@ export function useUpdateProduct() {
     mutationFn: (input) => updateProduct(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: productKeys.all });
+    },
+  });
+}
+
+/**
+ * Add a plant to a product's list of makers (D115). Invalidates the BOARD too:
+ * assigning a plant changes where the product is offered, and a stale board
+ * would keep refusing (or keep offering) it until something else refreshed.
+ */
+export function useAssignProductSite() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, ProductSiteInput>({
+    mutationFn: (input) => assignProductSite(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["board"] });
+    },
+  });
+}
+
+/** Remove a plant from a product's list of makers (D115). Same board invalidation. */
+export function useUnassignProductSite() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, ProductSiteInput>({
+    mutationFn: (input) => unassignProductSite(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: productKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["board"] });
     },
   });
 }

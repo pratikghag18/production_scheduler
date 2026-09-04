@@ -45,18 +45,11 @@
   letter-spacing: 0.3px;
 }
 
+/* POSITIONING ONLY. The button's chrome (border, size, hover, the chevron) is
+   shared from `PanelToggle.module.css` so this toggle matches the admin rail's
+   exactly (R-311). This class only places it in the panel header. */
 .toggle {
   margin-left: auto;
-  border: 1px solid var(--axis);
-  background: var(--surface);
-  border-radius: 5px;
-  width: calc(20px * var(--ui-scale, 1));
-  height: calc(20px * var(--ui-scale, 1));
-  flex: none;
-  cursor: pointer;
-  font-size: calc(11px * var(--ui-scale, 1));
-  color: var(--ink-2);
-  line-height: 1;
 }
 
 .collapsed .toggle {

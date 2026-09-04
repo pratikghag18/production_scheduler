@@ -150,5 +150,79 @@ export function adminAccess(
 ): AdminAccess {
   if (loading) return "pending";
   if (role === "admin") return "granted";
+  // ⭐⭐ D114: A SUPERVISOR GETS IN. 0032 made a supervisor's grant enough to
+  // keep the training record, and the maintainer's reason is the job: *"the
+  // supervisor will be the one who enters or uploads the training
+  // information."* Until this line the database said yes and the screen still
+  // turned them away at the door — the invisible half of a permission change.
+  //
+  // ⚠️ WHAT THEY SEE ONCE INSIDE IS `adminSectionsFor`, not this. This
+  // answers "may you come in"; that answers "which rooms".
+  //
+  // ⚠⚠ AND THIS ADMITS A SUPERVISOR WITH NO GRANTS AT ALL, who will find two
+  // empty lists. That is deliberate and it is the fail-open direction
+  // `scope.ts` argues for: the exact question — *do you hold a WRITABLE grant
+  // anywhere* — has no client answer today, because `app_is_admin_anywhere()`
+  // counts only ADMIN grants. Guessing "no" would hide the screen from the very
+  // people 0032 was built for, silently and permanently; guessing "yes" costs
+  // an empty list somebody can see and ask about. **Closing it properly needs a
+  // `can_write_anywhere()` to sit beside `app_is_admin_anywhere()`**, and that
+  // is recorded rather than half-built.
+  if (role === "supervisor") return "granted";
   return adminAnywhere === true ? "granted" : "denied";
+}
+
+/**
+ * Which admin sections are worth showing this person (D114).
+ *
+ * ⭐⭐ THE DOOR AND THE ROOMS ARE DIFFERENT QUESTIONS, AND THEY WERE THE SAME
+ * ONE UNTIL SUPERVISORS ARRIVED. Everybody who could reach this screen could
+ * see all of it, so no second answer was needed. The maintainer, 31 August:
+ * *"I think a supervisor should be able to see operators and trainings."* Not
+ * shifts, not products, not the hierarchy, not who-can-get-in.
+ *
+ * ⚠⚠ THIS IS A MENU, NOT A PERMISSION. Every write behind these screens is
+ * decided by the database on its own terms — `app_can_edit_node` and its
+ * relatives, widened by 0032 and pinned by `59_`. All this decides is which
+ * rail buttons are worth offering, so nobody is handed a screen that could only
+ * ever tell them no. **If this and the database ever disagree, the database is
+ * right and this is the bug.**
+ *
+ * ⚠️ A SUPERVISOR IS NOT GIVEN A REDUCED VARIANT OF THOSE TWO SCREENS. They
+ * get the same ones, showing what their grants reach, exactly as a site admin
+ * already does. A second, narrower copy would be two screens to keep in step,
+ * and §19.77 is the standing lesson about a screen's idea of the rules drifting
+ * from the server's.
+ */
+export function adminSectionsFor(
+  role: string | null | undefined,
+  adminAnywhere: boolean | null | undefined,
+): "all" | readonly string[] {
+  // Exactly who could reach this screen before D114, so nobody loses a tab.
+  if (role === "admin" || adminAnywhere === true) return "all";
+  // The Matrix is a third view of the same operators-and-trainings data those
+  // two screens show, scoped to what the reader can already see, so a supervisor
+  // gets it for the same reason they get Operators and Trainings.
+  return ["operators", "trainings", "matrix"];
+}
+
+/**
+ * Which section to actually show, given the rail this person gets.
+ *
+ * ⭐ FALLS BACK, NEVER STICKS — the same idiom as `resolveSelectedShape`,
+ * `resolvePlace` and `resolvePlantChoice`, and here for the same reason. The
+ * screen opens on `"hierarchy"`, which a supervisor cannot see: without this
+ * they would land on a heading with no rail button and an empty pane, and
+ * nothing on screen would explain why.
+ *
+ * ⚠️ It falls back to the FIRST section they can see rather than to a fixed
+ * one. "Operators" happens to be first for a supervisor today, but naming it
+ * here would be a second place to edit the day the rail order changes.
+ */
+export function resolveAdminSection<T extends string>(
+  allowed: readonly T[],
+  selected: T,
+): T | null {
+  if (allowed.includes(selected)) return selected;
+  return allowed.length > 0 ? allowed[0] : null;
 }

@@ -3,6 +3,7 @@ import type { BoardOperator, Skill, BoardNode } from "@/lib/api";
 import type { IndexedAssignment } from "../lib/boardIndex";
 import { isFullyAllocated } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import { PanelToggle } from "@/components/PanelToggle";
 import styles from "./OperatorPanel.module.css";
 
 function initials(name: string): string {
@@ -67,14 +68,12 @@ export function OperatorPanel({
     <aside className={`${styles.panel} ${open ? "" : styles.collapsed}`}>
       <div className={styles.panelHd}>
         <span className={styles.lbl}>OPERATORS</span>
-        <button
-          type="button"
+        <PanelToggle
+          collapsed={!open}
+          onToggle={onToggleOpen}
+          label="operators"
           className={styles.toggle}
-          onClick={onToggleOpen}
-          title={open ? "Collapse panel" : "Expand panel"}
-        >
-          {open ? "«" : "»"}
-        </button>
+        />
       </div>
       <div className={styles.list}>
         {visible.map((o) => {

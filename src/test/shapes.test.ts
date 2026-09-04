@@ -21,6 +21,14 @@ const run: Json = {
   org_id: "10000000-0000-0000-0000-000000000001",
   node_id: "30000000-0000-0000-0000-000000000007",
   product_id: "60000000-0000-0000-0000-000000000001",
+  // D110/0029: the snapshot a run keeps once its product is deleted. NULL here
+  // because this product still exists — but the keys must be PRESENT, because
+  // `isStrOrNull` rejects `undefined` and `board_window` sends every column.
+  // ⚠️ `tsc` cannot see a JSON fixture, so nothing but a run would have caught
+  // a missing key here.
+  product_sku: null,
+  product_name: null,
+  product_color_token: null,
   timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
   planned_headcount: 3,
   notes: null,
@@ -35,12 +43,20 @@ const assignment: Json = {
   org_id: "10000000-0000-0000-0000-000000000001",
   node_id: "30000000-0000-0000-0000-000000000007",
   operator_id: "50000000-0000-0000-0000-000000000004",
+  operator_display_name: null,
   run_id: "80000000-0000-0000-0000-000000000001",
   product_id: null,
+  product_sku: null,
+  product_name: null,
+  product_color_token: null,
   timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
   efficiency: 1.0,
   eligibility_override: false,
   override_reason: null,
+  // D113/0030. `isBool` rejects `undefined`, so a missing key here would fail
+  // every case in this file at runtime and none of them at compile time.
+  area_override: false,
+  area_override_reason: null,
   target_qty: null,
   target_unit: null,
   status: "planned",
@@ -79,6 +95,11 @@ const boardWindowJson: Json = {
       display_name: "Maria",
       employee_ref: "EMP-001",
       active: true,
+      // D109/0028, and D113 is what made the client read it: the part of the
+      // structure this person belongs to. `board_window` has emitted it since
+      // 0025 and `parseOperator` dropped it, so the board could not tell
+      // whether somebody belonged at the cell being scheduled. REQUIRED now.
+      site_node_id: "30000000-0000-0000-0000-000000000001",
       skill_ids: ["40000000-0000-0000-0000-000000000001"],
     },
   ],
@@ -92,6 +113,18 @@ const boardWindowJson: Json = {
       // now. The fixture carries it so the happy path matches the real payload
       // rather than the subset the parser happens to tolerate.
       color_token: "product-2",
+      // D115/0034: `board_window` emits `site_node_ids` — the LIST of nodes this
+      // product is made at, from `product_sites`. REQUIRED as an array by
+      // `parseProduct` (the last describe pins the shape). Here a one-element
+      // list naming the node in `nodes` above, as the real payload does.
+      site_node_ids: ["30000000-0000-0000-0000-000000000001"],
+      // DEF-0005 / 0042: the server's own answer to "where is this offered",
+      // scoped to this window. REQUIRED as an array, for the same reason
+      // `site_node_ids` is and one stronger: a payload without it comes from a
+      // `board_window` that predates the fix, and carrying on regardless would
+      // silently go back to deriving the offer from a list that RLS may have
+      // emptied. The cell below is the schedulable node in `nodes` above.
+      offered_node_ids: ["30000000-0000-0000-0000-000000000006"],
     },
   ],
   skills: [{ id: "40000000-0000-0000-0000-000000000001", name: "CNC" }],
@@ -120,6 +153,13 @@ const boardWindowJson: Json = {
     {
       node_id: "30000000-0000-0000-0000-000000000007",
       template_id: "70000000-0000-0000-0000-000000000001",
+    },
+  ],
+  cycle_times: [
+    {
+      node_id: "30000000-0000-0000-0000-000000000007",
+      product_id: "60000000-0000-0000-0000-000000000001",
+      seconds_per_unit: 90,
     },
   ],
 };
@@ -412,5 +452,225 @@ describe("parseProduct — the colour is presentation, not identity", () => {
     const win = parseBoardWindow(raw as unknown as Json);
     expect(win).not.toBe(null);
     expect(win?.products[0]?.colorToken).toBe("");
+  });
+});
+
+/*
+ * D115 / migration 0034 — the PLACES, and why an empty list is the new honest
+ * zero rather than a rejection.
+ *
+ * `board_window` emits `site_node_ids`, the LIST of nodes a product is made at;
+ * `app_guard_run_scope` / `app_guard_assignment_scope` refuse a run or
+ * assignment whose product is offered in NO plant covering the target cell
+ * (`not_offered_here`), and there is NO override for products. So the list is
+ * identity, like `sku`, not presentation like `color_token`.
+ *
+ * ⚠️ BUT AN EMPTY ARRAY IS ACCEPTED, and that is the change from the pre-0034
+ * single owner. A part assigned to no plant is a legitimate state. What is
+ * rejected is a MALFORMED shape (a non-array, or an array with a non-string
+ * entry): a payload this client does not understand, unlike an honest zero.
+ *
+ * ⚠️⚠️ AND `site_node_ids` NO LONGER DECIDES THE OFFER (DEF-0005). It is the raw
+ * place list, RLS-filtered on read, so for a supervisor granted a LINE a
+ * plant-wide part arrives with an empty one — indistinguishable from a part
+ * assigned to no plant, which is how a supervisor came to be offered one part
+ * out of four while the server accepted all four. `offered_node_ids` carries
+ * the server's own answer and is what the picker reads; both are required, and
+ * the cases below pin each of them separately, because they now mean different
+ * things and a fixture that conflated them would hide the next version of this.
+ */
+describe("parseProduct — the places are identity, and an empty list is honest", () => {
+  it("keeps the list the server actually sends", () => {
+    const win = parseBoardWindow(boardWindowJson);
+    expect(win?.products[0]?.siteNodeIds).toEqual(["30000000-0000-0000-0000-000000000001"]);
+  });
+
+  it("⭐ accepts an EMPTY list — a part assigned to no plant, offered nowhere", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids: unknown }[];
+    };
+    raw.products[0].site_node_ids = [];
+    const win = parseBoardWindow(raw as unknown as Json);
+    expect(win?.products[0]?.siteNodeIds).toEqual([]);
+  });
+
+  it("rejects a product with no site_node_ids rather than coercing it", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids?: unknown }[];
+    };
+    delete raw.products[0].site_node_ids;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+
+  it("rejects site_node_ids that is not an array — a shape it does not understand", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids: unknown }[];
+    };
+    raw.products[0].site_node_ids = "30000000-0000-0000-0000-000000000001";
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+
+  it("⭐ keeps offered_node_ids — the field the picker actually reads (DEF-0005)", () => {
+    const win = parseBoardWindow(boardWindowJson);
+    expect(win?.products[0]?.offeredNodeIds).toEqual(["30000000-0000-0000-0000-000000000006"]);
+  });
+
+  it("⭐ the two lists are independent: places may be EMPTY while the offer is not", () => {
+    // Ana's payload, in miniature. A supervisor granted a line cannot read the
+    // plant her parts are made at, so `product_sites_select` drops the row and
+    // `site_node_ids` arrives empty — while the server, asked directly, offers
+    // the part at her cell. A parser that treated the places as the offer (or a
+    // fixture that always sent them together) could not tell this apart from a
+    // part made nowhere, and that is the whole defect.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids: unknown; offered_node_ids: unknown }[];
+    };
+    raw.products[0].site_node_ids = [];
+    const win = parseBoardWindow(raw as unknown as Json);
+    expect(win?.products[0]?.siteNodeIds).toEqual([]);
+    expect(win?.products[0]?.offeredNodeIds).toEqual(["30000000-0000-0000-0000-000000000006"]);
+  });
+
+  it("rejects a product with no offered_node_ids — a server behind this client", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { offered_node_ids?: unknown }[];
+    };
+    delete raw.products[0].offered_node_ids;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+
+  it("rejects an array with a non-string entry", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids: unknown }[];
+    };
+    raw.products[0].site_node_ids = ["30000000-0000-0000-0000-000000000001", 42];
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+/* ===========================================================================
+ * D110 (migration 0029) and D113 (0030) — the nullable columns, and the case
+ * that would have taken the whole board down.
+ *
+ * ⚠️ NONE OF THIS IS VISIBLE TO `tsc`. The fixtures above are `Json`, so a
+ * missing key is `undefined` at runtime and nothing at compile time — the same
+ * shape as §19.72a's "a compiler cannot see a string expectation", one costume
+ * along. The three keys added to `run` and the five added to `assignment` were
+ * put there because these cases demanded them, not because anything complained.
+ * =========================================================================== */
+
+describe("a run whose product has been deleted", () => {
+  function withRun(over: Record<string, unknown>): Json {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as { runs: Record<string, unknown>[] };
+    raw.runs[0] = { ...raw.runs[0], ...over };
+    return raw as unknown as Json;
+  }
+
+  it("⭐⭐ parses AT ALL — one row that does not is the whole board gone", () => {
+    // `parseArrayOf` returns null for the WHOLE ARRAY on the first item that
+    // fails, so `parseBoardWindow` would return null and `fetchBoardWindow`
+    // would throw `shapeMismatch`. Before this change `productId` was typed
+    // `string` and guarded with `isStr`, so the first deleted product with
+    // history stopped the board loading for everyone, with an error about a
+    // shape rather than about a product.
+    expect(
+      parseBoardWindow(withRun({ product_id: null, product_sku: "WX", product_name: "Widget X" })),
+    ).not.toBeNull();
+  });
+
+  it("keeps the remembered sku and releases the id", () => {
+    const win = parseBoardWindow(
+      withRun({ product_id: null, product_sku: "WX", product_name: "Widget X" }),
+    );
+    expect(win?.runs[0]?.productId).toBeNull();
+    expect(win?.runs[0]?.productSku).toBe("WX");
+  });
+
+  it("rejects a payload with the snapshot keys ABSENT rather than null", () => {
+    // `isStrOrNull` rejects `undefined`, and `board_window` emits every column
+    // via `to_jsonb(r)` — so an absent key means a database older than 0029,
+    // not a legal shape.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      runs: Record<string, unknown>[];
+    };
+    delete raw.runs[0].product_sku;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+describe("an assignment whose operator has been deleted", () => {
+  it("⭐ parses, and keeps the name remembered at the moment they went", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      assignments: Record<string, unknown>[];
+    };
+    raw.assignments[0].operator_id = null;
+    raw.assignments[0].operator_display_name = "Dana Departing";
+    const win = parseBoardWindow(raw as unknown as Json);
+    expect(win?.assignments[0]?.operatorId).toBeNull();
+    expect(win?.assignments[0]?.operatorDisplayName).toBe("Dana Departing");
+  });
+
+  it("D113: carries the area override, and rejects a payload without it", () => {
+    expect(parseBoardWindow(boardWindowJson)?.assignments[0]?.areaOverride).toBe(false);
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      assignments: Record<string, unknown>[];
+    };
+    delete raw.assignments[0].area_override;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+describe("R-315: board_window hands over the standard cycle times", () => {
+  it("parses cycle_times to camelCase", () => {
+    expect(parseBoardWindow(boardWindowJson)?.cycleTimes).toEqual([
+      {
+        nodeId: "30000000-0000-0000-0000-000000000007",
+        productId: "60000000-0000-0000-0000-000000000001",
+        secondsPerUnit: 90,
+      },
+    ]);
+  });
+
+  it("rejects a cycle time whose seconds are not a number", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      cycle_times: Record<string, unknown>[];
+    };
+    raw.cycle_times[0]!.seconds_per_unit = "90";
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("rejects a payload with no cycle_times key at all", () => {
+    // board_window COALESCEs the key to '[]', so it is absent only against a
+    // database that has not run migration 0040. Defaulting to [] there would
+    // leave every derived target silently missing and the board otherwise
+    // working — loud is better than silently empty.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as Record<string, unknown>;
+    delete raw.cycle_times;
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("accepts an empty list — a cycle time is optional everywhere", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as Record<string, unknown>;
+    raw.cycle_times = [];
+    expect(parseBoardWindow(raw as never)?.cycleTimes).toEqual([]);
+  });
+});
+
+describe("an operator carries the part of the structure they belong to", () => {
+  it("D109/D113: parseOperator keeps site_node_id — it was sent and dropped", () => {
+    expect(parseBoardWindow(boardWindowJson)?.operators[0]?.siteNodeId).toBe(
+      "30000000-0000-0000-0000-000000000001",
+    );
+  });
+
+  it("and rejects a row without one, rather than coercing it to empty", () => {
+    // `""` would be worse than rejecting: `offeredAt` FAILS OPEN on an owner it
+    // cannot resolve, so an empty owner reads as "belongs everywhere" and the
+    // popover would annotate nobody.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      operators: Record<string, unknown>[];
+    };
+    delete raw.operators[0].site_node_id;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
   });
 });

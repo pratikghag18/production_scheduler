@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Product, BoardOperator, ShiftTemplate, Skill } from "@/lib/api";
 import type { BoardRow, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { ZOOMS, minutesToPx, intersects, type Density } from "../lib/geometry";
+import { assignmentProductView, operatorViewFor, productViewFor } from "../lib/history";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import { ShiftLayer } from "./ShiftLayer";
 import { RunBand } from "./RunBand";
@@ -92,7 +93,7 @@ export function TrackRow({
   assignmentsByRun: Map<string, IndexedAssignment[]>;
   productById: Map<string, Product>;
   operatorById: Map<string, BoardOperator>;
-  productColorVar: (productId: string | null) => string;
+  productColorVar: (product: Product | undefined) => string;
   windowStart: Date;
   windowMinutes: number;
   dayCount: number;
@@ -233,8 +234,8 @@ export function TrackRow({
             run={r}
             density={density}
             assignments={assignmentsByRun.get(r.id) ?? []}
-            product={productById.get(r.productId)}
-            productColorVar={productColorVar(r.productId)}
+            product={productViewFor(r, productById)}
+            productColorVar={productColorVar(productViewFor(r, productById))}
             windowStart={windowStart}
             pxPerHour={pxPerHour}
             windowMinutes={windowMinutes}
@@ -257,11 +258,9 @@ export function TrackRow({
               key={a.id}
               assignment={a}
               density={density}
-              operator={operatorById.get(a.operatorId)}
-              product={productById.get(a.productId ?? runById.get(a.runId ?? "")?.productId ?? "")}
-              productColorVar={productColorVar(
-                a.productId ?? runById.get(a.runId ?? "")?.productId ?? null,
-              )}
+              operator={operatorViewFor(a, operatorById)}
+              product={assignmentProductView(a, runById, productById)}
+              productColorVar={productColorVar(assignmentProductView(a, runById, productById))}
               windowStart={windowStart}
               pxPerHour={pxPerHour}
               windowMinutes={windowMinutes}
@@ -282,9 +281,9 @@ export function TrackRow({
               key={a.id}
               assignment={a}
               density={density}
-              operator={operatorById.get(a.operatorId)}
-              product={a.productId ? productById.get(a.productId) : undefined}
-              productColorVar={productColorVar(a.productId)}
+              operator={operatorViewFor(a, operatorById)}
+              product={productViewFor(a, productById)}
+              productColorVar={productColorVar(productViewFor(a, productById))}
               windowStart={windowStart}
               pxPerHour={pxPerHour}
               windowMinutes={windowMinutes}

@@ -67,7 +67,13 @@ export interface ToastResolveCtx {
   /** Only needed for the RunOverlap fallback path — see the comment at
    *  its call below. Keyed by run id, not node id (unlike
    *  `BoardIndex.runsByNode`). */
-  runById?: Map<string, { productId: string; nodeId: string; startMin: number; endMin: number }>;
+  // D110: `productId` is nullable once the product has been deleted. This is a
+  // STRUCTURAL type over `IndexedRun`, so it has to follow or the whole index
+  // stops being assignable to it.
+  runById?: Map<
+    string,
+    { productId: string | null; nodeId: string; startMin: number; endMin: number }
+  >;
   /** Needed only to format a RunOverlap/CapacityExceeded timerange as a
    *  clock range; omit to fall back to the raw ISO text. */
   formatRange?: (startMin: number, endMin: number) => string;
@@ -131,7 +137,16 @@ export function buildSchedulerErrorToast(
       // still-accurate but less specific sentence.
       const conflict = ctx.runById?.get(err.conflictingRunId);
       if (conflict) {
-        const product = ctx.productById?.get(conflict.productId)?.name ?? "another product";
+        // D110: the conflicting run may be drawing a product that no longer
+        // exists, in which case its id is null and the name lives on the run.
+        // `productSku` is not in this structural type — the toast context
+        // deliberately knows the four fields it needs and no more — so the
+        // fallback sentence is the honest answer here rather than a lookup
+        // that would always miss.
+        const product =
+          conflict.productId === null
+            ? "another product"
+            : (ctx.productById?.get(conflict.productId)?.name ?? "another product");
         const range = ctx.formatRange?.(conflict.startMin, conflict.endMin) ?? err.timerange;
         return { message: `${cell} already runs ${product} ${range} — reverted.`, kind: "crit" };
       }

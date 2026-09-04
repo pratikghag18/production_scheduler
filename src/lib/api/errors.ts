@@ -149,18 +149,41 @@ export type SchedulerError =
     }
   /**
    * Migration 0028 / D109: the thing being scheduled does not belong here.
-   * `jsonb_build_object('kind', ..., 'id', ..., 'owner_node_id', ..., 'node_id', ...)`
-   * — read from the migration's own `api_raise` calls, and pinned BY KEY in
-   * `55_ownership_scope_test.sql` case N3.
    *
    * `kind` says which list the row came from: `product`, `operator`, `skill`,
    * `shift_template`, `operator_home` or `operator_skill`.
+   *
+   * ⚠️ TWO PAYLOAD SHAPES, AND `ownerNodeId` IS THE DIFFERENCE (DEF-0003).
+   * 0028 raised one shape from every guard —
+   * `jsonb_build_object('kind', ..., 'id', ..., 'owner_node_id', ..., 'node_id', ...)`
+   * — so the field was required here and the parser demanded all four keys.
+   * Migration 0034 (D115, "a product belongs to a list of plants") changed
+   * that for the PRODUCT half only: a part now belongs to MANY plants, so
+   * there is no single owner node to name, and the two product guards
+   * (`app_guard_run_scope`, `app_guard_assignment_scope`) drop the key.
+   * Migration 0040's `app_guard_cycle_time_scope` copied the new shape. The
+   * OPERATOR half of 0034's assignment guard, and every 0028 guard that was
+   * not re-emitted (`node_skill`, `node_template`, `operator_home`,
+   * `operator_skill`), still send it.
+   *
+   * So the field is OPTIONAL rather than gone. Its absence is information, in
+   * the same way `LevelMismatch`'s missing `node_id` is: it says the refused
+   * row has a list of homes, not one. Deleting the field instead would throw
+   * away the one thing on the payload that says where the row DOES belong —
+   * the raw material for a better sentence than the one below — every time a
+   * guard bothers to send it. Nothing outside this file reads it today, which
+   * is why either choice compiles; that is the argument for keeping the
+   * server's own information, not for discarding it.
+   *
+   * The shapes were read from the LAST definition of each guard function, not
+   * from 0028: `create or replace` means an earlier file's `jsonb_build_object`
+   * is not what the database raises.
    */
   | {
       kind: "NotOfferedHere";
       what: string;
       id: string;
-      ownerNodeId: string;
+      ownerNodeId?: string;
       nodeId: string;
     }
   /**
@@ -453,17 +476,44 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
       return undefined;
     }
     case "not_offered_here": {
+      // THREE required keys, not four (DEF-0003). Requiring `owner_node_id`
+      // made every PRODUCT refusal since migration 0034 fall through to
+      // `Unknown`, so a supervisor who put a Plant B part on a Plant A cell was
+      // told "Something went wrong. Please try again." — an instruction to
+      // repeat an action that can never succeed — while the server had already
+      // sent the exact sentence to say instead.
+      //
+      // Why each of the three earns its place:
+      //   `kind`     — `describeSchedulerError` switches on it to choose the
+      //                noun ("That person" / "That training" / "That shift
+      //                pattern" / "That product") and the separate
+      //                `operator_home` sentence. Without it the message is
+      //                confidently about the wrong kind of row, which is worse
+      //                than Unknown.
+      //   `node_id`  — the place that refused. Every raise site sends it; a
+      //                payload without it is not this refusal.
+      //   `id`       — which row. Every single-row guard sends it, and the
+      //                variant promises it to callers as a `string`.
+      // and why the fourth does not:
+      //   `owner_node_id` — read from the LAST definition of each guard:
+      //                sent by the operator/skill/template/home guards, NOT by
+      //                the product guards since 0034 or by cycle times since
+      //                0040. Demanding it is demanding an owner from a row that
+      //                has a list of them.
+      //
+      // This is a narrower test, not a lenient one: a `not_offered_here` whose
+      // DETAIL is missing `kind`, `id` or `node_id` is still malformed and
+      // still becomes `Unknown`, because there is nothing true left to say.
       if (
         hasStringProp(detail, "kind") &&
         hasStringProp(detail, "id") &&
-        hasStringProp(detail, "owner_node_id") &&
         hasStringProp(detail, "node_id")
       ) {
         return {
           kind: "NotOfferedHere",
           what: detail.kind,
           id: detail.id,
-          ownerNodeId: detail.owner_node_id,
+          ownerNodeId: hasStringProp(detail, "owner_node_id") ? detail.owner_node_id : undefined,
           nodeId: detail.node_id,
         };
       }

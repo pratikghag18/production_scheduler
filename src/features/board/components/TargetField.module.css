@@ -1,0 +1,33 @@
+/* The two-input row for the target quantity + unit. Ported from the identical
+   `.row2` blocks that CreatePopover.module.css and AssignmentPopover.module.css
+   each carried before the field was shared. Rendered inside a popover's `.body`,
+   so the inputs inherit that wrapper's `.body input` styling; this file only
+   owns the row layout. */
+.row2 {
+  display: flex;
+  gap: calc(6px * var(--chrome-scale, 1));
+  margin-top: calc(2px * var(--chrome-scale, 1));
+}
+
+.row2 input {
+  width: auto;
+  /* The quantity input takes twice the width of the unit input. Flex items
+     default to `min-width: auto` (they refuse to shrink below their content),
+     so this is set explicitly. */
+  flex: 2;
+  min-width: 0;
+}
+
+.row2 input + input {
+  flex: 1;
+}
+
+/* R-316: the standard this cell's cycle time implies, shown under the row. It
+   explains what the placeholder means — that leaving the field blank is a
+   choice (use the standard), not an omission. Muted: it is a note, not a
+   value, and must not read as something already filled in. */
+.hint {
+  margin: calc(4px * var(--chrome-scale, 1)) 0 0;
+  font-size: calc(11px * var(--chrome-scale, 1));
+  color: var(--muted, #6b7280);
+}
