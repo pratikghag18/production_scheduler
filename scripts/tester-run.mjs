@@ -2,7 +2,8 @@
 // scripts/tester-run.mjs — the tester's fixed run order, in one command.
 //
 //   node scripts/tester-run.mjs            the standard run (plan check, types, tsc, lint, format, vitest, sweeps)
-//   node scripts/tester-run.mjs --sql      also run every supabase/tests file against the local stack
+//   node scripts/tester-run.mjs --sql      also run every supabase/tests file against the local stack,
+//                                          plus `dev_demo.sql` and its checks on a database of their own
 //   node scripts/tester-run.mjs --e2e      also run Playwright
 //   node scripts/tester-run.mjs --no-types skip `npm run db:types` (when the local Supabase stack is down;
 //                                          tsc is then INCONCLUSIVE and the report says so)
@@ -148,6 +149,14 @@ if (WANT_SQL) {
     .sort();
   run("sql: rebuild the scratch database", "bash", ["scripts/run-sql-test.sh", "--rebuild"]);
   for (const f of tests) run(`sql: ${f}`, "bash", ["scripts/run-sql-test.sh", f]);
+  // ⭐ THE DEMO WORLD, ON ITS OWN DATABASE (DEF-0006). `dev_demo.sql` is what the
+  // running app shows and it was on no runner's path, so migration 0044 could drop
+  // a column the demo still wrote and nothing went red — the fixture simply stopped
+  // building half way through the next `db:reset`. This step APPLIES that file
+  // under ON_ERROR_STOP, which is the half that catches it, and then asks the built
+  // world R-D112's questions. It cannot share `sql_test_db`: `dev_demo.sql` deletes
+  // org 1's seeded content, and the loop above does not rebuild between files.
+  run("sql: dev_demo.sql builds the demo world", "bash", ["scripts/run-sql-test.sh", "--demo"]);
   const upgrades = readdirSync(join(ROOT, "supabase/tests"))
     .filter((f) => /^upgrade_.*\.sql$/.test(f))
     .sort();

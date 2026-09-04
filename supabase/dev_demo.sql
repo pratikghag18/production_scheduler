@@ -411,11 +411,15 @@ BEGIN
            AND p.sku = 'PN-' || (ascii(v_letter) - ascii('A') + 1)
                        || (CASE WHEN v_i <= 2 AND v_d = 1 THEN '003' ELSE '001' END);
 
-        INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+        -- ⚠️ NO `status` COLUMN. Migration 0044 dropped `runs.status` (R-324);
+        -- this line still named it for one session and the demo world stopped
+        -- building here (DEF-0006). `dev_demo_test.sql` now applies this file
+        -- on a runner, so the next dropped column fails loudly instead.
+        INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
         VALUES (v_org, v_cell, v_prod,
                 tstzrange(v_day + (v_d || ' days')::interval + interval '6 hours',
                           v_day + (v_d || ' days')::interval + interval '14 hours'),
-                'planned', 1)
+                1)
         RETURNING id INTO v_run;
 
         INSERT INTO assignments (org_id, node_id, operator_id, run_id, timerange, efficiency)
