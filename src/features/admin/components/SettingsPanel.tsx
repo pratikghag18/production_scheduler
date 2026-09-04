@@ -7,7 +7,7 @@
    database; this only changes the rendering, through the seam in
    `src/lib/format/dates.ts`.
 
-   ⭐ ONE SETTING IS ONE ROW (R-310, settled Sep 3). The eight formats were eight
+   ⭐ ONE SETTING IS ONE ROW (R-320, settled Sep 3). The eight formats were eight
    radio rows, which is most of a screen spent on one preference; as more
    settings land here that layout crowds them out. Each setting is now a labelled
    row -- name and hint on the left, one control on the right -- so a second

@@ -42,7 +42,7 @@
   max-width: 34rem;
 }
 
-/* ONE SETTING IS ONE ROW (R-310): name and hint on the left, the control on the
+/* ONE SETTING IS ONE ROW (R-320): name and hint on the left, the control on the
    right, so the next setting is another row rather than another screenful. The
    row wraps to two lines on a narrow pane -- the control keeps its own width
    with `flex-shrink: 0` so a long hint never squeezes the picker. */

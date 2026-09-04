@@ -4,7 +4,7 @@ import { SettingsPanel } from "@/features/admin/components/SettingsPanel";
 import { DATE_FORMATS, formatCalendarDay } from "@/lib/format/dates";
 
 /**
- * THE SETTINGS TAB IS ONE ROW PER SETTING (R-310).
+ * THE SETTINGS TAB IS ONE ROW PER SETTING (R-320).
  *
  * The maintainer, 3 Sept: *"the date format should be a dropdown option... I
  * think we're going to fill up the settings tab with more options and this
@@ -94,7 +94,7 @@ beforeEach(() => {
   h.state.error = null;
 });
 
-describe("R-310: the settings tab is one row per setting", () => {
+describe("R-320: the settings tab is one row per setting", () => {
   it("offers the date format as one dropdown, not a row per format", () => {
     render(<SettingsPanel />);
     expect(picker()).toBeTruthy();
