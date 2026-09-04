@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: b11f7aa
+  tip: b4b31cc
   baseline:
     app_tests: 1788
     app_test_files: 60
     tsc: 0
     eslint: 0
-    db_checks: 522
-    migrations: 41
+    db_checks: 532
+    migrations: 44
     mutations: 509 of 536
 tracks:
 - id: core
@@ -2438,11 +2438,25 @@ requirements:
     → Area → Line → Cell) through `create_node`, with every row owned, at least six rows owned below a
     root, no run using a product owned outside it, and one supervisor (Ana) granted a single line. The
     empty "Standard Plant" structure is kept as what a new root copies.
-  verified_by: []
+  verified_by:
+  - kind: sql
+    file: supabase/tests/dev_demo_test.sql
+    cases: D0-D10 (11 cases, run by `scripts/run-sql-test.sh --demo`)
   status: contradicted
   note: >-
-    A development fixture rather than product behaviour; its own file ends in ten assertions, which are
-    not a suite case.
+    A development fixture rather than product behaviour, and for a long time the reason this was
+    `verified_by: []` — its own file ends in twelve assertions, which are not a suite case. DEF-0006
+    is what that cost: migration 0044 dropped `runs.status` while the demo went on writing it, the
+    file died at its runs insert, and every instrument stayed green. ⭐ THE ASSERTIONS WERE NOT THE
+    PROBLEM AND WOULD NOT HAVE BEEN THE FIX — one of the twelve counts the runs, and it is exactly
+    this bug; it never fired because it sits at the FOOT of a file that died four hundred lines above
+    it. A fixture cannot grade homework it did not finish. So the APPLY is now the test
+    (`--demo` runs `dev_demo.sql` under ON_ERROR_STOP against a database of its own) and
+    `dev_demo_test.sql` asks the built world this claim's questions from outside it.
+    ⚠️ STILL `contradicted`, WITH COVERAGE ATTACHED, AND THAT IS NOT A CONTRADICTION.
+    DEF-0006 is `fix-claimed`, which the validator counts as open — correctly, because the
+    developer does not get to clear a defect the tester filed. This goes to `covered` when the
+    tester has re-run its own reproduction, not before.
 - id: R-D113
   title: Placing a person outside their area needs a recorded reason
   source:
@@ -5653,6 +5667,35 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-082
+  title: The fixture the browser sees was the one file no runner ever built
+  tag: A guard that sits below the place things break
+  status: fixed
+  found_by: tester
+  refs:
+  - R-D112
+  - R-324
+  violates:
+  - R-D112
+  story: >-
+    `dev_demo.sql` builds the world the running app shows - three plants, a line-scoped supervisor, the
+    only fixture that can demonstrate rules the seed's single plant cannot. Migration 0044 dropped
+    `runs.status` and this file went on writing it, so it died at its runs insert on the next reset.
+    Everything the app needs to LOOK fine was already in by then: the sign-ins worked, the plants were
+    there, and the board was simply empty - which reads as a product with no data rather than as a
+    fixture that stopped half way.
+    ⭐ THE FILE HAD TWELVE ASSERTIONS AND ONE OF THEM WAS THIS BUG. Its section 8 opens by saying, in
+    as many words, that a demo which half-ran is worse than one that failed, and then checks that there
+    are 36 runs. It never ran. Assertions at the FOOT of a file cannot catch a file that dies four
+    hundred lines above them, and that is a general shape rather than an accident of this fixture: a
+    guard placed after the work only fires on the runs that did not need it. So the fix was not more
+    assertions but moving the check to the APPLY, where an error at any line is the failure.
+    ⛔ AND THE REASON IT WAS ON NO RUNNER TURNED OUT TO BE A GOOD ONE, WHICH IS WHY IT LASTED. The
+    file opens by DELETING org 1's seeded content, and about eighteen cases across eight files need
+    that content intact; the SQL suite runs every numbered file against one shared scratch database
+    without rebuilding between them. So it could not simply be given a number - anything sorted after
+    it would have read the wrong world, quietly. The answer was a second database of its own
+    (`run-sql-test.sh --demo`), not a place in the existing queue.
 - id: F-081
   title: The CI step that was red was two steps before the one we fixed
   tag: A test that never ran
@@ -7554,6 +7597,74 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 56
+  date: 2026-09-04
+  title: The demo world builds again, and the fixture the browser sees is on a runner (DEF-0006)
+  commits:
+  - b4b31cc
+  numbers:
+    app_tests: 1791
+    app_test_files: 61
+    tsc: 0
+    eslint: 0
+    db_checks: 532
+    migrations: 44
+  confirmed: true
+  summary: >-
+    The tester's DEF-0006, agreed with and fixed. Migration 0044 dropped `runs.status`; `dev_demo.sql`
+    line 414 went on naming it, so the fixture the running app actually shows died at its runs insert,
+    with the plants, people and products already in and the runs and assignments not. The maintainer
+    chose the wide fix over the one-line one: put the file on a runner.
+    ⭐ THE FILE WAS NOT UNGUARDED, WHICH IS THE PART TO REMEMBER. Its section 8 opens by saying that
+    a demo which half-ran is worse than one that failed, and then makes twelve assertions - one of
+    which counts the runs and IS this bug. Not one fired. They sit at the FOOT and the file died four
+    hundred lines above them. The lesson is not "assert more": an assertion block cannot catch a
+    fixture that never reaches it, so the APPLY had to become the test.
+    `scripts/run-sql-test.sh --demo` builds `sql_demo_db` from the harness, the migrations, the seed
+    and `dev_demo.sql` under ON_ERROR_STOP, where an error at any line fails the mode, and drops the
+    database afterwards. `scripts/tester-run.mjs --sql` now runs it.
+    ⛔ IT CANNOT SHARE `sql_test_db`, AND THAT IS WHY IT WAS NEVER ON A RUNNER AT ALL.
+    `dev_demo.sql` opens by deleting org 1's seeded content; about eighteen cases across eight files
+    rest on org 1 holding exactly one structure; and the suite does not rebuild between files. Being
+    unshareable is the whole reason it stayed off every path - so the fix is a second database, not a
+    place in the existing queue. A file that cannot share the fixture is exactly the file that ends up
+    with nothing watching it.
+    `supabase/tests/dev_demo_test.sql` is the other half and is what R-D112 never had: eleven cases
+    asking the built world what the requirement claims, from OUTSIDE the fixture rather than by it.
+    Two of them are things nothing counted anywhere - the ASSIGNMENTS, which are the statement
+    immediately after the one that broke and were missing along with it, and ANA'S SINGLE LINE, which
+    the requirement names in so many words while the demo's own assertions counted only passwords.
+    Granted a whole plant by accident she still works, and D107's read rule is simply no longer
+    demonstrated by anything on the machine.
+    ⭐ MEASURED IN BOTH DIRECTIONS, BECAUSE A GREEN RUNNER PROVES NOTHING BY ITSELF. Clean: 11
+    passed, 0 failed, 0 hard-errors. With the bug deliberately reinstated - the file copied first and
+    restored from the copy, never `git checkout --` - the mode exits 1 and prints `column "status" of
+    relation "runs" does not exist` verbatim. And the eleven cases were run against the SEED-only world
+    to check they are capable of failing at all: nine go red there, including D6
+    (`runs=8 assignments=12 cells=5`) and D8, which correctly reads Ana's seed grant as depth 2, an
+    Area, rather than depth 3, a Line. The three that hold there are invariants true of both worlds
+    rather than cases that assert nothing.
+    ⚠️ A CORRECTION TO THE DEFECT'S OWN PREMISE, WHICH MAKES IT WORSE RATHER THAN BETTER. The tester
+    wrote that `dev_demo.sql` "is not run by any script - it is applied by hand after a reset".
+    `supabase/config.toml` carries `sql_paths = ["./seed.sql", "./dev_demo.sql"]`, and its header
+    records why: `db:reset` used to wipe the demo world and a paste into Studio was the only way back.
+    So `npm run db:reset` has been applying this file and failing inside it every time, with no hand
+    step and no error anybody had to be watching for. The narrower claim the defect's Lead makes is the
+    correct one - it is on no TEST runner's path. Recorded in the defect under `## Developer note`.
+    ⚠️ TWO NUMBERS IN `meta.baseline` WERE STALE AND ARE NOW MEASURED RATHER THAN REASONED TO.
+    `migrations` said 41 against 44 files on disk. `db_checks` said 522; this run's own tally over the
+    34 numbered files is 521 passed, 0 failed, 0 hard-errors, plus the demo mode's 11, so 532. The
+    single unexplained unit between 521 and the old 522 is written down here rather than reconciled
+    away, because guessing at it would be worse than leaving it visible.
+    R-D112 gains its `verified_by` and STAYS `contradicted`. DEF-0006 is `fix-claimed`, which the
+    validator counts as open - correctly, since the developer does not clear a defect the tester filed.
+    It goes to `covered` when the tester has re-run its own reproduction.
+    NOT DONE, DELIBERATELY. The tester's two unfiled observations from session 55 stand untouched:
+    0044's `DELETE FROM runs WHERE status <> 'planned'` is wider than its own header, which says
+    "cancelled", and 0043 carried a comment about `app_guard_assignment_scope` across without the
+    function it describes. Both are in applied, append-only migrations and neither is this defect. The
+    phantom `node_product_rollup` in the generated types is also still owed.
+  shipped: []
 - id: 55
   date: 2026-09-04
   title: Tester run
