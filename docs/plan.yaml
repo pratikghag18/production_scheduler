@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 3e6e2ed
+  tip: 808a52d
   baseline:
-    app_tests: 1787
-    app_test_files: 61
+    app_tests: 1786
+    app_test_files: 60
     tsc: 0
     eslint: 0
     db_checks: 522
@@ -4104,11 +4104,24 @@ requirements:
     A client control is never hidden for something the server permits, and never shown for something the
     server refuses. Fixes to a permission defect land on the server first; a screen is turned on only
     when the policies behind it allow the edits it offers.
-  verified_by: []
+  verified_by:
+  - kind: sql
+    file: supabase/tests/65_offered_in_window_test.sql
+    cases: "X1 the defect in one comparison — the same person, part and cell, with the readable place list EMPTY and the server answering TRUE; X2 every part on a supervisor's board names her cell in offered_node_ids while site_node_ids stays empty (so a later fix that widened the read policy instead would move that number rather than pass quietly); X3 the answer is still per node; X4–X6 the SECURITY DEFINER helper discloses nothing the caller could not already read — not a root above their grant, not a sibling department, not the other tenant, which uses the same paths"
+  - kind: vitest
+    file: src/test/scope.test.ts
+    cases: "XP1 a part whose places were filtered away is still offered, XP2 an empty places list is not the question any more, XP3 an empty OFFERED list is offered nowhere, XP4 (promoted from DEF-0002's pin) a part made only at another plant is absent, XP5 a part on another line is absent, XP6 the answer is per node"
   status: contradicted
   note: >-
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
+    ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0005, fix 808a52d). This row has now been broken in BOTH directions by
+    the same picker, which is why it finally has cases of its own. DEF-0002 was the first half — a control
+    SHOWN for something the server refuses, eight parts of twelve. DEF-0005 was the second — a control HIDDEN
+    for something the server permits, three parts of four, and worse, because a refusal is loud while a
+    missing option is silent. The second was not a regression from the first: it dates to migration 0034 and
+    was invisible to every role that could report it, since an admin's own grant covers everything their
+    board can show.
 - id: R-240
   title: 0023 changes who may edit, not who may read
   source:
@@ -5569,6 +5582,13 @@ findings:
     nothing in the tree says so or makes them red together. The rule to apply when reading either: ask what
     narrowed the map. A permission-narrowed map means "I cannot tell", and the honest answer is to offer;
     a view-narrowed one means "not here", and the honest answer is to hide.
+    ⚠️ AND THE RULE HAS A LIMIT, FOUND BY DEF-0005 THREE HOURS LATER. It can only be applied by someone who
+    knows what narrowed the map — and for a supervisor BOTH had happened: the board's map was narrowed by a
+    view choice while the product's place list had already been narrowed by PERMISSION, one layer up, before
+    it arrived. By the time a client-side predicate saw an empty array the two were indistinguishable. The
+    product half of the rule is therefore retired rather than refined: migration 0042 moved the question to
+    the server, and `scope.ts` no longer decides where a part may be run. The rule still governs the operator
+    half (`ownedInScope`), and the limit is written into the file's header beside it.
 - id: F-078
   title: The settings icon was a sun
   tag: Words matter
@@ -7406,6 +7426,54 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 49
+  date: 2026-09-04
+  title: The board is told which parts it may offer, instead of deducing it from a list it cannot see all of (DEF-0005)
+  commits:
+  - 808a52d
+  numbers:
+    app_tests: 1786
+    app_test_files: 60
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The tester came back with the mirror image of DEF-0002, and it is the more serious of the two. A
+    supervisor granted one line opened her own board, saw four parts on her legend, was offered ONE, and the
+    server accepted all four. DEF-0002 was a control SHOWN for something the server refuses — loud, because
+    every attempt ends in a 409. This was a control HIDDEN for something the server permits, which says
+    nothing at all: three quarters of her work simply could not be scheduled and no screen explained why.
+    THE CAUSE WAS NOT THE RULE BUT ITS MATERIAL, and that distinction is the lesson. `product_sites` is
+    RLS-filtered on read and reading is downward from a grant, so a part made at the PLANT above her had its
+    only place row dropped before it reached her client. Every version of the client predicate then answered
+    "offered nowhere" — correctly, for the list it was handed. Two states arrived as the same empty array:
+    "assigned to no plant" and "every place is above your grant". Nothing downstream could tell them apart,
+    because the information was gone before it got there. It was invisible to every role that could report
+    it, too: an admin's grant covers everything their own board can show.
+    So the client stopped deriving the answer and started being told it. Migration 0042 adds
+    `app_offered_product_nodes` — the set form of `app_product_offered_at`, SECURITY DEFINER for the same
+    reason that one is — and `board_window` carries `offered_node_ids` per product: the nodes in THIS window
+    where a run would be ACCEPTED. The picker is membership and nothing else; no path logic is left on the
+    client that can disagree with the server. The other option, widening `product_sites_select`, was not
+    taken: it changes a read policy and hands a line supervisor the existence of a plant she has no grant on,
+    where answering the question changes no policy and discloses strictly less. The DEFINER helper therefore
+    filters its own output, and X4–X6 are the cases that would catch that slipping — a root above her grant,
+    a sibling department, and the other tenant, which uses the same paths.
+    ⚠️ THE TESTER'S SECOND FINDING IS THE ONE WORTH KEEPING. DEF-0002's fix argued in `scope.ts` that
+    "nothing legitimately offerable disappears" — sound about the change it made, and then generalised to
+    the picker as a whole, which it never examined. Case XP9 was GREEN while asserting the opposite of what
+    the server answers, and my review of that lane accepted both the argument and the case. They are gone
+    with the path logic they described. F-080's rule, "ask what narrowed the map", now carries its limit: it
+    can only be applied by someone who knows what narrowed it, and here both had happened, one layer apart.
+    When a question turns out to need information the client was never given, move the question rather than
+    sharpening the guess.
+    DEF-0002's pin was promoted in the same commit, as CLAUDE.md allows now that it is verified: its claim
+    survives as XP4 beside the new predicate, and its `pin` field points at the new home. Checked in the
+    browser as Ana — four parts offered where one was — and the admin's board still lists exactly its own
+    plant's four, so DEF-0002 has not come back. Suite 1786 in 60 files (the promoted pin's file is gone, its
+    claim is not); the SQL sweep reports 0 failed across all 30 files, 65 contributing 8; `npm run db:types`
+    was regenerated, so tsc 0 here is conclusive rather than inconclusive.
+  shipped: []
 - id: 48
   date: 2026-09-04
   title: Tester run
