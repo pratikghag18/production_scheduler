@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 23e18f0
+  tip: df1acfc
   baseline:
     app_tests: 1788
     app_test_files: 60
@@ -7647,6 +7647,46 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 58
+  date: 2026-09-04
+  title: The phantom table is gone and the generated types describe the migrations again
+  commits: []
+  numbers:
+    app_tests: 1800
+    app_test_files: 62
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    `node_product_rollup` is dropped and `src/lib/database.types.ts` regenerated. The maintainer ran the
+    DROP: the permission classifier refused it from the session, correctly, and working around a refusal
+    on a destructive database statement is not a thing to do -- so the command was handed over with the
+    evidence for it instead.
+    WHAT IT ACTUALLY WAS, which nobody had established across three tester runs of reporting it: the
+    PER-PRODUCT version of the roll-up choice, `(node_id, product_id) -> sums_children`, complete with
+    indexes and four RLS policies. Migration 0041 answered the same question with one nullable boolean
+    per NODE (`nodes.sums_children`) after the maintainer's "I want to be able to choose to add or not
+    to add", and the earlier table was left behind. No migration ever created it, so it existed on this
+    machine ALONE -- which is exactly why it was invisible to every runner and why the scratch database,
+    built from migrations, never had it.
+    ⭐ THE WARNING HAD INVERTED, AND THAT IS THE PART TO REMEMBER. It began as "the types drift from
+    the database". By session 55 the phantom had been regenerated INTO the committed types, so the file
+    described a table no migration creates and the drift ran the other way: a clean `db:reset` would
+    make `db:types` emit a DELETION. The tester reported it three runs running and the direction changed
+    underneath the report while the words stayed the same. A standing warning that is never actioned
+    stops describing the thing it was written about.
+    VERIFIED BY COMPARISON, NOT BY REGENERATING AND LOOKING PLEASED. The diff is one contiguous hunk,
+    49 deletions and 0 insertions, entirely that table -- no other table touched and no line-ending
+    churn. Then the stronger check: the 20 table names the types describe were compared against the 20
+    in `sql_test_db`, which is built from the harness, every migration and the seed. Both directions of
+    `comm` are empty, so the types now describe exactly what the migrations produce and a fresh reset
+    cannot reopen this. (The first run of that comparison reported all 20 as differing in both
+    directions -- Python's text-mode write had put CRLF on one list. Worth recording because a
+    comparison that reports EVERYTHING as different is a broken comparison, not a finding.)
+    `tsc` is conclusive here rather than inconclusive, because `db:types` has now run -- which is the
+    condition CLAUDE.md section 4 attaches to that word. 1800 tests in 62 files, unchanged: nothing in
+    `src/` ever referenced the table, which is why removing it moved no test.
+  shipped: []
 - id: 57
   date: 2026-09-04
   title: Three lanes off the small/known queue, and a leaf name that was never unique
