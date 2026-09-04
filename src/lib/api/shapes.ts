@@ -258,7 +258,13 @@ export interface Assignment {
   areaOverrideReason: string | null;
   targetQty: number | null;
   targetUnit: string | null;
-  status: string;
+  /**
+   * ⚠️ NO `status` HERE ANY MORE (R-323, migration 0043). An assignment that is
+   * deleted is deleted; the column is gone, so `board_window`'s `to_jsonb(a)`
+   * no longer carries the key and requiring it would reject every board read.
+   * `Run` above still has one — runs were not touched, and theirs has always
+   * been write-once 'planned'.
+   */
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -287,7 +293,6 @@ export function parseAssignment(v: Json): Assignment | null {
     area_override_reason,
     target_qty,
     target_unit,
-    status,
     created_by,
     created_at,
     updated_at,
@@ -311,7 +316,6 @@ export function parseAssignment(v: Json): Assignment | null {
     !isStrOrNull(area_override_reason) ||
     !isNumOrNull(target_qty) ||
     !isStrOrNull(target_unit) ||
-    !isStr(status) ||
     !isStrOrNull(created_by) ||
     !isStr(created_at) ||
     !isStr(updated_at)
@@ -341,7 +345,6 @@ export function parseAssignment(v: Json): Assignment | null {
     areaOverrideReason: area_override_reason,
     targetQty: target_qty,
     targetUnit: target_unit,
-    status,
     createdBy: created_by,
     createdAt: created_at,
     updatedAt: updated_at,

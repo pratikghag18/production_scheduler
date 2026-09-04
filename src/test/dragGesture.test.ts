@@ -34,6 +34,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     deleteRun: vi.fn(),
     createAssignment: vi.fn(),
     updateAssignmentFields: vi.fn(),
+    deleteAssignment: vi.fn(),
     // P1-4e: the staffed-run path now goes through `move_run`, and the
     // split flow through `capacity_probe` + `apply_split_coverage`.
     moveRun: vi.fn(),
@@ -46,6 +47,9 @@ const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
 const WINDOW_MINUTES = 1440;
 
 const runFixture: IndexedRun = {
+  // ⚠️ RUNS STILL CARRY A STATUS (R-323 removed the assignment's, not the
+  // run's), so this stays while the assignment fixture below has none.
+  status: "planned",
   id: "run-1",
   orgId: "org-1",
   nodeId: "cell-1",
@@ -56,7 +60,6 @@ const runFixture: IndexedRun = {
   timerange: "[2026-08-24 06:00:00+00,2026-08-24 10:00:00+00)",
   plannedHeadcount: 2,
   notes: null,
-  status: "planned",
   createdBy: null,
   createdAt: WINDOW_START.toISOString(),
   updatedAt: WINDOW_START.toISOString(),
@@ -84,7 +87,6 @@ function crewFixture(): IndexedAssignment {
     areaOverrideReason: null,
     targetQty: null,
     targetUnit: null,
-    status: "planned",
     createdBy: null,
     createdAt: WINDOW_START.toISOString(),
     updatedAt: WINDOW_START.toISOString(),
@@ -338,7 +340,7 @@ describe("useDragGesture", () => {
   });
 
   /**
-   * R-322 — THE PROGRESS LABEL IS GONE AND THE SOFT DELETE IS NOT.
+   * R-322/R-323 — THE PROGRESS LABEL IS GONE, AND SO IS THE SOFT DELETE.
    *
    * ⭐ TWO THINGS THAT LOOK LIKE ONE FIELD. The pop-up used to offer planned /
    * active / done, and `saveAssignmentFields` carried the chosen value down.
@@ -355,7 +357,7 @@ describe("useDragGesture", () => {
    * guards against is a status quietly reappearing on the save path and going
    * stale in the database where no screen shows it.
    */
-  it("R-322: saving an assignment sends no status, and Delete still cancels", async () => {
+  it("R-322/R-323: saving sends no status, and Delete DELETES the row", async () => {
     const api = await import("@/lib/api");
     const index = buildIndex([]);
     const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
@@ -370,12 +372,15 @@ describe("useDragGesture", () => {
     expect(saved).toEqual({ efficiencyPercent: 110, targetQty: 12, targetUnit: "pieces" });
     expect(saved && "status" in saved).toBe(false);
 
+    // ⚠️ R-323 CHANGED THIS HALF, and the contract changed rather than the case
+    // being wrong: Delete used to write `status: "cancelled"` through the very
+    // same field edit asserted above, which is what gave one concept two
+    // behaviours depending on whether you deleted the assignment or its run.
+    // It is a real delete now, and the field-edit path is not touched at all.
     act(() => {
       result.current.removeAssignment("a-1");
     });
-    await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(api.updateAssignmentFields).mock.calls[1]?.[1]).toEqual({
-      status: "cancelled",
-    });
+    await waitFor(() => expect(api.deleteAssignment).toHaveBeenCalledWith("a-1"));
+    expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1);
   });
 });

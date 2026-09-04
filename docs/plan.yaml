@@ -5516,6 +5516,40 @@ requirements:
     measured line moving from 0 to 1 of 22. Two things that only the screenshot could show were fixed there:
     the open editor was stretching its column so the whole grid reflowed on a click, and the summed rows were
     three times the height of the rows they total.
+- id: R-323
+  title: Deleting an assignment deletes it — assignments carry no status at all
+  source:
+  - the maintainer, 4 Sept (in session, "why do we need this in runs or assignments? We removed the option to assign status, what am I missing here?" and, on being offered gone versus kept-and-hidden, "I want it gone")
+  stated_by: maintainer
+  claim: >-
+    Deleting an assignment removes the row. There is no `status` column on `assignments` and no soft delete:
+    the same act that already removes a run's assignments when the run is deleted is now what the Delete
+    button on a single assignment does. The audit log keeps the record — a trigger has written actor, action
+    and the whole before/after row for `assignments` since migration 0007, and it is live (52 inserts, 5
+    updates, 12 deletes in the maintainer's own database), so "who removed this and when" was never what the
+    status column answered.
+    ⚠️ WHY THIS IS A DELETION AND NOT A RENAME. R-322 removed the picker that set planned / active / done and
+    narrowed the write type to the literal "cancelled", which left one bit — live or gone — spelled as a word
+    in a text column. Two things then made the column indefensible rather than merely redundant. The same
+    table already deleted BOTH ways: `delete_run` hard-deletes a run's assignments while the assignment's own
+    Delete marked them cancelled, so one concept had two behaviours depending on which button you pressed.
+    And migration 0029 had already written down that the status vocabulary cannot be trusted — "nothing in
+    the product ever advances it: every run this system has created is still 'planned', including the ones
+    that finished last week" — and deliberately used the clock instead. The column was being routed around
+    rather than used.
+    ⚠️ THE DANGEROUS PART IS THE PREDICATES, NOT THE COLUMN. Four functions filtered on it and must be
+    redefined from their LAST definitions before it can be dropped: `operator_peak_load` and `capacity_probe`
+    (an operator's load must not count a cancelled row), `check_operator_capacity` (which returned early for
+    a cancelled row), and `move_run` (a run's crew). With no cancellable row left, each clause is trivially
+    true and goes; what must be proved is that the two guards still refuse what they refused before — a
+    double-booked operator and an overlapping run — because those are the two rules that stop a person or a
+    cell being committed twice.
+    ⚠️ `runs.status` IS OUT OF SCOPE HERE AND STAYS, deliberately. Runs are already hard-deleted, so their
+    status is write-once 'planned' and its only reader is an exclusion constraint clause that can never fire.
+    Removing it means dropping and recreating that constraint, which is the one piece of this that touches a
+    correctness invariant nobody asked about; it is queued, not smuggled in.
+  verified_by: []
+  status: uncovered
 - id: R-322
   title: An assignment has no progress label — only the soft delete that actually does something
   source:
@@ -8774,6 +8808,13 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
+- text: Remove `runs.status` too — it is write-once 'planned' and its only reader can never fire
+  why: >-
+    The other half of R-323, split off on purpose. Runs are hard-deleted, so no run is ever 'cancelled', and
+    the `where (status <> 'cancelled')` clause on `runs_no_overlap_on_node` is therefore always true.
+    Removing the column means DROP and re-ADD of that exclusion constraint — the overlap invariant itself —
+    so it wants its own piece of work and its own SQL cases rather than riding along with the assignments
+    change. Migration 0029's header is the standing evidence that the column is not believed by anything.
 - text: Dark theme — app-wide colour tokens first, then the matrix
   why: >-
     Split out of M5 with the maintainer (session 22): the app has NO theming today — no colour variables,

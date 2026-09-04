@@ -4,6 +4,7 @@ import {
   createAssignment,
   toEfficiency,
   toTstzRange,
+  deleteAssignment,
   updateAssignmentFields,
   type Assignment,
   type AssignmentFieldEdit,
@@ -62,7 +63,6 @@ export function useCreateAssignment(rootPath: string, from: Date, to: Date) {
           overrideReason: input.overrideReason ?? null,
           targetQty: input.targetQty ?? null,
           targetUnit: input.targetUnit ?? null,
-          status: "planned",
           createdBy: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -120,7 +120,6 @@ export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
             overrideReason: na.overrideReason ?? null,
             targetQty: na.targetQty ?? null,
             targetUnit: na.targetUnit ?? null,
-            status: "planned",
             createdBy: null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -168,6 +167,48 @@ export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date
                 }
               : a,
           ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/**
+ * Delete an assignment (R-323). The row goes; nothing is marked.
+ *
+ * ⭐ THE OPTIMISTIC UPDATE IS A REMOVAL NOW, not a field patch. This used to be
+ * `useUpdateAssignmentFields` writing `status: "cancelled"`, and the board's
+ * index then filtered that row out — two steps to make one block disappear, and
+ * a soft delete nobody could see the other half of. Now the block is dropped
+ * from the cached window and the row is dropped from the table.
+ *
+ * ⚠️ THE ROLLBACK MATTERS MORE HERE THAN ON AN EDIT. If the server refuses —
+ * and it will, silently and with zero rows, for anyone without edit rights on
+ * that cell, which is why `deleteAssignment` checks the row count — the block
+ * has already vanished from the screen. `onError` puts the whole previous
+ * window back, so a refused delete restores the block rather than leaving a
+ * hole that only a reload explains.
+ */
+export function useDeleteAssignment(rootPath: string, from: Date, to: Date) {
+  const queryClient = useQueryClient();
+  const key = boardKeys.window(rootPath, from, to);
+
+  return useMutation({
+    mutationFn: (assignmentId: string) => deleteAssignment(assignmentId),
+    onMutate: async (assignmentId: string) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = snapshotBoard(queryClient, key);
+      if (previous) {
+        queryClient.setQueryData<BoardWindow>(key, {
+          ...previous,
+          assignments: previous.assignments.filter((a) => a.id !== assignmentId),
         });
       }
       return { previous };

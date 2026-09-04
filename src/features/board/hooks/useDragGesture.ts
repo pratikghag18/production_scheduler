@@ -55,6 +55,7 @@ import {
 import { useCreateRun, useUpdateRunFields, useDeleteRun, useMoveRun } from "./useRunMutations";
 import {
   useCreateAssignment,
+  useDeleteAssignment,
   useUpdateAssignmentFields,
   useApplySplitCoverage,
 } from "./useAssignmentMutations";
@@ -294,6 +295,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const moveRun = useMoveRun(rootPath, from, to); // D57 — first caller (brief §1 item 3)
   const createAssignment = useCreateAssignment(rootPath, from, to);
   const updateAssignmentFields = useUpdateAssignmentFields(rootPath, from, to);
+  const deleteAssignment = useDeleteAssignment(rootPath, from, to);
   const applySplitCoverage = useApplySplitCoverage(rootPath, from, to); // D61/D62 — first caller
   const toast = useSchedulerToast();
 
@@ -1446,21 +1448,23 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [updateAssignmentFields, failWith, assignmentLabelById],
   );
 
-  /** §5.4/§5.3: there is no delete_assignment RPC and no `useDeleteAssignment`
-   *  hook anywhere in P1-3b (see the agent report — flagged as a gap, not
-   *  silently worked around). `status = "cancelled"` is the one existing,
-   *  D36-compliant path: `useUpdateAssignmentFields` already accepts
-   *  `status`, and `boardIndex.ts`'s rule 17 already drops every row whose
-   *  `status === "cancelled"` from every map. */
+  /** ⭐ R-323: THIS DELETES THE ROW. The comment that stood here said there was
+   *  "no delete_assignment RPC and no `useDeleteAssignment` hook", and that
+   *  `status = "cancelled"` was "the one existing, D36-compliant path" — a gap
+   *  flagged rather than worked around, and then lived with for months. The
+   *  maintainer closed it by asking what the column was for: with the progress
+   *  picker gone there was one bit left, and the same table already deleted
+   *  outright whenever a RUN was deleted. So the soft delete is gone, the
+   *  column with it, and this is a real delete under the `assignments_delete`
+   *  policy that was there all along. */
   const removeAssignment = useCallback(
     (assignmentId: string) => {
-      updateAssignmentFields.mutate(
-        { assignmentId, edit: { status: "cancelled" } },
-        { onError: (err) => failWith(err, assignmentLabelById(assignmentId)) },
-      );
+      deleteAssignment.mutate(assignmentId, {
+        onError: (err) => failWith(err, assignmentLabelById(assignmentId)),
+      });
       setPopover(null);
     },
-    [updateAssignmentFields, failWith, assignmentLabelById],
+    [deleteAssignment, failWith, assignmentLabelById],
   );
 
   return {

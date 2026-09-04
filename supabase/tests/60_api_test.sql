@@ -288,13 +288,20 @@ CREATE OR REPLACE FUNCTION operator_peak_load(
 ) RETURNS numeric
 LANGUAGE sql STABLE
 SET search_path = public, pg_temp
+-- R-323: the two `a.status <> 'cancelled'` lines are gone from this copy too.
+-- ⚠️ THIS FILE HOLDS A SECOND COPY OF `operator_peak_load`'s QUERY, which it
+-- restores after mutating the real one -- and it is the reason dropping the
+-- column failed here and nowhere else in the suite. A body that lives in two
+-- places drifts, and this one had no way to be told: it is a string inside a
+-- test, invisible to every compiler and to the migration that changed the
+-- original. CLAUDE.md §4's "a column list that appears twice is a bug with a
+-- delay on it", found by the delay expiring.
 AS $restore$
   SELECT COALESCE(max(load), 0) FROM (
     SELECT (SELECT COALESCE(sum(a.efficiency), 0)
             FROM assignments a
             WHERE a.operator_id = p_operator_id
               AND (p_exclude_assignment_id IS NULL OR a.id <> p_exclude_assignment_id)
-              AND a.status <> 'cancelled'
               AND a.timerange @> p.pt) + p_efficiency AS load
     FROM (
       SELECT lower(p_timerange) AS pt
@@ -302,7 +309,6 @@ AS $restore$
       SELECT lower(a.timerange) FROM assignments a
       WHERE a.operator_id = p_operator_id
         AND (p_exclude_assignment_id IS NULL OR a.id <> p_exclude_assignment_id)
-        AND a.status <> 'cancelled'
         AND a.timerange && p_timerange
     ) p
     WHERE p_timerange @> p.pt

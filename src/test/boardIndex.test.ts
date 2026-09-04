@@ -194,25 +194,11 @@ function makeFixture(): BoardWindow {
       createdAt: "2026-08-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
     },
-    // case 17: cancelled -- excluded from every map
-    {
-      id: "a-cancelled",
-      orgId: "org1",
-      nodeId: "n-cell1",
-      operatorId: "op1",
-      runId: "r1",
-      productId: null,
-      timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
-      efficiency: 0.5,
-      eligibilityOverride: false,
-      overrideReason: null,
-      targetQty: null,
-      targetUnit: null,
-      status: "cancelled",
-      createdBy: null,
-      createdAt: "2026-08-01T00:00:00Z",
-      updatedAt: "2026-08-01T00:00:00Z",
-    },
+    // ⚠️ THE `a-cancelled` ASSIGNMENT FIXTURE IS GONE (R-323), not moved. A
+    // cancelled assignment is a state the server can no longer produce — the
+    // column does not exist — so a fixture carrying one would be testing this
+    // client against a payload it will never receive, which is worse than no
+    // fixture at all. The cancelled RUN above stays; runs kept their status.
     // case 18: malformed timerange -- dropped, droppedRanges += 1, no throw
     {
       id: "a-bad",
@@ -350,14 +336,34 @@ describe("boardIndex.ts", () => {
     expect((idx.assignmentsByNode.get("n-cell1") ?? []).some((a) => a.id === "a1")).toBe(false);
   });
 
-  it("cancelled rows are excluded from every map (case 17)", () => {
+  /**
+   * ⚠️ HALVED BY R-323, AND THE CONTRACT CHANGED RATHER THAN THE CASE BEING
+   * WRONG. It used to assert that a cancelled RUN and a cancelled ASSIGNMENT
+   * were both dropped from every map. The assignment half is gone because the
+   * state it described is gone: an assignment that is deleted is now deleted,
+   * so nothing arrives to be filtered and a fixture carrying `a-cancelled`
+   * would be asserting against a row the server can no longer produce.
+   * The run half is untouched and still asserted — runs kept their status.
+   */
+  it("a cancelled run is excluded from every map (case 17)", () => {
     const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
     const anyCancelledRun = [...idx.runsByNode.values()].flat().some((r) => r.id === "r-cancelled");
-    const anyCancelledAssignment = [...idx.assignmentsByNode.values()]
-      .flat()
-      .some((a) => a.id === "a-cancelled");
     expect(anyCancelledRun).toBe(false);
-    expect(anyCancelledAssignment).toBe(false);
+  });
+
+  /**
+   * ⭐ AND EVERY ASSIGNMENT THAT ARRIVES IS SHOWN (R-323). The counterpart to
+   * the deleted half above: with no soft delete left, a client that still
+   * filtered something would be hiding live work. Asserted positively, because
+   * "nothing was filtered" cannot be seen by removing an assertion.
+   */
+  it("every assignment in the window reaches a map — nothing is filtered out", () => {
+    const fixture = makeFixture();
+    const idx = buildBoardIndex(fixture, windowStart, windowEnd, STANDARD);
+    const shown = new Set([...idx.assignmentsByNode.values()].flat().map((a) => a.id));
+    // Everything except the row case 18 drops for an unparseable timerange.
+    const expected = fixture.assignments.filter((a) => a.id !== "a-bad").map((a) => a.id);
+    for (const id of expected) expect(shown.has(id)).toBe(true);
   });
 
   it("a malformed timerange drops that row, counts it, and does not throw (case 18)", () => {

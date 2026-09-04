@@ -11,7 +11,7 @@
  */
 import { supabase } from "@/lib/supabase";
 import type { Json, TablesUpdate } from "@/lib/database.types";
-import { shapeMismatch, toSchedulerError } from "./errors";
+import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
 import {
   parseAssignment,
   parseCreateAssignmentResult,
@@ -331,27 +331,6 @@ export interface AssignmentFieldEdit {
   efficiencyPercent?: number;
   targetQty?: number | null;
   targetUnit?: string | null;
-  /**
-   * ⭐ ONLY `"cancelled"`, AND THE NARROW TYPE IS THE POINT (R-322). This was
-   * `status?: string`, which let the pop-up write planned / active / done. That
-   * picker is gone: nothing read the value, no rule fired on it, and nothing
-   * obliged a supervisor to touch it, so it could only ever sit at "planned" on
-   * work that had finished — and a label nobody maintains is worse than no
-   * label, because it reads as fact.
-   *
-   * ⚠️ THE FIELD ITSELF CANNOT GO, because `cancelled` is not a label: it is the
-   * SOFT DELETE. `removeAssignment` writes it here (there is no
-   * delete_assignment RPC, §5.4/§5.3), and it is what frees the cell's slot past
-   * the overlap constraint, returns the operator's hours to the capacity guard,
-   * and drops the row from every board map (`boardIndex.ts` rule 17) while
-   * keeping it in history. So the field stays and the TYPE says what it is for:
-   * a literal, so an attempt to set a progress label here does not compile
-   * rather than reaching the database and going stale there.
-   *
-   * A future "the job actually started" belongs to shop-floor feedback, not to a
-   * field edit, and would be designed then rather than left as an open string.
-   */
-  status?: "cancelled";
   /** A resize that does not change node (docs/api.md §4). */
   timerange?: { start: Date; end: Date };
   /**
@@ -380,6 +359,41 @@ export interface AssignmentFieldEdit {
   productId?: string | null;
 }
 
+/**
+ * Delete an assignment. R-323: the row is REMOVED, not marked.
+ *
+ * ⭐ THIS REPLACED A SOFT DELETE, and the maintainer's reason is worth keeping
+ * next to the code: with the progress picker gone (R-322) the `status` column
+ * held one bit — live or gone — spelled as a word, and the same table already
+ * deleted both ways, since `delete_run` has always removed a run's assignments
+ * outright. One concept with two behaviours depending on which button was
+ * pressed. Now there is one.
+ *
+ * ⚠️ THE `.select("id")` IS NOT DECORATION. An RLS-filtered DELETE that matches
+ * no row removes nothing and raises NOTHING — a success with no effect, which
+ * is CLAUDE.md §4's "a write that reports success can have changed nothing".
+ * `requireWritten` turns the empty result into a refusal, so a person who may
+ * not edit that cell is told, rather than watching the block reappear on the
+ * next read. Same shape as `deleteOperator`.
+ *
+ * ⚠️ NO RPC, DELIBERATELY. `assignments_delete` (0008) already grants exactly
+ * the right people the right rows — `app_can_edit_node(node_id)`, the same
+ * predicate the update path uses — so a function wrapping this would add a
+ * second place for that rule to be stated and drift.
+ *
+ * The audit trigger (0007) records the actor and the whole deleted row, which
+ * is where "who removed this and when" lives now.
+ */
+export async function deleteAssignment(assignmentId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("assignments")
+    .delete()
+    .eq("id", assignmentId)
+    .select("id");
+  if (error) throw toSchedulerError(error);
+  requireWritten(data as unknown[] | null);
+}
+
 export async function updateAssignmentFields(
   assignmentId: string,
   edit: AssignmentFieldEdit,
@@ -388,7 +402,6 @@ export async function updateAssignmentFields(
   if (edit.efficiencyPercent !== undefined) patch.efficiency = toEfficiency(edit.efficiencyPercent);
   if ("targetQty" in edit) patch.target_qty = edit.targetQty ?? null;
   if ("targetUnit" in edit) patch.target_unit = edit.targetUnit ?? null;
-  if (edit.status !== undefined) patch.status = edit.status;
   if (edit.timerange) patch.timerange = toTstzRange(edit.timerange.start, edit.timerange.end);
   if ("runId" in edit) patch.run_id = edit.runId ?? null;
   if ("productId" in edit) patch.product_id = edit.productId ?? null;

@@ -51,6 +51,8 @@ const OPERATORS: ReadonlyMap<string, BoardOperator> = new Map([["o1", MARIA]]);
 
 function run(over: Partial<Run>): Run {
   return {
+    // Runs keep their status; only the assignment's was removed (R-323).
+    status: "planned",
     id: "r1",
     orgId: "org",
     nodeId: "n1",
@@ -61,7 +63,6 @@ function run(over: Partial<Run>): Run {
     timerange: "[2026-08-18 06:00:00+00,2026-08-18 14:00:00+00)",
     plannedHeadcount: 1,
     notes: null,
-    status: "planned",
     createdBy: null,
     createdAt: "x",
     updatedAt: "x",
@@ -89,7 +90,6 @@ function asg(over: Partial<Assignment>): Assignment {
     areaOverrideReason: null,
     targetQty: null,
     targetUnit: null,
-    status: "planned",
     createdBy: null,
     createdAt: "x",
     updatedAt: "x",

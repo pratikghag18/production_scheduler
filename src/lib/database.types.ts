@@ -53,7 +53,6 @@ export type Database = {
           product_name: string | null
           product_sku: string | null
           run_id: string | null
-          status: string
           target_qty: number | null
           target_unit: string | null
           timerange: unknown
@@ -77,7 +76,6 @@ export type Database = {
           product_name?: string | null
           product_sku?: string | null
           run_id?: string | null
-          status?: string
           target_qty?: number | null
           target_unit?: string | null
           timerange: unknown
@@ -101,7 +99,6 @@ export type Database = {
           product_name?: string | null
           product_sku?: string | null
           run_id?: string | null
-          status?: string
           target_qty?: number | null
           target_unit?: string | null
           timerange?: unknown

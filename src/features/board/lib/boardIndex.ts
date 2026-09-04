@@ -175,9 +175,15 @@ export function buildBoardIndex(
     }
   }
 
-  // Cancelled rows are dropped from every map (rule/case 17).
+  // Cancelled RUNS are dropped from every map (rule/case 17). Runs keep a
+  // status; nothing in the product has ever set one to 'cancelled', but the
+  // filter is what the rule says and runs were not in R-323's scope.
   const activeRuns = data.runs.filter((r) => r.status !== "cancelled");
-  const activeAssignments = data.assignments.filter((a) => a.status !== "cancelled");
+  // ⚠️ ASSIGNMENTS ARE NO LONGER FILTERED, because there is nothing left to
+  // filter (R-323): a deleted assignment is deleted, so every row that arrives
+  // is live. The line that used to sit here read `a.status !== "cancelled"` and
+  // was the client half of a soft delete that no longer exists.
+  const activeAssignments = data.assignments;
 
   const runsByNode = new Map<string, IndexedRun[]>();
   const runById = new Map<string, IndexedRun>();
