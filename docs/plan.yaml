@@ -2442,7 +2442,7 @@ requirements:
   - kind: sql
     file: supabase/tests/dev_demo_test.sql
     cases: D0-D10 (11 cases, run by `scripts/run-sql-test.sh --demo`)
-  status: contradicted
+  status: covered
   note: >-
     A development fixture rather than product behaviour, and for a long time the reason this was
     `verified_by: []` — its own file ends in twelve assertions, which are not a suite case. DEF-0006
@@ -7597,6 +7597,52 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 57
+  date: 2026-09-04
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1791
+    app_test_files: 61
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    DEF-0006 IS VERIFIED and the defect board is empty again. Every runner is green: `npm run test`
+    reports "1791 passed (1791)" in 61 files, exactly the plan; all 29 numbered SQL files pass, and so
+    does the new `--demo` step, 11 of 11; e2e green; typecheck and lint clean.
+    CHECKED BY MY OWN REPRODUCTION AND MY OWN MUTATION. Applying `dev_demo.sql` under ON_ERROR_STOP to
+    a throwaway database now exits 0 where it used to stop at line 431, and the world it builds is
+    whole — 36 runs, 36 assignments, 3 roots in org 1, where before there were none of the first two.
+    Then I put the bug back: `--demo` exits 1 and prints "column status of relation runs does not
+    exist" verbatim, and my pin goes red on the same mutant. The apply being the test is the right
+    half to have added — the demo's own twelve assertions still sit at its foot and still could not
+    catch a file that dies before reaching them. R-D112 goes to covered with the verifier it never had.
+    TWO CORRECTIONS TO MY OWN RECORD, both raised by the developer and both right. First, I wrote that
+    `dev_demo.sql` "is not run by any script". It is: `config.toml` carries `sql_paths = ["./seed.sql",
+    "./dev_demo.sql"]`, and I checked the line's history — it predates this work by many commits, so it
+    was already true when I filed. The Lead's narrower claim, on no TEST runner's path, is the accurate
+    one and is what the fix acted on. Second, and worse because it overstated the urgency: I wrote that
+    "the live dev database is already showing 0 runs across all three plants". I measured the table
+    rather than take the correction on trust — org 1 holds 36 runs, 39 assignments and 4 roots. What I
+    had actually seen was `board_window`'s payload for the default three-day window on one plant; the
+    demo's runs are dated 31 Aug to 2 Sep and today is 4 Sep, so they sit two days behind the left edge
+    and the board is legitimately empty. I read a windowed read as a statement about the table. Nothing
+    was ever half-built on that machine; the breakage was in the future tense, on the next reset. Still
+    major, and a weaker claim than the one I filed.
+    ⛔ SECONDING A WARNING THAT IS THE MAINTAINER'S CALL. The fourth root (Plant D) and three of the 39
+    assignments are hand-made and exist only in that database. `dev_demo.sql` opens by deleting org 1,
+    so the next `db:reset` takes them, fix or no fix. Worth knowing before the reset rather than after.
+    TWO SMALL THINGS ON THE RECORD, NEITHER FILED. `meta.baseline` still reads 1788 in 60 while session
+    56 and the suite both say 1791 in 61; `plan-format.md` calls that field "the confirmed counts the
+    tester compares against", and no instrument is affected because `tester-run.mjs` reads the newest
+    confirmed SESSION instead — but the document disagrees with itself. And `run-sql-test.sh --demo`
+    leaks one `NOTICE: database "sql_demo_db" does not exist, skipping` into the report from its own
+    opening DROP, because that line silences stdout and NOTICEs go to stderr.
+    STILL THE CRLF ARTIFACT, BOTH OF THEM. `format:check` red across 270 files and the db:types "stale"
+    warning are the working tree's line endings; the regenerated and committed types differ by nothing
+    else this run, and CI was measured green last run against an LF checkout.
+  shipped: []
 - id: 56
   date: 2026-09-04
   title: The demo world builds again, and the fixture the browser sees is on a runner (DEF-0006)
