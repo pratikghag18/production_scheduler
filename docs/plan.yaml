@@ -5460,6 +5460,26 @@ requirements:
     measured line moving from 0 to 1 of 22. Two things that only the screenshot could show were fixed there:
     the open editor was stretching its column so the whole grid reflowed on a click, and the summed rows were
     three times the height of the rows they total.
+- id: R-321
+  title: A signed-out visitor is sent to the sign-in screen, and the smoke test pins the app as it is
+  source:
+  - P1-6b
+  - §19.38
+  stated_by: agent
+  claim: >-
+    P1-6b wraps the whole shell in RequireAuth (`src/routes.tsx`, `src/features/auth/RequireAuth.tsx`):
+    a signed-out visitor to any route other than `/sign-in` is redirected to `/sign-in`, so the
+    signed-out Board shell the smoke test was rewritten around no longer exists. The committed e2e
+    smoke test (`e2e/smoke.spec.ts`) must therefore pin the app as it is — the sign-in redirect — and
+    `npm run e2e` must be green on `main`, because `.github/workflows/ci.yml` now runs it on every
+    push to `main`/`Development` and every pull request.
+  verified_by: []
+  status: contradicted
+  note: >-
+    ⚠️ FILED BY THE TESTER AS R-304 AND RENUMBERED ON MERGE. The tester's branch was cut before
+    Development reached R-304, so both sides wrote that id for different requirements; Development's
+    R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
+    `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
 - id: F-077
   title: A target computed from the standard is not the standard
@@ -7304,6 +7324,73 @@ sessions:
     one now, with the samples computed through the real seam so it cannot rot when the month turns. The site
     admin's case is pinned there too: the picker disabled with the reason in words, and the client refusing
     the write rather than trusting `disabled` to be the only "no". Suite 1753 in 57 files, up from 1746 in 56.
+  shipped: []
+- id: 43
+  date: 2026-09-03
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1582
+    app_test_files: 44
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    ⚠️ MERGED IN LATE AND RENUMBERED (filed by the tester as session 23; both branches had a 23).
+    It judged 51c3d04..7de7859 on a worktree cut before session 22 of this list, so its 1582-in-44 is
+    the count of THAT range, not of Development today — which is why it sits below session 41 rather
+    than at the top, where the numbers band reads from.
+    Second tester run. Every commit in that range is the tester's own (the role's formation, the
+    baseline run, and DEF-0001); no product code, no migration and no src/ file changed, so R-321
+    (filed as R-304) — the requirement DEF-0001 already contradicts — is the only one in scope, and it
+    is already contradicted. I confirmed the baseline: `npm run test` reports 1582 tests in 44 files,
+    exactly session 22's count. Every SQL check passed (26 files, from 45_acting_scope through
+    90_hierarchy_template). typecheck and lint are clean; format:check is red across 236 committed
+    files, which is a Prettier gate and not one of the tracked baseline numbers. The Playwright smoke
+    run failed again — all three cases — reproducing DEF-0001 against the live stack: a signed-out
+    visitor is sent to /sign-in (RequireAuth.tsx:39-45), not the removed signed-out Board shell the
+    test still asserts. The app is correct; the test is stale; DEF-0001 stays open. No fix-claimed
+    defects existed to re-verify. One correction to session 22: the db:types WARN is not CRLF.
+    Regenerating from the local database adds three real RPC signatures — create_product_at_node,
+    app_can_edit_product_record, set_org_date_format — that no committed migration creates and no src/
+    file reads. That is the local dev database sitting ahead of the committed migrations with
+    uncommitted work, not a defect in committed code, so nothing is filed; the committed
+    database.types.ts matches the committed migrations. The four audit_log dark columns are consistent
+    with the unchecked Phase 1 audit-log item. Filed nothing new.
+  shipped: []
+- id: 42
+  date: 2026-09-02
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1582
+    app_test_files: 44
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    ⚠️ MERGED IN LATE AND RENUMBERED (filed by the tester as session 22; see session 43 above for why).
+    First run of the tester in its own worktree, judging 51c3d04..21c868f — a single commit that
+    installs the tester role itself (the brief, plan.yaml, plan-format, the defect template, the run
+    script) and, crucially, widens `ci.yml`'s trigger to `[main, Development]` plus `pull_request` so
+    CI actually fires. It changes no product code, so no requirement's source or delivers stage was in
+    the diff and there was nothing to mutation-test; there were no fix-claimed defects to re-verify. I
+    confirmed the baseline: `npm run test` reports 1582 tests in 44 files, exactly the count in session
+    21. The runner first showed 1418 in 35 files with nine suites failing to collect on
+    `Missing VITE_SUPABASE_URL`; that was my worktree lacking a gitignored `.env.local`, not a code
+    fault — after pointing it at the local stack all 44 files collect and the count matches. Every SQL
+    check passed (26 files). Two red instrument lines are not defects: the `database.types.ts` "drift"
+    is CRLF-vs-LF line endings only, with zero content hunks under `git diff --ignore-all-space`; and
+    `format:check` is red across 236 committed files, a Prettier gate that is not one of the tracked
+    baseline numbers. But the Playwright smoke run is a real defect. My first pass dismissed it as the
+    maintainer's live-backend dev server being reused; the maintainer had me re-run it against my own
+    dummy-backend server on port 5174, and all three smoke cases still failed — a signed-out visitor is
+    served the sign-in screen, not the Board. The app is correct: P1-6b (session 19) wrapped the whole
+    shell in RequireAuth and removed the signed-out Board shell. The e2e smoke test, rewritten in
+    f2ac33d before P1-6b, still asserts that removed shell, so it is stale and red — and the ci.yml
+    trigger this same commit repaired means the next push is the first time that step has ever run, and
+    it will be red. Filed DEF-0001 (doc-drift, major) against a new agent-stated requirement, R-304 on
+    its branch and R-321 here; set it contradicted.
   shipped: []
 - id: 40
   date: 2026-09-03
