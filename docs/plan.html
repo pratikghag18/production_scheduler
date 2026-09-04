@@ -108,7 +108,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">0</span><span class="l">open defects</span></div>
   <div class="stat "><span class="n">140 / 263</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>e0c20b2</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>47a8d9c</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2962,7 +2962,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <summary><b>Session 41</b> · 2026-09-03 · The settings tab is one row per setting (R-320) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer, looking at Settings: <em>&quot;the date format should be a dropdown option, any objections? I think we're going to fill up the settings tab with more options and this could get crowded.&quot;</em> No objection, and the crowding was already there -- eight formats as eight radio rows is most of a pane spent on one preference, and the next setting to land would have arrived below the fold. The one thing worth protecting was the SAMPLE: the radio list showed today's date rendered in every format, which is how a person picks one, so each option now reads &quot;Day/Month/Year -- 03/09/2026&quot; and the closed control shows the sample for the current choice. Nothing is lost by collapsing. The row itself is the reusable part -- name and hint left, one control right -- so the second setting is another row. Two things came free with it. The picker uses the SHARED field module (R-318) instead of the copy of the skin the radio rows carried, so <code>SettingsPanel.module.css</code> came off <code>FIELD_LEGACY</code> -- the first entry to leave a list that may only shrink, and twenty-nine remain. And the panel had no test of its own; it has one now, with the samples computed through the real seam so it cannot rot when the month turns. The site admin's case is pinned there too: the picker disabled with the reason in words, and the client refusing the write rather than trusting <code>disabled</code> to be the only &quot;no&quot;. Suite 1753 in 57 files, up from 1746 in 56.</p>
-    <p class="fine">1753 app tests in 57 files · tsc 0 · eslint 0 · commits PENDING</p>
+    <p class="fine">1753 app tests in 57 files · tsc 0 · eslint 0 · commits 47a8d9c</p>
   </div>
 </details>
 <details class="donefold" >

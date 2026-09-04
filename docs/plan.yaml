@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-03'
-  tip: e0c20b2
+  tip: 47a8d9c
   baseline:
     app_tests: 1753
     app_test_files: 57
@@ -7281,7 +7281,8 @@ sessions:
 - id: 41
   date: 2026-09-03
   title: The settings tab is one row per setting (R-320)
-  commits: []
+  commits:
+  - 47a8d9c
   numbers:
     app_tests: 1753
     app_test_files: 57
