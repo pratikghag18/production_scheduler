@@ -4111,7 +4111,7 @@ requirements:
   - kind: vitest
     file: src/test/scope.test.ts
     cases: "XP1 a part whose places were filtered away is still offered, XP2 an empty places list is not the question any more, XP3 an empty OFFERED list is offered nowhere, XP4 (promoted from DEF-0002's pin) a part made only at another plant is absent, XP5 a part on another line is absent, XP6 the answer is per node"
-  status: contradicted
+  status: covered
   note: >-
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
@@ -7449,6 +7449,58 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 51
+  date: 2026-09-04
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 1786
+    app_test_files: 60
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    DEF-0005 IS VERIFIED, and with it every defect this role has ever filed. The board is clean:
+    `npm run test` reports "1786 passed (1786)" in 60 files, exactly the plan's baseline; all 27 SQL
+    files pass including the new 65_offered_in_window_test.sql; `npm run e2e` is green; typecheck and
+    lint clean. R-239 goes to covered and now has the vitest and SQL verifiers it had never had.
+    HOW I CHECKED IT, WHICH IS NOT BY READING THE FIX. I compared the picker's own options against
+    `app_product_offered_at` — the predicate the write guard runs — asked over each role's own session,
+    at three (role, cell) pairs. All three match exactly. Ana went from one part out of four to four
+    out of four, and the company admin's Cell 5 correctly swaps "Line 1 Subassembly A" for "Area 2
+    Frame A", so the within-plant precision survived the removal of the path compare. DEF-0002 has not
+    come back: every Plant B and Plant C part carries `offered_node_ids=0` on a Plant A board.
+    THE READ POLICY REALLY WAS NOT WIDENED, which was the alternative the report offered and the
+    developer declined. Ana's payload still shows `site_node_ids=0` for all three plant-wide parts
+    with `offered_node_ids=3` beside it — the place list is as filtered as it ever was, and the answer
+    now travels separately. That is the difference between showing more and asking better, and it is
+    visible in the payload rather than only in the header.
+    I ATTACKED THE NEW SECURITY DEFINER FUNCTION, because `p_root_path` is a boundary the caller
+    chooses. Asked from Ana's session for `plant_a`, `plant_a.area_1`, and each of the other three
+    plants in her own org, `app_offered_product_nodes` returns her own three readable nodes and
+    nothing else — 12 pairs at any root above her grant, 0 at any plant she has no grant on. Widening
+    the root gains her nothing. The other plants in her OWN org are the harder case, since org scoping
+    alone would not catch it, and they come back empty.
+    TWO MUTATIONS, BOTH CAUGHT BY NAME. Reverting `productsOfferedAtNode` to offer everything reds
+    XP3, XP4, XP5 and XP6. Reverting it to read `siteNodeIds` — this defect exactly — reds XP1, XP2,
+    XP5, XP6 and XP7, and XP1 is named "the filed defect: a part whose places were filtered away is
+    still offered". Held in both directions.
+    ONE THING TO FIX BEFORE IT HIDES SOMETHING. `npm run db:types` now differs from the committed file
+    by TWO things, not one: the phantom `node_product_rollup` table that has been there since 0041's
+    draft, and — genuinely — `app_offered_product_nodes`, which migration 0042 created and which the
+    committed types do not carry. That is CLAUDE.md §4's own rule ("tsc is inconclusive until db:types
+    has run after a migration touches a column or an RPC") missed, and it is exactly the outcome the
+    last two runs warned about: a standing false alarm on that instrument is how a real one gets
+    ignored. Nothing calls the function from TypeScript, so nothing is broken today. Drop the orphan
+    table when the app is free and regenerate, and the instrument goes back to meaning something.
+    `format:check` is still red across 269 files for the CRLF reason and is still green on Linux.
+    ⚠️ RENUMBERED FROM 50 ON MERGE (both branches wrote that id), and TWO of its observations were answered
+    by commits it did not have — it judged 808a52d. `9a7267a` had already regenerated `database.types.ts`,
+    so the committed file DOES carry `app_offered_product_nodes`; and `3b61997` had made `format:check`
+    genuinely green rather than green-only-on-Linux, which is what had been stopping every CI run since the
+    trigger was repaired (F-081). The phantom `node_product_rollup` table it names is real and still there.
+    Its verification of DEF-0005 stands untouched: that is about 808a52d, which is the fix.
+  shipped: []
 - id: 50
   date: 2026-09-04
   title: The gate that was actually stopping CI (F-081)
