@@ -38,11 +38,11 @@ export interface ProductHistory {
  * point at any more — and inventing one would put a value in front of a
  * component that no lookup anywhere could resolve.
  *
- * ⚠️ `siteNodeIds` IS EMPTY, AND UNDER D115 THAT IS THE SAFE VALUE RATHER THAN A
- * HAZARD. An empty places list means `productOfferedAt` returns FALSE — offered
- * nowhere — the honest zero, not the fail-open "cannot tell" a single unreadable
- * owner used to be. So even if a synthesised row reached the picker it would
- * simply not be offered; it still never does, because `productsOfferedHere`
+ * ⚠️ `siteNodeIds` AND `offeredNodeIds` ARE BOTH EMPTY, AND THAT IS THE SAFE
+ * VALUE RATHER THAN A HAZARD. `offeredNodeIds` is the one the picker asks
+ * (0042 / DEF-0005), and an empty one means offered at no node in this window —
+ * so even if a synthesised row reached the picker it would simply not be
+ * offered; it still never does, because `productsOfferedAtNode`
  * filters the catalogue array `board_window` returns and nothing synthesised is
  * ever put in it.
  */
@@ -54,6 +54,7 @@ function deletedProduct(row: ProductHistory): Product | undefined {
     name: row.productName ?? row.productSku,
     active: false,
     siteNodeIds: [],
+    offeredNodeIds: [],
     colorToken: row.productColorToken ?? "",
   };
 }

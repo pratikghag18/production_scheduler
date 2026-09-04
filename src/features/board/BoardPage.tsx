@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { offeredHere, ownedInScope, productsOfferedHere } from "@/features/admin/lib/scope";
+import { offeredHere, ownedInScope, productsOfferedAtNode } from "@/features/admin/lib/scope";
 import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
@@ -290,33 +290,21 @@ export default function BoardPage() {
   const offeredProducts = useMemo(() => {
     if (!boardQuery.data || createNodeId === null) return [];
     const active = boardQuery.data.products.filter((p) => p.active);
-    // D115: a product is offered where ANY of its plants covers this cell, so
-    // this uses `productsOfferedHere` (the list) rather than `offeredHere` (a
-    // single owner, still right for operators below).
+    // ⭐⭐ THE SERVER DECIDES THIS, AND THE CLIENT ONLY READS THE ANSWER
+    // (DEF-0005, migration 0042). `board_window` sends, per product, the nodes
+    // in THIS window where a run of it would be accepted — computed through the
+    // same predicate the write guard runs — so the offer is membership and
+    // nothing else.
     //
-    // ⭐⭐ THE MAP HANDED IN IS THIS PLANT'S SUBTREE, AND THAT IS WHY THIS DOES
-    // NOT FAIL OPEN (DEF-0002). `index.nodeById` is `board_window`'s `nodes`,
-    // scoped to the selected root — the same set `operatorPool` below treats as
-    // "this plant". `productOfferedAt` used to offer any part whose place it
-    // could not resolve, on `offeredAt`'s "I cannot tell" reasoning; but a
-    // different plant's node is NEVER in this map, so on Plant A's board every
-    // Plant B and Plant C part was offered and every one of them was refused by
-    // the database with `not_offered_here`. A place outside this map is a real
-    // "not this plant", exactly as an operator's owner outside it is. A part
-    // with no places at all is still offered nowhere.
-    //
-    // ⚠️ AND THE TWO FALLBACKS BELOW RETURN NOTHING, NOT EVERYTHING. They used
-    // to hand back the whole catalogue when the board index was missing or the
-    // popover's cell could not be found in it — which is the defect above by
-    // another route, since "I cannot locate this cell" is exactly when the
-    // offer is least trustworthy. A popover whose node has left the map is
-    // closed by `useDragGesture` now, so these are a net under that; an empty
-    // list refuses what the server would refuse anyway.
-    if (index === null) return [];
-    const path = index.nodeById.get(createNodeId)?.path;
-    if (path === undefined) return [];
-    return productsOfferedHere(active, path, index.nodeById);
-  }, [boardQuery.data, index, createNodeId]);
+    // ⚠️ IT USED TO DERIVE THE ANSWER from `site_node_ids` and the board's node
+    // map, and that list is RLS-filtered: a supervisor granted a LINE cannot
+    // read the PLANT, so a plant-wide part arrived with no places at all and
+    // was offered nowhere. Ana, granted Line 1, was offered ONE part out of the
+    // four on her own legend while the server accepted all four. No node map is
+    // consulted here any more, and no path is compared — those were the moving
+    // parts that could disagree with the server.
+    return productsOfferedAtNode(active, createNodeId);
+  }, [boardQuery.data, createNodeId]);
 
   /**
    * D113: the people who do NOT belong at this cell.

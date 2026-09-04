@@ -416,6 +416,32 @@ export interface Product {
    */
   siteNodeIds: string[];
   /**
+   * The nodes IN THIS BOARD WINDOW where this product is OFFERED — the server's
+   * own answer, from `board_window`'s `offered_node_ids` (migration 0042).
+   *
+   * ⭐⭐ THIS EXISTS BECAUSE `siteNodeIds` CANNOT ANSWER THE QUESTION, AND A
+   * SUPERVISOR PAID FOR THE DIFFERENCE (DEF-0005). `product_sites` is
+   * RLS-filtered on read: reading is downward from a grant, so a supervisor
+   * granted a LINE cannot read the PLANT, and a plant-wide part arrives with
+   * `siteNodeIds: []`. The picker read that as "made nowhere" and offered her
+   * ONE part out of the four on her own legend, while the server accepted all
+   * four. Two states — "assigned to no plant" and "every place is above your
+   * grant" — arrived as the same empty array, and nothing downstream could tell
+   * them apart, because the information was gone before it got here.
+   *
+   * So the client stopped deriving the answer and started being told it. This
+   * list is computed by `app_offered_product_nodes`, the set form of the same
+   * `app_product_offered_at` the write guard runs, under SECURITY DEFINER —
+   * CLAUDE.md §4: whatever a client hides or offers must be decided by the same
+   * test the server runs.
+   *
+   * ⚠️ IT IS SCOPED TO THE WINDOW, so membership is the whole test: a node id
+   * in here is a node where a run of this product would be ACCEPTED. An empty
+   * list here really does mean "nowhere in this window", because the server
+   * answered it rather than a filtered list implying it.
+   */
+  offeredNodeIds: string[];
+  /**
    * The palette token this product renders in — `product-1` .. `product-4`
    * (0023 §3, D102). A TOKEN NAME, NEVER A HEX: the board resolves it through
    * `tokens.css`, which is what lets the palette be re-pointed in one place.
@@ -461,7 +487,7 @@ export interface Product {
  */
 function parseProduct(v: Json): Product | null {
   if (!isJsonObject(v)) return null;
-  const { id, sku, name, active, color_token, site_node_ids } = v;
+  const { id, sku, name, active, color_token, site_node_ids, offered_node_ids } = v;
   if (
     !isStr(id) ||
     !isStr(sku) ||
@@ -469,7 +495,15 @@ function parseProduct(v: Json): Product | null {
     !isBool(active) ||
     // Required as a shape, unlike `color_token` — see above. An empty array is
     // accepted; a non-array, or an array with a non-string entry, is not.
-    !Array.isArray(site_node_ids)
+    !Array.isArray(site_node_ids) ||
+    // ⚠️ REQUIRED FOR THE SAME REASON, AND THE COUPLING IS DELIBERATE (0042 /
+    // DEF-0005). A server that does not send this key is one whose board_window
+    // predates the fix, and a client that quietly carried on would go back to
+    // deriving the offer from an RLS-filtered list — which is the defect, made
+    // silent. Failing the whole payload is loud, immediate and says which half
+    // is behind; the alternative is a picker that is wrong for exactly the
+    // roles least able to report it.
+    !Array.isArray(offered_node_ids)
   ) {
     return null;
   }
@@ -478,12 +512,18 @@ function parseProduct(v: Json): Product | null {
     if (!isStr(n)) return null;
     siteNodeIds.push(n);
   }
+  const offeredNodeIds: string[] = [];
+  for (const n of offered_node_ids) {
+    if (!isStr(n)) return null;
+    offeredNodeIds.push(n);
+  }
   return {
     id,
     sku,
     name,
     active,
     siteNodeIds,
+    offeredNodeIds,
     colorToken: isStr(color_token) ? color_token : "",
   };
 }

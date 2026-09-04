@@ -33,6 +33,7 @@ const LIVE: Product = {
   name: "Widget X",
   active: true,
   siteNodeIds: ["n1"],
+  offeredNodeIds: ["n1"],
   colorToken: "product-1",
 };
 const PRODUCTS: ReadonlyMap<string, Product> = new Map([["p1", LIVE]]);

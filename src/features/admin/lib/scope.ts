@@ -65,12 +65,24 @@
  * contract (§19.63), which was built for exactly this.
  *
  * ⚠⚠ THIS IS NOT "everything here", AND THE EXCEPTION COST A DEFECT (DEF-0002).
- * The argument above is about a map narrowed by PERMISSION. `ownedInScope` and
- * `productOfferedAt` are handed the board's `index.nodeById`, which is narrowed
- * by a VIEW CHOICE — the plant the reader picked — and there "I cannot resolve
- * it" means "it is in another plant", which is knowledge, not ignorance. Both
- * of those fail CLOSED, each says so at its own definition, and the rule for
- * telling them apart is the one §19.79 states below: ask what narrowed the map.
+ * The argument above is about a map narrowed by PERMISSION. `ownedInScope` is
+ * handed the board's `index.nodeById`, which is narrowed by a VIEW CHOICE — the
+ * plant the reader picked — and there "I cannot resolve it" means "it is in
+ * another plant", which is knowledge, not ignorance. It fails CLOSED, says so at
+ * its own definition, and the rule for telling the two apart is the one §19.79
+ * states below: ask what narrowed the map.
+ *
+ * ⚠⚠⚠ AND THAT RULE HAS A LIMIT, WHICH COST A SECOND DEFECT (DEF-0005). It can
+ * only be applied by someone who knows what narrowed the map — and for a
+ * supervisor the board's map is narrowed by a view choice while the product's
+ * PLACE LIST was already narrowed by permission, one layer up, before it
+ * arrived. By the time a predicate here sees an empty array the two are
+ * indistinguishable, and no amount of care inside this file recovers it. That
+ * is why the product half of this module no longer decides anything: the server
+ * answers it (`board_window`'s `offered_node_ids`, migration 0042) and
+ * `productsOfferedAtNode` below only reads the answer. When a question turns
+ * out to need information the client was never given, the fix is to move the
+ * question, not to sharpen the guess.
  *
  * ⚠️ Note this is the OPPOSITE default from `ProductsPanel`'s edit rights, and
  * deliberately so ([[verification-standard]] rule 8b): that decides whether to
@@ -164,69 +176,53 @@ export function ownedInScope<T extends { siteNodeId: string }>(
  * ------------------------------------------------------------------------- */
 
 /**
- * Is a product with these places offered at the node `targetPath`?
+ * Which products are offered at `nodeId`, ACCORDING TO THE SERVER.
  *
- * ⭐ ANY place covering the cell is enough — the union, D115's whole point.
+ * ⭐⭐ THIS FUNCTION USED TO DERIVE THE ANSWER AND NOW ONLY READS IT, AND THAT
+ * IS THE WHOLE OF DEF-0005. It was `productOfferedAt(siteNodeIds, targetPath,
+ * nodesById)`: take the product's places, resolve each one in the board's node
+ * map, and ask `isAtOrBelow`. That is the right RULE — it is the rule the
+ * server's `app_product_offered_at` runs — asked of the wrong MATERIAL.
+ * `product_sites` is RLS-filtered on read and reading is downward from a grant,
+ * so a supervisor granted a LINE cannot read the PLANT, and a plant-wide part
+ * reached this client with `siteNodeIds: []`. Every version of this function
+ * answered "offered nowhere", correctly, for a list that had been emptied on
+ * the way. One supervisor was offered ONE part out of the four on her own
+ * legend while the server accepted all four.
  *
- * ⭐⭐ A PLACE THAT IS NOT IN `nodesById` IS A REAL "NOT HERE", NOT AN "I CANNOT
- * TELL", AND THAT IS THE OPPOSITE OF `offeredAt` ABOVE ON PURPOSE (DEF-0002).
- * This used to read `if (place === undefined) return true` — the file header's
- * fail-open, applied per place. The header's argument is about a scope node the
- * reader may not READ, and it is still right for `offeredAt`, whose map is
- * whatever the reader's grants let through. It is wrong here, because this
- * function's only caller hands it a map narrowed by a VIEW CHOICE:
- * `BoardPage`'s `index.nodeById` is `board_window`'s `nodes`, which is
- * `n.path <@ p_root_path` — exactly the selected plant's subtree. A Plant B
- * part's place is a Plant B node, which is never in a Plant A board's map, so
- * the fail-open fired on every part of every other plant and the picker offered
- * eight guaranteed refusals (HTTP 409 `not_offered_here`) out of twelve
- * entries. This is the identical mistake `ownedInScope` was written to fix for
- * operators in R-310, one function over; the product half was left behind.
+ * ⚠️ AND THE PREVIOUS FIX'S OWN PROOF SAID THIS COULD NOT HAPPEN. DEF-0002
+ * turned a fail-open into a fail-closed here and argued, in this comment, that
+ * "nothing legitimately offerable disappears" — reasoning that was sound about
+ * the CHANGE (an empty list short-circuits before either branch, so the change
+ * moved nothing) and then generalised to the picker as a whole, which it never
+ * examined. `scope.test.ts` case XP9 was green while asserting the opposite of
+ * what the server answers. A green case can be pinning the bug; a proof that
+ * quietly widens its own scope is how one gets written.
  *
- * ⭐ IT IS MEMBERSHIP *AND* THE PATH COMPARE, NOT MEMBERSHIP ALONE. Membership
- * says "this place is in the plant on screen"; `isAtOrBelow` says "and it
- * covers this cell". Dropping the second half would offer a Plant A part scoped
- * to Area 2 at a cell in Area 1 — the case the tester confirmed was already
- * being answered correctly and which case XP7 keeps pinned.
+ * ⭐ SO THE CLIENT STOPPED DERIVING AND STARTED ASKING. `board_window` now
+ * carries `offered_node_ids` per product (migration 0042) — the nodes in this
+ * window where the server would ACCEPT a run — computed by
+ * `app_offered_product_nodes` under SECURITY DEFINER, the set form of the same
+ * predicate the write guard runs. Membership is the entire test, and there is
+ * no path logic left here to disagree with the server about. CLAUDE.md §4:
+ * whatever a client hides or offers must be decided by the same test the server
+ * runs.
  *
- * ⚠️ WHY THIS HIDES NOTHING THE SERVER WOULD HAVE ACCEPTED, which is the thing
- * to be sure of before turning a fail-open into a fail-closed. For a place P to
- * be wrongly hidden it would have to (a) be readable, so it reaches this client
- * inside `site_node_ids` at all, (b) cover the target cell, and (c) be absent
- * from the board's map. P covers a cell inside the selected root R, so P is at
- * or below R — in the map — or a STRICT ANCESTOR of R. And a strict ancestor of
- * R is never readable: R comes from `visible_board_roots`, "every node you can
- * read whose parent you cannot", and reading is downward from a grant, so if
- * anything above R were readable R would not have been a root. An unreadable
- * place is dropped from `site_node_ids` by `product_sites_select`
- * (`app_can_read_node`, downward only) before this function ever sees it. So
- * (a) and (c) cannot both hold, and nothing legitimately offerable disappears.
+ * ⚠️ AN EMPTY LIST IS STILL A REAL "NOWHERE", but for a better reason than
+ * before: it is now an ANSWER rather than a filtered list implying one.
+ * `history.ts`'s synthesised deleted product carries an empty one deliberately.
  *
- * ⚠️ AN EMPTY LIST IS UNCHANGED AND WAS ALWAYS RIGHT: a part assigned to no
- * plant is offered NOWHERE, and `some` over `[]` is `false`. That is the honest
- * zero, not an unknown — `history.ts`'s synthesised deleted product leans on it.
+ * ⚠️ NO NODE MAP, NO PATHS, NO `isAtOrBelow` — deliberately. Handing this
+ * function the board's node map again would reintroduce the question "what
+ * narrowed this map", which is exactly the question that cannot be answered
+ * from inside this module: for a supervisor the map is narrowed by a view
+ * choice AND the place list was already narrowed by permission one layer up.
  */
-export function productOfferedAt(
-  siteNodeIds: readonly string[],
-  targetPath: string,
-  nodesById: ReadonlyMap<string, ScopeNode>,
-): boolean {
-  return siteNodeIds.some((placeId) => {
-    const place = nodesById.get(placeId);
-    // Not in the map -> not in the plant this board is showing. No fail-open
-    // here on purpose; see the note above.
-    if (place === undefined) return false;
-    return isAtOrBelow(targetPath, place.path);
-  });
-}
-
-/** Every product in `items` offered at `targetPath`. Order is preserved. */
-export function productsOfferedHere<T extends { siteNodeIds: readonly string[] }>(
+export function productsOfferedAtNode<T extends { offeredNodeIds: readonly string[] }>(
   items: readonly T[],
-  targetPath: string,
-  nodesById: ReadonlyMap<string, ScopeNode>,
+  nodeId: string,
 ): T[] {
-  return items.filter((i) => productOfferedAt(i.siteNodeIds, targetPath, nodesById));
+  return items.filter((i) => i.offeredNodeIds.includes(nodeId));
 }
 
 /* ===========================================================================

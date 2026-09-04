@@ -118,6 +118,13 @@ const boardWindowJson: Json = {
       // `parseProduct` (the last describe pins the shape). Here a one-element
       // list naming the node in `nodes` above, as the real payload does.
       site_node_ids: ["30000000-0000-0000-0000-000000000001"],
+      // DEF-0005 / 0042: the server's own answer to "where is this offered",
+      // scoped to this window. REQUIRED as an array, for the same reason
+      // `site_node_ids` is and one stronger: a payload without it comes from a
+      // `board_window` that predates the fix, and carrying on regardless would
+      // silently go back to deriving the offer from a list that RLS may have
+      // emptied. The cell below is the schedulable node in `nodes` above.
+      offered_node_ids: ["30000000-0000-0000-0000-000000000006"],
     },
   ],
   skills: [{ id: "40000000-0000-0000-0000-000000000001", name: "CNC" }],
@@ -459,10 +466,18 @@ describe("parseProduct — the colour is presentation, not identity", () => {
  * identity, like `sku`, not presentation like `color_token`.
  *
  * ⚠️ BUT AN EMPTY ARRAY IS ACCEPTED, and that is the change from the pre-0034
- * single owner. A part assigned to no plant is a legitimate state — offered
- * nowhere, which `productOfferedAt` reads correctly as "no cell". What is
+ * single owner. A part assigned to no plant is a legitimate state. What is
  * rejected is a MALFORMED shape (a non-array, or an array with a non-string
  * entry): a payload this client does not understand, unlike an honest zero.
+ *
+ * ⚠️⚠️ AND `site_node_ids` NO LONGER DECIDES THE OFFER (DEF-0005). It is the raw
+ * place list, RLS-filtered on read, so for a supervisor granted a LINE a
+ * plant-wide part arrives with an empty one — indistinguishable from a part
+ * assigned to no plant, which is how a supervisor came to be offered one part
+ * out of four while the server accepted all four. `offered_node_ids` carries
+ * the server's own answer and is what the picker reads; both are required, and
+ * the cases below pin each of them separately, because they now mean different
+ * things and a fixture that conflated them would hide the next version of this.
  */
 describe("parseProduct — the places are identity, and an empty list is honest", () => {
   it("keeps the list the server actually sends", () => {
@@ -492,6 +507,35 @@ describe("parseProduct — the places are identity, and an empty list is honest"
       products: { site_node_ids: unknown }[];
     };
     raw.products[0].site_node_ids = "30000000-0000-0000-0000-000000000001";
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+
+  it("⭐ keeps offered_node_ids — the field the picker actually reads (DEF-0005)", () => {
+    const win = parseBoardWindow(boardWindowJson);
+    expect(win?.products[0]?.offeredNodeIds).toEqual(["30000000-0000-0000-0000-000000000006"]);
+  });
+
+  it("⭐ the two lists are independent: places may be EMPTY while the offer is not", () => {
+    // Ana's payload, in miniature. A supervisor granted a line cannot read the
+    // plant her parts are made at, so `product_sites_select` drops the row and
+    // `site_node_ids` arrives empty — while the server, asked directly, offers
+    // the part at her cell. A parser that treated the places as the offer (or a
+    // fixture that always sent them together) could not tell this apart from a
+    // part made nowhere, and that is the whole defect.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { site_node_ids: unknown; offered_node_ids: unknown }[];
+    };
+    raw.products[0].site_node_ids = [];
+    const win = parseBoardWindow(raw as unknown as Json);
+    expect(win?.products[0]?.siteNodeIds).toEqual([]);
+    expect(win?.products[0]?.offeredNodeIds).toEqual(["30000000-0000-0000-0000-000000000006"]);
+  });
+
+  it("rejects a product with no offered_node_ids — a server behind this client", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      products: { offered_node_ids?: unknown }[];
+    };
+    delete raw.products[0].offered_node_ids;
     expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
   });
 
