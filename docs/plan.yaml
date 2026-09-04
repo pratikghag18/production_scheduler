@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 808a52d
+  tip: 3b61997
   baseline:
     app_tests: 1786
     app_test_files: 60
@@ -5548,6 +5548,29 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-081
+  title: The CI step that was red was two steps before the one we fixed
+  tag: A test that never ran
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-321
+  story: >-
+    The maintainer, on a workflow that had never once been green: *"why are my workflows failing on github?
+    I thought we fixed them."* DEF-0001 was a real fix and CI never reached it. `format:check` runs two
+    steps before `test` and five before `e2e`, and it had been failing on thirteen committed files — so
+    every run since the trigger was repaired died before the suite, the build or the smoke test started.
+    Nothing about the e2e fix was wrong; it was simply never executed.
+    ⭐ THE MISS IS THE INTERESTING PART, AND IT HAD BEEN WRITTEN DOWN TWICE. The tester reported the red gate
+    in both of its first two runs and both times classified it as "a Prettier gate, and not one of the
+    tracked baseline numbers". True about the NUMBERS, and the wrong conclusion about the WORKFLOW: a step
+    that exits non-zero stops the job whether or not anybody counts it. A fact can be reported accurately,
+    twice, and still not be acted on, because it was filed under the wrong question — "does this move a
+    number we track" rather than "does this stop the build".
+    Fixed by running the repo's own formatter: wrapping and indentation only, in files last touched on 2 and
+    3 September. One of the fourteen was a hand-authored prose document committed an hour earlier at the top
+    level; it moved into `docs/`, which `.prettierignore` already exempts by directory for exactly that kind
+    of file.
 - id: F-079
   title: A third refusal shape nobody can read
   tag: A list that appears twice
@@ -7426,6 +7449,33 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 50
+  date: 2026-09-04
+  title: The gate that was actually stopping CI (F-081)
+  commits:
+  - 3b61997
+  numbers:
+    app_tests: 1786
+    app_test_files: 60
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer asked why the workflows were still failing when we had fixed them. We had fixed the e2e
+    smoke test, which is the LAST step of the job; `format:check` is the fourth, and it had been red on
+    thirteen committed files the whole time, so nothing after it ever ran. The fix is the repo's own
+    formatter over its own files — wrapping and indentation, no behaviour — plus moving a prose document I
+    had committed an hour earlier into `docs/`, the directory `.prettierignore` already exempts for
+    hand-authored docs.
+    Worth recording as F-081 rather than as a tidy-up, because the failure had been reported twice and
+    correctly, and dismissed both times as "a Prettier gate, not one of the tracked baseline numbers" — true
+    of the numbers, wrong about the job. The lesson for the next instrument report: "is this red" and "does
+    this move a number we track" are different questions, and only the first one decides whether the build
+    goes green.
+    Every step was then run here in the workflow's own order, which is the only way to know the job passes
+    rather than that my own step does: plan --check ok, typecheck 0, lint 0, format:check clean, test 1786
+    in 60 files, build ok, e2e 5 of 5.
+  shipped: []
 - id: 49
   date: 2026-09-04
   title: The board is told which parts it may offer, instead of deducing it from a list it cannot see all of (DEF-0005)
