@@ -51,8 +51,6 @@ const OPERATORS: ReadonlyMap<string, BoardOperator> = new Map([["o1", MARIA]]);
 
 function run(over: Partial<Run>): Run {
   return {
-    // Runs keep their status; only the assignment's was removed (R-323).
-    status: "planned",
     id: "r1",
     orgId: "org",
     nodeId: "n1",

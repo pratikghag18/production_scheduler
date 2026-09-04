@@ -59,7 +59,6 @@ export function useCreateRun(rootPath: string, from: Date, to: Date) {
           timerange: toTstzRange(input.start, input.end),
           plannedHeadcount: input.plannedHeadcount ?? null,
           notes: input.notes ?? null,
-          status: "planned",
           createdBy: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),

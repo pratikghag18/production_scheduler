@@ -370,10 +370,10 @@ DECLARE v_line uuid; v_err text := 'no error'; v_detail text := '-'; v_runs int;
 BEGIN
   SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
   BEGIN
-    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001', v_line,
             '60000000-0000-0000-0000-00000000ff01',
-            tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
+            tstzrange(now(), now()+interval '2 hours'), 1);
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLSTATE;
     -- The payload SHAPE, by key, not the message (doc_drift rule 7).
@@ -400,10 +400,10 @@ DECLARE v_line uuid; v_err text := 'no error'; v_runs int;
 BEGIN
   SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
   BEGIN
-    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001', v_line,
             '60000000-0000-0000-0000-00000000ff02',
-            tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
+            tstzrange(now(), now()+interval '2 hours'), 1);
   EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM; END;
   SELECT count(*) INTO v_runs FROM runs
    WHERE node_id = v_line AND product_id = '60000000-0000-0000-0000-00000000ff02';
@@ -419,10 +419,10 @@ DECLARE v_line uuid; v_unnameable int;
 BEGIN
   SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
   -- Their own board, populated legally.
-  INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+  INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
   VALUES ('10000000-0000-0000-0000-000000000001', v_line,
           '60000000-0000-0000-0000-00000000ff02',
-          tstzrange(now(), now()+interval '2 hours'), 'planned', 1);
+          tstzrange(now(), now()+interval '2 hours'), 1);
   PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000f2', true);
   SET LOCAL ROLE authenticated;
   -- Read every run RLS lets them have, then ask how many name a product RLS

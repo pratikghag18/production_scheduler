@@ -5516,6 +5516,31 @@ requirements:
     measured line moving from 0 to 1 of 22. Two things that only the screenshot could show were fixed there:
     the open editor was stretching its column so the whole grid reflowed on a click, and the summed rows were
     three times the height of the rows they total.
+- id: R-324
+  title: No run carries a status either — and the overlap rule stops making an exception for one
+  source:
+  - the maintainer, 4 Sept (in session, after the assignments half landed and the run half was explained and queued, "Let's go ahead and remove it from runs as well")
+  stated_by: maintainer
+  claim: >-
+    `runs.status` is gone. It was write-once 'planned' — nothing in the product has ever advanced a run to
+    active, done or cancelled, which migration 0029 recorded as fact and worked around by using the clock —
+    and runs have always been hard-deleted, so 'cancelled' was a state no run could reach.
+    ⚠️ THE REASON THIS WAS SPLIT OFF FROM R-323 IS `runs_no_overlap_on_node`, the rule that stops two runs
+    sharing a cell and a window. It is not a function that can be edited: it is a constraint on the table,
+    and its definition carries `where (status <> 'cancelled')`. Removing the column means DROPPING that
+    constraint and adding it back without the exception — the protection is off in between, and a
+    replacement written even slightly wrong is silently weaker rather than loudly broken. So the new
+    constraint is asserted from the outside afterwards: an overlapping run must be REFUSED, on the same cell,
+    including the case that used to be the exception.
+    ⚠️ AND THE EXCEPTION IS NOW A REAL REFUSAL. `10_constraints_test.sql` case 7c asserted that "an
+    overlapping run with status=cancelled is accepted". That was true and is now impossible to express;
+    the case is inverted rather than deleted, because the change of contract is the point.
+    Any cancelled run is deleted before the constraint is rebuilt, with its assignments first — not
+    housekeeping but a precondition, since an unconditional exclusion constraint cannot be created at all
+    over rows that violate it, and a cancelled run overlapping a live one is exactly the shape the old
+    exception permitted.
+  verified_by: []
+  status: uncovered
 - id: R-323
   title: Deleting an assignment deletes it — assignments carry no status at all
   source:
@@ -8860,13 +8885,6 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
-- text: Remove `runs.status` too — it is write-once 'planned' and its only reader can never fire
-  why: >-
-    The other half of R-323, split off on purpose. Runs are hard-deleted, so no run is ever 'cancelled', and
-    the `where (status <> 'cancelled')` clause on `runs_no_overlap_on_node` is therefore always true.
-    Removing the column means DROP and re-ADD of that exclusion constraint — the overlap invariant itself —
-    so it wants its own piece of work and its own SQL cases rather than riding along with the assignments
-    change. Migration 0029's header is the standing evidence that the column is not believed by anything.
 - text: Dark theme — app-wide colour tokens first, then the matrix
   why: >-
     Split out of M5 with the maintainer (session 22): the app has NO theming today — no colour variables,

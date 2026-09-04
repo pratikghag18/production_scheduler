@@ -159,19 +159,10 @@ function makeFixture(): BoardWindow {
       createdAt: "2026-08-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
     },
-    {
-      id: "r-cancelled",
-      orgId: "org1",
-      nodeId: "n-cell1",
-      productId: "p1",
-      timerange: '["2026-08-19 06:00:00+00","2026-08-19 14:00:00+00")',
-      plannedHeadcount: 1,
-      notes: null,
-      status: "cancelled",
-      createdBy: null,
-      createdAt: "2026-08-01T00:00:00Z",
-      updatedAt: "2026-08-01T00:00:00Z",
-    },
+    // ⚠️ THE `r-cancelled` FIXTURE IS GONE (R-324), not renamed. A cancelled run
+    // is a state the server can no longer produce — the column does not exist,
+    // and it never could reach that state anyway, since runs are hard-deleted.
+    // The row that stood here was the only reason this file needed a status.
   ];
 
   const assignments = [
@@ -337,26 +328,25 @@ describe("boardIndex.ts", () => {
   });
 
   /**
-   * ⚠️ HALVED BY R-323, AND THE CONTRACT CHANGED RATHER THAN THE CASE BEING
-   * WRONG. It used to assert that a cancelled RUN and a cancelled ASSIGNMENT
-   * were both dropped from every map. The assignment half is gone because the
-   * state it described is gone: an assignment that is deleted is now deleted,
-   * so nothing arrives to be filtered and a fixture carrying `a-cancelled`
-   * would be asserting against a row the server can no longer produce.
-   * The run half is untouched and still asserted — runs kept their status.
+   * ⚠️ CASE 17 IS GONE ENTIRELY, IN TWO STEPS, AND THE CONTRACT CHANGED BOTH
+   * TIMES RATHER THAN THE CASES BEING WRONG. It asserted that a cancelled RUN
+   * and a cancelled ASSIGNMENT were dropped from every map. R-323 removed the
+   * assignment half; R-324 removed the run half. Neither table has a status now
+   * — a deleted row is deleted — so the states those assertions described can no
+   * longer exist, and a fixture carrying one would be testing this client
+   * against a payload the server cannot produce.
+   *
+   * ⭐ WHAT REPLACES IT IS THE OPPOSITE ASSERTION, and it has to be positive:
+   * "nothing is filtered" is invisible if you only delete a case. So the two
+   * below say that every run and every assignment in the window reaches a map.
    */
-  it("a cancelled run is excluded from every map (case 17)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
-    const anyCancelledRun = [...idx.runsByNode.values()].flat().some((r) => r.id === "r-cancelled");
-    expect(anyCancelledRun).toBe(false);
+  it("every run in the window reaches a map — nothing is filtered out", () => {
+    const fixture = makeFixture();
+    const idx = buildBoardIndex(fixture, windowStart, windowEnd, STANDARD);
+    const shown = new Set([...idx.runsByNode.values()].flat().map((r) => r.id));
+    for (const r of fixture.runs) expect(shown.has(r.id)).toBe(true);
   });
 
-  /**
-   * ⭐ AND EVERY ASSIGNMENT THAT ARRIVES IS SHOWN (R-323). The counterpart to
-   * the deleted half above: with no soft delete left, a client that still
-   * filtered something would be hiding live work. Asserted positively, because
-   * "nothing was filtered" cannot be seen by removing an assertion.
-   */
   it("every assignment in the window reaches a map — nothing is filtered out", () => {
     const fixture = makeFixture();
     const idx = buildBoardIndex(fixture, windowStart, windowEnd, STANDARD);

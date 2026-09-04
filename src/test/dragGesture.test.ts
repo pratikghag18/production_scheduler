@@ -47,9 +47,6 @@ const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
 const WINDOW_MINUTES = 1440;
 
 const runFixture: IndexedRun = {
-  // ⚠️ RUNS STILL CARRY A STATUS (R-323 removed the assignment's, not the
-  // run's), so this stays while the assignment fixture below has none.
-  status: "planned",
   id: "run-1",
   orgId: "org-1",
   nodeId: "cell-1",

@@ -159,7 +159,12 @@ export interface Run {
   timerange: string;
   plannedHeadcount: number | null;
   notes: string | null;
-  status: string;
+  /**
+   * ⚠️ NO `status` ON A RUN EITHER (R-324, migration 0044). It was write-once
+   * 'planned' and its only reader was an exception inside the overlap rule that
+   * could never fire, since runs have always been hard-deleted. `board_window`
+   * builds a run with `to_jsonb(r)`, so the key simply stops arriving.
+   */
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -182,7 +187,6 @@ export function parseRun(v: Json): Run | null {
     timerange,
     planned_headcount,
     notes,
-    status,
     created_by,
     created_at,
     updated_at,
@@ -198,7 +202,6 @@ export function parseRun(v: Json): Run | null {
     !isStr(timerange) ||
     !isNumOrNull(planned_headcount) ||
     !isStrOrNull(notes) ||
-    !isStr(status) ||
     !isStrOrNull(created_by) ||
     !isStr(created_at) ||
     !isStr(updated_at)
@@ -216,7 +219,6 @@ export function parseRun(v: Json): Run | null {
     timerange,
     plannedHeadcount: planned_headcount,
     notes,
-    status,
     createdBy: created_by,
     createdAt: created_at,
     updatedAt: updated_at,

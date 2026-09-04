@@ -821,7 +821,6 @@ export type Database = {
           product_id: string | null
           product_name: string | null
           product_sku: string | null
-          status: string
           timerange: unknown
           updated_at: string
         }
@@ -837,7 +836,6 @@ export type Database = {
           product_id?: string | null
           product_name?: string | null
           product_sku?: string | null
-          status?: string
           timerange: unknown
           updated_at?: string
         }
@@ -853,7 +851,6 @@ export type Database = {
           product_id?: string | null
           product_name?: string | null
           product_sku?: string | null
-          status?: string
           timerange?: unknown
           updated_at?: string
         }

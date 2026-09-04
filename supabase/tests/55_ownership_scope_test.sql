@@ -215,10 +215,10 @@ DECLARE v_err text := 'no error'; v_n int;
 BEGIN
   RESET ROLE;
   BEGIN
-    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000007',
             '62000000-0000-0000-0000-0000000000c1',
-            tstzrange('2099-06-01 08:00+00','2099-06-01 10:00+00'), 'planned', 1);
+            tstzrange('2099-06-01 08:00+00','2099-06-01 10:00+00'), 1);
   EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM; END;
   SELECT count(*) INTO v_n FROM runs WHERE product_id = '62000000-0000-0000-0000-0000000000c1';
   IF v_err = 'no error' AND v_n = 1 THEN RAISE NOTICE 'PASS N2';
@@ -233,10 +233,10 @@ DECLARE v_err text := 'no error'; v_keys text := '-'; v_n int; v_detail text;
 BEGIN
   RESET ROLE;
   BEGIN
-    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000007',
             '62000000-0000-0000-0000-0000000000c3',
-            tstzrange('2099-06-01 08:00+00','2099-06-01 10:00+00'), 'planned', 1);
+            tstzrange('2099-06-01 08:00+00','2099-06-01 10:00+00'), 1);
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLSTATE;
     GET STACKED DIAGNOSTICS v_detail = PG_EXCEPTION_DETAIL;
@@ -265,10 +265,10 @@ BEGIN
   RESET ROLE;
   BEGIN
     -- product owned by Cell 1, run at Cell 2. Both inside Plant 1.
-    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000008',
             '62000000-0000-0000-0000-0000000000c4',
-            tstzrange('2099-06-01 08:00+00','2099-06-01 10:00+00'), 'planned', 1);
+            tstzrange('2099-06-01 08:00+00','2099-06-01 10:00+00'), 1);
   EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE; END;
   SELECT count(*) INTO v_n FROM runs WHERE product_id = '62000000-0000-0000-0000-0000000000c4';
   IF v_err = 'PT409' AND v_n = 0 THEN RAISE NOTICE 'PASS N4';
@@ -283,10 +283,10 @@ DECLARE v_err text := 'no error'; v_n int;
 BEGIN
   RESET ROLE;
   BEGIN
-    INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+    INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000007',
             '62000000-0000-0000-0000-0000000000c4',
-            tstzrange('2099-06-02 08:00+00','2099-06-02 10:00+00'), 'planned', 1);
+            tstzrange('2099-06-02 08:00+00','2099-06-02 10:00+00'), 1);
   EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM; END;
   SELECT count(*) INTO v_n FROM runs WHERE product_id = '62000000-0000-0000-0000-0000000000c4';
   IF v_err = 'no error' AND v_n = 1 THEN RAISE NOTICE 'PASS N5';
@@ -408,10 +408,10 @@ DECLARE v_err text := 'no error'; v_keys text := '-'; v_detail text; v_places in
 BEGIN
   RESET ROLE;
   -- c1 is made only in Plant 1, and now scheduled there.
-  INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
+  INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
   VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000007',
           '62000000-0000-0000-0000-0000000000c1',
-          tstzrange('2099-07-01 08:00+00','2099-07-01 10:00+00'), 'planned', 1);
+          tstzrange('2099-07-01 08:00+00','2099-07-01 10:00+00'), 1);
   -- Removing that plant would strand the run — no remaining plant covers Cell 1.
   BEGIN
     DELETE FROM product_sites
