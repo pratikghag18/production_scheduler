@@ -402,3 +402,180 @@ describe("toSchedulerError — table writes (§19.63)", () => {
     }
   });
 });
+
+/* ---------------------------------------------------------------------------
+   Group N (DEF-0003) — NOT_OFFERED_HERE HAS TWO PAYLOAD SHAPES.
+
+   Migration 0028 raised one shape from every scope guard: `kind`, `id`,
+   `owner_node_id`, `node_id`. The parser required all four. Migration 0034
+   (D115, "a product belongs to a list of plants") changed the PRODUCT half
+   only — a part now belongs to many plants, so there is no single owner node
+   to name — and migration 0040 copied the new shape for cycle times, while the
+   operator, skill, shift-template and home guards kept sending an owner.
+
+   Nothing could see that. `tsc` cannot: the required keys are a runtime string
+   test, not a type. No test could either — before this group `errors.test.ts`
+   had NO `not_offered_here` case at all, so the one branch in the file whose
+   comment is a paragraph about saying the right thing to a supervisor was the
+   one branch nothing proved reachable. The refusal a real person hits most
+   often, the wrong part on the wrong cell, arrived as "Something went wrong.
+   Please try again." — which asks them to repeat an action that can never
+   succeed.
+
+   THE PAYLOADS ARE BUILT FROM ONE DEFINITION ON PURPOSE. Two hand-written
+   copies of a key list is exactly the drift being pinned here (CLAUDE.md §4),
+   so writing the product and operator shapes out twice inside the test that
+   guards against them drifting apart would repeat the mistake one level up.
+   Only what differs is passed in, and the whole difference is visible in six
+   lines instead of a diff between two JSON blobs.
+   --------------------------------------------------------------------------- */
+describe("toSchedulerError — not_offered_here, both shapes (DEF-0003)", () => {
+  /** The cell that refused. Every raise site sends it, so it is shared. */
+  const REFUSING_NODE = "ce0d946d-d104-4c2e-be48-869220e3bad4";
+
+  /**
+   * One definition of the wire shape. `api_raise` puts the JSON in `details`
+   * as TEXT and PostgREST returns it under code PT409; that encoding is part
+   * of what is under test, so it happens here rather than being assumed away.
+   */
+  function scopeRefusal(detail: Record<string, unknown>, message: string) {
+    return {
+      code: "PT409",
+      details: JSON.stringify({ error: "not_offered_here", node_id: REFUSING_NODE, ...detail }),
+      hint: null,
+      message,
+    };
+  }
+
+  /**
+   * `app_guard_run_scope` as migration 0034 left it — `jsonb_build_object(
+   * 'kind', 'product', 'id', new.product_id, 'node_id', new.node_id)`. No
+   * owner. `app_guard_assignment_scope`'s product half and 0040's
+   * `app_guard_cycle_time_scope` raise the identical three keys.
+   */
+  const PRODUCT_REFUSAL = scopeRefusal(
+    { kind: "product", id: "b30f1677-e8b4-4465-bf3d-58caf2c9c4b0" },
+    "That product does not belong to this part of the structure.",
+  );
+
+  /**
+   * The OPERATOR half of the same guard, unchanged since 0028: a person still
+   * has exactly one site, so the owner is still there. This is the control —
+   * if it ever stops matching, the fix loosened something instead of
+   * narrowing it.
+   */
+  const OPERATOR_REFUSAL = scopeRefusal(
+    {
+      kind: "operator",
+      id: "0f1c1d6e-1111-4444-8888-aaaaaaaaaaaa",
+      owner_node_id: "22222222-3333-4444-5555-666666666666",
+    },
+    "That person does not belong to this part of the structure.",
+  );
+
+  it("N1: the product refusal, which sends no owner, is NotOfferedHere", () => {
+    const err = toSchedulerError(PRODUCT_REFUSAL);
+    expect(err.kind).toBe("NotOfferedHere");
+    if (err.kind !== "NotOfferedHere") throw new Error("unreachable");
+    expect(err.what).toBe("product");
+    expect(err.id).toBe("b30f1677-e8b4-4465-bf3d-58caf2c9c4b0");
+    expect(err.nodeId).toBe(REFUSING_NODE);
+  });
+
+  it("N2: and its owner is absent, not invented", () => {
+    // The server stopped sending it because the answer is a list, not a node.
+    // A parser that filled the gap with a placeholder would put that
+    // placeholder in front of a supervisor the first time anyone read it.
+    const err = toSchedulerError(PRODUCT_REFUSAL);
+    if (err.kind !== "NotOfferedHere") throw new Error("unreachable");
+    expect(err.ownerNodeId).toBe(undefined);
+  });
+
+  it("N3: the product refusal produces the real sentence, not the Unknown one", () => {
+    expect(describeSchedulerError(toSchedulerError(PRODUCT_REFUSAL))).toBe(
+      "That product belongs to a different part of the structure, so it can't be used here.",
+    );
+  });
+
+  it("N4: the operator refusal still classifies, with all four fields", () => {
+    const err = toSchedulerError(OPERATOR_REFUSAL);
+    expect(err.kind).toBe("NotOfferedHere");
+    if (err.kind !== "NotOfferedHere") throw new Error("unreachable");
+    expect(err.what).toBe("operator");
+    expect(err.id).toBe("0f1c1d6e-1111-4444-8888-aaaaaaaaaaaa");
+    expect(err.ownerNodeId).toBe("22222222-3333-4444-5555-666666666666");
+    expect(err.nodeId).toBe(REFUSING_NODE);
+  });
+
+  it("N5: and its sentence is character-for-character what it was", () => {
+    expect(describeSchedulerError(toSchedulerError(OPERATOR_REFUSAL))).toBe(
+      "That person belongs to a different part of the structure, so it can't be used here.",
+    );
+  });
+
+  it("N6: the two sentences differ — which is why `kind` stays required", () => {
+    // `kind` is the only key `describeSchedulerError` reads. Drop it from the
+    // required set and a misplaced person is announced as a product.
+    expect(describeSchedulerError(toSchedulerError(PRODUCT_REFUSAL))).not.toBe(
+      describeSchedulerError(toSchedulerError(OPERATOR_REFUSAL)),
+    );
+  });
+
+  it("N7: operator_home keeps its own sentence, and it still names an owner", () => {
+    // 0028's `app_guard_operator_home` was never re-emitted, so it sends all
+    // four keys and takes the one branch that is not "belongs to a different
+    // part of the structure".
+    const err = toSchedulerError(
+      scopeRefusal(
+        {
+          kind: "operator_home",
+          id: "0f1c1d6e-1111-4444-8888-aaaaaaaaaaaa",
+          owner_node_id: "22222222-3333-4444-5555-666666666666",
+        },
+        "That home cell is outside the site this person belongs to.",
+      ),
+    );
+    if (err.kind !== "NotOfferedHere") throw new Error("unreachable");
+    expect(err.ownerNodeId).toBe("22222222-3333-4444-5555-666666666666");
+    expect(describeSchedulerError(err)).toBe(
+      "That home cell is outside the site this person belongs to.",
+    );
+  });
+
+  it("N8: a payload missing kind, id or node_id is STILL Unknown", () => {
+    // The fix narrows the required set; it does not make the branch credulous.
+    // Each of these drops exactly one key that carries meaning, so there is
+    // nothing true left to put on the screen.
+    const full: Record<string, string> = {
+      kind: "product",
+      id: "b30f1677-e8b4-4465-bf3d-58caf2c9c4b0",
+      node_id: REFUSING_NODE,
+    };
+    for (const missing of ["kind", "id", "node_id"] as const) {
+      const detail: Record<string, string> = { ...full };
+      delete detail[missing];
+      const err = toSchedulerError({
+        code: "PT409",
+        details: JSON.stringify({ error: "not_offered_here", ...detail }),
+        hint: null,
+        message: "That product does not belong to this part of the structure.",
+      });
+      expect(err.kind, `dropping ${missing} must not classify`).toBe("Unknown");
+    }
+  });
+
+  it("N9: a non-string owner_node_id is dropped rather than carried through", () => {
+    // `hasStringProp` guards every other key; the optional one gets the same
+    // treatment, so a null from some future `jsonb_build_object` cannot reach
+    // a caller that was promised `string | undefined`.
+    const err = toSchedulerError(
+      scopeRefusal(
+        { kind: "product", id: "b30f1677-e8b4-4465-bf3d-58caf2c9c4b0", owner_node_id: null },
+        "That product does not belong to this part of the structure.",
+      ),
+    );
+    expect(err.kind).toBe("NotOfferedHere");
+    if (err.kind !== "NotOfferedHere") throw new Error("unreachable");
+    expect(err.ownerNodeId).toBe(undefined);
+  });
+});
