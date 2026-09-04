@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 69dca5e
+  tip: 33280cb
   baseline:
-    app_tests: 1787
+    app_tests: 1788
     app_test_files: 60
     tsc: 0
     eslint: 0
@@ -5548,8 +5548,17 @@ requirements:
     status is write-once 'planned' and its only reader is an exclusion constraint clause that can never fire.
     Removing it means dropping and recreating that constraint, which is the one piece of this that touches a
     correctness invariant nobody asked about; it is queued, not smuggled in.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/66_no_assignment_status_test.sql
+    cases: "X1 the column and the trigger clause that named it are both gone; X2 the capacity guard still REFUSES a second full booking of the same operator in the same window; X3 the overlap rule still refuses a second run on the same cell; X4 a delete removes the row AND the audit log records it with its actor; X5 an RLS-filtered delete outside a supervisor's grant removes zero rows and raises nothing, which is why the client checks ROW_COUNT; X6 deleting a run still takes its assignments, the behaviour this one now matches"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "R-322/R-323: saving an assignment sends no status, and Delete calls deleteAssignment rather than writing a field edit"
+  - kind: vitest
+    file: src/test/boardIndex.test.ts
+    cases: "a cancelled RUN is still excluded from every map; and every assignment in the window now reaches a map — asserted positively, because 'nothing is filtered' cannot be seen by deleting an assertion"
+  status: covered
 - id: R-322
   title: An assignment has no progress label — only the soft delete that actually does something
   source:
@@ -7511,6 +7520,49 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 53
+  date: 2026-09-04
+  title: A deleted assignment is deleted (R-323)
+  commits:
+  - 33280cb
+  numbers:
+    app_tests: 1788
+    app_test_files: 60
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer followed R-322 to its conclusion: *"why do we need this in runs or assignments? We
+    removed the option to assign status, what am I missing here?"* — and, offered gone versus
+    kept-and-hidden, *"I want it gone"*. Two facts turned that from a preference into an obvious call. The
+    same table already deleted BOTH ways — `delete_run` has always removed a run's assignments outright while
+    the assignment's own Delete marked them cancelled — and migration 0029 had already recorded that the
+    status vocabulary cannot be believed, using the clock instead. The column was being routed around rather
+    than used, and the audit trigger has held actor and whole row for every insert, update and delete since
+    0007, so nothing about "who removed this" depended on it.
+    ⭐ THE COLUMN WAS THE EASY PART. Four functions filtered on it, and those filters live inside the two
+    rules that stop a person or a cell being committed twice. Each is re-created in 0043 from its LAST
+    definition with only the assignment clause removed, and `66_no_assignment_status_test.sql` does not test
+    the removal at all: X2 and X3 test that the capacity guard and the overlap rule still REFUSE, which is
+    what a careless removal switches off silently. A suite that only checked "the column is gone" would pass
+    on a database that had stopped protecting anybody.
+    ⚠️ THE MOST DANGEROUS LINE IS THE ONE THAT DELETES THE CANCELLED ROWS FIRST, and it was nearly missed. A
+    cancelled assignment is invisible only because the board filters it and the guard skips it — drop the
+    column with those rows in place and the very thing making them invisible is what disappears, so every
+    cancelled assignment comes back to life at once, on a board, counting against an operator's hours. One
+    such row existed in the maintainer's database. It is deleted, with the audit log holding it.
+    Two things fell out. `60_api_test.sql` holds a SECOND copy of `operator_peak_load`'s query, restored
+    after it mutates the real one — the only place in the suite that failed the drop, and CLAUDE.md's "a
+    column list that appears twice is a bug with a delay on it" with the delay expired. And the boardIndex
+    case that asserted cancelled assignments are filtered was HALVED rather than deleted: the run half still
+    holds, and a new case asserts positively that every assignment reaches a map, because "nothing was
+    filtered" is invisible if you only remove an assertion.
+    `runs.status` is deliberately left and queued: removing it means dropping and re-adding the overlap
+    exclusion constraint, which is a correctness invariant nobody asked about. Suite 1788 in 60 files, tsc 0
+    with `db:types` regenerated, every SQL file green including the new one at 6 of 6. Driven in the browser:
+    Delete removed the block with no error, and the table went from 39 rows to 38 rather than 39 with one
+    hidden.
+  shipped: []
 - id: 52
   date: 2026-09-04
   title: The assignment status picker is removed (R-322)
