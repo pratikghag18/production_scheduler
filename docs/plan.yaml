@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 3b61997
+  tip: 69dca5e
   baseline:
-    app_tests: 1786
+    app_tests: 1787
     app_test_files: 60
     tsc: 0
     eslint: 0
@@ -7481,7 +7481,7 @@ sessions:
   date: 2026-09-04
   title: The assignment status picker is removed (R-322)
   commits:
-  - PENDING
+  - 69dca5e
   numbers:
     app_tests: 1787
     app_test_files: 60
