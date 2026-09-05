@@ -62,6 +62,7 @@ const GHOST = "cccccccc-0000-0000-0000-00000000000c";
 const h = vi.hoisted(() => ({
   fetchPage: vi.fn(),
   fetchActors: vi.fn(),
+  dateFormatArgs: [] as unknown[][],
   /** The hierarchy read the plant filter is resolved against. Empty is the
    *  default, which is the "no roots -> All plants" state most cases want. */
   tree: { nodes: [] as Array<Record<string, unknown>> },
@@ -123,8 +124,15 @@ vi.mock("@/lib/api", async () => {
 // The org's date-format token. Not mocked away to a literal: the seam is what
 // decides how the "when" column reads, and standing in for it would pin that
 // the panel calls something rather than that a reader can read a date.
+// ⚠️ THE SEAM RECORDS WHAT IT WAS ASKED, not just what it answered. The date
+// column has to follow the CHOSEN PLANT, and a stub that ignored its arguments
+// would let a panel resolving the company answer pass every case in this file —
+// which is exactly the state this screen shipped in until the maintainer noticed.
 vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
-  useDateFormat: () => "iso",
+  useDateFormat: (...args: unknown[]) => {
+    h.dateFormatArgs.push(args);
+    return "iso";
+  },
 }));
 
 function entry(over: Record<string, unknown> = {}) {
@@ -242,6 +250,7 @@ beforeEach(() => {
   h.tree.nodes = [];
   useAdminViewStore.setState({ plantChoice: null });
   h.fetchPage.mockReset();
+  h.dateFormatArgs.length = 0;
   h.fetchActors.mockReset();
   h.fetchPage.mockResolvedValue({ entries: [entry()], hasMore: false });
   // `audit_actor_identities()` (0046) returns an object per actor, not a role
@@ -1089,6 +1098,32 @@ describe("the plant filter narrows the log, and the server does the narrowing", 
     // The sentence that would be a claim about the company rather than about
     // this filter.
     expect(screen.queryByText("Nothing has been changed yet.")).toBeNull();
+  });
+
+  it("⭐⭐ the date column is resolved for the CHOSEN plant, not the company", async () => {
+    // ⚠️ AN INTEGRATION SEAM, AND IT SHIPPED WRONG. The per-plant date format was
+    // built while this screen had no plant filter, so "Activity spans plants and
+    // therefore reads the company value" was written down as a fact — and the
+    // filter that made it false landed in the same session. Two correct halves,
+    // one stale sentence between them, found by the maintainer and not by either.
+    //
+    // The assertion is on what the seam was ASKED, because what it answers is a
+    // stub: a panel resolving the company answer returns "iso" here either way.
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([at(LINE_A, { id: 9 })]);
+    show();
+    await screen.findByText(/Showing Plant A\./);
+    expect(h.dateFormatArgs.at(-1)?.[1]).toBe(PLANT_A);
+  });
+
+  it("⭐ and falls back to the company answer on All plants", async () => {
+    // Still right, and the reason the fix is an argument rather than a rewrite:
+    // a list spanning every plant has no one plant to ask.
+    serve([at(LINE_A, { id: 9 })]);
+    show();
+    await screen.findByText(/whole log/);
+    expect(h.dateFormatArgs.at(-1)?.[1] ?? null).toBeNull();
   });
 
   it("one readable root means nothing is narrowed, whatever is remembered", async () => {

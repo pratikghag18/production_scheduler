@@ -2632,9 +2632,16 @@ requirements:
     ⛔ THIS OVERRULES AN ASSUMPTION THE PREVIOUS PIECE SHIPPED ON. R-331 was built keeping
     `date_format` company-wide on the reasoning that it is a reader's display convention rather than a
     plant's rule. The maintainer has decided otherwise and that is the answer.
-    ⚠️ A SCREEN THAT SPANS PLANTS HAS NO PLANT TO ASK. Activity lists changes from every plant at once,
-    so a per-plant date format has no single answer there. Such a screen uses the COMPANY default, and
-    says nothing misleading by doing so; only a screen showing one plant resolves that plant's value.
+    ⚠️ A SCREEN THAT SPANS PLANTS HAS NO PLANT TO ASK — but "spans plants" is a state, not a property of
+    a screen, and this clause first read as though it were the latter. Activity lists every plant at
+    once ONLY while its filter says All plants; narrowed to one, it resolves that plant's value like any
+    other screen. A screen genuinely showing more than one plant uses the COMPANY default and says
+    nothing misleading by doing so.
+    ⛔ CORRECTED AFTER SHIPPING WRONG, AND THE SHAPE IS WORTH MORE THAN THE FIX. The per-plant date
+    format and Activity's plant filter were built in PARALLEL LANES in one session. The first was
+    briefed with "Activity spans plants and therefore reads the company value" as a fixed fact; the
+    second made that false while it was still being written. Two correct halves, one stale sentence
+    between them, and neither lane could see it. The maintainer found it on the screen.
   verified_by:
   - kind: sql
     file: supabase/tests/73_plant_settings_test.sql
@@ -5912,6 +5919,38 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-090
+  title: Two correct lanes, one stale sentence between them
+  tag: A fact that expired while it was being used
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-333
+  story: >-
+    The maintainer, on the screen: *"why is the date column in activity tab not honoring the selected
+    date format for that plant?"* Because it asked for the company's.
+    ⛔ NEITHER LANE WAS WRONG, AND THAT IS THE POINT. Two ran in parallel in one session. One made the
+    date format per-plant and was briefed — by me, in writing — that "Activity spans plants and
+    therefore reads the COMPANY value", which was true when the brief was written. The other gave
+    Activity a plant filter, which made it false while the first was still building. Each shipped
+    correct work against a premise the other was quietly retiring, and the requirement I wrote recorded
+    the expired version as though it were a property of the screen rather than a state it happens to be
+    in.
+    ⚠️ NO TEST COULD HAVE CAUGHT IT AND THAT IS NOT AN OVERSIGHT. Each lane's cases pinned its own half
+    and both stayed green; the full suite passed at 2097. The contradiction lived in prose — in a brief
+    and in a requirement — and there is nothing in this repo that reads a sentence and a screen together.
+    The seam that DID exist, `useDateFormat`'s optional plant argument, was built and simply never
+    handed anything by this screen.
+    ⭐ WHAT IT CHANGES ABOUT RUNNING LANES IN PARALLEL. Splitting by FILE is what makes parallel lanes
+    safe, and it worked — no lane touched another's files. But a shared FACT is not a file, and a brief
+    that states one as settled hands every lane a copy that cannot be invalidated. The cheap guard is to
+    name, in each brief, which premises the OTHER lanes are allowed to change, and to re-read them at
+    integration rather than only re-running the tests.
+    Fixed by passing the chosen plant, with two cases: the date column is resolved for the chosen plant,
+    and still falls back to the company answer on All plants. The first was checked against the bug put
+    back on purpose. The test seam now records what `useDateFormat` was ASKED, because a stub that
+    ignored its arguments would let a panel resolving the company answer pass every case in the file —
+    which is exactly the state that shipped.
 - id: F-089
   title: The Activity plant filter has a ceiling, and it is a request line
   tag: A limit you can measure before you hit it

@@ -452,7 +452,46 @@ export function AuditPanel() {
   // own. Same expression `AdminPage` filters `companyAdminOnly` on.
   const isCompanyAdmin = profile?.role === "admin";
   const enabled = canQuery && isCompanyAdmin;
-  const fmt = useDateFormat(canQuery);
+
+  /* ---------------------------------------------------------------------
+     ⭐⭐ WHICH PLANT THIS SCREEN IS SHOWING.
+
+     The tree is read here rather than passed, exactly as `ProductsPanel`,
+     `ShiftsPanel` and the rest read it: the choice lives ONCE on `AdminPage`
+     and every section asks `usePlantFilter` for it, so this panel keeps the
+     "takes no props" shape every other one keeps.
+
+     ⚠️ THE READ SITS ABOVE THE FILTER BECAUSE THE FILTER DEPENDS ON IT. It is
+     the same `["hierarchy","tree"]` query the Change column's name lookup
+     already used — moved, not added, so this costs no extra round trip. It is
+     ALSO still allowed to fail: while it is loading or broken there are no
+     roots, `usePlantFilter` answers "All plants" (its header says why that is
+     safe), and the log reads unnarrowed rather than empty.
+     ------------------------------------------------------------------ */
+  const nodesQuery = useQuery({
+    queryKey: [...hierarchyKeys.all, "tree"],
+    queryFn: fetchHierarchyTree,
+    enabled,
+  });
+  const allNodes: readonly ScopeNode[] = nodesQuery.data?.nodes ?? NO_NODES;
+  const plant = usePlantFilter(allNodes);
+
+  /**
+   * ⭐⭐ THE DATE COLUMN FOLLOWS THE CHOSEN PLANT, and it did not until the
+   * maintainer noticed. This is an integration seam rather than an oversight in
+   * either half: when the per-plant date format was built, this screen had no
+   * plant filter, so "Activity spans plants and therefore reads the COMPANY
+   * value" was written down as a fact — and R-333 still says so. The plant
+   * filter landed on this screen in the same session and quietly made that
+   * premise false. Two correct pieces, one stale sentence between them.
+   *
+   * ⚠️ SO IT IS RESOLVED HERE, BELOW `plant`, NOT BESIDE `canQuery` WHERE IT
+   * USED TO SIT. On "All plants" the choice is null and `useDateFormat` returns
+   * the company answer, which is still right: a list spanning every plant has no
+   * one plant to ask. Narrowed to a plant, the dates read the way that plant's
+   * own screens read them.
+   */
+  const fmt = useDateFormat(canQuery, plant.choice);
 
   const [periodId, setPeriodId] = useState<string>("all");
   const [actionId, setActionId] = useState<string>("all");
@@ -480,29 +519,6 @@ export function AuditPanel() {
      being posted to the server as an action the CHECK constraint has never
      heard of. Same shape as `period` above. */
   const action = ACTION_FILTERS.find((a) => a.id === actionId)?.id ?? "all";
-
-  /* ---------------------------------------------------------------------
-     ⭐⭐ WHICH PLANT THIS SCREEN IS SHOWING.
-
-     The tree is read here rather than passed, exactly as `ProductsPanel`,
-     `ShiftsPanel` and the rest read it: the choice lives ONCE on `AdminPage`
-     and every section asks `usePlantFilter` for it, so this panel keeps the
-     "takes no props" shape every other one keeps.
-
-     ⚠️ THE READ SITS ABOVE THE FILTER BECAUSE THE FILTER DEPENDS ON IT. It is
-     the same `["hierarchy","tree"]` query the Change column's name lookup
-     already used — moved, not added, so this costs no extra round trip. It is
-     ALSO still allowed to fail: while it is loading or broken there are no
-     roots, `usePlantFilter` answers "All plants" (its header says why that is
-     safe), and the log reads unnarrowed rather than empty.
-     ------------------------------------------------------------------ */
-  const nodesQuery = useQuery({
-    queryKey: [...hierarchyKeys.all, "tree"],
-    queryFn: fetchHierarchyTree,
-    enabled,
-  });
-  const allNodes: readonly ScopeNode[] = nodesQuery.data?.nodes ?? NO_NODES;
-  const plant = usePlantFilter(allNodes);
 
   /** Every place the reader can name. What separates "this change happened
    *  somewhere else" from "nobody can say where this change happened". */
