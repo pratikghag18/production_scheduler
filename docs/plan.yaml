@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 8d092ec
+  tip: ad2d5c2
   baseline:
     app_tests: 1788
     app_test_files: 60
@@ -2463,6 +2463,55 @@ requirements:
       C0-C7 (C1/C2 the two refusals, C3 the case the shared predicate exists for -- a training moved
       DOWN inside the plant while its holder owns the plant, which `app_owner_covers_in_org` would
       wrongly refuse -- C4 its mirror, C5/C7 moves with nobody in the way, C6 the grant guard unchanged)
+  status: covered
+- id: R-327
+  title: A shift pattern can be retired, and retiring says what it does not do
+  source:
+  - NEXT S21
+  stated_by: agent
+  claim: >-
+    `shift_templates.active` is reachable from the Shifts screen as Retire / Bring back, in the shape
+    `skills.active` got in session 18. ⚠️ The flag is ADVISORY and the database enforces nothing with
+    it — 0029's own column comment says so, `resolve_shift_template` never reads it and `board_window`
+    does not emit it — so the client is the whole of the rule. Retiring offers the pattern no longer
+    when pointing a place at one, detaches nothing, and changes no board; a place already running a
+    retired pattern still shows it in its own picker; and a retired pattern that places still run says
+    so and counts them.
+  verified_by:
+  - kind: vitest
+    file: src/test/shiftsPanel.test.tsx
+    cases: S18-S22 (S21 is a regression guard against the tempting over-fix, and was green before)
+  - kind: vitest
+    file: src/test/apiShiftShape.test.ts
+    cases: P1-P4 (the column list held against its own parser; P1/P2 verified red against a broken constant)
+  status: covered
+- id: R-328
+  title: The audit log can be read, by the only people the server will show it to
+  source:
+  - NEXT Phase 1
+  stated_by: agent
+  claim: >-
+    An Activity section on `/admin` renders `audit_log` as when / who / what / a field-level diff,
+    newest first, keyset-paged fifty at a time and always stating whether more remain. ⚠️ TWO GATES,
+    because `audit_log_select` is `app_is_admin() AND org_id = app_current_org()` and a site admin
+    reading it gets ZERO ROWS, no error and no refusal — indistinguishable from "nothing has ever
+    changed here". The rail hides the section and the panel independently refuses to fire the query,
+    both on `profile.role === "admin"`, which is the policy's own first term rather than a client rule.
+    A subject's name comes from the snapshot, never a join: after a delete the row is gone, and after a
+    rename the snapshot holds the name as it was.
+  verified_by:
+  - kind: vitest
+    file: src/test/auditAccess.test.tsx
+    cases: who is offered the section and who is not
+  - kind: vitest
+    file: src/test/auditPanel.test.tsx
+    cases: 15 cases including the D91 guard — the screen never claims the log is empty while the session resolves
+  - kind: vitest
+    file: src/test/auditView.test.ts
+    cases: the pure rendering half, including the range literal and the Postgres-timestamp normalisation
+  - kind: vitest
+    file: src/test/apiAuditShape.test.ts
+    cases: the read's column list held against its guard
   status: covered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
@@ -7697,6 +7746,70 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 60
+  date: 2026-09-04
+  title: Two lanes off the cleaned queue — retiring a shift pattern, and reading the audit log
+  commits:
+  - 5f90e05
+  - ad2d5c2
+  numbers:
+    app_tests: 1869
+    app_test_files: 67
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Two parallel lanes, exclusive files, each writing a failing test first, each reviewed by somebody
+    other than its author. 1800 in 62 files to 1869 in 67.
+    ⭐ THE SHIFT LANE'S REAL WORK WAS DECIDING WHAT RETIRING DOES NOT DO. `shift_templates.active`
+    has existed since 0029 with nothing able to set it. The flag is ADVISORY and the database enforces
+    nothing with it — 0029's own column comment says so, `resolve_shift_template` never reads it, and
+    `board_window` does not even emit it — so the client is the whole rule and every consequence is a
+    choice rather than a discovery. Three were made and written down: the attach picker offers live
+    patterns only; a place ALREADY running a retired pattern still shows it, because dropping it would
+    render "Inherit from above", a false claim about that place and one click from becoming true; and a
+    retired row that places still run says so and counts them, because "Retired" alone over a cell that
+    runs it nightly reads as "nobody runs this any more", which is the one thing retiring did not do.
+    ⭐ AND IT CLOSED A TRAP THIS PROJECT HAS ALREADY PAID FOR ONCE. `active` is REQUIRED on
+    `ShiftTemplateRow` and checked rather than defaulted, because `?? true` is a positive claim — "in
+    use" — about a row whose flag the client could not read. The column list that had grown to four
+    literals is one constant, and `apiShiftShape.test.ts` pins it to its own parser. That pin exists on
+    the trainings side only because the drift there emptied the whole screen silently: the guard began
+    requiring four columns, a second copy of the list still asked for three, every row was rejected into
+    `skipped`, and the panel suite stayed green because it mocks the query layer. Verified by breaking
+    the constant on purpose — P1 and P2 go red — rather than trusted for passing.
+    ⚠️ THE AUDIT LANE'S FIRST FINDING WAS THAT THE QUEUE ITEM WAS WRONG, which had already been
+    corrected earlier in the day: recording was never the gap. `runs` and `assignments` have fired
+    `write_audit_log` all along. The missing half was a reader, and it is now an Activity section.
+    ⛔ WHO CAN SEE IT IS THE PART THAT MATTERED. `audit_log_select` is
+    `app_is_admin() AND org_id = app_current_org()` — company admin only — and a site admin reading it
+    gets ZERO ROWS, no error, no refusal. That is indistinguishable from "nothing has ever changed
+    here": a screen disagreeing with the server in its quietest possible form. So there are two gates,
+    not one — the rail hides the section AND the panel refuses to fire the query — both on
+    `profile.role === "admin"`, which is the policy's own first term rather than a rule invented
+    client-side. Measured against the running database: the company admin sees 225 rows, the site admin
+    sees zero.
+    Keyset-paged on `id < cursor`, never `.range()`, because the top of this list moves while it is
+    read and offset paging repeats a row on one page and skips one on the next. A subject's name comes
+    out of the snapshot and never a join — after a delete the row is gone, and after a rename the
+    snapshot holds the name as it was at the time, which is the only correct answer.
+    ⚠️ THE TIMESTAMP TRAP, CAUGHT AND THEN CHECKED AGAINST REAL ROWS. `timerange` is decoded from its
+    raw range literal, and a Postgres timestamp is NOT an ISO string — a space instead of `T`, a
+    two-digit offset instead of `+00:00` — which `new Date()` accepts only by implementation grace and
+    would otherwise have rendered NaN down the busiest column. The regex was written from an example,
+    so it was run against actual `audit_log` rows from the dev database rather than trusted.
+    The lane also caught a bug in its own work: `showLoading` was `enabled && log.isPending`, and with
+    `enabled: false` React Query v5 leaves the companion flag false, so while the session resolved the
+    screen said "Nothing has been changed yet" — a claim about the company made before a row had been
+    requested. D91 for the third time, now with a case.
+    ⚠️ A DECISION LEFT FOR THE MAINTAINER, NOT INVENTED. Naming an actor is impossible from the
+    client: `audit_log.actor_id` is `auth.uid()`, `user_profiles` holds no name and no address, the
+    email lives in `auth.users` which PostgREST does not expose, and `site_people` is keyed by node and
+    returns a profile id. So "Who" reads You, System, or `Supervisor · 0000b2` — the role plus a short
+    tail — and never invents a name. Closing it wants a SECURITY DEFINER function mapping uid to an
+    identity, gated on `app_is_admin()`, plus a decision about showing addresses; and if names are
+    wanted rather than emails, there is nowhere to put one today.
+  shipped: []
 - id: 59
   date: 2026-09-04
   title: A certification cannot outlive the plant it was earned in (R-326, migration 0045)
@@ -9368,17 +9481,6 @@ next:
 # S22's "no permission preview on the Trainings tab" (`useEditRights` +
 # `canEdit`, asked with the owner's PATH).
 # ---------------------------------------------------------------------------
-- stage: S21
-  text: A control for shift_templates.active (NEXT item 5)
-  why: >-
-    skills.active got Retire in session 18; shift patterns still have the column with no control.
-- text: Phase 1 — A way to READ the audit log (the recording half is already done)
-  why: >-
-    ⚠️ MEASURED, AND THE ITEM AS WRITTEN WAS WRONG. It said the schedule mutations were the gap. They
-    are not: `runs` and `assignments` both fire `write_audit_log`, and the table already holds inserts,
-    updates and deletes for both, with `before`/`after` and an actor. What is missing is anything that
-    READS it — no API function, no screen, no export; `audit_log` appears in `src/` only as a generated
-    type. So this is a client piece, not a migration, and it is bigger than the old line implied.
 - text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: Unchecked Phase 1 item.
 - text: A way to CHOOSE warn or block for eligibility (the enforcement itself is built)
