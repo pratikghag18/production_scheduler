@@ -1310,7 +1310,7 @@ stages:
   track: core
   num: 24
   title: 'The front door: getting people into the system at all'
-  status: now
+  status: parked
   owner: agent
   refs:
   - P1-6b
@@ -1352,7 +1352,22 @@ stages:
     a route gate that sends you to sign in and then on to where you were headed, a way to sign out, and
     a plain dead-end for somebody who gets in but belongs to no company. The developer-only switcher is
     no longer the only door. Sign-in (P1-6b) and the no-access dead end shipped in session 19 (1 Sept);
-    invitations (P1-6c) and password reset (P1-6d) are not built, so the stage stays open.
+    invitations (P1-6c) and password reset (P1-6d) are not built.
+
+
+    **⛔ PARKED, NOT IN FLIGHT — corrected 5 Sept, and it had been wrong for a while.** This card read
+    `status: now` while all three of its remaining items sat under the queue's PARKED marker with
+    `decided: true`: invitations *"TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept"*,
+    password reset behind them, and the `useSession` debt beside both. The queue entry had even written
+    the contradiction down — *"⚠️ S24 is still `status: now` in `stages` while its whole queue is parked
+    here"* — and noting it is not fixing it.
+
+
+    It mattered more than a wrong word, because of how the page is built: shipped stages collapse into a
+    fold and only the not-done ones render open under *"Open — this is what is left"*. S24 was the ONLY
+    one, so the buildout's visible half said the front door was being worked on, every day for two
+    weeks, while the work went elsewhere. **Unpark it by moving its queue items back above the PARKED
+    marker, not by editing this line.**
 - id: S25
   track: core
   num: 25
@@ -8559,6 +8574,27 @@ sessions:
     2106 in 75, and `meta.tip` to `c24bc69` --- the commit those numbers were measured on. Docs only: no
     `src/` file changed, so the runners were not re-run after the edits and the numbers are session 68's,
     measured this session on this tree.
+    ⛔ AND THE MAINTAINER ASKED AGAIN, WHICH WAS RIGHT, BECAUSE ONLY THE HISTORY HAD BEEN FIXED. Eight
+    stages of shipped work went in and the page looked untouched, for a reason in the renderer: done
+    stages collapse into a fold and only the not-done ones render open under *"Open — this is what is
+    left"*. Every card I added was `done`, so all eight went straight into the fold, and the one thing
+    still showing expanded was S24 "The front door" — exactly what was there before.
+    S24 WAS `status: now` FOR WORK THE MAINTAINER HAD TABLED. All three of its remaining items sit under
+    the queue's PARKED marker with `decided: true` — invitations tabled in session 22, password reset
+    behind them, the `useSession` debt beside both. So the buildout's VISIBLE half said the front door
+    was in flight, every day for two weeks, while the work went to settings, the activity log and cycle
+    times. It now reads `parked`, and unparking it means moving its queue items back above the marker
+    rather than editing the card.
+    ⚠️ THE PLAN HAD ALREADY CAUGHT THIS AND WRITTEN IT DOWN INSTEAD OF FIXING IT. The queue entry for
+    invitations carried *"⚠️ S24 is still `status: now` in `stages` while its whole queue is parked
+    here"*. That is the third time in three days a sentence has stood in for the change it describes —
+    after DEF-0007's comment that outlived its migration and DEF-0008's "has its own cases". A note
+    saying two things disagree leaves them disagreeing.
+    ⭐ WHAT IS LEFT IS A DECISION, NOT AN EDIT, AND IT IS THE MAINTAINER'S. Nothing is in flight now:
+    every stage is done except one that is parked, which is accurate. The three live queue items — the
+    Phase 1 e2e pass, the board's expired-certificate dead end, and Phase 2's Copy Week — have no stage
+    between them, so the buildout cannot say what comes next until somebody says which of them does.
+    Asked rather than assumed, per CLAUDE.md section 4 on the queue's order being a guess.
 - id: 68
   date: 2026-09-05
   title: The rail's narrowed population gets a case, and DEF-0007's pin is promoted
@@ -10817,7 +10853,8 @@ next:
   why: >-
     TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept — do not pick this up without a
     fresh go-ahead. The gate on a second human using the product; needs the project's first server-side
-    code. ⚠️ S24 is still `status: now` in `stages` while its whole queue is parked here.
+    code. ⭐ S24's card now reads `parked` to match this, corrected 5 Sept; the warning that used to sit
+    on this line said the two disagreed and left them disagreeing.
   decided: true
 - stage: S24
   text: P1-6d password reset and change-password
