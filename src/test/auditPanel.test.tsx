@@ -122,10 +122,11 @@ beforeEach(() => {
   h.fetchActors.mockReset();
   h.fetchPage.mockResolvedValue({ entries: [entry()], hasMore: false });
   // `audit_actor_identities()` (0046) returns an object per actor, not a role
-  // string — the shape that lets a `display_name` be added later without
-  // touching a caller.
+  // string — the shape that let 0047's `display_name` be added without touching
+  // a caller. `displayName` is null here because that is what every live row
+  // carries: the column exists and nothing writes it yet.
   h.fetchActors.mockResolvedValue(
-    new Map([[ADMIN_USER, { role: "admin", email: "admin@example.test" }]]),
+    new Map([[ADMIN_USER, { role: "admin", email: "admin@example.test", displayName: null }]]),
   );
 });
 
@@ -161,9 +162,15 @@ describe("the screen answers what changed, when, and who did it", () => {
     // The maintainer's actual complaint about the first version: *"the who needs
     // to show a user, it is currently not that helpful."* Migration 0046 made
     // this answerable; this is the case that says the screen uses the answer.
+    //
+    // ⚠️ AND IT IS STILL THE ORDINARY CASE AFTER 0047. `display_name` is null on
+    // every live row, so the address is the rung the screen actually stands on
+    // until somebody decides how names get written.
     h.fetchPage.mockResolvedValue({ entries: [entry({ actorId: OTHER_USER })], hasMore: false });
     h.fetchActors.mockResolvedValue(
-      new Map([[OTHER_USER, { role: "supervisor", email: "marco@example.test" }]]),
+      new Map([
+        [OTHER_USER, { role: "supervisor", email: "marco@example.test", displayName: null }],
+      ]),
     );
     show();
     await screen.findByText("Product added");
@@ -173,9 +180,35 @@ describe("the screen answers what changed, when, and who did it", () => {
     expect(screen.getByRole("table").textContent).not.toContain("Supervisor");
   });
 
+  /**
+   * ⭐⭐ THE NAME WINS (migration 0047). *"add display_name to user_profiles
+   * too."* The same one-answer rule the case above states, one rung up: the
+   * address does not survive beside the name any more than the role survived
+   * beside the address.
+   */
+  it("⭐ names somebody by their NAME when the company has given them one", async () => {
+    h.fetchPage.mockResolvedValue({ entries: [entry({ actorId: OTHER_USER })], hasMore: false });
+    h.fetchActors.mockResolvedValue(
+      new Map([
+        [
+          OTHER_USER,
+          { role: "supervisor", email: "marco@example.test", displayName: "Marco Rossi" },
+        ],
+      ]),
+    );
+    show();
+    await screen.findByText("Product added");
+    expect(screen.getByText("Marco Rossi")).toBeTruthy();
+    const table = screen.getByRole("table").textContent ?? "";
+    expect(table).not.toContain("marco@example.test");
+    expect(table).not.toContain("Supervisor");
+  });
+
   it("names somebody else by role, and never as the reader", async () => {
     h.fetchPage.mockResolvedValue({ entries: [entry({ actorId: OTHER_USER })], hasMore: false });
-    h.fetchActors.mockResolvedValue(new Map([[OTHER_USER, { role: "supervisor", email: null }]]));
+    h.fetchActors.mockResolvedValue(
+      new Map([[OTHER_USER, { role: "supervisor", email: null, displayName: null }]]),
+    );
     show();
     await screen.findByText("Product added");
     expect(screen.getByRole("table").textContent).toContain("Supervisor");

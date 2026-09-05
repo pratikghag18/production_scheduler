@@ -346,6 +346,22 @@ export function AuditPanel() {
     for (const [uid, who] of identities) if (who.email !== null) m.set(uid, who.email);
     return m;
   }, [identities]);
+  /**
+   * ⭐ THE NAME, THIRD MAP OUT OF ONE READ (0047). `describeActor` prefers it
+   * over the address; absent is left out rather than mapped to null, exactly as
+   * above and for the same reason.
+   *
+   * ⚠️ EXPECT THIS MAP TO BE EMPTY. Nothing writes `user_profiles.display_name`
+   * yet, so every identity arrives with `displayName: null` and the Who column
+   * falls through to the address — which is the state the screen shipped in and
+   * must keep working in.
+   */
+  const actorNames = useMemo(() => {
+    if (identities === undefined) return NO_ACTORS;
+    const m = new Map<string, string>();
+    for (const [uid, who] of identities) if (who.displayName !== null) m.set(uid, who.displayName);
+    return m;
+  }, [identities]);
   const viewerUserId = profile?.userId ?? null;
 
   /**
@@ -362,8 +378,16 @@ export function AuditPanel() {
     for (const o of operatorsQuery.data?.operators ?? []) operators.set(o.id, o.displayName);
     const products = new Map<string, string>();
     for (const p of productsQuery.data ?? []) if (p !== null) products.set(p.id, p.name);
-    return { nodes, operators, products, actorRoles: roles, actorEmails, viewerUserId };
-  }, [nodesQuery.data, operatorsQuery.data, productsQuery.data, roles, actorEmails, viewerUserId]);
+    return { nodes, operators, products, actorRoles: roles, actorEmails, actorNames, viewerUserId };
+  }, [
+    nodesQuery.data,
+    operatorsQuery.data,
+    productsQuery.data,
+    roles,
+    actorEmails,
+    actorNames,
+    viewerUserId,
+  ]);
 
   const pages = log.data?.pages;
   /** Every row READ so far — the SCAN. Not what the reader is looking at. */
@@ -645,7 +669,7 @@ export function AuditPanel() {
                       <tr key={e.id} className={styles.row} data-action={e.action}>
                         <td className={styles.when}>{formatInstant(e.at, fmt)}</td>
                         <td className={styles.who}>
-                          {describeActor(e.actorId, viewerUserId, roles, actorEmails)}
+                          {describeActor(e.actorId, viewerUserId, roles, actorEmails, actorNames)}
                         </td>
                         <td className={styles.what}>
                           <span className={styles.headline}>{line.headline}</span>

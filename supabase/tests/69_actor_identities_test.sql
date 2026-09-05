@@ -85,11 +85,20 @@ BEGIN
     ('00000000-0000-0000-0000-0000000000f1', 'sitef1@example.test'),
     ('00000000-0000-0000-0000-0000000000f3', NULL);
 
-  INSERT INTO user_profiles (id, org_id, user_id, role) VALUES
+  INSERT INTO user_profiles (id, org_id, user_id, role, display_name) VALUES
     ('f0000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
-     '00000000-0000-0000-0000-0000000000f1', 'viewer'),
+     '00000000-0000-0000-0000-0000000000f1', 'viewer', 'Fiona Site'),
+    -- ⭐ f3 CARRIES NEITHER A NAME NOR AN ADDRESS, deliberately: the doubly-null
+    -- person is the one the client's fallback ladder has to reach the bottom of.
     ('f0000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001',
-     '00000000-0000-0000-0000-0000000000f3', 'supervisor');
+     '00000000-0000-0000-0000-0000000000f3', 'supervisor', NULL);
+
+  -- ⭐ ORG 2 GETS A NAME TOO, and E11 is the reason. A tenant boundary proved
+  -- only on addresses would say nothing about the column added beside them; a
+  -- `display_name` selected outside the `app_current_org()` filter would leak
+  -- exactly as an address would, and would leak something friendlier to read.
+  UPDATE user_profiles SET display_name = 'Bruno Two'
+   WHERE id = 'a000000b-0000-0000-0000-000000000001';
 
   INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
     ('f0000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
@@ -100,6 +109,7 @@ END $$;
 SAVEPOINT sp_E0;
 DO $$
 DECLARE v_f1 text; v_f1_grant text; v_f3_email text; v_a1 text; v_b1 text; v_org2 int;
+        v_f1_name text; v_f3_name text; v_b1_name text;
 BEGIN
   SELECT role INTO v_f1 FROM user_profiles WHERE id = 'f0000000-0000-0000-0000-000000000001';
   SELECT role INTO v_f1_grant FROM profile_grants
@@ -111,15 +121,26 @@ BEGIN
   SELECT role INTO v_b1 FROM user_profiles WHERE id = 'a000000b-0000-0000-0000-000000000001';
   SELECT count(*) INTO v_org2 FROM user_profiles
    WHERE org_id = '10000000-0000-0000-0000-000000000002';
+  SELECT display_name INTO v_f1_name FROM user_profiles
+   WHERE id = 'f0000000-0000-0000-0000-000000000001';
+  SELECT display_name INTO v_f3_name FROM user_profiles
+   WHERE id = 'f0000000-0000-0000-0000-000000000003';
+  SELECT display_name INTO v_b1_name FROM user_profiles
+   WHERE id = 'a000000b-0000-0000-0000-000000000001';
 
   -- f1 is a SITE admin: viewer org-wide, admin on the plant. a1 and b1 are the
   -- two company admins the positive cases are driven as. Org 2 has people, or
   -- E5 would be asserting an empty set equals an empty set.
+  -- The name half of the fixture: f1 HAS one, f3 has none, and org 2 holds a
+  -- name for the boundary case to look for. All three are read back rather
+  -- than assumed, because a fixture that silently failed to set a column would
+  -- make E9 and E11 pass by describing a world that is not there.
   IF v_f1 = 'viewer' AND v_f1_grant = 'admin' AND v_f3_email IS NULL
      AND v_a1 = 'admin' AND v_b1 = 'admin' AND v_org2 > 0
+     AND v_f1_name IS NOT NULL AND v_f3_name IS NULL AND v_b1_name IS NOT NULL
   THEN RAISE NOTICE 'PASS E0';
-  ELSE RAISE NOTICE 'FAIL E0: f1=% (want viewer), f1_grant=% (want admin), f3_email=% (want NULL), a1=% b1=% org2_profiles=%',
-       v_f1, v_f1_grant, v_f3_email, v_a1, v_b1, v_org2; END IF;
+  ELSE RAISE NOTICE 'FAIL E0: f1=% (want viewer), f1_grant=% (want admin), f3_email=% (want NULL), a1=% b1=% org2_profiles=% f1_name=% (want a name) f3_name=% (want NULL) b1_name=% (want a name)',
+       v_f1, v_f1_grant, v_f3_email, v_a1, v_b1, v_org2, v_f1_name, v_f3_name, v_b1_name; END IF;
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'FAIL E0: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;
@@ -364,5 +385,156 @@ EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'FAIL E8: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_E8;
+
+-- ===========================================================================
+-- THE NAME (migration 0047). `user_profiles.display_name`, the first place in
+-- this schema a person's own name can be stored, returned as a fourth column
+-- of the same function under the same gate.
+--
+-- THE REWRITE IS THE RISK, AND E1-E5 ARE WHAT MEASURE IT. Adding the column
+-- meant touching the SELECT list one line above
+-- `WHERE up.org_id = app_current_org()`, which is the entire tenant boundary on
+-- `auth.users`; every case above is re-run against the rewritten function and
+-- is what says the gate and the boundary survived. E11 then asks the boundary
+-- question again about the NEW column specifically, because a leak of names is
+-- a leak, and a friendlier-reading one than a leak of addresses.
+--
+-- NOTHING WRITES THIS COLUMN YET AND THESE CASES DO NOT PRETEND OTHERWISE.
+-- The fixture sets it directly as the table owner. `user_profiles_update` is
+-- `app_is_admin() AND org_id = app_current_org()`, so on the running product a
+-- company admin could set anybody's name and nobody could set their own -- an
+-- asymmetry that is the maintainer's to resolve, not this file's to assume.
+-- ===========================================================================
+
+\echo 'E9 a profile WITH a name returns it, beside the role and the address'
+SAVEPOINT sp_E9;
+DO $$
+DECLARE v_want text; v_got text; v_email text; v_role text;
+BEGIN
+  -- Read, never retyped: the same discipline as the addresses above, and for
+  -- the same reason -- a literal here would pin the fixture, not the function.
+  SELECT display_name INTO v_want FROM user_profiles
+   WHERE id = 'f0000000-0000-0000-0000-000000000001';
+
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  SELECT display_name, email, role INTO v_got, v_email, v_role
+    FROM audit_actor_identities()
+   WHERE user_id = '00000000-0000-0000-0000-0000000000f1';
+  RESET ROLE;
+
+  -- THE OTHER THREE COLUMNS ARE ASSERTED TOO. The name is an ADDITION, and a
+  -- function that returned the name while dropping the address would satisfy a
+  -- name-only case while breaking every actor the client still falls back on.
+  IF v_want IS NOT NULL AND v_got = v_want AND v_email IS NOT NULL AND v_role = 'viewer'
+  THEN RAISE NOTICE 'PASS E9';
+  ELSE RAISE NOTICE 'FAIL E9: display_name=% (want %) email=% (want an address) role=% (want viewer)',
+       v_got, v_want, v_email, v_role; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  RAISE NOTICE 'FAIL E9: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_E9;
+
+\echo 'E10 a profile with NO name is still LISTED, with display_name NULL'
+SAVEPOINT sp_E10;
+DO $$
+DECLARE v_rows int; v_name text; v_email text; v_role text; v_unnamed int;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  SELECT count(*) INTO v_rows FROM audit_actor_identities()
+   WHERE user_id = '00000000-0000-0000-0000-0000000000f3';
+  SELECT display_name, email, role INTO v_name, v_email, v_role
+    FROM audit_actor_identities()
+   WHERE user_id = '00000000-0000-0000-0000-0000000000f3';
+  -- The column is nullable and WILL BE NULL ON ALMOST EVERY ROW for a long
+  -- time, because nothing writes it yet. "Most of the company is unnamed" is
+  -- the ordinary state here, not an edge, and the function must be
+  -- uninterested in it.
+  SELECT count(*) INTO v_unnamed FROM audit_actor_identities() WHERE display_name IS NULL;
+  RESET ROLE;
+
+  -- E6's argument, one column further along: filtering to the named people
+  -- would be the obvious tidying-up and would be the same mistake. A missing
+  -- key in the client's map is indistinguishable from an actor who is not in
+  -- this company at all, so a nameless person must arrive nameless rather than
+  -- not arrive.
+  IF v_rows = 1 AND v_name IS NULL AND v_email IS NULL AND v_role = 'supervisor'
+     AND v_unnamed > 0
+  THEN RAISE NOTICE 'PASS E10';
+  ELSE RAISE NOTICE 'FAIL E10: rows=% (want 1) display_name=% (want NULL) email=% (want NULL) role=% unnamed_rows=% (want > 0)',
+       v_rows, v_name, v_email, v_role, v_unnamed; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  RAISE NOTICE 'FAIL E10: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_E10;
+
+\echo 'E11 THE TENANT BOUNDARY, ASKED ABOUT THE NEW COLUMN: no other org NAMES'
+SAVEPOINT sp_E11;
+DO $$
+DECLARE v_seen text[]; v_leaked int; v_own int; v_own_want int;
+BEGIN
+  -- Carried out of the `authenticated` block in an array and compared as the
+  -- owner afterwards, exactly as E2 does and for the same grant reason.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  SELECT array_agg(a.display_name) INTO v_seen
+    FROM audit_actor_identities() a WHERE a.display_name IS NOT NULL;
+  RESET ROLE;
+
+  -- Every NAME belonging to the other org, whatever it happens to be.
+  SELECT count(*) INTO v_leaked FROM user_profiles up
+   WHERE up.org_id = '10000000-0000-0000-0000-000000000002'
+     AND up.display_name = ANY (coalesce(v_seen, ARRAY[]::text[]));
+  SELECT count(*) INTO v_own_want FROM user_profiles up
+   WHERE up.org_id = '10000000-0000-0000-0000-000000000001'
+     AND up.display_name IS NOT NULL;
+  v_own := coalesce(array_length(v_seen, 1), 0);
+
+  -- v_own IS HALF THE CASE, as it is in E2. Zero leaked names is what a
+  -- function returning no names AT ALL would also score; the second count says
+  -- the column is genuinely populated on the caller's own side.
+  IF v_leaked = 0 AND v_own_want > 0 AND v_own = v_own_want
+  THEN RAISE NOTICE 'PASS E11';
+  ELSE RAISE NOTICE 'FAIL E11: other_org_names=% (want 0), own_names=% (want %)',
+       v_leaked, v_own, v_own_want; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  RAISE NOTICE 'FAIL E11: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_E11;
+
+\echo 'E12 the declared result columns are the four the client writes down'
+SAVEPOINT sp_E12;
+DO $$
+DECLARE v_cols text[]; v_notnull boolean;
+BEGIN
+  -- THE CLIENT KEEPS A COPY OF THIS LIST (`ACTOR_IDENTITY_COLUMNS` in
+  -- `src/lib/api/audit.ts`), because an RPC has no column list to send and so
+  -- nothing else would notice the two drifting apart. This is the server-side
+  -- half of that pair; `apiAuditShape.test.ts` holds the other.
+  SELECT array_agg(a.name ORDER BY a.name) INTO v_cols
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    CROSS JOIN LATERAL unnest(p.proargnames) AS a(name)
+   WHERE n.nspname = 'public' AND p.proname = 'audit_actor_identities';
+
+  SELECT attnotnull INTO v_notnull FROM pg_attribute
+   WHERE attrelid = 'user_profiles'::regclass AND attname = 'display_name';
+
+  -- AND THE COLUMN IS NULLABLE ON THE TABLE, asserted rather than assumed.
+  -- `supabase gen types` cannot see nullability through a RETURNS TABLE and
+  -- will type `display_name: string`; the fact that makes that a lie lives
+  -- here (F-085).
+  IF v_cols = ARRAY['display_name','email','role','user_id'] AND v_notnull = false
+  THEN RAISE NOTICE 'PASS E12';
+  ELSE RAISE NOTICE 'FAIL E12: result_columns=% (want display_name,email,role,user_id) display_name_notnull=% (want false)',
+       v_cols, v_notnull; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL E12: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_E12;
 
 ROLLBACK;

@@ -141,6 +141,7 @@ function identityFromColumns(overrides: Record<string, unknown> = {}): Record<st
     user_id: "00000000-0000-0000-0000-0000000000a2",
     role: "supervisor",
     email: "ana@example.test",
+    display_name: "Ana Ruiz",
   };
   const row: Record<string, unknown> = {};
   for (const col of ACTOR_IDENTITY_COLUMNS.split(",").map((c) => c.trim())) row[col] = sample[col];
@@ -152,18 +153,22 @@ describe("the identity read asks for exactly what its guard requires", () => {
     expect(parseActorIdentity(identityFromColumns())).toEqual({
       role: "supervisor",
       email: "ana@example.test",
+      displayName: "Ana Ruiz",
     });
   });
 
-  it("names the three columns `audit_actor_identities()` returns and no more", () => {
-    // Held against migration 0046's `returns table (...)`. Adding a
-    // `display_name` there means adding it here, and the mismatch is the whole
-    // point of writing the list down.
+  it("names the four columns `audit_actor_identities()` returns and no more", () => {
+    // Held against migration 0047's `returns table (...)`. This list said THREE
+    // until the name landed, and the comment then read "adding a `display_name`
+    // there means adding it here" — which is exactly what happened, in the same
+    // commit, and this line is what would have gone red had it not.
+    // `69_actor_identities_test.sql` E12 is the server-side half of the pair:
+    // it reads the function's declared result columns out of `pg_proc`.
     expect(
       ACTOR_IDENTITY_COLUMNS.split(",")
         .map((c) => c.trim())
         .sort(),
-    ).toEqual(["email", "role", "user_id"].sort());
+    ).toEqual(["display_name", "email", "role", "user_id"].sort());
   });
 });
 
@@ -176,6 +181,43 @@ describe("the identity guard survives the address being absent", () => {
     expect(parsed).not.toBe(null);
     expect(parsed?.email).toBe(null);
     expect(parsed?.role).toBe("supervisor");
+  });
+
+  /**
+   * The name is the SECOND nullable identity column and it is nullable for a
+   * blunter reason than the address: NOTHING WRITES IT YET (migration 0047 adds
+   * the column and no editor), so `display_name` is NULL on every row in every
+   * database this ships against today. A guard that required a string here
+   * would empty the whole map on the live product, and the Who column would go
+   * back to what the maintainer complained about.
+   *
+   * `database.types.ts` says `display_name: string` on the RPC's return, the
+   * same lie it tells about `email`, and for the same reason: F-085, the
+   * generator cannot see nullability through a `RETURNS TABLE`.
+   */
+  it("keeps a NULL display_name, which is what every live row carries", () => {
+    const parsed = parseActorIdentity(identityFromColumns({ display_name: null }));
+    expect(parsed).not.toBe(null);
+    expect(parsed?.displayName).toBe(null);
+    // and the row is otherwise intact — the address is still the fallback.
+    expect(parsed?.email).toBe("ana@example.test");
+    expect(parsed?.role).toBe("supervisor");
+  });
+
+  it("normalises a blank or non-string display_name to null", () => {
+    // ⚠️ A BLANK IS NOT A NAME, and it is the one value that would be WORSE
+    // than null: `describeActor` reads "present" as "this is who it was", so a
+    // "" would win the precedence and render an empty Who cell — a present
+    // answer meaning nothing. There is no CHECK constraint on the column
+    // (migration 0047 says why), so the normalising has to happen here.
+    expect(parseActorIdentity(identityFromColumns({ display_name: "" }))?.displayName).toBe(null);
+    expect(parseActorIdentity(identityFromColumns({ display_name: "   " }))?.displayName).toBe(
+      null,
+    );
+    expect(parseActorIdentity(identityFromColumns({ display_name: undefined }))?.displayName).toBe(
+      null,
+    );
+    expect(parseActorIdentity(identityFromColumns({ display_name: 7 }))?.displayName).toBe(null);
   });
 
   it("normalises a missing or non-string email to null rather than passing it on", () => {
@@ -218,7 +260,14 @@ describe("the identity map is keyed by the id the audit log actually carries", (
       "00000000-0000-0000-0000-0000000000a2",
     );
     expect(typeof value).toBe("object");
-    expect(value).toEqual({ role: "supervisor", email: "ana@example.test" });
+    // ⭐ AND THE PROMISE WAS KEPT. 0047 added the name; `fetchActorIdentities`
+    // kept its signature, the Map kept its shape, and no caller reading
+    // `.email` was touched. This assertion is the receipt.
+    expect(value).toEqual({
+      role: "supervisor",
+      email: "ana@example.test",
+      displayName: "Ana Ruiz",
+    });
   });
 
   it("skips a row it cannot read instead of throwing the whole map away", () => {
@@ -234,6 +283,7 @@ describe("the identity map is keyed by the id the audit log actually carries", (
     expect(map.get("00000000-0000-0000-0000-0000000000a1")).toEqual({
       role: "supervisor",
       email: null,
+      displayName: "Ana Ruiz",
     });
   });
 

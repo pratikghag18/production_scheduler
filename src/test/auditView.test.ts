@@ -214,6 +214,83 @@ describe("who did it, given that the log stores an account id and nothing else",
   });
 });
 
+/* ---------------------------------------------------------------------------
+   ⭐⭐ THE NAME (migration 0047, R-330). The maintainer: *"add display_name to
+   user_profiles too."*
+
+   ⛔⛔ THE PRECEDENCE IS THE DECISION, AND IT IS ONE CHOICE, NOT TWO ANSWERS.
+   The ladder is System → You → NAME → address → role-and-tail, and each rung
+   REPLACES the one below rather than joining it. That rule is not new here: it
+   is what 0046 did when the address arrived, and the panel's own case says so
+   in words ("the role-and-tail fallback is GONE, not merely joined by the
+   address — two answers to 'who' in one cell is the thing this replaced").
+   Rendering "Marco Rossi (marco@example.test)" on every row would undo the
+   thing that was asked for — a Who column a person can read at a glance — to
+   insure against a collision (two colleagues with the same name) that a company
+   admin who types the names can see and spell around.
+   ------------------------------------------------------------------------ */
+describe("a person is called by their name when the company has given them one", () => {
+  const A1 = "00000000-0000-0000-0000-0000000000a1";
+  const B2 = "00000000-0000-0000-0000-0000000000b2";
+  const roles = new Map([
+    [A1, "admin"],
+    [B2, "supervisor"],
+  ]);
+  const emails = new Map([
+    [A1, "ana@example.test"],
+    [B2, "marco@example.test"],
+  ]);
+  const names = new Map([[B2, "Marco Rossi"]]);
+
+  it("⭐ prefers the name over the address", () => {
+    expect(describeActor(B2, A1, roles, emails, names)).toBe("Marco Rossi");
+  });
+
+  it("shows ONE answer, not a name and an address in the same cell", () => {
+    // The rule 0046 set when the address replaced role-and-tail, applied one
+    // rung further up. A reader wanting the address has the person's name to
+    // look them up by; a reader wanting the name and given both has neither
+    // quickly.
+    const out = describeActor(B2, A1, roles, emails, names);
+    expect(out).not.toContain("@");
+    expect(out).not.toContain("Supervisor");
+  });
+
+  it("falls back to the address for somebody the company has not named", () => {
+    // ⚠️ THE ORDINARY CASE FOR A LONG TIME. Nothing writes `display_name` yet,
+    // so every live row is null and this rung is the one the screen actually
+    // stands on today.
+    expect(describeActor(A1, B2, roles, emails, names)).toBe("ana@example.test");
+  });
+
+  it("falls all the way to role-and-tail when there is neither", () => {
+    const out = describeActor(B2, A1, roles, new Map(), new Map());
+    expect(out).toContain("Supervisor");
+    expect(out).toContain("0000b2");
+  });
+
+  it("⚠️ still says You for the reader, name or no name", () => {
+    // Their own hand is the one thing a reader never needs identifying, and
+    // seeing their own name in the Who column would read as somebody else.
+    expect(describeActor(B2, B2, roles, emails, names)).toBe("You");
+  });
+
+  it("treats a blank name as no name rather than as an empty answer", () => {
+    // Defence in depth: `parseActorIdentity` normalises this away, and there is
+    // no CHECK constraint on the column, so the module a blank could reach must
+    // not render one.
+    const blank = new Map([[B2, "   "]]);
+    expect(describeActor(B2, A1, roles, emails, blank)).toBe("marco@example.test");
+  });
+
+  it("changes nothing for a caller that has not looked names up", () => {
+    // ⛔ THE ARGUMENT IS OPTIONAL AND ITS ABSENCE IS THE OLD BEHAVIOUR EXACTLY,
+    // the same promise the emails argument made when it was added.
+    expect(describeActor(B2, A1, roles, emails)).toBe("marco@example.test");
+    expect(describeActor(B2, A1, roles)).toContain("Supervisor");
+  });
+});
+
 describe("an insert reads as a thing that was added, named", () => {
   const entry = {
     action: "insert" as const,
@@ -618,6 +695,29 @@ describe("a user column speaks the same vocabulary as the actor column", () => {
       { actorRoles: roles, viewerUserId: "00000000-0000-0000-0000-0000000000a1" },
     );
     expect(after(line, "created_by")).toBe("You");
+  });
+
+  it("names a created_by by the company's name for them, as the Who column does", () => {
+    // ⚠️ ONE VOCABULARY FOR ONE ACCOUNT. `created_by` in a snapshot and the Who
+    // column are the same person; a name in one and an address in the other is
+    // how a log starts contradicting itself about who did something.
+    const line = describeEntry(
+      {
+        action: "insert",
+        tableName: "runs",
+        rowId: "r1",
+        before: null,
+        after: { created_by: "00000000-0000-0000-0000-0000000000b2" },
+      },
+      FMT,
+      {
+        actorRoles: new Map([["00000000-0000-0000-0000-0000000000b2", "supervisor"]]),
+        actorEmails: new Map([["00000000-0000-0000-0000-0000000000b2", "marco@example.test"]]),
+        actorNames: new Map([["00000000-0000-0000-0000-0000000000b2", "Marco Rossi"]]),
+        viewerUserId: null,
+      },
+    );
+    expect(after(line, "created_by")).toBe("Marco Rossi");
   });
 
   it("says the same thing describeActor says about an account it cannot place", () => {

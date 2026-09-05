@@ -286,45 +286,62 @@ function tail(id: string): string {
 }
 
 /**
- * ⚠️⚠️ THIS IS THE HONEST CEILING, AND IT IS A SERVER LIMITATION, NOT A CHOICE.
+ * WHO A ROW SAYS DID IT — one answer, chosen from four rungs.
  *
- * `audit_log.actor_id` is `auth.uid()` — a row in `auth.users`, which PostgREST
- * does not expose. `user_profiles` (which an admin CAN read across their org)
- * carries no name and no address at all: `id, org_id, user_id, role,
- * default_create_mode, created_at, updated_at`. The single function that
- * reaches an email, `site_people`, is keyed by a NODE and returns a PROFILE id,
- * not a user id, so it cannot answer "who is `auth.uid()` X" even indirectly.
+ * ⭐⭐ THE LADDER, BEST FIRST, AND EACH RUNG REPLACES THE ONE BELOW IT:
  *
- * **Turning an actor into a person's name needs a new SECURITY DEFINER function
- * on the database** — a migration, and a decision about exposing addresses that
- * is not this screen's to make. Until then: the reader's own changes are named
- * as theirs, and everybody else gets the role the client CAN read plus a tail
- * that distinguishes two people holding it.
+ *   1. `System` — a NULL actor. `audit_current_actor()` degrades to NULL for a
+ *      seed or a server-side write and says so in its own comment (0007); the
+ *      live table has such rows. Calling that an unknown PERSON would invent a
+ *      suspect.
+ *   2. `You` — the reader's own hand. The one actor a reader never needs
+ *      identifying, and their own name here would read as somebody else.
+ *   3. THE NAME — `user_profiles.display_name` (0047, R-330). *"add
+ *      display_name to user_profiles too."* This is the first thing in this
+ *      schema that is actually what a colleague is CALLED.
+ *   4. the address — `auth.users.email` via 0046. Unambiguous, and nobody's
+ *      name. ⚠️ THIS IS THE RUNG THE SCREEN STANDS ON TODAY: nothing writes
+ *      `display_name` yet, so every live row falls through rung 3.
+ *   5. role and tail — `Supervisor · 0000b2`. The honest floor, and the answer
+ *      the maintainer objected to: a role and six characters of a uuid, neither
+ *      of which is a person you can go and ask about a change.
  *
- * ⚠️ A NULL ACTOR IS "System", NOT "unknown". `audit_current_actor()` degrades
- * to NULL for a seed or a server-side write and says so in its own comment
- * (0007); the live table has such rows. Calling that an unknown person would
- * invent a suspect.
+ * ⛔⛔ ONE ANSWER, NOT TWO, AND THAT IS A DECISION WORTH DEFENDING. The obvious
+ * alternative is "Marco Rossi (marco@example.test)" — friendly AND unambiguous.
+ * It is rejected for the reason 0046 already recorded when the address replaced
+ * role-and-tail: two answers to "who" in one cell is the thing that was
+ * replaced. The Who column is one narrow cell on the busiest table in the app,
+ * and a reader scanning it for a person reads a name faster than a name wearing
+ * an address. The risk being traded away is a COLLISION — two colleagues named
+ * Chris — and it is small and visible: whoever types the names can see the
+ * clash and spell around it, which is how every roster in the product already
+ * works. If the maintainer would rather see both, this function is the one
+ * place that changes.
+ *
+ * ⚠️ AN OPTIONAL FIFTH ARGUMENT RATHER THAN A REORDERED THIRD OR FOURTH. This
+ * module is pure and is called from a component and from `describeEntry`;
+ * widening the existing maps into one object would have rewritten every call
+ * site and every fixture for a value that is allowed to be absent anyway, and
+ * SWAPPING the order of two `ReadonlyMap<string, string>` arguments is a change
+ * `tsc` cannot see. Absent means "not looked up", exactly as it does for the
+ * name maps.
  */
 export function describeActor(
   actorId: string | null,
   viewerUserId: string | null,
   roles: ReadonlyMap<string, string>,
   emails?: ReadonlyMap<string, string>,
+  displayNames?: ReadonlyMap<string, string>,
 ): string {
   if (actorId === null) return "System";
   if (viewerUserId !== null && actorId === viewerUserId) return "You";
-  // ⭐ THE ADDRESS WINS WHERE THERE IS ONE, and migration 0046 is what put it
-  // within reach — `audit_actor_identities()`, company-admin-only and
-  // org-scoped. The maintainer's objection to the old answer was exactly right:
-  // "Supervisor · 0000a2" tells you a role and a fragment of a uuid, neither of
-  // which is a person you can go and ask about a change.
-  //
-  // ⚠️ AN OPTIONAL FOURTH ARGUMENT RATHER THAN A CHANGED THIRD. This module is
-  // pure and is called from a component and from `describeEntry`; widening the
-  // existing map to an object would have rewritten every call site and every
-  // fixture for a value that is allowed to be absent anyway. Absent means "not
-  // looked up" here, exactly as it does for the name maps.
+  // ⚠️ THE BLANK CHECK IS NOT DECORATION on either rung. `parseActorIdentity`
+  // normalises a blank away and `AuditPanel` leaves an absent value out of the
+  // map entirely, but there is no CHECK constraint on `display_name` (0047 says
+  // why), so a "" reaching here must be read as "no name" rather than rendered
+  // as an empty Who cell — a present answer meaning nothing.
+  const name = displayNames?.get(actorId);
+  if (name !== undefined && name.trim() !== "") return name;
   const email = emails?.get(actorId);
   if (email !== undefined && email !== "") return email;
   const role = roles.get(actorId);
@@ -426,6 +443,11 @@ export interface AuditNames {
    *  Who column does — two vocabularies for one account is how a log starts
    *  contradicting itself. */
   actorEmails?: ReadonlyMap<string, string>;
+  /** uid -> `user_profiles.display_name`, from `audit_actor_identities()`
+   *  (0047). Absent = not looked up. Beside `actorEmails` and for the same
+   *  reason: `describeActor` decides which of them a person is called by, once,
+   *  and BOTH columns of the log say the same thing about the same account. */
+  actorNames?: ReadonlyMap<string, string>;
   /** The reader's own `auth.uid()`, so their own hand reads "You". */
   viewerUserId?: string | null;
 }
@@ -486,6 +508,7 @@ function resolveIdentity(
       names.viewerUserId ?? null,
       names.actorRoles ?? new Map(),
       names.actorEmails,
+      names.actorNames,
     );
   }
 

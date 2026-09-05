@@ -219,6 +219,17 @@ export async function fetchAuditPage(beforeId: number | null = null): Promise<Au
  * signature, no change to the Map it returns, and no change to any caller that
  * already reads `.email`. A `Map<string, string>` of addresses would have to be
  * rewritten everywhere on that day.
+ *
+ * ⭐⭐ AND THAT DAY WAS THE NEXT ONE — migration 0047, R-330. The maintainer:
+ * *"add display_name to user_profiles too."* The promise above was kept
+ * exactly: `fetchActorIdentities()` has the same signature, `actorIdentityMap`
+ * returns the same Map, `AuditPanel` reads `.email` unchanged, and the diff on
+ * this side is one column in `ACTOR_IDENTITY_COLUMNS`, one field on
+ * `ActorIdentity` and two lines in the guard.
+ *
+ * ⚠️ WHICH ONE THE SCREEN SAYS IS NOT DECIDED HERE. This file reports what the
+ * server knows; `describeActor` picks (name, then address, then role-and-tail)
+ * and is the single place that argument lives.
  * ======================================================================== */
 
 /**
@@ -237,6 +248,18 @@ export interface ActorIdentity {
   role: string;
   /** `auth.users.email`, or null when the account has no address. */
   email: string | null;
+  /**
+   * `user_profiles.display_name` (0047), or null when nobody has named this
+   * person.
+   *
+   * ⚠️⚠️ NULL IS THE NORMAL VALUE TODAY, NOT AN EDGE. 0047 adds the column and
+   * NO WRITER: `user_profiles_update` is `app_is_admin() AND org_id =
+   * app_current_org()`, which would let an admin name everybody and let nobody
+   * name themselves, so the write was deliberately left for the maintainer to
+   * decide. Every row in every live database is null until then, and the same
+   * F-085 lie applies as to `email` — the generated type says `string`.
+   */
+  displayName: string | null;
 }
 
 /**
@@ -245,25 +268,51 @@ export interface ActorIdentity {
  * `AUDIT_COLUMNS`. Exported for `apiAuditShape.test.ts`.
  *
  * ⚠️ It is NOT passed to `.select()`; an RPC has no column list to send. It is
- * a written-down copy of migration 0046's `returns table (...)`, and a
- * `display_name` added there is added here in the same commit.
+ * a written-down copy of migration 0047's `returns table (...)`, and a column
+ * added there is added here in the same commit — which is what happened when
+ * `display_name` landed. `69_actor_identities_test.sql` E12 reads the
+ * function's declared result columns out of `pg_proc` and is the server-side
+ * half of this pair.
  */
-export const ACTOR_IDENTITY_COLUMNS = "user_id, role, email";
+export const ACTOR_IDENTITY_COLUMNS = "user_id, role, email, display_name";
+
+/**
+ * A value that is a usable piece of text, or null.
+ *
+ * ⚠️ A BLANK IS NORMALISED AWAY, and that is the whole reason this is a
+ * function rather than a `typeof` in two places. `describeActor` reads
+ * "present" as "this is who it was", so an empty `display_name` would WIN the
+ * precedence and render an empty Who cell — a present answer meaning nothing,
+ * which is worse than the null it would have displaced. There is no CHECK
+ * constraint on the column (migration 0047 says why: a form clearing a name
+ * sends "" and should not get a 400 back), so this is where a blank stops.
+ */
+function textOrNull(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const trimmed = v.trim();
+  return trimmed === "" ? null : v;
+}
 
 /**
  * One raw row in, an `ActorIdentity` or `null` out — the guard.
  *
  * `role` is required: it is NOT NULL server-side and it is the label the screen
- * falls back to, so a row without one has nothing left to say. `email` is
- * NORMALISED rather than required — null, undefined and anything that is not a
- * string all become `null`, which is the one value every caller has to handle
- * anyway.
+ * falls back to, so a row without one has nothing left to say. `email` and
+ * `display_name` are NORMALISED rather than required — null, undefined, a
+ * blank and anything that is not a string all become `null`, which is the one
+ * value every caller has to handle anyway.
+ *
+ * ⚠️ NEITHER IDENTITY COLUMN MAY REJECT A ROW. `display_name` is null on every
+ * live row today (0047 adds the column and no writer) and `email` is null for a
+ * phone-only signup; a guard that required either would empty the map and send
+ * the Who column back to "Supervisor · 0000b2" for people the server can
+ * perfectly well place.
  */
 export function parseActorIdentity(row: unknown): ActorIdentity | null {
   if (!isRecord(row)) return null;
-  const { role, email } = row;
+  const { role, email, display_name } = row;
   if (typeof role !== "string") return null;
-  return { role, email: typeof email === "string" ? email : null };
+  return { role, email: textOrNull(email), displayName: textOrNull(display_name) };
 }
 
 /**

@@ -1016,6 +1016,7 @@ export type Database = {
         Row: {
           created_at: string
           default_create_mode: string
+          display_name: string | null
           id: string
           org_id: string
           role: string
@@ -1025,6 +1026,7 @@ export type Database = {
         Insert: {
           created_at?: string
           default_create_mode?: string
+          display_name?: string | null
           id?: string
           org_id: string
           role?: string
@@ -1034,6 +1036,7 @@ export type Database = {
         Update: {
           created_at?: string
           default_create_mode?: string
+          display_name?: string | null
           id?: string
           org_id?: string
           role?: string
@@ -1153,6 +1156,7 @@ export type Database = {
       audit_actor_identities: {
         Args: never
         Returns: {
+          display_name: string
           email: string
           role: string
           user_id: string
