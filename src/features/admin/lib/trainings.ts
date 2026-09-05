@@ -155,9 +155,16 @@ export function retireActionLabel(active: boolean): string {
  * IDs and not node names — `scope.ts`'s `scopeLabel` stays the one place an id
  * becomes a name, exactly as `describeSkillNameClash` requires of its caller.
  *
- * ⚠️ AND IT IS THE LEAF NAME, so two "Line 1"s in different plants still
- * collide here. The full path is the row's tooltip (`scopePathLabel`); an
- * accessible name three levels deep would be read out in full on every button.
+ * ⚠️ WHICH LABEL IT IS REMAINS THE CALLER'S ANSWER, AND THE CALLER'S HAS
+ * CHANGED. This used to record that the leaf name was passed, so two "Line 1"s
+ * in different plants still collided here — filed as a known edge, which it was
+ * not: `unique (org_id, parent_id, name)` (0001) makes SIBLING names unique and
+ * says nothing across the tree, so two plants each naming their first line
+ * "Line A" is ordinary rather than exotic. `TrainingsPanel` now hands in the
+ * full PATH of names where the leaf is shared and the leaf alone where it is
+ * not, because the objection recorded here was also right: a name three levels
+ * deep read out on every button is a cure worse than the disease. Both halves
+ * are the caller's to weigh, and this function still only joins two strings.
  */
 export function trainingHandle(name: string, ownerLabel: string): string {
   return `${name} at ${ownerLabel}`;

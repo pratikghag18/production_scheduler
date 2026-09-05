@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
-import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
+import { certificateGaps, type CertificateGap } from "../lib/boardIndex";
+import { DEFAULT_DATE_FORMAT, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
 import styles from "./CreatePopover.module.css";
@@ -10,6 +11,23 @@ import styles from "./CreatePopover.module.css";
 /** Shown in place of the product picker when nothing belongs at this cell.
  *  An empty `<select>` is a dead control that explains nothing. */
 const NO_PRODUCTS_HERE = "No product belongs at this cell, so there is nothing to schedule here.";
+
+/**
+ * F-087: what the operator picker appends to a name that has a problem at this
+ * cell. The two states get their own words in the LIST as well as in the
+ * warning, because the list is where a planner picks somebody — a person who
+ * only needs a renewal should not read the same as one who has never done the
+ * course, and before this change the second read the same as somebody with no
+ * problem at all.
+ */
+function operatorLabelSuffix(gaps: readonly CertificateGap[]): string {
+  const untrained = gaps.some((g) => g.state === "never-trained");
+  const lapsed = gaps.some((g) => g.state === "lapsed");
+  if (untrained && lapsed) return " — Never trained, and a certificate expired (override)";
+  if (untrained) return " — Never trained for this (override)";
+  if (lapsed) return " — Certificate expired (override)";
+  return "";
+}
 
 /**
  * Port of the mockup's `openCreatePop` (brief §5.4/P1-4e D64/D65). D35:
@@ -23,20 +41,33 @@ const NO_PRODUCTS_HERE = "No product belongs at this cell, so there is nothing t
  * exactly where the fence lifts, but only HALF the hint is ported. The
  * "will ask to split" half requires the mockup's client-side `peakLoad()`
  * — exactly the second implementation of `operator_peak_load()` D63/§8
- * forbids — so it is NOT ported; the eligibility half ("not certified") is
- * plain set arithmetic over `skillsForNode`/`operator.skillIds` (no peak
- * load involved) and is ported, per D65's own "hint from skillsForNode +
- * operator.skillIds" instruction.
+ * forbids — so it is NOT ported; the eligibility half is ported, per D65's
+ * own "hint from skillsForNode + operator.skillIds" instruction.
  *
- * D64: when the selected operator is missing a skill this node requires,
- * shows what is missing and — under `warn` policy — an override checkbox
- * with a required free-text reason; Create stays disabled until either the
- * operator IS eligible, or the box is ticked with a non-empty reason.
- * Under `block` policy there is no override; Create is disabled outright
- * with an explanatory line, matching `create_assignment`'s own refusal
- * (docs/api.md §3 item 2). The server is still the actual authority
- * either way — this is a same-call UI courtesy, not a second security
- * layer (§8's rule, restated for eligibility instead of peak load).
+ * ⛔ AND THAT INSTRUCTION IS EXACTLY WHERE F-087 CAME FROM. "Set arithmetic
+ * over `skillsForNode`/`operator.skillIds`" answers "was this person ever
+ * trained" — and `check_eligibility` has ALSO refused a certificate that ran
+ * out before the window ends since migration 0009. So a person whose ticket
+ * lapsed a year ago drew as eligible, warned nobody, was offered no override
+ * tick, and Create failed with "override required under warn policy" against
+ * a screen with no box to supply one: a dead end, not a warning. The board
+ * could not have done better — `board_window` sent a bare array of ids with
+ * no date on it until migration 0048. The verdict now comes from
+ * `certificateGaps` (`../lib/boardIndex`), which is the server's own rule
+ * transcribed, judged against the END OF THE WINDOW BEING CREATED.
+ *
+ * D64, extended by F-087: when the selected operator has a gap this node
+ * cares about, the popover names it, says WHICH KIND it is — never trained,
+ * or trained and lapsed, which need a course and a renewal respectively —
+ * dates the lapsed one through the app's date seam, and offers, under `warn`
+ * policy, ONE override checkbox with a required free-text reason (the server
+ * has one `p_eligibility_override` covering both). Create stays disabled
+ * until either the operator IS eligible, or the box is ticked with a
+ * non-empty reason. Under `block` policy there is no override; Create is
+ * disabled outright with an explanatory line, matching `create_assignment`'s
+ * own refusal (docs/api.md §3 item 2). The server is still the actual
+ * authority either way — this is a same-call UI courtesy, not a second
+ * security layer (§8's rule, restated for eligibility instead of peak load).
  *
  * D108/0028: `products` arrives ALREADY NARROWED to what is offered at this
  * cell (and to what is still made) — `BoardPage` resolves it from the board
@@ -97,6 +128,19 @@ export function CreatePopover({
    * with a reason. Filtering them would delete the feature.
    */
   outsideAreaOperatorIds: ReadonlySet<string>;
+  /**
+   * ⭐ R-331 / migration 0051: THE POLICY FOR **THIS** NODE, resolved on the
+   * server and looked up by `BoardPage` through `policyForNode` — not
+   * `org.settings.eligibility_policy`, which is only what a node inherits when
+   * nothing nearer overrides it.
+   *
+   * Until 0051 the board handed every cell in the company the same value, so on
+   * a plant deliberately set to `block` this popover still drew an override tick
+   * and a reason box, and Create then failed with a message about an override
+   * the server would never take — a dead end, the same shape as F-087. Like
+   * `requiredSkills` and `outsideAreaOperatorIds` beside it, this is resolved
+   * before it gets here: the popover holds no rule, it only renders one.
+   */
   eligibilityPolicy: "warn" | "block";
   /** D65: set only when this popover was opened by a panel drop. */
   presetOperatorId?: string;
@@ -184,19 +228,40 @@ export function CreatePopover({
           Number.isFinite(typedEfficiency) && typedEfficiency > 0 ? typedEfficiency : 100,
         ) ?? null);
 
-  const missingSkillsByOperator = useMemo(() => {
-    const m = new Map<string, Skill[]>();
+  /**
+   * F-087. This used to be `requiredSkills.filter((s) => !o.skillIds.includes(s.id))`
+   * — "does this person hold the training at all" — and EXPIRY WAS NEVER
+   * CONSIDERED. So somebody whose certificate lapsed a year ago drew as
+   * eligible, warned nobody, was offered no override tick, and Create then
+   * failed with "override required under warn policy" against a screen with no
+   * box to supply one. `certificateGaps` asks `check_eligibility`'s own
+   * question instead, and answers it per REASON rather than per person.
+   *
+   * ⚠️ IT DEPENDS ON `range.endMin`, WHICH MOVES WHILE THIS FORM IS OPEN. The
+   * server compares against the END of the window being written, so dragging a
+   * handle past a renewal date has to change the answer here too — exactly as
+   * it changes it on the server.
+   */
+  const windowEnd = addMinutes(windowStart, range.endMin);
+  const gapsByOperator = useMemo(() => {
+    const m = new Map<string, CertificateGap[]>();
     if (requiredSkills.length === 0) return m;
     for (const o of operators) {
-      const missing = requiredSkills.filter((s) => !o.skillIds.includes(s.id));
-      if (missing.length > 0) m.set(o.id, missing);
+      const gaps = certificateGaps(o, requiredSkills, windowEnd);
+      if (gaps.length > 0) m.set(o.id, gaps);
     }
     return m;
-  }, [operators, requiredSkills]);
+    // `windowEnd` is a fresh Date each render; its INSTANT is what the answer
+    // turns on, so the memo keys on that rather than on object identity.
+  }, [operators, requiredSkills, windowEnd.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedOutsideArea = outsideAreaOperatorIds.has(operatorId);
-  const selectedMissing = missingSkillsByOperator.get(operatorId) ?? [];
-  const ineligible = selectedMissing.length > 0;
+  const selectedGaps = gapsByOperator.get(operatorId) ?? [];
+  const selectedUntrained = selectedGaps.filter((g) => g.state === "never-trained");
+  const selectedLapsed = selectedGaps.filter(
+    (g): g is Extract<CertificateGap, { state: "lapsed" }> => g.state === "lapsed",
+  );
+  const ineligible = selectedGaps.length > 0;
   const blocked = ineligible && eligibilityPolicy === "block";
   const needsOverride = ineligible && eligibilityPolicy === "warn";
   // Both modes send a product — `create_run` requires one and `submitCreateDirect`
@@ -285,7 +350,11 @@ export function CreatePopover({
               {operators.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.displayName}
-                  {missingSkillsByOperator.has(o.id) ? " — not certified (override)" : ""}
+                  {/* F-087: the list used to say "— not certified (override)"
+                      for a missing training and NOTHING AT ALL for a lapsed
+                      one. Two problems, two labels, so the difference is
+                      visible before anybody is selected. */}
+                  {operatorLabelSuffix(gapsByOperator.get(o.id) ?? [])}
                   {outsideAreaOperatorIds.has(o.id) ? " — not from this area (override)" : ""}
                 </option>
               ))}
@@ -357,14 +426,40 @@ export function CreatePopover({
 
             {ineligible && (
               <div className={styles.eligWarn}>
-                {blocked ? (
+                {/* ⛔ F-087: TWO PARAGRAPHS, NEVER ONE. "Never trained" needs a
+                    course booked; "certificate expired" needs a renewal. The
+                    old screen printed one sentence for the first and nothing
+                    at all for the second. Each names the trainings it is about,
+                    and the expired one names the DATE — through the app's date
+                    seam, in the org's chosen format. */}
+                {selectedUntrained.length > 0 && (
                   <p>
-                    Missing {selectedMissing.map((s) => s.name).join(", ")} — this org requires
-                    certification for this cell (no override).
+                    <strong>Never trained:</strong>{" "}
+                    {selectedUntrained.map((g) => g.skill.name).join(", ")}. Booking the training is
+                    what fixes this.
                   </p>
+                )}
+                {selectedLapsed.length > 0 && (
+                  <p>
+                    <strong>Certificate expired:</strong>{" "}
+                    {selectedLapsed
+                      .map(
+                        (g) =>
+                          `${g.skill.name} (expired ${formatCalendarDay(g.expiresAt, dateFormat)})`,
+                      )
+                      .join(", ")}
+                    . They held this — it needs renewing before this shift ends.
+                  </p>
+                )}
+                {blocked ? (
+                  // R-331: "this org" was true when the policy was read once
+                  // from the company's bag. It is now resolved for THIS cell —
+                  // the plant it sits in may refuse while the plant next door
+                  // allows an override — so the sentence names the place the
+                  // rule was actually found for, which is here.
+                  <p>Certification is required at this place, so there is no override.</p>
                 ) : (
                   <>
-                    <p>Missing {selectedMissing.map((s) => s.name).join(", ")}.</p>
                     <label className={styles.overrideLbl}>
                       <input
                         type="checkbox"

@@ -183,6 +183,38 @@
   font-size: 0.8125rem;
 }
 
+/* ---------------------------------------------------------------------------
+   ⭐ "Nothing has been shared with you yet" — the whole screen, for somebody the
+   server has handed no readable node.
+
+   ⚠️ NOT AN ERROR STYLE. No amber, no border, no icon: this is an ordinary and
+   correct state of a new account, and dressing it as a warning would tell the
+   reader something has gone wrong — which is precisely the confusion the words
+   are there to end. Quiet chrome, one measure wide, the same weight as any
+   other prose on these screens.
+
+   ⚠️ `max-width` in `rem` like everything else here (D84), so the measure holds
+   its ~65 characters at any scale rather than growing to the viewport.
+   --------------------------------------------------------------------------- */
+.emptyScope {
+  max-width: 34rem;
+  padding: 1rem 0;
+}
+
+.emptyLead {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.emptyNote {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
 .hierarchyGrid {
   display: grid;
   grid-template-columns: minmax(20rem, 26.25rem) 1fr;

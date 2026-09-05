@@ -313,51 +313,44 @@ export type Database = {
           },
         ]
       }
-      node_product_rollup: {
+      node_settings: {
         Row: {
           created_at: string
+          key: string
           node_id: string
           org_id: string
-          product_id: string
-          sums_children: boolean
           updated_at: string
+          value: string
         }
         Insert: {
           created_at?: string
+          key: string
           node_id: string
           org_id: string
-          product_id: string
-          sums_children: boolean
           updated_at?: string
+          value: string
         }
         Update: {
           created_at?: string
+          key?: string
           node_id?: string
           org_id?: string
-          product_id?: string
-          sums_children?: boolean
           updated_at?: string
+          value?: string
         }
         Relationships: [
           {
-            foreignKeyName: "node_product_rollup_org_id_fkey"
+            foreignKeyName: "node_settings_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "orgs"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "node_product_rollup_org_id_node_id_fkey"
+            foreignKeyName: "node_settings_org_id_node_id_fkey"
             columns: ["org_id", "node_id"]
             isOneToOne: false
             referencedRelation: "nodes"
-            referencedColumns: ["org_id", "id"]
-          },
-          {
-            foreignKeyName: "node_product_rollup_org_id_product_id_fkey"
-            columns: ["org_id", "product_id"]
-            isOneToOne: false
-            referencedRelation: "products"
             referencedColumns: ["org_id", "id"]
           },
         ]
@@ -1065,6 +1058,7 @@ export type Database = {
         Row: {
           created_at: string
           default_create_mode: string
+          display_name: string | null
           id: string
           org_id: string
           role: string
@@ -1074,6 +1068,7 @@ export type Database = {
         Insert: {
           created_at?: string
           default_create_mode?: string
+          display_name?: string | null
           id?: string
           org_id: string
           role?: string
@@ -1083,6 +1078,7 @@ export type Database = {
         Update: {
           created_at?: string
           default_create_mode?: string
+          display_name?: string | null
           id?: string
           org_id?: string
           role?: string
@@ -1168,6 +1164,10 @@ export type Database = {
         Args: { p_node: string; p_org: string; p_owner: string }
         Returns: boolean
       }
+      app_owner_overlaps_in_org: {
+        Args: { p_a: string; p_b: string; p_org: string }
+        Returns: boolean
+      }
       app_pick_product_color: { Args: { p_org_id: string }; Returns: string }
       app_product_offered_at: {
         Args: { p_node: string; p_product: string }
@@ -1190,10 +1190,23 @@ export type Database = {
         Args: { p_delta: number; p_new_parent_id: string; p_node_id: string }
         Returns: Json
       }
+      app_resolve_node_setting: {
+        Args: { p_key: string; p_node_id: string }
+        Returns: string
+      }
       app_trim_ws: { Args: { input: string }; Returns: string }
       apply_split_coverage: {
         Args: { p_adjustments: Json; p_new_assignment: Json }
         Returns: Json
+      }
+      audit_actor_identities: {
+        Args: never
+        Returns: {
+          display_name: string
+          email: string
+          role: string
+          user_id: string
+        }[]
       }
       audit_current_actor: { Args: never; Returns: string }
       board_window: {
@@ -1211,6 +1224,10 @@ export type Database = {
       }
       check_eligibility: {
         Args: { p_node_id: string; p_operator_id: string; p_timerange: unknown }
+        Returns: Json
+      }
+      clear_node_setting: {
+        Args: { p_key: string; p_node_id: string }
         Returns: Json
       }
       copy_plant_structure: {
@@ -1346,7 +1363,12 @@ export type Database = {
         Args: { p_levels: Json; p_template_id: string }
         Returns: Json
       }
+      set_node_setting: {
+        Args: { p_key: string; p_node_id: string; p_value: string }
+        Returns: Json
+      }
       set_org_date_format: { Args: { p_format: string }; Returns: Json }
+      set_org_eligibility_policy: { Args: { p_policy: string }; Returns: Json }
       set_site_member: {
         Args: { p_node_id: string; p_profile_id: string; p_role: string }
         Returns: Json

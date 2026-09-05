@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the sixteen admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the eighteen admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -259,6 +259,9 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // 0040 / R-315: the Cycle times section. Seventeenth surface, same
         // two-place edit.
         "src/features/admin/components/CycleTimesPanel.module.css",
+        // The Activity section (the audit log, 0007 / 0029 §6). Eighteenth
+        // surface, same two-place edit.
+        "src/features/admin/components/AuditPanel.module.css",
       ].sort(),
     );
   });
@@ -465,7 +468,7 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
     expect(auditAdminSections(repoRoot)).toEqual([]);
   });
 
-  it("H2: the nine ids are exactly these, in rail order", () => {
+  it("H2: the ten ids are exactly these, in rail order", () => {
     // The list that drives H1 is itself untested unless something asserts it —
     // deleting an entry from SECTIONS makes H1 *greener*, which is the shape
     // R10 and G12 both exist to close.
@@ -493,6 +496,13 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       // `profile.role` in AdminPage — the id is still in SECTIONS, so it is
       // still here and still has a render branch (which is what H2 guards).
       "settings",
+      // The audit log, read for the first time. Company-admin ONLY — a stricter
+      // gate than any other section's, because `audit_log_select` (0008) hands a
+      // SITE admin zero rows rather than a refusal, and an empty list reads like
+      // "nothing has ever changed here". Filtered on `companyAdminOnly` exactly
+      // as `settings` is; the id is in SECTIONS, so it is here and has a render
+      // branch, which is what H2 guards.
+      "audit",
     ]);
   });
 

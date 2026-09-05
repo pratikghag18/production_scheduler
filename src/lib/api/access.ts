@@ -241,3 +241,220 @@ export async function setOrgDateFormat(format: DateFormat): Promise<void> {
   const { error } = await supabase.rpc("set_org_date_format", { p_format: format });
   if (error) throw toSchedulerError(error);
 }
+
+/**
+ * What the org does when somebody is scheduled onto work they are not
+ * certified for. Mirrors migration 0001's
+ * `check (settings->>'eligibility_policy' in ('warn','block'))` — the same
+ * shape, and for the same reason, as `SiteMemberRole` mirroring
+ * `profile_grants_role_check` above.
+ *
+ *   "warn"  — the placement is allowed if the planner ticks an override and
+ *             types a reason, which is stored on the assignment
+ *             (`assignments.override_reason`). The 0001 default.
+ *   "block" — the server refuses the placement outright; there is no override.
+ *
+ * ⚠️ THIS IS NOT A NEW CONCEPT, only a newly WRITEABLE one. The board has read
+ * it since P1-4e (`readEligibilityPolicy` in
+ * `src/features/board/lib/boardIndex.ts`, which spells the union inline) and
+ * `create_assignment` / `move_run` / `apply_split_coverage` have enforced it
+ * for as long. Until migration 0049 nothing could set it.
+ */
+export type EligibilityPolicy = "warn" | "block";
+
+/**
+ * `set_org_eligibility_policy(p_policy)` (migration 0049). Sets the org-wide
+ * eligibility policy. Raises: `not_permitted` (not a system admin),
+ * `invalid_argument` (anything but `warn`/`block`, carrying
+ * `field: "eligibility_policy"`).
+ *
+ * ⚠️ The returned settings are DISCARDED, exactly as `setOrgDateFormat` above:
+ * the caller invalidates and refetches, and the loudness of a refusal comes
+ * from the server RAISE, not from anything this wrapper could inspect. A plain
+ * `orgs` UPDATE could not do that — `orgs_update` (0008) filters a non-admin to
+ * zero rows and raises nothing, which is why this is an RPC at all (0049's
+ * header; `72_eligibility_policy_test.sql` X7 beside X8).
+ */
+export async function setOrgEligibilityPolicy(policy: EligibilityPolicy): Promise<void> {
+  const { error } = await supabase.rpc("set_org_eligibility_policy", { p_policy: policy });
+  if (error) throw toSchedulerError(error);
+}
+/* ===========================================================================
+ * PER-PLANT SETTINGS — migrations 0050 (R-331) and 0052 (R-333).
+ *
+ * The maintainer, session 62: "There is a filter at the top for selecting
+ * plants. Once we select the plant at the top we should be able to assign the
+ * settings to that particular plant, and it should be all types of settings on
+ * the settings tab, not just this one."
+ *
+ * ⭐ SO THIS LAYER IS KEYED BY THE SETTING, NOT NAMED AFTER ONE. It shipped as
+ * `fetchPlantEligibilityPolicies` / `setPlantEligibilityPolicy` /
+ * `clearPlantEligibilityPolicy`, three wrappers that hard-coded
+ * `'eligibility_policy'` in their RPC bodies. The server was already generic —
+ * `set_node_setting(node, KEY, value)` — so a second setting under that shape
+ * meant three more wrappers saying the same thing about a different string,
+ * and a third setting three more again. `NodeSettingKey` is the server's own
+ * `p_key`, so one wrapper serves every setting the table validates.
+ *
+ * ⭐ THE STORE IS `node_settings`, NOT A SECOND JSONB BAG, AND THE REASON IS
+ * THE STATE THE SCREEN HAS TO RENDER. "Plant 2 is set to block" and "Plant 2
+ * inherits the company's block" are DIFFERENT things — the first survives the
+ * company changing its mind and the second does not — and a jsonb bag cannot
+ * tell them apart, because `settings->>'k'` reads back null both for a missing
+ * key and for a key holding a JSON null (F-088, measured). A row exists or it
+ * does not; `override: null` below is the absence, and it is load-bearing.
+ *
+ * ⛔ AND THIS LAYER DOES NOT COERCE THE STORED TEXT. `node_settings.value` is
+ * `text`, validated per key by the table's CASE, and what a legal value IS
+ * differs per key. A parser here would have to carry a copy of every key's
+ * vocabulary — a second place for `warn`/`block` and a second place for the
+ * eight date tokens — which is CLAUDE.md §4's "column list that appears twice"
+ * in a new costume. The raw string comes back, and the caller applies the
+ * coercion it already owns (`coerceEligibilityPolicy`, `coerceDateFormat` and
+ * their null-returning twins in `useOrgSettings.ts`).
+ *
+ * ⚠️ THE SERVER REMAINS THE AUTHORITY FOR `eligibility_policy`.
+ * `check_eligibility` and `move_run` resolve it themselves, per node, through
+ * `app_resolve_node_setting` — nearest ancestor-or-self with an override, else
+ * the company's, else `warn`. Nothing here decides anything; it renders what
+ * the server will do and writes what the person chose. `date_format` has no
+ * server-side reader at all (0052's header), because it decides how a string
+ * is RENDERED rather than whether a write is allowed.
+ *
+ * AUTHOR-ONLY — imports `@/lib/supabase`.
+ * ======================================================================== */
+
+/**
+ * A setting `node_settings` knows how to validate — the server's own `p_key`.
+ *
+ * ⚠️ THIS UNION MIRRORS `node_settings_key_check`, and a third member here
+ * without a matching migration is a control the server refuses. 0052's header
+ * carries the full list of what a third key costs on the server side.
+ */
+export type NodeSettingKey = "eligibility_policy" | "date_format";
+
+/** Every key, so a caller can loop rather than restate the union. */
+export const NODE_SETTING_KEYS: readonly NodeSettingKey[] = ["eligibility_policy", "date_format"];
+
+/** One plant's own answer for one setting, as the Settings screen has to show it. */
+export interface PlantSettingRow {
+  nodeId: string;
+  name: string;
+  /**
+   * ⛔ `null` MEANS INHERITING, and it is not the same as the resolved value
+   * happening to equal the company's today. A plant deliberately set to `warn`
+   * while the company is on `warn` stays on `warn` when the company moves to
+   * `block`; a plant that is merely inheriting moves with it. The screen has to
+   * be able to say which of the two it is looking at.
+   *
+   * The RAW stored text — see the section header on why nothing is coerced here.
+   */
+  override: string | null;
+}
+
+/**
+ * Every plant (a ROOT node) the caller can see, with its own override for one
+ * setting.
+ *
+ * ⛔ ROOTS ONLY, AND THE FILTER IS WHAT MAKES THE CALLER'S ONE-LINE RESOLUTION
+ * LEGAL. The server's rule is "the nearest ancestor-or-self carrying an answer,
+ * else the company's". A root has no ancestors, so for a root — and ONLY for a
+ * root — that reduces to "its own override, else the company's", which is what
+ * `useOrgSettings.ts` computes. For any deeper node the walk is real and the
+ * answer must come from the server (`app_resolve_node_setting`), never from
+ * that shortcut: an override on an ancestor the caller cannot READ would
+ * silently drop out and the screen would claim the company's permissive default
+ * for a place that is strict. `supabase/tests/73_plant_settings_test.sql`
+ * P16/P17 are that hazard, pinned on the server side.
+ *
+ * ⭐ NO `orgValue` ARGUMENT ANY MORE. The eligibility version took one and
+ * folded it into an `effective` field, which meant the CACHE KEY had to carry
+ * the company's answer or a stale list would keep showing the old company
+ * value against every inheriting plant. Resolving one line up instead — where
+ * the company's value is already read for the company row — deletes both the
+ * argument and the hazard: there is nothing cached that can disagree.
+ *
+ * THROWS on a failed read, like `fetchOrgSettings` and for its reason: a plant
+ * whose rule could not be read must reach the user as an error, not as a wrong
+ * default silently rendered next to the word "block".
+ */
+export async function fetchPlantSettings(key: NodeSettingKey): Promise<PlantSettingRow[]> {
+  const [plants, overrides] = await Promise.all([
+    // ⚠️ NO `path` IN THE COLUMN LIST, and that is a decision rather than an
+    // omission: `nodes.path` is a Postgres ltree, which `supabase gen types`
+    // emits as `unknown` because it has no JS mapping, and every other reader of
+    // it in this layer therefore carries a runtime guard (`parseShiftNodeRow`).
+    // A list of plants needs a name and an id; asking for a column that would
+    // buy a guard and nothing else is how a screen ends up silently dropping a
+    // plant whose row failed to parse. The PERMISSION preview does need the
+    // path, and takes it from the shared hierarchy read instead.
+    supabase.from("nodes").select("id, name").is("parent_id", null).order("name"),
+    supabase.from("node_settings").select("node_id, value").eq("key", key),
+  ]);
+  if (plants.error) throw toSchedulerError(plants.error);
+  if (overrides.error) throw toSchedulerError(overrides.error);
+
+  const byNode = new Map<string, string | null>();
+  for (const row of overrides.data ?? []) {
+    byNode.set(row.node_id, typeof row.value === "string" ? row.value : null);
+  }
+
+  return (plants.data ?? []).map((n) => ({
+    nodeId: n.id,
+    name: n.name,
+    override: byNode.get(n.id) ?? null,
+  }));
+}
+
+/**
+ * `set_node_setting(p_node_id, p_key, p_value)` (0050, second key in 0052).
+ * Gives ONE place its own answer for ONE setting, overriding the company's.
+ *
+ * Raises: `not_permitted` (not an admin of that place — the gate is
+ * `app_is_admin_for`, so a site admin may set their OWN plant and no other),
+ * `invalid_argument` (an unknown value, carrying `field: <the key>`; an unknown
+ * key, carrying `field: "key"`; an unknown node, carrying `field: "p_node_id"`).
+ *
+ * ⚠️ An RPC and not a plain upsert, for 0049's reason one level down: a write
+ * a policy filters out reports success and changes nothing, and the screen
+ * would show the choice "saving" and then reverting with nothing said.
+ */
+export async function setPlantSetting(
+  nodeId: string,
+  key: NodeSettingKey,
+  value: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("set_node_setting", {
+    p_node_id: nodeId,
+    p_key: key,
+    p_value: value,
+  });
+  if (error) throw toSchedulerError(error);
+}
+
+/**
+ * `clear_node_setting(p_node_id, p_key)` (0050, second key in 0052). Returns
+ * ONE place to inheriting the company's answer for ONE setting.
+ *
+ * ⛔ A SEPARATE CALL, NOT `setPlantSetting(nodeId, key, null)`. "Set to
+ * nothing" is precisely the state migration 0050 spent a table avoiding, and a
+ * screen with a broken binding that sent a null would silently return a strict
+ * plant to the company's permissive default — the one direction nobody goes and
+ * checks. Clearing is its own verb here because it is its own verb on the
+ * server.
+ *
+ * ⚠️ IT CLEARS ONE KEY, NOT THE PLACE. The primary key is `(node_id, key)`, so
+ * returning a plant's date format to inheriting leaves its eligibility rule
+ * exactly where it was — pinned by P21, because a writer keyed on the node
+ * alone would have one setting silently unset another.
+ *
+ * Raises: `not_permitted` (not an admin of that place). Clearing a place that
+ * had no override is not an error — it is already in the state asked for.
+ */
+export async function clearPlantSetting(nodeId: string, key: NodeSettingKey): Promise<void> {
+  const { error } = await supabase.rpc("clear_node_setting", {
+    p_node_id: nodeId,
+    p_key: key,
+  });
+  if (error) throw toSchedulerError(error);
+}

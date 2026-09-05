@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardWindow } from "@/lib/api";
-import { buildBoardIndex } from "@/features/board/lib/boardIndex";
+import { buildBoardIndex, policyForNode } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
 
 /**
@@ -238,6 +238,7 @@ function makeFixture(): BoardWindow {
       employeeRef: null,
       active: true,
       skillIds: [],
+      skillExpiries: [],
     },
     {
       id: "op2",
@@ -246,6 +247,7 @@ function makeFixture(): BoardWindow {
       employeeRef: null,
       active: true,
       skillIds: [],
+      skillExpiries: [],
     },
   ];
   const products = [{ id: "p1", sku: "WX", name: "Widget X", active: true }];
@@ -287,6 +289,22 @@ function makeFixture(): BoardWindow {
     { nodeId: "n-unknownlevel", templateId: null },
   ];
 
+  // R-331: the server's ALREADY-RESOLVED answer for each node — the plant is
+  // strict, Machining under it was relaxed, and `n-unknownlevel` is deliberately
+  // LEFT OUT so a case can measure what an unanswered node falls back to.
+  const nodePolicies = [
+    { nodeId: "n-plant", eligibilityPolicy: "block" },
+    { nodeId: "n-assembly", eligibilityPolicy: "block" },
+    { nodeId: "n-line1", eligibilityPolicy: "block" },
+    { nodeId: "n-cell1", eligibilityPolicy: "block" },
+    { nodeId: "n-machining", eligibilityPolicy: "warn" },
+    { nodeId: "n-cncline", eligibilityPolicy: "warn" },
+    { nodeId: "n-cell6", eligibilityPolicy: "warn" },
+    { nodeId: "n-other", eligibilityPolicy: "block" },
+    { nodeId: "n-otherline", eligibilityPolicy: "block" },
+    { nodeId: "n-otherx", eligibilityPolicy: "block" },
+  ];
+
   return {
     org: { id: "org1", name: "Northwind", settings: { capacity_cap: 1.2 } },
     levels,
@@ -300,6 +318,7 @@ function makeFixture(): BoardWindow {
     shiftTemplates,
     nodeShiftMap,
     cycleTimes,
+    nodePolicies,
   } as unknown as BoardWindow;
 }
 
@@ -488,5 +507,73 @@ describe("R-316: an assignment carries the target its cell's cycle time implies"
     const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
     expect(idx.assignmentById.get("a1")?.defaultTargetQty).toBe(160);
     expect(idx.assignmentById.get("a-ok")?.defaultTargetQty).toBeNull();
+  });
+});
+
+/**
+ * ⭐ THE HEADLINE IS B-EP1: two cells on the SAME board, in the same company,
+ * answering differently. That is the case the old company-wide scalar could not
+ * express however it was read, and it is the whole reason `board_window` now
+ * sends a map rather than one value.
+ *
+ * ⛔ AND THE REST ARE ABOUT WHAT HAPPENS WHEN THE MAP CANNOT ANSWER. An unknown
+ * node fails SAFE (`block`), never open: guessing the company's `warn` draws an
+ * override tick the server may then refuse — the dead end this work removes.
+ */
+describe("R-331: the eligibility rule is the CELL's, not the company's", () => {
+  it("⭐ B-EP1: two cells on ONE board carry two different policies", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    expect(policyForNode(idx, "n-cell1")).toBe("block");
+    expect(policyForNode(idx, "n-cell6")).toBe("warn");
+    // ...and the company's own value is still there, unread by the popover.
+    expect(idx.eligibilityPolicy).toBe("warn");
+  });
+
+  it("⛔ B-EP2: a node the payload did not answer for falls back to BLOCK, not to the company", () => {
+    // `n-unknownlevel` is in `nodes` and absent from `node_policies`. Guessing
+    // the company's "warn" here would draw an override tick the server may then
+    // refuse — the dead end this work exists to remove. Refusing something the
+    // server might have allowed is the survivable half of that pair.
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    expect(idx.eligibilityPolicy).toBe("warn");
+    expect(policyForNode(idx, "n-unknownlevel")).toBe("block");
+    expect(policyForNode(idx, "n-not-on-this-board-at-all")).toBe("block");
+  });
+
+  it("B-EP3: an EMPTY map is the not-yet-loaded board, and reads the company's answer", () => {
+    // The one state in which the company's value IS every node's value: there
+    // are no per-node answers to have missed. `emptyIndex` in BoardPage.
+    const data = makeFixture();
+    data.nodePolicies = [];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(idx.eligibilityPolicyByNode.size).toBe(0);
+    expect(policyForNode(idx, "n-cell1")).toBe("warn");
+  });
+
+  it("B-EP4: an unrecognised policy string is DROPPED, so that node fails safe", () => {
+    // Not coerced, not trusted. A third value from a future migration must
+    // arrive as "we do not know this cell's rule", which is `block`.
+    const data = makeFixture();
+    data.nodePolicies = [
+      { nodeId: "n-cell1", eligibilityPolicy: "refuse-politely" },
+      { nodeId: "n-cell6", eligibilityPolicy: "warn" },
+    ];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(idx.eligibilityPolicyByNode.has("n-cell1")).toBe(false);
+    expect(policyForNode(idx, "n-cell1")).toBe("block");
+    expect(policyForNode(idx, "n-cell6")).toBe("warn");
+  });
+
+  it("B-EP5: the company's value is read defensively and defaults to warn", () => {
+    const data = makeFixture();
+    (data.org as { settings: unknown }).settings = { eligibility_policy: "nonsense" };
+    data.nodePolicies = [];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(policyForNode(idx, "n-cell1")).toBe("warn");
+  });
+
+  it("B-EP6: no index at all is BLOCK — the popover cannot be opened, and this is the safe answer", () => {
+    expect(policyForNode(null, "n-cell1")).toBe("block");
+    expect(policyForNode(undefined, "n-cell1")).toBe("block");
   });
 });

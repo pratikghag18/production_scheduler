@@ -231,7 +231,6 @@ const PLACE_CHIP: Record<PlaceVerdict, { state: CellState; glyph: string; label:
 export function OperatorsPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
-  const dateFormat = useDateFormat(canQuery);
   const orgId = profile?.orgId ?? null;
 
   const { data, isLoading, isError } = useOperatorsAdmin(canQuery);
@@ -311,6 +310,16 @@ export function OperatorsPanel() {
    * so nothing here has to special-case it.
    * ------------------------------------------------------------------- */
   const plant = usePlantFilter(nodes);
+
+  /**
+   * ⚠️ ASKED FOR THE CHOSEN PLANT, and it was not until F-090. This screen has
+   * honoured the plant filter for a long time, so the certification dates it
+   * draws belong to whichever plant is showing — but the format token was read
+   * company-wide, which was the only possible answer until settings became
+   * per-plant and is now simply the wrong one. `null` on "All plants" is right:
+   * a list spanning plants has no one plant to ask.
+   */
+  const dateFormat = useDateFormat(canQuery, plant.choice);
 
   // ⭐ THE LIST AS IT WOULD BE WITH NO PLANT FILTER, KEPT SO THE TRIM CAN BE
   // COUNTED. `scope.ts`'s header is the reason it is not simply dropped:

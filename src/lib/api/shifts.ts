@@ -81,16 +81,45 @@ function isStrOrNull(v: unknown): v is string | null {
   return v === null || typeof v === "string";
 }
 
+function isBool(v: unknown): v is boolean {
+  return typeof v === "boolean";
+}
+
 /** A minute column. `smallint`, so a non-integer is a shape mismatch, not a value. */
 function isMin(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v);
 }
+
+/**
+ * ⭐ THE COLUMN LIST, ONCE. It is read by `fetchShiftPatterns` and read BACK by
+ * three separate writes, and a list that appears four times is four chances for
+ * the next column to be added to three of them. `SKILL_COLUMNS` in
+ * `operators.ts` is the same constant for the same reason.
+ */
+// Exported so `apiShiftShape.test.ts` can hold it against
+// `parseShiftTemplateRow`. `SKILL_COLUMNS` is exported for the same reason
+// and after the same accident.
+export const SHIFT_TEMPLATE_COLUMNS = "id, name, site_node_id, active";
 
 /** `shift_templates`. `siteNodeId === null` is company-wide (0023). */
 export interface ShiftTemplateRow {
   id: string;
   name: string;
   siteNodeId: string;
+  /**
+   * `false` = retired. `not null default true` since migration 0029.
+   *
+   * ⚠️⚠️ IT IS ADVISORY AND THE DATABASE ENFORCES NOTHING WITH IT. 0029's own
+   * comment on the column: *"False = retired: not offered when attaching a
+   * pattern to a node. ADVISORY, exactly as skills.active — nodes already
+   * attached keep resolving to it."* `resolve_shift_template` never reads it,
+   * `board_window` does not even emit it, and no policy or trigger mentions it.
+   * So retiring a pattern detaches nothing and changes no board: the ONLY thing
+   * that acts on this flag is the screen, which stops offering the pattern for
+   * new attachments. Anything that reads this column and then claims a place
+   * stopped running the pattern is claiming something the server never did.
+   */
+  active: boolean;
 }
 
 /** `shifts`. `endMin` may exceed 1440 — that is what a night shift IS. */
@@ -131,13 +160,21 @@ export interface ShiftNodeRow {
 
 export function parseShiftTemplateRow(v: unknown): ShiftTemplateRow | null {
   if (!isRecord(v)) return null;
-  const { id, name, site_node_id } = v;
+  const { id, name, site_node_id, active } = v;
   // ⭐ `isStr`, not `isStrOrNull`, since 0028: the column is NOT NULL, so a
   // null here means the row did not come from a database this client
   // understands. Reject it rather than coerce it — the panel already counts
   // and reports what it skipped.
   if (!isStr(id) || !isStr(name) || !isStr(site_node_id)) return null;
-  return { id, name, siteNodeId: site_node_id };
+  // ⭐ AND `active` IS CHECKED, NOT DEFAULTED. `?? true` here would be the
+  // guard failing open: a row that arrived without the column would render as
+  // "in use" — the safe-looking answer that is a positive claim about a pattern
+  // this client could not read. The column is `not null default true`, so its
+  // absence means the database is not the one this client was built for, and
+  // `patternRows` counts the rejection into `view.skipped` where somebody sees
+  // it.
+  if (!isBool(active)) return null;
+  return { id, name, siteNodeId: site_node_id, active };
 }
 
 export function parseShiftRow(v: unknown): ShiftRow | null {
@@ -213,7 +250,7 @@ export interface ShiftPatternsPayload {
  */
 export async function fetchShiftPatterns(): Promise<ShiftPatternsPayload> {
   const [templatesRes, shiftsRes, breaksRes, attachmentsRes, nodesRes] = await Promise.all([
-    supabase.from("shift_templates").select("id, name, site_node_id").order("name"),
+    supabase.from("shift_templates").select(SHIFT_TEMPLATE_COLUMNS).order("name"),
     supabase.from("shifts").select("id, template_id, name, start_min, end_min").order("start_min"),
     supabase
       .from("shift_breaks")
@@ -288,7 +325,7 @@ export async function createPattern(input: CreatePatternInput): Promise<ShiftTem
   const { data, error } = await supabase
     .from("shift_templates")
     .insert({ org_id: input.orgId, name: input.name, site_node_id: input.siteNodeId })
-    .select("id, name, site_node_id");
+    .select(SHIFT_TEMPLATE_COLUMNS);
   if (error) throw toSchedulerError(error);
   return writtenRow(data, parseShiftTemplateRow, "shift_templates.insert");
 }
@@ -323,16 +360,57 @@ export async function renamePattern(
     .from("shift_templates")
     .update(patch)
     .eq("id", templateId)
-    .select("id, name, site_node_id");
+    .select(SHIFT_TEMPLATE_COLUMNS);
   if (error) throw toSchedulerError(error);
   return writtenRow(data, parseShiftTemplateRow, "shift_templates.update");
 }
 
+export interface SetPatternActiveInput {
+  templateId: string;
+  active: boolean;
+}
+
 /**
- * ⚠️ THIS IS THE ONLY REMOVAL THERE IS. The maintainer's standing decision is that
- * deactivating is the main action wherever a thing has an on/off flag —
- * `shift_templates` has none, so there is nothing to deactivate and delete is
- * the whole of it.
+ * Retire a shift pattern, or bring a retired one back — `shift_templates.active`.
+ *
+ * ⭐⭐ THE MAIN ACTION, AND `deletePattern` BELOW IS THE SECONDARY ONE. The
+ * maintainer's standing decision is that deactivating comes first wherever a
+ * thing has an on/off flag; `shift_templates` gained one in migration 0029 and
+ * nothing on any screen could reach it, so until now a pattern could only be
+ * created and destroyed. Modelled on `setSkillActive` (operators.ts) rather
+ * than invented: same one-column update, same read-back, same vocabulary on the
+ * screen.
+ *
+ * ⚠️⚠️ WHAT IT DOES **NOT** DO IS THE HALF WORTH WRITING DOWN. Retiring is
+ * ADVISORY (see `ShiftTemplateRow.active`): it does not detach the pattern from
+ * anything, and every node already attached goes on resolving to it, because
+ * `resolve_shift_template` does not read the flag. A place stops running a
+ * retired pattern when somebody points that place somewhere else — `detachPattern`
+ * or `attachPattern` — and not one moment sooner. The panel says so on the row.
+ *
+ * ⭐ SAME `USING`-CLAUSE FILTER AS THE RENAME, so it ends the same three lines.
+ * `shift_templates`' UPDATE policy is `app_is_admin() or
+ * app_is_admin_for(site_node_id)` in `USING`, which FILTERS rather than raises:
+ * a site admin retiring another site's pattern gets `error === null` and zero
+ * rows, and without `requireWritten` that arrives on screen as "retired".
+ */
+export async function setPatternActive(input: SetPatternActiveInput): Promise<ShiftTemplateRow> {
+  const { data, error } = await supabase
+    .from("shift_templates")
+    .update({ active: input.active })
+    .eq("id", input.templateId)
+    .select(SHIFT_TEMPLATE_COLUMNS);
+  if (error) throw toSchedulerError(error);
+  return writtenRow(data, parseShiftTemplateRow, "shift_templates.setActive");
+}
+
+/**
+ * ⚠️ THE SECONDARY REMOVAL SINCE `setPatternActive` LANDED. It used to be the
+ * only one there was, and the comment here said so — *"`shift_templates` has
+ * none, so there is nothing to deactivate and delete is the whole of it"* —
+ * which stopped being true when migration 0029 added the column and stopped
+ * being an excuse when the control above reached it. Retiring is reversible and
+ * this is not; the panel offers both and puts Retire first.
  *
  * Its shifts and their breaks CASCADE (0005's `on delete cascade` on the
  * composite FK). Its ATTACHMENTS DO NOT: `node_shift_templates`' FK to

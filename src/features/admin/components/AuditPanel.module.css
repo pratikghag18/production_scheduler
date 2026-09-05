@@ -1,0 +1,319 @@
+/* Activity — the audit log (0007 / 0029 §6).
+
+   Sized in `rem`, not px (D84, design plan §19.16): the root font-size scales
+   with `--chrome-scale`, so the whole surface follows the viewport with nothing
+   to remember per-property. Hairline borders stay in px on purpose — a 1px rule
+   scaled up renders blurry, and `unscaledPxLengths` exempts a border/outline
+   width of <=2px and nothing else.
+
+   ⚠️ LISTED IN `REM_SURFACES` IN BOTH `src/test/scaleAudit.ts` AND its R10 copy
+   in `scaleAudit.test.ts` — a stylesheet in this directory that is not in both
+   is a test failure. Added there in the same change as this file.
+
+   ⚠️ NO FIELD SKIN HERE. `fieldStandard.test.ts` bans a hand-rolled editable box
+   outside `src/components/Field.module.css`, and `FIELD_LEGACY` may only ever
+   shrink. This screen writes nothing — one button and three filters that only
+   narrow what is already on it — and the filters wear `Field.module.css`'s
+   `.select` (R-318), exactly as `SettingsPanel`'s picker does. The classes below
+   give them LAYOUT and nothing else: no border, no radius, no background. A copy
+   of the skin here would be a build failure as well as a wrong look, and the
+   button is likewise deliberately not one.
+
+   NOTHING HERE IS A DRAG SURFACE: no `cursor: grab`, no `user-select: none`, no
+   `touch-action`. No `--ui-scale` either (that token is fitted board content
+   only).
+
+   The table scrolls INSIDE its own container rather than widening the page: a
+   change list can run long horizontally, and the page must never scroll
+   sideways. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.intro {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+.note {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.status {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+.error {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.875rem;
+  color: var(--crit);
+}
+
+.muted {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+   THE FILTER BAR — LAYOUT ONLY.
+
+   The controls themselves are `Field.module.css`'s `.select` (R-318). Nothing
+   here sets a border, a radius or a background, because that is the shared
+   module's job and a second copy of it is what `fieldStandard.test.ts` exists to
+   stop. `.filterSelect` caps the width so a long option ("Shift pattern") does
+   not stretch one picker away from its neighbours.
+   --------------------------------------------------------------------------- */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.filterLabel {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.filterSelect {
+  max-width: 13rem;
+}
+
+/* The table's own scroller — see the header. */
+.scroll {
+  overflow-x: auto;
+  border: 1px solid var(--grid);
+  border-radius: 0.375rem;
+  background: var(--surface);
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8125rem;
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--page);
+  border-bottom: 1px solid var(--axis);
+  padding: 0.4375rem 0.625rem;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   THE ACTION ACCENT.
+
+   The maintainer, on the Change column: *"I see a few rows which are crossed or
+   cut, we could have a red card border for the row to signify deletion, it will
+   be much visual."*
+
+   ⭐ A LEFT BAR, NOT A BORDER ROUND THE ROW. A full red box round a table row
+   reads as an ERROR — something wrong that wants attention — and a deletion is
+   an ordinary, intended event that merely wants finding. A bar on the left edge
+   can also be skimmed vertically down a long table, which is how somebody
+   actually looks for "when was that removed".
+
+   ⭐ ALL THREE ACTIONS, NOT DELETIONS ALONE. One system a reader learns beats
+   one exception they have to be told about, and it means the bar's WIDTH is
+   constant so no row is indented against its neighbours. Red is reserved for the
+   removal.
+
+   ⚠️⚠️ COLOUR NEVER CARRIES THE MEANING ALONE. The What column already says
+   "Product added" / "Operator changed" / "Run deleted", and it keeps saying it:
+   the accent is an addition, so the table still reads correctly to a colour-blind
+   reader and in a black-and-white print.
+
+   ⚠️ AMBER AND THE PRODUCT COLOURS ARE SPOKEN FOR. `--warn` means understaffed
+   or overridden everywhere else in this app, and `--product-N` is an identity
+   vocabulary rather than a status one; borrowing either here would make one
+   colour mean two things. An edit therefore takes the neutral `--ink-2` — it is
+   the ordinary case and the majority of rows, so a quiet mark is the right one.
+   --------------------------------------------------------------------------- */
+/* ⚠️ THE HEADER RESERVES THE SAME WIDTH AND SHOWS NOTHING. Without it the head
+   row has no left border, the body rows have three pixels of one, and "When"
+   sits visibly left of the timestamps under it — a column that looks misaligned
+   because of a signal it does not carry. */
+.headRow {
+  border-left: 0.1875rem solid transparent;
+}
+
+.row {
+  border-bottom: 1px solid var(--grid);
+  /* In `rem` (D84): a 3px bar is a real dimension, not a hairline, so it scales
+     with the root font-size like everything else on this surface. Declared on
+     every row so the accent is a COLOUR change and never a width change. */
+  border-left: 0.1875rem solid transparent;
+  vertical-align: top;
+}
+
+.row[data-action="insert"] {
+  border-left-color: var(--signal-ok);
+}
+
+.row[data-action="update"] {
+  border-left-color: var(--ink-2);
+}
+
+.row[data-action="delete"] {
+  border-left-color: var(--crit);
+}
+
+/* ⭐ THE STRIKETHROUGH COMES OFF A DELETION. `.from` means "this value was
+   REPLACED", which is true of an edit and false of a delete — where `after` is
+   null, so every field on the row renders as a struck-through `.from` at once
+   and the row reads as damaged rather than as removed. The row already says
+   "deleted"; the marks on top of that were redundant as well as alarming. The
+   value also comes back to full ink here, because on a deletion the old value is
+   not the discarded half of a pair — it is the whole of what was lost, and it is
+   the evidence somebody came to this screen for. */
+.row[data-action="delete"] .from {
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.when {
+  padding: 0.4375rem 0.625rem;
+  white-space: nowrap;
+  color: var(--ink-2);
+  /* Tabular figures so a column of timestamps lines up on the colon rather than
+     jittering row to row. */
+  font-variant-numeric: tabular-nums;
+}
+
+.who {
+  padding: 0.4375rem 0.625rem;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.what {
+  padding: 0.4375rem 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 11rem;
+}
+
+/* The kind and the verb — "Product added". The quieter of the two, because the
+   NAME is what a reader scans for. */
+.headline {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* What the thing is called, taken from the snapshot. The most important word on
+   the line, so it is the only one at full ink. */
+.subject {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Why a row is on screen under a plant it cannot be shown to belong to.
+ *
+ * ⭐ QUIET, AND STILL A WORD. It sits under the subject in muted ink at the
+ * small size the rest of the secondary text uses -- it must not compete with
+ * the change itself -- but it is TEXT, not a dot or a tint, so a colour-blind
+ * reader and a black-and-white print both get it. Same rule the action accent
+ * keeps: colour is never the only signal on this screen. */
+.unplaced {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.changes {
+  padding: 0.4375rem 0.625rem;
+  min-width: 16rem;
+}
+
+.changeList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3125rem;
+}
+
+.field {
+  color: var(--muted);
+}
+
+/* The old value is struck through as well as dimmed: colour alone is not a
+   distinction every reader can make, and "yes no" with no mark between them
+   reads as two current values rather than a before and an after. */
+.from {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.arrow {
+  color: var(--axis);
+}
+
+.to {
+  color: var(--ink);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.more {
+  font: inherit;
+  padding: 0.3125rem 0.75rem;
+  border: 1px solid var(--axis);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.more:hover:not(:disabled) {
+  background: var(--page);
+}
+
+.more:disabled {
+  cursor: default;
+  color: var(--muted);
+}

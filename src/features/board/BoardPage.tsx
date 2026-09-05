@@ -12,7 +12,7 @@ import { useRootPath } from "./hooks/useRootPath";
 import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
 import { useBoardViewStore } from "./store/boardView";
 import { useDragGesture } from "./hooks/useDragGesture";
-import { buildBoardIndex, type BoardIndex } from "./lib/boardIndex";
+import { buildBoardIndex, policyForNode, type BoardIndex } from "./lib/boardIndex";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
 import { splitFits } from "./lib/interaction";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
@@ -117,7 +117,22 @@ export default function BoardPage() {
   // R-309: the org-wide date format for the board's day labels. Same shared
   // React Query cache as the Settings screen, so a change there re-renders the
   // board without a board refetch. Gated on `canQuery` (D91).
-  const dateFormat = useDateFormat(canQuery);
+  /**
+   * ⚠️ THE BOARD SHOWS EXACTLY ONE PLANT, so it asks that plant for its format.
+   * It did not until F-090: the token was read company-wide, which was the only
+   * possible answer until settings became per-plant, and afterwards was simply
+   * the wrong one on every plant that had chosen otherwise.
+   *
+   * `rootPath` is a path and `useDateFormat` wants a node id, so the id comes
+   * off the root already loaded rather than from a second read. Null while the
+   * roots are still resolving, which falls back to the company answer — the
+   * board renders no dates before it knows where it is.
+   */
+  const rootNodeId = useMemo(
+    () => roots.find((r) => r.path === rootPath)?.id ?? null,
+    [roots, rootPath],
+  );
+  const dateFormat = useDateFormat(canQuery, rootNodeId);
   // ⚠️ AND NOT UNTIL WE KNOW WHERE. `rootPath` is null while the places read is
   // in flight and stays null for someone with no access to any of them; asking
   // `board_window` for `""` would be the old hardcoded constant with extra
@@ -186,6 +201,12 @@ export default function BoardPage() {
         // itself falls back to) so a not-yet-loaded board never behaves as
         // the stricter "block" policy by accident.
         eligibilityPolicy: "warn",
+        // R-331: EMPTY, not populated with the company's answer. An empty map
+        // is `policyForNode`'s "no per-node answers exist" state, in which it
+        // falls back to `eligibilityPolicy` above — which is exactly what a
+        // board with no data should do. A map with entries but a MISS is the
+        // other state, and that one fails safe to "block".
+        eligibilityPolicyByNode: new Map(),
         droppedRanges: 0,
         density,
       },
@@ -384,15 +405,22 @@ export default function BoardPage() {
     return <p>Loading session…</p>;
   }
 
-  if (!session) {
-    return (
-      <div className={styles.panel}>
-        <h1>Board</h1>
-        <p>Sign in with a dev profile to see schedule data.</p>
-        <DevProfileSwitcher />
-      </div>
-    );
-  }
+  // ⚠️ THERE IS NO `if (!session)` BRANCH HERE ANY MORE, AND ITS ABSENCE IS THE
+  // POINT. It used to render "Sign in with a dev profile to see schedule data"
+  // with a `DevProfileSwitcher` under it — the whole signed-out door, from
+  // before P1-6b gave the app a real one. `RequireAuth` now wraps every route
+  // below the shell and renders `<Outlet />` ONLY for `screen === "app"`, which
+  // is `!loading && hasSession && hasProfile`; a signed-out visitor is
+  // redirected to `/sign-in` and never mounts this component at all. So the
+  // branch could not be reached, and a second signed-out screen that disagreed
+  // with the real one was the failure waiting in it.
+  //
+  // ⭐ `sessionLoading` ABOVE IS NOT DEAD AND STAYS. `useSession` keeps its
+  // `session`/`loading` in per-instance `useState` (only `lastUserId` is at
+  // module scope), so this component mounts with `loading: true` and repeats
+  // the `getSession()` round trip `RequireAuth` has already made. That flash is
+  // real, it is the "five duplicated getSession() round trips" debt the queue
+  // records under `SessionProvider`, and it is not this change's to fix.
 
   // ⭐ NOWHERE TO OPEN IS A REAL STATE, NOT AN ERROR. An org member with no
   // grant on any node has no board — pinned server-side by 0027's case V8 —
@@ -534,6 +562,13 @@ export default function BoardPage() {
 
       <Toasts />
 
+      {/* ⭐ R-331: `eligibilityPolicy` below is THE RULE OF THE CELL THIS
+          POPOVER IS ON, not the company's. `board_window` resolves one answer
+          per node (migration 0051) because a supervisor cannot read the
+          override on their own plant's root and a browser-side walk would
+          therefore fall through to the company default and offer an override
+          tick on a plant set to refuse. An unknown node falls back to the
+          STRICT answer, never the permissive one — see `policyForNode`. */}
       {popover?.kind === "create" && (
         <CreatePopover
           nodeId={popover.nodeId}
@@ -546,7 +581,7 @@ export default function BoardPage() {
           windowStart={index?.windowStart ?? from}
           requiredSkills={index?.skillsForNode.get(popover.nodeId) ?? []}
           outsideAreaOperatorIds={outsideAreaOperatorIds}
-          eligibilityPolicy={index?.eligibilityPolicy ?? "warn"}
+          eligibilityPolicy={policyForNode(index, popover.nodeId)}
           presetOperatorId={popover.presetOperatorId}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}

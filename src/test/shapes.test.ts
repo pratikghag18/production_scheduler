@@ -101,6 +101,13 @@ const boardWindowJson: Json = {
       // whether somebody belonged at the cell being scheduled. REQUIRED now.
       site_node_id: "30000000-0000-0000-0000-000000000001",
       skill_ids: ["40000000-0000-0000-0000-000000000001"],
+      // F-087/0048: `board_window` emits this on EVERY operator (`[]` where
+      // nothing is dated) and `parseOperator` REQUIRES it, for the reason
+      // `site_node_ids` is required above: a payload without it comes from a
+      // database that cannot tell a live certificate from a lapsed one, and
+      // carrying on regardless would read "no dates sent" as "nothing has
+      // expired". `certificateExpiry.test.tsx` pins the shape.
+      skill_expiries: [],
     },
   ],
   products: [
@@ -161,6 +168,13 @@ const boardWindowJson: Json = {
       product_id: "60000000-0000-0000-0000-000000000001",
       seconds_per_unit: 90,
     },
+  ],
+  // R-331 / migration 0051: one RESOLVED answer per node. Two nodes, two
+  // different answers, because that is the shape a company-wide scalar cannot
+  // carry and the reason this key exists at all.
+  node_policies: [
+    { node_id: "30000000-0000-0000-0000-000000000007", eligibility_policy: "block" },
+    { node_id: "30000000-0000-0000-0000-000000000001", eligibility_policy: "warn" },
   ],
 };
 
@@ -653,6 +667,46 @@ describe("R-315: board_window hands over the standard cycle times", () => {
     const raw = JSON.parse(JSON.stringify(boardWindowJson)) as Record<string, unknown>;
     raw.cycle_times = [];
     expect(parseBoardWindow(raw as never)?.cycleTimes).toEqual([]);
+  });
+});
+
+describe("R-331: board_window hands over the policy RESOLVED FOR EACH NODE", () => {
+  it("parses node_policies to camelCase, one entry per node", () => {
+    expect(parseBoardWindow(boardWindowJson)?.nodePolicies).toEqual([
+      { nodeId: "30000000-0000-0000-0000-000000000007", eligibilityPolicy: "block" },
+      { nodeId: "30000000-0000-0000-0000-000000000001", eligibilityPolicy: "warn" },
+    ]);
+  });
+
+  it("rejects a payload with no node_policies key at all", () => {
+    // Same stance as cycle_times, with more behind it: this key — and NOT
+    // org.settings — decides whether the popover offers an override tick. A
+    // payload without it that parsed anyway would put the whole board back on
+    // one company-wide answer and look like it was working.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as Record<string, unknown>;
+    delete raw.node_policies;
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("rejects an entry missing its node_id", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      node_policies: Record<string, unknown>[];
+    };
+    delete raw.node_policies[0]!.node_id;
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("keeps an unrecognised policy string rather than failing the whole board", () => {
+    // ⚠️ The narrowing to warn/block belongs to boardIndex, not here. A future
+    // migration adding a third value must not stop the board LOADING; it must
+    // land as an unknown node in the index, where `policyForNode` fails SAFE.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      node_policies: Record<string, unknown>[];
+    };
+    raw.node_policies[0]!.eligibility_policy = "refuse-politely";
+    expect(parseBoardWindow(raw as never)?.nodePolicies[0]?.eligibilityPolicy).toBe(
+      "refuse-politely",
+    );
   });
 });
 

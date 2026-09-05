@@ -34,7 +34,6 @@ import {
   deleteSkill,
   fetchOperatorsAdmin,
   grantSkill,
-  renameSkill,
   setSkillActive,
   type SetSkillActiveInput,
   setSkillDocumentNumber,
@@ -121,14 +120,6 @@ export function useCreateSkill() {
   const invalidate = useInvalidateOperators();
   return useMutation<SkillRecord, SchedulerError, CreateSkillInput>({
     mutationFn: (input) => createSkill(input),
-    onSuccess: invalidate,
-  });
-}
-
-export function useRenameSkill() {
-  const invalidate = useInvalidateOperators();
-  return useMutation<SkillRecord, SchedulerError, { id: string; name: string }>({
-    mutationFn: (input) => renameSkill(input),
     onSuccess: invalidate,
   });
 }
