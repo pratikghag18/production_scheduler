@@ -2557,6 +2557,37 @@ requirements:
       27 cases including a filtered-empty list that is not called an empty log, the unfinished-search
       sentence, the self-read bound, and the address actually rendering
   status: covered
+- id: R-331
+  title: A setting is answered for a plant, not only for the company
+  source:
+  - session 62 conversation
+  stated_by: maintainer
+  claim: >-
+    *"These settings I think cannot be applied plant wise which defeats the purpose of both options.
+    Lets make it possible to assign settings individually for each plant."* A schedulable rule is
+    resolved for the NODE it is being applied to — the nearest ancestor that has an answer, falling back
+    to the company's — rather than read once from `orgs.settings`. `eligibility_policy` is the first,
+    because a company running one strict plant and one permissive one currently cannot say so and the
+    warn/block choice is therefore company-wide or nothing. ⚠️ Every server-side reader must resolve the
+    same way: `check_eligibility`, `create_assignment`, `move_run`, `apply_split_coverage` and their
+    0043/0044 successors all read `orgs.settings->>'eligibility_policy'` today, and one left behind is a
+    plant whose rule is enforced on some paths and not others.
+  verified_by: []
+  status: uncovered
+- id: R-332
+  title: Every setting's control lines up with every other setting's
+  source:
+  - session 62 conversation
+  stated_by: maintainer
+  claim: >-
+    *"in the settings tab, the drop down options are not aligned in different options. It does not look
+    professional."* A settings row is laid out by ONE shared definition, so every control starts and
+    ends on the same edge whatever its longest option happens to say. ⚠️ The cause was structural, as
+    R-318's was: the row is a flex box whose control column is `flex: 0 0 auto`, so each picker is sized
+    by its own content and two rows can only align by coincidence. R-318 made the BOX one definition;
+    this makes the ROW one.
+  verified_by: []
+  status: uncovered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
   source:
