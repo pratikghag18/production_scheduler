@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * THE ACTIVITY SCREEN — every change is recorded and, until now, nothing showed
  * it.
@@ -29,10 +30,14 @@
  * a row says; this owns what the SCREEN does with a page of them.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import * as fs from "node:fs";
 import type { ReactNode } from "react";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AuditPanel } from "@/features/admin/components/AuditPanel";
+import { AUDIT_AUTO_SCAN_PAGES, AuditPanel } from "@/features/admin/components/AuditPanel";
+
+/** The stylesheet two of the cases below read as text — jsdom applies no CSS. */
+const PANEL_CSS = "src/features/admin/components/AuditPanel.module.css";
 
 const ADMIN_USER = "00000000-0000-0000-0000-0000000000a1";
 const OTHER_USER = "00000000-0000-0000-0000-0000000000b2";
@@ -61,9 +66,19 @@ vi.mock("@/features/auth/useSession", () => ({
   }),
 }));
 
+// ⚠️ FOUR READS NOW, AND THE THREE NAME LOOKUPS ARE STUBBED EMPTY ON PURPOSE.
+// The panel decorates ids with names from `nodes` / `operators` / `products`,
+// and every one of those is allowed to be absent — `auditView` renders an
+// honest "Unknown place · 000007" rather than a name it does not have. Resolving
+// them here would hide that path from every case in this file; the cases that
+// care about names supply their own map. What must NOT be empty is the actor
+// read, because the Who column is what these cases are largely about.
 vi.mock("@/lib/api", () => ({
   fetchAuditPage: (...args: unknown[]) => h.fetchPage(...args),
-  fetchAuditActors: (...args: unknown[]) => h.fetchActors(...args),
+  fetchActorIdentities: (...args: unknown[]) => h.fetchActors(...args),
+  fetchHierarchyTree: () => Promise.resolve({ nodes: [], levels: [], templates: [] }),
+  fetchOperatorsAdmin: () => Promise.resolve({ operators: [], skills: [] }),
+  fetchAdminProducts: () => Promise.resolve([]),
   describeSchedulerError: (e: unknown) => String(e),
 }));
 
@@ -106,7 +121,12 @@ beforeEach(() => {
   h.fetchPage.mockReset();
   h.fetchActors.mockReset();
   h.fetchPage.mockResolvedValue({ entries: [entry()], hasMore: false });
-  h.fetchActors.mockResolvedValue(new Map([[ADMIN_USER, "admin"]]));
+  // `audit_actor_identities()` (0046) returns an object per actor, not a role
+  // string — the shape that lets a `display_name` be added later without
+  // touching a caller.
+  h.fetchActors.mockResolvedValue(
+    new Map([[ADMIN_USER, { role: "admin", email: "admin@example.test" }]]),
+  );
 });
 
 describe("the screen answers what changed, when, and who did it", () => {
@@ -137,9 +157,25 @@ describe("the screen answers what changed, when, and who did it", () => {
     expect(await screen.findByText("You")).toBeTruthy();
   });
 
+  it("⭐ names somebody else by their ADDRESS when the server could supply one", async () => {
+    // The maintainer's actual complaint about the first version: *"the who needs
+    // to show a user, it is currently not that helpful."* Migration 0046 made
+    // this answerable; this is the case that says the screen uses the answer.
+    h.fetchPage.mockResolvedValue({ entries: [entry({ actorId: OTHER_USER })], hasMore: false });
+    h.fetchActors.mockResolvedValue(
+      new Map([[OTHER_USER, { role: "supervisor", email: "marco@example.test" }]]),
+    );
+    show();
+    await screen.findByText("Product added");
+    expect(screen.getByText("marco@example.test")).toBeTruthy();
+    // and the role-and-tail fallback is GONE, not merely joined by the address —
+    // two answers to "who" in one cell is the thing this replaced.
+    expect(screen.getByRole("table").textContent).not.toContain("Supervisor");
+  });
+
   it("names somebody else by role, and never as the reader", async () => {
     h.fetchPage.mockResolvedValue({ entries: [entry({ actorId: OTHER_USER })], hasMore: false });
-    h.fetchActors.mockResolvedValue(new Map([[OTHER_USER, "supervisor"]]));
+    h.fetchActors.mockResolvedValue(new Map([[OTHER_USER, { role: "supervisor", email: null }]]));
     show();
     await screen.findByText("Product added");
     expect(screen.getByRole("table").textContent).toContain("Supervisor");
@@ -299,5 +335,239 @@ describe("the screen says which columns it does not list", () => {
     const note = screen.getByText(/updated_at/);
     expect(within(note).queryByText("nothing")).toBe(null);
     expect(note.textContent).toContain("org_id");
+  });
+});
+
+/* ===========================================================================
+ * NARROWING THE LOG — AND THE ONE WAY A FILTER CAN LIE.
+ *
+ * ⭐⭐ THE LIST IS KEYSET-PAGED, SO A FILTER APPLIED TO A PAGE IS NOT A FILTER
+ * ON THE LOG. `fetchAuditPage` returns fifty ROWS, not fifty MATCHES. A reader
+ * who picks "removals, last 7 days" and is shown whatever removals happen to sit
+ * in the newest fifty rows — under a footer that counts them as if that were the
+ * answer — has been told something false about their own history, and told it in
+ * the one screen whose entire job is to be trustworthy about the past.
+ *
+ * So the screen distinguishes TWO facts it must never confuse:
+ *   - how many rows it has READ from the log (the scan), and
+ *   - how many of those MATCH the filter.
+ * and it may only ever use the word "all" once it can prove the scan covered
+ * every row the filter could have matched.
+ *
+ * ⚠️ THE PROOF IS THE ORDERING. The log is read newest-first on `id`, and every
+ * period offered is anchored at NOW — "last 24 hours", "last 7 days", "last 30
+ * days". Rows inside such a period are therefore a PREFIX of the scan: the
+ * moment the scan reaches a row older than the cutoff, every matching row has
+ * already been read, and the screen can say "all". A period that did NOT end at
+ * now (say "August") would sit in the middle of the log and could not be
+ * completed without reading everything newer, which is why none is offered.
+ *
+ * ⚠️ "ALL TIME" HAS NO CUTOFF, so under a filter it is complete only when the
+ * whole log has been read. Until then the footer says what it actually searched.
+ * ======================================================================== */
+function agoIso(hours: number): string {
+  return new Date(Date.now() - hours * 3600_000).toISOString();
+}
+
+describe("the reader can narrow the log", () => {
+  it("offers a time period and a kind-of-change filter", async () => {
+    show();
+    await screen.findByText("Product added");
+    expect(screen.getByLabelText(/time period/i)).toBeTruthy();
+    expect(screen.getByLabelText(/kind of change/i)).toBeTruthy();
+  });
+
+  it("hides changes outside the chosen time period", async () => {
+    h.fetchPage.mockResolvedValue({
+      entries: [
+        entry({ id: 300, at: agoIso(2) }),
+        entry({ id: 200, at: agoIso(24 * 40), tableName: "runs", action: "delete" }),
+      ],
+      hasMore: false,
+    });
+    show();
+    await screen.findByText("Product added");
+    expect(screen.getByText("Run deleted")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "7d" } });
+    expect(screen.queryByText("Run deleted")).toBe(null);
+    expect(screen.getByText("Product added")).toBeTruthy();
+  });
+
+  it("hides changes that are not the chosen kind of change", async () => {
+    h.fetchPage.mockResolvedValue({
+      entries: [
+        entry({ id: 300, at: agoIso(2) }),
+        entry({ id: 200, at: agoIso(3), tableName: "runs", action: "delete" }),
+      ],
+      hasMore: false,
+    });
+    show();
+    await screen.findByText("Product added");
+    fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
+    expect(screen.getByText("Run deleted")).toBeTruthy();
+    expect(screen.queryByText("Product added")).toBe(null);
+  });
+
+  /** A filter that empties the view has not emptied the company's history. */
+  it("does not call a filtered-empty list an empty log", async () => {
+    h.fetchPage.mockResolvedValue({ entries: [entry({ at: agoIso(2) })], hasMore: false });
+    show();
+    await screen.findByText("Product added");
+    fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
+    expect(screen.queryByText("Product added")).toBe(null);
+    expect(screen.queryByText(/nothing has been changed yet/i)).toBe(null);
+  });
+});
+
+describe("a filter never claims to have searched more of the log than it has", () => {
+  /**
+   * ⚠️⚠️ THE FAILURE THIS PINS. All time + "removals", one page read, more rows
+   * behind it, no removal in the page. The tempting screen says "no removals" —
+   * a statement about the whole company drawn from fifty rows. It must instead
+   * say what it searched, and keep the control that searches further.
+   */
+  it("says what it searched rather than answering, when older rows are unread", async () => {
+    h.fetchPage.mockResolvedValue({ entries: [entry({ at: agoIso(2) })], hasMore: true });
+    show();
+    await screen.findByText("Product added");
+    fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
+    const page = document.body.textContent ?? "";
+    expect(/have not been searched/i.test(page)).toBe(true);
+    // Never the words that would make it an answer about the whole log.
+    expect(/whole log/i.test(page)).toBe(false);
+    expect(screen.getByRole("button", { name: /older/i })).toBeTruthy();
+  });
+
+  /**
+   * The other half, and the reason a period is worth having: a period anchored
+   * at now IS completable against a newest-first scan. The screen reads on by
+   * itself until it passes the cutoff, and only then uses the word "all".
+   */
+  it("reads on until the chosen period is passed, then says the period is complete", async () => {
+    h.fetchPage.mockResolvedValueOnce({
+      entries: [entry({ id: 300, at: agoIso(2) })],
+      hasMore: true,
+    });
+    h.fetchPage.mockResolvedValueOnce({
+      entries: [entry({ id: 200, at: agoIso(24 * 40), tableName: "runs", action: "delete" })],
+      hasMore: true,
+    });
+    h.fetchPage.mockResolvedValue({ entries: [], hasMore: false });
+    show();
+    await screen.findByText("Product added");
+    fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "7d" } });
+    await waitFor(() => expect(h.fetchPage).toHaveBeenCalledWith(300));
+    await waitFor(() =>
+      expect(
+        /whole of the last 7 days has been searched/i.test(document.body.textContent ?? ""),
+      ).toBe(true),
+    );
+    // The row outside the period is not shown, and the one inside it is.
+    expect(screen.queryByText("Run deleted")).toBe(null);
+    expect(screen.getByText("Product added")).toBeTruthy();
+  });
+
+  /** The self-reading is bounded. An unbounded one is a screen that hammers the
+   *  database on a busy company; a bounded one that says so is honest. */
+  it("stops reading on by itself after a bounded number of pages, and says so", async () => {
+    h.fetchPage.mockResolvedValue({ entries: [entry({ at: agoIso(1) })], hasMore: true });
+    show();
+    await screen.findByText("Product added");
+    fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "7d" } });
+    await waitFor(() => expect(h.fetchPage.mock.calls.length).toBe(AUDIT_AUTO_SCAN_PAGES));
+    expect(/have not been searched/i.test(document.body.textContent ?? "")).toBe(true);
+  });
+});
+
+/* ===========================================================================
+ * A DELETION AT A GLANCE.
+ *
+ * The maintainer, on the Change column: *"I see a few rows which are crossed or
+ * cut, we could have a red card border for the row to signify deletion."* The
+ * crossing-out is how a REPLACED value reads (`Active: yes -> no`); on a DELETE
+ * every field is struck at once, which reads as damage rather than as a removal.
+ *
+ * ⚠️ COLOUR NEVER CARRIES THE MEANING ALONE. The accent is an addition to the
+ * word already in the What column ("Run deleted"), not a replacement for it, so
+ * the row survives a colour-blind reader and a black-and-white print. All three
+ * actions get one, so a reader learns one system rather than one exception.
+ * ======================================================================== */
+describe("a deletion is visible at a glance", () => {
+  it("marks every row with the action it records", async () => {
+    h.fetchPage.mockResolvedValue({
+      entries: [
+        entry({ id: 300 }),
+        entry({ id: 250, action: "update", before: { name: "a" }, after: { name: "b" } }),
+        entry({
+          id: 200,
+          tableName: "runs",
+          action: "delete",
+          before: { notes: "x" },
+          after: null,
+        }),
+      ],
+      hasMore: false,
+    });
+    show();
+    await screen.findByText("Run deleted");
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows.map((r) => r.getAttribute("data-action"))).toEqual(["insert", "update", "delete"]);
+  });
+
+  it("keeps the word beside the accent, so colour is never the only signal", async () => {
+    h.fetchPage.mockResolvedValue({
+      entries: [
+        entry({
+          id: 200,
+          tableName: "runs",
+          action: "delete",
+          before: { notes: "x" },
+          after: null,
+        }),
+      ],
+      hasMore: false,
+    });
+    show();
+    const row = (await screen.findByText("Run deleted")).closest("tr");
+    expect(row?.getAttribute("data-action")).toBe("delete");
+    expect(row?.textContent).toContain("deleted");
+  });
+
+  /* The two rules below are properties of the STYLESHEET, and jsdom applies no
+     CSS (`css: false` in vitest.config.ts), so they are read from the file the
+     way `scaleAudit` and `fieldStandard` read theirs. A rule nothing asserts is
+     a rule that gets deleted in a tidy-up. */
+  it("reserves red for a removal and gives each action its own accent", () => {
+    const clean = fs
+      .readFileSync(`${process.cwd()}/${PANEL_CSS}`, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    const rules = new Map<string, string>();
+    for (const m of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      rules.set(m[1].trim().replace(/\s+/g, " "), m[2]);
+    }
+    for (const action of ["insert", "update", "delete"]) {
+      const sel = `.row[data-action="${action}"]`;
+      const body = rules.get(sel);
+      expect(body, `${sel} must set its own accent colour`).toBeTruthy();
+      expect(/border-left-color\s*:/.test(body ?? "")).toBe(true);
+    }
+    expect(rules.get('.row[data-action="delete"]')).toContain("--crit");
+    expect(rules.get('.row[data-action="insert"]')).not.toContain("--crit");
+    expect(rules.get('.row[data-action="update"]')).not.toContain("--crit");
+    // Every row gets a bar, so the accent is a signal and not a width change.
+    expect(/\.row\s*\{[^}]*border-left:/.test(clean)).toBe(true);
+  });
+
+  it("does not strike through the fields of a deleted row", () => {
+    const clean = fs
+      .readFileSync(`${process.cwd()}/${PANEL_CSS}`, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    // The strikethrough stays where it is doing real work — the replaced side of
+    // an edit — and is switched off inside a delete, where every field would
+    // carry it and none of them is a replacement.
+    expect(/\.from\s*\{[^}]*text-decoration:\s*line-through/.test(clean)).toBe(true);
+    const off = /\.row\[data-action="delete"\]\s+\.from\s*\{([^}]*)\}/.exec(clean);
+    expect(off, "a delete row must switch the strikethrough off").toBeTruthy();
+    expect(/text-decoration:\s*none/.test(off?.[1] ?? "")).toBe(true);
   });
 });

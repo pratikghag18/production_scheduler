@@ -1150,6 +1150,14 @@ export type Database = {
         Args: { p_adjustments: Json; p_new_assignment: Json }
         Returns: Json
       }
+      audit_actor_identities: {
+        Args: never
+        Returns: {
+          email: string
+          role: string
+          user_id: string
+        }[]
+      }
       audit_current_actor: { Args: never; Returns: string }
       board_window: {
         Args: { p_from: string; p_root_path: unknown; p_to: string }

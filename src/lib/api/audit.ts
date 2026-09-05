@@ -176,35 +176,135 @@ export async function fetchAuditPage(beforeId: number | null = null): Promise<Au
   return { entries, hasMore };
 }
 
-/**
- * `auth.uid()` -> org-wide role, for every account in the caller's company.
- *
- * ⚠️⚠️ THIS IS AS FAR AS THE CLIENT CAN GET TOWARDS "WHO", AND THE LIMIT IS THE
- * DATABASE'S. `user_profiles` carries `id, org_id, user_id, role,
- * default_create_mode, created_at, updated_at` — **no name and no address.** The
- * email lives in `auth.users`, which PostgREST does not expose; the one function
- * that reaches it (`site_people`, 0021) is keyed by a NODE and returns a PROFILE
- * id rather than a user id, so it cannot answer "who is `auth.uid()` X" even
- * indirectly. Naming actors properly needs a new SECURITY DEFINER function —
- * flagged to the maintainer, not invented here.
- *
- * ⚠️ THE POLICY MATCHES THE AUDIENCE EXACTLY. `user_profiles_select` is
- * `user_id = auth.uid() OR (app_is_admin() AND org_id = app_current_org())`, so
- * the company admin who can read the audit log can read every profile in it, and
- * nobody else gains anything from this call.
- *
- * ⚠️ THE CALLER MUST TREAT A FAILURE AS COSMETIC. This decorates the actor
- * column; the CHANGES are the screen. `AuditPanel` keeps it in its own query for
- * that reason — see the case that renders the list with this read rejected.
+/*
+ * ⚠️ `fetchAuditActors()` USED TO SIT HERE AND IS GONE. It read
+ * `user_profiles(user_id, role)` and returned one role per account -- the
+ * whole of what the Who column could say before migration 0046, which is why
+ * it said "Supervisor · 0000a2" at a reader who wanted a person.
+ * `fetchActorIdentities()` below returns that same role AND the address, so
+ * this was strictly the poorer half of one read. Removed in the same commit
+ * as the screen moved across, rather than left behind as the narrower of two
+ * functions that look interchangeable -- which is the trap `renameSkill` had
+ * been sitting in until earlier today.
  */
-export async function fetchAuditActors(): Promise<Map<string, string>> {
-  const { data, error } = await supabase.from("user_profiles").select("user_id, role");
-  if (error) throw toSchedulerError(error);
-  const out = new Map<string, string>();
-  for (const row of data ?? []) {
-    if (typeof row.user_id === "string" && typeof row.role === "string") {
-      out.set(row.user_id, row.role);
-    }
+
+/* ===========================================================================
+ * WHO, PROPERLY — `audit_actor_identities()` (migration 0046, R-329).
+ *
+ * ⭐ THE DECISION IT SERVES: *"the who needs to show a user, it is currently not
+ * that helpful."* Before this the screen could render `You`, `System`, or
+ * `Supervisor · 0000b2` — a role and six characters of a uuid — because
+ * `user_profiles` carries `id, org_id, user_id, role, default_create_mode,
+ * created_at, updated_at` and **no name and no address**.
+ *
+ * ⚠️ THE IDENTITY IS AN EMAIL BECAUSE IT IS THE ONLY ONE THAT EXISTS. There is
+ * nowhere in this schema to put a person's name; that is a schema question,
+ * raised with the maintainer separately and deliberately not invented here. The
+ * address lives in `auth.users`, which PostgREST does not expose, so this is an
+ * RPC and could not have been anything else.
+ *
+ * ⛔⛔ IT IS A NARROWER DOOR THAN IT LOOKS, AND THAT IS THE WHOLE DESIGN. 0046
+ * is gated on `app_is_admin() AND org_id = app_current_org()` — the SAME
+ * predicate as `audit_log_select`, so it can name exactly the people whose
+ * changes the caller can already read and nobody else. A SITE admin (org-wide
+ * `viewer` plus an admin GRANT) fails `app_is_admin()` and is REFUSED with
+ * `not_permitted` rather than handed an empty list: a refusal that reads as
+ * "nobody works here" would be indistinguishable from a broken call.
+ * `69_actor_identities_test.sql` proves the gate from outside.
+ *
+ * ⭐ SO THE MAP HOLDS AN OBJECT, NOT A STRING, and that is the one thing in this
+ * file worth defending. The identity that is coming is a real name; when a
+ * `display_name` column lands it becomes one more expression in 0046 and one
+ * more optional field on `ActorIdentity`, with no change to this function's
+ * signature, no change to the Map it returns, and no change to any caller that
+ * already reads `.email`. A `Map<string, string>` of addresses would have to be
+ * rewritten everywhere on that day.
+ * ======================================================================== */
+
+/**
+ * What the app knows about one account.
+ *
+ * ⚠️ `email` IS NULLABLE AND `database.types.ts` DISAGREES. The generated type
+ * says `email: string`, because `supabase gen types` cannot tell that a column
+ * of a `RETURNS TABLE` may come back NULL. `auth.users.email` has no NOT NULL
+ * constraint — a phone-only signup carries none — and 0046 lists such a person
+ * anyway rather than shrinking the company. So the declaration here is the
+ * honest one, `parseActorIdentity` is what makes it true, and `tsc` is no help
+ * on either.
+ */
+export interface ActorIdentity {
+  /** The org-wide role from `user_profiles`, the screen's fallback label. */
+  role: string;
+  /** `auth.users.email`, or null when the account has no address. */
+  email: string | null;
+}
+
+/**
+ * The columns `audit_actor_identities()` returns, in one place so they cannot
+ * drift from the guard below — the same discipline, and the same reason, as
+ * `AUDIT_COLUMNS`. Exported for `apiAuditShape.test.ts`.
+ *
+ * ⚠️ It is NOT passed to `.select()`; an RPC has no column list to send. It is
+ * a written-down copy of migration 0046's `returns table (...)`, and a
+ * `display_name` added there is added here in the same commit.
+ */
+export const ACTOR_IDENTITY_COLUMNS = "user_id, role, email";
+
+/**
+ * One raw row in, an `ActorIdentity` or `null` out — the guard.
+ *
+ * `role` is required: it is NOT NULL server-side and it is the label the screen
+ * falls back to, so a row without one has nothing left to say. `email` is
+ * NORMALISED rather than required — null, undefined and anything that is not a
+ * string all become `null`, which is the one value every caller has to handle
+ * anyway.
+ */
+export function parseActorIdentity(row: unknown): ActorIdentity | null {
+  if (!isRecord(row)) return null;
+  const { role, email } = row;
+  if (typeof role !== "string") return null;
+  return { role, email: typeof email === "string" ? email : null };
+}
+
+/**
+ * Rows -> `auth.uid()` -> identity.
+ *
+ * ⚠️ KEYED ON `user_id`, NOT ON THE PROFILE ID. `audit_log.actor_id` is
+ * `auth.uid()`; `user_profiles.id` is a different uuid entirely, and a map keyed
+ * on it would never match a single row while looking perfectly healthy.
+ *
+ * ⚠️ A ROW IT CANNOT READ COSTS ONE NAME, NOT THE LIST — `fetchAuditPage`'s own
+ * rule. This read decorates a column; the CHANGES are the screen. A non-list
+ * payload yields an empty map for the same reason.
+ */
+export function actorIdentityMap(rows: unknown): Map<string, ActorIdentity> {
+  const out = new Map<string, ActorIdentity>();
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const { user_id } = row;
+    if (typeof user_id !== "string") continue;
+    const identity = parseActorIdentity(row);
+    if (identity !== null) out.set(user_id, identity);
   }
   return out;
+}
+
+/**
+ * Every account in the caller's company, by `auth.uid()`.
+ *
+ * Raises (via `toSchedulerError`): `not_permitted` when the caller is not a
+ * COMPANY admin — see the block above for why that is a refusal and not an
+ * empty map.
+ *
+ * ⚠️ THE CALLER MUST TREAT A FAILURE AS COSMETIC, as must the three name
+ * lookups beside it: keep each in its own query, and render the list with names
+ * missing rather than not at all. The CHANGES are the screen, and a log that
+ * refused to draw because an address lookup returned 401 would be the worse
+ * answer by a distance.
+ */
+export async function fetchActorIdentities(): Promise<Map<string, ActorIdentity>> {
+  const { data, error } = await supabase.rpc("audit_actor_identities");
+  if (error) throw toSchedulerError(error);
+  return actorIdentityMap(data);
 }

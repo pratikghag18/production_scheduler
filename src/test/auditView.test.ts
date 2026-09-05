@@ -404,3 +404,277 @@ describe("a snapshot that is not an object does not take the screen down", () =>
     expect(line.subject).toContain("r1");
   });
 });
+
+/* ---------------------------------------------------------------------------
+   ⭐⭐ THE CHANGE COLUMN SHOWS NAMES, NOT IDS
+
+   The maintainer, 4 Sept: *"We should show the names in the change column, IDs
+   are not fun when trying to troubleshoot something."* A real assignment row out
+   of the running database renders
+   `Operator: 50000000-0000-0000-0000-000000000004` today, which answers nothing.
+
+   ⚠️⚠️ AND THE DENORMALISED COLUMNS DO NOT SAVE US. `product_name`,
+   `product_sku` and `operator_display_name` exist on `runs` and `assignments`
+   but are NULL on every live row — 0029 fills them in on the DELETE path only.
+   So "the snapshot already carries the name" is true exactly when the row is
+   gone, and a lookup is needed for every other row.
+   ------------------------------------------------------------------------ */
+
+const NODES = new Map([["30000000-0000-0000-0000-000000000007", "Line 1"]]);
+const OPERATORS = new Map([["50000000-0000-0000-0000-000000000004", "Maria"]]);
+const PRODUCTS = new Map([["60000000-0000-0000-0000-000000000001", "Widget X"]]);
+
+/** The real assignment snapshot quoted above, trimmed to what matters. */
+function assignment(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "90000000-0000-0000-0000-000000000007",
+    run_id: "80000000-0000-0000-0000-000000000005",
+    node_id: "30000000-0000-0000-0000-000000000007",
+    operator_id: "50000000-0000-0000-0000-000000000004",
+    product_id: null,
+    product_name: null,
+    product_sku: null,
+    operator_display_name: null,
+    ...over,
+  };
+}
+
+function after(line: { changes: { field: string; after: string | null }[] }, field: string) {
+  return line.changes.find((c) => c.field === field)?.after ?? null;
+}
+
+describe("an identity column renders the name of the thing it points at", () => {
+  const entry = {
+    action: "insert" as const,
+    tableName: "assignments",
+    rowId: "90000000-0000-0000-0000-000000000007",
+    before: null,
+    after: assignment(),
+  };
+
+  it("names the person and the place from the supplied lookups", () => {
+    const line = describeEntry(entry, FMT, {
+      nodes: NODES,
+      operators: OPERATORS,
+      products: PRODUCTS,
+    });
+    expect(after(line, "operator_id")).toBe("Maria");
+    expect(after(line, "node_id")).toBe("Line 1");
+  });
+
+  it("labels the column by the thing, not by the id it used to show", () => {
+    const line = describeEntry(entry, FMT, { operators: OPERATORS });
+    expect(line.changes.find((c) => c.field === "operator_id")?.label).toBe("Operator");
+    expect(fieldLabel("product_id")).toBe("Product");
+    expect(fieldLabel("run_id")).toBe("Run");
+    // Already right, and must stay: the app calls a node a place.
+    expect(fieldLabel("node_id")).toBe("Place");
+  });
+
+  /**
+   * ⚠️⚠️ AN UNRESOLVED ID MUST NOT LOOK RESOLVED. A blank, or a bare
+   * name-shaped placeholder, would tell a reader troubleshooting that the row
+   * points at nothing. `describeActor` already set the pattern for "I cannot
+   * name this": a word saying so, then a distinguishing tail of the id, so the
+   * reader can still search for it.
+   */
+  it("says it could not name an id, and keeps the id searchable", () => {
+    const line = describeEntry(entry, FMT, { nodes: new Map(), operators: new Map() });
+    const shown = after(line, "operator_id") ?? "";
+    expect(shown).toContain("Unknown");
+    expect(shown).toContain("000004");
+    expect(shown).not.toBe("Maria");
+  });
+
+  /**
+   * ⚠️⚠️ A RUN HAS NO NAME AT ALL. `runs` is `id, org_id, node_id, product_id,
+   * timerange, planned_headcount, notes, created_by, …` — there is no `name`
+   * column and never was. Calling an unmapped run "Unknown" would report a
+   * failed lookup where there is nothing to look up; the honest line names the
+   * KIND and shows the tail.
+   */
+  it("identifies a run rather than pretending to have failed to name one", () => {
+    const line = describeEntry(entry, FMT, { operators: OPERATORS });
+    const shown = after(line, "run_id") ?? "";
+    expect(shown).not.toContain("Unknown");
+    expect(shown).toContain("Run");
+    expect(shown).toContain("000005");
+  });
+
+  /**
+   * An operator snapshot carries TWO more node ids — `home_node_id` and
+   * `site_node_id` — and they are exactly the columns a reader checking a
+   * transfer is looking at. A kind is earned by being named, not guessed from
+   * the `_id` suffix, so these have to be listed as node columns explicitly.
+   */
+  it("names the other node columns an operator row carries", () => {
+    const line = describeEntry(
+      {
+        action: "insert",
+        tableName: "operators",
+        rowId: "50000000-0000-0000-0000-000000000001",
+        before: null,
+        after: {
+          display_name: "Maria",
+          home_node_id: "30000000-0000-0000-0000-000000000007",
+          site_node_id: "30000000-0000-0000-0000-00000000000c",
+        },
+      },
+      FMT,
+      { nodes: NODES },
+    );
+    expect(after(line, "home_node_id")).toBe("Line 1");
+    expect(after(line, "site_node_id")).toContain("Unknown place");
+  });
+
+  it("uses a caption for a run when the caller has built one", () => {
+    const runs = new Map([["80000000-0000-0000-0000-000000000005", "Widget X on Line 1"]]);
+    expect(after(describeEntry(entry, FMT, { runs }), "run_id")).toBe("Widget X on Line 1");
+  });
+});
+
+describe("the snapshot's own name beats a live lookup", () => {
+  /**
+   * ⭐ THE SAME RULE THE SUBJECT ALREADY FOLLOWS. `NAME_FIELDS` names the row
+   * out of `before`/`after` and never out of a join, because for a DELETE the
+   * row is gone and after a RENAME the current name is not what happened. A
+   * field pointing AT another row is the same problem one step out.
+   */
+  it("names a deleted product as it was called, not as the lookup says today", () => {
+    const line = describeEntry(
+      {
+        action: "delete",
+        tableName: "assignments",
+        rowId: "90000000-0000-0000-0000-000000000007",
+        before: assignment({
+          product_id: "60000000-0000-0000-0000-000000000001",
+          product_name: "Widget X (old name)",
+        }),
+        after: null,
+      },
+      FMT,
+      { products: PRODUCTS, operators: OPERATORS },
+    );
+    expect(line.changes.find((c) => c.field === "product_id")?.before).toBe("Widget X (old name)");
+  });
+
+  /**
+   * ⚠️ AND IT IS READ SIDE BY SIDE. On an update, `before.product_name`
+   * describes `before.product_id` and `after.product_name` describes
+   * `after.product_id`; taking one row's name for both sides would report the
+   * swap as a change from a part to itself.
+   */
+  it("reads each side's name from that side's snapshot", () => {
+    const line = describeEntry(
+      {
+        action: "update",
+        tableName: "assignments",
+        rowId: "90000000-0000-0000-0000-000000000007",
+        before: assignment({ product_id: "aaaa1111", product_name: "Old part" }),
+        after: assignment({ product_id: "bbbb2222", product_name: "New part" }),
+      },
+      FMT,
+      { products: PRODUCTS },
+    );
+    const change = line.changes.find((c) => c.field === "product_id");
+    expect(change?.before).toBe("Old part");
+    expect(change?.after).toBe("New part");
+  });
+
+  it("falls through to the lookup when the snapshot's name column is null", () => {
+    // Which is EVERY live row: 0029 fills these in on the delete path only.
+    const line = describeEntry(
+      {
+        action: "insert",
+        tableName: "runs",
+        rowId: "80000000-0000-0000-0000-000000000001",
+        before: null,
+        after: {
+          product_id: "60000000-0000-0000-0000-000000000001",
+          product_name: null,
+          product_sku: null,
+        },
+      },
+      FMT,
+      { products: PRODUCTS },
+    );
+    expect(after(line, "product_id")).toBe("Widget X");
+  });
+});
+
+describe("a user column speaks the same vocabulary as the actor column", () => {
+  const roles = new Map([["00000000-0000-0000-0000-0000000000a1", "admin"]]);
+
+  it("names the reader's own hand on created_by", () => {
+    const line = describeEntry(
+      {
+        action: "insert",
+        tableName: "runs",
+        rowId: "r1",
+        before: null,
+        after: { created_by: "00000000-0000-0000-0000-0000000000a1" },
+      },
+      FMT,
+      { actorRoles: roles, viewerUserId: "00000000-0000-0000-0000-0000000000a1" },
+    );
+    expect(after(line, "created_by")).toBe("You");
+  });
+
+  it("says the same thing describeActor says about an account it cannot place", () => {
+    const line = describeEntry(
+      {
+        action: "insert",
+        tableName: "runs",
+        rowId: "r1",
+        before: null,
+        after: { created_by: "11111111-2222-3333-4444-555566667777" },
+      },
+      FMT,
+      { actorRoles: roles, viewerUserId: null },
+    );
+    expect(after(line, "created_by")).toBe(
+      describeActor("11111111-2222-3333-4444-555566667777", null, roles),
+    );
+  });
+});
+
+describe("the lookups are optional and their absence changes nothing", () => {
+  /**
+   * ⛔ THE CALL SITE MUST KEEP COMPILING AND KEEP RENDERING. `AuditPanel` calls
+   * `describeEntry(e, fmt)` and another lane is editing that file right now.
+   * Omitting the argument is also a truthful state of its own: nobody LOOKED,
+   * which is not the same fact as "looked and could not find it", so the whole
+   * raw id is what is shown.
+   */
+  it("renders the raw id exactly as it does today when no lookups are passed", () => {
+    const line = describeEntry(
+      {
+        action: "insert",
+        tableName: "assignments",
+        rowId: "90000000-0000-0000-0000-000000000007",
+        before: null,
+        after: assignment(),
+      },
+      FMT,
+    );
+    expect(after(line, "operator_id")).toBe("50000000-0000-0000-0000-000000000004");
+    expect(after(line, "node_id")).toBe("30000000-0000-0000-0000-000000000007");
+  });
+});
+
+describe("the line says whether the row was removed", () => {
+  // For the panel's coloured accent and its "Removed" word — one rule decides
+  // it here, and the styling stays in the panel's CSS.
+  it("is true for a delete and false otherwise", () => {
+    const del = describeEntry(
+      { action: "delete", tableName: "products", rowId: "p1", before: { name: "A" }, after: null },
+      FMT,
+    );
+    const ins = describeEntry(
+      { action: "insert", tableName: "products", rowId: "p1", before: null, after: { name: "A" } },
+      FMT,
+    );
+    expect(del.removed).toBe(true);
+    expect(ins.removed).toBe(false);
+  });
+});

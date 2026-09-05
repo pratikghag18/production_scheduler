@@ -54,6 +54,15 @@ export interface AuditLine {
   subject: string;
   /** "Product added" / "Operator changed" / "Training deleted". */
   headline: string;
+  /**
+   * Whether this entry destroyed the row.
+   *
+   * ⚠️ FOR THE PANEL'S ACCENT AND ITS "Removed" WORD, so that one rule decides
+   * what counts as a deletion and the two do not drift. It is a FACT, not a
+   * style: nothing here knows about colours, and the per-field strikethrough
+   * stays where it is, in the panel's own CSS.
+   */
+  removed: boolean;
   changes: AuditFieldChange[];
 }
 
@@ -128,6 +137,13 @@ const FIELD_LABEL: Readonly<Record<string, string>> = {
   site_node_id: "Site",
   external_id: "External id",
   org_id: "Company",
+  // ⚠️ THE `id` IS DROPPED FROM EVERY IDENTITY COLUMN'S LABEL because the column
+  // no longer SHOWS an id when it can help it — see `IDENTITY_COLUMN` below.
+  // "Operator id: Maria" reads like a mismatch; "Operator: Maria" is the fact.
+  operator_id: "Operator",
+  product_id: "Product",
+  run_id: "Run",
+  actor_id: "Actor",
 };
 
 export function fieldLabel(column: string): string {
@@ -294,12 +310,190 @@ export function describeActor(
   actorId: string | null,
   viewerUserId: string | null,
   roles: ReadonlyMap<string, string>,
+  emails?: ReadonlyMap<string, string>,
 ): string {
   if (actorId === null) return "System";
   if (viewerUserId !== null && actorId === viewerUserId) return "You";
+  // ⭐ THE ADDRESS WINS WHERE THERE IS ONE, and migration 0046 is what put it
+  // within reach — `audit_actor_identities()`, company-admin-only and
+  // org-scoped. The maintainer's objection to the old answer was exactly right:
+  // "Supervisor · 0000a2" tells you a role and a fragment of a uuid, neither of
+  // which is a person you can go and ask about a change.
+  //
+  // ⚠️ AN OPTIONAL FOURTH ARGUMENT RATHER THAN A CHANGED THIRD. This module is
+  // pure and is called from a component and from `describeEntry`; widening the
+  // existing map to an object would have rewritten every call site and every
+  // fixture for a value that is allowed to be absent anyway. Absent means "not
+  // looked up" here, exactly as it does for the name maps.
+  const email = emails?.get(actorId);
+  if (email !== undefined && email !== "") return email;
   const role = roles.get(actorId);
   if (role === undefined) return `Unknown account · ${tail(actorId)}`;
   return `${ROLE_WORD[role] ?? prettify(role)} · ${tail(actorId)}`;
+}
+
+/* ---------------------------------------------------------------------------
+   WHICH COLUMNS POINT AT SOMETHING, AND WHAT IT IS CALLED
+   ------------------------------------------------------------------------ */
+
+/**
+ * ⭐⭐ THE CHANGE COLUMN SHOWS NAMES. The maintainer, 4 Sept: *"We should show
+ * the names in the change column, IDs are not fun when trying to troubleshoot
+ * something."* A real assignment row out of the running database is
+ *
+ *   { node_id: "30000000-…0007", operator_id: "50000000-…0004",
+ *     product_id: null, product_name: null, operator_display_name: null, … }
+ *
+ * so the line a reader troubleshooting actually sees is
+ * `Operator: 50000000-0000-0000-0000-000000000004`, which answers nothing.
+ *
+ * ⚠️⚠️ AND THE DENORMALISED COLUMNS DO NOT SAVE US. `product_name`,
+ * `product_sku` and `operator_display_name` exist on `runs` and `assignments`
+ * but are **NULL on every live row** — 0029 fills them in on the DELETE path
+ * only. "The snapshot already carries the name" is therefore true exactly when
+ * the row is gone, which is the one case a lookup could not have answered
+ * anyway. Both halves are needed and neither is redundant.
+ */
+type IdentityKind = "node" | "operator" | "product" | "run" | "user";
+
+/**
+ * The columns that hold a reference to another row, and to what.
+ *
+ * `home_node_id` and `site_node_id` are on every operator snapshot and are node
+ * ids like `node_id` is; `created_by` is on runs and assignments and is an
+ * `auth.uid()`, the same kind of thing `audit_log.actor_id` is.
+ *
+ * ⚠️ NOT A GUESS FROM THE SUFFIX. `external_id` ends in `_id` and is a customer's
+ * own string; `org_id` is omitted entirely. A column earns a lookup by being
+ * named here, so a new `*_id` column renders as itself rather than as an
+ * "unknown" something this file invented a kind for.
+ */
+const IDENTITY_COLUMN: Readonly<Record<string, IdentityKind>> = {
+  node_id: "node",
+  home_node_id: "node",
+  site_node_id: "node",
+  operator_id: "operator",
+  product_id: "product",
+  run_id: "run",
+  created_by: "user",
+  actor_id: "user",
+};
+
+/**
+ * The name the SNAPSHOT already carries for a reference, best first.
+ *
+ * ⭐ THE SAME RULE `NAME_FIELDS` FOLLOWS FOR THE ROW'S OWN SUBJECT, one step
+ * out: the snapshot's name beats a live lookup, because for a DELETE the row it
+ * points at may be gone and after a RENAME the current name is not what
+ * happened. These are the very columns 0029 fills in on the delete path, and
+ * they are read from the SIDE the id came from.
+ */
+const SNAPSHOT_NAME_FOR: Readonly<Record<string, readonly string[]>> = {
+  operator_id: ["operator_display_name"],
+  product_id: ["product_name", "product_sku"],
+};
+
+/** The app's own word for each kind, for the sentence said when it cannot be
+ *  named. `node` is "place" because that is what the app calls a node. */
+const IDENTITY_NOUN: Readonly<Record<IdentityKind, string>> = {
+  node: "place",
+  operator: "operator",
+  product: "product",
+  run: "run",
+  user: "account",
+};
+
+/**
+ * Id -> name, per kind. **Every field is optional and this whole argument is
+ * optional**, because this module fetches nothing: the caller reads the
+ * catalogues it already holds and passes them in.
+ *
+ * `actorRoles` is the role half of `fetchActorIdentities()` (0046) and `AuditPanel`
+ * already holds, so a user column in a snapshot is described by `describeActor`
+ * itself rather than by a second, drifting vocabulary for the same fact.
+ *
+ * `runs` is a caption, not a name — see `resolveIdentity`.
+ */
+export interface AuditNames {
+  nodes?: ReadonlyMap<string, string>;
+  operators?: ReadonlyMap<string, string>;
+  products?: ReadonlyMap<string, string>;
+  runs?: ReadonlyMap<string, string>;
+  /** `auth.uid()` -> org-wide role, from `fetchActorIdentities()` (0046). */
+  actorRoles?: ReadonlyMap<string, string>;
+  /** uid -> email, from `audit_actor_identities()` (0046). Absent = not looked up.
+   *  Threaded through so a `created_by` in a snapshot names the same person the
+   *  Who column does — two vocabularies for one account is how a log starts
+   *  contradicting itself. */
+  actorEmails?: ReadonlyMap<string, string>;
+  /** The reader's own `auth.uid()`, so their own hand reads "You". */
+  viewerUserId?: string | null;
+}
+
+function lookupFor(names: AuditNames, kind: IdentityKind): ReadonlyMap<string, string> | undefined {
+  switch (kind) {
+    case "node":
+      return names.nodes;
+    case "operator":
+      return names.operators;
+    case "product":
+      return names.products;
+    case "run":
+      return names.runs;
+    case "user":
+      return undefined;
+  }
+}
+
+/**
+ * One identity column's value, as a name. `null` means "not an identity column,
+ * or nothing here to name" — the caller then formats it as any other value.
+ *
+ * ⚠️⚠️ AN UNRESOLVED ID MUST NOT LOOK RESOLVED. A blank, or a bare name-shaped
+ * placeholder, would tell a reader troubleshooting that the row points at
+ * nothing. `describeActor` set the pattern: a word saying so, then the tail of
+ * the id, which is enough to tell two rows apart and to search for.
+ *
+ * ⚠️⚠️ A RUN HAS NO NAME AT ALL. `runs` is `id, org_id, node_id, product_id,
+ * timerange, planned_headcount, notes, created_by, product_*` — there is no
+ * `name` column and there never was; a run is identified by its product, its
+ * place and its hours. So an unmapped run is NOT an "unknown": reporting a
+ * failed lookup where there is nothing to look up is its own small lie. It
+ * renders as its kind plus its tail, and a caller that has composed a caption
+ * ("Widget X on Line 1") passes one in `runs` and that caption wins.
+ */
+function resolveIdentity(
+  column: string,
+  value: unknown,
+  row: Record<string, unknown> | null,
+  names: AuditNames,
+): string | null {
+  const kind = IDENTITY_COLUMN[column];
+  if (kind === undefined) return null;
+  if (typeof value !== "string" || value.trim() === "") return null;
+
+  // The snapshot's own word first — see `SNAPSHOT_NAME_FOR`.
+  for (const key of SNAPSHOT_NAME_FOR[column] ?? []) {
+    const carried = row === null ? undefined : row[key];
+    if (typeof carried === "string" && carried.trim() !== "") return carried;
+  }
+
+  // A user is described by the one function that knows what the client can
+  // truthfully say about an account, so the two columns cannot drift apart.
+  if (kind === "user") {
+    return describeActor(
+      value,
+      names.viewerUserId ?? null,
+      names.actorRoles ?? new Map(),
+      names.actorEmails,
+    );
+  }
+
+  const named = lookupFor(names, kind)?.get(value);
+  if (named !== undefined && named.trim() !== "") return named;
+
+  if (kind === "run") return `${describeTable("runs")} · ${tail(value)}`;
+  return `Unknown ${IDENTITY_NOUN[kind]} · ${tail(value)}`;
 }
 
 /* ---------------------------------------------------------------------------
@@ -366,7 +560,22 @@ function changesBetween(
   before: Record<string, unknown> | null,
   after: Record<string, unknown> | null,
   fmt: DateFormat,
+  names: AuditNames | undefined,
 ): AuditFieldChange[] {
+  /**
+   * ⚠️ EACH SIDE IS NAMED FROM ITS OWN SNAPSHOT. `before.product_name`
+   * describes `before.product_id` and `after.product_name` describes
+   * `after.product_id`; reading one row's name for both sides would report a
+   * swap of parts as a change from a part to itself.
+   *
+   * ⛔ AND WITH NO LOOKUPS THIS IS EXACTLY WHAT IT WAS. Omitting the argument
+   * is a truthful state of its own — nobody LOOKED, which is not the same fact
+   * as "looked and could not find it" — so the whole raw id is shown, and the
+   * call site that has not been wired up yet renders precisely as before.
+   */
+  const show = (field: string, v: unknown, row: Record<string, unknown> | null): string =>
+    (names === undefined ? null : resolveIdentity(field, v, row, names)) ??
+    formatAuditValue(v, fmt);
   const keys = new Set<string>([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
   const out: AuditFieldChange[] = [];
   for (const field of keys) {
@@ -383,8 +592,8 @@ function changesBetween(
     out.push({
       field,
       label: fieldLabel(field),
-      before: hadBefore ? formatAuditValue(b, fmt) : null,
-      after: hasAfter ? formatAuditValue(a, fmt) : null,
+      before: hadBefore ? show(field, b, before) : null,
+      after: hasAfter ? show(field, a, after) : null,
     });
   }
   // Stable, so two renders of the same row never reorder. Alphabetical by the
@@ -393,8 +602,25 @@ function changesBetween(
   return out;
 }
 
-/** One audit row, as a reader sees it. */
-export function describeEntry(entry: DescribableEntry, fmt: DateFormat): AuditLine {
+/**
+ * One audit row, as a reader sees it.
+ *
+ * ⛔ `names` IS OPTIONAL AND ITS ABSENCE IS THE OLD BEHAVIOUR, EXACTLY. Callers
+ * that have not been wired to the catalogues keep compiling and keep rendering
+ * what they rendered — and, since nothing here fetches, that is the only way a
+ * pure module can offer names at all.
+ *
+ * ⚠️ THE SUBJECT IS STILL SNAPSHOT-ONLY and deliberately so. `subjectFor` names
+ * the row itself, and every table whose rows have names carries that name in
+ * the snapshot (`display_name`, `name`, `product_name`) — a lookup would add
+ * nothing there but a way for a rename to rewrite the log's past. `names` only
+ * ever names a row this one POINTS AT.
+ */
+export function describeEntry(
+  entry: DescribableEntry,
+  fmt: DateFormat,
+  names?: AuditNames,
+): AuditLine {
   const kind = describeTable(entry.tableName);
   const before = isRecord(entry.before) ? entry.before : null;
   const after = isRecord(entry.after) ? entry.after : null;
@@ -402,6 +628,7 @@ export function describeEntry(entry: DescribableEntry, fmt: DateFormat): AuditLi
     kind,
     subject: subjectFor({ ...entry, before, after }),
     headline: `${kind} ${VERB[entry.action] ?? entry.action}`,
-    changes: changesBetween(before, after, fmt),
+    removed: entry.action === "delete",
+    changes: changesBetween(before, after, fmt, names),
   };
 }

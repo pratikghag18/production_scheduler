@@ -18,7 +18,14 @@
  * silently truncated by the server instead of by this code.
  */
 import { describe, expect, it } from "vitest";
-import { AUDIT_COLUMNS, AUDIT_PAGE_SIZE, parseAuditEntry } from "@/lib/api/audit";
+import {
+  ACTOR_IDENTITY_COLUMNS,
+  AUDIT_COLUMNS,
+  AUDIT_PAGE_SIZE,
+  actorIdentityMap,
+  parseActorIdentity,
+  parseAuditEntry,
+} from "@/lib/api/audit";
 
 /** `"a, b, c"` -> `["a","b","c"]`. */
 function selectedColumns(): string[] {
@@ -107,5 +114,132 @@ describe("the page size stays under the server's ceiling", () => {
     // 1000 is `max_rows`. A page at or above it would be truncated BY THE
     // SERVER, and a truncated page looks exactly like the end of the log.
     expect(AUDIT_PAGE_SIZE).toBeLessThan(1000);
+  });
+});
+
+/* ===========================================================================
+ * The SECOND read: who the actors are (0046, R-329).
+ *
+ * Same idiom as everything above — a column list and a guard, held against each
+ * other — with one extra reason to bother, and it is a big one:
+ *
+ * ⛔⛔ `database.types.ts` DECLARES `email: string`, AND THAT IS A LIE. The
+ * function is `returns table (user_id uuid, role text, email text)`, and
+ * `supabase gen types` has no way to know a RETURNS TABLE column can come back
+ * NULL, so it types every one of them non-nullable. `auth.users.email` HAS no
+ * NOT NULL constraint (a phone-only signup carries none) and migration 0046
+ * deliberately lists such a person rather than dropping them. So `tsc` will
+ * cheerfully accept `identity.email.toLowerCase()` on a value that is null at
+ * runtime. The guard below is the only thing standing between that and a
+ * TypeError on the Activity screen, and these cases are the only thing standing
+ * behind the guard — `tsc` cannot see either.
+ * ======================================================================== */
+
+/** A row built FROM THE COLUMN LIST, never typed out by hand. */
+function identityFromColumns(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const sample: Record<string, unknown> = {
+    user_id: "00000000-0000-0000-0000-0000000000a2",
+    role: "supervisor",
+    email: "ana@example.test",
+  };
+  const row: Record<string, unknown> = {};
+  for (const col of ACTOR_IDENTITY_COLUMNS.split(",").map((c) => c.trim())) row[col] = sample[col];
+  return { ...row, ...overrides };
+}
+
+describe("the identity read asks for exactly what its guard requires", () => {
+  it("every column the guard needs is one the function actually returns", () => {
+    expect(parseActorIdentity(identityFromColumns())).toEqual({
+      role: "supervisor",
+      email: "ana@example.test",
+    });
+  });
+
+  it("names the three columns `audit_actor_identities()` returns and no more", () => {
+    // Held against migration 0046's `returns table (...)`. Adding a
+    // `display_name` there means adding it here, and the mismatch is the whole
+    // point of writing the list down.
+    expect(
+      ACTOR_IDENTITY_COLUMNS.split(",")
+        .map((c) => c.trim())
+        .sort(),
+    ).toEqual(["email", "role", "user_id"].sort());
+  });
+});
+
+describe("the identity guard survives the address being absent", () => {
+  it("⭐ keeps a NULL email, because the generated type says it cannot happen", () => {
+    // `auth.users.email` is nullable and 0046 lists the person anyway. The row
+    // must SURVIVE with `email: null` — a dropped row is indistinguishable from
+    // an actor who was never in this company.
+    const parsed = parseActorIdentity(identityFromColumns({ email: null }));
+    expect(parsed).not.toBe(null);
+    expect(parsed?.email).toBe(null);
+    expect(parsed?.role).toBe("supervisor");
+  });
+
+  it("normalises a missing or non-string email to null rather than passing it on", () => {
+    // undefined, a number, an object: none of them are an address, and every
+    // one of them would satisfy `email: string` at the type level.
+    expect(parseActorIdentity(identityFromColumns({ email: undefined }))?.email).toBe(null);
+    expect(parseActorIdentity(identityFromColumns({ email: 7 }))?.email).toBe(null);
+    expect(parseActorIdentity(identityFromColumns({ email: { a: 1 } }))?.email).toBe(null);
+  });
+
+  it("refuses a row with no usable role", () => {
+    // `user_profiles.role` is NOT NULL and the screen's fallback label is built
+    // from it, so a row without one has nothing left to say.
+    expect(parseActorIdentity(identityFromColumns({ role: null }))).toBe(null);
+    expect(parseActorIdentity(identityFromColumns({ role: 4 }))).toBe(null);
+  });
+
+  it("refuses a non-object", () => {
+    expect(parseActorIdentity(null)).toBe(null);
+    expect(parseActorIdentity("ana@example.test")).toBe(null);
+    expect(parseActorIdentity([])).toBe(null);
+  });
+});
+
+describe("the identity map is keyed by the id the audit log actually carries", () => {
+  it("keys on user_id — `auth.uid()`, which is what `actorId` is", () => {
+    const map = actorIdentityMap([identityFromColumns()]);
+    // ⚠️ NOT `user_profiles.id`. `audit_log.actor_id` is `auth.uid()`, and the
+    // profile id is a different uuid entirely; keying on it would produce a map
+    // that never matches and a screen that looks exactly like the old one.
+    expect([...map.keys()]).toEqual(["00000000-0000-0000-0000-0000000000a2"]);
+  });
+
+  it("⭐ holds an identity OBJECT, not a bare string", () => {
+    // The forward-compatibility promise 0046 is designed around: a
+    // `display_name` arriving later is one more field here and no change to any
+    // caller that already reads `.email`. A `Map<string, string>` would have to
+    // be rewritten everywhere the day it lands.
+    const value = actorIdentityMap([identityFromColumns()]).get(
+      "00000000-0000-0000-0000-0000000000a2",
+    );
+    expect(typeof value).toBe("object");
+    expect(value).toEqual({ role: "supervisor", email: "ana@example.test" });
+  });
+
+  it("skips a row it cannot read instead of throwing the whole map away", () => {
+    // Same call as `fetchAuditPage`'s: this read DECORATES a column. One bad
+    // row must cost one name, not the list.
+    const map = actorIdentityMap([
+      identityFromColumns(),
+      null,
+      identityFromColumns({ user_id: 42 }),
+      identityFromColumns({ user_id: "00000000-0000-0000-0000-0000000000a1", email: null }),
+    ]);
+    expect(map.size).toBe(2);
+    expect(map.get("00000000-0000-0000-0000-0000000000a1")).toEqual({
+      role: "supervisor",
+      email: null,
+    });
+  });
+
+  it("tolerates a null payload, because a refused call is cosmetic here", () => {
+    expect(actorIdentityMap(null).size).toBe(0);
+    expect(actorIdentityMap(undefined).size).toBe(0);
+    expect(actorIdentityMap("not a list").size).toBe(0);
   });
 });

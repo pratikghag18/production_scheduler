@@ -12,9 +12,12 @@
 
    ⚠️ NO FIELD SKIN HERE. `fieldStandard.test.ts` bans a hand-rolled editable box
    outside `src/components/Field.module.css`, and `FIELD_LEGACY` may only ever
-   shrink. This screen is READ-ONLY — one button and no inputs — so there is
-   nothing to skin, and the button below is deliberately not a copy of the field
-   look.
+   shrink. This screen writes nothing — one button and three filters that only
+   narrow what is already on it — and the filters wear `Field.module.css`'s
+   `.select` (R-318), exactly as `SettingsPanel`'s picker does. The classes below
+   give them LAYOUT and nothing else: no border, no radius, no background. A copy
+   of the skin here would be a build failure as well as a wrong look, and the
+   button is likewise deliberately not one.
 
    NOTHING HERE IS A DRAG SURFACE: no `cursor: grab`, no `user-select: none`, no
    `touch-action`. No `--ui-scale` either (that token is fitted board content
@@ -62,6 +65,37 @@
   color: var(--muted);
 }
 
+/* ---------------------------------------------------------------------------
+   THE FILTER BAR — LAYOUT ONLY.
+
+   The controls themselves are `Field.module.css`'s `.select` (R-318). Nothing
+   here sets a border, a radius or a background, because that is the shared
+   module's job and a second copy of it is what `fieldStandard.test.ts` exists to
+   stop. `.filterSelect` caps the width so a long option ("Shift pattern") does
+   not stretch one picker away from its neighbours.
+   --------------------------------------------------------------------------- */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.filterLabel {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.filterSelect {
+  max-width: 13rem;
+}
+
 /* The table's own scroller — see the header. */
 .scroll {
   overflow-x: auto;
@@ -89,9 +123,75 @@
   white-space: nowrap;
 }
 
+/* ---------------------------------------------------------------------------
+   THE ACTION ACCENT.
+
+   The maintainer, on the Change column: *"I see a few rows which are crossed or
+   cut, we could have a red card border for the row to signify deletion, it will
+   be much visual."*
+
+   ⭐ A LEFT BAR, NOT A BORDER ROUND THE ROW. A full red box round a table row
+   reads as an ERROR — something wrong that wants attention — and a deletion is
+   an ordinary, intended event that merely wants finding. A bar on the left edge
+   can also be skimmed vertically down a long table, which is how somebody
+   actually looks for "when was that removed".
+
+   ⭐ ALL THREE ACTIONS, NOT DELETIONS ALONE. One system a reader learns beats
+   one exception they have to be told about, and it means the bar's WIDTH is
+   constant so no row is indented against its neighbours. Red is reserved for the
+   removal.
+
+   ⚠️⚠️ COLOUR NEVER CARRIES THE MEANING ALONE. The What column already says
+   "Product added" / "Operator changed" / "Run deleted", and it keeps saying it:
+   the accent is an addition, so the table still reads correctly to a colour-blind
+   reader and in a black-and-white print.
+
+   ⚠️ AMBER AND THE PRODUCT COLOURS ARE SPOKEN FOR. `--warn` means understaffed
+   or overridden everywhere else in this app, and `--product-N` is an identity
+   vocabulary rather than a status one; borrowing either here would make one
+   colour mean two things. An edit therefore takes the neutral `--ink-2` — it is
+   the ordinary case and the majority of rows, so a quiet mark is the right one.
+   --------------------------------------------------------------------------- */
+/* ⚠️ THE HEADER RESERVES THE SAME WIDTH AND SHOWS NOTHING. Without it the head
+   row has no left border, the body rows have three pixels of one, and "When"
+   sits visibly left of the timestamps under it — a column that looks misaligned
+   because of a signal it does not carry. */
+.headRow {
+  border-left: 0.1875rem solid transparent;
+}
+
 .row {
   border-bottom: 1px solid var(--grid);
+  /* In `rem` (D84): a 3px bar is a real dimension, not a hairline, so it scales
+     with the root font-size like everything else on this surface. Declared on
+     every row so the accent is a COLOUR change and never a width change. */
+  border-left: 0.1875rem solid transparent;
   vertical-align: top;
+}
+
+.row[data-action="insert"] {
+  border-left-color: var(--signal-ok);
+}
+
+.row[data-action="update"] {
+  border-left-color: var(--ink-2);
+}
+
+.row[data-action="delete"] {
+  border-left-color: var(--crit);
+}
+
+/* ⭐ THE STRIKETHROUGH COMES OFF A DELETION. `.from` means "this value was
+   REPLACED", which is true of an edit and false of a delete — where `after` is
+   null, so every field on the row renders as a struck-through `.from` at once
+   and the row reads as damaged rather than as removed. The row already says
+   "deleted"; the marks on top of that were redundant as well as alarming. The
+   value also comes back to full ink here, because on a deletion the old value is
+   not the discarded half of a pair — it is the whole of what was lost, and it is
+   the evidence somebody came to this screen for. */
+.row[data-action="delete"] .from {
+  text-decoration: none;
+  color: var(--ink);
 }
 
 .row:last-child {
