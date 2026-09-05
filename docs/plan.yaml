@@ -2985,7 +2985,7 @@ requirements:
       N6/N7 (DEF-0008) -- the whole rail as a LIST for a supervisor with no admin grant, and for a
       company admin so the first cannot pass by the rail emptying; red on the one-line widening of
       `adminSectionsFor` that the 2103-case suite passed
-  status: contradicted
+  status: covered
   note: >-
     ⛔ THE CLAUSE ABOUT `adminSectionsFor` HAS NO CASE BEHIND IT (DEF-0008, open). The row says the flag's
     test is "would the server refuse for EVERY person `adminSectionsFor` admits", and taking
@@ -2996,6 +2996,43 @@ requirements:
     green. The behaviour shipped is RIGHT; only the evidence is missing, which is why this is
     `test-cannot-fail` and not a permission defect. `src/test/defects/DEF-0008.test.tsx` asserts the whole
     rail as a LIST, because three `toBeTruthy()`s cannot notice a fourth button and a list can.
+    ⭐ CLOSED AND VERIFIED BY THE TESTER, 5 Sept. `cab45d9` added N6/N7 to `adminNoGrants.test.tsx`,
+    and the reproduction was re-run cold at that commit together with four mutations it did not cover:
+    one extra tab sorting AFTER "operators" (`cycletimes`), one sorting BEFORE it (`access`), the REMOVAL
+    of a tab the supervisor should keep (`matrix`), and the lock bypassed a layer up in `AdminPage`'s
+    filter rather than in the helper. N6 goes red by name on all five, and the promoted DEF-0007 cases
+    catch the sixth (the `companyAdminOnly` axis). The rail was also read off the running app as five
+    people. This row is back to `covered`.
+- id: R-336
+  title: A pointer in the plan resolves at the other end
+  source:
+  - DEF-0009
+  - F-093
+  stated_by: agent
+  claim: >-
+    `docs/plan.yaml` links its four halves to each other, and each of those links is one fact written
+    from two ends, so it can be held against itself. A stage's `refs` names the sessions that shipped it
+    and those sessions' `shipped` names the stage back; a requirement's `verified_by.file` names a file
+    that is on disk. A pointer that does not resolve is worse than an absent one: it reads as a record
+    and is a guess.
+    ⚠️ STATED BY THE AGENT, from F-093's own sentence --- *"`shipped` on a session is not
+    decoration, it is the only link between a day's work and the shape it belongs to"* --- which states
+    the rule and then leaves seven links unmade. The maintainer overrules it by saying a stage card is
+    prose and not a record, in which case `refs` should carry no session numbers at all rather than
+    wrong ones.
+  verified_by:
+  - kind: vitest
+    file: src/test/defects/DEF-0009.test.ts
+    cases: >-
+      every session a stage names as its own agrees that it shipped that stage (7 broken links, all
+      written by 6086c23); the guard on the guard, that there are session refs to check at all, so the
+      first case cannot pass by the links being deleted; and every `verified_by` entry naming a real
+      path names a file that exists (R-239 -> the deleted `src/test/defects/DEF-0007.test.tsx`)
+  status: contradicted
+  note: >-
+    Filed with DEF-0009 and `contradicted` while it is open. The requirements and their tests --- the
+    load-bearing half of the file --- were checked one by one across the eight new cards and are right;
+    it is the layer that says WHICH SESSION DID WHAT that is wrong, in four of the eight.
 - id: R-D112
   title: The demo world is three generic plants with everything owned
   source:
@@ -4700,7 +4737,7 @@ requirements:
     cases: >-
       the rail offers what the server permits, tab by tab -- a site admin IS offered Settings, is NOT
       offered Activity, and a company admin gets both, so no case passes by hiding everything
-  status: covered
+  status: contradicted
   note: >-
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
@@ -4723,6 +4760,19 @@ requirements:
     her own session was READ BACK OUT OF THE DATABASE rather than trusted because nothing threw. Both
     halves of the axis were mutated on a scratch copy and both go red with a name, so the replacement
     for the case that used to pin the bug is not itself a case that cannot fail.
+    ⛔ A FOURTH TIME, FROM THE HIDDEN SIDE, ONE LEVEL DEEPER (DEF-0010, open). DEF-0007 was a PLANT admin
+    refused the Settings tab. The tab is reachable now and the scope it can be pointed at is still a
+    PLANT ROOT --- so somebody whose ADMIN grant sits on a LINE or a CELL gets the whole rail, lands on
+    "Company defaults" with both controls disabled and "Only a system admin can change this", and reaches
+    none of the panel's three states. Measured over that person's own session with the rows read back:
+    `set_node_setting` takes their write on their own line AND on a cell below it, and refuses the plant
+    root above them; `board_window` emits `node_policies` PER NODE, so a line-level answer is the one the
+    board enforces there. The client predicate is not the bug --- `canAdministerPlant` mirrors the server
+    exactly --- the bug is that `SettingsScope` has no way to name a place below a root, and
+    `settingsScope` sends a reader who cannot write the company to the company anyway.
+    ⚠️ AND THIS ROW'S OWN EVIDENCE HAS A HOLE IN IT (DEF-0009): the third `verified_by` entry above names
+    `src/test/defects/DEF-0007.test.tsx`, which `cab45d9` deleted when it promoted that pin. The cases
+    live on in `src/test/auditAccess.test.tsx`; the pointer was not moved with them.
 - id: R-240
   title: 0023 changes who may edit, not who may read
   source:
@@ -8517,6 +8567,100 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 70
+  date: 2026-09-05
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2111
+    app_test_files: 77
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Judged `52ed2b7..6086c23` --- the DEF-0008 fix with DEF-0007's pin promoted, its plan entry, and the
+    buildout catch-up. Merged fast-forward, no `package-lock.json` change, tree clean at the start.
+    THE COUNT MATCHES. The runner's own lines were "Test Files 75 passed (75)" and "Tests 2106 passed
+    (2106)", against the plan's newest confirmed session, 69, at 2106 in 75, and the runner's own check
+    agreed: "ok count matches the plan: 2106 in 75". Two things moved it and they cancel: `cab45d9` added
+    three cases (N6, N7 and the promoted company-admin case) and deleted
+    `src/test/defects/DEF-0007.test.tsx` with its three, so the case count held and the file count fell by
+    one. The deletion was confirmed on disk --- that directory now holds DEF-0003, DEF-0006 and DEF-0008
+    --- and the promoted cases were read against the pin they came from: same three assertions, same
+    fixture, `role: "viewer"` with `adminAnywhere: true`, which is the whole reason they mean anything.
+    Not a weakened restatement. After my own two new pins the suite is "Test Files 2 failed | 75 passed
+    (77)" and "Tests 4 failed | 2107 passed (2111)", the four failures being those pins and nothing else;
+    `tsc` 0 and `eslint` 0 with them in. `tsc` is CONCLUSIVE: `db:types` regenerated and `git diff` shows
+    no diff at all, and the runner's stale-types warning and its 287-file `format:check` failure are both
+    this worktree's `core.autocrlf=true` handing prettier CRLF --- re-confirmed rather than assumed,
+    `prettier --check --end-of-line crlf` passes on the same files.
+    DEF-0008 IS VERIFIED, AND PUSHED HARDER THAN MY OWN REPRODUCTION. A fix that only pins the exact line
+    the tester wrote is not a fix, so five more mutations went in beside it: one extra tab sorting AFTER
+    "operators" (`cycletimes` --- the shape the old suite was blind to), one sorting BEFORE it (`access`),
+    the REMOVAL of a tab the supervisor should keep (`matrix` --- a narrowing, which three `toBeTruthy()`s
+    would have missed and a list catches), the lock bypassed a layer up in `AdminPage`'s filter with
+    `session.ts` untouched, and the `companyAdminOnly` axis switched off to check the promotion. N6 goes
+    red by name on all five of the first; the promoted `auditAccess` cases catch the sixth. The rail was
+    also read off the running app through a browser as five people --- company admin, two site admins and
+    two supervisors --- and is right for every one of them.
+    THE BUILDOUT COMMIT WAS JUDGED AS ITS OWN PIECE OF WORK, AND HALF OF IT IS WRONG (DEF-0009, filed).
+    The load-bearing half is fine: every requirement the eight new cards claim exists, and their
+    `verified_by` were read one by one --- `64_cycle_times_test.sql` at C0-C13, `iconStandard.test.ts` and
+    `popoverStandard.test.ts` walking the real `src` tree, `shiftsPanel` S13/S13b/S13c, `productsPanel`
+    T2b-T2e. Nothing is marked covered on a test that cannot fail. The two things the commit says about
+    the CODE are true, checked against the code and not the prose: nothing under `src/features/board/`
+    reads `expiringSkills`, and `SettingsPanel` really does render a live `<select>` writing
+    `eligibility_policy`, so removing that queue item was right. WHAT IS WRONG IS THE HISTORY. Four of the
+    eight cards name sessions that shipped something else: S27 (cycle times) points at session 51, a
+    TESTER RUN, and session 52, the status picker; S28 (one shell, one field, one chevron) points at
+    session 50, "The gate that was actually stopping CI"; S29 and S30 point at the same two. Measured from
+    git rather than from the prose: `11e6fc1` shipped the cycle-times grid and the plan names it in
+    session 37, `159e094` shipped `Popover.tsx` in session 35, `e6e0b7b` the one chevron in session 31,
+    `a2d86c3` the date format in session 28. Seven of the nineteen session refs in the file do not
+    resolve, and all seven were written by this commit. A likely reason, and a trap worth knowing about:
+    `sessions` is NOT in id order --- reading down, the ids go 58, 57, 64, 56, 55 --- so counting
+    positions gives the wrong number, and the wrong numbers all land in the 49-52 band.
+    AND ONE MORE POINTER THAT DOES NOT RESOLVE, one file over. `cab45d9` promoted DEF-0007's pin and
+    deleted the copy; `c24bc69` repointed the DEFECT's `pin` field but not R-239's `verified_by`, which
+    still cites `src/test/defects/DEF-0007.test.tsx`. Of 227 `verified_by` file pointers, eight are
+    missing and seven of those say in the value itself that the name was never recorded; this is the
+    eighth, and it is on the requirement the rail's whole permission story hangs off. `npm run plan --
+    --check` is green on it because the validator makes that demand of a defect's `pin` and not of a
+    requirement's evidence.
+    THE NOTE LEFT OPEN LAST RUN IS SETTLED, AND IT IS A DEFECT (DEF-0010, filed). The person whose ADMIN
+    grant sits on a line or a cell rather than a plant root is real --- the Access tab grants a role at
+    ANY focused node --- so I made one and looked. She gets the whole rail including Settings, lands on
+    "Company defaults" with both controls disabled and "Only a system admin can change this", and there is
+    no plant control at all, because a line grant does not make the plant root readable, so
+    `readablePlants` is empty and `settingsScope` falls through to a scope she cannot write. Over her own
+    session, with the rows READ BACK OUT OF THE DATABASE: `set_node_setting` took her write on her own
+    line (`eligibility_policy=block`) and on a cell below it (`date_format=iso`), and refused the plant
+    root above her with `PT403 not_permitted`. It is not a rule nothing reads --- `board_window` emits
+    `node_policies` PER NODE and 0050's resolver says "a line's override beats its plant's". So it is
+    R-239's second clause, hidden for something the server permits, the same shape as DEF-0007 one level
+    deeper. Filed `minor` because it is the safe direction, with the note that it becomes `major` the day
+    the maintainer says line-level admins are a supported shape. The cheaper fix may be at the other end
+    --- the Access tab refusing to grant `admin` below a root --- and that is the maintainer's call, which
+    the defect says rather than assuming.
+    THE ADVERSARIAL PASS WENT AT `set_node_setting`'S NODE PARAMETER, the boundary the caller chooses, AND
+    IT HELD. A supervisor grant on the node is refused `PT403 not_permitted/not_admin` with no row; the
+    same person writing straight to `node_settings` past the RPC is refused `42501` with no row; a site
+    admin writing on another plant is refused with no row; a node id outside the org answers
+    `invalid_argument/not found` BEFORE any permission answer, so nothing leaks; and `set_site_member`
+    refuses both a site admin granting admin on a plant they do not run and a supervisor granting
+    themselves admin on their own line. `profile_grants` was 5 rows before and 5 after, and the two
+    overrides I wrote were cleared. Nothing wrong found in that category.
+    WHAT ELSE WAS LOOKED AT AND WAS FINE. Every SQL file green, 45 of them, including
+    `73_plant_settings_test.sql` at P0-P22 and `74_board_plant_policy_test.sql`; Playwright green; sweep 1
+    empty, no migrations since the tip; sweep 3's "company-wide" and "no longer" hits are the same
+    long-standing set as last run and none of them describes a rule the current migrations have dropped.
+    Sweep 2's one dark column, `audit_log.at`, is a FALSE POSITIVE --- it is in `AUDIT_COLUMNS`, it is
+    what `.gte("at", ...)` and `.lt("at", ...)` bound the period with, and `AuditPanel.tsx:991` renders it
+    through `formatInstant`; the detector misses it because the column name sits inside a
+    comma-separated string rather than as its own token.
+    STATUSES SET: R-335 back to `covered` (DEF-0008 verified). R-239 to `contradicted` (DEF-0010 open) ---
+    it had been `covered` since DEF-0007 was verified this morning. R-336 added, `stated_by: agent`,
+    `contradicted` while DEF-0009 is open: a pointer in the plan resolves at the other end.
 - id: 69
   date: 2026-09-05
   title: The buildout catches up with thirteen sessions of shipped work
