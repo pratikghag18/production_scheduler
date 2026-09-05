@@ -514,12 +514,21 @@ describe("the screen says which columns it does not list", () => {
    * single update and would put one meaningless line on every row). That is a
    * defensible choice ONLY if the screen admits it.
    */
-  it("names the omission rather than hiding it", async () => {
+  it("⭐ hides the bookkeeping columns, and no longer recites their names", async () => {
+    // ⚠️ REWRITTEN, AND IT IS STRICTER THAN WHAT IT REPLACES. This used to
+    // assert that a paragraph containing "org_id" and "updated_at" was on
+    // screen — pinning a SENTENCE about the rule rather than the rule. The
+    // maintainer asked for the jargon to go ("please remove unnecessary text"),
+    // and raw database column names on a plant manager's screen were the worst
+    // of it. The disclosure went; the rule did not, so this now pins the rule
+    // directly: those columns must not reach the reader at all, whether in a
+    // row or in a note explaining that they will not.
     show();
     await screen.findByText("Product added");
-    const note = screen.getByText(/updated_at/);
-    expect(within(note).queryByText("nothing")).toBe(null);
-    expect(note.textContent).toContain("org_id");
+    const body = document.body.textContent ?? "";
+    for (const column of ["org_id", "updated_at", "created_at"]) {
+      expect(body).not.toContain(column);
+    }
   });
 });
 
@@ -1173,8 +1182,8 @@ describe("the plant filter narrows the log, and the server does the narrowing", 
     showPlant(PLANT_A);
     serve([at(LINE_A, { id: 9 })]);
     show();
-    await screen.findByText(/more than one request to the server can carry/);
-    expect(screen.getByText(/showing every plant, not just Plant A/)).toBeTruthy();
+    await screen.findByText(/too many other places to filter by/);
+    expect(screen.getByText(/Showing every plant instead/)).toBeTruthy();
     // Nothing was sent, and — the part that matters — the footer does not name
     // the plant, because the list under it is not one plant's.
     await waitFor(() => expect(lastFilter().elsewhere ?? null).toBeNull());

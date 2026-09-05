@@ -197,7 +197,6 @@ import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import { operatorKeys } from "../hooks/useOperators";
 import { productKeys } from "../hooks/useProducts";
 import {
-  OMITTED_FIELDS,
   type AuditNames,
   describeActor,
   describeEntry,
@@ -830,16 +829,17 @@ export function AuditPanel() {
 
   return (
     <div className={styles.panel}>
-      <p className={styles.intro}>
-        Every change to a run, an assignment, a person, a product, a training or a shift pattern,
-        newest first. Times are shown in your own timezone.
-      </p>
-      {/* ⚠️ NAMED, NOT HIDDEN — see the header. Built from the list itself so the
-          sentence cannot drift from what is actually left out. */}
-      <p className={styles.note}>
-        Four bookkeeping columns are never listed: {OMITTED_FIELDS.join(", ")}. Everything else the
-        row carried is shown.
-      </p>
+      {/* ⚠️ THE BOOKKEEPING-COLUMNS SENTENCE USED TO SIT HERE AND IS GONE. It
+          read "Four bookkeeping columns are never listed: id, org_id,
+          created_at, updated_at" — raw database column names, on a screen a
+          plant manager reads. The instinct behind it was right (a log that
+          silently drops fields is worse than one that dumps JSON) and the
+          audience was wrong: `org_id` means nothing to the person reading, and
+          the four are bookkeeping precisely because nobody changes them on
+          purpose. `OMITTED_FIELDS` still governs what is hidden and
+          `auditView.test.ts` still pins it — what went is the paragraph, not
+          the rule. */}
+      <p className={styles.intro}>Every change, newest first. Times are in your timezone.</p>
 
       {/* ⭐⭐ THE SCREEN SAYS WHAT ITS OWN PLANT FILTER MEANS. Without this
           paragraph a reader would meet a product's change under "Plant A" and
@@ -847,10 +847,8 @@ export function AuditPanel() {
           row is the per-row half; this is the rule. */}
       {plantApplied && (
         <p className={styles.note}>
-          Showing {plant.label}. A change that records no place, and a change recorded against a
-          place that has since been removed, are listed under every plant and marked below — nobody
-          can say which plant they belong to, and a log that hid what it could not place would be
-          under-reporting history rather than filtering it.
+          Showing {plant.label}. Some changes cannot be traced to a plant — they are listed under
+          every plant and marked below.
         </p>
       )}
 
@@ -860,9 +858,8 @@ export function AuditPanel() {
           fix. It over-shows, and it says that is what it is doing. */}
       {placeFilterTooWide && (
         <p className={styles.note} role="status">
-          {plant.label} is selected, but this company has {elsewhere?.length ?? 0} places outside it
-          — more than one request to the server can carry. The activity log below is showing every
-          plant, not just {plant.label}. Nothing is hidden.
+          {plant.label} is selected, but this company has too many other places to filter by.
+          Showing every plant instead — nothing is hidden.
         </p>
       )}
 

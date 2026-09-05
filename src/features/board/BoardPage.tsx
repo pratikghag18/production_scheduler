@@ -117,7 +117,22 @@ export default function BoardPage() {
   // R-309: the org-wide date format for the board's day labels. Same shared
   // React Query cache as the Settings screen, so a change there re-renders the
   // board without a board refetch. Gated on `canQuery` (D91).
-  const dateFormat = useDateFormat(canQuery);
+  /**
+   * ⚠️ THE BOARD SHOWS EXACTLY ONE PLANT, so it asks that plant for its format.
+   * It did not until F-090: the token was read company-wide, which was the only
+   * possible answer until settings became per-plant, and afterwards was simply
+   * the wrong one on every plant that had chosen otherwise.
+   *
+   * `rootPath` is a path and `useDateFormat` wants a node id, so the id comes
+   * off the root already loaded rather than from a second read. Null while the
+   * roots are still resolving, which falls back to the company answer — the
+   * board renders no dates before it knows where it is.
+   */
+  const rootNodeId = useMemo(
+    () => roots.find((r) => r.path === rootPath)?.id ?? null,
+    [roots, rootPath],
+  );
+  const dateFormat = useDateFormat(canQuery, rootNodeId);
   // ⚠️ AND NOT UNTIL WE KNOW WHERE. `rootPath` is null while the places read is
   // in flight and stays null for someone with no access to any of them; asking
   // `board_window` for `""` would be the old hardcoded constant with extra

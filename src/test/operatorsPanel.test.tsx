@@ -233,8 +233,17 @@ vi.mock("@/lib/api", () => ({
 // spares this test a React Query round trip it does not care about. Mocked at
 // the hook, not through `@/lib/api`, so the api factory stays down to the one
 // name this screen uses (same reasoning as the `useDeletion` mock below).
+// ⚠️ THE STUB RECORDS WHAT IT WAS ASKED, not only what it answered. This screen
+// honours the plant filter, so the certification dates it draws belong to the
+// plant on show — and a stub that ignored its arguments would let a panel
+// reading the COMPANY answer pass every case in this file. That is exactly the
+// state the Activity tab shipped in (F-090), found on screen rather than here.
+const dateFormatArgs: unknown[][] = [];
 vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
-  useDateFormat: () => "d_mon_yyyy",
+  useDateFormat: (...args: unknown[]) => {
+    dateFormatArgs.push(args);
+    return "d_mon_yyyy";
+  },
 }));
 
 /**
@@ -1048,6 +1057,19 @@ describe("OperatorsPanel — the header says where somebody belongs", () => {
     // (D109: an area need not be a root), which is the whole reason the places
     // list can hold a ⚠ row one line over.
     expect(where.textContent).not.toBe("Belongs to Plant 1");
+  });
+
+  it("O42 ⭐ the dates are asked for the CHOSEN plant, not the company (F-090)", () => {
+    // The gap the maintainer found on Activity, swept for here. The shared date
+    // seam was never the problem — this screen has always drawn its dates
+    // through `formatCalendarDay`. What was wrong is WHICH format it asked for,
+    // a question that did not exist until settings became per-plant.
+    render(<OperatorsPanel />);
+    dateFormatArgs.length = 0;
+    showPlant(id.P1);
+    expect(dateFormatArgs.at(-1)?.[1]).toBe(id.P1);
+    showPlant(null);
+    expect(dateFormatArgs.at(-1)?.[1] ?? null).toBeNull();
   });
 
   it("O40: it follows the selection rather than sticking to whoever was read first", () => {
