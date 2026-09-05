@@ -7972,11 +7972,18 @@ sessions:
   - cbc7c92
   - 5f19eb8
   numbers:
-    app_tests: 1998
-    app_test_files: 71
+    app_tests: 2025
+    app_test_files: 72
     tsc: 0
     eslint: 0
   confirmed: true
+  numbers_note: >-
+    ⚠️ CORRECTED. This entry first recorded 1998 in 71 files, which I had run myself — one commit too
+    early. The count was taken at `cbc7c92` and the session's own list names `5f19eb8` after it, which
+    adds `plantSettings.test.ts`. `git ls-tree` at each commit settles the file count at 71 and 72, and
+    the test total was measured on the session's final tree. The rule this breaks is the one
+    `confirmed: true` exists for: a number is only confirmed for the state it was read in, and running
+    the suite honestly is not the same as running it last. Found by the next lane, not by me.
   summary: >-
     Two maintainer observations on the Settings screen, both of which turned out to be structural
     rather than cosmetic.
