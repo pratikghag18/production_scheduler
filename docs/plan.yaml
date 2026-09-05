@@ -4372,7 +4372,7 @@ requirements:
   - kind: vitest
     file: src/test/scope.test.ts
     cases: "XP1 a part whose places were filtered away is still offered, XP2 an empty places list is not the question any more, XP3 an empty OFFERED list is offered nowhere, XP4 (promoted from DEF-0002's pin) a part made only at another plant is absent, XP5 a part on another line is absent, XP6 the answer is per node"
-  status: covered
+  status: contradicted
   note: >-
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
@@ -8059,6 +8059,60 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 65
+  date: 2026-09-05
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2103
+    app_test_files: 75
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Judged 5e9a0ec..a4e938a — thirty-one commits, eight migrations, per-plant settings, the Activity
+    screen and the certification rules. The tester branch had not been taken since 5e9a0ec, so this run
+    opened with a real merge rather than a fast-forward: only docs/plan.yaml conflicted, both sides had
+    added session entries, and they are kept newest first. My session 57 is renumbered 64 because
+    Development had independently used 57, and it sits by the range it judged rather than at the top.
+    THE COUNT DID NOT MATCH, WHICH IS THE FIRST TIME IT HAS FIRED. The runner reported "2100 passed
+    (2100)" in 74 files against the plan's 2097 in 74. The cause is `a4e938a`, the tip: it changed
+    AuditPanel, OperatorsPanel and BoardPage and added cases to `auditPanel.test.tsx` and
+    `operatorsPanel.test.tsx` with NO plan entry at all — the only commit in the range that touches
+    `src/` without touching `docs/`. Three tests, no session, so the number moved and the record did
+    not. The suite is 2103 in 75 after my own pin.
+    ONE DEFECT, AND A GREEN CASE IS HOLDING IT IN PLACE. DEF-0007: Dana, the site admin of Plant A, has
+    no Settings tab, and the server would take her writes on her own plant. Asked over her own session
+    with a deliberately illegal value — so the permission gate is the only thing that can answer first
+    and nothing is written — `set_node_setting(plant_a, 'eligibility_policy', '__probe__')` comes back
+    `invalid_argument`, not `not_permitted`: the gate ran and passed her. 0050 made that writer
+    `app_is_admin() OR app_is_admin_for(node)` and 0052 moved `date_format` under the same shape, so
+    Settings stopped being an org-wide screen two migrations ago. `SettingsPanel`'s own header says "A
+    SITE ADMIN REACHES THIS PANE ... on THEIR OWN plant they get working pickers" and implements all
+    three states; `AdminPage`'s `companyAdminOnly: true` means none of them is reachable. And
+    `auditAccess.test.tsx`'s last case asserts `railButton("Settings")` is null "so neither can drift" —
+    the tie that was meant to stop drift is what now holds the stale half in place. It has to change
+    with the fix.
+    THE ACTIVITY TAB BESIDE IT IS RIGHT, AND I CHECKED RATHER THAN ASSUMED. `audit_log_select` really is
+    `app_is_admin() and org_id = app_current_org()`, and Dana's own GET on the table returns `200 []` —
+    zero rows, not a refusal, which is the silent-empty the tab is hidden to avoid. So the
+    `companyAdminOnly` axis is correct and must stay; it is applied to one tab too many. My pin asserts
+    both directions so a fix that simply deletes the axis goes red.
+    THE RISK R-331 NAMED FOR ITSELF IS CLOSED. Its claim warned that every server-side reader of
+    `eligibility_policy` had to resolve per node or "one left behind is a plant whose rule is enforced
+    on some paths and not others". I grepped every live definition: the three that name the key all read
+    `COALESCE(app_resolve_node_setting(node, 'eligibility_policy'), 'warn')`, and 0051 gives the board
+    the same expression through `node_policies` rather than letting the client apply one org value to
+    every plant. Nothing is left on `orgs.settings->>'eligibility_policy'` except the company-level
+    writer, which is about the company's own value.
+    EVERYTHING ELSE IS GREEN: 30 SQL files including the new 68, 69 and 73 and the demo build, e2e,
+    typecheck and lint. Two notes. The sweep's last "dark column" is `audit_log.at`, and it is a false
+    positive — `AUDIT_COLUMNS` is "id, at, actor_id, table_name, row_id, action, before, after", so `at`
+    is read; a two-letter column name is below the resolution of a word search. And `meta.baseline` now
+    reads 1788 in 60 against a suite of 2103, three sessions stale; `plan-format.md` calls that field
+    the counts the tester compares against, and the runner reads the newest confirmed session instead,
+    so nothing is broken and the document still disagrees with itself.
+  shipped: []
 - id: 63
   date: 2026-09-04
   title: The plant filter is obeyed everywhere, and the Activity log learns where a change happened
