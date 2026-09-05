@@ -5803,6 +5803,35 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-088
+  title: The CHECK that guards the eligibility policy cannot reject a null
+  tag: A constraint that passes on nothing
+  status: fixed
+  found_by: agent
+  refs:
+  - R-330
+  story: >-
+    Migration 0001 guards the org settings bag with
+    `check (settings->>'eligibility_policy' in ('warn','block'))`, and that reads like it admits exactly
+    two values. It admits three.
+    ⛔ `NULL IN ('warn','block')` IS NULL, NOT FALSE, AND A CHECK CONSTRAINT PASSES ON NULL. Postgres
+    rejects a row only when a check evaluates to FALSE; unknown is accepted, which is the documented
+    behaviour and the whole reason `NOT NULL` is a separate thing to write. So
+    `jsonb_build_object('eligibility_policy', NULL)` stores a JSON null, `settings->>'…'` reads back SQL
+    NULL, the check evaluates to unknown, and the write is allowed. The setting is then absent, every
+    server-side `COALESCE(…, 'warn')` quietly answers `warn`, and a plant that had been set to `block`
+    is silently permissive again.
+    Verified rather than reasoned about: `select null::text in ('warn','block') is null` is true on this
+    database.
+    ⭐ IT WAS FOUND BY SABOTAGE, WHICH IS THE POINT. The lane building
+    `set_org_eligibility_policy` removed its own `IN` test to check that its case could fail — and TWO
+    cases went red, the expected one and a second showing the stored value as NULL. That second failure
+    is the one nobody was looking for. A test written only to prove the happy path would not have gone
+    near it.
+    Closed by the function's own `p_policy IS NULL` test, which is therefore load-bearing rather than
+    belt-and-braces. ⚠️ The CHECK itself is unchanged and still cannot reject a null — anything that
+    writes the bag by another route inherits the hole, and migrations are append-only, so this is
+    recorded rather than repaired.
 - id: F-087
   title: The board offers people whose certificates have expired, and the save then fails
   tag: A screen offering what the server refuses
