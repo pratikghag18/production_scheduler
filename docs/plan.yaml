@@ -5803,6 +5803,33 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-087
+  title: The board offers people whose certificates have expired, and the save then fails
+  tag: A screen offering what the server refuses
+  status: open
+  found_by: agent
+  refs:
+  - R-330
+  story: >-
+    Checking a queue item against the code rather than reading its line, ahead of choosing what to do
+    next. The item claimed certification expiry still needed wiring to the board. The SERVER half has
+    been there since 0009: `check_eligibility` computes `expiring_skills` as
+    `expires_at < upper(p_timerange)` and `eligible` is false when any exist, and `create_assignment`
+    acts on it — refusing outright under `block`, and under `warn` refusing unless an override is
+    supplied.
+    ⛔ THE BOARD ASKS A SIMPLER QUESTION AND GETS A DIFFERENT ANSWER. `CreatePopover` computes
+    `ineligible` from `!o.skillIds.includes(s.id)` — does this person hold the training at all — and
+    never looks at `expires_at`. So a person whose certificate lapsed a year ago is drawn as eligible,
+    raises no warning, and is offered no override tick. Create then fails with "operator is not eligible
+    for this node/window; override required under warn policy". Because the client never decided an
+    override was needed, the box that would supply one is not on screen: the assignment cannot be
+    completed through the board at all. A dead end, not a warning.
+    ⚠️ THE PARTS ARE ALL PRESENT, WHICH IS WHY THIS IS SMALL AND WHY IT LASTED. `shapes.ts` already
+    parses `expiring_skills` into `expiringSkills`, with its own type; grep for it under
+    `src/features/board/` and there is not one hit. The data arrives at the client and stops there.
+    ⭐ THE SHAPE IS SECTION 4'S RULE WITH THE ARROW REVERSED. That rule warns against a screen that
+    shows what the server will refuse; this is a screen that OFFERS what the server refuses, which is
+    the same disagreement and the worse half, because the person only finds out after doing the work.
 - id: F-085
   title: The generated types promise a string where the database may send nothing
   tag: A guard the compiler cannot give you
@@ -9639,8 +9666,22 @@ next:
     from the app at all: every org is on 'warn' unless somebody edits jsonb by hand. So this is a
     Settings control plus one write RPC, in the shape 0037 already established, NOT the Phase 2 board
     work the old line described.
-- text: Phase 2 — Certification expiry checked against a run's dates on the board
-  why: The matrix surfaces expiry; checking it against assignment dates is the remaining half.
+- text: >-
+    ⛔ A DEAD END ON THE BOARD: an expired certificate is invisible until the server refuses the save
+  why: >-
+    ⚠️ MEASURED, AND THIS IS A DEFECT RATHER THAN THE PHASE 2 POLISH THE LINE USED TO DESCRIBE. The
+    check already exists end to end on the SERVER: `check_eligibility` computes `expiring_skills`
+    (`expires_at < upper(p_timerange)`) and folds it into `eligible`, and `create_assignment` refuses
+    on it — under `block` outright, under `warn` unless an override is supplied.
+    THE BOARD DOES NOT ASK THAT QUESTION. `CreatePopover` derives `ineligible` from
+    `!o.skillIds.includes(s.id)` — whether the person HOLDS the training at all — and expiry is never
+    considered, so somebody whose certificate lapsed last year shows as perfectly eligible, gets no
+    warning and is offered no override tick. Pressing Create then raises `not_eligible … override
+    required under warn policy`, and because the client never decided an override was needed there is
+    no way to supply one: the assignment cannot be made through the board at all.
+    The api layer already parses `expiringSkills` (`shapes.ts`) and nothing in `src/features/board/`
+    reads it, which is the whole of the gap. This is CLAUDE.md section 4's rule with the arrow
+    reversed — a screen OFFERING what the server refuses.
 - text: Phase 2 — Copy Week with dry-run conflict preview
   why: Unchecked Phase 2 item.
 # ------------------------------- PARKED ------------------------------------
