@@ -8,6 +8,7 @@ import {
   canSetRole,
   describeAccess,
   GRANT_ROLES,
+  ROLES_BELOW_ROOT,
   partitionAccess,
   removalNote,
   removalReason,
@@ -91,6 +92,15 @@ export function SiteAccessPanel({
   );
   const activeFocus = focus !== null && focus.root === siteNodeId ? focus : null;
   const activeNodeId = activeFocus?.nodeId ?? siteNodeId;
+  // ⭐ AT A PLANT ROOT, OR SOMEWHERE INSIDE ONE (0053 / R-340). `places` is
+  // filtered to plant roots by `AdminPage`, so the unfocused view IS the root
+  // and a focus is always a descendant. Derived from the state that already
+  // exists rather than re-read from the tree: a second source for "which node
+  // am I showing" is the thing `activeNodeId` was written to prevent.
+  const atPlantRoot = activeFocus === null;
+  // One list, both controls. `selfLocked` is a per-ROW fact so it cannot be
+  // folded in here; `atPlantRoot` is a per-SCREEN one and can.
+  const addableRoles = atPlantRoot ? GRANT_ROLES : ROLES_BELOW_ROOT;
 
   const peopleQuery = useSitePeople(activeNodeId, !treeLoading);
   const setMemberMutation = useSetSiteMember();
@@ -304,7 +314,7 @@ export function SiteAccessPanel({
                       disabled={isPending}
                       onChange={(e) => runSetMember(row, e.target.value as GrantRole)}
                     >
-                      {allowedRoles(row, viewerIsCompanyAdmin).map((r) => (
+                      {allowedRoles(row, viewerIsCompanyAdmin, atPlantRoot).map((r) => (
                         <option key={r} value={r}>
                           {r}
                         </option>
@@ -406,7 +416,13 @@ export function SiteAccessPanel({
                   setAddRoles((prev) => ({ ...prev, [row.profileId]: e.target.value as GrantRole }))
                 }
               >
-                {GRANT_ROLES.map((r) => (
+                {/* ⚠️ THE SAME LIST THE ROW CONTROL USES, NOT `GRANT_ROLES`. This
+                    picker offered `admin` on any node while `allowedRoles` was
+                    about to stop doing so -- two controls on one screen
+                    disagreeing about the same rule is how DEF-0010 got here in
+                    the first place. Below a plant root this is supervisor and
+                    viewer, which is what 0053 will accept. */}
+                {addableRoles.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>

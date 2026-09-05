@@ -42,6 +42,7 @@ import {
   removalNote,
   removalReason,
   resolvePlace,
+  ROLES_BELOW_ROOT,
   type AccessPlace,
   type AccessRow,
   type GrantRole,
@@ -358,18 +359,70 @@ check("A17: a malformed sweep never throws", () => {
 // A18–A27 — allowedRoles / canRemoveAccess. The mirror of 0021 §4/§5.
 // ---------------------------------------------------------------------------
 
+/* ===========================================================================
+ * ⭐⭐ ADMIN IS A PLANT'S ROLE (DEF-0010, R-340, migration 0053).
+ *
+ * The maintainer, session 71: *"the admin level should only be applied to the
+ * plant root. If you make someone a site admin they automatically get access to
+ * the whole site and not just to a particular hierarchy."*
+ *
+ * ⚠️ THESE CASES MIRROR A SERVER RULE AND ARE WORTH NOTHING ALONE. 0053 refuses
+ * `admin` where `nodes.parent_id IS NOT NULL`, measured over a real session
+ * before this was written: at a plant root the write returns the stored role,
+ * one level down it raises `invalid_argument` with `reason: admin_below_root`,
+ * and `supervisor` one level down still succeeds. If the two ever disagree it is
+ * the SERVER that is right and this list that is stale — R-239 in the direction
+ * DEF-0005 and DEF-0007 both broke.
+ * ======================================================================== */
+
+check("A27 ⭐⭐: below a plant root, admin is not offered at all", () => {
+  const got = allowedRoles(stranger({ directRole: "viewer" }), false, false).join(",");
+  return got === "supervisor,viewer" || got;
+});
+
+check("A28: ...and every other role still is, because only admin was narrowed", () => {
+  // A line supervisor is the ordinary case D114 and 0032 were built for. A fix
+  // that narrowed the whole picker below a root would pass A27 and fail here.
+  const got = allowedRoles(stranger({ directRole: null }), false, false).join(",");
+  return got === "supervisor,viewer" || got;
+});
+
+check("A29 ⭐: at a plant root a company admin still gets all three", () => {
+  // The control for A27: without it, a fix that returned `ROLES_BELOW_ROOT`
+  // everywhere would look correct.
+  const got = allowedRoles(stranger({ directRole: "viewer" }), true, true).join(",");
+  return got === "admin,supervisor,viewer" || got;
+});
+
+check("A30 ⛔: the self-rule still wins below a root, so no control is left empty", () => {
+  // Somebody who ALREADY holds admin on a node below a root -- a grant made
+  // before 0053, which that migration deliberately leaves alone rather than
+  // deleting. Returning `["supervisor","viewer"]` here would render a control
+  // with nothing selected while the person really is an admin there, which is
+  // the state `allowedRoles` exists to avoid. Narrowing must not create it.
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), false, false).join(",");
+  return got === "admin" || got;
+});
+
+check("A31: the below-root list is exactly the roles the server will take", () => {
+  // Reads the exported constant rather than restating the pair, so a fourth
+  // role added to `GRANT_ROLES` has one place to be decided, not two.
+  const got = ROLES_BELOW_ROOT.join(",");
+  return got === "supervisor,viewer" || got;
+});
+
 check("A18: a stranger's row offers all three roles", () => {
-  const got = allowedRoles(stranger({ directRole: "viewer" }), false).join(",");
+  const got = allowedRoles(stranger({ directRole: "viewer" }), false, true).join(",");
   return got === "admin,supervisor,viewer" || got;
 });
 
 check("A19 ⭐: your OWN admin grant on this node locks the control to admin", () => {
-  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), false).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), false, true).join(",");
   return got === "admin" || got;
 });
 
 check("A20 ⭐: ...and a company admin is exempt", () => {
-  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), true).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), true, true).join(",");
   return got === "admin,supervisor,viewer" || got;
 });
 
@@ -377,14 +430,14 @@ check("A21 ⭐: your own SUPERVISOR grant is not locked", () => {
   // The narrowing. A broad "never your own row" rule passes A19 and fails
   // here — and it is the rule migration 0021 shipped first, contradicting its
   // own comment (§19.51, rule 17).
-  const got = allowedRoles(stranger({ isSelf: true, directRole: "supervisor" }), false).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "supervisor" }), false, true).join(",");
   return got === "admin,supervisor,viewer" || got;
 });
 
 check("A22 ⭐: adding YOURSELF where you hold no direct grant is not locked", () => {
   // The other half of the narrowing: it takes nothing away, because the
   // stronger covering grant above still decides.
-  const got = allowedRoles(stranger({ isSelf: true, directRole: null }), false).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: null }), false, true).join(",");
   return got === "admin,supervisor,viewer" || got;
 });
 
@@ -429,9 +482,9 @@ check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {
   // narrowing, A20/A26 walk the exemption, and nothing walked "not me".
   const other = stranger({ isSelf: false, directRole: "admin" });
   return (
-    (allowedRoles(other, false).join(",") === "admin,supervisor,viewer" &&
+    (allowedRoles(other, false, true).join(",") === "admin,supervisor,viewer" &&
       canRemoveAccess(other, false) === true) ||
-    `roles=${allowedRoles(other, false).join(",")} remove=${canRemoveAccess(other, false)}`
+    `roles=${allowedRoles(other, false, true).join(",")} remove=${canRemoveAccess(other, false)}`
   );
 });
 

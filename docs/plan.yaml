@@ -3038,6 +3038,43 @@ requirements:
       the three signed-in cases, which failed intermittently under load before the fix and pass three
       runs in a row after it -- the only level that can see two useSession instances disagree
   status: covered
+- id: R-340
+  title: An admin grant belongs to a plant, never to a branch inside one
+  source:
+  - session 72 conversation
+  - DEF-0010
+  stated_by: maintainer
+  claim: >-
+    *"the admin level should only be applied to the plant root. If you make someone a site admin they
+    automatically get access to the whole site and not just to a particular hierarchy."* So `admin` is
+    the role of the person who runs a PLANT, and it may be given only where `nodes.parent_id IS NULL`.
+    `supervisor` and `viewer` are unchanged and still go anywhere: a line supervisor is the ordinary
+    case D114 and 0032 were built for.
+    ⭐ ENFORCED ON THE SERVER FIRST AND MIRRORED ON THE CLIENT, which is the whole reason this is a
+    migration rather than a dropdown change. 0053 re-emits `set_site_member` with one block added and
+    refuses `admin` below a root as `invalid_argument` / `reason: admin_below_root`; `allowedRoles`
+    offers exactly the roles that writer will take. Narrowing only the picker would have been R-239
+    broken in the direction DEF-0005 and DEF-0007 both broke it --- a control withheld for something the
+    server permits.
+    ⚠️ AN EXISTING BELOW-ROOT ADMIN IS LEFT ALONE, not deleted. 0053 refuses new ones and changes to
+    them; it backfills nothing, because taking someone's access away silently during a migration is
+    worse than an inconsistency somebody can see on the Access tab. `allowedRoles` therefore still
+    returns `["admin"]` for such a row under the self-rule, so no control is ever rendered with nothing
+    selected.
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: >-
+      A27 admin is not offered below a root, A28 supervisor and viewer still are (so a fix that
+      narrowed the whole picker fails), A29 all three at a root, A30 the self-rule still wins below a
+      root so no control is left empty, A31 the below-root list is read from the exported constant
+      rather than restated
+  - kind: manual
+    steps: >-
+      Measured over a real session before the client was touched, on the local stack: admin at a plant
+      root returns the stored role; admin one level down raises invalid_argument with reason
+      admin_below_root; supervisor one level down still succeeds.
+  status: covered
 - id: R-339
   title: Copy Week shows every clash and lets the person choose which plan wins, one by one
   source:
@@ -6464,6 +6501,38 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-095
+  title: The screen invited a grant the rest of the product had no answer for
+  tag: A role with nowhere to stand
+  status: fixed
+  found_by: tester
+  refs:
+  - R-340
+  - R-239
+  story: >-
+    The Access tab offered `admin` on any node the viewer administered, and `set_site_member` took it.
+    So a line-level admin was a person the product could create --- and then had no answer for. The
+    Settings tab's scope is a PLANT: `readablePlants` keeps only `parent_id IS NULL`, a line grant makes
+    no root readable, so `settingsScope` fell through to "company" and rendered every control disabled
+    with *"only a system admin can change this"* --- to somebody whose write the server would have taken
+    on their own line, with the row read back out of the database to prove it.
+    ⭐ TWO HONEST FIXES OF VERY DIFFERENT SIZES, AND THE MAINTAINER PICKED THE SMALL ONE. Either
+    Settings learns to target any node a person administers --- a node picker, which the server already
+    supports since a line's override beats its plant's --- or the product stops creating that person.
+    The maintainer: *"the admin level should only be applied to the plant root."* That is a definition
+    rather than a workaround: an admin is who runs a plant, so the role has no meaning on a branch
+    inside one.
+    ⚠️ AND THE FIX HAD TO START ON THE SERVER, WHICH IS THE PART WORTH KEEPING. Hiding `admin` in the
+    picker alone would have left the writer accepting what the screen refuses --- R-239 broken in the
+    other direction, the exact shape of DEF-0005 and DEF-0007. Migration 0053 refuses it first and
+    `allowedRoles` mirrors that predicate and nothing more. The tester had already filed this `minor`
+    on the grounds that it was the SAFE direction; the fix is the direction that stays safe.
+    ⛔ THE PIN CANNOT GO GREEN AND SHOULD NOT BE MADE TO. `DEF-0010.test.tsx` renders `SettingsPanel`
+    for a line-level admin through its own mocks, so it constructs a person the product no longer lets
+    anyone create. The defect's own REPRODUCTION is now blocked at step 1 --- the server refuses the
+    grant --- which is the strongest form of fixed there is, and is not something a mocked render can
+    observe. Left for the tester to re-judge rather than edited, because a developer editing a pin to
+    make it pass is the one move that would make the whole loop worthless.
 - id: F-094
   title: Two copies of the session disagreed, and the menu was drawn from the one that had not answered
   tag: A right answer arriving after a wrong one
@@ -8756,6 +8825,55 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 72
+  date: 2026-09-05
+  title: An admin runs a plant, and now the database says so too (DEF-0010, DEF-0009)
+  commits: []
+  numbers:
+    app_tests: 2117
+    app_test_files: 77
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Two of the tester's defects, one of them mine.
+    DEF-0009 WAS MINE AND IT IS THE SAME FAILURE I SPENT SESSION 69 REMOVING. Four of the eight stage
+    cards named sessions that shipped something else --- S27 cited session 51, a tester run --- because
+    I grouped the requirements from their claims and then INVENTED the refs, while the commit message
+    claimed I had followed each one back to its session. Fixed by holding the mapping once and writing
+    both ends from it, which is what R-336 says they are. Every pairing is evidence now: a session is
+    listed only where its own title or summary names a requirement that stage delivers. Six
+    requirements no session names in its own words are simply not claimed --- a ref that is true and
+    partial beats one that is complete and invented. R-239 also stopped citing
+    `src/test/defects/DEF-0007.test.tsx`, which I deleted when promoting that pin in `cab45d9`: I
+    updated the defect's `pin` field and missed the requirement citing the same file. Its pin is green,
+    3 of 3.
+    DEF-0010 IS A PRODUCT DECISION AND THE MAINTAINER MADE IT: *"the admin level should only be applied
+    to the plant root. If you make someone a site admin they automatically get access to the whole site
+    and not just to a particular hierarchy."* Recorded as R-340 before any code.
+    ⛔ AND IT STARTED WITH A MIGRATION, DELIBERATELY. The tempting fix is to drop `admin` from the
+    picker below a root, and it would have been R-239 broken in the direction DEF-0005 and DEF-0007
+    both broke it --- a control withheld for something the server still permits. 0053 re-emits
+    `set_site_member` whole with one block added and refuses `admin` where `parent_id IS NOT NULL`;
+    `allowedRoles` then mirrors that predicate and nothing else. Measured over a real session BEFORE the
+    client was touched: at a root the write returns the stored role, one level down it raises
+    `admin_below_root`, and `supervisor` one level down still succeeds.
+    NO BACKFILL, AND THE COUNT WAS CHECKED RATHER THAN ASSUMED --- zero below-root admin grants exist on
+    the dev database and neither fixture makes one. Existing ones would be left alone rather than
+    deleted, so `allowedRoles` still returns `["admin"]` for such a row under the self-rule and no
+    control is ever rendered with nothing selected (A30).
+    ⚠️ DEF-0010's PIN IS STILL RED AND I HAVE NOT TOUCHED IT. It renders `SettingsPanel` for a
+    line-level admin through its own mocks, so it constructs a person the product no longer lets anyone
+    create; the defect's REPRODUCTION is now blocked at step 1, which a mocked render cannot see. That
+    is the tester's to re-judge. A developer editing a pin to make it pass is the one move that would
+    make the loop worthless.
+    ⚠️ THE MIGRATION LEDGER IS OUT OF SYNC WITH THE DATABASE and this run did not fix it.
+    `supabase migration up` tries to replay from 0037 and dies on a constraint that already exists ---
+    the same "applied by hand, the ledger never told" state F-086 recorded. 0053 was applied with
+    `psql` like the others. Worth a repair pass, not worth a `db:reset` while the app is in use.
+    `db:types` regenerated after the RPC change, per CLAUDE.md: no diff, because the signature did not
+    move and only the body did --- so `tsc` is conclusive here rather than inconclusive.
+    Green apart from the one pin: `npm run test` 2115 passed of 2117 in 77 files, `tsc` 0, `eslint` 0.
 - id: 71
   date: 2026-09-05
   title: The browser tests get past the front door, and find a defect in the first minute

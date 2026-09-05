@@ -227,6 +227,9 @@ export function canSetRole(row: AccessRow, viewerIsCompanyAdmin: boolean): boole
   return !protectedRow(row, viewerIsCompanyAdmin);
 }
 
+/** Every role that may be given anywhere BELOW a plant root (0053). */
+export const ROLES_BELOW_ROOT: readonly GrantRole[] = ["supervisor", "viewer"];
+
 /**
  * Which roles this screen may offer for this person, in `GRANT_ROLES` order.
  *
@@ -234,9 +237,34 @@ export function canSetRole(row: AccessRow, viewerIsCompanyAdmin: boolean): boole
  * list would leave the control with nothing selected while the person is, in
  * fact, an admin here; the honest rendering is a control showing `admin` with
  * no other option.
+ *
+ * ⭐⭐ `admin` IS OFFERED ONLY AT A PLANT ROOT (DEF-0010, R-340). The
+ * maintainer: *"the admin level should only be applied to the plant root. If you
+ * make someone a site admin they automatically get access to the whole site and
+ * not just to a particular hierarchy."* An admin is the person who runs a plant,
+ * so the role has no meaning on a branch inside one.
+ *
+ * ⚠️ AND THE SERVER SAYS THE SAME THING FIRST, which is what makes this a menu
+ * rather than a rule. Migration 0053 refuses `admin` where
+ * `nodes.parent_id IS NOT NULL` with `reason: admin_below_root`; this mirrors
+ * that predicate and nothing more. Hiding it here alone would have been R-239
+ * broken in the other direction — a control withheld for something the server
+ * permits — which is the shape of DEF-0005 and DEF-0007 and is why the fix
+ * started with a migration.
+ *
+ * ⚠️ THE SELF-RULE STILL WINS WHERE IT APPLIES. A locked row keeps `['admin']`
+ * even below a root: that person already HOLDS admin there (a grant made before
+ * 0053, or by hand), and offering them an empty control would be the
+ * nothing-selected state this function's first paragraph exists to avoid. 0053
+ * deliberately leaves such rows alone rather than deleting them.
  */
-export function allowedRoles(row: AccessRow, viewerIsCompanyAdmin: boolean): readonly GrantRole[] {
-  return selfLocked(row, viewerIsCompanyAdmin) ? (["admin"] as const) : GRANT_ROLES;
+export function allowedRoles(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  isPlantRoot: boolean,
+): readonly GrantRole[] {
+  if (selfLocked(row, viewerIsCompanyAdmin)) return ["admin"] as const;
+  return isPlantRoot ? GRANT_ROLES : ROLES_BELOW_ROOT;
 }
 
 /**
