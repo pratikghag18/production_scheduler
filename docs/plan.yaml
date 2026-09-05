@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-05'
-  tip: a665c7c
+  tip: c24bc69
   baseline:
-    app_tests: 1788
-    app_test_files: 60
+    app_tests: 2106
+    app_test_files: 75
     tsc: 0
     eslint: 0
     db_checks: 609
@@ -1316,7 +1316,8 @@ stages:
   - P1-6b
   - P1-6c
   - P1-6d
-  delivers: []
+  delivers:
+  - R-321
   what: >-
     **Parked on your call — capability first. Recorded here so it can't go missing again, because it already
     did once.** You asked where somebody searches to add a person, and whether they'd have to be in the
@@ -1386,6 +1387,263 @@ stages:
     Shipped in session 18 (§19.79). Built without a stage card at the time; this card was added on 2 Sept
     when the plan file was assembled. Still owed from it: the `canEdit` defect — all three `scopeOptions`
     callers pass none — kept out deliberately because it is a permission and the filter is a view choice.
+- id: S26
+  track: core
+  num: 26
+  title: The status columns that never meant anything are gone
+  status: done
+  owner: agent
+  refs:
+  - session 53
+  - session 54
+  delivers:
+  - R-322
+  - R-323
+  - R-324
+  what: >-
+    **Three columns that looked like features and were not.** An assignment carried a progress label
+    nothing read, a "deleted" assignment was only marked, and a run carried a status that one overlap
+    rule had to make an exception for. Each was a word in the schema that a screen showed and no rule
+    obeyed, which is worse than an absent feature: it reads as a promise.
+
+
+    Deleting an assignment now deletes it. Assignments carry no status at all, runs carry none either,
+    and the overlap rule stops carving out the one value that used to be exempt — so the constraint says
+    what it means for every row rather than for most of them.
+  state: >-
+    Shipped in sessions 53 and 54. Built without a stage card at the time; this card was added on
+    5 Sept in the buildout catch-up, on the same footing as S25's.
+- id: S27
+  track: core
+  num: 27
+  title: Standard cycle times, and the level above that adds up — or refuses to
+  status: done
+  owner: agent
+  refs:
+  - session 51
+  - session 52
+  delivers:
+  - R-315
+  - R-316
+  - R-317
+  - R-319
+  what: >-
+    **How long a part takes at a place, set per cell per product in seconds**, on a grid shaped like the
+    hierarchy rather than repeated inside every product row. An assignment with no typed target shows
+    what its cell's cycle time implies, so the number a planner did not enter is still visible as the
+    one the cell would produce.
+
+
+    **⛔ AND THE ROLL-UP LEARNED THAT ADDING UP IS NOT ALWAYS RIGHT.** R-317 summed every measured place
+    below a row on the reading that a sum is the labour content of one unit. That holds for two cells in
+    a line — sequential stations, so a unit really does cost 60 s + 90 s — and is nonsense for two lines
+    under an area, which are ALTERNATIVE ROUTES no unit ever takes both of. Migration 0041 gives a node
+    `sums_children`, nullable, so unset RESOLVES on read rather than the column guessing. The stage is
+    worth reading for that correction rather than for the feature.
+  state: >-
+    Shipped in sessions 51 and 52, the roll-up correction (R-319) with it. Built without a stage card at
+    the time; this card was added on 5 Sept in the buildout catch-up.
+- id: S28
+  track: core
+  num: 28
+  title: One shell, one field, one chevron — the screens stop each inventing their own
+  status: done
+  owner: agent
+  refs:
+  - session 50
+  - session 52
+  delivers:
+  - R-311
+  - R-313
+  - R-314
+  - R-318
+  what: >-
+    **The same thing built three times is three things.** There were three parallel floating-panel
+    implementations — the board's, a line-for-line clone on admin, and a hand-rolled one that had no
+    focus trap and no Escape. The field box was hand-copied into eleven stylesheets, so the twelfth
+    screen had nothing to import and silently got the browser's own. Four affordances each drew their
+    own chevron, which is how the maintainer noticed: it looked different on the board than on admin.
+
+
+    Each is now ONE module with a build audit forbidding a second — `Popover.tsx`,
+    `Field.module.css` / `InlineEdit.tsx`, and `icons.tsx`. **The audits are the deliverable**, not
+    the consolidation: a standard nothing enforces is a convention, and a convention is what produced
+    eleven copies.
+
+
+    **⚠️ AND ONE OF THEM REACHED THE DATABASE.** The shared pop-up stopped NEW assignments getting a
+    stray `target_unit`, but a code change only decides the next write. The maintainer: *"a rule is a
+    rule, be it new or old."* Migration 0039 backfills the old rows and adds the CHECK, so the invariant
+    is a fact of the schema rather than something the UI remembers.
+  state: >-
+    Shipped across sessions 50-52. Built without a stage card at the time; this card was added on
+    5 Sept in the buildout catch-up.
+- id: S29
+  track: core
+  num: 29
+  title: Edit is one door, on both screens that have one
+  status: done
+  owner: agent
+  refs:
+  - session 49
+  - session 50
+  delivers:
+  - R-306
+  - R-307
+  what: >-
+    **Edit opens everything editable about the row, and Cancel closes all of it.** A shift pattern's
+    Edit reaches its name, its owner, and its shifts and breaks together, rather than being a rename
+    that leaves the times behind a second click. A product's Edit reaches its code, its name and its
+    colour, and the colour is STAGED until Save like everything else in the panel.
+
+
+    Both reverse an earlier narrow-Edit scoping at the maintainer's request, and the reason is the same
+    each time: the row had two controls disagreeing about it. The pattern used to expand its shifts on
+    its own, which left the Edit button reading "Edit" over an already-open row.
+  state: >-
+    Shipped in sessions 49 and 50. Built without a stage card at the time; this card was added on
+    5 Sept in the buildout catch-up.
+- id: S30
+  track: core
+  num: 30
+  title: The plant you chose reaches past the admin screen
+  status: done
+  owner: agent
+  refs:
+  - session 50
+  - session 63
+  delivers:
+  - R-308
+  - R-310
+  - R-312
+  - R-325
+  - R-334
+  what: >-
+    **S25 put one plant control on the admin screen; this is the rest of the app catching up.** The
+    board's assignable operator pool follows the selected plant. The training matrix groups its columns
+    under each plant's own ancestry — and had to learn that in this schema a plant IS a root, so a
+    matrix spanning plants has no common ancestor to trim to. A site admin may create a part at a plant
+    they administer, with the whole lifecycle bounded to parts they own.
+
+
+    **⭐ AND A TAB CANNOT SILENTLY IGNORE THE FILTER ANY MORE (R-334).** The maintainer: *"please ensure
+    that any future tabs created honor the filter."* The audit walks the DIRECTORY rather than a list,
+    so a tab that does not exist yet is already in scope, and the debt list is shrink-only.
+
+
+    **⚠️ AND WHAT AN EMPTY SCOPE SAYS (R-325).** A reader the server has granted nothing is told so in
+    words, with no rail and no panels — and a read that FAILED says something different, so the two are
+    never mistaken for each other.
+  state: >-
+    Shipped across sessions 50 and 63. Built without a stage card at the time; this card was added on
+    5 Sept in the buildout catch-up.
+- id: S31
+  track: core
+  num: 31
+  title: 'The Activity log: who changed what, and when'
+  status: done
+  owner: agent
+  refs:
+  - session 60
+  - session 61
+  - session 63
+  delivers:
+  - R-328
+  - R-329
+  - R-330
+  what: >-
+    **The audit log had been written by trigger since 0008 and never read.** This is the screen: what
+    changed, where, and when, attributed to a person, with a filter that says in words what it searched
+    rather than leaving the reader to infer it from what came back.
+
+
+    **⚠️ IT IS THE STRICTEST GATE IN THE APP AND THAT IS DELIBERATE.** `audit_log_select` is
+    `app_is_admin() and org_id = app_current_org()` — the ORG-WIDE role, so a site admin gets ZERO
+    ROWS rather than a refusal, and an empty list reads exactly like "nothing has ever changed here".
+    The tab is therefore hidden from them by `companyAdminOnly`, which is the only tab that flag is
+    for. DEF-0007 is what happened when it was carried by a second one.
+
+
+    It is also the first table in the app to meet PostgREST's thousand-row ceiling, so it pages.
+  state: >-
+    Shipped in sessions 60, 61 and 63 (the date column learning the chosen plant's format came last,
+    via F-090). Built without a stage card at the time; this card was added on 5 Sept in the buildout
+    catch-up.
+- id: S32
+  track: core
+  num: 32
+  title: A setting is answered for a plant, not only for the company
+  status: done
+  owner: agent
+  refs:
+  - session 62
+  - session 63
+  - session 66
+  - session 68
+  delivers:
+  - R-309
+  - R-320
+  - R-331
+  - R-332
+  - R-333
+  - R-335
+  what: >-
+    **The company had exactly one write RPC for its settings and no screen to change most of them.**
+    This stage is the Settings tab: the date-display format first (R-309), then the shape that lets any
+    setting be answered for ONE PLANT and fall back to the company when it is not (0050, 0052).
+
+
+    **⭐ THE TAB FOLLOWS THE PLANT FILTER RATHER THAN LISTING PLANTS (R-333), AND THAT OVERRULED WHAT
+    R-331 SHIPPED.** The maintainer: *"Once we select the plant at the top we should be able to assign
+    the settings to that particular plant."* The first version grew its own row-per-plant card at the
+    bottom, so a reader who had narrowed the whole admin screen to Plant B still had to find Plant B
+    again in a column — one control, two answers, and they could disagree.
+
+
+    **⚠️ AND WHO MAY CHANGE THEM IS ONE PREDICATE (R-335), WHICH COST TWO DEFECTS.** `set_node_setting`
+    is `app_is_admin() OR app_is_admin_for(node)`, so a plant's own admin may set that plant's rules;
+    only the company defaults are system-admin-only. DEF-0007: the rail hid the tab from every plant
+    admin for two migrations after the server started taking their writes. DEF-0008: removing the flag
+    that did the hiding also removed a SPARE LOCK, and the one left had no test over its narrowed
+    branch.
+
+
+    The rows line up because they are one shared definition (R-320, R-332): one setting is one row with
+    one control on one shared column, so a third setting composes it and has nothing to decide.
+  state: >-
+    Shipped across sessions 62, 63, 66 and 68. **⚠️ DEF-0008 is fix-claimed rather than verified**, so
+    R-335 reads `contradicted` until the tester re-runs its own reproduction; the fix and its evidence
+    are in. Built without a stage card at the time; this card was added on 5 Sept in the buildout
+    catch-up.
+- id: S33
+  track: core
+  num: 33
+  title: Things that can be brought to an end
+  status: done
+  owner: agent
+  refs:
+  - session 59
+  - session 60
+  delivers:
+  - R-326
+  - R-327
+  what: >-
+    **Two ways for something to stop being current, which the app had no way to say.** A shift pattern
+    can be retired and brought back, and retiring is careful about what it does NOT do: it detaches
+    nothing, changes no board, and a place already running a retired pattern still shows it in its own
+    picker. A retired pattern that places still run says so and counts them.
+
+
+    **⚠️ THE RETIRE FLAG IS ADVISORY AND THE CLIENT IS THE WHOLE OF THE RULE** — 0029's own column
+    comment says so, `resolve_shift_template` never reads it, `board_window` does not emit it. Worth
+    knowing before anyone builds on it.
+
+
+    A certification, by contrast, ends on the SERVER: it cannot outlive the plant it was earned in
+    (migration 0045), because a training is a fact about a person at a place and the place can go.
+  state: >-
+    Shipped in sessions 59 and 60. Built without a stage card at the time; this card was added on
+    5 Sept in the buildout catch-up.
 - id: M1
   track: matrix
   num: 1
@@ -6001,6 +6259,42 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-093
+  title: The buildout stopped recording the shape of the work while recording everything else
+  tag: A record that kept half its columns
+  status: fixed
+  found_by: maintainer
+  refs:
+  - S26
+  - S32
+  story: >-
+    The maintainer, opening the page: *"Please check the scheduler buildout, I don't think it has been
+    updated."* It had not. Thirty requirements --- R-306 to R-335, every one of them shipped and covered
+    --- belonged to no stage. The highest requirement any stage claimed was R-305, and the stage list
+    stopped at S25 while sessions ran on to 68.
+    ⭐ THE OTHER THREE HALVES OF THE FILE WERE FINE, WHICH IS WHY NOBODY NOTICED. `requirements`,
+    `findings` and `sessions` were all current --- every piece of work in that range had a session
+    entry, a requirement row and a test named against it. What was missing was only the layer that says
+    what BELONGS WITH WHAT: which of those thirty rows were one job. A reader could learn that
+    `set_node_setting` is gated per node and find the cases proving it, and still not learn that the
+    Settings tab was a piece of work with a beginning and an end.
+    ⚠️ AND THE SHAPE OF THE OMISSION EXPLAINS ITSELF. CLAUDE.md section 3 lists what closes a piece of
+    work and `sessions` is FIRST; the stage's `status`/`state` is second, and is the only item that
+    requires deciding whether the thing you just did was part of something larger. A session entry is
+    always writable at the end of a session. A stage card is not, so it kept being the thing that could
+    wait --- for thirteen sessions, and `shipped: []` on every one of them was the visible symptom
+    nobody read as one.
+    ⛔ THE QUEUE HAD GONE STALE THE SAME WAY, AND THAT ONE COULD HAVE MISLED SOMEBODY INTO REBUILDING
+    WORKING CODE. "A way to CHOOSE warn or block for eligibility" was still listed as next. Its own note
+    said what was missing was a Settings control plus one write RPC --- which is exactly what shipped in
+    sessions 62-63. A finished feature sitting at the top of a queue is worse than an empty queue: it is
+    an instruction.
+    ⭐ WHAT IT CHANGES. The eight stages added here (S26-S33) were grouped from the requirements' own
+    claims and the sessions that shipped them, and the grouping is a judgement --- it is the developer's
+    reading of what was one job, and is meant to be argued with rather than inherited. The durable part
+    is smaller and duller: `shipped` on a session is not decoration, it is the only link between a day's
+    work and the shape it belongs to, and an empty one should be as uncomfortable to leave as an empty
+    `numbers`.
 - id: F-092
   title: The lock I removed was doing a second job
   tag: A guard that was only ever a spare
@@ -8223,6 +8517,48 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 69
+  date: 2026-09-05
+  title: The buildout catches up with thirteen sessions of shipped work
+  commits: []
+  numbers:
+    app_tests: 2106
+    app_test_files: 75
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer asked whether the scheduler buildout had been kept up. It had not, and the gap was
+    measurable rather than a feeling: thirty requirements, R-306 to R-335, belonged to no stage. The
+    highest requirement any stage claimed was R-305; the stage list ended at S25 while the sessions ran
+    to 68. Every one of those thirty had a requirement row, a session entry and a test --- what was
+    missing was only the layer that says which of them were ONE JOB.
+    EIGHT STAGES, S26 TO S33, GROUPED FROM THE REQUIREMENTS' OWN CLAIMS AND THE SESSIONS THAT SHIPPED
+    THEM: the status columns that never meant anything (R-322-324); standard cycle times and the roll-up
+    that had to learn adding up is not always right (R-315-317, R-319); one shell, one field, one
+    chevron, each with an audit forbidding a second (R-311, R-313, R-314, R-318); Edit as one door on
+    both screens that have one (R-306, R-307); the plant filter reaching past the admin screen (R-308,
+    R-310, R-312, R-325, R-334); the Activity log (R-328-330); settings answered for a plant (R-309,
+    R-320, R-331-333, R-335); and things that can be brought to an end (R-326, R-327). S24 gains R-321,
+    the sign-in redirect it actually delivered.
+    THE GROUPING IS A JUDGEMENT AND IS MARKED AS ONE. Each new card's `state` says it was written on
+    5 Sept rather than when the work shipped, which is the footing S25's own card already sits on. If
+    any of the eight cuts the work in the wrong place, moving a requirement between two cards costs
+    nothing --- the requirements and their tests are the load-bearing half and were never wrong.
+    NINE SESSIONS NOW NAME THE STAGE THEY SHIPPED, which is the link that had been empty. `shipped: []`
+    on thirteen consecutive sessions was the visible symptom and nobody read it as one, including me.
+    AND THE QUEUE HAD GONE STALE IN A WAY THAT COULD HAVE COST REAL WORK. "A way to CHOOSE warn or block
+    for eligibility" was still listed as next, and its own note described the missing piece as a
+    Settings control plus one write RPC --- which is what sessions 62-63 shipped. Checked by reading
+    `SettingsPanel` rather than the plan: there is a live `<select>` writing `eligibility_policy`. It is
+    removed, with the reason, under the same 4 Sept convention that records why each queue item went.
+    THE ITEM BESIDE IT IS STILL GENUINELY OPEN and was checked the same way, so the sweep does not only
+    delete: nothing in `src/features/board/` reads `expiringSkills`, so an expired certificate really is
+    still invisible on the board until the server refuses the save. Left where it is.
+    `meta.baseline` moves off 1788 tests in 60 files, which it had read since the file was assembled, to
+    2106 in 75, and `meta.tip` to `c24bc69` --- the commit those numbers were measured on. Docs only: no
+    `src/` file changed, so the runners were not re-run after the edits and the numbers are session 68's,
+    measured this session on this tree.
 - id: 68
   date: 2026-09-05
   title: The rail's narrowed population gets a case, and DEF-0007's pin is promoted
@@ -8265,6 +8601,8 @@ sessions:
     R-239 is back to `covered`, set by the tester when it verified. R-335 stays `contradicted` while
     DEF-0008 is fix-claimed, and gains the N6/N7 evidence it was written without. Green: `npm run test`
     2106 in 75, `tsc` 0, `eslint` 0.
+  shipped:
+  - S32
 - id: 67
   date: 2026-09-05
   title: Tester run
@@ -8375,6 +8713,8 @@ sessions:
     only the tester sets `verified`. The pin stays under `src/test/defects/` until then. Green
     throughout: `npm run test` 2103 in 75, `tsc` 0, `eslint` 0. No migration was touched, so `db:types`
     was not needed and `tsc` is conclusive here.
+  shipped:
+  - S32
 - id: 65
   date: 2026-09-05
   title: Tester run
@@ -8502,7 +8842,10 @@ sessions:
     suite myself — one commit too early, at `cbc7c92`, while the entry names `5f19eb8` after it.
     Corrected to 2025/72 with the file counts settled by `git ls-tree` rather than memory. Running the
     suite honestly is not the same as running it last, and the next lane caught it, not me.
-  shipped: []
+  shipped:
+  - S30
+  - S31
+  - S32
 - id: 62
   date: 2026-09-04
   title: Settings rows line up, and a rule can be answered for one plant
@@ -8580,7 +8923,8 @@ sessions:
     INVOKER and a supervisor never receives the plant root's override. It must be server-resolved.
     Also still open: the write gate was widened so a SITE admin may set their own plant's rule, which
     hands a safety rule to more people and is the maintainer's to confirm.
-  shipped: []
+  shipped:
+  - S32
 - id: 61
   date: 2026-09-04
   title: The Activity screen answers who, what and when — three lanes and an integration
@@ -8640,7 +8984,8 @@ sessions:
     OWED AND NAMED: pushing the filters into the query itself (`.gte("at", …)`, `.in("action", …)`)
     would make a page mean fifty MATCHES rather than fifty rows scanned, and would let a bounded period
     exist at all. The client half degrades honestly without it and would simplify, not change shape.
-  shipped: []
+  shipped:
+  - S31
 - id: 60
   date: 2026-09-04
   title: Two lanes off the cleaned queue — retiring a shift pattern, and reading the audit log
@@ -8704,7 +9049,9 @@ sessions:
     tail — and never invents a name. Closing it wants a SECURITY DEFINER function mapping uid to an
     identity, gated on `app_is_admin()`, plus a decision about showing addresses; and if names are
     wanted rather than emails, there is nowhere to put one today.
-  shipped: []
+  shipped:
+  - S31
+  - S33
 - id: 59
   date: 2026-09-04
   title: A certification cannot outlive the plant it was earned in (R-326, migration 0045)
@@ -8758,7 +9105,8 @@ sessions:
     Recorded as F-084; somebody should reconcile that ledger deliberately.
     35 numbered SQL files at 529 passed, 0 failed, 0 hard-errors, plus the demo mode's 11. 1800 tests in
     62 files. `tsc` conclusive rather than inconclusive, because `db:types` ran after the migration.
-  shipped: []
+  shipped:
+  - S33
 - id: 58
   date: 2026-09-04
   title: The phantom table is gone and the generated types describe the migrations again
@@ -9072,7 +9420,8 @@ sessions:
     gone, replaced by positive cases asserting every run and every assignment reaches a map.
     Suite 1788 in 60 files, tsc 0 with `db:types` regenerated, every SQL file green. Driven in the browser:
     the board draws its runs and a run's pop-up still opens, edits and deletes.
-  shipped: []
+  shipped:
+  - S26
 - id: 53
   date: 2026-09-04
   title: A deleted assignment is deleted (R-323)
@@ -9115,7 +9464,8 @@ sessions:
     with `db:types` regenerated, every SQL file green including the new one at 6 of 6. Driven in the browser:
     Delete removed the block with no error, and the table went from 39 rows to 38 rather than 39 with one
     hidden.
-  shipped: []
+  shipped:
+  - S26
 - id: 52
   date: 2026-09-04
   title: The assignment status picker is removed (R-322)
@@ -10425,23 +10775,17 @@ next:
 # takes `siteNodeId` and its own doc says supplying it MOVES the training); and
 # S22's "no permission preview on the Trainings tab" (`useEditRights` +
 # `canEdit`, asked with the owner's PATH).
+#
+# Removed on 5 Sept, same rule -- checked against the code, not assumed:
+# "A way to CHOOSE warn or block for eligibility". Its own note said what was
+# missing was the SWITCH, "a Settings control plus one write RPC, in the shape
+# 0037 already established". That is exactly what S32 shipped: migration 0050
+# added `node_settings` and `set_node_setting`, and `SettingsPanel` renders the
+# policy as a `<select>` writing `eligibility_policy` -- per plant, which is
+# more than the item asked for. Verified by reading the panel, not the plan.
 # ---------------------------------------------------------------------------
 - text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: Unchecked Phase 1 item.
-- text: A way to CHOOSE warn or block for eligibility (the enforcement itself is built)
-  why: >-
-    ⚠️ MEASURED, AND THE ITEM AS WRITTEN WAS WRONG — the maintainer said so first: *"one has to give an
-    override decision right now, there is a warning as well and doesn't let you assign a person without
-    a reason, what am I missing?"* Nothing. Enforcement shipped on BOTH sides. `assignments` carries
-    `eligibility_override` and `override_reason`; `CreatePopover` computes `blocked` and `needsOverride`
-    from `eligibilityPolicy` and disables Create until a reason is typed; and the server reads
-    `orgs.settings->>'eligibility_policy'` in `create_assignment`, `move_run`, `apply_split_coverage`
-    and their 0043/0044 successors, with a CHECK constraint pinning it to ('warn','block') since 0001.
-    WHAT IS ACTUALLY MISSING is the switch. `orgs.settings` has exactly ONE write RPC —
-    `set_org_date_format` (0037/0038) — so `eligibility_policy` and `capacity_cap` cannot be changed
-    from the app at all: every org is on 'warn' unless somebody edits jsonb by hand. So this is a
-    Settings control plus one write RPC, in the shape 0037 already established, NOT the Phase 2 board
-    work the old line described.
 - text: >-
     ⛔ A DEAD END ON THE BOARD: an expired certificate is invisible until the server refuses the save
   why: >-
