@@ -226,6 +226,19 @@
   background: var(--page);
 }
 
+/* A retired pattern's row — `shift_templates.active === false`.
+
+   ⚠️ IT IS DASHED AND QUIET, NOT FADED OUT. `opacity` on the row would take the
+   Bring-back button and the "1 place still runs it" line down with it, and those
+   two are the whole reason a retired row is on screen at all: one is the way out
+   of the state, the other is the fact the state does not change. So the BORDER
+   carries the difference and every piece of text keeps its own contrast — the
+   same reason TrainingsPanel's `.retired` only drops the background. */
+.retiredRow {
+  border-style: dashed;
+  background: transparent;
+}
+
 /* The row's title, plain text. It used to be a disclosure button that opened
    the pattern on its own (a caret, a hover underline and a "show shifts" hint,
    all one affordance). One-door, 2 Sept: Edit is the only opener now, so the
@@ -272,6 +285,20 @@
   grid-column: 1 / -1;
   margin: 0;
   font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+/* The word "Retired" at the head of that line.
+
+   ⚠️ `--ink-2`, NOT the `--muted` TrainingsPanel's `.tag` uses, and it is the
+   same measurement `.rowNote` above records: --muted is 3.50:1 on --surface,
+   under AA for small text, and this tag is the state of the row rather than a
+   column header nobody has to read. Uppercase and letter-spaced so it reads as a
+   badge and not as the first word of the sentence beside it. */
+.tag {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
   color: var(--ink-2);
 }
 

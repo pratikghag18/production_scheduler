@@ -97,6 +97,14 @@ import {
   type ShiftView,
 } from "../lib/shiftDraft";
 import { indentedLabel, scopeIndex, scopeOptions } from "../lib/scope";
+/* ⭐ THE LABEL IS IMPORTED, NOT RETYPED, and it is worth a line. `retireActionLabel`
+   is `../lib/trainings`' two-word pure helper ("Retire" / "Bring back") and the
+   Trainings screen is where this whole shape comes from (`skills.active`, session
+   18). Copying the two strings into this file instead would leave two screens free
+   to drift into "Deactivate"/"Reactivate" on one and "Retire"/"Bring back" on the
+   other for the identical act — a second convention for one idea, which costs more
+   than the import does. */
+import { retireActionLabel } from "../lib/trainings";
 import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import {
@@ -109,6 +117,7 @@ import {
   useDeleteShift,
   useDetachPattern,
   useRenamePattern,
+  useSetPatternActive,
   useShiftPatterns,
   useUpdateShift,
 } from "../hooks/useShifts";
@@ -237,6 +246,7 @@ export function ShiftsPanel() {
 
   const createPattern = useCreatePattern();
   const renamePattern = useRenamePattern();
+  const setPatternActive = useSetPatternActive();
   const createShift = useCreateShift();
   const updateShift = useUpdateShift();
   const deleteShift = useDeleteShift();
@@ -296,6 +306,26 @@ export function ShiftsPanel() {
   const hiddenNodes = view.nodes.length - visibleNodes.length;
   const visiblePatterns = rowsInPlant(view.patterns, plant.choice, plant.plants, nodesById);
   const hiddenPatterns = view.patterns.length - visiblePatterns.length;
+
+  /* ⭐⭐ RETIRED OR IN USE — `shift_templates.active`, migration 0029.
+     ⚠️ READ FROM THE RAW TEMPLATE ROWS, NOT FROM `PatternView`, and not because
+     that is tidier. `patternRows` assembles the view out of five tables and does
+     not carry the flag; this panel is where the flag is needed and the raw rows
+     are already in hand, exactly as `readableNodes` above is. Nothing else in the
+     app reads the column — `resolve_shift_template` does not, and `board_window`
+     does not even emit it — so this map is the whole of the feature's state.
+     ⚠️ `!== false`, not `?? true`: a `PatternView` exists only because
+     `parseShiftTemplateRow` accepted a row, and that guard REJECTS a row with no
+     boolean `active`, so a miss here is impossible rather than a third state to
+     invent a default for. */
+  const activeById = new Map(
+    (query.data?.templates ?? []).filter((t) => t !== null).map((t) => [t.id, t.active]),
+  );
+  function isInUse(p: PatternView): boolean {
+    return activeById.get(p.id) !== false;
+  }
+  const livePatterns = visiblePatterns.filter(isInUse);
+  const retiredPatterns = visiblePatterns.filter((p) => !isInUse(p));
 
   // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). `patternRows` already returns
   // every node with its depth and path for the attachment card below, so the
@@ -839,11 +869,16 @@ export function ShiftsPanel() {
     const open = openPatternId === pattern.id;
     const renaming = activeRename !== null && activeRename.id === pattern.id;
     const confirming = activeConfirmId === pattern.id;
+    const inUse = isInUse(pattern);
+    const rowClass = [
+      styles.patternRow,
+      open ? styles.patternRowOpen : null,
+      inUse ? null : styles.retiredRow,
+    ]
+      .filter((c) => c !== null)
+      .join(" ");
     return (
-      <li
-        className={open ? `${styles.patternRow} ${styles.patternRowOpen}` : styles.patternRow}
-        key={pattern.id}
-      >
+      <li className={rowClass} key={pattern.id}>
         {/* ⭐ ONE DOOR (the maintainer, 2 Sept). The name USED to be a button that
             toggled the shift list on its own. Opening it that way left the Edit
             button still reading "Edit" over an already-open row — the name said
@@ -863,6 +898,38 @@ export function ShiftsPanel() {
           {pattern.attachedCount === 1 ? "1 place" : `${pattern.attachedCount} places`}
         </span>
         <div className={styles.rowActions}>
+          {/* ⭐⭐ RETIRE FIRST, EDIT SECOND, DELETE LAST (and Delete is still a
+              link on its own line below). The order on screen is the decision:
+              retiring is reversible and deleting is not, so the reversible act
+              is the one nearest to hand. Same order, same two words and the same
+              helper as the Trainings screen — `skills.active` got exactly this
+              treatment in session 18 and a second vocabulary for one idea would
+              cost more than it is worth.
+              ⚠️ NAMED FOR ITS ROW (`aria-label`), like every Retire on the
+              Trainings screen: a column of buttons all called "Retire" leaves a
+              screen-reader user choosing between identical controls with no way
+              to tell which pattern they are about. */}
+          <button
+            type="button"
+            className={styles.btn}
+            aria-label={`${retireActionLabel(inUse)} ${pattern.name}`}
+            title={
+              inUse
+                ? "Stop offering it when pointing a place at a pattern. Places already attached keep running it."
+                : "Offer it again when pointing a place at a pattern."
+            }
+            disabled={setPatternActive.isPending}
+            onClick={() => {
+              const key = `active-${pattern.id}`;
+              clear(key);
+              setPatternActive.mutate(
+                { templateId: pattern.id, active: !inUse },
+                { onError: (e) => fail(key, e) },
+              );
+            }}
+          >
+            {retireActionLabel(inUse)}
+          </button>
           <button
             type="button"
             className={styles.btn}
@@ -977,18 +1044,44 @@ export function ShiftsPanel() {
             `node_shift_templates` and it is useful before the dialog opens —
             and the confirmation names the same number from the server.
 
-            ⚠️ AND THERE IS STILL NO DEACTIVATE HERE. 0029 gives
-            `shift_templates` an `active` column so all four owned lists mean
-            the same thing, but nothing reads or writes it yet: the column is
-            in the schema and the control is owed. Offering a Deactivate button
-            that changed a flag no screen renders would be worse than the gap.
-            See docs/roadmap.md. */}
-        {pattern.attachedCount > 0 && (
+            ⭐ AND THE "THERE IS STILL NO DEACTIVATE HERE" NOTE THAT SAT HERE IS
+            GONE WITH THE GAP IT DESCRIBED. It said 0029 had given
+            `shift_templates` an `active` column that nothing read or wrote, and
+            that a Deactivate button over a flag no screen renders would be worse
+            than the gap. Both halves are answered: the Retire control above
+            writes it and this row draws it. */}
+        {inUse && pattern.attachedCount > 0 && (
           <p className={styles.rowNote}>
             {`Attached to ${pattern.attachedCount} ${
               pattern.attachedCount === 1 ? "place" : "places"
             }.`}
           </p>
+        )}
+
+        {/* ⚠️⚠️ WHAT RETIRING DID NOT DO, SAID OUT LOUD. `shift_templates.active`
+            is ADVISORY — 0029's own comment on the column is *"not offered when
+            attaching a pattern to a node ... nodes already attached keep
+            resolving to it"*, and `resolve_shift_template` never reads it. So
+            the word "Retired" alone, over a pattern a cell still runs every
+            night, reads as "nobody runs this any more", which is the one thing
+            putting it away did not do. The count is this panel's own read of
+            `node_shift_templates`, the same number the column above shows. */}
+        {!inUse && (
+          <p className={styles.rowNote}>
+            <span className={styles.tag}>Retired</span>{" "}
+            {pattern.attachedCount === 0
+              ? "Not offered when pointing a place at a pattern."
+              : `Not offered when pointing a place at a pattern. ${
+                  pattern.attachedCount === 1
+                    ? "1 place still runs it"
+                    : `${pattern.attachedCount} places still run it`
+                }, until you point ${
+                  pattern.attachedCount === 1 ? "it" : "them"
+                } somewhere else below.`}
+          </p>
+        )}
+        {errorFor(`active-${pattern.id}`) !== null && (
+          <p className={styles.rowError}>{errorFor(`active-${pattern.id}`)}</p>
         )}
         {confirming ? (
           <DeleteDialog
@@ -1088,7 +1181,9 @@ export function ShiftsPanel() {
         <h2 className={styles.h2}>Shift patterns</h2>
         <p className={styles.hint}>
           A pattern is the set of shifts a place runs. Everything here is a clock time; a shift that
-          runs past midnight shows its end marked +1d, so 22:00–06:00 +1d is a night shift.
+          runs past midnight shows its end marked +1d, so 22:00–06:00 +1d is a night shift. Retiring
+          a pattern stops it being offered when you point a place at one; anywhere already attached
+          keeps running it until you move that place yourself.
         </p>
 
         {pending && <p className={styles.status}>Loading shift patterns…</p>}
@@ -1170,7 +1265,32 @@ export function ShiftsPanel() {
                   <span>Attached to</span>
                   <span />
                 </div>
-                <ul className={styles.list}>{visiblePatterns.map(renderPattern)}</ul>
+                {/* ⚠️ THE HEADER IS DRAWN EVEN WHEN THE LIVE LIST IS EMPTY,
+                    because the retired list underneath uses the same five
+                    tracks and a table of unlabelled columns is worse than a
+                    header standing over one sentence. */}
+                {livePatterns.length === 0 ? (
+                  <p className={styles.status}>Every pattern here is retired.</p>
+                ) : (
+                  <ul className={styles.list}>{livePatterns.map(renderPattern)}</ul>
+                )}
+
+                {/* ⭐ RETIRED PATTERNS ARE AN ORDINARY, POPULATED PART OF THIS
+                    SCREEN — retiring is the main action, so what has been put
+                    away has to be somewhere a person can find it and bring it
+                    back. Same shape as the Trainings screen, with ONE
+                    difference: the heading is not drawn over "Nothing retired."
+                    when nothing is. Trainings has a card of its own and can
+                    afford the empty section; this panel already carries two
+                    counted footnotes and a skipped-rows line under the same
+                    list, and a fourth permanent line saying nothing happened
+                    would bury the three that say something did. */}
+                {retiredPatterns.length > 0 && (
+                  <>
+                    <h3 className={styles.h3}>Retired</h3>
+                    <ul className={styles.list}>{retiredPatterns.map(renderPattern)}</ul>
+                  </>
+                )}
               </>
             )}
 
@@ -1217,18 +1337,36 @@ export function ShiftsPanel() {
           </p>
           <ul className={styles.nodeList}>
             {visibleNodes.map((n) => {
-              /* ⭐ THE OPTIONS ARE THE VISIBLE PATTERNS PLUS, IF IT IS NOT
+              /* ⭐ THE OPTIONS ARE THE PATTERNS ON OFFER PLUS, IF IT IS NOT
                  AMONG THEM, THE ONE THIS PLACE IS ACTUALLY RUNNING. A row that
                  dropped its own attachment from the list would render as
                  "Inherit from above" — a positive claim about this place that
                  is simply false, and one click from becoming true. Attaching
                  needs `app_is_admin_for(node_id)` and says nothing about who
                  owns the pattern, so a company admin can and does put one
-                 plant's pattern on another's node; this is that case. */
+                 plant's pattern on another's node; this is that case.
+
+                 ⭐⭐ AND "ON OFFER" IS `livePatterns`, NOT `visiblePatterns`,
+                 SINCE THE RETIRE CONTROL LANDED. This is the ONE thing
+                 `shift_templates.active` means — migration 0029's comment on the
+                 column, verbatim: *"False = retired: not offered when attaching a
+                 pattern to a node."* The database refuses nothing here, so this
+                 client is the whole of the rule, which is the LESSER of the two
+                 mistakes house rule 4 ranks: a screen that refuses what the
+                 server allows is recoverable in one click (bring it back), and
+                 one that offers what the server refuses is not.
+
+                 ⚠️ THE SECOND ARM NOW COVERS A RETIRED ATTACHMENT AS WELL AS A
+                 FILTERED-AWAY ONE, and it has to, because retiring detaches
+                 NOTHING: `resolve_shift_template` never reads `active`, so a
+                 place attached to a pattern the day before it was retired goes
+                 on running it. Dropping it from this row would be the panel
+                 claiming a change the server never made. */
+              const offered = livePatterns;
               const options =
-                n.templateId === null || visiblePatternIds.has(n.templateId)
-                  ? visiblePatterns
-                  : [...visiblePatterns, ...view.patterns.filter((p) => p.id === n.templateId)];
+                n.templateId === null || offered.some((p) => p.id === n.templateId)
+                  ? offered
+                  : [...offered, ...view.patterns.filter((p) => p.id === n.templateId)];
 
               /* ⚠️⚠️ THE DRAFT IS RESOLVED AGAINST THOSE OPTIONS, NOT TRUSTED.
                  `attachDraft` is keyed by node id and holds a PATTERN id, and

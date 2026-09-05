@@ -39,6 +39,7 @@ import {
   detachPattern,
   fetchShiftPatterns,
   renamePattern,
+  setPatternActive,
   updateBreak,
   updateShift,
   type CreateBreakInput,
@@ -47,6 +48,7 @@ import {
   type AttachPatternInput,
   type NodeShiftTemplateRow,
   type SchedulerError,
+  type SetPatternActiveInput,
   type ShiftBreakRow,
   type ShiftPatternsPayload,
   type ShiftRow,
@@ -106,6 +108,29 @@ export function useRenamePattern() {
     // that did not mean to touch the scope silently move the pattern.
     (v) => renamePattern(v.templateId, v.name, "siteNodeId" in v ? v.siteNodeId : undefined),
     true,
+  );
+}
+
+/**
+ * Retire / bring back — the MAIN action on a pattern, `deletePattern` the
+ * secondary one. Mirrors `useSetSkillActive` in `useOperators.ts` deliberately
+ * rather than inventing a second shape for the same idea.
+ *
+ * ⚠️ `alsoBoard: false`, AND THAT IS A MEASURED CLAIM RATHER THAN A SAVING.
+ * Every other write here that touches a pattern passes `true`, so the odd one
+ * out needs its reason on the line: `active` is ADVISORY.
+ * `resolve_shift_template` never reads it, so no node changes the pattern it
+ * resolves to; and `board_window` does not emit the column at all (it builds
+ * `shift_templates` with an explicit `jsonb_build_object` of `id`, `name`,
+ * `shifts` — migration 0042:204-206), so no open board is holding a stale copy
+ * of it. There is nothing on a board that could draw differently, and
+ * invalidating every board window to redraw the identical answer would be a
+ * cost paid for a comment nobody wrote.
+ */
+export function useSetPatternActive() {
+  return useShiftWrite<ShiftTemplateRow, SetPatternActiveInput>(
+    (input) => setPatternActive(input),
+    false,
   );
 }
 

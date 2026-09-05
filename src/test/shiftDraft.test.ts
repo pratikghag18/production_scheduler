@@ -507,14 +507,24 @@ function payload(over: Partial<ShiftPatternsPayload> = {}): ShiftPatternsPayload
 
 const PLANT = { id: "n-plant", name: "Plant 1", parentId: null, path: "plant1" };
 const LINE = { id: "n-line", name: "Line A", parentId: "n-plant", path: "plant1.linea" };
-const OWNED = { id: "t-owned", name: "Plant 1 nights", siteNodeId: "n-plant" };
+// `active: true` because these two are the ORDINARY case this file is about —
+// draft arithmetic over patterns that are in use. S21 made `active` a required
+// field on `ShiftTemplateRow` rather than an optional one, deliberately: a
+// parser that defaults it fails open into "in use". Nothing here reads the
+// flag, so this is a type obligation and not a behaviour change.
+const OWNED = { id: "t-owned", name: "Plant 1 nights", siteNodeId: "n-plant", active: true };
 // ⭐ 0028 / D108: this was `siteNodeId: null` — the company-wide pattern. There
 // is no such row now. It keeps its name and its role in this file (the pattern
 // whose OWNER the fixture deliberately does not supply a node for, so
 // `ownerLabel` has to fall back) but the owner is a real node id the fixture
 // omits from `nodes`, which is the state that still exists: a row you can read
 // whose owning node you cannot name.
-const SHARED = { id: "t-shared", name: "Company standard", siteNodeId: "n-elsewhere" };
+const SHARED = {
+  id: "t-shared",
+  name: "Company standard",
+  siteNodeId: "n-elsewhere",
+  active: true,
+};
 
 /** The seed's night shift, on the site-owned pattern. */
 const NIGHT_ROW = {
