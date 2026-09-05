@@ -581,6 +581,45 @@ export default function AdminPage() {
    * with no next step is a dead end. Access is granted on the Access tab
    * (`SiteAccessPanel`), which only an administrator can see.
    */
+  /* ---------------------------------------------------------------------
+   * ⛔⛔ NO RAIL UNTIL THIS COMPONENT'S OWN SESSION HAS ANSWERED, and the word
+   * OWN is the whole point. `RequireAdmin` already gates this page on
+   * `adminAccess(..., loading)` and renders "Loading…" while pending — but it
+   * calls `useSession()` and so does this file, and those are two INDEPENDENT
+   * instances with their own `loading` and their own `profile` (the standing
+   * "useSession() called in five components" debt). So the gate's copy can
+   * finish, admit you, and mount this page while THIS copy still has
+   * `profile === null`.
+   *
+   * ⚠️ AND A NULL PROFILE IS NOT A NEUTRAL STATE HERE. `adminSectionsFor`
+   * answers `["operators", "trainings", "matrix"]` for an unknown person —
+   * correct as a floor, and indistinguishable on screen from the real answer
+   * for a supervisor. So a company admin opening /admin drew a THREE-TAB rail
+   * for a moment before it became eleven, and a site admin's Settings tab
+   * appeared late. Found by the first browser test that ever signed in
+   * (`e2e/signedIn.spec.ts`); no unit case could see it, because they mock
+   * `useSession` and a mock has only one answer to disagree with.
+   *
+   * This is D97/D91's standing lesson — a permission answer shown before the
+   * answer has landed reads as a permission BUG to the person it happens to —
+   * applied to the rail rather than to the refusal sentence. N5 in
+   * `adminNoGrants.test.tsx` already holds that line for the "nothing has been
+   * shared" heading; this holds it for the menu.
+   *
+   * ⭐ IT IS A GUARD, NOT THE CURE. The cure is one `SessionProvider` at the
+   * root so there is a single answer to disagree with, which is the parked debt
+   * item. Until then every reader of `useSession` owes its own version of this.
+   * ------------------------------------------------------------------- */
+  if (sessionLoading) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.content}>
+          <p className={styles.status}>Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
   if (nothingShared) {
     return (
       <div className={styles.page}>

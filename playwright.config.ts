@@ -1,34 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { supabaseUrl, supabaseAnonKey } from "./e2e/env";
 
-// Minimal .env.local loader (no dotenv dependency — this brief's stack doesn't
-// include one). Falls back to dummy Supabase values so the app boots without
-// a real project; HealthPill going "unreachable" against the dummy URL is
-// expected and must not fail the smoke test.
-function loadDotEnvLocal(): Record<string, string> {
-  const dir = path.dirname(fileURLToPath(import.meta.url));
-  const envPath = path.join(dir, ".env.local");
-  const parsed: Record<string, string> = {};
-  if (existsSync(envPath)) {
-    for (const line of readFileSync(envPath, "utf-8").split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const value = trimmed.slice(eq + 1).trim();
-      parsed[key] = value;
-    }
-  }
-  return parsed;
-}
-
-const dotEnvLocal = loadDotEnvLocal();
-
-const supabaseUrl = dotEnvLocal.VITE_SUPABASE_URL ?? "https://example.supabase.co";
-const supabaseAnonKey = dotEnvLocal.VITE_SUPABASE_ANON_KEY ?? "dummy-anon-key";
+/*
+ * ⚠️ THE CREDENTIALS AND THE "IS THERE A BACKEND" VERDICT LIVE IN `e2e/env.ts`,
+ * not here. Both this file and the signed-in specs need that answer, and a
+ * second copy of it would drift — the config would hand the dev server real
+ * values while a spec still believed it was on the dummies, or the reverse.
+ * The .env.local loader that used to sit inline here moved there whole.
+ *
+ * HealthPill going "unreachable" against the dummy URL is expected and must not
+ * fail the smoke test.
+ */
 
 export default defineConfig({
   testDir: "./e2e",

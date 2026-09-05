@@ -1659,6 +1659,41 @@ stages:
   state: >-
     Shipped in sessions 59 and 60. Built without a stage card at the time; this card was added on
     5 Sept in the buildout catch-up.
+- id: S34
+  track: core
+  num: 34
+  title: The browser tests get past the front door
+  status: now
+  owner: agent
+  refs:
+  - session 70
+  - NEXT Phase 1
+  delivers:
+  - R-337
+  what: >-
+    **Every browser test this app had was taken from the pavement.** All five cases in
+    `e2e/smoke.spec.ts` are signed-out ones — the gate, the redirect, the door it sends people to —
+    and its own header said the signed-in half was *"unreachable here and not faked"*. That was true of
+    CI, which has no database. It was never true LOCALLY: `.env.local` points at the running stack and
+    both `seed.sql` and `dev_demo.sql` have set a known `encrypted_password` on every demo account
+    since they were written. The door was open the whole time and nobody tried it.
+
+
+    `e2e/signedIn.spec.ts` signs in as three real people and reads the admin rail. It skips rather than
+    fails when there is no backend (`e2e/env.ts` decides, keyed on the URL rather than on `CI`, so a
+    developer with no `.env.local` gets the same honest skip), which is what lets it exist before CI
+    has a database.
+
+
+    **⛔ IT FOUND A DEFECT ON ITS FIRST RUN, WHICH IS THE ARGUMENT FOR THE WHOLE STAGE.** See R-337 and
+    F-094: the admin rail drew three tabs for everyone while the profile was still loading. No unit
+    case could have found it — they mock `useSession`, and the bug is two instances of `useSession`
+    disagreeing.
+  state: >-
+    **Half done, and the halves are different jobs.** The specs exist and are green locally (8 e2e
+    cases, 3 of them signed in). What is left is the CI half: a database service, the 52 migrations and
+    a fixture, so the three signed-in cases stop skipping on a push. Until then a skip is not a pass
+    and this stage stays open.
 - id: M1
   track: matrix
   num: 1
@@ -2960,6 +2995,42 @@ requirements:
       15 cases; three sabotages caught -- a new panel that never asks, one that calls the hook and never
       reads it, and one sneaked onto the debt list
   status: covered
+- id: R-337
+  title: A screen draws no permission-shaped answer before its own session has answered
+  source:
+  - F-094
+  - D97
+  - D91
+  stated_by: agent
+  claim: >-
+    A screen that narrows what it offers by role must render NOTHING of that narrowing until the
+    session it reads has resolved. The admin rail is the case this was written for: while `profile` is
+    null, `adminSectionsFor` answers `["operators", "trainings", "matrix"]` — a correct floor for an
+    unknown person, and on screen indistinguishable from a supervisor's real answer — so a company
+    admin saw three tabs become eleven and a site admin's Settings tab arrived late.
+    ⚠️ `RequireAdmin` DOES NOT PREVENT THIS AND CANNOT. It gates the page on
+    `adminAccess(..., loading)`, but it calls `useSession()` and `AdminPage` calls it again — two
+    instances with their own `loading` and their own `profile` (the standing "useSession() called in
+    five components" debt). The gate's copy can finish, admit you, and mount a page whose own copy has
+    not. So the guard belongs in the screen that draws the answer, and every reader of `useSession`
+    owes its own until one `SessionProvider` at the root makes there be a single answer to disagree
+    with.
+    ⭐ THIS IS D97/D91's STANDING LESSON APPLIED TO THE MENU rather than to the refusal sentence: a
+    permission answer shown before the answer has landed reads as a permission BUG to the person it
+    happens to. N5 in `adminNoGrants.test.tsx` has held that line for the "nothing has been shared"
+    heading since session 19; nothing held it for the rail.
+  verified_by:
+  - kind: vitest
+    file: src/test/adminNoGrants.test.tsx
+    cases: >-
+      N8 -- a company admin with the session still resolving gets no rail at all, neither the eleven
+      tabs nor the three an unknown person resolves to; measured RED against the guard removed
+  - kind: e2e
+    file: e2e/signedIn.spec.ts
+    cases: >-
+      the three signed-in cases, which failed intermittently under load before the fix and pass three
+      runs in a row after it -- the only level that can see two useSession instances disagree
+  status: covered
 - id: R-336
   title: An expired certificate is a warning you can act on, not a save that fails
   source:
@@ -3030,6 +3101,13 @@ requirements:
       N6/N7 (DEF-0008) -- the whole rail as a LIST for a supervisor with no admin grant, and for a
       company admin so the first cannot pass by the rail emptying; red on the one-line widening of
       `adminSectionsFor` that the 2103-case suite passed
+  - kind: e2e
+    file: e2e/signedIn.spec.ts
+    cases: >-
+      the same three populations in a REAL browser against the real server, grants and profile read --
+      a company admin's eleven tabs, a site admin offered Settings and not Activity, a supervisor's
+      exact three. The unit cases prove the decision; these prove the decision is what reaches the
+      screen
   status: contradicted
   note: >-
     ⛔ THE CLAUSE ABOUT `adminSectionsFor` HAS NO CASE BEHIND IT (DEF-0008, open). The row says the flag's
@@ -6304,6 +6382,40 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-094
+  title: Two copies of the session disagreed, and the menu was drawn from the one that had not answered
+  tag: A right answer arriving after a wrong one
+  status: fixed
+  found_by: test
+  refs:
+  - R-337
+  - S34
+  story: >-
+    The first browser test that ever signed in failed on its first full run, and only under load: a
+    company admin's rail came back as `["Operators", "Trainings", "Matrix"]` instead of eleven tabs,
+    and a site admin's Settings tab was missing. Run alone, all three cases passed. Run beside the five
+    smoke cases on three workers, two of them failed.
+    ⭐ THE CAUSE IS A DEBT ITEM NOBODY THOUGHT WAS A BUG. `useSession()` is called in five components,
+    which has sat in the queue as *"five duplicated getSession() round trips"* — a performance note.
+    It is not. Each call is an INDEPENDENT instance with its own `loading` and its own `profile`, so
+    `RequireAdmin` can finish loading, decide you are an admin and mount `AdminPage` while AdminPage's
+    own copy still has `profile === null`. Two components disagreeing about who you are, for as long as
+    one round trip takes.
+    ⛔ AND A NULL PROFILE IS NOT A BLANK ANSWER. `adminSectionsFor(undefined, undefined)` returns the
+    three-tab floor. That is right as a default and wrong as a thing to draw: on screen it is exactly a
+    supervisor's real rail, so the app confidently showed every admin somebody else's menu for a beat.
+    The supervisor case never failed, because the loading state happens to equal its expected answer --
+    the one role for whom the bug is invisible.
+    ⚠️ NO UNIT CASE COULD HAVE CAUGHT IT, AND THAT IS THE POINT WORTH KEEPING. Every admin suite mocks
+    `useSession`, and one mock has exactly one answer -- the two instances that disagreed in the
+    browser are the same object under test. 2106 unit cases were green through it. The e2e case found
+    it in the first minute it existed, and found it by being SLOW: the failure only appears when the
+    profile round trip loses a race, which a mock never runs.
+    ⭐ THE FIX IS A GUARD AND NOT THE CURE, and it says so where it sits. `AdminPage` renders nothing
+    until its own session answers (R-337, pinned by N8). The cure is one `SessionProvider` at the root
+    so there is a single answer to disagree with -- which is the parked debt item, and which should now
+    be read as a correctness item rather than a tidy-up. Every other reader of `useSession` owes its
+    own guard until then.
 - id: F-093
   title: The buildout stopped recording the shape of the work while recording everything else
   tag: A record that kept half its columns
@@ -8562,6 +8674,49 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 70
+  date: 2026-09-05
+  title: The browser tests get past the front door, and find a defect in the first minute
+  commits: []
+  numbers:
+    app_tests: 2107
+    app_test_files: 75
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The maintainer said to begin. The e2e lane started, and the premise it started from was half wrong
+    in a useful direction: the browser tests were never blocked on CI having a database, only the CI
+    RUN of them was. `.env.local` has pointed the local run at the real stack all along, and both
+    `seed.sql` and `dev_demo.sql` have set a known password on every demo account since they were
+    written. The door was open and nobody had tried it.
+    `e2e/signedIn.spec.ts` signs in as the company admin, as Dana the site admin and as Ana the
+    supervisor, and reads the admin rail for each. `e2e/env.ts` is the one place that decides whether a
+    run has a backend, imported by both `playwright.config.ts` and the spec so the credentials and the
+    verdict cannot drift; the specs SKIP without one, keyed on the URL rather than on `CI` so a
+    developer with no `.env.local` gets the same honest answer. Measured both ways: 3 skipped and 5
+    passed with the env file hidden, 8 passed with it back.
+    ⛔ AND THE FIRST FULL RUN WENT RED, WHICH IS THE WHOLE ARGUMENT FOR THE LANE. Under load a company
+    admin's rail came back as the supervisor's three tabs. Not flake: `useSession()` is called
+    independently by `RequireAdmin` and by `AdminPage`, two instances with their own `loading` and
+    `profile`, so the gate can admit you and mount a page whose own copy has not answered -- and
+    `adminSectionsFor(undefined, undefined)` draws the three-tab floor, which on screen is exactly a
+    supervisor's real menu. The supervisor case never failed, because the loading state equals its
+    expected answer; the one role for whom the bug is invisible.
+    THAT DEBT ITEM IS A CORRECTNESS ITEM. "useSession() called in five components" has sat in the queue
+    as five duplicated round trips, a performance note. It is two components disagreeing about who you
+    are. R-337 and N8 pin the guard in `AdminPage`; the cure is one `SessionProvider` at the root and
+    every other reader owes its own guard until then. F-094 carries it.
+    NOTHING IN 2106 UNIT CASES COULD HAVE SEEN IT. They mock `useSession`, and one mock has one answer
+    -- the two instances that disagreed are the same object under test. The e2e case found it by being
+    slow enough to lose the race a mock never runs. N8 is pinned red against the guard removed, so the
+    fix cannot be undone quietly.
+    ALSO CORRECTED ALONG THE WAY: `format:check` is red locally on four files and it is NOT a CI
+    failure -- the record already measured it as the CRLF working-tree artifact, green on a Linux
+    checkout, and I nearly reformatted four files before reading that. `tsconfig.node.json` now
+    includes `e2e` as a directory, which typechecks the specs for the first time. S34 is the stage,
+    and it is `now` -- the first thing in flight since the buildout was told the truth.
+    Green: `npm run test` 2107 in 75, `tsc` 0, `eslint` 0, `npm run e2e` 8 passed, three runs in a row.
 - id: 69
   date: 2026-09-05
   title: The buildout catches up with thirteen sessions of shipped work
@@ -10879,6 +11034,11 @@ next:
     walkthroughs — sign in as each of the dev switcher's four people, open the board, drag an
     assignment, walk the admin rail — plus the load sanity the roadmap line asks for (hundreds of rows,
     thousands of assignments).
+    ⛔ UPDATE, SESSION 70: JOB B IS DONE LOCALLY AND JOB A IS THE WHOLE OF WHAT IS LEFT. The premise
+    above was half wrong and the correction is worth keeping: A does not block B, because `.env.local`
+    already points the LOCAL run at the running stack. `e2e/signedIn.spec.ts` signs in as three roles
+    and reads the admin rail, green locally, skipping where there is no backend. So the remaining work
+    is exactly the CI database, and the reward for it is already written and waiting. See S34.
     ⭐ AND JOB A IS SMALLER THAN IT LOOKS, BECAUSE THE FIXTURE ALREADY EXISTS AND IS ALREADY TESTED.
     `supabase/dev_demo.sql` builds three plants, a line-scoped supervisor and the people the switcher
     signs in as, and DEF-0006 put it on its own runner in session 56 (`supabase/tests/dev_demo_test.sql`)

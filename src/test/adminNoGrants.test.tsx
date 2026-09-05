@@ -329,4 +329,51 @@ describe("the admin screen explains an empty scope instead of showing one", () =
     expect(screen.queryByRole("heading", { name: EMPTY_HEADING })).toBe(null);
     expect(screen.queryByText(/not been given access/i)).toBe(null);
   });
+
+  /**
+   * ⛔⛔ N8: THE SAME RULE FOR THE MENU, AND IT COST A REAL FLICKER. N5 above
+   * keeps the refusal SENTENCE off screen while the session resolves. Nothing
+   * kept the RAIL off, and a rail drawn from a null profile is not blank:
+   * `adminSectionsFor(undefined, undefined)` answers
+   * `["operators", "trainings", "matrix"]` — a sensible floor, and on screen
+   * indistinguishable from a supervisor's real answer.
+   *
+   * So a company admin opening /admin drew THREE tabs for a moment and then
+   * eleven, and a site admin's Settings tab arrived late. `RequireAdmin` does
+   * not prevent it: it calls `useSession()` and `AdminPage` calls it again, two
+   * instances with their own `loading`, so the gate can finish and mount a page
+   * whose own copy has not.
+   *
+   * ⚠️ NO UNIT CASE COULD HAVE FOUND IT, INCLUDING THIS ONE. Every suite here
+   * mocks `useSession`, and one mock has only one answer — the two instances
+   * that disagreed in the browser are the same object under test. It was found
+   * by `e2e/signedIn.spec.ts`, the first browser test that ever signed in,
+   * which failed only under load when the profile round trip lost the race.
+   * This case pins the FIX so it cannot be undone quietly; it is not evidence
+   * the bug is impossible.
+   */
+  it("N8 ⛔: while the session is still resolving, no RAIL is drawn either", () => {
+    h.state.profile = {
+      id: "p1",
+      userId: "u1",
+      orgId: "org-1",
+      role: "admin",
+      adminAnywhere: true,
+    };
+    h.state.tree = { ...EMPTY_TREE, nodes: [h.node("n1", "Line A", null, "plant_1")] };
+    h.state.loading = true;
+    show();
+    // A company admin, whose real rail is eleven tabs. Nothing is drawn while
+    // the answer is outstanding — not eleven, and above all not the three that
+    // an unknown person resolves to.
+    expect(screen.queryByRole("navigation", { name: "Admin sections" })).toBe(null);
+    expect(screen.queryByRole("button", { name: "Operators" })).toBe(null);
+    expect(screen.queryByRole("button", { name: "Hierarchy" })).toBe(null);
+
+    // ⚠️ THAT THE RAIL ARRIVES ONCE THE ANSWER LANDS IS N7'S JOB, NOT THIS
+    // ONE'S. Rendering a second AdminPage into the same document to prove it
+    // here mounts two of them, and the query then finds the first page's
+    // loading state rather than the second page's rail -- a case that fails
+    // for a reason that has nothing to do with what it is named after.
+  });
 });
