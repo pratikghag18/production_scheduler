@@ -2960,6 +2960,36 @@ requirements:
       15 cases; three sabotages caught -- a new panel that never asks, one that calls the hook and never
       reads it, and one sneaked onto the debt list
   status: covered
+- id: R-336
+  title: An expired certificate is a warning you can act on, not a save that fails
+  source:
+  - F-087
+  - commit 60bfdeb
+  stated_by: agent
+  claim: >-
+    The board asks the SERVER'S question about a certificate, not a narrower one. `check_eligibility`
+    has computed `expiring_skills` as `expires_at < upper(p_timerange)` since 0009, and
+    `create_assignment` refuses on it. The board's `certificateGaps` mirrors that comparison exactly
+    --- `dated.expiresAt < endDay`, on the data 0048 added to `board_window` --- so somebody whose
+    certificate has lapsed is marked ineligible BEFORE Create is pressed, drives `needsOverride` under
+    `warn`, and is offered the override box the server will accept.
+    ⭐ AND THE TWO REASONS READ DIFFERENTLY, WHICH IS THE POINT RATHER THAN A DETAIL. "Never trained"
+    needs a course booked; "certificate expired" needs a renewal, and is named WITH ITS DATE through the
+    app's date seam in the org's chosen format. The old screen printed one sentence for the first and
+    nothing at all for the second, so the second arrived only as a server refusal the screen had no box
+    to answer.
+    ⚠️ WRITTEN DOWN ON 5 SEPT, A DAY AFTER THE CODE SHIPPED (`60bfdeb`, 4 Sept). The work had a test
+    file and no requirement, no session entry and a finding still reading `open` --- found the same way
+    F-087 itself was, by checking a queue item against the code instead of reading its line.
+  verified_by:
+  - kind: vitest
+    file: src/test/certificateExpiry.test.tsx
+    cases: >-
+      the boundary both ways (expiring ON the window's last day is valid because the server compares
+      with `<`, the day before is lapsed), an open-ended window, a lapsed training this cell does not
+      ask for being ignored, never-trained and lapsed being disjoint and both reported, and the wording
+      naming the date rather than saying "not certified"
+  status: covered
 - id: R-335
   title: Who may change a plant's settings is one predicate, and the rail is not where it is asked
   source:
@@ -6483,7 +6513,7 @@ findings:
 - id: F-087
   title: The board offers people whose certificates have expired, and the save then fails
   tag: A screen offering what the server refuses
-  status: open
+  status: fixed
   found_by: agent
   refs:
   - R-330
@@ -10819,25 +10849,18 @@ next:
 # added `node_settings` and `set_node_setting`, and `SettingsPanel` renders the
 # policy as a `<select>` writing `eligibility_policy` -- per plant, which is
 # more than the item asked for. Verified by reading the panel, not the plan.
+#
+# And "A DEAD END ON THE BOARD: an expired certificate is invisible until the
+# server refuses the save", removed 5 Sept for the same reason and found the same
+# way. `60bfdeb` shipped it on 4 Sept: `certificateGaps` mirrors the server's
+# `expires_at < upper(p_timerange)` as `dated.expiresAt < endDay`, `CreatePopover`
+# splits "Never trained" from "Certificate expired" with its date, and
+# `src/test/certificateExpiry.test.tsx` pins both sides of the boundary. The
+# finding it came from (F-087) had never been flipped off `open` and the work had
+# no requirement; both are fixed, and the requirement is R-336.
 # ---------------------------------------------------------------------------
 - text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: Unchecked Phase 1 item.
-- text: >-
-    ⛔ A DEAD END ON THE BOARD: an expired certificate is invisible until the server refuses the save
-  why: >-
-    ⚠️ MEASURED, AND THIS IS A DEFECT RATHER THAN THE PHASE 2 POLISH THE LINE USED TO DESCRIBE. The
-    check already exists end to end on the SERVER: `check_eligibility` computes `expiring_skills`
-    (`expires_at < upper(p_timerange)`) and folds it into `eligible`, and `create_assignment` refuses
-    on it — under `block` outright, under `warn` unless an override is supplied.
-    THE BOARD DOES NOT ASK THAT QUESTION. `CreatePopover` derives `ineligible` from
-    `!o.skillIds.includes(s.id)` — whether the person HOLDS the training at all — and expiry is never
-    considered, so somebody whose certificate lapsed last year shows as perfectly eligible, gets no
-    warning and is offered no override tick. Pressing Create then raises `not_eligible … override
-    required under warn policy`, and because the client never decided an override was needed there is
-    no way to supply one: the assignment cannot be made through the board at all.
-    The api layer already parses `expiringSkills` (`shapes.ts`) and nothing in `src/features/board/`
-    reads it, which is the whole of the gap. This is CLAUDE.md section 4's rule with the arrow
-    reversed — a screen OFFERING what the server refuses.
 - text: Phase 2 — Copy Week with dry-run conflict preview
   why: Unchecked Phase 2 item.
 # ------------------------------- PARKED ------------------------------------
