@@ -313,6 +313,48 @@ export type Database = {
           },
         ]
       }
+      node_settings: {
+        Row: {
+          created_at: string
+          key: string
+          node_id: string
+          org_id: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          created_at?: string
+          key: string
+          node_id: string
+          org_id: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          created_at?: string
+          key?: string
+          node_id?: string
+          org_id?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "node_settings_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "node_settings_org_id_node_id_fkey"
+            columns: ["org_id", "node_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
       node_shift_templates: {
         Row: {
           node_id: string
@@ -1148,6 +1190,10 @@ export type Database = {
         Args: { p_delta: number; p_new_parent_id: string; p_node_id: string }
         Returns: Json
       }
+      app_resolve_node_setting: {
+        Args: { p_key: string; p_node_id: string }
+        Returns: string
+      }
       app_trim_ws: { Args: { input: string }; Returns: string }
       apply_split_coverage: {
         Args: { p_adjustments: Json; p_new_assignment: Json }
@@ -1178,6 +1224,10 @@ export type Database = {
       }
       check_eligibility: {
         Args: { p_node_id: string; p_operator_id: string; p_timerange: unknown }
+        Returns: Json
+      }
+      clear_node_setting: {
+        Args: { p_key: string; p_node_id: string }
         Returns: Json
       }
       copy_plant_structure: {
@@ -1311,6 +1361,10 @@ export type Database = {
       resolve_shift_template: { Args: { p_node_id: string }; Returns: string }
       save_hierarchy_levels: {
         Args: { p_levels: Json; p_template_id: string }
+        Returns: Json
+      }
+      set_node_setting: {
+        Args: { p_key: string; p_node_id: string; p_value: string }
         Returns: Json
       }
       set_org_date_format: { Args: { p_format: string }; Returns: Json }
