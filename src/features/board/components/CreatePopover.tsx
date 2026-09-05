@@ -128,6 +128,19 @@ export function CreatePopover({
    * with a reason. Filtering them would delete the feature.
    */
   outsideAreaOperatorIds: ReadonlySet<string>;
+  /**
+   * ⭐ R-331 / migration 0051: THE POLICY FOR **THIS** NODE, resolved on the
+   * server and looked up by `BoardPage` through `policyForNode` — not
+   * `org.settings.eligibility_policy`, which is only what a node inherits when
+   * nothing nearer overrides it.
+   *
+   * Until 0051 the board handed every cell in the company the same value, so on
+   * a plant deliberately set to `block` this popover still drew an override tick
+   * and a reason box, and Create then failed with a message about an override
+   * the server would never take — a dead end, the same shape as F-087. Like
+   * `requiredSkills` and `outsideAreaOperatorIds` beside it, this is resolved
+   * before it gets here: the popover holds no rule, it only renders one.
+   */
   eligibilityPolicy: "warn" | "block";
   /** D65: set only when this popover was opened by a panel drop. */
   presetOperatorId?: string;
@@ -439,7 +452,12 @@ export function CreatePopover({
                   </p>
                 )}
                 {blocked ? (
-                  <p>This org requires certification for this cell, so there is no override.</p>
+                  // R-331: "this org" was true when the policy was read once
+                  // from the company's bag. It is now resolved for THIS cell —
+                  // the plant it sits in may refuse while the plant next door
+                  // allows an override — so the sentence names the place the
+                  // rule was actually found for, which is here.
+                  <p>Certification is required at this place, so there is no override.</p>
                 ) : (
                   <>
                     <label className={styles.overrideLbl}>

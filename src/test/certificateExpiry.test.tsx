@@ -205,6 +205,7 @@ function payload(operators: Json[]): Json {
     shift_templates: [],
     node_shift_map: [],
     cycle_times: [],
+    node_policies: [],
   } as Json;
 }
 

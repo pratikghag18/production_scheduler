@@ -87,8 +87,32 @@ export interface BoardIndex {
   skillById: Map<string, Skill>;
   nodeById: Map<string, BoardNode>;
   capacityCap: number;
-  /** P1-4e D64: `org.settings.eligibility_policy`, defensively read. */
+  /**
+   * P1-4e D64: `org.settings.eligibility_policy`, defensively read — THE
+   * COMPANY'S answer, which since R-331 is only what a node INHERITS when
+   * nothing nearer overrides it.
+   *
+   * ⚠️ NOT WHAT THE POPOVER READS. `policyForNode` below is, and this is its
+   * fallback for the one case where the map cannot answer at all: a payload
+   * carrying no per-node map (a board that has not loaded, `emptyIndex` in
+   * `BoardPage`). Where there are no per-node answers, the company's IS every
+   * node's answer, which is exactly what the pre-0051 board did.
+   */
   eligibilityPolicy: "warn" | "block";
+  /**
+   * ⭐ R-331 / migration 0051: the eligibility rule RESOLVED FOR EACH NODE, as
+   * `board_window` answered it — nearest ancestor-or-self with an override,
+   * else the company's, else `warn`. One entry per node in the window.
+   *
+   * ⛔ NOTHING HERE RESOLVES ANYTHING, AND THAT IS DELIBERATE. Walking the
+   * ancestry in the browser (as `templateForNode` beside it does) would mean
+   * walking the `node_settings` rows the caller can READ, and a supervisor
+   * granted a line cannot read the override on their plant's root — so their
+   * board would fall through to the company's `warn` and offer an override
+   * tick on a plant deliberately set to `block`. Read `shapes.ts`'s
+   * `NodePolicy` and migration 0051's header for the full argument.
+   */
+  eligibilityPolicyByNode: Map<string, "warn" | "block">;
   droppedRanges: number;
   /** D45: the density every row in `rows` was laid out at. */
   density: Density;
@@ -138,6 +162,48 @@ function readEligibilityPolicy(settings: Json): "warn" | "block" {
     if (v === "warn" || v === "block") return v;
   }
   return "warn";
+}
+
+/**
+ * ⭐ R-331: THE ONE QUESTION THE POPOVER ASKS — what does the eligibility rule
+ * say AT THIS CELL. `BoardPage` calls this and hands the answer to
+ * `CreatePopover`, which turns it into `blocked` / `needsOverride`.
+ *
+ * ⛔ AN UNKNOWN NODE FALLS BACK TO `"block"`, AND THAT IS THE FAIL-SAFE
+ * DIRECTION, not the cautious-looking one. The two ways to be wrong are not
+ * symmetric:
+ *
+ *   fail OPEN  (guess `warn`)  — the screen draws an override tick, the planner
+ *                                writes a reason, presses Create, and the
+ *                                server refuses it. A DEAD END, and the exact
+ *                                defect this migration exists to remove (F-087
+ *                                was the same shape).
+ *   fail SAFE  (guess `block`) — the screen refuses something the server might
+ *                                have allowed. Visibly wrong, nobody is
+ *                                scheduled onto work they are not certified
+ *                                for, and it is the side CLAUDE.md names: "a
+ *                                screen that shows what the server will refuse
+ *                                is worse than one that refuses what the server
+ *                                allows".
+ *
+ * ⚠️ AN EMPTY MAP IS A DIFFERENT STATE FROM A MISSING ENTRY and is handled
+ * differently on purpose. `board_window` builds `node_policies` from the same
+ * `scoped_nodes` CTE that produces `nodes`, and `parseBoardWindow` is strict
+ * about the key, so a LOADED board always has an entry for every node it drew —
+ * a miss there means we are being asked about a node this payload never
+ * described, and we do not know its rule. An entirely empty map is instead the
+ * not-yet-loaded board (`emptyIndex`), where there are no per-node answers to
+ * miss and the company's value is every node's value.
+ */
+export function policyForNode(
+  index: Pick<BoardIndex, "eligibilityPolicyByNode" | "eligibilityPolicy"> | null | undefined,
+  nodeId: string,
+): "warn" | "block" {
+  if (!index) return "block";
+  const forNode = index.eligibilityPolicyByNode.get(nodeId);
+  if (forNode !== undefined) return forNode;
+  if (index.eligibilityPolicyByNode.size === 0) return index.eligibilityPolicy;
+  return "block";
 }
 
 /**
@@ -320,6 +386,23 @@ export function buildBoardIndex(
   // Usually empty — a cycle time is optional everywhere.
   const cycleTimeByKey = buildCycleTimeIndex(data.cycleTimes);
 
+  // R-331: the server's per-node answer, transcribed. ⚠️ NO ANCESTRY WALK HERE
+  // — unlike `templateForNode` right above, which resolves nearest-ancestor in
+  // the browser, this is already resolved. `resolve_shift_template` may be
+  // walked here because a template a caller cannot read is a template that is
+  // not theirs; an eligibility override they cannot read is still THEIR RULE,
+  // and missing it fails open (see `policyForNode`).
+  //
+  // A value that is neither `warn` nor `block` is dropped rather than trusted,
+  // so a key a future migration widens can never arrive as an unchecked string
+  // — and a dropped entry then reads as "unknown", which fails safe.
+  const eligibilityPolicyByNode = new Map<string, "warn" | "block">();
+  for (const p of data.nodePolicies) {
+    if (p.eligibilityPolicy === "warn" || p.eligibilityPolicy === "block") {
+      eligibilityPolicyByNode.set(p.nodeId, p.eligibilityPolicy);
+    }
+  }
+
   // Rule 2: an assignment belongs to the row named by `assignment.nodeId`,
   // never by its run's node.
   const rawByNode = new Map<string, Assignment[]>();
@@ -466,6 +549,7 @@ export function buildBoardIndex(
     nodeById,
     capacityCap: readCapacityCap(data.org.settings),
     eligibilityPolicy: readEligibilityPolicy(data.org.settings),
+    eligibilityPolicyByNode,
     droppedRanges,
     density,
   };

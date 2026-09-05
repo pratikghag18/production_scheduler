@@ -690,6 +690,36 @@ function parseShiftTemplate(v: Json): ShiftTemplate | null {
   return { id, name, shifts: parsedShifts };
 }
 
+/**
+ * R-331 / migration 0051: what the eligibility rule SAYS AT ONE NODE — the
+ * answer `app_resolve_node_setting` reached for it, not the company's bag.
+ *
+ * ⛔ RESOLVED ON THE SERVER, AND THAT IS THE WHOLE POINT. The cheap version of
+ * this key is the raw `node_settings` rows plus an ancestry walk here beside
+ * `templateForNode` — and it FAILS OPEN. `board_window` is SECURITY INVOKER and
+ * `node_settings_select` is gated on `app_can_read_node`, so a supervisor
+ * granted a LINE never receives the override sitting on the PLANT ROOT they
+ * cannot read; their board would fall through to the company default and offer
+ * an override tick on a plant deliberately set to refuse. The resolver is
+ * SECURITY DEFINER for exactly that reason (migration 0050 §3), so nothing here
+ * resolves anything — it reads an answer.
+ *
+ * ⚠️ `"warn"`/`"block"` is not typed as a union on purpose: an unknown string
+ * from a future migration must not fail the WHOLE board to parse, and
+ * `boardIndex.ts` narrows it once, defensively, where it builds its map.
+ */
+export interface NodePolicy {
+  nodeId: string;
+  eligibilityPolicy: string;
+}
+
+function parseNodePolicy(v: Json): NodePolicy | null {
+  if (!isJsonObject(v)) return null;
+  const { node_id, eligibility_policy } = v;
+  if (!isStr(node_id) || !isStr(eligibility_policy)) return null;
+  return { nodeId: node_id, eligibilityPolicy: eligibility_policy };
+}
+
 export interface NodeShiftMapEntry {
   nodeId: string;
   templateId: string | null;
@@ -721,6 +751,11 @@ export interface BoardWindow {
   /** R-315: standard seconds-per-unit for the scoped nodes. Empty is normal —
    *  a cycle time is optional everywhere, and most orgs will set none. */
   cycleTimes: CycleTime[];
+  /** R-331: one resolved eligibility policy per node in the window. NEVER
+   *  empty against a database that has run migration 0051 — `board_window`
+   *  builds it off the same `scoped_nodes` CTE `nodes` comes from, so the two
+   *  lists cover exactly the same ids. */
+  nodePolicies: NodePolicy[];
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -738,6 +773,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     shift_templates,
     node_shift_map,
     cycle_times,
+    node_policies,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -759,6 +795,12 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   // 0040. Defaulting to [] there would leave every derived target silently
   // absent and the board otherwise working — the `silent-empty` defect class.
   const parsedCycleTimes = parseArrayOf(cycle_times, parseCycleTime);
+  // Strict for the same reason `cycle_times` is, with one more behind it:
+  // R-331's whole point is that this key, and not `org.settings`, decides
+  // whether the popover offers an override. A payload without it that parsed
+  // anyway would put the board straight back on the company-wide answer and
+  // look like it was working — the `silent-empty` defect class again.
+  const parsedNodePolicies = parseArrayOf(node_policies, parseNodePolicy);
 
   if (
     parsedOrg === null ||
@@ -772,7 +814,8 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     parsedNodeSkillRequirements === null ||
     parsedShiftTemplates === null ||
     parsedNodeShiftMap === null ||
-    parsedCycleTimes === null
+    parsedCycleTimes === null ||
+    parsedNodePolicies === null
   ) {
     return null;
   }
@@ -790,6 +833,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     shiftTemplates: parsedShiftTemplates,
     nodeShiftMap: parsedNodeShiftMap,
     cycleTimes: parsedCycleTimes,
+    nodePolicies: parsedNodePolicies,
   };
 }
 

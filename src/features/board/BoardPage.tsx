@@ -12,7 +12,7 @@ import { useRootPath } from "./hooks/useRootPath";
 import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
 import { useBoardViewStore } from "./store/boardView";
 import { useDragGesture } from "./hooks/useDragGesture";
-import { buildBoardIndex, type BoardIndex } from "./lib/boardIndex";
+import { buildBoardIndex, policyForNode, type BoardIndex } from "./lib/boardIndex";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
 import { splitFits } from "./lib/interaction";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
@@ -186,6 +186,12 @@ export default function BoardPage() {
         // itself falls back to) so a not-yet-loaded board never behaves as
         // the stricter "block" policy by accident.
         eligibilityPolicy: "warn",
+        // R-331: EMPTY, not populated with the company's answer. An empty map
+        // is `policyForNode`'s "no per-node answers exist" state, in which it
+        // falls back to `eligibilityPolicy` above — which is exactly what a
+        // board with no data should do. A map with entries but a MISS is the
+        // other state, and that one fails safe to "block".
+        eligibilityPolicyByNode: new Map(),
         droppedRanges: 0,
         density,
       },
@@ -541,6 +547,13 @@ export default function BoardPage() {
 
       <Toasts />
 
+      {/* ⭐ R-331: `eligibilityPolicy` below is THE RULE OF THE CELL THIS
+          POPOVER IS ON, not the company's. `board_window` resolves one answer
+          per node (migration 0051) because a supervisor cannot read the
+          override on their own plant's root and a browser-side walk would
+          therefore fall through to the company default and offer an override
+          tick on a plant set to refuse. An unknown node falls back to the
+          STRICT answer, never the permissive one — see `policyForNode`. */}
       {popover?.kind === "create" && (
         <CreatePopover
           nodeId={popover.nodeId}
@@ -553,7 +566,7 @@ export default function BoardPage() {
           windowStart={index?.windowStart ?? from}
           requiredSkills={index?.skillsForNode.get(popover.nodeId) ?? []}
           outsideAreaOperatorIds={outsideAreaOperatorIds}
-          eligibilityPolicy={index?.eligibilityPolicy ?? "warn"}
+          eligibilityPolicy={policyForNode(index, popover.nodeId)}
           presetOperatorId={popover.presetOperatorId}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}

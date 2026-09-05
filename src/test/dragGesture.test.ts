@@ -130,6 +130,10 @@ function buildIndex(crew: IndexedAssignment[]): BoardIndex {
     runById: new Map([["run-1", runFixture]]),
     assignmentById: new Map(crew.map((a) => [a.id, a] as const)),
     eligibilityPolicy: "warn",
+    // R-331: `BoardIndex` gained a per-node policy map. Empty here on purpose
+    // — none of these cases opens a create popover, and an empty map is the
+    // state `policyForNode` reads the company scalar above for.
+    eligibilityPolicyByNode: new Map(),
   };
 }
 
