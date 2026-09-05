@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { SettingsPanel } from "@/features/admin/components/SettingsPanel";
 import { DATE_FORMATS, formatCalendarDay } from "@/lib/format/dates";
+import rowStyles from "@/components/SettingRow.module.css";
 
 /**
  * THE SETTINGS TAB IS ONE ROW PER SETTING (R-320).
@@ -311,5 +312,85 @@ describe("R-014: choosing what happens when someone is not certified for the job
     expect(screen.getByText("Only a system admin can change this.")).toBeTruthy();
     fireEvent.change(select, { target: { value: "block" } });
     expect(h.setPolicyMutate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * R-332 — EVERY SETTING'S CONTROL LINES UP WITH EVERY OTHER SETTING'S.
+ *
+ * The maintainer, on this tab: *"the drop down options are not aligned in
+ * different options. It does not look professional. Please create a standard
+ * for it."*
+ *
+ * The cause was structural, the same shape as R-318's. A setting was a flex row
+ * whose control column was `flex: 0 0 auto` — sized by its own content. The
+ * eligibility picker's longest option ("Allow it, with a reason on record") is
+ * not the date picker's, so the two columns computed two widths and the pickers
+ * could only line up by coincidence. The fix is one shared definition of the
+ * ROW, `src/components/SettingRow.module.css`, with a control track that is a
+ * constant.
+ *
+ * ⚠️ JSDOM DOES NOT LAY OUT, so nothing here can measure two widths and compare
+ * them — a case that claimed to would be a case that passes on a stylesheet that
+ * does nothing. What is checkable, and what actually carries the guarantee, is
+ * that both rows are the SAME definition: the class names below are hashed per
+ * module, so `rowStyles.control` in the DOM is proof the element took its width
+ * from the shared file rather than from a copy in the panel's own. The width
+ * itself is pinned by `src/test/settingRowStandard.test.ts`, which reads the
+ * CSS: one track, one named `rem` width, declared nowhere else in the tree.
+ */
+describe("R-332: every setting's control is the same column", () => {
+  /** The nearest ancestor carrying the shared control-cell class. */
+  function cellOf(el: HTMLElement): HTMLElement | null {
+    return el.closest(`.${rowStyles.control}`);
+  }
+
+  it("both pickers sit in a control cell from the one shared module", () => {
+    render(<SettingsPanel />);
+    const dateCell = cellOf(picker());
+    const policyCell = cellOf(policyPicker());
+    expect(dateCell).not.toBeNull();
+    expect(policyCell).not.toBeNull();
+    // Two different cells — one per setting — built from one definition.
+    expect(dateCell).not.toBe(policyCell);
+    expect(dateCell!.className).toBe(policyCell!.className);
+  });
+
+  it("both settings are the same shared row, with the same text cell", () => {
+    const { container } = render(<SettingsPanel />);
+    const rows = container.querySelectorAll(`.${rowStyles.row}`);
+    expect(rows).toHaveLength(2);
+    const texts = container.querySelectorAll(`.${rowStyles.text}`);
+    expect(texts).toHaveLength(2);
+    for (const row of Array.from(rows)) {
+      expect(row.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(1);
+      expect(row.querySelectorAll(`.${rowStyles.control}`)).toHaveLength(1);
+    }
+  });
+
+  /**
+   * ⚠️ THE ROW WITH TWO THINGS IN ITS CONTROL AREA IS THE ONE THAT BREAKS RULES.
+   * Eligibility carries a consequence paragraph under its picker and the date
+   * format does not. The paragraph must live INSIDE the control cell — a sibling
+   * of the cell would be a third grid item and would land in the wrong column —
+   * and it must not be the thing that decides the column's width, which is what
+   * its hand-tuned `max-width: 20rem` used to be doing.
+   */
+  it("a control area two elements tall is one cell, and does not set the width", () => {
+    render(<SettingsPanel />);
+    const cell = cellOf(policyPicker())!;
+    const consequence = screen.getByText(/only by ticking an override and typing why/i);
+    expect(cell.contains(consequence)).toBe(true);
+    // The date row's control cell holds one element; the eligibility row's holds
+    // two. Same class, so the same width regardless.
+    expect(cellOf(picker())!.children.length).toBe(1);
+    expect(cell.children.length).toBe(2);
+  });
+
+  it("the picker fills the shared track rather than sizing itself", () => {
+    render(<SettingsPanel />);
+    for (const select of [picker(), policyPicker()]) {
+      expect(select.classList.contains(rowStyles.controlField)).toBe(true);
+    }
   });
 });

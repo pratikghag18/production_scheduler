@@ -15,6 +15,17 @@
    admin directory, so a stylesheet that exists and is not listed is a test
    failure -- which is how `DeleteDialog.module.css` was caught.
 
+   ⭐ THE ROW LAYOUT IS NOT HERE ANY MORE (R-332). This file used to define
+   `.setting` / `.settingText` / `.settingControl` itself: a flex row whose
+   control column was `flex: 0 0 auto`, i.e. sized by its own content. That is
+   why the maintainer saw two pickers on two different edges -- the eligibility
+   options are longer than the date options, so the two rows computed two
+   widths. A settings row is now ONE definition,
+   `src/components/SettingRow.module.css`, and this stylesheet keeps only what
+   is particular to this section: the card, its heading, and the three kinds of
+   note that hang under a control. `src/test/settingRowStandard.test.ts` fails
+   the build if a row is hand-rolled here again.
+
    NOTHING HERE IS A DRAG SURFACE. No `cursor: grab`, no `user-select: none`, no
    `touch-action: none`: this screen has no gesture. */
 .panel {
@@ -31,79 +42,32 @@
 }
 
 .h2 {
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.75rem;
   font-size: 0.875rem;
 }
 
-.hint {
-  color: var(--muted);
-  font-size: 0.75rem;
-  margin: 0;
-  max-width: 34rem;
-}
-
-/* ONE SETTING IS ONE ROW (R-320): name and hint on the left, the control on the
-   right, so the next setting is another row rather than another screenful. The
-   row wraps to two lines on a narrow pane -- the control keeps its own width
-   with `flex-shrink: 0` so a long hint never squeezes the picker. */
-.setting {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem 1rem;
-  padding-top: 0.25rem;
-}
-
-.settingText {
-  flex: 1 1 16rem;
-  min-width: 0;
-}
-
-.settingName {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--ink);
-  margin-bottom: 0.1875rem;
-}
-
-.settingControl {
-  flex: 0 0 auto;
-  max-width: 100%;
-}
-
-/* THE PICKER ITSELF IS THE SHARED FIELD (R-318): `SettingsPanel.tsx` puts
-   `Field.module.css`'s `.select` on the control and this class adds only a
-   width, so the app's one editable-box definition still owns the skin. That is
-   why this stylesheet is no longer on `FIELD_LEGACY` in
-   `src/test/fieldStandard.test.ts` -- it hand-rolls nothing. */
-.formatSelect {
-  min-width: 15rem;
-  max-width: 100%;
-}
-
 /* THE CONSEQUENCE LINE under the eligibility picker: what the current choice
-   actually does, spelled out rather than left behind an option label. It is
-   capped at the picker's own column width -- `.settingControl` is
-   `flex: 0 0 auto`, so an uncapped paragraph would size the whole right-hand
-   column to one long line and squeeze the setting's name off to the left. */
+   actually does, spelled out rather than left behind an option label.
+
+   ⭐ IT NO LONGER CARRIES A WIDTH. It used to be capped at `max-width: 20rem`
+   by hand, because on the old flex row an uncapped paragraph sized the whole
+   right-hand column and squeezed the setting's name off to the left. That 20rem
+   was a second copy of the control column's width with nothing keeping the two
+   in step -- the "column list that appears twice" CLAUDE.md §4 names. The
+   shared `.control` cell is capped by the same token as the grid track it sits
+   in, so the paragraph is bounded by the column itself and there is one number
+   to change. */
 .consequence {
+  composes: note from "../../../components/SettingRow.module.css";
   color: var(--ink-2);
-  font-size: 0.75rem;
-  line-height: 1.45;
-  margin: 0.5rem 0 0;
-  max-width: 20rem;
 }
 
 .status {
+  composes: note from "../../../components/SettingRow.module.css";
   color: var(--ink-2);
-  font-size: 0.75rem;
-  margin: 0.625rem 0 0;
 }
 
 .error {
+  composes: note from "../../../components/SettingRow.module.css";
   color: var(--crit);
-  font-size: 0.75rem;
-  margin: 0.625rem 0 0;
 }

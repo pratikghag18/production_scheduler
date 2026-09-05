@@ -26,6 +26,15 @@
    setting is another row, not another screenful. A closed enum picks with a
    `<select>`; a toggle or a number would sit in the same slot.
 
+   ⭐ AND THE ROW IS ONE SHARED DEFINITION (R-332). The rows were laid out by
+   this section's own stylesheet, as a flex box whose control column was
+   `flex: 0 0 auto` -- sized by its own content, so the eligibility picker and
+   the date picker sat on two different edges and the maintainer said so. The
+   layout now comes from `@/components/SettingRow.module.css`: `.row`, `.text`,
+   `.name`, `.hint`, `.control` and `.controlField`, with ONE control-column
+   width shared by every setting on the screen. A third setting composes the
+   same six classes and lands on the same column with nothing to decide.
+
    ⭐ THE PICKER IS THE SHARED FIELD (R-318), `Field.module.css`'s `.select`,
    not a copy of the skin: this stylesheet came off `FIELD_LEGACY` in the same
    commit, because the block that put it there was the radio row this replaced.
@@ -62,6 +71,7 @@ import {
   useSetEligibilityPolicy,
 } from "../hooks/useOrgSettings";
 import fieldStyles from "@/components/Field.module.css";
+import rowStyles from "@/components/SettingRow.module.css";
 import styles from "./SettingsPanel.module.css";
 
 /** Read by `AdminPage`'s rail, the same way `TRAININGS_PANEL_READY` is. */
@@ -155,21 +165,21 @@ export function SettingsPanel() {
       <section className={styles.card}>
         <h2 className={styles.h2}>Display</h2>
 
-        <div className={styles.setting}>
-          <div className={styles.settingText}>
-            <label className={styles.settingName} htmlFor="settings-date-format">
+        <div className={rowStyles.row}>
+          <div className={rowStyles.text}>
+            <label className={rowStyles.name} htmlFor="settings-date-format">
               Date format
             </label>
-            <p className={styles.hint}>
+            <p className={rowStyles.hint}>
               How dates read across the app — training expiry, records and more. Data is stored the
               same way regardless; this only changes what is shown.
             </p>
           </div>
 
-          <div className={styles.settingControl}>
+          <div className={rowStyles.control}>
             <select
               id="settings-date-format"
-              className={`${fieldStyles.select} ${styles.formatSelect}`}
+              className={`${fieldStyles.select} ${rowStyles.controlField}`}
               value={current}
               disabled={!isSystemAdmin || setFormat.isPending}
               onChange={(e) => {
@@ -202,21 +212,21 @@ export function SettingsPanel() {
       <section className={styles.card}>
         <h2 className={styles.h2}>Scheduling</h2>
 
-        <div className={styles.setting}>
-          <div className={styles.settingText}>
-            <label className={styles.settingName} htmlFor="settings-eligibility-policy">
+        <div className={rowStyles.row}>
+          <div className={rowStyles.text}>
+            <label className={rowStyles.name} htmlFor="settings-eligibility-policy">
               Putting someone on a job they are not certified for
             </label>
-            <p className={styles.hint}>
+            <p className={rowStyles.hint}>
               Jobs can require training, and the board knows who holds it. This decides what happens
               when a planner picks someone who does not.
             </p>
           </div>
 
-          <div className={styles.settingControl}>
+          <div className={rowStyles.control}>
             <select
               id="settings-eligibility-policy"
-              className={`${fieldStyles.select} ${styles.formatSelect}`}
+              className={`${fieldStyles.select} ${rowStyles.controlField}`}
               value={policy}
               disabled={!isSystemAdmin || setPolicy.isPending}
               onChange={(e) => {
