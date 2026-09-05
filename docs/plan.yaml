@@ -1409,6 +1409,7 @@ stages:
   status: done
   owner: agent
   refs:
+  - session 52
   - session 53
   - session 54
   delivers:
@@ -1435,8 +1436,8 @@ stages:
   status: done
   owner: agent
   refs:
-  - session 51
-  - session 52
+  - session 37
+  - session 40
   delivers:
   - R-315
   - R-316
@@ -1465,8 +1466,10 @@ stages:
   status: done
   owner: agent
   refs:
-  - session 50
-  - session 52
+  - session 31
+  - session 35
+  - session 36
+  - session 38
   delivers:
   - R-311
   - R-313
@@ -1500,8 +1503,7 @@ stages:
   status: done
   owner: agent
   refs:
-  - session 49
-  - session 50
+  - session 26
   delivers:
   - R-306
   - R-307
@@ -1525,7 +1527,9 @@ stages:
   status: done
   owner: agent
   refs:
-  - session 50
+  - session 31
+  - session 33
+  - session 34
   - session 63
   delivers:
   - R-308
@@ -1591,6 +1595,9 @@ stages:
   status: done
   owner: agent
   refs:
+  - session 28
+  - session 30
+  - session 41
   - session 62
   - session 63
   - session 66
@@ -1666,7 +1673,7 @@ stages:
   status: now
   owner: agent
   refs:
-  - session 70
+  - session 71
   - NEXT Phase 1
   delivers:
   - R-337
@@ -4881,7 +4888,7 @@ requirements:
     file: src/test/scope.test.ts
     cases: "XP1 a part whose places were filtered away is still offered, XP2 an empty places list is not the question any more, XP3 an empty OFFERED list is offered nowhere, XP4 (promoted from DEF-0002's pin) a part made only at another plant is absent, XP5 a part on another line is absent, XP6 the answer is per node"
   - kind: vitest
-    file: src/test/defects/DEF-0007.test.tsx
+    file: src/test/auditAccess.test.tsx
     cases: >-
       the rail offers what the server permits, tab by tab -- a site admin IS offered Settings, is NOT
       offered Activity, and a company admin gets both, so no case passes by hiding everything
@@ -8792,6 +8799,8 @@ sessions:
     includes `e2e` as a directory, which typechecks the specs for the first time. S34 is the stage,
     and it is `now` -- the first thing in flight since the buildout was told the truth.
     Green: `npm run test` 2107 in 75, `tsc` 0, `eslint` 0, `npm run e2e` 8 passed, three runs in a row.
+  shipped:
+  - S34
 - id: 70
   date: 2026-09-05
   title: Tester run
@@ -9885,7 +9894,8 @@ sessions:
     status being TYPED into a field edit, and nothing in the type system says the save path stopped SENDING
     one or that Delete still does. Both are asserted. Driven in the browser: the pop-up shows efficiency,
     target and the time band, with Delete still removing the block.
-  shipped: []
+  shipped:
+  - S26
 - id: 51
   date: 2026-09-04
   title: Tester run
@@ -10261,7 +10271,8 @@ sessions:
     one now, with the samples computed through the real seam so it cannot rot when the month turns. The site
     admin's case is pinned there too: the picker disabled with the reason in words, and the client refusing
     the write rather than trusting `disabled` to be the only "no". Suite 1753 in 57 files, up from 1746 in 56.
-  shipped: []
+  shipped:
+  - S32
 - id: 43
   date: 2026-09-03
   title: Tester run
@@ -10361,7 +10372,8 @@ sessions:
     setting misleads a reader and corrupts nothing, which is why a plain toggle is proportionate and a routing
     model is not. Driven in the browser: lines defaulted to adding and showed 30/45/15 min, the areas above
     read "not added", ticking Plant A totalled 1.5 h over six cells. Suite 1746 in 56 files, up from 1738.
-  shipped: []
+  shipped:
+  - S27
 - id: 39
   date: 2026-09-03
   title: A target computed from the standard is not the standard (F-077)
@@ -10420,7 +10432,8 @@ sessions:
     editor was stretching its column so the grid reflowed on every click, and summed rows were three times the
     height of the rows they total. Both fixed; the partial-sum note is now an inline "1/6". JS suite 1733 green
     in 55 files, up from 1715 in 53.
-  shipped: []
+  shipped:
+  - S28
 - id: 37
   date: 2026-09-03
   title: A standard cycle time per cell per part, and the target the board derives from it (R-315..R-317)
@@ -10461,7 +10474,8 @@ sessions:
     payload, the cross-tenant FK and the cascade. JS suite 1715 green, up from 1663. Applied to the dev DB and
     round-tripped there as the real admin persona, including the client's exact upsert path. The verify-db.sh
     db_checks recount (+11) is owed on CI.
-  shipped: []
+  shipped:
+  - S27
 - id: 36
   date: 2026-09-03
   title: The unit rule holds for old data too, enforced by a CHECK (R-314)
@@ -10485,7 +10499,8 @@ sessions:
     four PASS) and applied to the dev DB — one dirty row backfilled to zero, a bad write refused. No column or
     RPC changed, so db:types is unaffected; JS suite 1663 green. The canonical verify-db.sh db_checks recount
     (+4) is owed on CI.
-  shipped: []
+  shipped:
+  - S28
 - id: 35
   date: 2026-09-03
   title: One shared pop-up shell, an audit, and the "units" fix (R-313)
@@ -10514,7 +10529,8 @@ sessions:
     render under jsdom. Suite 1663 green (was 1653: targetField and popoverStandard cases). tsc and eslint
     clean. No migration. NOT yet driven in the app — the parent will verify the assignment/record popovers
     and the units field there.
-  shipped: []
+  shipped:
+  - S28
 - id: 34
   date: 2026-09-03
   title: Matrix plants read alphabetically (R-312 follow-up)
@@ -10534,7 +10550,8 @@ sessions:
     app — the header reads Plant A, Plant B, Plant C, Plant D; screenshot sent. The multi-root test gives a
     plant a higher sortOrder than its alphabetical predecessor to pin that the name wins. Suite 1653 green.
     tsc and eslint clean.
-  shipped: []
+  shipped:
+  - S30
 - id: 33
   date: 2026-09-03
   title: The training matrix header groups by plant (R-312)
@@ -10561,7 +10578,8 @@ sessions:
     container (overflow-x: auto), so ten plants get a scrollbar rather than overflowing the page. A new test
     builds plants as true roots and pins the grouping; the single-plant and company-root cases are unchanged.
     Suite 1653 green. tsc and eslint clean. No migration.
-  shipped: []
+  shipped:
+  - S30
 - id: 32
   date: 2026-09-03
   title: Both fixes actually landed — operator pool and one shared toggle, verified in the app
@@ -10621,7 +10639,9 @@ sessions:
     date seam did: a shared primitive plus an audit that forbids bypassing it.
     Suite 1653 green (was 1642: five ownedUnder cases, six iconStandard cases). tsc and eslint clean. No
     migration and no db:types — board_window is unchanged; the operators fix is entirely client-side.
-  shipped: []
+  shipped:
+  - S28
+  - S30
 - id: 30
   date: 2026-09-03
   title: Four more date-format presets (R-309)
@@ -10646,7 +10666,8 @@ sessions:
     1642 green (was 1637: four seam cases, one board case). tsc and eslint clean. The seven SQL cases in
     63_org_date_format_test.sql run green on a fresh-seed database (X6 sets an added preset); the canonical
     verify-db.sh db_checks recount is owed on CI, so baseline db_checks is left at 522.
-  shipped: []
+  shipped:
+  - S32
 - id: 29
   date: 2026-09-03
   title: The date format reaches the board's day labels (R-309 follow-up)
@@ -10712,7 +10733,8 @@ sessions:
     63_org_date_format_test.sql were run green against the local container (harness + migrations + seed) and
     db:types regenerated (one added line, the RPC -- the committed types were in sync); the canonical
     verify-db.sh db_checks recount is owed on CI, so the baseline db_checks is left at 522.
-  shipped: []
+  shipped:
+  - S32
 - id: 27
   date: 2026-09-02
   title: A site admin makes, and wholly owns, a product at their own plant (D116)
@@ -10767,6 +10789,7 @@ sessions:
     from the session's own `npm run test` run.
   shipped:
   - S22
+  - S29
 - id: 25
   date: 2026-09-02
   title: Cancel closes the shifts Edit opened
@@ -11203,7 +11226,7 @@ next:
     walkthroughs — sign in as each of the dev switcher's four people, open the board, drag an
     assignment, walk the admin rail — plus the load sanity the roadmap line asks for (hundreds of rows,
     thousands of assignments).
-    ⛔ UPDATE, SESSION 70: JOB B IS DONE LOCALLY AND JOB A IS THE WHOLE OF WHAT IS LEFT. The premise
+    ⛔ UPDATE, SESSION 71: JOB B IS DONE LOCALLY AND JOB A IS THE WHOLE OF WHAT IS LEFT. The premise
     above was half wrong and the correction is worth keeping: A does not block B, because `.env.local`
     already points the LOCAL run at the running stack. `e2e/signedIn.spec.ts` signs in as three roles
     and reads the admin rail, green locally, skipping where there is no backend. So the remaining work
