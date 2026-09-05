@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 5f19eb8
+  tip: a665c7c
   baseline:
     app_tests: 1788
     app_test_files: 60
     tsc: 0
     eslint: 0
-    db_checks: 549
-    migrations: 46
+    db_checks: 609
+    migrations: 52
     mutations: 509 of 536
 tracks:
 - id: core
@@ -2635,8 +2635,37 @@ requirements:
     ⚠️ A SCREEN THAT SPANS PLANTS HAS NO PLANT TO ASK. Activity lists changes from every plant at once,
     so a per-plant date format has no single answer there. Such a screen uses the COMPANY default, and
     says nothing misleading by doing so; only a screen showing one plant resolves that plant's value.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/73_plant_settings_test.sql
+    cases: P0-P22 (P18-P21 the date format as a per-plant key, P22 that an unvalidated key is still refused)
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: 40 cases -- the two scopes named in words, all three states on BOTH settings, and the
+      one-readable-plant split between a company admin and a site admin
+  - kind: vitest
+    file: src/test/plantSettings.test.ts
+    cases: 15 cases on `settingsScope` and which plants a reader may administer
+  status: covered
+- id: R-334
+  title: A tab cannot silently ignore the plant filter
+  source:
+  - session 63 conversation
+  stated_by: maintainer
+  claim: >-
+    *"please ensure that any future tabs created honor the filter."* Every panel under
+    `src/features/admin/components/*Panel.tsx` either reads `usePlantFilter` — calling it AND consuming
+    the result, since an unused import is the cheapest way to fake compliance — or is named on one of
+    two lists with a reason. `PLANT_AGNOSTIC` is for a panel that genuinely has no plant; the debt list
+    is SHRINK-ONLY, so a new offender cannot be added to it. The audit walks the DIRECTORY rather than a
+    list, so a tab that does not exist yet is already in scope.
+  verified_by:
+  - kind: vitest
+    file: src/test/plantFilterStandard.test.ts
+    cases: >-
+      15 cases; three sabotages caught -- a new panel that never asks, one that calls the hook and never
+      reads it, and one sneaked onto the debt list
+  status: covered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
   source:
@@ -5883,6 +5912,33 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-089
+  title: The Activity plant filter has a ceiling, and it is a request line
+  tag: A limit you can measure before you hit it
+  status: open
+  found_by: agent
+  refs:
+  - R-334
+  - R-330
+  story: >-
+    `audit_log` has no place column, so narrowing the Activity log to a plant means asking the server
+    about ids held INSIDE the snapshot jsonb — and the clause has to repeat that id list once per
+    snapshot path (`after->>node_id`, `after->>site_node_id`, and both again for `before`).
+    ⛔ SO THE FILTER'S COST GROWS WITH THE COMPANY, AND THE LIMIT IS A REQUEST LINE RATHER THAN A
+    QUERY. Kong caps it at 8 KB. Measured against this stack with a realistic page request beside it: a
+    7328-character clause is served and 7624 comes back **414**. The budget is set at 6800 — roughly 44
+    places outside the chosen plant. Each of the four plants here leaves 36, so it works today with
+    about eight nodes of headroom, and a fifth plant or a deeper tree spends that.
+    ⭐ WHAT IT DOES AT THE CEILING IS THE PART THAT MATTERS. It does not silently read every plant
+    under a footer naming one. The screen says it is showing every plant and hiding nothing, the plant
+    is dropped from the footer so the sentence cannot claim a scope it does not have, and the read
+    THROWS rather than going unnarrowed. Degrading loudly is the whole reason this is a finding and not
+    a defect.
+    The durable fix is a `node_id` column on `audit_log`, written by `write_audit_log` from the row's
+    own node or site column: one indexed `in` instead of four id lists, and no ceiling worth naming.
+    ⚠️ It only helps rows written AFTER it, so the 232 rows already here would stay unattributed unless
+    a backfill reads each snapshot — which is a migration, and a decision about a table that is
+    deliberately append-only history.
 - id: F-088
   title: The CHECK that guards the eligibility policy cannot reject a null
   tag: A constraint that passes on nothing
@@ -7964,6 +8020,80 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 63
+  date: 2026-09-04
+  title: The plant filter is obeyed everywhere, and the Activity log learns where a change happened
+  commits:
+  - ae86442
+  - 5ffbb3d
+  - 869e081
+  - a665c7c
+  numbers:
+    app_tests: 2097
+    app_test_files: 74
+    tsc: 0
+    eslint: 0
+    db_checks: 609
+    migrations: 52
+  confirmed: true
+  summary: >-
+    The maintainer, twice, on shapes I had briefed wrongly: the Settings tab should follow the plant
+    control at the top rather than grow its own list of plants, every setting on it should be per-plant,
+    and the Activity tab's filter does nothing at all.
+    ⭐ MY BRIEF WAS THE BUG IN THE FIRST ONE. I described the task as "let somebody set the policy per
+    plant" and never mentioned `usePlantFilter`, so the lane solved what I wrote and built a second
+    answer to a question the app already answers once for six other panels. The tab now reads the same
+    hook from the same shared tree read, names its scope in words — Company defaults, or the plant —
+    and gives BOTH settings all three states.
+    ⚠️ AND THE JUDGEMENT I MADE ON THE MAINTAINER'S BEHALF WAS ALSO WRONG. R-331 kept `date_format`
+    company-wide on my reasoning that it is a reader's display convention rather than a plant's rule.
+    Overruled, and recorded as R-333.
+    ⛔ THE ONE-READABLE-PLANT CASE DECIDED THE SCOPE RULE, AND ACTIVITY IS WHY. Below two plants the
+    filter disappears, and following that collapse mechanically would send everybody to the company
+    defaults. A company admin of a one-plant org DOES go there — because Activity spans plants and
+    therefore reads the company value, so editing only the plant would leave that screen showing the old
+    format, and a setting that applies everywhere except one screen is worse than one that applies
+    nowhere. A site admin granted one plant goes to their plant, because both org-wide writers are
+    admin-only and the company scope would hand them two dead controls.
+    ⭐ "THREE ONE-LINE EDITS" WAS WRONG AND THE FIRST RED RUN SAID SO. 0050's header recorded that a
+    second per-plant key would cost three edits. It is five in four places, and the missed one —
+    `node_settings_key_check` — refuses the row outright, so without it every other change is dead code.
+    The writer rejected `date_format` as "unknown setting" on the first run. The honest number is now in
+    0052's header. No server-side reader changed, which is the difference from 0050: eligibility decides
+    whether a WRITE IS ALLOWED, the date format decides how a string is RENDERED. `capacity_cap` and
+    `week_start` would cost those five edits plus moving a write-gating reader, which is the expensive
+    half and why they stayed out.
+    ⛔ THE ACTIVITY FILTER WAS THE HARDER ONE AND A MEASUREMENT RESHAPED IT. `audit_log` has no place
+    column — the place is a key inside the jsonb — and products carry no node reference at all since
+    0034 moved them to `product_sites` (31 rows). What I had NOT measured, and the lane did: 64 further
+    rows name a node that no longer exists, from a rebuilt seed or a deleted line. Filtering by the
+    plant's own ids would have hidden those 64 plus the 31 from every plant at once, under a footer
+    saying the whole log had been searched. So the clause is a COMPLEMENT — hidden only when every place
+    a row names is a place the company still has and none of them is the chosen plant — and its
+    `is.null` branch is load-bearing, because `NULL NOT IN (…)` is NULL rather than true and without it
+    every products row vanishes. Checked on real rows: Plant A shows 148, decomposing exactly into "in
+    Plant A" plus "unplaceable"; the positive version showed 84.
+    The narrowing went INTO THE QUERY beside the period and action clauses, so `hasMore` still means
+    older matches exist and R-330's honesty property is untouched. Unplaceable rows are shown under
+    every plant and marked with two different reasons, because "no place recorded" and "place since
+    removed" are two different facts.
+    ⚠️ A REAL CEILING, MEASURED AGAINST THE RUNNING STACK RATHER THAN ASSUMED. The clause repeats the
+    id list once per snapshot path and Kong caps a request line at 8 KB: 7328 characters is served,
+    7624 returns 414. The budget is 6800 — about 44 places outside the chosen plant — and each plant
+    here leaves 36, so roughly eight nodes of headroom. Past it the screen SAYS it is showing every
+    plant and hiding nothing, drops the plant from the footer so it cannot claim a scope it does not
+    have, and the read throws rather than quietly going unnarrowed. Recorded as F-089; the durable fix
+    is a place column written by `write_audit_log`, which is a migration and the maintainer's call.
+    R-334 is the standing rule asked for: the audit walks the DIRECTORY, so a tab that does not exist
+    yet is already in scope, and honouring means the hook is called AND its answer read, since an unused
+    import is the cheapest way to fake compliance. `ImportPanel` and `SiteAccessPanel` went on a
+    shrink-only debt list rather than into an exemption, because neither is legitimately plant-agnostic
+    and writing one into an exemption list records a bug as a design decision.
+    ⚠️ AND A NUMBER OF MY OWN WAS WRONG. Session 62 recorded 1998 tests in 71 files. I had run the
+    suite myself — one commit too early, at `cbc7c92`, while the entry names `5f19eb8` after it.
+    Corrected to 2025/72 with the file counts settled by `git ls-tree` rather than memory. Running the
+    suite honestly is not the same as running it last, and the next lane caught it, not me.
+  shipped: []
 - id: 62
   date: 2026-09-04
   title: Settings rows line up, and a rule can be answered for one plant
