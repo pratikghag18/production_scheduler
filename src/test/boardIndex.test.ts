@@ -238,6 +238,7 @@ function makeFixture(): BoardWindow {
       employeeRef: null,
       active: true,
       skillIds: [],
+      skillExpiries: [],
     },
     {
       id: "op2",
@@ -246,6 +247,7 @@ function makeFixture(): BoardWindow {
       employeeRef: null,
       active: true,
       skillIds: [],
+      skillExpiries: [],
     },
   ];
   const products = [{ id: "p1", sku: "WX", name: "Widget X", active: true }];

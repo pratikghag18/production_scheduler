@@ -101,6 +101,13 @@ const boardWindowJson: Json = {
       // whether somebody belonged at the cell being scheduled. REQUIRED now.
       site_node_id: "30000000-0000-0000-0000-000000000001",
       skill_ids: ["40000000-0000-0000-0000-000000000001"],
+      // F-087/0048: `board_window` emits this on EVERY operator (`[]` where
+      // nothing is dated) and `parseOperator` REQUIRES it, for the reason
+      // `site_node_ids` is required above: a payload without it comes from a
+      // database that cannot tell a live certificate from a lapsed one, and
+      // carrying on regardless would read "no dates sent" as "nothing has
+      // expired". `certificateExpiry.test.tsx` pins the shape.
+      skill_expiries: [],
     },
   ],
   products: [

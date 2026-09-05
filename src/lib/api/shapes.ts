@@ -370,12 +370,61 @@ export interface BoardOperator {
    * on an owner it cannot resolve.
    */
   siteNodeId: string;
+  /**
+   * The trainings this person has EVER held, live or lapsed. It answers
+   * "were they ever trained", and that is all it answers — `skillExpiries`
+   * below is what says whether a certificate is still good.
+   */
   skillIds: string[];
+  /**
+   * F-087 / migration 0048: the expiry date of every certificate in
+   * `skillIds` that CARRIES one. Only the dated rows are listed — an undated
+   * certificate never expires, and its absence here says so once.
+   *
+   * ⛔ THE BOARD WAS BLIND WITHOUT THIS AND COULD NOT HAVE BEEN OTHERWISE.
+   * `check_eligibility` has refused an operator whose certification ran out
+   * since migration 0009, and `create_assignment` acts on that refusal — but
+   * `board_window` sent a bare array of skill ids with no date on it, so the
+   * popover drew a person whose ticket lapsed a year ago as fully eligible,
+   * warned nobody, offered no override tick, and let Create fail with a
+   * message about an override the screen had no box for. `certificateGaps`
+   * (`features/board/lib/boardIndex.ts`) is where this becomes the server's
+   * own verdict.
+   */
+  skillExpiries: SkillExpiry[];
+}
+
+/**
+ * One dated certificate: a Postgres `date`, so `expiresAt` is `"YYYY-MM-DD"`
+ * and TIMEZONE-LESS BY CONSTRUCTION. It is compared as text and displayed
+ * through `formatCalendarDay`; putting it through `new Date(...)` would
+ * reinterpret it as UTC midnight and print the day before for anyone west of
+ * Greenwich (the reasoning `src/lib/format/dates.ts` records).
+ */
+export interface SkillExpiry {
+  skillId: string;
+  expiresAt: string;
+}
+
+function parseSkillExpiry(v: Json): SkillExpiry | null {
+  if (!isJsonObject(v)) return null;
+  const { skill_id, expires_at } = v;
+  if (!isStr(skill_id) || !isStr(expires_at)) return null;
+  return { skillId: skill_id, expiresAt: expires_at };
 }
 
 function parseOperator(v: Json): BoardOperator | null {
   if (!isJsonObject(v)) return null;
-  const { id, home_node_id, display_name, employee_ref, active, site_node_id, skill_ids } = v;
+  const {
+    id,
+    home_node_id,
+    display_name,
+    employee_ref,
+    active,
+    site_node_id,
+    skill_ids,
+    skill_expiries,
+  } = v;
   if (
     !isStr(id) ||
     !isStrOrNull(home_node_id) ||
@@ -390,6 +439,13 @@ function parseOperator(v: Json): BoardOperator | null {
   }
   const skillIds = parseArrayOf(skill_ids, (item) => (isStr(item) ? item : null));
   if (skillIds === null) return null;
+  // ⚠️ REQUIRED, NOT OPTIONAL, and that is the whole point of the field. Since
+  // 0048 `board_window` emits `skill_expiries` on EVERY operator — `[]` where
+  // nothing is dated (71_board_expiry_test.sql, case E8). Tolerating its
+  // absence would mean "this database sends no dates" arrived as "nothing has
+  // expired", which is F-087 restored with a shrug.
+  const skillExpiries = parseArrayOf(skill_expiries, parseSkillExpiry);
+  if (skillExpiries === null) return null;
   return {
     id,
     homeNodeId: home_node_id,
@@ -398,6 +454,7 @@ function parseOperator(v: Json): BoardOperator | null {
     active,
     siteNodeId: site_node_id,
     skillIds,
+    skillExpiries,
   };
 }
 

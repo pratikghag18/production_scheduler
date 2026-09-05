@@ -46,6 +46,8 @@ const MARIA: BoardOperator = {
   active: true,
   siteNodeId: "n1",
   skillIds: [],
+  // F-087/0048: required on BoardOperator now — nothing held, nothing dated.
+  skillExpiries: [],
 };
 const OPERATORS: ReadonlyMap<string, BoardOperator> = new Map([["o1", MARIA]]);
 

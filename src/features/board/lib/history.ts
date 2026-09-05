@@ -119,6 +119,11 @@ export function operatorViewFor(
     active: false,
     siteNodeId: "",
     skillIds: [],
+    // F-087 / 0048. Empty for the same reason `skillIds` is: a departed person
+    // holds no certificate, so none of theirs can be expiring, and an empty
+    // list is a true statement where `undefined` would make every eligibility
+    // read guess.
+    skillExpiries: [],
   };
 }
 

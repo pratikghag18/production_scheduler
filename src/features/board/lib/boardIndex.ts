@@ -140,6 +140,100 @@ function readEligibilityPolicy(settings: Json): "warn" | "block" {
   return "warn";
 }
 
+/**
+ * The calendar day an instant falls on IN THE BOARD'S OWN FRAME —
+ * `"YYYY-MM-DD"`, the same text a Postgres `date` arrives as.
+ *
+ * ⚠️ THIS IS A SEAM, NOT A CONVENIENCE. `check_eligibility` compares
+ * `expires_at < upper(p_timerange)::date`, and that cast happens in the
+ * database session's timezone, which is UTC. The board renders in UTC too
+ * (`BOARD_ZONE`, `./time.ts`). So the client's day must be the UTC day, and
+ * `toISOString().slice(0, 10)` is exactly that — where a local-time
+ * `getFullYear()/getMonth()/getDate()` would put every window that ends near
+ * midnight on the wrong day for anybody west of Greenwich, and would disagree
+ * with the server on precisely the shifts that run to the end of a day.
+ */
+export function boardDay(instant: Date): string {
+  return instant.toISOString().slice(0, 10);
+}
+
+/**
+ * One reason a person is not eligible at a cell — and WHICH of the two reasons
+ * it is, because they are different problems with different fixes.
+ *
+ * ⛔ `never-trained` NEEDS A COURSE BOOKED. `lapsed` NEEDS A RENEWAL. Collapsing
+ * them into "not eligible" is most of what made the old screen unhelpful: it
+ * sent a planner looking for a training slot for somebody who only had to
+ * re-sign a ticket, and it said nothing at all about the person whose ticket
+ * ran out last month.
+ */
+export type CertificateGap =
+  { skill: Skill; state: "never-trained" } | { skill: Skill; state: "lapsed"; expiresAt: string };
+
+/**
+ * F-087 — `check_eligibility`'s verdict, reached on the client, for the window
+ * the planner is actually about to write. An EMPTY result means eligible.
+ *
+ * ⭐ THE SERVER'S RULE, TRANSCRIBED RATHER THAN APPROXIMATED (migration 0009,
+ * unchanged since):
+ *
+ *     missing  = required AND NOT held
+ *     expiring = required AND held AND expires_at IS NOT NULL
+ *                AND (upper_inf(window) OR expires_at < upper(window)::date)
+ *     eligible = no missing AND no expiring
+ *
+ * Four things about that rule are load-bearing here:
+ *
+ *  1. `missing` and `expiring` are DISJOINT in the server too — `missing` is a
+ *     `NOT EXISTS` against the held rows and `expiring` is a JOIN onto them —
+ *     so a training never held is never also reported as lapsed. The `continue`
+ *     below is that, not a shortcut.
+ *  2. The comparison is STRICT. A certificate that expires ON the window's last
+ *     day is still valid; `<=` here would refuse the final legal shift, which
+ *     is a screen refusing what the server allows (CLAUDE.md §4).
+ *  3. An OPEN-ENDED window counts EVERY dated certificate as lapsed —
+ *     `upper_inf`. There is no finite day to compare against, so any real
+ *     expiry falls inside it. `windowEnd === null` is that case.
+ *  4. Only REQUIRED trainings are judged. A stale ticket for something this
+ *     cell never asks for is not this cell's problem, and warning about it
+ *     would make every warning worth ignoring.
+ *
+ * The dates are compared AS TEXT: `expires_at` is a Postgres `date`, so both
+ * sides are fixed-width zero-padded `"YYYY-MM-DD"`, for which lexicographic
+ * order IS chronological order — and no `Date` is constructed from a
+ * timezone-less day, which is the bug `src/lib/format/dates.ts` was written to
+ * end.
+ *
+ * `windowEnd` is the END of the range being created — `addMinutes(windowStart,
+ * range.endMin)`, the same instant `submitCreateDirect` puts in the tstzrange's
+ * upper bound. It is asked per render, because the drag handles and the shift
+ * chips move it while the popover is open.
+ */
+export function certificateGaps(
+  operator: Pick<BoardOperator, "skillIds" | "skillExpiries">,
+  requiredSkills: readonly Skill[],
+  windowEnd: Date | null,
+): CertificateGap[] {
+  if (requiredSkills.length === 0) return [];
+  const endDay = windowEnd === null ? null : boardDay(windowEnd);
+  const gaps: CertificateGap[] = [];
+  for (const skill of requiredSkills) {
+    if (!operator.skillIds.includes(skill.id)) {
+      gaps.push({ skill, state: "never-trained" });
+      continue;
+    }
+    const dated = operator.skillExpiries.find((e) => e.skillId === skill.id);
+    // No date on the row: the certificate does not expire. `expires_at IS NOT
+    // NULL` is the server's first condition, and 0048 sends only dated rows,
+    // so "absent" and "NULL" are the same statement here.
+    if (dated === undefined) continue;
+    if (endDay === null || dated.expiresAt < endDay) {
+      gaps.push({ skill, state: "lapsed", expiresAt: dated.expiresAt });
+    }
+  }
+  return gaps;
+}
+
 export function buildBoardIndex(
   data: BoardWindow,
   windowStart: Date,
