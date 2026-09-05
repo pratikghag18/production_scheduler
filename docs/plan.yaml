@@ -2616,6 +2616,27 @@ requirements:
     file: src/test/settingsPanel.test.tsx
     cases: every setting, company-wide or per-plant, renders in the same shared row and column
   status: covered
+- id: R-333
+  title: The Settings tab follows the plant filter, and every setting on it is per-plant
+  source:
+  - session 62 conversation
+  stated_by: maintainer
+  claim: >-
+    *"There is a filter at the top for selecting plants. Once we select the plant at the top we should
+    be able to assign the settings to that particular plant, and it should be all types of settings on
+    the settings tab, not just this one."* Settings reads `usePlantFilter` like every other admin panel
+    rather than growing its own plant list: choose a plant and the tab edits THAT plant's values; choose
+    All plants and it edits the company defaults everything falls back to. Every setting the tab
+    surfaces is per-plant — the date format as well as the eligibility policy — each with the same three
+    states (inheriting / set here / set here to the other value).
+    ⛔ THIS OVERRULES AN ASSUMPTION THE PREVIOUS PIECE SHIPPED ON. R-331 was built keeping
+    `date_format` company-wide on the reasoning that it is a reader's display convention rather than a
+    plant's rule. The maintainer has decided otherwise and that is the answer.
+    ⚠️ A SCREEN THAT SPANS PLANTS HAS NO PLANT TO ASK. Activity lists changes from every plant at once,
+    so a per-plant date format has no single answer there. Such a screen uses the COMPANY default, and
+    says nothing misleading by doing so; only a screen showing one plant resolves that plant's value.
+  verified_by: []
+  status: uncovered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
   source:

@@ -106,7 +106,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">549</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">46</span><span class="l">database changes (migrations)</span></div>
   <div class="stat act"><span class="n">1</span><span class="l">open defects</span></div>
-  <div class="stat act"><span class="n">155 / 275</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">155 / 276</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>5f19eb8</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -1378,7 +1378,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>275 requirements · 155 covered · 105 uncovered · 1 contradicted · 14 superseded</caption>
+<caption>276 requirements · 155 covered · 106 uncovered · 1 contradicted · 14 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -1847,6 +1847,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
       <br><span class="fine">session 62 conversation · maintainer</span></td>
   <td class="fine">vitest · <code>src/test/settingRowStandard.test.ts</code> 14 cases on four prongs -- no stylesheet outside the shared module names a rule after a setting and lays it out; the width token is declared exactly once and in rem; the shared module's own shape; and a count in the panel that disagrees the moment a control dodges the shared cell. Eight mutations were applied and each caught by a different case.<br>vitest · <code>src/test/settingsPanel.test.tsx</code> every setting, company-wide or per-plant, renders in the same shared row and column</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-uncovered" id="R-333">
+  <td class="g-n">R-333</td>
+  <td class="reqmain"><b>The Settings tab follows the plant filter, and every setting on it is per-plant</b><br><span class="fine"><em>&quot;There is a filter at the top for selecting plants. Once we select the plant at the top we should be able to assign the settings to that particular plant, and it should be all types of settings on the settings tab, not just this one.&quot;</em> Settings reads <code>usePlantFilter</code> like every other admin panel rather than growing its own plant list: choose a plant and the tab edits THAT plant's values; choose All plants and it edits the company defaults everything falls back to. Every setting the tab surfaces is per-plant — the date format as well as the eligibility policy — each with the same three states (inheriting / set here / set here to the other value). ⛔ THIS OVERRULES AN ASSUMPTION THE PREVIOUS PIECE SHIPPED ON. R-331 was built keeping <code>date_format</code> company-wide on the reasoning that it is a reader's display convention rather than a plant's rule. The maintainer has decided otherwise and that is the answer. ⚠️ A SCREEN THAT SPANS PLANTS HAS NO PLANT TO ASK. Activity lists changes from every plant at once, so a per-plant date format has no single answer there. Such a screen uses the COMPANY default, and says nothing misleading by doing so; only a screen showing one plant resolves that plant's value.</span>
+      <br><span class="fine">session 62 conversation · maintainer</span></td>
+  <td class="fine">—</td>
+  <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
 <tr class="r-contradicted" id="R-D112">
   <td class="g-n">R-D112</td>
