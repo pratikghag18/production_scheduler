@@ -2721,7 +2721,17 @@ requirements:
   - kind: sql
     file: supabase/tests/73_plant_settings_test.sql
     cases: P0-P22, the server side of the same predicate
-  status: covered
+  status: contradicted
+  note: >-
+    ⛔ THE CLAUSE ABOUT `adminSectionsFor` HAS NO CASE BEHIND IT (DEF-0008, open). The row says the flag's
+    test is "would the server refuse for EVERY person `adminSectionsFor` admits", and taking
+    `companyAdminOnly` off Settings put the whole of that tab's gate onto `adminSectionsFor`. Nothing in
+    the suite renders the rail for the population that helper NARROWS. The tester widened its non-admin
+    branch to `["operators", "trainings", "matrix", "import", "products", "settings"]` --- a supervisor
+    with no admin grant anywhere offered three tabs the server refuses --- and all 2103 cases stayed
+    green. The behaviour shipped is RIGHT; only the evidence is missing, which is why this is
+    `test-cannot-fail` and not a permission defect. `src/test/defects/DEF-0008.test.tsx` asserts the whole
+    rail as a LIST, because three `toBeTruthy()`s cannot notice a fourth button and a list can.
 - id: R-D112
   title: The demo world is three generic plants with everything owned
   source:
@@ -4421,7 +4431,12 @@ requirements:
   - kind: vitest
     file: src/test/scope.test.ts
     cases: "XP1 a part whose places were filtered away is still offered, XP2 an empty places list is not the question any more, XP3 an empty OFFERED list is offered nowhere, XP4 (promoted from DEF-0002's pin) a part made only at another plant is absent, XP5 a part on another line is absent, XP6 the answer is per node"
-  status: contradicted
+  - kind: vitest
+    file: src/test/defects/DEF-0007.test.tsx
+    cases: >-
+      the rail offers what the server permits, tab by tab -- a site admin IS offered Settings, is NOT
+      offered Activity, and a company admin gets both, so no case passes by hiding everything
+  status: covered
   note: >-
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
@@ -4432,13 +4447,18 @@ requirements:
     missing option is silent. The second was not a regression from the first: it dates to migration 0034 and
     was invisible to every role that could report it, since an admin's own grant covers everything their
     board can show.
-    ⚠️ AND A THIRD TIME, FROM THE HIDDEN SIDE AGAIN (DEF-0007, fix-claimed). The Settings tab was hidden
-    from every plant admin while `set_node_setting` was taking their writes on their own plant. Same
-    shape as DEF-0005 and the same reason it stayed: the client's rule was a BOOLEAN CONSTANT written
-    when the server's rule was one too, and the server's became per-node two migrations later. A flag on
-    a menu row cannot track a predicate that takes an argument. The lesson this row now carries three
-    times over: where the server's gate names a NODE, the client's answer belongs where the node is
-    known, not on the rail.
+    ⚠️ AND A THIRD TIME, FROM THE HIDDEN SIDE AGAIN (DEF-0007, VERIFIED 2026-09-05, fix 23ba9aa). The
+    Settings tab was hidden from every plant admin while `set_node_setting` was taking their writes on
+    their own plant. Same shape as DEF-0005 and the same reason it stayed: the client's rule was a
+    BOOLEAN CONSTANT written when the server's rule was one too, and the server's became per-node two
+    migrations later. A flag on a menu row cannot track a predicate that takes an argument. The lesson
+    this row now carries three times over: where the server's gate names a NODE, the client's answer
+    belongs where the node is known, not on the rail.
+    ⭐ The tester re-verified it on the screen and at the server: Dana is offered Settings and not
+    Activity, all three of the panel's scopes behave as its header says, and a legal value written over
+    her own session was READ BACK OUT OF THE DATABASE rather than trusted because nothing threw. Both
+    halves of the axis were mutated on a scratch copy and both go red with a name, so the replacement
+    for the case that used to pin the bug is not itself a case that cannot fail.
 - id: R-240
   title: 0023 changes who may edit, not who may read
   source:
@@ -8161,6 +8181,72 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 67
+  date: 2026-09-05
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2106
+    app_test_files: 76
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Judged `4f80dee..c1e4a8c` --- the DEF-0007 fix and its plan entry. Merged fast-forward, no
+    `package-lock.json` change, tree clean before and after.
+    THE COUNT MATCHES FOR THE FIRST TIME SINCE IT STARTED FIRING. The runner's own lines were "Test
+    Files 75 passed (75)" and "Tests 2103 passed (2103)" against the plan's newest confirmed session,
+    66, at 2103 in 75. Session 65's mismatch was `a4e938a` shipping three tests with no plan entry;
+    session 66 wrote the record and the two agree. After my own new pin the suite is "Test Files 76
+    passed (76)" and "Tests 2106 passed (2106)", `tsc` 0, `eslint` 0 --- the numbers above, run by me.
+    `tsc` is CONCLUSIVE here rather than inconclusive: `db:types` regenerated with no content change
+    (the runner's stale warning and its whole-repo `format:check` failure are both this worktree's
+    `core.autocrlf=true` handing prettier CRLF, which `git diff` shows as no diff at all and which flags
+    files nobody has touched, `.claude/agents/tester.md` among them).
+    DEF-0007 IS VERIFIED, RE-RUN COLD AND ON THE SCREEN. Both halves of my own reproduction from the
+    top. The rail as the dev switcher's four people, driven through a real browser: Dana the site admin
+    now gets Settings and still does not get Activity; both supervisors get Operators, Trainings and
+    Matrix and nothing more; the company admin gets all eleven. The server over Dana's own session
+    against her own plant, with the same deliberately illegal value, still answers `invalid_argument`
+    rather than `not_permitted` --- and this time A LEGAL VALUE TOO, WITH THE ROW READ BACK OUT OF THE
+    DATABASE, because "it returned 200" is not evidence anything was written. It was written; clearing
+    it removed it; the dev world is as I found it.
+    THE THREE STATES ARE REACHABLE NOW, WHICH IS WHAT "COVERED IS NOT THE SAME AS REACHABLE" MEANT. With
+    a temporary read grant on Plant B (deleted afterwards, `profile_grants` back to 7) Dana sees:
+    company defaults with both controls DISABLED and "Only a system admin can change this"; Plant A with
+    both pickers LIVE; Plant B with NO CONTROL and "Plant B isn't a place you manage". With her real
+    single grant there is no plant control at all and `settingsScope`'s `plants.length === 1` branch
+    sends her straight to her own plant rather than to a company screen she may not edit.
+    THE REPLACEMENT FOR THE CASE THAT PINNED THE BUG CAN STILL FAIL, WHICH I CHECKED BY BREAKING IT.
+    Putting `companyAdminOnly` back on Settings goes red in `auditAccess` and in my pin; taking it OFF
+    Activity --- the dangerous direction --- goes red in three cases across both files. Deleting the
+    per-plant guard in the panel goes red in five. Letting a site admin edit the COMPANY defaults goes
+    red in two. Four mutations, four caught with names.
+    ONE FILED: DEF-0008, `test-cannot-fail`, minor, against R-335 which now reads `contradicted`.
+    Settings used to have two locks and now has one, and the remaining one has no test. Widening
+    `adminSectionsFor`'s non-admin branch to hand a supervisor with NO admin grant the Import, Products
+    and Settings tabs leaves all 2103 cases green, and the server refuses that person outright
+    (`42501 new row violates row-level security policy for table "products"`). The one case that looks
+    like it guards this, `adminNoGrants` N3, guards which PANEL they land on, so it notices only tabs
+    sorting BEFORE "operators" in `SECTIONS` and misses everything after --- including Settings. And
+    `requireAdmin.test.tsx:103` says in a comment that the cases exist. Nothing a user sees is wrong
+    today; the evidence is what is missing, so it is filed as a coverage defect and not as a permission
+    one. My pin asserts the whole rail as a LIST and is green on this build, red on the mutation.
+    THE ADVERSARIAL PASS FOUND NOTHING, AND THE LOOKING IS THE POINT. `set_node_setting` takes a node id
+    the caller chooses, so I drove that parameter as Dana: her own plant passes the gate, a LINE inside
+    her plant passes it (`app_is_admin_for` walks the path, which is intended), Plant B comes back
+    `not_permitted` naming the node, and the other tenant's plant root is indistinguishable from a
+    bogus uuid --- both "no such place in this company", which discloses nothing. The write-no-op
+    category is clean too and for a stated reason: the INSERT ... ON CONFLICT cannot be silently
+    filtered because a WITH CHECK violation raises 42501 on both arms, and `clear_node_setting` reads
+    the row back after its DELETE precisely because ROW_COUNT would lie there.
+    WHAT ELSE I READ AND FOUND FINE. All three sweeps. Sweep 1 empty (no migrations). Sweep 2's one dark
+    column, `audit_log.at`, is carried over from my last run and untouched by this diff. Sweep 3's two
+    hits inside the diff, `AuditPanel.tsx:28` and `useOrgSettings.ts:334`, both say "company-wide" about
+    things that really are company-wide --- I checked `audit_log_select` against the LIVE database
+    (`app_is_admin() AND org_id = app_current_org()`) and `app_is_admin` against `pg_get_functiondef`,
+    not against the comment. The stale prose the fix cleaned out of `AuditPanel.tsx`, `src/lib/api/audit.ts`,
+    `auditPanel.test.tsx` and `scaleAudit.test.ts` is gone and what replaced it is accurate.
 - id: 66
   date: 2026-09-05
   title: The plant admin can reach the settings the server already lets them change (DEF-0007)
