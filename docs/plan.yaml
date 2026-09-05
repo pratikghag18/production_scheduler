@@ -8828,7 +8828,9 @@ sessions:
 - id: 72
   date: 2026-09-05
   title: An admin runs a plant, and now the database says so too (DEF-0010, DEF-0009)
-  commits: []
+  commits:
+  - 52a1bac
+  - 4ce143d
   numbers:
     app_tests: 2117
     app_test_files: 77
