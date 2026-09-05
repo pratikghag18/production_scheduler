@@ -1149,6 +1149,7 @@ export type Database = {
       }
       app_is_admin_on_path: { Args: { p_path: unknown }; Returns: boolean }
       app_node_exists_in_org: { Args: { p_node_id: string }; Returns: boolean }
+      app_node_is_plant_root: { Args: { p_node_id: string }; Returns: boolean }
       app_offered_product_nodes: {
         Args: { p_root_path: unknown }
         Returns: {

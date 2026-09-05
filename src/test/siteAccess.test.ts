@@ -411,6 +411,36 @@ check("A31: the below-root list is exactly the roles the server will take", () =
   return got === "supervisor,viewer" || got;
 });
 
+check("A32 ⛔: somebody ELSE's below-root admin grant is drawn as admin (DEF-0012)", () => {
+  // The cell of the table A30 and A48 both missed: not the viewer's own row
+  // (A30), not at a root (A48). It fell through to `ROLES_BELOW_ROOT`, and a
+  // control whose value is not among its options shows the first option, so
+  // the screen said "supervisor" beside "Admin of Area 1". The held role
+  // leads; the two demotions are the moves the server will take.
+  const got = allowedRoles(stranger({ isSelf: false, directRole: "admin" }), true, false).join(",");
+  return got === "admin,supervisor,viewer" || got;
+});
+
+check("A33 ⭐: a control never offers a list that omits the role its subject holds", () => {
+  // The property behind A32, walked over every combination rather than the one
+  // that was found: whatever the viewer and the node, if the person holds a
+  // role here it is among the options, so nothing is ever drawn as a role the
+  // person does not have.
+  for (const viewerIsCompanyAdmin of [true, false]) {
+    for (const isPlantRoot of [true, false]) {
+      for (const isSelf of [true, false]) {
+        for (const directRole of ["admin", "supervisor", "viewer"] as const) {
+          const got = allowedRoles(stranger({ isSelf, directRole }), viewerIsCompanyAdmin, isPlantRoot);
+          if (!got.includes(directRole)) {
+            return `viewer=${viewerIsCompanyAdmin} root=${isPlantRoot} self=${isSelf} holds=${directRole} offered=${got.join(",")}`;
+          }
+        }
+      }
+    }
+  }
+  return true;
+});
+
 check("A18: a stranger's row offers all three roles", () => {
   const got = allowedRoles(stranger({ directRole: "viewer" }), false, true).join(",");
   return got === "admin,supervisor,viewer" || got;

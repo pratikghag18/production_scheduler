@@ -84,8 +84,12 @@ it into `requirements` in that turn, before the code.
 - **`tsc` cannot see a string expectation.** After deleting a concept, grep the tests for its
   words. Adding a file to a directory an audit walks means editing the audit's list in both
   places (`REM_SURFACES` in `src/test/scaleAudit.ts` and its copy in `scaleAudit.test.ts`).
-- **Extract, never retype.** `grep -n "function <name>" supabase/migrations/*.sql` and take the
-  LAST hit, or `pg_get_functiondef` from the live database.
+- **Extract, never retype.** `grep -in "function \(public\.\)\?<name>(" supabase/migrations/*.sql`
+  and take the LAST hit, or `pg_get_functiondef` from the live database. The `-i` and the optional
+  `public.` are not decoration: 0022 declares `CREATE OR REPLACE FUNCTION public.set_site_member`,
+  a case-sensitive grep for the bare name skipped it, and 0053 re-emitted the function from the
+  wrong migration and silently dropped a rule (DEF-0011). Better still, slice the body out of the
+  file with a script and assert the guards you expect on the assembled text before writing it.
 - **Never `npm run db:reset` while the maintainer is using the app.**
 - **Do not stop to report.** Listing what is left is not progress; stop only for a decision
   only the maintainer can make, ask one question, and keep everything else moving. The queue's

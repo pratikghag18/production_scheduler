@@ -257,6 +257,18 @@ export const ROLES_BELOW_ROOT: readonly GrantRole[] = ["supervisor", "viewer"];
  * 0053, or by hand), and offering them an empty control would be the
  * nothing-selected state this function's first paragraph exists to avoid. 0053
  * deliberately leaves such rows alone rather than deleting them.
+ *
+ * ⛔ AND A CONTROL NEVER SHOWS A ROLE ITS SUBJECT DOES NOT HOLD (DEF-0012).
+ * The self-rule is about the viewer's OWN row; somebody ELSE's below-root
+ * admin grant fell through to `ROLES_BELOW_ROOT`, and a `<select>` whose value
+ * is not among its options renders the FIRST option — so the screen read
+ * *supervisor* beside a sentence saying *Admin of Area 1*, and saving that row
+ * would have written the role it showed rather than the one the person held.
+ * Such a row is drawn as what it is, `admin`, with exactly the two moves the
+ * server will take from here: `set_site_member` and the table's own trigger
+ * (0054) refuse `admin` below a root, so re-selecting it is a no-op and the two
+ * demotions are the repairs an administrator makes. The list is
+ * `GRANT_ROLES` order, which puts the held role first.
  */
 export function allowedRoles(
   row: AccessRow,
@@ -264,7 +276,8 @@ export function allowedRoles(
   isPlantRoot: boolean,
 ): readonly GrantRole[] {
   if (selfLocked(row, viewerIsCompanyAdmin)) return ["admin"] as const;
-  return isPlantRoot ? GRANT_ROLES : ROLES_BELOW_ROOT;
+  if (isPlantRoot) return GRANT_ROLES;
+  return row.directRole === "admin" ? GRANT_ROLES : ROLES_BELOW_ROOT;
 }
 
 /**

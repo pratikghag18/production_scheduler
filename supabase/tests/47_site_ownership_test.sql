@@ -1185,15 +1185,21 @@ BEGIN
   -- worry (§9). Access to a PLACE is theirs; the company-admin flag is not,
   -- and W33 is that half. Without this case the whole section is one long
   -- refusal and a migration that granted nothing would pass it all.
+  --
+  -- ⚠️ THE ROLE WAS 'admin' UNTIL 0054 AND THE CONTRACT CHANGED, NOT THE CASE.
+  -- R-340: admin is given only at a plant root, and the table now refuses it
+  -- on Line 1 for every signed-in session (77's AR5). What this case proves is
+  -- that access to a PLACE is a site admin's to give; supervisor is that
+  -- access on a line.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', true);
   SET LOCAL ROLE authenticated;
   INSERT INTO profile_grants (profile_id, node_id, org_id, role)
     VALUES ('d0000000-0000-0000-0000-000000000004','30000000-0000-0000-0000-000000000004',
-            '10000000-0000-0000-0000-000000000001','admin');
+            '10000000-0000-0000-0000-000000000001','supervisor');
   RESET ROLE;
   SELECT count(*) INTO v_n FROM profile_grants
    WHERE profile_id = 'd0000000-0000-0000-0000-000000000004'
-     AND node_id = '30000000-0000-0000-0000-000000000004' AND role = 'admin';
+     AND node_id = '30000000-0000-0000-0000-000000000004' AND role = 'supervisor';
   IF v_n = 1 THEN RAISE NOTICE 'PASS W29';
   ELSE RAISE NOTICE 'FAIL W29: rows=%', v_n; END IF;
 EXCEPTION WHEN OTHERS THEN
