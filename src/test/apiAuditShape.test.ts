@@ -22,10 +22,18 @@ import {
   ACTOR_IDENTITY_COLUMNS,
   AUDIT_COLUMNS,
   AUDIT_PAGE_SIZE,
+  PLACE_CLAUSE_BUDGET,
+  PLACE_KEYS,
+  PLACE_PATHS,
+  SNAPSHOT_COLUMNS,
   actorIdentityMap,
+  buildPlaceClause,
+  entryPlaceIds,
   fetchAuditPage,
   parseActorIdentity,
   parseAuditEntry,
+  placeFilterFits,
+  type AuditEntry,
 } from "@/lib/api/audit";
 
 /* ---------------------------------------------------------------------------
@@ -46,7 +54,7 @@ const sb = vi.hoisted(() => {
       calls.push([name, ...args]);
       return builder;
     };
-  for (const method of ["select", "order", "limit", "lt", "gte", "in", "eq"]) {
+  for (const method of ["select", "order", "limit", "lt", "gte", "in", "eq", "or"]) {
     builder[method] = record(method);
   }
   builder.then = (onFulfilled: (v: unknown) => unknown) => Promise.resolve(reply).then(onFulfilled);
@@ -430,6 +438,173 @@ describe("the read narrows on the server, so a page is fifty matches", () => {
     const page = await fetchAuditPage(null, { since: T0, until: T1, actions: ["delete"] });
     expect(page.hasMore).toBe(false);
     expect(page.entries.length).toBe(1);
+  });
+});
+
+/* ===========================================================================
+ * WHICH PLANT A CHANGE HAPPENED IN — the hardest of the four filters.
+ *
+ * ⭐⭐ `audit_log` HAS NO PLACE COLUMN, so the place is a key inside the jsonb
+ * snapshot and which key it is depends on the table. Two measurements on the
+ * live database decide the whole design, and both of them push the same way:
+ *
+ *   · a `products` row (31 of 232) carries NO place key at all — 0034 moved a
+ *     product's plants into `product_sites`, which the snapshot does not hold;
+ *   · **64 of the 201 rows that DO carry a place name a node that no longer
+ *     exists.** A rebuilt seed, a deleted line. An audit row outliving its
+ *     place is the log doing its job.
+ *
+ * ⭐⭐⭐ SO THE CLAUSE IS A COMPLEMENT — it is sent the places that are NOT the
+ * chosen plant, and hides a row only when every place it names is a place the
+ * company still has and none of them is the chosen one. The obvious version,
+ * sending the plant's own ids, reads better and quietly drops all 95 of those
+ * rows out of every plant's view under a footer claiming the whole log had been
+ * searched. That is the one failure this screen exists to avoid, so these cases
+ * pin the shape rather than merely the fact that something was sent.
+ * ======================================================================== */
+const A = "aaaaaaaa-0000-0000-0000-000000000001";
+const B = "bbbbbbbb-0000-0000-0000-000000000002";
+
+/** An entry, built from the guard's own shape. */
+function auditEntry(over: Partial<AuditEntry> = {}): AuditEntry {
+  const parsed = parseAuditEntry(rowFromColumns());
+  expect(parsed).not.toBeNull();
+  return { ...(parsed as AuditEntry), ...over };
+}
+
+describe("the place keys are written down once", () => {
+  it("names the two keys a snapshot can carry a place in", () => {
+    // A seventh audited table with a third key name is one edit HERE. The
+    // clause, the guard and the panel's mark all read this list.
+    expect([...PLACE_KEYS].sort()).toEqual(["node_id", "site_node_id"]);
+  });
+
+  it("tests both snapshots, because an insert has only `after` and a delete only `before`", () => {
+    expect([...SNAPSHOT_COLUMNS].sort()).toEqual(["after", "before"]);
+    expect(PLACE_PATHS).toEqual([
+      "after->>node_id",
+      "after->>site_node_id",
+      "before->>node_id",
+      "before->>site_node_id",
+    ]);
+  });
+
+  it("⚠️ builds the paths from the two lists, so neither can be extended alone", () => {
+    expect(PLACE_PATHS.length).toBe(SNAPSHOT_COLUMNS.length * PLACE_KEYS.length);
+  });
+});
+
+describe("the screen and the server read a row's place the same way", () => {
+  it("finds a place in `after` (an insert) and in `before` (a delete)", () => {
+    expect(entryPlaceIds(auditEntry({ after: { node_id: A }, before: null }))).toEqual([A]);
+    expect(entryPlaceIds(auditEntry({ after: null, before: { site_node_id: B } }))).toEqual([B]);
+  });
+
+  it("⭐ reports BOTH sides of a move, because the row belongs to both plants", () => {
+    const moved = auditEntry({ before: { site_node_id: A }, after: { site_node_id: B } });
+    expect(entryPlaceIds(moved).sort()).toEqual([A, B].sort());
+  });
+
+  it("⭐⭐ finds nothing on a products row, which is the point", () => {
+    const product = auditEntry({
+      tableName: "products",
+      before: null,
+      after: { name: "Widget X", sku: "WX-1", active: true },
+    });
+    expect(entryPlaceIds(product)).toEqual([]);
+  });
+
+  it("does not count a value that is not a usable id", () => {
+    expect(entryPlaceIds(auditEntry({ after: { node_id: null }, before: null }))).toEqual([]);
+    expect(entryPlaceIds(auditEntry({ after: { node_id: "" }, before: null }))).toEqual([]);
+    expect(entryPlaceIds(auditEntry({ after: { node_id: 7 }, before: null }))).toEqual([]);
+  });
+});
+
+describe("the plant clause hides only what it can prove is somewhere else", () => {
+  it("narrows nothing when there is nothing to narrow", () => {
+    expect(buildPlaceClause(null)).toBeNull();
+    expect(buildPlaceClause([])).toBeNull();
+  });
+
+  it("⭐⭐ tests every path against the ELSEWHERE list, not against the plant's own ids", () => {
+    const clause = buildPlaceClause([A, B]) as string;
+    for (const path of PLACE_PATHS) expect(clause).toContain(`${path}.not.in.(${A},${B})`);
+    // And nothing anywhere says `in.(` without the `not` — a positive test on
+    // the plant's own ids is the version that deletes 95 rows of history.
+    expect(/(?<!not\.)in\.\(/.test(clause)).toBe(false);
+  });
+
+  it("⭐⭐⭐ keeps a row that names no place at all, which SQL would otherwise drop", () => {
+    // `NULL NOT IN (…)` is NULL, not TRUE. Without this branch every products
+    // row falls out of every plant's view at once.
+    const clause = buildPlaceClause([A]) as string;
+    const nowhere = `and(${PLACE_PATHS.map((p) => `${p}.is.null`).join(",")})`;
+    expect(clause).toContain(nowhere);
+  });
+
+  it("⚠️ sends ids unquoted, because the clause is pressing on a request-size ceiling", () => {
+    expect(buildPlaceClause([A])).not.toContain('"');
+  });
+});
+
+describe("the plant clause is refused rather than silently dropped", () => {
+  beforeEach(() => sb.reset());
+
+  it("sends the clause as one `or` beside the other filters", async () => {
+    await fetchAuditPage(233, { since: T0, elsewhere: [A, B] });
+    expect(sb.argsOf("or")).toEqual([[buildPlaceClause([A, B])]]);
+    // The cursor and the period are untouched by it: one is a boundary on
+    // `id`, the others are predicates on rows.
+    expect(sb.argsOf("lt")).toEqual([["id", 233]]);
+    expect(sb.argsOf("gte")).toEqual([["at", T0]]);
+  });
+
+  it("sends nothing for `All plants`", async () => {
+    await fetchAuditPage(null, { elsewhere: null });
+    expect(sb.argsOf("or")).toEqual([]);
+    await fetchAuditPage(null, { elsewhere: [] });
+    expect(sb.argsOf("or")).toEqual([]);
+  });
+
+  it("⛔ refuses a value that is not a node id rather than rewriting the logic tree", async () => {
+    // Unlike `.in()`, this clause is a string this code builds. A value
+    // carrying a comma or a paren cannot reach anyone else's rows — RLS decided
+    // that long before — but it would silently ask a different question.
+    await expect(fetchAuditPage(null, { elsewhere: [`${A}),foo.eq.bar,(`] })).rejects.toBeTruthy();
+    expect(sb.argsOf("or")).toEqual([]);
+  });
+
+  /**
+   * ⛔⛔ THE MEASURED CEILING. Kong caps a request line at 8 KB and this clause
+   * repeats the list once per path: against the running stack a 48-id list is
+   * served and a 52-id list comes back 414. The failure that matters is not the
+   * 414 — it is a version of this function that noticed and sent the read
+   * UNNARROWED, handing the screen a page of the whole company under a header
+   * naming one plant.
+   */
+  it("⛔⛔ refuses an over-long list instead of quietly reading every plant", async () => {
+    const many = Array.from(
+      { length: 400 },
+      (_, i) => `aaaaaaaa-0000-0000-0000-${String(i).padStart(12, "0")}`,
+    );
+    expect(placeFilterFits(many)).toBe(false);
+    await expect(fetchAuditPage(null, { elsewhere: many })).rejects.toBeTruthy();
+    expect(sb.argsOf("or")).toEqual([]);
+  });
+
+  it("the budget leaves room for the rest of the request", () => {
+    // Measured with a whole real page request beside it: a 7328-character
+    // clause is served and a 7624-character one is refused. The budget sits
+    // below the first of those, not merely below Kong's 8 KB line.
+    expect(PLACE_CLAUSE_BUDGET).toBeLessThan(7328);
+    // And it has to be big enough for the database in front of us: each of the
+    // live org's four plants leaves 36 places outside it.
+    const live = Array.from(
+      { length: 36 },
+      (_, i) => `aaaaaaaa-0000-0000-0000-${String(i).padStart(12, "0")}`,
+    );
+    expect(placeFilterFits(live)).toBe(true);
   });
 });
 

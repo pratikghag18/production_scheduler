@@ -235,6 +235,22 @@
   font-weight: 600;
 }
 
+/* Why a row is on screen under a plant it cannot be shown to belong to.
+ *
+ * ⭐ QUIET, AND STILL A WORD. It sits under the subject in muted ink at the
+ * small size the rest of the secondary text uses -- it must not compete with
+ * the change itself -- but it is TEXT, not a dot or a tint, so a colour-blind
+ * reader and a black-and-white print both get it. Same rule the action accent
+ * keeps: colour is never the only signal on this screen. */
+.unplaced {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-style: italic;
+  white-space: nowrap;
+}
+
 .changes {
   padding: 0.4375rem 0.625rem;
   min-width: 16rem;

@@ -112,6 +112,48 @@
    ⚠️ THE ACTOR LOOKUP IS ALLOWED TO FAIL. It is a decoration on one column; the
    changes are the screen. It is a separate query for exactly that reason.
 
+   ⭐⭐⭐ AND THE PLANT FILTER IS THE SAME PROBLEM A THIRD TIME, WEARING THE
+   HARDEST DISGUISE OF ALL. The maintainer: *"in the activity tab, the filter to
+   select the plant is not doing anything."* It was not: this file never called
+   `usePlantFilter`, so `AdminPage`'s one plant control sat above a list of the
+   whole company with a header chip naming one plant. It does now — and the
+   whole difficulty is that **`audit_log` has no place column**. See
+   `src/lib/api/audit.ts` for the measured shape of every snapshot; the two
+   facts that decide this screen are:
+
+     · a `products` row carries NO place at all (0034 moved a product's plants
+       into `product_sites`, and a deleted product's links are gone too), and
+     · **64 of the 201 attributable rows in the live database name a node that
+       no longer exists** — a rebuilt seed, a deleted line. An audit row
+       outliving its place is the audit log working, not failing.
+
+   ⭐⭐⭐ SO THE RULE IS A COMPLEMENT AND IT IS DELIBERATE: a change is hidden
+   only when every place it names is a place the company still has and none of
+   them is in the chosen plant. A change that names no place, and a change whose
+   place has been removed, are shown under EVERY plant — and are MARKED on the
+   row, so nobody reads one as a Plant A change. Over-showing a log is a
+   nuisance; hiding is deleting evidence, and 95 rows quietly leaving every
+   plant's view under a footer saying "the whole log has been searched" is the
+   worst version of this screen's one failure mode.
+
+   ⚠️⚠️ AND IT IS IN THE QUERY, LIKE THE OTHER THREE. A plant filter applied to
+   rows already fetched would put back exactly the lie the paragraphs above
+   describe: `hasMore` would mean "the log has more rows" and say nothing about
+   whether any of them could be Plant A's. `fetchAuditPage` sends the clause, so
+   a page is still fifty MATCHES and `searchComplete === !lastPage.hasMore` is
+   still the whole proof, unchanged.
+
+   ⚠️ THE ONE PLACE IT GIVES UP, AND IT SAYS SO ON SCREEN. The clause repeats
+   the id list once per snapshot column and Kong caps a request line at 8 KB —
+   measured with a whole real page request beside it, not assumed: a clause of
+   7328 characters is served and one of 7624 comes back 414. That works out at
+   about 44 places outside the chosen plant; each of the live database's four
+   plants leaves 36, so it is comfortable today and not by a wide margin. Past
+   the ceiling the panel does NOT quietly send an unnarrowed read: it says the
+   filter could not be applied and that every plant is therefore on screen. The
+   durable fix is a place column on `audit_log` written by `write_audit_log`,
+   which is a migration and so the maintainer's call.
+
    ⚠️ `AUDIT_PANEL_READY` LIVES HERE, not in `AdminPage.tsx`, exactly as every
    other panel's flag does: a section cannot be switched on without a panel
    behind it.
@@ -135,7 +177,10 @@ import {
   fetchAuditPage,
   fetchHierarchyTree,
   fetchOperatorsAdmin,
+  entryPlaceIds,
+  placeFilterFits,
   type AuditAction,
+  type AuditEntry,
   type AuditFilter,
   type AuditPage,
   type SchedulerError,
@@ -145,6 +190,9 @@ import fieldStyles from "@/components/Field.module.css";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { useDateFormat } from "../hooks/useOrgSettings";
+import { usePlantFilter } from "../hooks/usePlantFilter";
+import { nodesInPlant } from "../lib/plantFilter";
+import { type ScopeNode } from "../lib/scope";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import { operatorKeys } from "../hooks/useOperators";
 import { productKeys } from "../hooks/useProducts";
@@ -168,6 +216,15 @@ const NO_ACTORS: ReadonlyMap<string, string> = new Map();
 /** The same, for the kinds the screen has seen — the effect that fills it
  *  compares against this, so a first render cannot loop. */
 const NO_KINDS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * ⚠️⚠️ ONE ARRAY, NOT `?? []` AT THE CALL SITE, AND IT IS NOT TIDYING.
+ * `usePlantFilter` memoises on the array it is handed, and the plant choice
+ * ends up inside this screen's QUERY KEY. A fresh `[]` every render would
+ * therefore mint a new key every render and the log would refetch forever.
+ * `OperatorsPanel` keeps the same rule and says the same thing.
+ */
+const NO_NODES: readonly ScopeNode[] = [];
 
 /*
  * ⚠️ `AUDIT_AUTO_SCAN_PAGES` USED TO SIT HERE AND IS GONE. It bounded a
@@ -340,6 +397,54 @@ function ChangeLine({ change }: { change: AuditFieldChange }) {
   );
 }
 
+/**
+ * ⭐⭐ THE TWO WAYS A RECORDED CHANGE CANNOT BE PUT IN A PLANT, said in words on
+ * the row rather than left to the reader to infer.
+ *
+ * The maintainer's steer, and the whole reason this screen over-shows: *in a
+ * log, over-showing is a nuisance and hiding is deleting evidence.* But a row
+ * listed under Plant A that has nothing to do with Plant A is only honest if the
+ * row SAYS SO — otherwise the screen has swapped an under-count for a wrong one.
+ *
+ * ⚠️ TWO REASONS, NOT ONE, BECAUSE THEY ARE DIFFERENT FACTS. "No place
+ * recorded" is a permanent property of the kind of thing (every `products` row,
+ * forever). "Place since removed" is a property of this one row's history and
+ * would go away if the place came back. Collapsing them into "unknown plant"
+ * would tell a reader troubleshooting a deleted line nothing at all.
+ */
+const UNPLACED = {
+  none: {
+    label: "no place recorded",
+    why:
+      "This change records no place at all — a product belongs to its plants through a separate " +
+      "list, which the record of the change does not carry — so it cannot be narrowed to one " +
+      "plant. It is listed under every plant.",
+  },
+  gone: {
+    label: "place since removed",
+    why:
+      "This change was recorded against a place that no longer exists, so it can no longer be " +
+      "put in a plant. It is listed under every plant rather than dropped from all of them.",
+  },
+} as const;
+
+/**
+ * Why this entry could not be placed, or `null` when it could be.
+ *
+ * ⚠️ THE SAME TEST THE SERVER RAN, ON THIS SIDE. `buildPlaceClause` shows a row
+ * whose places are all unresolvable; this decides whether to mark it. They read
+ * the same two keys, through the same `entryPlaceIds`, so the mark cannot end up
+ * on a different set of rows than the query let through.
+ */
+function unplacedReason(
+  entry: AuditEntry,
+  known: ReadonlySet<string>,
+): (typeof UNPLACED)[keyof typeof UNPLACED] | null {
+  const places = entryPlaceIds(entry);
+  if (places.length === 0) return UNPLACED.none;
+  return places.some((id) => known.has(id)) ? null : UNPLACED.gone;
+}
+
 export function AuditPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
@@ -376,14 +481,62 @@ export function AuditPanel() {
      heard of. Same shape as `period` above. */
   const action = ACTION_FILTERS.find((a) => a.id === actionId)?.id ?? "all";
 
+  /* ---------------------------------------------------------------------
+     ⭐⭐ WHICH PLANT THIS SCREEN IS SHOWING.
+
+     The tree is read here rather than passed, exactly as `ProductsPanel`,
+     `ShiftsPanel` and the rest read it: the choice lives ONCE on `AdminPage`
+     and every section asks `usePlantFilter` for it, so this panel keeps the
+     "takes no props" shape every other one keeps.
+
+     ⚠️ THE READ SITS ABOVE THE FILTER BECAUSE THE FILTER DEPENDS ON IT. It is
+     the same `["hierarchy","tree"]` query the Change column's name lookup
+     already used — moved, not added, so this costs no extra round trip. It is
+     ALSO still allowed to fail: while it is loading or broken there are no
+     roots, `usePlantFilter` answers "All plants" (its header says why that is
+     safe), and the log reads unnarrowed rather than empty.
+     ------------------------------------------------------------------ */
+  const nodesQuery = useQuery({
+    queryKey: [...hierarchyKeys.all, "tree"],
+    queryFn: fetchHierarchyTree,
+    enabled,
+  });
+  const allNodes: readonly ScopeNode[] = nodesQuery.data?.nodes ?? NO_NODES;
+  const plant = usePlantFilter(allNodes);
+
+  /** Every place the reader can name. What separates "this change happened
+   *  somewhere else" from "nobody can say where this change happened". */
+  const knownPlaceIds = useMemo(() => new Set(allNodes.map((n) => n.id)), [allNodes]);
+
+  /**
+   * ⭐⭐ THE COMPLEMENT: every readable place that is NOT in the chosen plant.
+   *
+   * This is what goes to the server, and sending the complement rather than the
+   * plant's own ids is the single decision that keeps this screen honest — see
+   * the file header and `buildPlaceClause`. `null` is "All plants", which
+   * narrows nothing.
+   */
+  const elsewhere = useMemo(() => {
+    if (plant.choice === null) return null;
+    const inPlant = new Set(nodesInPlant(allNodes, plant.choice, plant.plants).map((n) => n.id));
+    return allNodes.filter((n) => !inPlant.has(n.id)).map((n) => n.id);
+  }, [allNodes, plant.choice, plant.plants]);
+
+  /* ⚠️ ASKED BEFORE THE SERVER IS ASKED. Past the measured request-size ceiling
+     the alternative to saying so is a 414 rendered as "couldn't load the
+     activity log", which blames the read for a limit this screen can see. */
+  const placeFilterTooWide = elsewhere !== null && !placeFilterFits(elsewhere);
+  const plantApplied = elsewhere !== null && !placeFilterTooWide;
+
   const filter: AuditFilter = useMemo(
     () => ({
       since: period.fromMs === null ? null : new Date(period.fromMs).toISOString(),
       until: period.toMs === null ? null : new Date(period.toMs).toISOString(),
       actions: action === "all" ? null : [action],
       tables: kindId === "all" ? null : [kindId],
+      elsewhere: plantApplied ? elsewhere : null,
     }),
-    [period, action, kindId],
+    [period, action, kindId, plantApplied, elsewhere],
   );
 
   /* ⚠️ THE ERROR TYPE IS SPELLED OUT, and it is not decoration. `fetchAuditPage`
@@ -428,11 +581,6 @@ export function AuditPanel() {
   const actors = useQuery({
     queryKey: auditKeys.actors,
     queryFn: fetchActorIdentities,
-    enabled,
-  });
-  const nodesQuery = useQuery({
-    queryKey: [...hierarchyKeys.all, "tree"],
-    queryFn: fetchHierarchyTree,
     enabled,
   });
   const operatorsQuery = useQuery({
@@ -554,8 +702,17 @@ export function AuditPanel() {
   const hasEverListed = kindsSeen.size > 0;
 
   /* ⚠️ READ OFF THE RESOLVED VALUES, so "is anything narrowed?" and "what was
-     sent to the server" can never disagree. */
-  const filtering = period.id !== "all" || action !== "all" || kindId !== "all";
+     sent to the server" can never disagree.
+
+     ⚠️⚠️ `plantApplied`, NOT `plant.choice !== null`. A plant that was CHOSEN
+     but could not be sent (past the request-size ceiling) narrows nothing, and
+     counting it here would put the plant's name into a footer describing a list
+     of the whole company — which is the report this work started from, only
+     now in the sentence instead of the table. */
+  const filtering = period.id !== "all" || action !== "all" || kindId !== "all" || plantApplied;
+
+  /** What the footer calls the narrowing, when a plant is part of it. */
+  const scope = plantApplied ? ` in ${plant.label}` : "";
   const hasNextPage = log.hasNextPage;
 
   /**
@@ -629,10 +786,14 @@ export function AuditPanel() {
           `No changes could be read from this page of the log. There are older ones.`
         : `Showing the most recent ${matched} change${plural(matched)}. There are older ones.`;
   } else if (searchComplete) {
+    /* ⚠️ "THE WHOLE OF THE LOG HAS BEEN SEARCHED" IS STILL TRUE WITH A PLANT
+       CHOSEN, and that is the point of putting the plant in the query: the
+       server read past every row, applying this predicate, and found no other
+       match. The plant qualifies WHAT MATCHED, never how far the search got. */
     footerText =
       matched === 0
-        ? `No changes match this filter — the whole of ${period.phrase} has been searched.`
-        : `Showing all ${matched} matching change${plural(matched)} — the whole of ${period.phrase} has been searched.`;
+        ? `No changes match this filter${scope} — the whole of ${period.phrase} has been searched.`
+        : `Showing all ${matched} matching change${plural(matched)}${scope} — the whole of ${period.phrase} has been searched.`;
   } else {
     /* ⚠️⚠️ NOT AN ANSWER, AND IT MUST NOT READ AS ONE. The server found MORE
        matches than one page holds, so the count on screen is a page of the
@@ -642,8 +803,8 @@ export function AuditPanel() {
        matches rather than about how far it looked. */
     footerText =
       matched === 0
-        ? `No matching changes on this page of ${period.phrase}. There are older ones still to read.`
-        : `Showing the ${matched} most recent matching change${plural(matched)} in ${period.phrase}. There are older ones.`;
+        ? `No matching changes${scope} on this page of ${period.phrase}. There are older ones still to read.`
+        : `Showing the ${matched} most recent matching change${plural(matched)}${scope} in ${period.phrase}. There are older ones.`;
   }
 
   // ⚠️ NO BUTTON ONCE THE SEARCH IS FINISHED: there may well be older changes
@@ -663,6 +824,31 @@ export function AuditPanel() {
         Four bookkeeping columns are never listed: {OMITTED_FIELDS.join(", ")}. Everything else the
         row carried is shown.
       </p>
+
+      {/* ⭐⭐ THE SCREEN SAYS WHAT ITS OWN PLANT FILTER MEANS. Without this
+          paragraph a reader would meet a product's change under "Plant A" and
+          reasonably conclude the product belongs to Plant A. The mark on the
+          row is the per-row half; this is the rule. */}
+      {plantApplied && (
+        <p className={styles.note}>
+          Showing {plant.label}. A change that records no place, and a change recorded against a
+          place that has since been removed, are listed under every plant and marked below — nobody
+          can say which plant they belong to, and a log that hid what it could not place would be
+          under-reporting history rather than filtering it.
+        </p>
+      )}
+
+      {/* ⚠️⚠️ THE CEILING, SAID OUT LOUD RATHER THAN SILENTLY IGNORED. The
+          header chip still reads the chosen plant, so a screen that quietly
+          showed every plant here would be the bug this filter was built to
+          fix. It over-shows, and it says that is what it is doing. */}
+      {placeFilterTooWide && (
+        <p className={styles.note} role="status">
+          {plant.label} is selected, but this company has {elsewhere?.length ?? 0} places outside it
+          — more than one request to the server can carry. The activity log below is showing every
+          plant, not just {plant.label}. Nothing is hidden.
+        </p>
+      )}
 
       {log.isError && (
         <p className={styles.error} role="alert">
@@ -771,6 +957,11 @@ export function AuditPanel() {
                 <tbody>
                   {entries.map((e) => {
                     const line = describeEntry(e, fmt, names);
+                    /* ⚠️ ONLY WHILE A PLANT IS APPLIED. On "All plants" every
+                       row is in scope and the mark would answer a question
+                       nobody asked; it is meaningful exactly when the reader
+                       has narrowed and needs to know why this row survived. */
+                    const unplaced = plantApplied ? unplacedReason(e, knownPlaceIds) : null;
                     return (
                       /* ⚠️ `data-action` IS THE HOOK FOR THE ACCENT, and the
                          accent is an ADDITION to `line.headline` ("Run deleted"),
@@ -783,6 +974,14 @@ export function AuditPanel() {
                         <td className={styles.what}>
                           <span className={styles.headline}>{line.headline}</span>
                           <span className={styles.subject}>{line.subject}</span>
+                          {unplaced !== null && (
+                            /* ⚠️ THE REASON IS IN THE TEXT AND ALSO IN `title`,
+                               never in colour alone — the same rule the action
+                               accent keeps three paragraphs up in the header. */
+                            <span className={styles.unplaced} title={unplaced.why}>
+                              {unplaced.label}
+                            </span>
+                          )}
                         </td>
                         <td className={styles.changes}>
                           {line.changes.length === 0 ? (

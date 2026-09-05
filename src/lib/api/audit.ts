@@ -129,7 +129,184 @@ export interface AuditFilter {
   actions?: readonly AuditAction[] | null;
   /** Restrict to these `table_name`s. Absent or EMPTY restricts nothing. */
   tables?: readonly string[] | null;
+  /**
+   * ⭐⭐ THE PLACES THAT ARE **NOT** THE PLANT BEING SHOWN — every readable node
+   * id outside the chosen plant's subtree. Absent or EMPTY restricts nothing,
+   * which is exactly "All plants".
+   *
+   * ⚠️⚠️ IT IS THE COMPLEMENT, AND THAT IS THE WHOLE DESIGN. See
+   * `buildPlaceClause` for why sending the plant's OWN ids would quietly delete
+   * a third of this database's history.
+   */
+  elsewhere?: readonly string[] | null;
 }
+
+/* ===========================================================================
+ * WHICH PLANT A RECORDED CHANGE HAPPENED IN.
+ *
+ * ⭐⭐ `audit_log` HAS NO PLACE COLUMN. Its nine columns are `id, org_id,
+ * actor_id, table_name, row_id, action, before, after, at` — the place, when
+ * there is one at all, is a key INSIDE the jsonb snapshot, and which key it is
+ * depends on the table:
+ *
+ *     assignments (73)      node_id           in the snapshot
+ *     runs        (55)      node_id
+ *     operators   (46)      site_node_id
+ *     skills      (19)      site_node_id
+ *     shift_templates (8)   site_node_id
+ *     products    (31)      ⛔ NOTHING AT ALL
+ *
+ * ⭐⭐ AND `products` CANNOT BE ATTRIBUTED, EVER. Migration 0034 deliberately
+ * removed `products.site_node_id`; a product belongs to its plants through the
+ * separate `product_sites` table, which the snapshot does not carry — and for a
+ * DELETED product the links are gone as well. There is no query, however
+ * clever, that places a product's audit row in a plant.
+ *
+ * ⭐⭐⭐ WORSE, AND MEASURED RATHER THAN IMAGINED: **64 of the 201 attributable
+ * rows in the live database name a node that no longer exists.** A seed rebuild
+ * or a deleted line leaves the audit row behind — that is the point of an audit
+ * log — pointing at an id `nodes` can no longer resolve. Nobody can say which
+ * plant those changes happened in either.
+ *
+ * ⭐⭐⭐ SO THE CLAUSE IS WRITTEN AS A COMPLEMENT: **hide a change only when
+ * every place it names is a place this company still has, and none of them is
+ * in the chosen plant.** Everything else is shown — changes in the plant,
+ * changes that name no place at all, and changes naming a place that has since
+ * been removed. The maintainer's rule for a log, and the rule `scope.ts` and
+ * `rowsInPlant` already keep everywhere else: *"I cannot tell" must never
+ * become "hidden"*, because over-showing is a nuisance and hiding is deleting
+ * evidence.
+ *
+ * ⚠️ THE OBVIOUS VERSION IS THE WRONG ONE. Sending the plant's OWN node ids —
+ * `after->>node_id.in.(…the plant…)` plus "carries no place at all" — reads
+ * better and is a lie: every one of those 64 rows falls out of every plant's
+ * view at once, silently, under a footer claiming the whole log had been
+ * searched.
+ * ======================================================================== */
+
+/**
+ * The keys a snapshot can carry a place in.
+ *
+ * ⚠️ IN ONE PLACE BECAUSE IT APPEARS FOUR TIMES IN THE QUERY (CLAUDE.md §4: a
+ * column list that appears twice is a bug with a delay on it). A seventh
+ * audited table arriving with a third key name is one edit here and the clause,
+ * the guard and `entryPlaceIds` all move together.
+ */
+export const PLACE_KEYS: readonly string[] = ["node_id", "site_node_id"];
+
+/** The two jsonb columns a snapshot lives in. An insert has only `after`, a
+ *  delete only `before`, an update both — so both are always tested. */
+export const SNAPSHOT_COLUMNS: readonly string[] = ["after", "before"];
+
+/**
+ * Every `<snapshot>->><key>` path the clause tests, built from the two lists
+ * above so a third key or a third snapshot column cannot be added to one and
+ * forgotten in the other.
+ */
+export const PLACE_PATHS: readonly string[] = SNAPSHOT_COLUMNS.flatMap((col) =>
+  PLACE_KEYS.map((key) => `${col}->>${key}`),
+);
+
+/**
+ * Every place id this entry names, from either snapshot.
+ *
+ * The SCREEN's half of the same question the clause asks the server: a row for
+ * which this returns nothing that the reader can resolve is a row that cannot
+ * be placed, and the panel marks it as such. Lives here rather than in
+ * `auditView` because `src/lib/api/` is the only place allowed to know that
+ * `site_node_id` is spelled that way (docs/conventions.md).
+ */
+export function entryPlaceIds(entry: AuditEntry): string[] {
+  const out: string[] = [];
+  for (const snap of [entry.after, entry.before]) {
+    if (snap === null) continue;
+    for (const key of PLACE_KEYS) {
+      const v = snap[key];
+      if (typeof v === "string" && v !== "" && !out.includes(v)) out.push(v);
+    }
+  }
+  return out;
+}
+
+/**
+ * How long the place clause is allowed to get.
+ *
+ * ⛔⛔ THIS IS A MEASURED CEILING, NOT A ROUND NUMBER. Supabase serves
+ * PostgREST behind Kong, whose request line caps at 8 KB, and this clause
+ * repeats the id list once per path in `PLACE_PATHS`. Measured against the
+ * running stack, with the WHOLE of a real page request beside it — the eight
+ * columns, the order, the limit, both period bounds, the action list and the
+ * table list — a clause of 7328 characters is served and one of 7624 comes back
+ * **414 URI Too Long**. A 414 is a failed read, which this screen already
+ * renders honestly; but it is a failure a size check can see coming, and a
+ * reader is better told the filter could not be applied than shown a read
+ * error under a header still naming one plant.
+ *
+ * ⚠️ THE BUDGET IS ON THE CLAUSE, NOT ON A NUMBER OF NODES, because what the
+ * server rejects is a length. 6800 sits 528 characters below the largest
+ * request measured to work.
+ *
+ * ⚠️⚠️ AND IT IS A REAL LIMIT ON THIS FEATURE, WORTH SAYING OUT LOUD. It works
+ * out at roughly 44 places OUTSIDE the chosen plant; the live database's four
+ * plants each leave 36, so this is comfortable today and not by a wide margin.
+ * The durable fix is a place column on `audit_log`, written by
+ * `write_audit_log` — one indexed `in` on one column instead of four id lists —
+ * which is a migration and therefore a decision for the maintainer rather than
+ * one to take here.
+ */
+export const PLACE_CLAUSE_BUDGET = 6800;
+
+/**
+ * The PostgREST `or=` logic tree that narrows the log to one plant.
+ *
+ * `elsewhere` is every readable node id **outside** the chosen plant. Returns
+ * `null` when there is nothing to narrow.
+ *
+ * The shape, for `PLACE_PATHS` = `[a, b, c, d]`:
+ *
+ *     or( a.not.in.(…), b.not.in.(…), c.not.in.(…), d.not.in.(…),
+ *         and( a.is.null, b.is.null, c.is.null, d.is.null ) )
+ *
+ * ⭐ READ IT AS: *shown if any place it names is not somewhere else, or if it
+ * names no place at all.*
+ *
+ * ⚠️⚠️ THE `is.null` BRANCH IS NOT BELT-AND-BRACES AND SQL IS THE REASON.
+ * `NULL NOT IN (…)` is NULL, not TRUE, so an absent key contributes **false**
+ * to the four `not.in` tests — which is exactly right for a row that names a
+ * place in one column and nothing in the other three, and exactly wrong for a
+ * products row, which names nothing anywhere and would otherwise vanish from
+ * every plant. The `and(…is.null)` branch is the whole of what keeps those 31
+ * rows on screen.
+ *
+ * ⚠️ A CHANGE THAT MOVED SOMETHING BETWEEN PLANTS APPEARS UNDER BOTH. `before`
+ * places it where it was and `after` where it went, and either one being "not
+ * elsewhere" is enough. That is deliberate: "this person left Plant B" is a
+ * Plant B change and "this person arrived in Plant A" is a Plant A change, and
+ * they are the same row.
+ *
+ * ⚠️ IDS ARE SENT UNQUOTED. A uuid holds only hex and hyphens — none of
+ * PostgREST's reserved characters — so quoting would cost four encoded bytes
+ * per id against a ceiling this clause is already pressing on. `assertUuids`
+ * is what makes that safe rather than merely true today.
+ */
+export function buildPlaceClause(elsewhere: readonly string[] | null | undefined): string | null {
+  const ids = restriction(elsewhere);
+  if (ids === null) return null;
+  const list = [...ids].join(",");
+  const outside = PLACE_PATHS.map((p) => `${p}.not.in.(${list})`);
+  const nowhere = `and(${PLACE_PATHS.map((p) => `${p}.is.null`).join(",")})`;
+  return `${outside.join(",")},${nowhere}`;
+}
+
+/** Whether the clause for this list fits under the measured ceiling. The panel
+ *  asks BEFORE it asks the server, so it can say what it could not do. */
+export function placeFilterFits(elsewhere: readonly string[] | null | undefined): boolean {
+  const clause = buildPlaceClause(elsewhere);
+  return clause === null || clause.length <= PLACE_CLAUSE_BUDGET;
+}
+
+/** A uuid, and nothing that could carry a comma or a paren into the clause. */
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
  * The columns every read below selects, in one place so they cannot drift.
@@ -279,6 +456,41 @@ export async function fetchAuditPage(
   if (actions !== null) query = query.in("action", [...actions]);
   const tables = restriction(filter.tables);
   if (tables !== null) query = query.in("table_name", [...tables]);
+
+  /* ⭐⭐ THE PLANT, IN THE QUERY LIKE EVERYTHING ELSE. A plant filter applied to
+     rows already fetched would put back precisely the lie R-330 removed: a page
+     is fifty MATCHES, so `hasMore` means "older MATCHES exist" and the footer's
+     "all" stays a fact about the filtered set rather than an argument about
+     ordering. Narrowing here changes nothing about that proof — it is one more
+     predicate on rows, and the cursor is still a boundary on `id`. */
+  const elsewhere = restriction(filter.elsewhere);
+  if (elsewhere !== null) {
+    /* ⛔ EVERY ID IS CHECKED BEFORE IT IS INTERPOLATED. Unlike `.in()`, which
+       postgrest-js escapes for us, this clause is a STRING we build; a value
+       carrying a comma or a paren would not inject a row into anyone's result
+       (RLS decided that long before this predicate is read) but it would
+       silently rewrite the logic tree into a different question. Refusing is
+       loud; a quietly different filter is not. */
+    for (const id of elsewhere) {
+      if (!UUID.test(id)) {
+        throw toSchedulerError(new Error(`audit place filter: ${id} is not a node id`));
+      }
+    }
+    /* ⛔ AND AN OVER-LONG LIST IS REFUSED RATHER THAN DROPPED. Silently sending
+       an unnarrowed read would hand the screen a page of the whole company
+       under a header naming one plant — the exact failure this filter exists to
+       fix. `placeFilterFits` is exported so the caller can ask first and say
+       what it could not do; reaching this line is a bug, and it is loud. */
+    if (!placeFilterFits(elsewhere)) {
+      throw toSchedulerError(
+        new Error(
+          `audit place filter: ${elsewhere.length} places is past the request-size ceiling`,
+        ),
+      );
+    }
+    const clause = buildPlaceClause(elsewhere);
+    if (clause !== null) query = query.or(clause);
+  }
 
   const { data, error } = await query;
   if (error) throw toSchedulerError(error);

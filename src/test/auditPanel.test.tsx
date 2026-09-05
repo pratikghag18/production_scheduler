@@ -32,9 +32,15 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import type { ReactNode } from "react";
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuditPanel } from "@/features/admin/components/AuditPanel";
+import { useAdminViewStore } from "@/features/admin/store/adminView";
+/* ⚠️ THE REAL ONE, NOT A COPY. `entryPlaceIds` is how the panel decides which
+   rows to MARK and how the server double below decides which rows to SERVE; a
+   second implementation here could agree with neither. `@/lib/api` is mocked
+   below, `@/lib/api/audit` is not. */
+import { entryPlaceIds } from "@/lib/api/audit";
 
 /** The stylesheet two of the cases below read as text — jsdom applies no CSS. */
 const PANEL_CSS = "src/features/admin/components/AuditPanel.module.css";
@@ -42,9 +48,23 @@ const PANEL_CSS = "src/features/admin/components/AuditPanel.module.css";
 const ADMIN_USER = "00000000-0000-0000-0000-0000000000a1";
 const OTHER_USER = "00000000-0000-0000-0000-0000000000b2";
 
+/* The two plants the filter cases work in, and one line inside each. Real uuid
+   shapes: `fetchAuditPage` refuses anything else, and a fixture that could not
+   be sent to the server is not a fixture. */
+const PLANT_A = "aaaaaaaa-0000-0000-0000-00000000000a";
+const LINE_A = "aaaaaaaa-0000-0000-0000-00000000001a";
+const PLANT_B = "bbbbbbbb-0000-0000-0000-00000000000b";
+const LINE_B = "bbbbbbbb-0000-0000-0000-00000000001b";
+/** A place that is not in the tree — a deleted line, which 64 of the live
+ *  database's 201 attributable rows actually name. */
+const GHOST = "cccccccc-0000-0000-0000-00000000000c";
+
 const h = vi.hoisted(() => ({
   fetchPage: vi.fn(),
   fetchActors: vi.fn(),
+  /** The hierarchy read the plant filter is resolved against. Empty is the
+   *  default, which is the "no roots -> All plants" state most cases want. */
+  tree: { nodes: [] as Array<Record<string, unknown>> },
   state: {
     profile: {
       id: "p1",
@@ -73,14 +93,32 @@ vi.mock("@/features/auth/useSession", () => ({
 // them here would hide that path from every case in this file; the cases that
 // care about names supply their own map. What must NOT be empty is the actor
 // read, because the Who column is what these cases are largely about.
-vi.mock("@/lib/api", () => ({
-  fetchAuditPage: (...args: unknown[]) => h.fetchPage(...args),
-  fetchActorIdentities: (...args: unknown[]) => h.fetchActors(...args),
-  fetchHierarchyTree: () => Promise.resolve({ nodes: [], levels: [], templates: [] }),
-  fetchOperatorsAdmin: () => Promise.resolve({ operators: [], skills: [] }),
-  fetchAdminProducts: () => Promise.resolve([]),
-  describeSchedulerError: (e: unknown) => String(e),
-}));
+//
+// ⚠️ THE HIERARCHY READ IS NO LONGER ONE OF THE DECORATIONS. It is still the
+// Change column's place lookup, and it is now also what the PLANT FILTER is
+// resolved against — so it is served from `h.tree` rather than hard-coded
+// empty, and the plant cases at the bottom of this file set it.
+
+// ⚠️ THE SUPABASE CLIENT IS STUBBED ONLY SO THE REAL `audit.ts` CAN BE
+// IMPORTED. Nothing here touches it: `fetchAuditPage` is the double above.
+vi.mock("@/lib/supabase", () => ({ supabase: {} }));
+vi.mock("@/lib/api", async () => {
+  // ⭐ THE TWO PURE HELPERS COME FROM THE REAL MODULE. `entryPlaceIds` decides
+  // which rows are marked "no place recorded" and `placeFilterFits` decides
+  // when the panel gives up on the ceiling; stubbing either would test this
+  // file's opinion of them rather than theirs.
+  const audit = await vi.importActual<typeof import("@/lib/api/audit")>("@/lib/api/audit");
+  return {
+    entryPlaceIds: audit.entryPlaceIds,
+    placeFilterFits: audit.placeFilterFits,
+    fetchAuditPage: (...args: unknown[]) => h.fetchPage(...args),
+    fetchActorIdentities: (...args: unknown[]) => h.fetchActors(...args),
+    fetchHierarchyTree: () => Promise.resolve({ ...h.tree, levels: [], templates: [] }),
+    fetchOperatorsAdmin: () => Promise.resolve({ operators: [], skills: [] }),
+    fetchAdminProducts: () => Promise.resolve([]),
+    describeSchedulerError: (e: unknown) => String(e),
+  };
+});
 
 // The org's date-format token. Not mocked away to a literal: the seam is what
 // decides how the "when" column reads, and standing in for it would pin that
@@ -108,7 +146,7 @@ function entry(over: Record<string, unknown> = {}) {
  * `null` for "do not narrow on this", so a call can be asserted whole rather
  * than by picking at the keys somebody remembered to look at.
  */
-const NO_FILTER = { since: null, until: null, actions: null, tables: null };
+const NO_FILTER = { since: null, until: null, actions: null, tables: null, elsewhere: null };
 
 /**
  * ⭐⭐ THE SERVER HALF, FAITHFULLY. `fetchAuditPage` now puts the period, the
@@ -125,6 +163,21 @@ interface ServedFilter {
   until?: string | null;
   actions?: readonly string[] | null;
   tables?: readonly string[] | null;
+  elsewhere?: readonly string[] | null;
+}
+
+/**
+ * ⭐⭐ THE PLANT PREDICATE, EXACTLY AS `buildPlaceClause` PUTS IT TO POSTGRES:
+ * a row is hidden only when every place it names is in the ELSEWHERE list. A
+ * row naming no place, or naming a place the company no longer has, survives —
+ * which is the whole design, so a double that quietly dropped either would let
+ * a panel that had lost that property pass every case below.
+ */
+function inPlant(row: ReturnType<typeof entry>, elsewhere: readonly string[] | null | undefined) {
+  if (elsewhere == null || elsewhere.length === 0) return true;
+  const places = entryPlaceIds(row as never);
+  if (places.length === 0) return true;
+  return places.some((p) => !elsewhere.includes(p));
 }
 
 function serve(rows: ReturnType<typeof entry>[], pageSize = 50): void {
@@ -135,6 +188,7 @@ function serve(rows: ReturnType<typeof entry>[], pageSize = 50): void {
       .filter((r) => filter.until == null || Date.parse(r.at) < Date.parse(filter.until))
       .filter((r) => filter.actions == null || filter.actions.includes(r.action))
       .filter((r) => filter.tables == null || filter.tables.includes(r.tableName))
+      .filter((r) => inPlant(r, filter.elsewhere))
       .sort((a, b) => b.id - a.id);
     return Promise.resolve({
       entries: matches.slice(0, pageSize),
@@ -160,10 +214,33 @@ function show(): void {
   );
 }
 
+/** A node as `fetchHierarchyTree` returns one — id, name, parent, ltree path. */
+function node(id: string, name: string, parentId: string | null, path: string) {
+  return { id, name, parentId, path };
+}
+
+/** Two plants, one line each. `plantControlVisible` needs two roots before the
+ *  control exists at all, so a one-plant fixture cannot test a filter. */
+function withTwoPlants(): void {
+  h.tree.nodes = [
+    node(PLANT_A, "Plant A", null, "plant_a"),
+    node(LINE_A, "Line 1", PLANT_A, "plant_a.line_1"),
+    node(PLANT_B, "Plant B", null, "plant_b"),
+    node(LINE_B, "Line 9", PLANT_B, "plant_b.line_9"),
+  ];
+}
+
+/** Choose a plant the way `AdminPage`'s one header control does. */
+function showPlant(choice: string | null): void {
+  act(() => useAdminViewStore.setState({ plantChoice: choice }));
+}
+
 beforeEach(() => {
   h.state.profile.role = "admin";
   h.state.profile.userId = ADMIN_USER;
   h.state.sessionLoading = false;
+  h.tree.nodes = [];
+  useAdminViewStore.setState({ plantChoice: null });
   h.fetchPage.mockReset();
   h.fetchActors.mockReset();
   h.fetchPage.mockResolvedValue({ entries: [entry()], hasMore: false });
@@ -841,5 +918,231 @@ describe("a deletion is visible at a glance", () => {
     const off = /\.row\[data-action="delete"\]\s+\.from\s*\{([^}]*)\}/.exec(clean);
     expect(off, "a delete row must switch the strikethrough off").toBeTruthy();
     expect(/text-decoration:\s*none/.test(off?.[1] ?? "")).toBe(true);
+  });
+});
+
+/* ===========================================================================
+ * WHICH PLANT — the maintainer's report, and the hardest of the four filters.
+ *
+ * *"In the activity tab, the filter to select the plant is not doing anything."*
+ * It was not: this panel never called `usePlantFilter`, so `AdminPage`'s one
+ * header control sat above a list of the whole company with a chip naming one
+ * plant.
+ *
+ * ⭐⭐ AND `audit_log` HAS NO PLACE COLUMN. The place is a key inside the jsonb
+ * snapshot, and two measurements on the live database decide everything:
+ *
+ *   · a `products` row carries NO place key at all (0034 moved a product's
+ *     plants into `product_sites`);
+ *   · **64 of the 201 rows that DO carry one name a node that no longer
+ *     exists** — a rebuilt seed, a deleted line.
+ *
+ * ⭐⭐⭐ SO THE SCREEN OVER-SHOWS AND SAYS SO. A change nobody can place is
+ * listed under every plant and MARKED, rather than dropped from all of them:
+ * over-showing a log is a nuisance, hiding is deleting evidence, and 95 rows
+ * vanishing under a footer reading "the whole log has been searched" is this
+ * screen's one failure mode wearing a new costume.
+ *
+ * ⚠️⚠️ EVERY CASE BELOW DRIVES THE REAL `usePlantFilter` / `plantFilter.ts` /
+ * `adminView.ts`, and the server double applies the same predicate the query
+ * does. Mocking the hook would pin that the panel calls something.
+ * ======================================================================== */
+
+/** Wait for a subject to be listed.
+ *
+ * ⚠️ `getAllByText`, NOT `getByText`: a name shows up twice on a row — once as
+ * the subject and once as the value of the field that changed — so the singular
+ * query is ambiguous on every insert. */
+async function onScreen(text: string): Promise<void> {
+  await waitFor(() => expect(screen.getAllByText(text).length).toBeGreaterThan(0));
+}
+
+/** A change recorded against a place. */
+function at(place: string, over: Record<string, unknown> = {}) {
+  return entry({ tableName: "runs", after: { name: "Run", node_id: place }, ...over });
+}
+
+describe("the plant filter narrows the log, and the server does the narrowing", () => {
+  it("⭐⭐ asks the SERVER which plant, and asks it with the OTHER plants", async () => {
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([at(LINE_A, { id: 9 })]);
+    show();
+    // The complement, not the plant's own ids — see `buildPlaceClause`. This is
+    // the assertion that fails if somebody "simplifies" it back to the obvious
+    // version that deletes 95 rows of history.
+    await waitFor(() => {
+      expect([...(lastFilter().elsewhere ?? [])].sort()).toEqual([PLANT_B, LINE_B].sort());
+    });
+  });
+
+  it("sends no plant narrowing at all on All plants", async () => {
+    withTwoPlants();
+    serve([at(LINE_A, { id: 9 })]);
+    show();
+    await screen.findByText(/whole log|older ones/);
+    expect(lastFilter().elsewhere ?? null).toBeNull();
+  });
+
+  it("⭐ a change in another plant is not listed", async () => {
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([
+      at(LINE_A, { id: 9, after: { name: "Made here", node_id: LINE_A } }),
+      at(LINE_B, { id: 8, after: { name: "Made there", node_id: LINE_B } }),
+    ]);
+    show();
+    await onScreen("Made here");
+    expect(screen.queryAllByText("Made there")).toHaveLength(0);
+  });
+
+  it("⭐⭐ a change that records no place is listed under the plant, and says why", async () => {
+    // A products row. There is no query that can place it, so hiding it would
+    // be under-reporting rather than filtering.
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([entry({ id: 9, tableName: "products", after: { name: "Widget X", sku: "WX-1" } })]);
+    show();
+    await onScreen("Widget X");
+    expect(screen.getByText("no place recorded")).toBeTruthy();
+  });
+
+  it("⭐⭐⭐ a change whose place has since been removed is KEPT, not deleted", async () => {
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([at(GHOST, { id: 9, after: { name: "On a deleted line", node_id: GHOST } })]);
+    show();
+    await onScreen("On a deleted line");
+    expect(screen.getByText("place since removed")).toBeTruthy();
+  });
+
+  it("⚠️ tells the two reasons apart, because they are different facts", async () => {
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([
+      entry({ id: 9, tableName: "products", after: { name: "Widget X", sku: "WX-1" } }),
+      at(GHOST, { id: 8, after: { name: "On a deleted line", node_id: GHOST } }),
+      at(LINE_A, { id: 7, after: { name: "Made here", node_id: LINE_A } }),
+    ]);
+    show();
+    await onScreen("Made here");
+    expect(screen.getByText("no place recorded")).toBeTruthy();
+    expect(screen.getByText("place since removed")).toBeTruthy();
+    // The row that IS in the plant carries no mark — the mark answers "why is
+    // this here", and that row needs no answer.
+    expect(screen.getAllByText(/no place recorded|place since removed/)).toHaveLength(2);
+  });
+
+  it("marks nothing while the reader is looking at all plants", async () => {
+    withTwoPlants();
+    serve([entry({ id: 9, tableName: "products", after: { name: "Widget X", sku: "WX-1" } })]);
+    show();
+    await onScreen("Widget X");
+    expect(screen.queryByText("no place recorded")).toBeNull();
+  });
+
+  it("⭐⭐ the screen states what its own plant filter means", async () => {
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([at(LINE_A, { id: 9 })]);
+    show();
+    await screen.findByText(/Showing Plant A\./);
+    expect(screen.getByText(/listed under every plant and marked below/)).toBeTruthy();
+  });
+
+  it("⭐⭐ the footer names the plant and only says `all` when the server says so", async () => {
+    withTwoPlants();
+    showPlant(PLANT_A);
+    // Fifty-one matches in Plant A: the server has more, so the word "all" is
+    // not available whatever the plant filter did.
+    serve(Array.from({ length: 51 }, (_, i) => at(LINE_A, { id: 200 - i })));
+    show();
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Showing the 50 most recent matching changes in Plant A in the log\./),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/whole of the log has been searched/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search older changes" }));
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /Showing all 51 matching changes in Plant A — the whole of the log has been searched\./,
+        ),
+      ).toBeTruthy();
+    });
+  });
+
+  it("⚠️ a plant with nothing in it is a finished search, never an empty log", async () => {
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([at(LINE_B, { id: 9 })]);
+    show();
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /No changes match this filter in Plant A — the whole of the log has been searched\./,
+        ),
+      ).toBeTruthy();
+    });
+    // The sentence that would be a claim about the company rather than about
+    // this filter.
+    expect(screen.queryByText("Nothing has been changed yet.")).toBeNull();
+  });
+
+  it("one readable root means nothing is narrowed, whatever is remembered", async () => {
+    // `plantControlVisible` hides the control below two roots, and
+    // `resolvePlantChoice` collapses a remembered id to All plants with it. A
+    // panel that read the stored value directly would filter with no control on
+    // screen to undo it — `plantFilter.ts` decision 2.
+    h.tree.nodes = [node(PLANT_A, "Plant A", null, "plant_a")];
+    showPlant(PLANT_A);
+    serve([at(LINE_A, { id: 9 }), at(GHOST, { id: 8 })]);
+    show();
+    await screen.findByText(/whole log/);
+    expect(lastFilter().elsewhere ?? null).toBeNull();
+    expect(screen.queryByText(/Showing Plant A\./)).toBeNull();
+  });
+
+  it("reads unnarrowed while the tree is still resolving, rather than empty", async () => {
+    // `usePlantFilter` answers "All plants" with no nodes, and its header says
+    // why that is safe here. What must not happen is a first read that narrows
+    // to a plant nobody could have chosen yet.
+    withTwoPlants();
+    showPlant(PLANT_A);
+    serve([at(LINE_A, { id: 9 })]);
+    show();
+    expect(h.fetchPage.mock.calls[0]?.[1]).toMatchObject({ elsewhere: null });
+  });
+
+  /**
+   * ⛔⛔ THE MEASURED CEILING. Kong caps a request line at 8 KB and the clause
+   * repeats the id list once per snapshot path: 48 ids are served, 52 come back
+   * 414. The failure worth a case is not the 414 — it is a panel that noticed
+   * and quietly read every plant while the header chip still said "Plant A".
+   */
+  it("⛔⛔ says when there are too many places to narrow, instead of pretending", async () => {
+    h.tree.nodes = [
+      node(PLANT_A, "Plant A", null, "plant_a"),
+      node(PLANT_B, "Plant B", null, "plant_b"),
+      ...Array.from({ length: 200 }, (_, i) =>
+        node(
+          `bbbbbbbb-0000-0000-0000-${String(i).padStart(12, "0")}`,
+          `Line ${i}`,
+          PLANT_B,
+          `plant_b.line_${i}`,
+        ),
+      ),
+    ];
+    showPlant(PLANT_A);
+    serve([at(LINE_A, { id: 9 })]);
+    show();
+    await screen.findByText(/more than one request to the server can carry/);
+    expect(screen.getByText(/showing every plant, not just Plant A/)).toBeTruthy();
+    // Nothing was sent, and — the part that matters — the footer does not name
+    // the plant, because the list under it is not one plant's.
+    await waitFor(() => expect(lastFilter().elsewhere ?? null).toBeNull());
+    expect(screen.queryByText(/matching changes in Plant A/)).toBeNull();
   });
 });
