@@ -106,7 +106,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">609</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">52</span><span class="l">database changes (migrations)</span></div>
   <div class="stat act"><span class="n">2</span><span class="l">open defects</span></div>
-  <div class="stat act"><span class="n">160 / 281</span><span class="l">requirements covered by a test · 2 contradicted</span></div>
+  <div class="stat act"><span class="n">160 / 282</span><span class="l">requirements covered by a test · 2 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>c24bc69</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -1736,7 +1736,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>281 requirements · 160 covered · 105 uncovered · 2 contradicted · 14 superseded</caption>
+<caption>282 requirements · 160 covered · 106 uncovered · 2 contradicted · 14 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -2226,6 +2226,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
       <br><span class="fine">F-094, D97, D91 · agent</span></td>
   <td class="fine">vitest · <code>src/test/adminNoGrants.test.tsx</code> N8 -- a company admin with the session still resolving gets no rail at all, neither the eleven tabs nor the three an unknown person resolves to; measured RED against the guard removed<br>e2e · <code>e2e/signedIn.spec.ts</code> the three signed-in cases, which failed intermittently under load before the fix and pass three runs in a row after it -- the only level that can see two useSession instances disagree</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-uncovered" id="R-339">
+  <td class="g-n">R-339</td>
+  <td class="reqmain"><b>Copy Week shows every clash and lets the person choose which plan wins, one by one</b><br><span class="fine"><em>&quot;For the copy week, if there are conflicts lets present them to the user and let them decide what they want to keep, the prior plan or the copied plan.&quot;</em> So Copy Week never silently merges, never silently skips, and never refuses the whole copy because one cell clashes. Every conflict is listed before anything is written, each one names the two candidates side by side --- what is on the destination week now, and what the source week would put there --- and each is resolved INDIVIDUALLY by the person: keep the prior plan, or take the copied one. ⚠️ SO THE DRY RUN IS NOT A WARNING SCREEN, IT IS THE DECISION SCREEN, and that is a different build from the queue line's &quot;dry-run conflict preview&quot;. A preview informs and then you press on; this collects an answer per clash and applies exactly those answers. Nothing is written until the person has been through the list. ⛔ WHAT IS NOT YET DECIDED, and must not be guessed: what COUNTS as a conflict. The candidates are an occupied cell in the destination window, the same operator assigned twice at once, a person no longer certified for the work, and a retired shift pattern. These are different questions with different answers --- the first two are about the plan colliding with itself, the second two are about the plan colliding with the RULES, and a rules clash may not be a thing the person should be offered a &quot;keep the copied one&quot; button for at all, since the server would refuse the write. R-239 is the line: a choice offered here must be one <code>create_assignment</code> would accept.</span>
+      <br><span class="fine">session 71 conversation · maintainer</span></td>
+  <td class="fine">—</td>
+  <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
 <tr class="r-covered" id="R-338">
   <td class="g-n">R-338</td>

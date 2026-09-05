@@ -3031,6 +3031,31 @@ requirements:
       the three signed-in cases, which failed intermittently under load before the fix and pass three
       runs in a row after it -- the only level that can see two useSession instances disagree
   status: covered
+- id: R-339
+  title: Copy Week shows every clash and lets the person choose which plan wins, one by one
+  source:
+  - session 71 conversation
+  stated_by: maintainer
+  claim: >-
+    *"For the copy week, if there are conflicts lets present them to the user and let them decide what
+    they want to keep, the prior plan or the copied plan."* So Copy Week never silently merges, never
+    silently skips, and never refuses the whole copy because one cell clashes. Every conflict is listed
+    before anything is written, each one names the two candidates side by side --- what is on the
+    destination week now, and what the source week would put there --- and each is resolved
+    INDIVIDUALLY by the person: keep the prior plan, or take the copied one.
+    ⚠️ SO THE DRY RUN IS NOT A WARNING SCREEN, IT IS THE DECISION SCREEN, and that is a different build
+    from the queue line's "dry-run conflict preview". A preview informs and then you press on; this
+    collects an answer per clash and applies exactly those answers. Nothing is written until the person
+    has been through the list.
+    ⛔ WHAT IS NOT YET DECIDED, and must not be guessed: what COUNTS as a conflict. The candidates are
+    an occupied cell in the destination window, the same operator assigned twice at once, a person no
+    longer certified for the work, and a retired shift pattern. These are different questions with
+    different answers --- the first two are about the plan colliding with itself, the second two are
+    about the plan colliding with the RULES, and a rules clash may not be a thing the person should be
+    offered a "keep the copied one" button for at all, since the server would refuse the write.
+    R-239 is the line: a choice offered here must be one `create_assignment` would accept.
+  verified_by: []
+  status: uncovered
 - id: R-338
   title: An expired certificate is a warning you can act on, not a save that fails
   source:
