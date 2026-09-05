@@ -10864,26 +10864,6 @@ next:
 - text: Phase 2 — Copy Week with dry-run conflict preview
   why: Unchecked Phase 2 item.
 # ------------------------------- PARKED ------------------------------------
-- text: Dark theme — app-wide colour tokens first, then the matrix
-  why: >-
-    MOVED TO THE END BY THE MAINTAINER, 4 Sept: *"this is going to be much bigger and different than
-    what you have right, I'm still thinking over it."* Do not start it without a fresh go-ahead, and
-    expect the shape to change. Originally split out of M5 (session 22): the app has NO theming today —
-    no colour variables, no prefers-color-scheme, no toggle anywhere in `src/`.
-  decided: true
-- stage: S24
-  text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
-  why: >-
-    TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept — do not pick this up without a
-    fresh go-ahead. The gate on a second human using the product; needs the project's first server-side
-    code. ⭐ S24's card now reads `parked` to match this, corrected 5 Sept; the warning that used to sit
-    on this line said the two disagreed and left them disagreeing.
-  decided: true
-- stage: S24
-  text: P1-6d password reset and change-password
-  why: >-
-    Same browser-only shape as the sign-in screen. Sits behind invitations, which is tabled.
-  decided: true
 - stage: S24
   text: 'Debt: useSession() called in five components; one SessionProvider at the root'
   why: >-
@@ -10906,6 +10886,38 @@ next:
   why: >-
     DECIDED, NOT OPEN. Do not put this back to the maintainer as a choice. max_rows = 1000 and no
     `.range(` anywhere in src/lib/api/.
+  decided: true
+- text: Dark theme — app-wide colour tokens first, then the matrix
+  why: >-
+    MOVED TO THE END BY THE MAINTAINER, 4 Sept: *"this is going to be much bigger and different than
+    what you have right, I'm still thinking over it."* Do not start it without a fresh go-ahead, and
+    expect the shape to change. Originally split out of M5 (session 22): the app has NO theming today —
+    no colour variables, no prefers-color-scheme, no toggle anywhere in `src/`.
+    ⭐ AND ON 5 SEPT IT WAS ACTUALLY MOVED THERE. The maintainer, shown the next five as a list:
+    *"Move #3,#4,#5 at the end of the list."* This entry had said "MOVED TO THE END" since 4 Sept while
+    sitting at the TOP of the parked block, above three items that were more live than it — the same
+    shape as S24 reading `now` for parked work, and the third sentence in three days found standing in
+    for the change it describes. It is now below real-time, the timezone and the row ceiling.
+  decided: true
+- stage: S24
+  text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
+  why: >-
+    TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept — do not pick this up without a
+    fresh go-ahead. The gate on a second human using the product; needs the project's first server-side
+    code. ⭐ S24's card now reads `parked` to match this, corrected 5 Sept; the warning that used to sit
+    on this line said the two disagreed and left them disagreeing.
+    ⭐ MOVED TO THE ACTUAL END OF THE QUEUE 5 SEPT at the maintainer's word — *"Move #3,#4,#5 at the end
+    of the list"* — having claimed since 4 Sept to be there already.
+  decided: true
+- stage: S24
+  text: P1-6d password reset and change-password
+  why: >-
+    Same browser-only shape as the sign-in screen. Sits behind invitations, which is tabled.
+    ⚠️ IT IS THE CHEAPEST THING ON THE WHOLE LIST AND IT IS LAST BY ASSOCIATION, not by cost: one
+    browser call, no server piece, no migration — the sign-in screen's own shape. It sits here because
+    it was grouped with invitations, which need the project's first Edge Function. Worth unparking on
+    its own if a quick win is ever wanted; moved to the end 5 Sept with the rest of the group at the
+    maintainer's word.
   decided: true
 - stage: S23
   text: Tree CSV importer
