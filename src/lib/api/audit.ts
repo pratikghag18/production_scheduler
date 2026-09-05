@@ -45,9 +45,28 @@
  * every tie by construction. (The `(org_id, at DESC)` index is therefore not the
  * one serving this query; at this table's size the primary key is ample, and a
  * matching index is a migration to add if the log ever grows enough to need it.)
+ *
+ * ⭐⭐ AND THE PAGE IS NARROWED BY THE SERVER, NOT BY THE SCREEN. `AuditFilter`
+ * puts the period, the action and the table into the query itself, so a page is
+ * fifty MATCHES rather than fifty rows the browser then throws most of away.
+ * The measured `at` index (`audit_log_org_at_idx`) serves the period bound; the
+ * ordering is still `id`, and the two never interfere because one is a
+ * predicate and the other is a boundary. What this bought is not only round
+ * trips: a filtered `hasMore` means *"older MATCHES exist"*, which is a fact
+ * the screen can print an answer from, and a period with BOTH ends — "August",
+ * "yesterday" — becomes expressible where before it could not be finished at
+ * all.
  */
 import { supabase } from "@/lib/supabase";
 import { toSchedulerError } from "./errors";
+
+/**
+ * The three values `audit_log_action_check` allows (0007).
+ *
+ * Named so the FILTER below can be typed on it: a caller cannot ask the server
+ * for an action the CHECK constraint forbids without `tsc` saying so.
+ */
+export type AuditAction = "insert" | "update" | "delete";
 
 /** One recorded change, as the screen needs it. */
 export interface AuditEntry {
@@ -59,7 +78,7 @@ export interface AuditEntry {
   actorId: string | null;
   tableName: string;
   rowId: string;
-  action: "insert" | "update" | "delete";
+  action: AuditAction;
   /** The whole row as it was. NULL on an insert. */
   before: Record<string, unknown> | null;
   /** The whole row as it became. NULL on a delete. */
@@ -68,8 +87,48 @@ export interface AuditEntry {
 
 export interface AuditPage {
   entries: AuditEntry[];
-  /** Whether older changes exist beyond this page — measured, not guessed. */
+  /**
+   * Whether older MATCHING changes exist beyond this page — measured, not
+   * guessed.
+   *
+   * ⭐⭐ "MATCHING" IS THE WORD THAT CHANGED, AND THE SCREEN'S HONESTY RESTS ON
+   * IT. While the filter was applied to rows already fetched, this meant "the
+   * log has more rows" and said nothing about whether any of them could match;
+   * the Activity panel therefore had to PROVE completeness itself, by reading
+   * past the period's edge and arguing from the ordering. Now that the query
+   * carries the filter, `false` here means the server found no older row that
+   * satisfies it — which is the whole of the proof, for any period, bounded or
+   * not.
+   */
   hasMore: boolean;
+}
+
+/**
+ * How a read is narrowed. Every field is optional and an absent one narrows
+ * nothing, so `fetchAuditPage(cursor)` is exactly the read it always was.
+ *
+ * ⛔⛔ THIS IS NARROWING AND IT IS NOT AUTHORISATION. `audit_log_select` is
+ * `app_is_admin() AND org_id = app_current_org()` and RLS has already decided
+ * which rows exist for this caller before any of these clauses is looked at. A
+ * filter is a convenience for a reader; nothing here may ever be relied on to
+ * keep a row away from somebody, and a bug in this function can only ever show
+ * a company admin too many of their OWN company's rows.
+ */
+export interface AuditFilter {
+  /** Inclusive lower bound on `at`, ISO. Absent means "back to the beginning". */
+  since?: string | null;
+  /**
+   * EXCLUSIVE upper bound on `at`, ISO. Absent means "up to now".
+   *
+   * ⚠️ EXCLUSIVE ON PURPOSE. Two adjacent periods (yesterday / today) must not
+   * both claim the instant on their shared boundary, or one change appears in
+   * both and every count is one out on the day it lands at midnight.
+   */
+  until?: string | null;
+  /** Restrict to these actions. Absent or EMPTY restricts nothing — see below. */
+  actions?: readonly AuditAction[] | null;
+  /** Restrict to these `table_name`s. Absent or EMPTY restricts nothing. */
+  tables?: readonly string[] | null;
 }
 
 /**
@@ -93,8 +152,8 @@ export const AUDIT_COLUMNS = "id, at, actor_id, table_name, row_id, action, befo
  */
 export const AUDIT_PAGE_SIZE = 50;
 
-/** The three values `audit_log_action_check` allows (0007). */
-const ACTIONS: ReadonlySet<string> = new Set(["insert", "update", "delete"]);
+/** The same three, as a runtime guard — `AuditAction` is not one at runtime. */
+const ACTIONS: ReadonlySet<string> = new Set<AuditAction>(["insert", "update", "delete"]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -144,24 +203,82 @@ export function parseAuditEntry(row: unknown): AuditEntry | null {
 }
 
 /**
- * One page of changes, newest first.
+ * A list to narrow on, or `null` when it would narrow nothing.
+ *
+ * ⚠️⚠️ AN EMPTY LIST MEANS "NO RESTRICTION" HERE, AND THE CHOICE IS DELIBERATE.
+ * `.in(col, [])` renders as `col=in.()`, which matches no row at all — so an
+ * empty array arriving by accident (a `.filter()` that removed everything, a
+ * state that has not loaded) would empty the one screen whose entire job is to
+ * show that things happened, under a footer that would then say the search was
+ * complete. Widening is the recoverable direction: the reader sees more than
+ * they asked for and can see that they did.
+ */
+function restriction<T>(values: readonly T[] | null | undefined): readonly T[] | null {
+  return values !== null && values !== undefined && values.length > 0 ? values : null;
+}
+
+/**
+ * A timestamp bound to send, or `null` when there is nothing to send.
+ *
+ * ⚠️ A BLANK IS NOT A BOUND. `at=gte.` reaches Postgres as an empty string and
+ * comes back `22007 invalid input syntax for type timestamp with time zone` —
+ * a 400 on the whole page, so an unset bound arriving as "" would not narrow
+ * the log, it would EMPTY the screen and print a read failure over it.
+ */
+function bound(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/**
+ * One page of MATCHING changes, newest first.
  *
  * `beforeId` is the cursor: `null` for the newest page, otherwise the `id` of
  * the oldest row already on screen. See the header for why this is keyset rather
  * than `.range()`.
  *
+ * ⭐⭐ THE FILTER IS APPLIED HERE, BY THE SERVER, AND THAT IS WHAT MAKES THE
+ * SCREEN ABOVE HONEST CHEAPLY. Filtered in the browser, fifty rows read might
+ * hold three matches and say nothing whatever about the rest of the log, so the
+ * panel had to keep a scan and a match apart and reason its way to the word
+ * "all". With the clauses in the query, a page is fifty MATCHES and `hasMore`
+ * answers the only question the footer ever needed to ask.
+ *
+ * ⚠️ THE CURSOR AND THE FILTER ARE INDEPENDENT, and it matters that they are.
+ * The ordering is by `id` alone; the filter is a predicate on rows, not on the
+ * ordering. So `id < cursor` still names exactly the rows already shown,
+ * however the `at` bounds fall — including the case the OLD proof quietly
+ * assumed away, where two rows written in one transaction share an `at` and a
+ * row inside the period sits BELOW one outside it.
+ *
  * ⚠️ IT ASKS FOR ONE MORE ROW THAN IT RETURNS. `hasMore` is then a fact about
  * the database rather than a guess from "the page came back full" — which is
- * wrong exactly once, at the boundary where the log's size is a multiple of the
- * page size, and wrong in the direction that offers a button fetching nothing.
+ * wrong exactly once, at the boundary where the matching set's size is a
+ * multiple of the page size, and wrong in the direction that offers a button
+ * fetching nothing.
+ *
+ * ⚠️ AND THE LIMIT STAYS ON A FILTERED READ. PostgREST caps a response at
+ * `max_rows = 1000`; a narrow filter is the tempting place to drop the paging
+ * ("it only returns a handful"), and the day it does not, the server truncates
+ * the page and the screen calls that the end of the log.
  */
-export async function fetchAuditPage(beforeId: number | null = null): Promise<AuditPage> {
+export async function fetchAuditPage(
+  beforeId: number | null = null,
+  filter: AuditFilter = {},
+): Promise<AuditPage> {
   let query = supabase
     .from("audit_log")
     .select(AUDIT_COLUMNS)
     .order("id", { ascending: false })
     .limit(AUDIT_PAGE_SIZE + 1);
   if (beforeId !== null) query = query.lt("id", beforeId);
+  const since = bound(filter.since);
+  if (since !== null) query = query.gte("at", since);
+  const until = bound(filter.until);
+  if (until !== null) query = query.lt("at", until);
+  const actions = restriction(filter.actions);
+  if (actions !== null) query = query.in("action", [...actions]);
+  const tables = restriction(filter.tables);
+  if (tables !== null) query = query.in("table_name", [...tables]);
 
   const { data, error } = await query;
   if (error) throw toSchedulerError(error);

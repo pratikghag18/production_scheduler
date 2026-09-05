@@ -34,7 +34,7 @@ import * as fs from "node:fs";
 import type { ReactNode } from "react";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AUDIT_AUTO_SCAN_PAGES, AuditPanel } from "@/features/admin/components/AuditPanel";
+import { AuditPanel } from "@/features/admin/components/AuditPanel";
 
 /** The stylesheet two of the cases below read as text — jsdom applies no CSS. */
 const PANEL_CSS = "src/features/admin/components/AuditPanel.module.css";
@@ -101,6 +101,52 @@ function entry(over: Record<string, unknown> = {}) {
     after: { name: "Widget X", sku: "WX-1", active: true } as Record<string, unknown> | null,
     ...over,
   };
+}
+
+/**
+ * ⭐⭐ THE FILTER OBJECT EVERY READ CARRIES. All four keys are always sent, with
+ * `null` for "do not narrow on this", so a call can be asserted whole rather
+ * than by picking at the keys somebody remembered to look at.
+ */
+const NO_FILTER = { since: null, until: null, actions: null, tables: null };
+
+/**
+ * ⭐⭐ THE SERVER HALF, FAITHFULLY. `fetchAuditPage` now puts the period, the
+ * action and the table INTO the query, so a page is fifty MATCHES; a mock that
+ * ignored the filter and returned everything would let a panel that had quietly
+ * stopped narrowing pass every case in this file.
+ *
+ * So this double does what the database does: it applies the filter it is
+ * handed, honours the keyset cursor, and measures `hasMore` on the MATCHING
+ * set — which is the fact the whole footer now rests on.
+ */
+interface ServedFilter {
+  since?: string | null;
+  until?: string | null;
+  actions?: readonly string[] | null;
+  tables?: readonly string[] | null;
+}
+
+function serve(rows: ReturnType<typeof entry>[], pageSize = 50): void {
+  h.fetchPage.mockImplementation((beforeId: number | null, filter: ServedFilter = {}) => {
+    const matches = rows
+      .filter((r) => beforeId == null || r.id < beforeId)
+      .filter((r) => filter.since == null || Date.parse(r.at) >= Date.parse(filter.since))
+      .filter((r) => filter.until == null || Date.parse(r.at) < Date.parse(filter.until))
+      .filter((r) => filter.actions == null || filter.actions.includes(r.action))
+      .filter((r) => filter.tables == null || filter.tables.includes(r.tableName))
+      .sort((a, b) => b.id - a.id);
+    return Promise.resolve({
+      entries: matches.slice(0, pageSize),
+      hasMore: matches.length > pageSize,
+    });
+  });
+}
+
+/** The last filter object the panel sent. */
+function lastFilter(): ServedFilter {
+  const call = h.fetchPage.mock.calls[h.fetchPage.mock.calls.length - 1];
+  return (call?.[1] ?? {}) as ServedFilter;
 }
 
 function show(): void {
@@ -281,7 +327,7 @@ describe("the screen never misrepresents how much of the log it is showing", () 
     // ⚠️ KEYSET, NOT OFFSET. The cursor is the last id ON SCREEN; an offset
     // would skip or repeat a row every time a change lands while somebody is
     // reading, which is the normal case for a live log.
-    expect(h.fetchPage).toHaveBeenLastCalledWith(233);
+    expect(h.fetchPage).toHaveBeenLastCalledWith(233, NO_FILTER);
     // Both pages stay on screen; "load older" appends, it does not replace.
     expect(screen.getByText("Product added")).toBeTruthy();
   });
@@ -315,6 +361,26 @@ describe("the screen never misrepresents how much of the log it is showing", () 
     expect(screen.queryByText(/nothing has been changed yet/i)).toBe(null);
     expect(screen.getByText("Loading…")).toBeTruthy();
     expect(h.fetchPage).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⚠️⚠️ A PAGE CAN COME BACK EMPTY WITHOUT THE LOG BEING FINISHED.
+   * `fetchAuditPage` drops any row `parseAuditEntry` refuses — a row with no
+   * usable `id`, an action outside the CHECK constraint — so a page of fifty
+   * such rows arrives as no entries and `hasMore: true`. That is the one state
+   * in which the screen knows LEAST, and both of the sentences it could reach
+   * for are claims it cannot support: "nothing has been changed yet" is about
+   * the company, and "this is the whole log" is about the read.
+   */
+  it("does not call a page it could not read an empty log, or the whole one", async () => {
+    h.fetchPage.mockResolvedValue({ entries: [], hasMore: true });
+    show();
+    await waitFor(() =>
+      expect(/there are older ones/i.test(document.body.textContent ?? "")).toBe(true),
+    );
+    const page = document.body.textContent ?? "";
+    expect(/nothing has been changed yet/i.test(page)).toBe(false);
+    expect(/whole log/i.test(page)).toBe(false);
   });
 
   it("says a failed read failed, and does not call it an empty log", async () => {
@@ -375,31 +441,44 @@ describe("the screen says which columns it does not list", () => {
  * NARROWING THE LOG — AND THE ONE WAY A FILTER CAN LIE.
  *
  * ⭐⭐ THE LIST IS KEYSET-PAGED, SO A FILTER APPLIED TO A PAGE IS NOT A FILTER
- * ON THE LOG. `fetchAuditPage` returns fifty ROWS, not fifty MATCHES. A reader
- * who picks "removals, last 7 days" and is shown whatever removals happen to sit
- * in the newest fifty rows — under a footer that counts them as if that were the
- * answer — has been told something false about their own history, and told it in
- * the one screen whose entire job is to be trustworthy about the past.
+ * ON THE LOG. A reader who picks "removals, last 7 days" and is shown whatever
+ * removals happen to sit in the newest fifty rows — under a footer that counts
+ * them as if that were the answer — has been told something false about their
+ * own history, in the one screen whose entire job is to be trustworthy about
+ * the past.
  *
- * So the screen distinguishes TWO facts it must never confuse:
- *   - how many rows it has READ from the log (the scan), and
- *   - how many of those MATCH the filter.
- * and it may only ever use the word "all" once it can prove the scan covered
- * every row the filter could have matched.
+ * ⭐⭐⭐ THE FILTER IS NOW IN THE QUERY, AND THAT CHANGED WHAT THE FOOTER RESTS
+ * ON. `fetchAuditPage` takes the period, the action and the table and sends
+ * `.gte("at", …)`, `.lt("at", …)` and `.in(…)`, so a page is fifty MATCHES and
+ * `hasMore` means *"older MATCHING rows exist"*. The word "all" is therefore
+ * licensed by exactly one fact — the server saying there are no more matches —
+ * rather than by the old argument from ordering, which had to read PAST the
+ * period's edge and then reason that nothing unread could still be inside it.
  *
- * ⚠️ THE PROOF IS THE ORDERING. The log is read newest-first on `id`, and every
- * period offered is anchored at NOW — "last 24 hours", "last 7 days", "last 30
- * days". Rows inside such a period are therefore a PREFIX of the scan: the
- * moment the scan reaches a row older than the cutoff, every matching row has
- * already been read, and the screen can say "all". A period that did NOT end at
- * now (say "August") would sit in the middle of the log and could not be
- * completed without reading everything newer, which is why none is offered.
+ * ⚠️ THE OLD ARGUMENT ALSO CARRIED AN ASSUMPTION NOBODY HAD WRITTEN DOWN: that
+ * `at` rises with `id`. Two rows written in ONE transaction share `at` exactly,
+ * and a transaction that starts before another and commits after it takes its
+ * `at` from its start — so a row INSIDE the period can sit below a row outside
+ * it, and "the scan reached something older than the cutoff" would have
+ * declared the search finished with that row unread. A predicate in the query
+ * has no such assumption: `id < cursor` is a boundary, the filter is a test on
+ * each row, and neither depends on the other.
  *
- * ⚠️ "ALL TIME" HAS NO CUTOFF, so under a filter it is complete only when the
- * whole log has been read. Until then the footer says what it actually searched.
+ * ⚠️ WHICH IS ALSO WHY A PERIOD WITH BOTH ENDS CAN BE OFFERED AT LAST. Nothing
+ * about "yesterday" is a prefix of a newest-first read; it is a middle slice.
+ * The server does not care.
  * ======================================================================== */
 function agoIso(hours: number): string {
   return new Date(Date.now() - hours * 3600_000).toISOString();
+}
+
+/** Midnight this morning, in the reader's own timezone — where "yesterday"
+ *  ends. Written out here rather than imported, so the case states the
+ *  DEFINITION of the period and not the panel's arithmetic. */
+function localMidnight(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 describe("the reader can narrow the log", () => {
@@ -410,105 +489,265 @@ describe("the reader can narrow the log", () => {
     expect(screen.getByLabelText(/kind of change/i)).toBeTruthy();
   });
 
+  /**
+   * ⭐⭐ THE POINT OF THE WHOLE CHANGE, PINNED ON THE CALL. A panel that had
+   * quietly gone back to filtering its own rows would pass every case below
+   * this one on a fixture this small; only the request shows it.
+   */
+  it("⭐ asks the SERVER to narrow, rather than reading rows to throw them away", async () => {
+    serve([entry({ id: 300, at: agoIso(2) })]);
+    show();
+    await screen.findByText("Product added");
+    expect(h.fetchPage).toHaveBeenLastCalledWith(null, NO_FILTER);
+
+    fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "7d" } });
+    await waitFor(() => expect(lastFilter().since).toBeTruthy());
+    const since = Date.parse(lastFilter().since ?? "");
+    expect(Math.round((Date.now() - since) / 3600_000)).toBe(24 * 7);
+    // A now-anchored period has no upper end: "and everything since".
+    expect(lastFilter().until ?? null).toBe(null);
+
+    fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
+    await waitFor(() => expect(lastFilter().actions).toEqual(["delete"]));
+
+    fireEvent.change(screen.getByLabelText(/kind of thing/i), { target: { value: "products" } });
+    await waitFor(() => expect(lastFilter().tables).toEqual(["products"]));
+  });
+
   it("hides changes outside the chosen time period", async () => {
-    h.fetchPage.mockResolvedValue({
-      entries: [
-        entry({ id: 300, at: agoIso(2) }),
-        entry({ id: 200, at: agoIso(24 * 40), tableName: "runs", action: "delete" }),
-      ],
-      hasMore: false,
-    });
+    serve([
+      entry({ id: 300, at: agoIso(2) }),
+      entry({ id: 200, at: agoIso(24 * 40), tableName: "runs", action: "delete" }),
+    ]);
     show();
     await screen.findByText("Product added");
     expect(screen.getByText("Run deleted")).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "7d" } });
-    expect(screen.queryByText("Run deleted")).toBe(null);
-    expect(screen.getByText("Product added")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Run deleted")).toBe(null));
+    expect(await screen.findByText("Product added")).toBeTruthy();
   });
 
   it("hides changes that are not the chosen kind of change", async () => {
-    h.fetchPage.mockResolvedValue({
-      entries: [
-        entry({ id: 300, at: agoIso(2) }),
-        entry({ id: 200, at: agoIso(3), tableName: "runs", action: "delete" }),
-      ],
-      hasMore: false,
-    });
+    serve([
+      entry({ id: 300, at: agoIso(2) }),
+      entry({ id: 200, at: agoIso(3), tableName: "runs", action: "delete" }),
+    ]);
     show();
     await screen.findByText("Product added");
     fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
-    expect(screen.getByText("Run deleted")).toBeTruthy();
+    expect(await screen.findByText("Run deleted")).toBeTruthy();
     expect(screen.queryByText("Product added")).toBe(null);
   });
 
   /** A filter that empties the view has not emptied the company's history. */
   it("does not call a filtered-empty list an empty log", async () => {
-    h.fetchPage.mockResolvedValue({ entries: [entry({ at: agoIso(2) })], hasMore: false });
+    serve([entry({ at: agoIso(2) })]);
     show();
     await screen.findByText("Product added");
     fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
-    expect(screen.queryByText("Product added")).toBe(null);
+    await waitFor(() => expect(screen.queryByText("Product added")).toBe(null));
     expect(screen.queryByText(/nothing has been changed yet/i)).toBe(null);
+  });
+
+  /**
+   * ⚠️⚠️ THE TRAP THE SERVER-SIDE FILTER OPENS, AND IT IS A ONE-WAY DOOR FOR
+   * THE READER. The kind picker is built from the rows the screen has actually
+   * read, because the audited set is decided by triggers and a hand-written
+   * list here would go blind to a seventh table. Once the SERVER does the
+   * narrowing, the rows read under "Products" are all products — so a picker
+   * rebuilt from them offers "Products" and nothing else, and there is no
+   * control left to undo the filter with. What it has seen is remembered.
+   */
+  it("⭐ keeps every kind it has seen in the picker, so a filter can be undone", async () => {
+    serve([
+      entry({ id: 300, at: agoIso(2) }),
+      entry({ id: 200, at: agoIso(3), tableName: "runs", action: "delete" }),
+    ]);
+    show();
+    await screen.findByText("Run deleted");
+    const kind = screen.getByLabelText(/kind of thing/i);
+    fireEvent.change(kind, { target: { value: "products" } });
+    await waitFor(() => expect(screen.queryByText("Run deleted")).toBe(null));
+    const options = within(kind)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(options).toContain("Run");
+    expect(options).toContain("Product");
+    // and the reader can actually get back
+    fireEvent.change(kind, { target: { value: "all" } });
+    expect(await screen.findByText("Run deleted")).toBeTruthy();
+  });
+
+  /**
+   * ⭐⭐ A PERIOD WITH BOTH ENDS, WHICH THIS SCREEN COULD NOT OFFER BEFORE.
+   * "Yesterday" sits in the MIDDLE of the log: it is not a prefix of a
+   * newest-first read, so no amount of reading from the top proved it finished
+   * while the browser was doing the filtering. The server does not care where
+   * the slice sits.
+   */
+  it("⭐ offers a period with both ends, and asks the server for both", async () => {
+    serve([entry({ id: 300, at: agoIso(2) })]);
+    show();
+    await screen.findByText("Product added");
+    const picker = screen.getByLabelText(/time period/i);
+    const labels = within(picker)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(labels).toContain("Yesterday");
+
+    fireEvent.change(picker, { target: { value: "yesterday" } });
+    await waitFor(() => expect(lastFilter().until).toBeTruthy());
+    const until = localMidnight();
+    const since = new Date(until);
+    since.setDate(since.getDate() - 1);
+    // ⚠️ THE READER'S OWN TIMEZONE, because the When column is in it too: a
+    // "yesterday" that meant UTC would disagree with the dates on screen.
+    expect(lastFilter().since).toBe(since.toISOString());
+    // Exclusive at the top: today's changes belong to today.
+    expect(lastFilter().until).toBe(until.toISOString());
   });
 });
 
 describe("a filter never claims to have searched more of the log than it has", () => {
   /**
-   * ⚠️⚠️ THE FAILURE THIS PINS. All time + "removals", one page read, more rows
-   * behind it, no removal in the page. The tempting screen says "no removals" —
-   * a statement about the whole company drawn from fifty rows. It must instead
-   * say what it searched, and keep the control that searches further.
+   * ⚠️⚠️ THE FAILURE THIS PINS, AND IT DID NOT GO AWAY WITH THE ROUND TRIPS.
+   * The server returns a PAGE of matches, not every match. While more matching
+   * rows exist behind the cursor, the count on screen is not the answer, and
+   * the screen must not dress it as one.
    */
-  it("says what it searched rather than answering, when older rows are unread", async () => {
-    h.fetchPage.mockResolvedValue({ entries: [entry({ at: agoIso(2) })], hasMore: true });
+  it("does not say `all` while the server says older matches exist", async () => {
+    serve(
+      [
+        entry({
+          id: 300,
+          at: agoIso(1),
+          tableName: "runs",
+          action: "delete",
+          before: { notes: "a" },
+          after: null,
+        }),
+        entry({
+          id: 290,
+          at: agoIso(2),
+          tableName: "runs",
+          action: "delete",
+          before: { notes: "b" },
+          after: null,
+        }),
+        entry({
+          id: 280,
+          at: agoIso(3),
+          tableName: "runs",
+          action: "delete",
+          before: { notes: "c" },
+          after: null,
+        }),
+      ],
+      2,
+    );
     show();
-    await screen.findByText("Product added");
+    await screen.findAllByText("Run deleted");
     fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
+    // The page holds two of the three matches, and the sentence says exactly
+    // that — a count of what is shown, never of what exists.
+    await waitFor(() =>
+      expect(
+        /Showing the 2 most recent matching changes in the log\. There are older ones\./.test(
+          document.body.textContent ?? "",
+        ),
+      ).toBe(true),
+    );
     const page = document.body.textContent ?? "";
-    expect(/have not been searched/i.test(page)).toBe(true);
-    // Never the words that would make it an answer about the whole log.
+    expect(screen.getAllByText("Run deleted").length).toBe(2);
+    expect(/showing all/i.test(page)).toBe(false);
+    expect(/has been searched/i.test(page)).toBe(false);
     expect(/whole log/i.test(page)).toBe(false);
+    // and the control that reads further is still there
     expect(screen.getByRole("button", { name: /older/i })).toBeTruthy();
   });
 
   /**
-   * The other half, and the reason a period is worth having: a period anchored
-   * at now IS completable against a newest-first scan. The screen reads on by
-   * itself until it passes the cutoff, and only then uses the word "all".
+   * ⭐⭐ THE OTHER HALF, AND IT IS NOW ONE ROUND TRIP. `hasMore: false` on a
+   * FILTERED read is the server saying there is no older row that matches — so
+   * the search is finished, whatever the period was and wherever it sits.
    */
-  it("reads on until the chosen period is passed, then says the period is complete", async () => {
-    h.fetchPage.mockResolvedValueOnce({
-      entries: [entry({ id: 300, at: agoIso(2) })],
-      hasMore: true,
-    });
-    h.fetchPage.mockResolvedValueOnce({
-      entries: [entry({ id: 200, at: agoIso(24 * 40), tableName: "runs", action: "delete" })],
-      hasMore: true,
-    });
-    h.fetchPage.mockResolvedValue({ entries: [], hasMore: false });
+  it("says the period is complete as soon as the server has no more matches", async () => {
+    serve([
+      entry({ id: 300, at: agoIso(2) }),
+      entry({ id: 200, at: agoIso(24 * 40), tableName: "runs", action: "delete" }),
+    ]);
     show();
     await screen.findByText("Product added");
     fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "7d" } });
-    await waitFor(() => expect(h.fetchPage).toHaveBeenCalledWith(300));
     await waitFor(() =>
       expect(
         /whole of the last 7 days has been searched/i.test(document.body.textContent ?? ""),
       ).toBe(true),
     );
-    // The row outside the period is not shown, and the one inside it is.
     expect(screen.queryByText("Run deleted")).toBe(null);
     expect(screen.getByText("Product added")).toBeTruthy();
+    // ⚠️ NO BUTTON: there are older changes in the log, but none of them can
+    // match, so offering to search for them would be offering work that cannot
+    // change the answer.
+    expect(screen.queryByRole("button", { name: /older/i })).toBe(null);
   });
 
-  /** The self-reading is bounded. An unbounded one is a screen that hammers the
-   *  database on a busy company; a bounded one that says so is honest. */
-  it("stops reading on by itself after a bounded number of pages, and says so", async () => {
-    h.fetchPage.mockResolvedValue({ entries: [entry({ at: agoIso(1) })], hasMore: true });
+  /**
+   * ⭐⭐ AND THE SELF-READ IS GONE, WHICH IS THE COST HALF OF THE SAME CHANGE.
+   * The panel used to page towards the period's floor by itself — up to ten
+   * requests — because that walk was the only way to earn the word "all". With
+   * the filter in the query the first page already carries the proof, so a
+   * chosen period costs ONE request. Ten would now be ten pages of matches
+   * nobody asked to see.
+   */
+  it("⭐ costs one request per filter, not ten", async () => {
+    serve([entry({ id: 300, at: agoIso(1) })]);
     show();
     await screen.findByText("Product added");
+    h.fetchPage.mockClear();
     fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "7d" } });
-    await waitFor(() => expect(h.fetchPage.mock.calls.length).toBe(AUDIT_AUTO_SCAN_PAGES));
-    expect(/have not been searched/i.test(document.body.textContent ?? "")).toBe(true);
+    await waitFor(() =>
+      expect(/has been searched/i.test(document.body.textContent ?? "")).toBe(true),
+    );
+    expect(h.fetchPage.mock.calls.length).toBe(1);
+  });
+
+  /**
+   * A filtered-empty answer is now a COMPLETE answer — the server searched the
+   * period and found nothing — and it must read as one, without ever borrowing
+   * the sentence that describes an empty company.
+   */
+  it("calls an empty result what it is: a finished search of that period", async () => {
+    serve([entry({ id: 300, at: agoIso(2) })]);
+    show();
+    await screen.findByText("Product added");
+    fireEvent.change(screen.getByLabelText(/kind of change/i), { target: { value: "delete" } });
+    await waitFor(() =>
+      expect(/no changes match this filter/i.test(document.body.textContent ?? "")).toBe(true),
+    );
+    const page = document.body.textContent ?? "";
+    expect(/the whole of the log has been searched/i.test(page)).toBe(true);
+    expect(/nothing has been changed yet/i.test(page)).toBe(false);
+    // The controls survive a filter that empties the table, or the reader is
+    // stuck looking at nothing.
+    expect(screen.getByLabelText(/kind of change/i)).toBeTruthy();
+  });
+
+  it("finishes a bounded period the same way it finishes a now-anchored one", async () => {
+    const until = localMidnight();
+    const inYesterday = new Date(until.getTime() - 3600_000).toISOString();
+    serve([
+      entry({ id: 300, at: agoIso(1) }),
+      entry({ id: 250, at: inYesterday, tableName: "runs", action: "delete" }),
+    ]);
+    show();
+    await screen.findByText("Product added");
+    fireEvent.change(screen.getByLabelText(/time period/i), { target: { value: "yesterday" } });
+    expect(await screen.findByText("Run deleted")).toBeTruthy();
+    expect(screen.queryByText("Product added")).toBe(null);
+    expect(/whole of yesterday has been searched/i.test(document.body.textContent ?? "")).toBe(
+      true,
+    );
   });
 });
 

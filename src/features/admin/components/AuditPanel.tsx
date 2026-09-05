@@ -33,50 +33,63 @@
    ⭐⭐⭐ THE FILTERS ARE THE SAME PROBLEM WEARING A DISGUISE, AND THEY ARE THE
    EASIEST PLACE ON THIS SCREEN TO SHIP A LIE.
 
-   `fetchAuditPage` returns fifty ROWS, not fifty MATCHES. Filter its result in
-   the browser and the honest-looking footer beneath — *"showing 3 removals"* —
-   is a count of the removals that happen to sit in the newest fifty rows of the
-   log, presented as a count of the company's removals. On a busy company it is
-   an EMPTY LIST under the word "removals", which a reader will quite reasonably
-   take to mean nothing has ever been deleted. That is strictly worse than
-   offering no filter at all, because a missing feature is visible and a wrong
-   answer is not.
+   A filter applied to rows already fetched is not a filter on the log. Fifty
+   rows read might hold three removals, and an honest-looking footer beneath —
+   *"showing 3 removals"* — would be a count of the removals that happen to sit
+   in the newest fifty rows, presented as a count of the company's removals. On
+   a busy company it is an EMPTY LIST under the word "removals", which a reader
+   will quite reasonably take to mean nothing has ever been deleted. That is
+   strictly worse than offering no filter at all, because a missing feature is
+   visible and a wrong answer is not.
 
-   So this panel keeps TWO numbers apart and never lets one stand in for the
-   other:
+   ⭐⭐⭐ SO THE FILTER IS IN THE QUERY, AND THAT IS WHAT MAKES THE FOOTER'S
+   ARITHMETIC TRIVIAL RATHER THAN CLEVER. `fetchAuditPage` takes the period,
+   the action and the kind of thing and sends `.gte("at", …)`, `.lt("at", …)`
+   and `.in(…)`. A page is therefore fifty MATCHES, and `hasMore` — still
+   measured by asking for one row more than the page shows — means *"there are
+   older rows that MATCH"*. The scan and the match are the same number now, and
+   the whole footer rests on one server-computed boolean:
 
-     - the SCAN — how many rows it has actually read out of the log, and
-     - the MATCH — how many of those rows the filter keeps.
+       searchComplete === !hasNextPage
 
-   and it may print the word "all" only when it can PROVE the scan covered every
-   row the filter could possibly have matched. The proof is the ordering:
+   ⭐ WHY THAT IS SOUND, IN ONE LINE: `hasNextPage` is false exactly when the
+   server, applying the same predicate the list was drawn from, found no row
+   older than the cursor that satisfies it. There is then nothing unread that
+   could match — so "all" is a statement about the FILTERED SET, which is what
+   the reader is looking at, and it needs no argument about ordering at all.
 
-   ⚠️⚠️ EVERY PERIOD OFFERED IS ANCHORED AT NOW, AND THAT IS A CORRECTNESS
-   DECISION RATHER THAN A TASTE ONE. The read is newest-first on `id`, so the
-   rows inside "the last 7 days" are a PREFIX of the scan. The moment the scan
-   reaches one row older than the cutoff, every row that could have matched has
-   already been read and the screen may say "all". A period that did NOT end at
-   now — "August", "last month" — sits in the MIDDLE of the log and cannot be
-   completed without reading every row newer than it, so none is offered. When
-   `fetchAuditPage` learns to take a `since`, that changes; until then, offering
-   one would be offering a filter this screen cannot finish.
+   ⚠️⚠️ AND THE ARGUMENT IT REPLACED WAS WEAKER THAN IT LOOKED. The old proof
+   was: the read is newest-first on `id`, every period ends at NOW, so the
+   period's rows are a PREFIX of the scan and one row older than the cutoff
+   proves the rest cannot match. That silently assumed `at` rises with `id`. It
+   does not always: `at` is the TRANSACTION's start time, two rows written in
+   one transaction share it exactly, and a long transaction can commit — taking
+   a later `id` — after a shorter one that started later. One such row inside
+   the period, sitting below a row outside it, and the old screen would have
+   said "the whole of the last 7 days has been searched" with that change
+   unread. The predicate in the query has no such assumption: `id < cursor` is
+   a boundary and the filter is a test on each row, and neither depends on the
+   other.
 
-   ⚠️ "ALL TIME" HAS NO CUTOFF, so under a filter it is complete only once the
-   whole log has been read. Until then the footer says what it SEARCHED, never
-   what it found, and keeps the control that searches further.
+   ⚠️ WHICH IS ALSO WHY A PERIOD WITH BOTH ENDS CAN BE OFFERED NOW —
+   "Yesterday", "last month". Such a period is a MIDDLE slice of the log and can
+   never be a prefix of anything, which is exactly why the old screen refused to
+   offer one. The server does not care where the slice sits.
 
-   ⚠️ AND THE SCREEN FINISHES A BOUNDED PERIOD BY ITSELF. Once a period is
-   chosen the scan has a floor, so the panel pages towards it without being
-   asked — up to `AUDIT_AUTO_SCAN_PAGES`, because an unbounded self-read is a
-   screen that hammers the database on a company with a long history. When it
-   stops short it says so in the same sentence it always uses.
+   ⚠️ AND THE SELF-READ IS GONE WITH IT. The panel used to page towards the
+   period's floor by itself, up to ten requests, because that walk was the only
+   way to earn the word "all". The first page now carries the proof, so a chosen
+   period costs ONE request; ten would be ten pages of matches nobody asked to
+   see. What is left is the ordinary "load older" button, which means what it
+   says: there are more MATCHES.
 
-   ⚠️ WHAT THIS COSTS, SAID PLAINLY: a narrow filter over a long log is many
-   round trips, because the server is filtering nothing. `src/lib/api/audit.ts`
-   taking `since` / `tables` / `actions` and pushing them into `.gte("at", …)`
-   and `.in(…)` would make a page fifty MATCHES instead of fifty rows, and would
-   also let a bounded period be offered. That is a change to a file this panel
-   does not own; it is flagged, not invented here.
+   ⚠️ THE KIND PICKER REMEMBERS WHAT IT HAS SEEN, and that is a consequence of
+   the same change rather than a nicety. The list of kinds is built from rows
+   actually read — never a hand-written list of table names, because the audited
+   set is decided by triggers on the database and grew by four in one migration.
+   Once the SERVER narrows, the rows read under "Products" are all products, so
+   a picker rebuilt from them would offer "Products" alone and leave the reader
+   no control to undo the filter with.
 
    ⭐ A DELETION IS VISIBLE AT A GLANCE, AND NOT BY COLOUR ALONE. The maintainer
    read the struck-through fields of a delete row as damage — which is fair,
@@ -122,9 +135,12 @@ import {
   fetchAuditPage,
   fetchHierarchyTree,
   fetchOperatorsAdmin,
+  type AuditAction,
+  type AuditFilter,
   type AuditPage,
   type SchedulerError,
 } from "@/lib/api";
+import { formatCalendarMonth, type DateFormat } from "@/lib/format/dates";
 import fieldStyles from "@/components/Field.module.css";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
@@ -149,24 +165,35 @@ export const AUDIT_PANEL_READY = true;
 /** Stable identity so an empty map never re-renders the list. */
 const NO_ACTORS: ReadonlyMap<string, string> = new Map();
 
-/**
- * How many pages the screen will read on its own to finish a chosen period.
- *
- * ⚠️ A CEILING, NOT A TARGET, and it exists because the alternative is a screen
- * that walks the entire history of a busy company fifty rows at a time the
- * moment somebody picks "last 30 days". Ten pages is five hundred changes; past
- * that the reader is told the search is unfinished and drives it themselves.
- * Exported so the case that pins the bound reads the same number the code does.
+/** The same, for the kinds the screen has seen — the effect that fills it
+ *  compares against this, so a first render cannot loop. */
+const NO_KINDS: ReadonlyMap<string, string> = new Map();
+
+/*
+ * ⚠️ `AUDIT_AUTO_SCAN_PAGES` USED TO SIT HERE AND IS GONE. It bounded a
+ * self-read that paged towards the chosen period's floor, up to ten requests,
+ * because reading past that floor was the only way the screen could prove a
+ * filtered search had finished. The server now applies the filter, so the first
+ * page's `hasMore` IS the proof and the walk has nothing left to do. Removed in
+ * the same commit as the filter moved into the query, rather than left behind
+ * as a bound on a loop nobody runs.
  */
-export const AUDIT_AUTO_SCAN_PAGES = 10;
 
 export const auditKeys = {
   all: ["audit-log"] as const,
   actors: ["audit-log", "actors"] as const,
+  /**
+   * ⚠️ THE FILTER IS PART OF THE KEY, because it is now part of the QUERY. Two
+   * filters are two different reads and must not share a cache entry — and
+   * because they do not, going back to a filter already seen is instant.
+   * Still under the `["audit-log"]` prefix, so every existing invalidation
+   * reaches it.
+   */
+  page: (filter: AuditFilter) => ["audit-log", "page", filter] as const,
 };
 
 /* ---------------------------------------------------------------------------
-   THE PERIODS — AND WHY THESE FOUR
+   THE PERIODS — AND WHY THESE SIX
    ------------------------------------------------------------------------ */
 
 interface AuditPeriod {
@@ -175,26 +202,94 @@ interface AuditPeriod {
   label: string;
   /** In the footer: "the whole of ___ has been searched." */
   phrase: string;
-  /** How far back from NOW. `null` is no cutoff at all. */
-  hours: number | null;
+  /** Inclusive lower bound, ms since the epoch. `null` is the start of the log. */
+  fromMs: number | null;
+  /**
+   * EXCLUSIVE upper bound, ms. `null` is "now, and anything that lands while
+   * this is on screen".
+   *
+   * ⚠️ EXCLUSIVE SO TWO ADJACENT PERIODS CANNOT BOTH CLAIM ONE INSTANT.
+   * "Yesterday" ends where today starts; a change written at exactly midnight
+   * belongs to one of them, not to both.
+   */
+  toMs: number | null;
+}
+
+/** Midnight at the start of the day `ms` falls in, IN THE READER'S TIMEZONE —
+ *  the same timezone the When column is rendered in, so a period boundary and
+ *  the dates beside it agree. */
+function startOfLocalDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 /**
- * ⚠️ ALL FOUR END AT NOW. See the header: that is what makes them a prefix of a
- * newest-first scan, and therefore the only kind of period this screen can
- * finish without a server-side filter.
+ * The periods offered, resolved against one instant.
+ *
+ * ⭐⭐ TWO OF THEM HAVE BOTH ENDS, WHICH THIS SCREEN COULD NOT OFFER BEFORE.
+ * While the browser did the filtering, only a period anchored at NOW could ever
+ * be shown to be finished (see the header); "yesterday" and "last month" sit in
+ * the middle of the log and were therefore left out rather than offered
+ * unfinishable. With the bounds in the query they are ordinary.
  *
  * The set is what somebody troubleshooting actually reaches for — "it worked
- * this morning" (24 hours), "it worked last week" (7 days), "since the last
- * time anyone looked" (30 days) — plus the whole log, which stays the default so
- * that arriving at this screen shows the same thing it always did.
+ * this morning" (24 hours), "it worked yesterday", "it worked last week" (7
+ * days), "since the last time anyone looked" (30 days), "what happened in
+ * August" — plus the whole log, which stays the default so that arriving at
+ * this screen shows the same thing it always did.
  */
-const PERIODS: readonly AuditPeriod[] = [
-  { id: "all", label: "All time", phrase: "the log", hours: null },
-  { id: "24h", label: "Last 24 hours", phrase: "the last 24 hours", hours: 24 },
-  { id: "7d", label: "Last 7 days", phrase: "the last 7 days", hours: 24 * 7 },
-  { id: "30d", label: "Last 30 days", phrase: "the last 30 days", hours: 24 * 30 },
-];
+function buildPeriods(nowMs: number, fmt: DateFormat): readonly AuditPeriod[] {
+  const midnight = startOfLocalDay(nowMs);
+  const yesterday = new Date(midnight);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const monthStart = new Date(midnight);
+  monthStart.setDate(1);
+  const lastMonthStart = new Date(monthStart);
+  lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+  // ⚠️ THROUGH THE SEAM, NOT A MONTH ARRAY OF OUR OWN. This file grew twelve
+  // English month names and `dateSeam.test.ts` refused them, correctly: the
+  // names belong to `dates.ts`, which already owns them for every other date on
+  // this screen. `formatCalendarMonth` also follows the ORG's chosen format, so
+  // the picker cannot read "August 2026" beside a column reading "2026-08-14".
+  const lastMonthDay = `${lastMonthStart.getFullYear()}-${String(
+    lastMonthStart.getMonth() + 1,
+  ).padStart(2, "0")}-01`;
+  const lastMonth = formatCalendarMonth(lastMonthDay, fmt);
+  const ago = (hours: number) => nowMs - hours * 3_600_000;
+  return [
+    { id: "all", label: "All time", phrase: "the log", fromMs: null, toMs: null },
+    {
+      id: "24h",
+      label: "Last 24 hours",
+      phrase: "the last 24 hours",
+      fromMs: ago(24),
+      toMs: null,
+    },
+    { id: "7d", label: "Last 7 days", phrase: "the last 7 days", fromMs: ago(24 * 7), toMs: null },
+    {
+      id: "30d",
+      label: "Last 30 days",
+      phrase: "the last 30 days",
+      fromMs: ago(24 * 30),
+      toMs: null,
+    },
+    {
+      id: "yesterday",
+      label: "Yesterday",
+      phrase: "yesterday",
+      fromMs: yesterday.getTime(),
+      toMs: midnight,
+    },
+    {
+      id: "prev-month",
+      label: lastMonth,
+      phrase: lastMonth,
+      fromMs: lastMonthStart.getTime(),
+      toMs: monthStart.getTime(),
+    },
+  ];
+}
 
 /**
  * The three actions, in the product's words.
@@ -204,32 +299,24 @@ const PERIODS: readonly AuditPeriod[] = [
  * fourth cannot arrive without a migration — which is why a fixed list is safe
  * here and a fixed list of TABLE names below would not be.
  */
-const ACTION_FILTERS: ReadonlyArray<{ id: string; label: string }> = [
+const ACTION_FILTERS: ReadonlyArray<{ id: "all" | AuditAction; label: string }> = [
   { id: "all", label: "Any change" },
   { id: "insert", label: "Added" },
   { id: "update", label: "Changed" },
   { id: "delete", label: "Removed" },
 ];
 
-/**
- * An audit row's `at`, in milliseconds, or `null` when it cannot be read.
- *
- * ⚠️ `at` COMES BACK PROPERLY ISO on the audit row itself, but the same
- * normalisation `auditView` applies to jsonb timestamps is done anyway — one
- * parser that accepts both beats two that can disagree, and a value this cannot
- * read must degrade to "unknown when", never to zero (which would be 1970 and
- * would silently drop the row out of every period).
+/*
+ * ⚠️ `instantMs()` USED TO SIT HERE AND IS GONE, AND ITS ABSENCE IS A PROPERTY
+ * WORTH NAMING. It parsed an audit row's `at` so this file could decide whether
+ * the row was inside the chosen period — a SECOND parser for a value the
+ * database had already compared perfectly well, and one whose failure mode had
+ * to be written round carefully ("a row whose timestamp cannot be read is
+ * always shown, never hidden, and never counted as proof the window is
+ * exhausted"). The comparison happens in Postgres now, against the column's own
+ * type. No row on this screen can be hidden by a parse this code got wrong,
+ * because this code no longer parses anything.
  */
-function instantMs(raw: string): number | null {
-  const d = new Date(
-    raw
-      .trim()
-      .replace(" ", "T")
-      .replace(/([+-]\d{2})$/, "$1:00"),
-  );
-  const t = d.getTime();
-  return Number.isNaN(t) ? null : t;
-}
 
 function plural(n: number): string {
   return n === 1 ? "" : "s";
@@ -266,6 +353,39 @@ export function AuditPanel() {
   const [actionId, setActionId] = useState<string>("all");
   const [kindId, setKindId] = useState<string>("all");
 
+  /* ⚠️ THE PERIODS ARE RESOLVED ONCE, AT MOUNT, and every bound is frozen with
+     them. A bound that slid forwards while somebody paged would quietly drop
+     rows off the bottom of the window they are reading, and "the whole of the
+     last 7 days has been searched" would be a claim about a period that no
+     longer exists. Freezing can only ever make the window slightly WIDER than
+     the label promises as the minutes pass, which over-shows rather than
+     under-claims — the safe direction for a log. */
+  const periods = useMemo(() => buildPeriods(Date.now(), fmt), [fmt]);
+  const period = periods.find((p) => p.id === periodId) ?? periods[0];
+
+  /**
+   * ⭐⭐ WHAT THE SERVER IS ASKED FOR. All four keys are always present so the
+   * request reads the same shape whether or not anything is narrowed, and this
+   * object is the query key as well as the argument — the two can therefore
+   * never describe different reads.
+   */
+  /* ⚠️ RESOLVED THROUGH THE LIST, NOT CAST. A `<select>`'s value is a string
+     as far as the DOM is concerned; looking it up in the offered set means an
+     id this screen does not recognise degrades to "no restriction" instead of
+     being posted to the server as an action the CHECK constraint has never
+     heard of. Same shape as `period` above. */
+  const action = ACTION_FILTERS.find((a) => a.id === actionId)?.id ?? "all";
+
+  const filter: AuditFilter = useMemo(
+    () => ({
+      since: period.fromMs === null ? null : new Date(period.fromMs).toISOString(),
+      until: period.toMs === null ? null : new Date(period.toMs).toISOString(),
+      actions: action === "all" ? null : [action],
+      tables: kindId === "all" ? null : [kindId],
+    }),
+    [period, action, kindId],
+  );
+
   /* ⚠️ THE ERROR TYPE IS SPELLED OUT, and it is not decoration. `fetchAuditPage`
      throws through `toSchedulerError`, so every failure here IS a
      `SchedulerError` — but React Query's default error generic is `Error`, and
@@ -275,11 +395,11 @@ export function AuditPanel() {
     AuditPage,
     SchedulerError,
     InfiniteData<AuditPage>,
-    typeof auditKeys.all,
+    ReturnType<typeof auditKeys.page>,
     number | null
   >({
-    queryKey: auditKeys.all,
-    queryFn: ({ pageParam }) => fetchAuditPage(pageParam),
+    queryKey: auditKeys.page(filter),
+    queryFn: ({ pageParam }) => fetchAuditPage(pageParam, filter),
     initialPageParam: null as number | null,
     // ⚠️ THE CURSOR IS THE LAST ID ON SCREEN, never a row offset — a change
     // landing while somebody reads moves every offset by one, so offset paging
@@ -390,109 +510,81 @@ export function AuditPanel() {
   ]);
 
   const pages = log.data?.pages;
-  /** Every row READ so far — the SCAN. Not what the reader is looking at. */
+  /**
+   * The rows on screen. Every one of them MATCHES: the server applied the
+   * filter, so there is no longer a scan and a match to keep apart.
+   */
   const entries = useMemo(() => pages?.flatMap((p) => p.entries) ?? [], [pages]);
 
-  const period = PERIODS.find((p) => p.id === periodId) ?? PERIODS[0];
-  /* ⚠️ FROZEN AT THE MOMENT THE PERIOD IS CHOSEN, not recomputed every render.
-     A cutoff that slid forwards while somebody paged would quietly drop rows off
-     the bottom of the window they are reading, and the "whole period searched"
-     claim would be about a period that no longer exists. */
-  const cutoff = useMemo(
-    () => (period.hours === null ? null : Date.now() - period.hours * 3_600_000),
-    [period],
-  );
-
   /**
-   * The oldest instant the scan has reached.
-   *
-   * ⚠️ THE MINIMUM, NOT THE LAST ROW. `id` and `at` agree in practice but the
-   * api file is explicit that ordering is by `id` alone, and a row whose `at`
-   * cannot be parsed contributes nothing here rather than a wrong floor — the
-   * scan is only ever declared finished on evidence it actually has.
-   */
-  const oldestReadMs = useMemo(() => {
-    let oldest: number | null = null;
-    for (const e of entries) {
-      const t = instantMs(e.at);
-      if (t !== null && (oldest === null || t < oldest)) oldest = t;
-    }
-    return oldest;
-  }, [entries]);
-
-  /**
-   * The kinds of thing offered, built from the rows actually read.
+   * The kinds of thing offered — every kind this screen has SEEN, not the kinds
+   * in the current result.
    *
    * ⚠️ NOT A HAND-WRITTEN LIST OF TABLE NAMES. `describeTable` is deliberately
    * not an allowlist — the audited set is decided by triggers on the database
    * and grew by four in one migration — so a fixed list here would be a second
    * copy of a list that lives in the schema, and would go silently blind to a
-   * seventh table. Derived from the scan, it cannot.
+   * seventh table.
+   *
+   * ⚠️⚠️ AND IT REMEMBERS, WHICH IT DID NOT HAVE TO WHILE THE BROWSER FILTERED.
+   * Every row read under "Products" is a product, so a picker rebuilt from the
+   * current rows would offer "Products" and nothing else — a filter with no
+   * control left to undo it. It also never shrinks when a period narrows, so a
+   * kind with nothing in the chosen window can still be asked for, and gets the
+   * honest answer ("no changes match this filter") instead of vanishing.
    */
-  const kinds = useMemo(() => {
-    const seen = new Map<string, string>();
+  const [kindsSeen, setKindsSeen] = useState<ReadonlyMap<string, string>>(NO_KINDS);
+  useEffect(() => {
+    let found = false;
+    const next = new Map(kindsSeen);
     for (const e of entries) {
-      if (!seen.has(e.tableName)) seen.set(e.tableName, describeTable(e.tableName));
+      if (!next.has(e.tableName)) {
+        next.set(e.tableName, describeTable(e.tableName));
+        found = true;
+      }
     }
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [entries]);
-
-  /** The rows the reader is looking at — the MATCH. */
-  const visible = useMemo(
-    () =>
-      entries.filter((e) => {
-        if (cutoff !== null) {
-          const t = instantMs(e.at);
-          // ⚠️ AN UNREADABLE TIMESTAMP IS SHOWN, NEVER HIDDEN. This is a log:
-          // over-showing a row whose date this code cannot parse is a nuisance,
-          // hiding it is deleting evidence to keep a filter tidy.
-          if (t !== null && t < cutoff) return false;
-        }
-        if (actionId !== "all" && e.action !== actionId) return false;
-        if (kindId !== "all" && e.tableName !== kindId) return false;
-        return true;
-      }),
-    [entries, cutoff, actionId, kindId],
+    if (found) setKindsSeen(next);
+  }, [entries, kindsSeen]);
+  const kinds = useMemo(
+    () => [...kindsSeen.entries()].sort((a, b) => a[1].localeCompare(b[1])),
+    [kindsSeen],
   );
+  /** Whether a row has EVER been read — which is what licenses the controls,
+   *  not whether the current filter matched anything. */
+  const hasEverListed = kindsSeen.size > 0;
 
-  const filtering = periodId !== "all" || actionId !== "all" || kindId !== "all";
+  /* ⚠️ READ OFF THE RESOLVED VALUES, so "is anything narrowed?" and "what was
+     sent to the server" can never disagree. */
+  const filtering = period.id !== "all" || action !== "all" || kindId !== "all";
   const hasNextPage = log.hasNextPage;
 
   /**
-   * ⭐⭐ THE ONE PREDICATE THE WHOLE FOOTER RESTS ON: has the scan covered every
-   * row the filter could have matched?
+   * ⭐⭐ THE ONE PREDICATE THE WHOLE FOOTER RESTS ON, AND IT IS NOW ONE FACT
+   * RATHER THAN AN ARGUMENT: has every row the filter could match been read?
    *
-   * Either the whole log has been read, or the scan has reached a row strictly
-   * older than the cutoff — at which point, the read being newest-first, nothing
-   * unread can be inside the period. Nothing else may license the word "all".
+   * `hasMore` comes from `fetchAuditPage` asking for one row more than it
+   * returns, WITH the filter in the query. False on the last page therefore
+   * means the server — applying the same predicate this list was drawn from —
+   * found no row older than the cursor that satisfies it, so nothing unread can
+   * match and "all" is a true statement about the filtered set. Nothing else may
+   * license that word.
+   *
+   * ⚠️ IT NO LONGER DEPENDS ON THE PERIOD ENDING AT NOW, on `at` rising with
+   * `id`, or on this file parsing a timestamp correctly. See the header for the
+   * assumption that used to be buried in the version this replaced.
+   *
+   * ⚠️⚠️ AND IT IS THE PAGE'S OWN `hasMore`, NOT `!hasNextPage`. React Query
+   * reports no next page when `getNextPageParam` returns undefined, and that
+   * happens for TWO reasons: the server said there is nothing more, or the page
+   * carried no row to take a cursor from. The second is reachable — a page whose
+   * rows are ALL rejected by `parseAuditEntry` arrives empty with `hasMore`
+   * true — and it is precisely the case where the screen knows least and would
+   * have claimed most. Reading the flag itself keeps "finished" meaning
+   * finished; the reader is told there are older changes and, with no cursor to
+   * ask from, is not offered a button that cannot move.
    */
-  const searchComplete =
-    !hasNextPage || (cutoff !== null && oldestReadMs !== null && oldestReadMs < cutoff);
-
-  /* ⚠️ THE SELF-READ, AND ITS TWO BOUNDS. It runs only when a period gives the
-     scan a floor to reach, and never past `AUDIT_AUTO_SCAN_PAGES`. Without the
-     first bound "all time" plus a narrow filter would read the entire log;
-     without the second, "last 30 days" would on a busy company. */
-  const pageCount = pages?.length ?? 0;
-  const { fetchNextPage, isFetchingNextPage } = log;
-  const scanOn =
-    cutoff !== null &&
-    !searchComplete &&
-    hasNextPage === true &&
-    !isFetchingNextPage &&
-    pageCount > 0 &&
-    pageCount < AUDIT_AUTO_SCAN_PAGES;
-  /* ⚠️⚠️ `pageCount` IS IN THE DEPS AND IT IS LOAD-BEARING. Depending on
-     `scanOn` alone reads as enough — it goes false while a page is in flight and
-     true again after — but React batches the start and the end of a fast fetch
-     into ONE render, so the flag is never observed false, the deps never change,
-     and the effect fires exactly twice and stops. Measured: the self-read
-     stopped after two pages instead of ten. The page count is the thing that
-     actually moves every time a page lands. */
-  useEffect(() => {
-    if (!scanOn) return;
-    void fetchNextPage();
-  }, [scanOn, pageCount, fetchNextPage]);
+  const lastPage = pages !== undefined && pages.length > 0 ? pages[pages.length - 1] : undefined;
+  const searchComplete = lastPage !== undefined && !lastPage.hasMore;
 
   /* ⭐ THE GATE, AND IT SAYS WHY. An empty list would be a lie here: the log is
      not empty, it is filtered to nothing by a policy this person does not
@@ -519,37 +611,45 @@ export function AuditPanel() {
      `AdminPage` spells out for its own read. */
   const showLoading = !canQuery || log.isPending;
 
-  const scanned = entries.length;
-  const matched = visible.length;
+  const matched = entries.length;
 
-  /* ⭐⭐ THE SENTENCE. Three shapes, and which one is printed is decided by
-     `searchComplete` and nothing else. The unfiltered pair is word for word what
-     this screen has always said, because nothing about it changed. */
+  /* ⭐⭐ THE SENTENCE. Which one is printed is decided by `searchComplete` and
+     nothing else. The unfiltered pair is word for word what this screen has
+     always said, because nothing about it changed; so is the pair that reports
+     a finished search, because what changed is how it is PROVED, not what it
+     claims. */
   let footerText: string;
   if (!filtering) {
-    footerText = hasNextPage
-      ? `Showing the most recent ${scanned} change${plural(scanned)}. There are older ones.`
-      : `Showing the most recent ${scanned} change${plural(scanned)} — this is the whole log.`;
+    footerText = searchComplete
+      ? `Showing the most recent ${matched} change${plural(matched)} — this is the whole log.`
+      : matched === 0
+        ? // Only reachable when a page arrived whose rows the guard all
+          // refused. It is a fact about this screen, not about the company,
+          // and saying nothing would leave the reader with a blank panel.
+          `No changes could be read from this page of the log. There are older ones.`
+        : `Showing the most recent ${matched} change${plural(matched)}. There are older ones.`;
   } else if (searchComplete) {
     footerText =
       matched === 0
         ? `No changes match this filter — the whole of ${period.phrase} has been searched.`
         : `Showing all ${matched} matching change${plural(matched)} — the whole of ${period.phrase} has been searched.`;
   } else {
-    // ⚠️⚠️ NEITHER OF THESE IS AN ANSWER, AND THAT IS THE POINT. The screen has
-    // read part of the log; it reports what it read and what it found in it, and
-    // says outright that the rest is unsearched. A reader who sees no removals
-    // here has been told why they might be seeing none.
+    /* ⚠️⚠️ NOT AN ANSWER, AND IT MUST NOT READ AS ONE. The server found MORE
+       matches than one page holds, so the count on screen is a page of the
+       answer and not the answer. This sentence replaced one that reported a
+       scan ("found in the 50 most recent changes read"), because the screen no
+       longer reads rows it does not show — the honest report is now about
+       matches rather than about how far it looked. */
     footerText =
       matched === 0
-        ? `No match yet in the ${scanned} most recent change${plural(scanned)} read. Older changes have not been searched.`
-        : `Showing ${matched} matching change${plural(matched)} found in the ${scanned} most recent change${plural(scanned)} read. Older changes have not been searched.`;
+        ? `No matching changes on this page of ${period.phrase}. There are older ones still to read.`
+        : `Showing the ${matched} most recent matching change${plural(matched)} in ${period.phrase}. There are older ones.`;
   }
 
-  // ⚠️ NO BUTTON ONCE A BOUNDED PERIOD IS FINISHED: there are older changes, but
-  // none of them can be inside the period, so offering to search for them would
-  // be offering work that cannot change the answer.
-  const showMore = hasNextPage === true && !(filtering && searchComplete);
+  // ⚠️ NO BUTTON ONCE THE SEARCH IS FINISHED: there may well be older changes
+  // in the log, but none of them can match, so offering to search for them
+  // would be offering work that cannot change the answer.
+  const showMore = hasNextPage === true;
 
   return (
     <div className={styles.panel}>
@@ -573,16 +673,25 @@ export function AuditPanel() {
 
       {showLoading && <p className={styles.status}>Loading…</p>}
 
-      {/* ⚠️ AN EMPTY LOG AND A FAILED READ MUST NOT SHARE A SENTENCE: one is a
-          fact about the company, the other is worth retrying. */}
-      {!showLoading && !log.isError && entries.length === 0 && (
+      {/* ⚠️⚠️ AN EMPTY LOG, AN EMPTY RESULT AND A FAILED READ ARE THREE
+          DIFFERENT FACTS AND MAY NEVER SHARE A SENTENCE. One is a claim about
+          the company, one is the answer to a question the reader asked, and one
+          is worth retrying. `!filtering` is what keeps them apart now that the
+          SERVER does the narrowing: a filtered read that matches nothing comes
+          back with no rows at all, where the browser-side version always still
+          had the scan behind it. */}
+      {!showLoading && !log.isError && !filtering && searchComplete && entries.length === 0 && (
         <p className={styles.status}>Nothing has been changed yet.</p>
       )}
 
-      {entries.length > 0 && (
+      {(hasEverListed || filtering) && (
         <>
-          {/* ⚠️ GATED ON THE SCAN, NOT ON THE MATCH — the controls must survive a
-              filter that empties the table, or the reader cannot undo it. */}
+          {/* ⚠️⚠️ GATED ON HAVING EVER LISTED ANYTHING, NEVER ON THE CURRENT
+              RESULT — the controls must survive a filter that empties the
+              table, or the reader cannot undo it and is left looking at
+              nothing. This is the same rule the old panel kept by gating on the
+              scan; with the filter in the query there IS no scan behind an
+              empty result, so the panel remembers instead. */}
           <div className={styles.filters}>
             <div className={styles.filter}>
               <label className={styles.filterLabel} htmlFor="audit-period">
@@ -594,7 +703,7 @@ export function AuditPanel() {
                 value={periodId}
                 onChange={(e) => setPeriodId(e.target.value)}
               >
-                {PERIODS.map((p) => (
+                {periods.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
                   </option>
@@ -640,7 +749,7 @@ export function AuditPanel() {
             </div>
           </div>
 
-          {visible.length > 0 && (
+          {entries.length > 0 && (
             <div className={styles.scroll}>
               <table className={styles.table}>
                 <thead>
@@ -660,7 +769,7 @@ export function AuditPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((e) => {
+                  {entries.map((e) => {
                     const line = describeEntry(e, fmt, names);
                     return (
                       /* ⚠️ `data-action` IS THE HOOK FOR THE ACCENT, and the
@@ -693,29 +802,41 @@ export function AuditPanel() {
               </table>
             </div>
           )}
-
-          {/* ⭐⭐ THE SCREEN STATES ITS OWN COMPLETENESS — of the LOG when it is
-              unfiltered, and of the SEARCH when it is not. The counts are the
-              rows actually read and the rows actually rendered, so no sentence
-              can drift from the thing it describes. */}
-          <div className={styles.footer}>
-            <p className={styles.status}>{footerText}</p>
-            {showMore && (
-              <button
-                type="button"
-                className={styles.more}
-                disabled={log.isFetchingNextPage}
-                onClick={() => void log.fetchNextPage()}
-              >
-                {log.isFetchingNextPage
-                  ? "Loading…"
-                  : filtering
-                    ? "Search older changes"
-                    : "Load older changes"}
-              </button>
-            )}
-          </div>
         </>
+      )}
+
+      {/* ⭐⭐ THE SCREEN STATES ITS OWN COMPLETENESS — of the LOG when it is
+          unfiltered, and of the SEARCH when it is not. The count is the rows
+          actually rendered, which are exactly the rows that matched, so no
+          sentence can drift from the thing it describes.
+
+          ⚠️ OUTSIDE THE CONTROLS' BLOCK, and that is not tidying. The one state
+          with no rows, no filter and an unfinished read — a page whose rows the
+          guard all refused — has no controls to sit under and is precisely the
+          state the reader most needs a sentence for.
+
+          ⚠️ SILENT WHILE A READ IS IN FLIGHT, rather than describing the page it
+          is about to replace: a filter change is a NEW query (the filter is
+          part of the key), so the alternative is a sentence counting rows that
+          are no longer the answer. */}
+      {!showLoading && !log.isError && (hasEverListed || filtering || !searchComplete) && (
+        <div className={styles.footer}>
+          <p className={styles.status}>{footerText}</p>
+          {showMore && (
+            <button
+              type="button"
+              className={styles.more}
+              disabled={log.isFetchingNextPage}
+              onClick={() => void log.fetchNextPage()}
+            >
+              {log.isFetchingNextPage
+                ? "Loading…"
+                : filtering
+                  ? "Search older changes"
+                  : "Load older changes"}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

@@ -111,6 +111,44 @@ export function coerceDateFormat(v: unknown): DateFormat {
  * it is not a well-formed `YYYY-MM-DD` — matching the old `formatDay`, so a
  * malformed or already-formatted value is shown as-is rather than mangled.
  */
+/**
+ * A whole MONTH's name, for labelling a period rather than a day: `"2026-08-01"`
+ * (or any day in that month) -> `"August 2026"`, or `"2026-08"` where the org
+ * has chosen a numeric format.
+ *
+ * ⚠️⚠️ THIS EXISTS BECAUSE A SCREEN GREW ITS OWN MONTH-NAME ARRAY AND THE SEAM
+ * AUDIT CAUGHT IT. `AuditPanel` needed to label "the previous calendar month" on
+ * a filter and wrote out twelve English month names beside the picker — which is
+ * a second vocabulary for something this module already owns, and the thing
+ * `dateSeam.test.ts` exists to refuse. The names live here once.
+ *
+ * ⚠️ IT FOLLOWS THE ORG'S FORMAT RATHER THAN ALWAYS SPELLING THE MONTH. An org
+ * that asked for `iso` dates is telling you it wants numbers, and a picker
+ * reading "August 2026" beside a column reading "2026-08-14" is two dialects on
+ * one screen. The numeric formats therefore get `YYYY-MM`, in their own order
+ * where that order is unambiguous.
+ *
+ * Returns the input UNCHANGED when it is not a well-formed day, exactly as
+ * `formatCalendarDay` does, so a malformed value is shown rather than mangled.
+ */
+export function formatCalendarMonth(day: string, fmt: DateFormat = DEFAULT_DATE_FORMAT): string {
+  const m = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(day);
+  if (m === null) return day;
+  const [, yyyy, mm] = m;
+  const monFull = MONTHS_FULL[Number(mm) - 1];
+  switch (fmt) {
+    case "dmy_slash":
+    case "mdy_slash":
+    case "ymd_slash":
+      return `${mm}/${yyyy}`;
+    case "iso":
+      return `${yyyy}-${mm}`;
+    default:
+      // Every remaining format spells a month, so this one does too.
+      return monFull === undefined ? day : `${monFull} ${yyyy}`;
+  }
+}
+
 export function formatCalendarDay(day: string, fmt: DateFormat = DEFAULT_DATE_FORMAT): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (m === null) return day;

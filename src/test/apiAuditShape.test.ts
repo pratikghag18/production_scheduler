@@ -17,15 +17,54 @@
  * size is asserted to sit well under the ceiling so a page can never be
  * silently truncated by the server instead of by this code.
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACTOR_IDENTITY_COLUMNS,
   AUDIT_COLUMNS,
   AUDIT_PAGE_SIZE,
   actorIdentityMap,
+  fetchAuditPage,
   parseActorIdentity,
   parseAuditEntry,
 } from "@/lib/api/audit";
+
+/* ---------------------------------------------------------------------------
+   A RECORDING POSTGREST BUILDER.
+
+   ⭐ THE FILTER IS NOW THE SERVER'S JOB, and the only way to prove a `.gte` was
+   actually sent is to watch the call. Every builder method returns the same
+   object and writes down what it was asked for; the object is thenable, so
+   `await query` in `fetchAuditPage` resolves to whatever `sb.reply` holds.
+   ------------------------------------------------------------------------ */
+const sb = vi.hoisted(() => {
+  const calls: unknown[][] = [];
+  let reply: { data: unknown; error: unknown } = { data: [], error: null };
+  const builder: Record<string, unknown> = {};
+  const record =
+    (name: string) =>
+    (...args: unknown[]) => {
+      calls.push([name, ...args]);
+      return builder;
+    };
+  for (const method of ["select", "order", "limit", "lt", "gte", "in", "eq"]) {
+    builder[method] = record(method);
+  }
+  builder.then = (onFulfilled: (v: unknown) => unknown) => Promise.resolve(reply).then(onFulfilled);
+  return {
+    calls,
+    reset(rows: unknown[] = []) {
+      calls.length = 0;
+      reply = { data: rows, error: null };
+    },
+    client: { from: record("from") },
+    /** Every argument list one builder method was called with. */
+    argsOf(name: string): unknown[][] {
+      return calls.filter((c) => c[0] === name).map((c) => c.slice(1));
+    },
+  };
+});
+
+vi.mock("@/lib/supabase", () => ({ supabase: sb.client }));
 
 /** `"a, b, c"` -> `["a","b","c"]`. */
 function selectedColumns(): string[] {
@@ -291,5 +330,119 @@ describe("the identity map is keyed by the id the audit log actually carries", (
     expect(actorIdentityMap(null).size).toBe(0);
     expect(actorIdentityMap(undefined).size).toBe(0);
     expect(actorIdentityMap("not a list").size).toBe(0);
+  });
+});
+
+/* ===========================================================================
+ * THE FILTER IS THE SERVER'S JOB NOW.
+ *
+ * ⭐⭐ WHY THIS MATTERS MORE THAN THE ROUND TRIPS IT SAVES. While the filter was
+ * applied to rows already fetched, a page was fifty ROWS and the screen could
+ * only ever say "all" by an argument about ORDERING — it had to read past the
+ * period's edge and reason that nothing unread could still match. Pushed into
+ * the query, a page is fifty MATCHES and `hasMore` is a measured fact about the
+ * matching set: "are there older rows that match?". The screen's honesty then
+ * rests on one boolean the server computed rather than on a proof the client
+ * assembled, and a period with BOTH ends becomes expressible at all.
+ *
+ * ⚠️ SO THESE CASES WATCH THE CALL, not the result. A filter that is quietly
+ * dropped on the floor returns exactly the same rows as no filter at all when
+ * the log is small, which is the sort of failure that ships.
+ * ======================================================================== */
+const T0 = "2026-09-01T00:00:00.000Z";
+const T1 = "2026-09-04T00:00:00.000Z";
+
+describe("the read narrows on the server, so a page is fifty matches", () => {
+  beforeEach(() => sb.reset());
+
+  it("sends no narrowing at all when nothing is filtered", async () => {
+    await fetchAuditPage();
+    expect(sb.argsOf("gte")).toEqual([]);
+    expect(sb.argsOf("in")).toEqual([]);
+    expect(sb.argsOf("lt")).toEqual([]);
+    // Newest first on `id`, unchanged: the cursor is the primary key because a
+    // tie on `at` has no stable boundary. See the api file's header.
+    expect(sb.argsOf("order")).toEqual([["id", { ascending: false }]]);
+    expect(sb.argsOf("select")).toEqual([[AUDIT_COLUMNS]]);
+  });
+
+  it("⭐ asks the server for the period instead of reading rows to throw them away", async () => {
+    await fetchAuditPage(null, { since: T0 });
+    expect(sb.argsOf("gte")).toEqual([["at", T0]]);
+  });
+
+  it("⭐ carries BOTH ends of a bounded period — which is what makes one offerable", async () => {
+    await fetchAuditPage(null, { since: T0, until: T1 });
+    expect(sb.argsOf("gte")).toEqual([["at", T0]]);
+    // Exclusive at the top so two adjacent periods can never both claim the
+    // same instant — "yesterday" ends where "today" starts.
+    expect(sb.argsOf("lt")).toEqual([["at", T1]]);
+  });
+
+  it("narrows on the action and the table with `in`", async () => {
+    await fetchAuditPage(null, { actions: ["delete"], tables: ["runs", "assignments"] });
+    expect(sb.argsOf("in")).toEqual([
+      ["action", ["delete"]],
+      ["table_name", ["runs", "assignments"]],
+    ]);
+  });
+
+  it("keeps the keyset cursor working beside the filter", async () => {
+    // ⚠️ THE TWO ARE INDEPENDENT AND MUST STAY SO. `id < cursor` excludes what
+    // is already on screen; the filter decides what counts as a row at all.
+    // Ordering is by `id`, so the filter cannot disturb the boundary.
+    await fetchAuditPage(233, { since: T0, actions: ["delete"] });
+    expect(sb.argsOf("lt")).toEqual([["id", 233]]);
+    expect(sb.argsOf("gte")).toEqual([["at", T0]]);
+  });
+
+  it("⚠️ still bounds a filtered read, so it cannot quietly become an unpaged one", async () => {
+    // PostgREST caps a response at `max_rows = 1000`. A filtered read is the
+    // easy place to lose the limit — it "obviously" returns few rows — and a
+    // server-truncated page is indistinguishable from the end of the log.
+    await fetchAuditPage(null, { since: T0, until: T1, actions: ["insert"], tables: ["runs"] });
+    expect(sb.argsOf("limit")).toEqual([[AUDIT_PAGE_SIZE + 1]]);
+    expect(AUDIT_PAGE_SIZE + 1).toBeLessThan(1000);
+  });
+
+  it("treats an empty list as no restriction, never as a query that matches nothing", async () => {
+    // `.in(col, [])` renders as `col=in.()`, which matches no row. A list
+    // nobody chose must not empty the one screen whose job is to show history.
+    await fetchAuditPage(null, { actions: [], tables: [], since: null, until: null });
+    expect(sb.argsOf("in")).toEqual([]);
+    expect(sb.argsOf("gte")).toEqual([]);
+  });
+
+  it("⭐ measures hasMore with the extra row under a filter, so it means `older MATCHES exist`", async () => {
+    sb.reset(
+      Array.from({ length: AUDIT_PAGE_SIZE + 1 }, (_, i) => rowFromColumns({ id: 1000 - i })),
+    );
+    const page = await fetchAuditPage(null, { actions: ["insert"] });
+    expect(page.entries.length).toBe(AUDIT_PAGE_SIZE);
+    // This is the boolean the whole footer now rests on: false proves every
+    // matching row has been read, whatever period was asked for.
+    expect(page.hasMore).toBe(true);
+    expect(page.entries[page.entries.length - 1].id).toBe(1000 - (AUDIT_PAGE_SIZE - 1));
+  });
+
+  it("says the search is finished when the filtered page is not full", async () => {
+    sb.reset([rowFromColumns({ id: 7 })]);
+    const page = await fetchAuditPage(null, { since: T0, until: T1, actions: ["delete"] });
+    expect(page.hasMore).toBe(false);
+    expect(page.entries.length).toBe(1);
+  });
+});
+
+describe("a bound that is not a bound is not sent", () => {
+  beforeEach(() => sb.reset());
+
+  it("⚠️ drops a blank timestamp rather than posting `at=gte.`", async () => {
+    // Postgres answers an empty timestamp with `22007 invalid input syntax`,
+    // which is a 400 on the whole page: the screen would show a read failure
+    // rather than a narrower list. An unset bound must reach the query as
+    // nothing at all.
+    await fetchAuditPage(null, { since: "", until: "   " });
+    expect(sb.argsOf("gte")).toEqual([]);
+    expect(sb.argsOf("lt")).toEqual([]);
   });
 });

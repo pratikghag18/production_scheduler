@@ -10,6 +10,7 @@ import {
   DATE_FORMATS,
   DEFAULT_DATE_FORMAT,
   formatCalendarDay,
+  formatCalendarMonth,
   type DateFormat,
 } from "@/lib/format/dates";
 import { formatDay } from "@/features/admin/lib/operators";
@@ -77,4 +78,48 @@ describe("the seam default and the dependency-free logic layer agree", () => {
       expect(formatDay(day)).toBe(formatCalendarDay(day, DEFAULT_DATE_FORMAT));
     });
   }
+});
+
+describe("formatCalendarMonth — labelling a whole month, not a day", () => {
+  // ⚠️ IT EXISTS BECAUSE A SCREEN GREW ITS OWN MONTH-NAME ARRAY. `AuditPanel`
+  // needed "August 2026" for a filter and wrote out twelve English month names
+  // beside the picker; `dateSeam.test.ts` refused them. These cases are what
+  // stops the next screen doing the same for want of a function to call.
+
+  it("spells the month for every format that spells a month", () => {
+    expect(formatCalendarMonth("2026-08-01", "d_mon_yyyy")).toBe("August 2026");
+    expect(formatCalendarMonth("2026-08-01", "d_month_yyyy")).toBe("August 2026");
+    expect(formatCalendarMonth("2026-08-01", "month_d_yyyy")).toBe("August 2026");
+    expect(formatCalendarMonth("2026-08-01", "dmy_dash_mon")).toBe("August 2026");
+  });
+
+  it("⭐ stays numeric for an org that asked for numbers", () => {
+    // A picker reading "August 2026" beside a column reading "2026-08-14" is two
+    // dialects on one screen, which is the whole point of the org's token.
+    expect(formatCalendarMonth("2026-08-01", "iso")).toBe("2026-08");
+    expect(formatCalendarMonth("2026-08-01", "dmy_slash")).toBe("08/2026");
+    expect(formatCalendarMonth("2026-08-01", "mdy_slash")).toBe("08/2026");
+    expect(formatCalendarMonth("2026-08-01", "ymd_slash")).toBe("08/2026");
+  });
+
+  it("takes any day in the month, and a bare YYYY-MM", () => {
+    expect(formatCalendarMonth("2026-08-31", "d_mon_yyyy")).toBe("August 2026");
+    expect(formatCalendarMonth("2026-08", "d_mon_yyyy")).toBe("August 2026");
+  });
+
+  it("returns the input unchanged when it is not a date, as formatCalendarDay does", () => {
+    // Shown rather than mangled — the same contract as its neighbour, so the two
+    // cannot disagree about what a malformed value looks like on screen.
+    for (const bad of ["sometime", "", "2026", "2026-13-01", "08/2026"]) {
+      expect(formatCalendarMonth(bad, "d_mon_yyyy")).toBe(bad);
+    }
+  });
+
+  it("every declared format returns a non-empty label", () => {
+    // Built from DATE_FORMATS itself, so a format added later is covered here
+    // without anybody remembering to widen this file.
+    for (const fmt of DATE_FORMATS) {
+      expect(formatCalendarMonth("2026-08-01", fmt)).not.toBe("");
+    }
+  });
 });
