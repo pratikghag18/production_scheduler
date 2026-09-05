@@ -7,6 +7,18 @@
    database; this only changes the rendering, through the seam in
    `src/lib/format/dates.ts`.
 
+   The second is the ELIGIBILITY POLICY (R-014, migration 0049), and it is a
+   different KIND of setting: the date format changes what a screen looks like,
+   this changes what the plant may do. It decides whether somebody who is not
+   certified for a job can be scheduled onto it at all. The enforcement is not
+   here and never was -- `create_assignment` / `move_run` /
+   `apply_split_coverage` read `orgs.settings->>'eligibility_policy'` on the
+   server and `CreatePopover` mirrors them on the board. What was missing until
+   0049 was any way to CHANGE it: `orgs.settings` had exactly one write function
+   (`set_org_date_format`), so every org sat on the 0001 default of "warn". This
+   panel is that switch, and the block above `POLICY_CHOICES` is about the only
+   hard part of it, which is the wording.
+
    ⭐ ONE SETTING IS ONE ROW (R-320, settled Sep 3). The eight formats were eight
    radio rows, which is most of a screen spent on one preference; as more
    settings land here that layout crowds them out. Each setting is now a labelled
@@ -39,11 +51,16 @@
    in `src/lib/format/dates.ts`, which is pure and is what `src/test/dateFormat.
    test.ts` tests. This file offers the choice and shows a live sample.
    --------------------------------------------------------------------------- */
-import { describeSchedulerError } from "@/lib/api";
+import { describeSchedulerError, type EligibilityPolicy } from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { DATE_FORMATS, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
-import { useDateFormat, useSetDateFormat } from "../hooks/useOrgSettings";
+import {
+  useDateFormat,
+  useEligibilityPolicy,
+  useSetDateFormat,
+  useSetEligibilityPolicy,
+} from "../hooks/useOrgSettings";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./SettingsPanel.module.css";
 
@@ -61,6 +78,52 @@ const FORMAT_LABEL: Record<DateFormat, string> = {
   month_d_yyyy: "Month Day, Year",
   ymd_slash: "Year/Month/Day",
 };
+
+/* ---------------------------------------------------------------------------
+   THE ELIGIBILITY POLICY, IN WORDS (R-014; the switch arrived with migration
+   0049, the enforcement had shipped long before).
+
+   ⛔ "WARN" AND "BLOCK" ARE THE DATABASE'S WORDS, NOT A READER'S, and neither
+   appears on this screen. They are the two tokens `orgs.settings.
+   eligibility_policy` accepts and they mean nothing to the person choosing
+   between them: "warn" in particular does NOT mean "show a warning and carry
+   on" — it means the placement is ALLOWED, on a typed reason that is then kept
+   against the assignment for good. Somebody scanning a settings page and
+   picking "Warn" because it sounded like the cautious one would have chosen the
+   permissive option. So each choice is written as its CONSEQUENCE, and the
+   consequence of the current choice is spelled out in full underneath the
+   picker rather than hidden behind opening it.
+
+   This is a decision about how a plant behaves — whether an uncertified person
+   can be put on a job at all — so the cost of a reader guessing wrong is not a
+   cosmetic one. `src/test/settingsPanel.test.tsx` asserts that neither bare
+   word is offered as a label.
+   --------------------------------------------------------------------------- */
+interface PolicyChoice {
+  value: EligibilityPolicy;
+  /** What the option says in the closed control. */
+  label: string;
+  /** What actually happens, shown for whichever choice is current. */
+  consequence: string;
+}
+
+const POLICY_CHOICES: readonly PolicyChoice[] = [
+  {
+    value: "warn",
+    label: "Allow it, with a reason on record",
+    consequence:
+      "A planner can still put someone on a job they are not certified for, but only by ticking an " +
+      "override and typing why. The reason is saved with the assignment, so anyone reading the " +
+      "schedule later can see who was placed without the training and on whose word.",
+  },
+  {
+    value: "block",
+    label: "Refuse it — no exceptions",
+    consequence:
+      "The assignment is refused. There is no override to tick and no reason that gets past it — " +
+      "the person cannot be scheduled onto that job until their training is on record.",
+  },
+];
 
 /** Today as `YYYY-MM-DD` in LOCAL time — the same reasoning as OperatorsPanel's
  *  `todayIso`: `toISOString().slice(0,10)` is the UTC day and is a day out west
@@ -82,6 +145,10 @@ export function SettingsPanel() {
   const current = useDateFormat(canQuery);
   const setFormat = useSetDateFormat();
   const today = todayIso();
+
+  const policy = useEligibilityPolicy(canQuery);
+  const setPolicy = useSetEligibilityPolicy();
+  const currentPolicy = POLICY_CHOICES.find((c) => c.value === policy) ?? POLICY_CHOICES[0];
 
   return (
     <div className={styles.panel}>
@@ -127,6 +194,56 @@ export function SettingsPanel() {
             {setFormat.isPending && <p className={styles.status}>Saving…</p>}
             {setFormat.isError && (
               <p className={styles.error}>{describeSchedulerError(setFormat.error)}</p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.card}>
+        <h2 className={styles.h2}>Scheduling</h2>
+
+        <div className={styles.setting}>
+          <div className={styles.settingText}>
+            <label className={styles.settingName} htmlFor="settings-eligibility-policy">
+              Putting someone on a job they are not certified for
+            </label>
+            <p className={styles.hint}>
+              Jobs can require training, and the board knows who holds it. This decides what happens
+              when a planner picks someone who does not.
+            </p>
+          </div>
+
+          <div className={styles.settingControl}>
+            <select
+              id="settings-eligibility-policy"
+              className={`${fieldStyles.select} ${styles.formatSelect}`}
+              value={policy}
+              disabled={!isSystemAdmin || setPolicy.isPending}
+              onChange={(e) => {
+                // ⚠️ THE GUARD IS NOT THE `disabled` ATTRIBUTE — the same
+                // reasoning as the date picker above, and it matters more here:
+                // the server refuses a non-admin either way (migration 0049),
+                // so a change that slipped through would be a control that
+                // silently does nothing about how the plant is scheduled.
+                if (!isSystemAdmin) return;
+                setPolicy.mutate(e.target.value as EligibilityPolicy);
+              }}
+            >
+              {POLICY_CHOICES.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            {/* The consequence of the CURRENT choice, in full and unopened —
+                the picker's own label is a summary and this is what it means. */}
+            <p className={styles.consequence}>{currentPolicy.consequence}</p>
+            {!isSystemAdmin && (
+              <p className={styles.status}>Only a system admin can change this.</p>
+            )}
+            {setPolicy.isPending && <p className={styles.status}>Saving…</p>}
+            {setPolicy.isError && (
+              <p className={styles.error}>{describeSchedulerError(setPolicy.error)}</p>
             )}
           </div>
         </div>

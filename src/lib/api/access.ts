@@ -241,3 +241,41 @@ export async function setOrgDateFormat(format: DateFormat): Promise<void> {
   const { error } = await supabase.rpc("set_org_date_format", { p_format: format });
   if (error) throw toSchedulerError(error);
 }
+
+/**
+ * What the org does when somebody is scheduled onto work they are not
+ * certified for. Mirrors migration 0001's
+ * `check (settings->>'eligibility_policy' in ('warn','block'))` — the same
+ * shape, and for the same reason, as `SiteMemberRole` mirroring
+ * `profile_grants_role_check` above.
+ *
+ *   "warn"  — the placement is allowed if the planner ticks an override and
+ *             types a reason, which is stored on the assignment
+ *             (`assignments.override_reason`). The 0001 default.
+ *   "block" — the server refuses the placement outright; there is no override.
+ *
+ * ⚠️ THIS IS NOT A NEW CONCEPT, only a newly WRITEABLE one. The board has read
+ * it since P1-4e (`readEligibilityPolicy` in
+ * `src/features/board/lib/boardIndex.ts`, which spells the union inline) and
+ * `create_assignment` / `move_run` / `apply_split_coverage` have enforced it
+ * for as long. Until migration 0049 nothing could set it.
+ */
+export type EligibilityPolicy = "warn" | "block";
+
+/**
+ * `set_org_eligibility_policy(p_policy)` (migration 0049). Sets the org-wide
+ * eligibility policy. Raises: `not_permitted` (not a system admin),
+ * `invalid_argument` (anything but `warn`/`block`, carrying
+ * `field: "eligibility_policy"`).
+ *
+ * ⚠️ The returned settings are DISCARDED, exactly as `setOrgDateFormat` above:
+ * the caller invalidates and refetches, and the loudness of a refusal comes
+ * from the server RAISE, not from anything this wrapper could inspect. A plain
+ * `orgs` UPDATE could not do that — `orgs_update` (0008) filters a non-admin to
+ * zero rows and raises nothing, which is why this is an RPC at all (0049's
+ * header; `72_eligibility_policy_test.sql` X7 beside X8).
+ */
+export async function setOrgEligibilityPolicy(policy: EligibilityPolicy): Promise<void> {
+  const { error } = await supabase.rpc("set_org_eligibility_policy", { p_policy: policy });
+  if (error) throw toSchedulerError(error);
+}

@@ -83,6 +83,19 @@
   max-width: 100%;
 }
 
+/* THE CONSEQUENCE LINE under the eligibility picker: what the current choice
+   actually does, spelled out rather than left behind an option label. It is
+   capped at the picker's own column width -- `.settingControl` is
+   `flex: 0 0 auto`, so an uncapped paragraph would size the whole right-hand
+   column to one long line and squeeze the setting's name off to the left. */
+.consequence {
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0.5rem 0 0;
+  max-width: 20rem;
+}
+
 .status {
   color: var(--ink-2);
   font-size: 0.75rem;
