@@ -1739,7 +1739,7 @@ stages:
   track: core
   num: 35
   title: Copy a week forward, and settle every clash by asking
-  status: open
+  status: now
   owner: agent
   refs:
   # ⚠️ A CONVERSATION REF, NOT A SHIPPING ONE, and the difference is load-bearing.
@@ -1800,8 +1800,11 @@ stages:
     whether "take the copied one" on an occupied cell removes the prior run whole or only the part
     that overlaps --- the lean is whole, because half a run is not a plan anyone asked for.
   state: >-
-    **Not started; next in the queue.** R-339 is written and `uncovered`; the requirement came
-    before the code on purpose, and the plan above is the build order. Nothing is blocked on a
+    **In flight, session 75, as two parallel lanes against one written contract** (CLAUDE.md section 5):
+    the server lane owns migration 0055 and `78_copy_week_test.sql`; the client lane owns the API
+    module, the dialog, the toolbar button, the unit cases and the browser spec. A third agent with
+    one job, break it, reviews both before anything is called done. R-339 is written and
+    `uncovered`; the requirement came before the code on purpose, and the plan above is the build order. Nothing is blocked on a
     decision. Sized against what this project has shipped: the plant settings (0050--0052 plus the
     tab) ran from the first commit to the last in about a day and a half of wall-clock across seven
     sessions with tester rounds between; cycle times (S27) in under a day. Copy Week is larger than
