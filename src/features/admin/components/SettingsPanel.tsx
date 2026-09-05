@@ -1,93 +1,114 @@
 /* ---------------------------------------------------------------------------
-   Settings — the company's preferences, and each plant's answer to them.
+   Settings — the company's answers, or one plant's, decided by the control at
+   the top of the admin screen.
 
-   The first setting is the DATE-DISPLAY FORMAT (R-308-adjacent, settled Sep 3):
-   one choice, made once for the whole company, that decides how every calendar
-   date the app shows as text reads. The underlying data stays ISO in the
-   database; this only changes the rendering, through the seam in
+   ⭐⭐ THIS TAB FOLLOWS THE PLANT FILTER; IT DOES NOT LIST PLANTS (R-333).
+   The maintainer, session 62: *"There is a filter at the top for selecting
+   plants. Once we select the plant at the top we should be able to assign the
+   settings to that particular plant, and it should be all types of settings on
+   the settings tab, not just this one."*
+
+   ⛔ THIS OVERRULES THE SHAPE R-331 SHIPPED, WHICH WAS MINE AND WAS WRONG.
+   `AdminPage` has had ONE plant control since §19.77, and `ProductsPanel`,
+   `ShiftsPanel` and `OperatorsPanel` all read it through `usePlantFilter`
+   taking no props — "which plant am I showing" is a question the app answers
+   once. Settings ignored that and grew a second answer: a card at the bottom
+   with a row per plant, so a reader who had already narrowed the whole admin
+   screen to Plant B still had to find Plant B again in a column. One control,
+   two answers, and they could disagree. Deleted rather than kept beside the new
+   one — a screen that offers two ways to say the same thing has to explain
+   which one wins, and there is no good explanation.
+
+   So: **a plant chosen at the top → this tab edits that plant. "All plants" →
+   this tab edits the company defaults everything falls back to.** Which of the
+   two is spelled out at the top of the tab in words, because a screen that
+   silently edits a different scope depending on a control somewhere else is
+   worse than one that lists everything. `settingsScope` in
+   `../hooks/useOrgSettings.ts` is the rule, including the case where the plant
+   control is not on screen at all, and carries the argument for it.
+
+   ⭐ AND EVERY SETTING ON THE TAB IS PER-PLANT, not just the eligibility rule.
+   The date format moved with it (migration 0052), which overrules 0050's stated
+   reasoning that a display convention is not a plant's business. Both settings
+   have the same three states — inheriting / set here to X / set here to Y — and
+   `clear_node_setting` is the way back to the first.
+
+   ⚠️ WHAT IS DELIBERATELY NOT HERE: `capacity_cap`, `week_start` and
+   `default_snap_minutes`. They live in `orgs.settings` and have never had a
+   control on this tab; giving them one is new product surface, not this task.
+   Turning one on now costs a `WHEN` in each of migration 0052's two CHECK
+   constraints, its key in both writers' key lists and one more `WHEN` in
+   `set_node_setting`'s value CASE, a member of `NodeSettingKey`, a coercer
+   beside `asDateFormat`, a field on `PlantOverrides`, and a third row here —
+   plus, unlike the date format, a server-side READER to move onto
+   `app_resolve_node_setting`, because all three of them are read by the
+   functions that decide whether a write is allowed.
+
+   ---------------------------------------------------------------------------
+   THE TWO SETTINGS.
+
+   The DATE-DISPLAY FORMAT (R-308-adjacent, settled Sep 3) decides how every
+   calendar date the app shows as text reads. The underlying data stays ISO in
+   the database; this only changes the rendering, through the seam in
    `src/lib/format/dates.ts`.
 
-   The second is the ELIGIBILITY POLICY (R-014, migration 0049), and it is a
-   different KIND of setting: the date format changes what a screen looks like,
-   this changes what the plant may do. It decides whether somebody who is not
-   certified for a job can be scheduled onto it at all. The enforcement is not
-   here and never was -- `create_assignment` / `move_run` /
-   `apply_split_coverage` read `orgs.settings->>'eligibility_policy'` on the
-   server and `CreatePopover` mirrors them on the board. What was missing until
-   0049 was any way to CHANGE it: `orgs.settings` had exactly one write function
-   (`set_org_date_format`), so every org sat on the 0001 default of "warn". This
-   panel is that switch, and the block above `POLICY_CHOICES` is about the only
-   hard part of it, which is the wording.
+   The ELIGIBILITY POLICY (R-014, migration 0049) is a different KIND of
+   setting: the date format changes what a screen looks like, this changes what
+   the plant may do. It decides whether somebody who is not certified for a job
+   can be scheduled onto it at all. The enforcement is not here and never was —
+   `create_assignment` / `move_run` / `apply_split_coverage` resolve it on the
+   server, per node, through `app_resolve_node_setting`. This panel is the
+   switch, and the block above `POLICY_CHOICES` is about the only hard part of
+   it, which is the wording.
 
-   ⭐ ONE SETTING IS ONE ROW (R-320, settled Sep 3). The eight formats were eight
-   radio rows, which is most of a screen spent on one preference; as more
-   settings land here that layout crowds them out. Each setting is now a labelled
-   row -- name and hint on the left, one control on the right -- so a second
-   setting is another row, not another screenful. A closed enum picks with a
-   `<select>`; a toggle or a number would sit in the same slot.
-
-   ⭐ AND THE ROW IS ONE SHARED DEFINITION (R-332). The rows were laid out by
-   this section's own stylesheet, as a flex box whose control column was
-   `flex: 0 0 auto` -- sized by its own content, so the eligibility picker and
-   the date picker sat on two different edges and the maintainer said so. The
-   layout now comes from `@/components/SettingRow.module.css`: `.row`, `.text`,
-   `.name`, `.hint`, `.control` and `.controlField`, with ONE control-column
-   width shared by every setting on the screen. A third setting composes the
-   same six classes and lands on the same column with nothing to decide.
-
-   ⭐ THE PICKER IS THE SHARED FIELD (R-318), `Field.module.css`'s `.select`,
-   not a copy of the skin: this stylesheet came off `FIELD_LEGACY` in the same
-   commit, because the block that put it there was the radio row this replaced.
-
-   ⭐ THE SAMPLE MOVED INTO THE OPTIONS. The radio list showed a live sample
-   beside every format at once, which is how a reader picks one -- by what they
-   will actually see, not by a token's name. Each `<option>` therefore reads
-   "Day/Month/Year -- 03/09/2026", so the closed control shows the sample for the
-   current choice and opening it shows all eight. Nothing is lost by collapsing.
+   ⭐ ONE SETTING IS ONE ROW (R-320), AND THE ROW IS ONE SHARED DEFINITION
+   (R-332). The layout comes from `@/components/SettingRow.module.css`: `.row`,
+   `.text`, `.name`, `.hint`, `.control` and `.controlField`, with ONE
+   control-column width shared by every setting on the screen. A third setting
+   composes the same six classes and lands on the same column with nothing to
+   decide. ⚠️ `src/test/settingRowStandard.test.ts` counts those classes against
+   the number of `<select>`s in this file, so each setting must be ONE row with
+   ONE control — which is why the company and per-plant variants of a row are
+   the same `<select>` with different options, not two.
 
    ⭐ `SETTINGS_PANEL_READY` LIVES HERE, NOT IN `AdminPage.tsx`, exactly as the
    other panels' flags do. The rail entry reads it, so a section cannot be
    switched on without a panel behind it.
 
-   ⭐ THE THIRD SETTING IS THE SAME SETTING, ASKED OF ONE PLACE (R-331,
-   migration 0050). The maintainer, session 62: *"These settings I think cannot
-   be applied plant wise which defeats the purpose of both options. Lets make it
-   possible to assign settings individually for each plant."* `node_settings`
-   answers the server half; the per-plant card at the bottom of this file is the
-   screen half, and the long block above it is about the only hard part, which
-   is that a plant has THREE states and a picker with two options cannot say the
-   first one.
-
-   ⚠️⚠️ THE ORG-WIDE ROWS ARE SYSTEM-ADMIN ONLY; THE PLANT ROWS ARE NOT, and
-   the difference is the whole of R-331. A SITE ADMIN REACHES THIS PANE -- this
-   header used to claim `AdminPage.tsx` hid it from them, which is not what the
-   code does: `adminSectionsFor` returns "all" for anyone with
-   `adminAnywhere === true`, and a site admin holds an admin GRANT, so they have
-   always landed here. Corrected rather than left standing, because R-331 turns
-   on it. What they see is the company rows DISABLED with the reason in words --
-   `set_org_date_format` (0037) and `set_org_eligibility_policy` (0049) are both
-   `app_is_admin()`, so a live control there would silently do nothing -- and a
-   working picker on THEIR OWN plant, whose write gate is
-   `app_is_admin() or app_is_admin_for(node)`.
-
-   DECIDES NOTHING ITSELF about how a date renders: every token maps to a string
-   in `src/lib/format/dates.ts`, which is pure and is what `src/test/dateFormat.
-   test.ts` tests. This file offers the choice and shows a live sample.
+   ⚠️⚠️ A SITE ADMIN REACHES THIS PANE — `adminSectionsFor` returns "all" for
+   anyone with `adminAnywhere === true`, and a site admin holds an admin GRANT.
+   On the company scope they see both controls DISABLED with the reason in words
+   (`set_org_date_format` and `set_org_eligibility_policy` are both
+   `app_is_admin()`, so a live control there would silently do nothing); on
+   THEIR OWN plant they get working pickers, because `set_node_setting`'s gate
+   is `app_is_admin() or app_is_admin_for(node)`. On a plant they may READ but
+   not administer they get no control at all and are told whose place it is —
+   D106: a greyed control is a control named after something it does not do.
    --------------------------------------------------------------------------- */
-import { describeSchedulerError, type EligibilityPolicy } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import {
+  describeSchedulerError,
+  fetchHierarchyTree,
+  type EligibilityPolicy,
+  type SchedulerError,
+} from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { DATE_FORMATS, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
 import {
+  canAdministerPlant,
   INHERIT_CHOICE,
-  useDateFormat,
-  useEligibilityPolicy,
-  usePlantPolicies,
+  settingsScope,
+  useCompanyDateFormat,
+  useCompanyEligibilityPolicy,
+  usePlantOverrides,
   useSetDateFormat,
   useSetEligibilityPolicy,
-  useSetPlantPolicy,
-  type PlantPolicyChoice,
+  useSetPlantSetting,
 } from "../hooks/useOrgSettings";
+import { useEditRights } from "../hooks/useEditRights";
+import { hierarchyKeys } from "../hooks/useHierarchyMutations";
+import { usePlantFilter } from "../hooks/usePlantFilter";
 import { notManagedNote } from "../lib/editRights";
 import fieldStyles from "@/components/Field.module.css";
 import rowStyles from "@/components/SettingRow.module.css";
@@ -113,15 +134,15 @@ const FORMAT_LABEL: Record<DateFormat, string> = {
    0049, the enforcement had shipped long before).
 
    ⛔ "WARN" AND "BLOCK" ARE THE DATABASE'S WORDS, NOT A READER'S, and neither
-   appears on this screen. They are the two tokens `orgs.settings.
-   eligibility_policy` accepts and they mean nothing to the person choosing
-   between them: "warn" in particular does NOT mean "show a warning and carry
-   on" — it means the placement is ALLOWED, on a typed reason that is then kept
-   against the assignment for good. Somebody scanning a settings page and
-   picking "Warn" because it sounded like the cautious one would have chosen the
-   permissive option. So each choice is written as its CONSEQUENCE, and the
-   consequence of the current choice is spelled out in full underneath the
-   picker rather than hidden behind opening it.
+   appears on this screen. They are the two tokens the setting accepts and they
+   mean nothing to the person choosing between them: "warn" in particular does
+   NOT mean "show a warning and carry on" — it means the placement is ALLOWED,
+   on a typed reason that is then kept against the assignment for good. Somebody
+   scanning a settings page and picking "Warn" because it sounded like the
+   cautious one would have chosen the permissive option. So each choice is
+   written as its CONSEQUENCE, and the consequence of the current choice is
+   spelled out in full underneath the picker rather than hidden behind opening
+   it.
 
    This is a decision about how a plant behaves — whether an uncertified person
    can be put on a job at all — so the cost of a reader guessing wrong is not a
@@ -158,10 +179,10 @@ const POLICY_CHOICES: readonly PolicyChoice[] = [
    THE SAME TWO ANSWERS, IN THREE WORDS INSTEAD OF TWELVE (R-331).
 
    `POLICY_CHOICES` above spells each answer as a sentence, which is right for a
-   picker where the reader is deciding. The per-plant rows have to name an
-   answer INSIDE another sentence -- "Inheriting from the company - currently
-   ..." -- and a full clause there reads as gibberish. These are the same two
-   answers, short enough to be a noun.
+   picker where the reader is deciding. A plant's rows have to name an answer
+   INSIDE another sentence -- "Inheriting from the company - currently ..." --
+   and a full clause there reads as gibberish. These are the same two answers,
+   short enough to be a noun.
 
    ⛔ STILL NOT THE STORED WORDS. "Warn" reads as the cautious option and is the
    permissive one; that trap does not stop being a trap because the label got
@@ -185,32 +206,167 @@ function todayIso(): string {
   return `${y}-${m}-${d}`;
 }
 
+/* ---------------------------------------------------------------------------
+   THE STATE SENTENCE UNDER A PLANT'S PICKER.
+
+   ⛔⛔ THREE STATES, NOT TWO, AND A PICKER WITH TWO OPTIONS CANNOT SAY THE
+   FIRST. A plant is INHERITING (no `node_settings` row), or SET to one of the
+   values. A control that showed only the resolved value would make every plant
+   nobody has ever touched read as though somebody chose its current behaviour
+   -- which is a lie that only shows up on the day the company changes its mind,
+   when the untouched plants move and the deliberately-set ones do not.
+   --------------------------------------------------------------------------- */
+function inheritingNote(current: string): string {
+  return (
+    `Inheriting from the company — currently ${current}. ` +
+    `Change the company answer and this plant follows.`
+  );
+}
+
+function setHereNote(current: string, company: string): string {
+  return (
+    `Set for this plant — ${current}. The company is on ${company}, ` +
+    `and this plant does not follow the company if that changes.`
+  );
+}
+
 export function SettingsPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  // Mirrors `app_is_admin()`, which is the gate on BOTH org-wide writers.
   const isSystemAdmin = profile?.role === "admin";
-
-  const current = useDateFormat(canQuery);
-  const setFormat = useSetDateFormat();
   const today = todayIso();
 
-  const policy = useEligibilityPolicy(canQuery);
-  const setPolicy = useSetEligibilityPolicy();
+  /* -- which scope this tab is editing ---------------------------------- */
+
+  // The SAME key `AdminPage`, `ProductsPanel` and `CycleTimesPanel` use, so
+  // this costs one shared request and one cache entry rather than a fourth
+  // round trip. ⚠️ IT FAILS OPEN WHEN THE READ FAILS: `allNodes` is then `[]`,
+  // there are no readable roots, and `settingsScope` answers "company" — the
+  // scope every reader can at least SEE, rather than an empty screen.
+  const treeQuery = useQuery({
+    queryKey: [...hierarchyKeys.all, "tree"],
+    queryFn: fetchHierarchyTree,
+    enabled: canQuery,
+  });
+  const plantFilter = usePlantFilter(treeQuery.data?.nodes ?? []);
+  const scope = settingsScope(plantFilter.choice, plantFilter.plants, isSystemAdmin);
+  const onPlant = scope.kind === "plant";
+
+  const { rights } = useEditRights(canQuery, profile?.role ?? null);
+  // ⚠️ NOT `canEditNode` — `useOrgSettings.ts` carries the whole argument. The
+  // company scope's gate is `app_is_admin()`; a plant's is
+  // `app_is_admin() or app_is_admin_for(node)`.
+  const mayEdit = scope.kind === "company" ? isSystemAdmin : canAdministerPlant(scope.path, rights);
+  // ⚠️ THE TWO REFUSALS ARE NOT THE SAME SHAPE, and the difference is D106's.
+  // On the COMPANY scope a non-system-admin still sees the control, disabled,
+  // with the reason: the setting exists and somebody can change it, just not
+  // them. On a PLANT they may read but not administer there is NO control at
+  // all — a greyed picker named after a plant is a control named after
+  // something it does not do — and the tab says whose place it is instead. The
+  // row still renders, with what is in force there, because dropping it
+  // silently is `scope.ts`'s invisible-and-permanent failure.
+  const showControl = scope.kind === "company" || mayEdit;
+
+  /* -- what is set where ------------------------------------------------- */
+
+  const companyFormat = useCompanyDateFormat(canQuery);
+  const companyPolicy = useCompanyEligibilityPolicy(canQuery);
+  // `null` on a field is INHERITING, and it is not the same as the resolved
+  // value happening to equal the company's today.
+  const own = usePlantOverrides(canQuery, scope.kind === "plant" ? scope.nodeId : null);
+
+  const format = own.dateFormat ?? companyFormat;
+  const policy = own.policy ?? companyPolicy;
   const currentPolicy = POLICY_CHOICES.find((c) => c.value === policy) ?? POLICY_CHOICES[0];
 
-  // R-331. `policy` is passed in rather than read again inside the hook so the
-  // two halves of one screen cannot disagree about the company's answer while a
-  // refetch is in flight -- `fetchPlantEligibilityPolicies`' own header.
-  const plants = usePlantPolicies(canQuery, policy, profile?.role ?? null);
-  const setPlant = useSetPlantPolicy();
-  // ⚠️ ONE MUTATION SERVES EVERY ROW (a hook per row is not allowed), so the
-  // in-flight and failed states have to be attributed to the plant they belong
-  // to. React Query hands `variables` back; without this, one plant saving
-  // would put "Saving…" under all of them.
-  const savingPlantId = setPlant.isPending ? (setPlant.variables?.nodeId ?? null) : null;
+  /* -- the writers, and which row each in-flight write belongs to -------- */
+
+  const setOrgFormat = useSetDateFormat();
+  const setOrgPolicy = useSetEligibilityPolicy();
+  // ⚠️ ONE MUTATION SERVES BOTH PLANT ROWS (a hook per row is not allowed), so
+  // the in-flight and failed states have to be attributed to the SETTING they
+  // belong to. React Query hands `variables` back; without this, the date
+  // format saving would put "Saving…" under the eligibility rule too.
+  const setPlant = useSetPlantSetting();
+  const plantBusyKey = setPlant.isPending ? (setPlant.variables?.key ?? null) : null;
+  const plantFailedKey = setPlant.isError ? (setPlant.variables?.key ?? null) : null;
+
+  const formatBusy = onPlant ? plantBusyKey === "date_format" : setOrgFormat.isPending;
+  const policyBusy = onPlant ? plantBusyKey === "eligibility_policy" : setOrgPolicy.isPending;
+  const formatError: SchedulerError | null = onPlant
+    ? plantFailedKey === "date_format"
+      ? setPlant.error
+      : null
+    : setOrgFormat.isError
+      ? setOrgFormat.error
+      : null;
+  const policyError: SchedulerError | null = onPlant
+    ? plantFailedKey === "eligibility_policy"
+      ? setPlant.error
+      : null
+    : setOrgPolicy.isError
+      ? setOrgPolicy.error
+      : null;
+
+  /* -- one write, dispatched by scope ------------------------------------ */
+
+  // ⚠️ THE GUARD IS NOT THE `disabled` ATTRIBUTE, and it is not the absence of
+  // the control either. `disabled` is what a person meets; a change event can
+  // still arrive without one (a test, an extension, a script), and the client
+  // must refuse the write itself rather than rely on the server's refusal being
+  // the only "no". The RPCs refuse it too.
+  //
+  // ⛔ `INHERIT_CHOICE` NEVER REACHES THE SERVER. `useSetPlantSetting`
+  // dispatches it to `clear_node_setting`, the separate verb — there is no "set
+  // to nothing" here because there is none on the server.
+  function write(key: "date_format" | "eligibility_policy", value: string): void {
+    if (!mayEdit) return;
+    if (scope.kind === "plant") {
+      setPlant.mutate({ nodeId: scope.nodeId, key, choice: value });
+    } else if (key === "date_format") {
+      setOrgFormat.mutate(value as DateFormat);
+    } else {
+      setOrgPolicy.mutate(value as EligibilityPolicy);
+    }
+  }
+
+  /* -- the sentence that says which scope this is ------------------------ */
+
+  const scopeTitle = onPlant ? scope.name : "Company defaults";
+  const scopeLead = onPlant
+    ? `These are ${scope.name}'s own answers. A setting left on “Use the company setting” follows ` +
+      `the company and moves when the company's answer moves.`
+    : "These are the answers every plant follows unless it has been given its own.";
+  // ⭐ AND HOW TO GET TO THE OTHER ONE. The control is one screen up, so the tab
+  // names it rather than assuming the reader connects the two. Omitted when
+  // there is no control (`plantFilter.visible` is false below two readable
+  // roots) — pointing at a control that is not on screen is worse than silence.
+  const scopeSwitch = !plantFilter.visible
+    ? null
+    : onPlant
+      ? "Choose “All plants” in Showing, at the top, to edit the company defaults instead."
+      : "Choose a plant in Showing, at the top, to give that plant its own answers.";
 
   return (
     <div className={styles.panel}>
+      <section className={styles.card}>
+        <h2 className={styles.h2}>{scopeTitle}</h2>
+        <p className={styles.lead}>
+          {scopeLead}
+          {scopeSwitch !== null && ` ${scopeSwitch}`}
+        </p>
+        {treeQuery.isError && (
+          <p className={styles.status} role="alert">
+            Couldn&rsquo;t load which plants you can see, so this is showing the company defaults.
+            Try refreshing the page.
+          </p>
+        )}
+        {own.isLoading && <p className={styles.status}>Loading this plant&rsquo;s settings…</p>}
+        {own.error !== null && <p className={styles.error}>{describeSchedulerError(own.error)}</p>}
+        {onPlant && !mayEdit && <p className={styles.status}>{notManagedNote(scope.name)}</p>}
+      </section>
+
       <section className={styles.card}>
         <h2 className={styles.h2}>Display</h2>
 
@@ -226,33 +382,53 @@ export function SettingsPanel() {
           </div>
 
           <div className={rowStyles.control}>
-            <select
-              id="settings-date-format"
-              className={`${fieldStyles.select} ${rowStyles.controlField}`}
-              value={current}
-              disabled={!isSystemAdmin || setFormat.isPending}
-              onChange={(e) => {
-                // ⚠️ THE GUARD IS NOT THE `disabled` ATTRIBUTE. `disabled` is
-                // what a person meets; a change event can still arrive without
-                // one (a test, an extension, a script), and the client must
-                // refuse the write itself rather than rely on the server's
-                // refusal to be the only "no". The RPC refuses it too.
-                if (!isSystemAdmin) return;
-                setFormat.mutate(e.target.value as DateFormat);
-              }}
-            >
-              {DATE_FORMATS.map((fmt) => (
-                <option key={fmt} value={fmt}>
-                  {FORMAT_LABEL[fmt]} — {formatCalendarDay(today, fmt)}
-                </option>
-              ))}
-            </select>
-            {!isSystemAdmin && (
+            {/* ⭐ ONE `<select>`, TWO OPTION LISTS. The company scope offers the
+                eight formats; a plant offers those plus "use the company
+                setting" FIRST, which is both the third state and the way back
+                to it. Two `<select>` elements here would break the row audit's
+                count and would be two bindings to keep in step. */}
+            {showControl && (
+              <select
+                id="settings-date-format"
+                className={`${fieldStyles.select} ${rowStyles.controlField}`}
+                value={onPlant ? (own.dateFormat ?? INHERIT_CHOICE) : companyFormat}
+                disabled={!mayEdit || formatBusy}
+                onChange={(e) => write("date_format", e.target.value)}
+              >
+                {/* ⭐ THE OPTION CARRIES THE COMPANY'S CURRENT ANSWER IN ITS OWN
+                    LABEL, so a closed control on an inheriting plant reads "Use
+                    the company setting (currently Day Month Year — 03/09/2026)".
+                    The state and what it currently means are both visible
+                    without opening anything. */}
+                {onPlant && (
+                  <option value={INHERIT_CHOICE}>
+                    Use the company setting (currently {FORMAT_LABEL[companyFormat]} —{" "}
+                    {formatCalendarDay(today, companyFormat)})
+                  </option>
+                )}
+                {/* ⭐ THE SAMPLE IS IN THE OPTION. A reader picks a format by
+                    what they will actually see, not by a token's name, so each
+                    option reads "Day/Month/Year — 03/09/2026". */}
+                {DATE_FORMATS.map((fmt) => (
+                  <option key={fmt} value={fmt}>
+                    {FORMAT_LABEL[fmt]} — {formatCalendarDay(today, fmt)}
+                  </option>
+                ))}
+              </select>
+            )}
+            {onPlant && (
+              <p className={styles.consequence}>
+                {own.dateFormat === null
+                  ? inheritingNote(FORMAT_LABEL[format])
+                  : setHereNote(FORMAT_LABEL[format], FORMAT_LABEL[companyFormat])}
+              </p>
+            )}
+            {!onPlant && !mayEdit && (
               <p className={styles.status}>Only a system admin can change the date format.</p>
             )}
-            {setFormat.isPending && <p className={styles.status}>Saving…</p>}
-            {setFormat.isError && (
-              <p className={styles.error}>{describeSchedulerError(setFormat.error)}</p>
+            {formatBusy && <p className={styles.status}>Saving…</p>}
+            {formatError !== null && (
+              <p className={styles.error}>{describeSchedulerError(formatError)}</p>
             )}
           </div>
         </div>
@@ -273,156 +449,45 @@ export function SettingsPanel() {
           </div>
 
           <div className={rowStyles.control}>
-            <select
-              id="settings-eligibility-policy"
-              className={`${fieldStyles.select} ${rowStyles.controlField}`}
-              value={policy}
-              disabled={!isSystemAdmin || setPolicy.isPending}
-              onChange={(e) => {
-                // ⚠️ THE GUARD IS NOT THE `disabled` ATTRIBUTE — the same
-                // reasoning as the date picker above, and it matters more here:
-                // the server refuses a non-admin either way (migration 0049),
-                // so a change that slipped through would be a control that
-                // silently does nothing about how the plant is scheduled.
-                if (!isSystemAdmin) return;
-                setPolicy.mutate(e.target.value as EligibilityPolicy);
-              }}
-            >
-              {POLICY_CHOICES.map((choice) => (
-                <option key={choice.value} value={choice.value}>
-                  {choice.label}
-                </option>
-              ))}
-            </select>
-            {/* The consequence of the CURRENT choice, in full and unopened —
+            {showControl && (
+              <select
+                id="settings-eligibility-policy"
+                className={`${fieldStyles.select} ${rowStyles.controlField}`}
+                value={onPlant ? (own.policy ?? INHERIT_CHOICE) : companyPolicy}
+                disabled={!mayEdit || policyBusy}
+                onChange={(e) => write("eligibility_policy", e.target.value)}
+              >
+                {onPlant && (
+                  <option value={INHERIT_CHOICE}>
+                    Use the company setting (currently {POLICY_SHORT[companyPolicy]})
+                  </option>
+                )}
+                {POLICY_CHOICES.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {/* The consequence of what is IN FORCE here, in full and unopened —
                 the picker's own label is a summary and this is what it means. */}
-            <p className={styles.consequence}>{currentPolicy.consequence}</p>
-            {!isSystemAdmin && (
+            <p className={styles.consequence}>
+              {onPlant
+                ? own.policy === null
+                  ? inheritingNote(POLICY_SHORT[policy])
+                  : setHereNote(POLICY_SHORT[policy], POLICY_SHORT[companyPolicy])
+                : currentPolicy.consequence}
+            </p>
+            {onPlant && <p className={styles.consequence}>{currentPolicy.consequence}</p>}
+            {!onPlant && !mayEdit && (
               <p className={styles.status}>Only a system admin can change this.</p>
             )}
-            {setPolicy.isPending && <p className={styles.status}>Saving…</p>}
-            {setPolicy.isError && (
-              <p className={styles.error}>{describeSchedulerError(setPolicy.error)}</p>
+            {policyBusy && <p className={styles.status}>Saving…</p>}
+            {policyError !== null && (
+              <p className={styles.error}>{describeSchedulerError(policyError)}</p>
             )}
           </div>
         </div>
-      </section>
-
-      {/* ------------------------------------------------------------------
-          R-331 -- THE SAME SETTING, ANSWERED FOR ONE PLACE.
-
-          ⛔⛔ THREE STATES, NOT TWO, AND THE PICKER HAS THREE OPTIONS BECAUSE
-          OF IT. A plant is INHERITING (no `node_settings` row), SET TO ALLOW or
-          SET TO REFUSE. A two-option control cannot say the first, and it would
-          make every plant nobody has ever touched read as though somebody chose
-          its current behaviour -- which is a lie that only shows up on the day
-          the company changes its mind, when the untouched plants move and the
-          deliberately-set ones do not.
-
-          ⭐ THE FIRST OPTION IS BOTH THE STATE AND THE WAY BACK TO IT. Choosing
-          "Use the company setting" is how a plant is RETURNED to inheriting,
-          and it dispatches to `clear_node_setting` -- the separate verb -- never
-          to `set_node_setting` with a null. There is no "set to nothing" on the
-          server and there is none here.
-
-          ⭐ AND THE OPTION CARRIES THE COMPANY'S CURRENT ANSWER IN ITS OWN
-          LABEL, so a closed control on an inheriting plant reads "Use the
-          company setting (currently Refused)". The state and its consequence
-          are both visible without opening anything, which is the same decision
-          the org-wide row makes with its consequence paragraph.
-
-          ⚠️ A PLANT THE READER MAY NOT WRITE GETS NO CONTROL, NOT A GREYED ONE
-          (D106): a disabled picker is a control named after something it does
-          not do. It is still LISTED with what is in force there, because
-          dropping it silently is `scope.ts`'s invisible-and-permanent failure.
-          The gate is `canAdministerPlant` in `../hooks/useOrgSettings.ts`, which
-          mirrors `app_is_admin() or app_is_admin_for(node)` -- deliberately NOT
-          `canEditNode`, which carries an arm this table's policies do not.
-          ------------------------------------------------------------------ */}
-      <section className={styles.card}>
-        <h2 className={styles.h2}>Scheduling at each plant</h2>
-        <p className={styles.lead}>
-          A plant can keep the company answer above or be given its own. A plant with its own answer
-          keeps it when the company answer changes.
-        </p>
-
-        {plants.isLoading && <p className={styles.status}>Loading plants…</p>}
-        {plants.error !== null && (
-          <p className={styles.error}>{describeSchedulerError(plants.error)}</p>
-        )}
-        {!plants.isLoading && plants.error === null && plants.rows.length === 0 && (
-          <p className={styles.status}>
-            No plants to show here — there is nowhere you can set this individually.
-          </p>
-        )}
-
-        {plants.rows.map((plant) => {
-          const inheriting = plant.override === null;
-          const state = inheriting
-            ? `Inheriting from the company — currently ${POLICY_SHORT[plant.effective]}. ` +
-              `Change the company answer above and this plant follows.`
-            : `Set for this plant — ${POLICY_SHORT[plant.effective]}. The company is on ` +
-              `${POLICY_SHORT[policy]}, and this plant does not follow the company if that changes.`;
-          const controlId = `settings-plant-policy-${plant.nodeId}`;
-          const saving = savingPlantId === plant.nodeId;
-
-          return (
-            <div className={rowStyles.row} key={plant.nodeId}>
-              <div className={rowStyles.text}>
-                {plant.editable ? (
-                  <label className={rowStyles.name} htmlFor={controlId}>
-                    {plant.name}
-                  </label>
-                ) : (
-                  <span className={rowStyles.name}>{plant.name}</span>
-                )}
-                <p className={rowStyles.hint}>
-                  What this plant does when a planner picks someone who is not certified for the
-                  job.
-                </p>
-              </div>
-
-              <div className={rowStyles.control}>
-                {plant.editable ? (
-                  <select
-                    id={controlId}
-                    className={`${fieldStyles.select} ${rowStyles.controlField}`}
-                    value={plant.override ?? INHERIT_CHOICE}
-                    disabled={saving}
-                    onChange={(e) => {
-                      // ⚠️ THE GUARD IS NOT THE ABSENCE OF THE CONTROL, for the
-                      // same reason the two rows above do not rely on
-                      // `disabled`: a change event can arrive without a person,
-                      // and the client must refuse the write itself. The server
-                      // refuses it too (`app_is_admin_for`).
-                      if (!plant.editable) return;
-                      setPlant.mutate({
-                        nodeId: plant.nodeId,
-                        choice: e.target.value as PlantPolicyChoice,
-                      });
-                    }}
-                  >
-                    <option value={INHERIT_CHOICE}>
-                      Use the company setting (currently {POLICY_SHORT[policy]})
-                    </option>
-                    {POLICY_CHOICES.map((choice) => (
-                      <option key={choice.value} value={choice.value}>
-                        {choice.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <p className={styles.status}>{notManagedNote(plant.name)}</p>
-                )}
-                <p className={styles.consequence}>{state}</p>
-                {saving && <p className={styles.status}>Saving…</p>}
-                {setPlant.isError && setPlant.variables?.nodeId === plant.nodeId && (
-                  <p className={styles.error}>{describeSchedulerError(setPlant.error)}</p>
-                )}
-              </div>
-            </div>
-          );
-        })}
       </section>
     </div>
   );

@@ -1,15 +1,13 @@
 /**
- * R-331 — THE CLIENT'S MIRROR OF "WHO MAY SET A PLANT'S RULE", AND THE THREE
- * STATES A PLANT CAN BE IN.
+ * R-331 / R-333 — THE THREE PURE DECISIONS THE SETTINGS TAB RESTS ON.
  *
- * The maintainer, session 62: *"These settings I think cannot be applied plant
- * wise which defeats the purpose of both options. Lets make it possible to
- * assign settings individually for each plant."* Migration 0050 answers the
- * server half. This file pins the two pure decisions the screen has to get
- * right before any of it renders.
+ *   1. WHO may set a place's answer (`canAdministerPlant`).
+ *   2. WHICH SCOPE the tab is editing (`settingsScope`).
+ *   3. WHETHER A PLANT HAS AN ANSWER AT ALL (`asDateFormat` /
+ *      `asEligibilityPolicy` — the null-returning twins of the `coerce*` pair).
  *
- * ⛔ THE WRITE GATE IS **NOT** `canEditNode`, AND THIS IS THE WHOLE POINT OF
- * THE FILE. `node_settings`' three write policies are
+ * ⛔ (1) THE WRITE GATE IS **NOT** `canEditNode`. `node_settings`' three write
+ * policies are
  *
  *     org_id = app_current_org() and (app_is_admin() or app_is_admin_for(node_id))
  *
@@ -25,6 +23,15 @@
  * (`editRights.ts`'s header is the standing argument): an unlanded grant read
  * or an unresolvable path answers "offer it", so the server does the refusing
  * out loud rather than the screen hiding a control in silence.
+ *
+ * ⛔ (3) `coerceDateFormat` AND `coerceEligibilityPolicy` ARE THE WRONG TOOL
+ * FOR A PLANT'S ROW, and using them would be a silent bug rather than a
+ * near-miss. They turn anything unrecognised into the DEFAULT, which is right
+ * for a company bag that has never had the key set — a date must render
+ * somehow. For a plant, "absent" and "unrecognised" must both come back as
+ * `null`, because `null` IS the third state: a plant read as "set to the
+ * default" would show as OVERRIDING when it is not, and would keep that
+ * appearance on the day the company changed its mind.
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -34,18 +41,19 @@ vi.mock("@/lib/api", () => ({
   fetchOrgSettings: vi.fn(),
   setOrgDateFormat: vi.fn(),
   setOrgEligibilityPolicy: vi.fn(),
-  fetchHierarchyTree: vi.fn(),
-  fetchPlantEligibilityPolicies: vi.fn(),
-  setPlantEligibilityPolicy: vi.fn(),
-  clearPlantEligibilityPolicy: vi.fn(),
+  fetchPlantSettings: vi.fn(),
+  setPlantSetting: vi.fn(),
+  clearPlantSetting: vi.fn(),
 }));
 
 import {
-  buildPlantPolicyRows,
+  asDateFormat,
+  asEligibilityPolicy,
   canAdministerPlant,
-  type PlantPolicyRow,
+  settingsScope,
 } from "@/features/admin/hooks/useOrgSettings";
 import type { EditRights } from "@/features/admin/lib/editRights";
+import type { PlantOption } from "@/features/admin/lib/plantFilter";
 
 const KNOWN = (over: Partial<EditRights> = {}): EditRights => ({
   role: "viewer",
@@ -54,6 +62,9 @@ const KNOWN = (over: Partial<EditRights> = {}): EditRights => ({
   known: true,
   ...over,
 });
+
+const A: PlantOption = { id: "a", name: "Plant A", path: "plant_a" };
+const B: PlantOption = { id: "b", name: "Plant B", path: "plant_b" };
 
 describe("R-331: which plants a reader is offered mirrors app_is_admin_for", () => {
   it("a company admin may set every plant", () => {
@@ -94,50 +105,114 @@ describe("R-331: which plants a reader is offered mirrors app_is_admin_for", () 
   });
 });
 
-/**
- * ⛔ THREE STATES, NOT TWO. A row exists (`override`) or it does not (`null`),
- * and "inheriting, currently refuse" is not the same thing as "set to refuse":
- * the second survives the company changing its mind and the first does not.
- * `buildPlantPolicyRows` must carry both numbers through untouched.
- */
-describe("R-331: a plant row keeps 'inheriting' apart from 'set to the same value'", () => {
-  const plants = [
-    { nodeId: "a", name: "Plant A", override: null, effective: "warn" as const },
-    { nodeId: "b", name: "Plant B", override: "warn" as const, effective: "warn" as const },
-    { nodeId: "c", name: "Plant C", override: "block" as const, effective: "block" as const },
-  ];
-  const paths = new Map([
-    ["a", "plant_a"],
-    ["b", "plant_b"],
-    ["c", "plant_c"],
-  ]);
-
-  it("does not collapse an absent override into the value it resolves to", () => {
-    const rows = buildPlantPolicyRows(plants, paths, KNOWN({ role: "admin" }));
-    expect(rows.map((r: PlantPolicyRow) => r.override)).toEqual([null, "warn", "block"]);
-    expect(rows.map((r: PlantPolicyRow) => r.effective)).toEqual(["warn", "warn", "block"]);
-    // Plant A and Plant B look identical today and are not the same state.
-    expect(rows[0].override).not.toBe(rows[1].override);
-    expect(rows[0].effective).toBe(rows[1].effective);
+/* ===========================================================================
+ * R-333 — THE TAB FOLLOWS THE CONTROL AT THE TOP.
+ *
+ * The maintainer, session 62: *"There is a filter at the top for selecting
+ * plants. Once we select the plant at the top we should be able to assign the
+ * settings to that particular plant."*
+ *
+ * ⚠️⚠️ THE HARD CASE IS "THERE IS NO CONTROL". `plantControlVisible` is false
+ * below two readable roots, and `resolvePlantChoice` then collapses the stored
+ * choice to `null`. Following that mechanically would send every such reader to
+ * the company defaults, which is right for one of them and wrong for the other
+ * — the two are the last four cases below, and `settingsScope`'s own header
+ * carries the argument.
+ * ======================================================================== */
+describe("R-333: which scope the Settings tab is editing", () => {
+  it("edits the chosen plant when a plant is chosen", () => {
+    expect(settingsScope("b", [A, B], true)).toEqual({
+      kind: "plant",
+      nodeId: "b",
+      name: "Plant B",
+      path: "plant_b",
+    });
   });
 
-  it("marks only the plants this reader may actually write", () => {
-    const dana = KNOWN({ role: "viewer", adminPaths: ["plant_b"] });
-    const rows = buildPlantPolicyRows(plants, paths, dana);
-    expect(rows.map((r) => [r.name, r.editable])).toEqual([
-      ["Plant A", false],
-      ["Plant B", true],
-      ["Plant C", false],
-    ]);
+  it("edits the company defaults on All plants", () => {
+    expect(settingsScope(null, [A, B], true)).toEqual({ kind: "company" });
+    expect(settingsScope(null, [A, B], false)).toEqual({ kind: "company" });
   });
 
-  it("offers a plant whose path it could not resolve, rather than hiding it", () => {
-    const rows = buildPlantPolicyRows(plants, new Map(), KNOWN({ role: "viewer" }));
-    expect(rows.every((r) => r.editable)).toBe(true);
+  /**
+   * ⚠️ A stored id naming a plant this reader can no longer see is already
+   * widened to `null` by `resolvePlantChoice`. Widening here too, rather than
+   * throwing or rendering a plant that is not on offer, means the tab lands on
+   * the scope every reader can at least SEE if that ever stops being true.
+   */
+  it("widens to the company defaults if the chosen plant is not on offer", () => {
+    expect(settingsScope("gone", [A, B], true)).toEqual({ kind: "company" });
   });
 
-  it("keeps every plant it was given, in the order it was given them", () => {
-    const rows = buildPlantPolicyRows(plants, paths, KNOWN({ role: "viewer" }));
-    expect(rows.map((r) => r.nodeId)).toEqual(["a", "b", "c"]);
+  /**
+   * ⛔ THE CASE THAT DECIDES THE NO-CONTROL RULE. A company admin of a
+   * one-plant org must edit the COMPANY's values. Sending them to the plant
+   * would look identical on the board — every node is under that one root — and
+   * would leave `orgs.settings` untouched, so the ACTIVITY screen, which spans
+   * plants and therefore reads the company value, would go on showing the old
+   * date format. A setting that applies everywhere except one screen is worse
+   * than one that applies nowhere.
+   */
+  it("sends a company admin with one plant to the company defaults", () => {
+    expect(settingsScope(null, [A], true)).toEqual({ kind: "company" });
+  });
+
+  /**
+   * ⛔ AND ITS OPPOSITE, WHICH IS THE WHOLE OF R-331. A site admin granted one
+   * plant cannot write `orgs.settings` at all (`set_org_date_format` and
+   * `set_org_eligibility_policy` are both `app_is_admin()`), so the company
+   * scope would hand them two disabled controls and nothing to do.
+   */
+  it("sends a site admin with one readable plant to that plant", () => {
+    expect(settingsScope(null, [A], false)).toEqual({
+      kind: "plant",
+      nodeId: "a",
+      name: "Plant A",
+      path: "plant_a",
+    });
+  });
+
+  /**
+   * ⚠️ FAILS OPEN ON A FAILED STRUCTURE READ. No readable roots is what the
+   * panel sees while the hierarchy read is in flight or after it failed;
+   * inventing a plant scope out of that would edit nothing at all.
+   */
+  it("falls back to the company defaults when no plant is readable", () => {
+    expect(settingsScope(null, [], false)).toEqual({ kind: "company" });
+    expect(settingsScope(null, [], true)).toEqual({ kind: "company" });
+  });
+});
+
+/* ===========================================================================
+ * R-331 — "INHERITING" IS A STATE, AND ONLY A NULL CAN SAY IT.
+ * ======================================================================== */
+describe("R-331: a plant's own answer is told apart from having none", () => {
+  it("reads a stored token as an override", () => {
+    expect(asDateFormat("iso")).toBe("iso");
+    expect(asDateFormat("ymd_slash")).toBe("ymd_slash");
+    expect(asEligibilityPolicy("warn")).toBe("warn");
+    expect(asEligibilityPolicy("block")).toBe("block");
+  });
+
+  /**
+   * ⛔ THE CASE THAT SEPARATES THESE FROM `coerceDateFormat`. Every value here
+   * would come back as the DEFAULT from the coercer — `d_mon_yyyy`, `warn` —
+   * and the screen would then show a plant as having chosen the default when it
+   * has chosen nothing at all.
+   */
+  it("reads absent, empty and unrecognised as no override at all", () => {
+    for (const junk of [null, undefined, "", "ISO", "iso ", "not_a_format", 0, true, [], {}]) {
+      expect(asDateFormat(junk)).toBeNull();
+      expect(asEligibilityPolicy(junk)).toBeNull();
+    }
+  });
+
+  /** ⛔ And the two keys' vocabularies do not leak into each other — the same
+   *  thing migration 0052's `else false` holds on the server side. */
+  it("does not accept one setting's value for the other setting", () => {
+    expect(asDateFormat("warn")).toBeNull();
+    expect(asDateFormat("block")).toBeNull();
+    expect(asEligibilityPolicy("iso")).toBeNull();
+    expect(asEligibilityPolicy("d_mon_yyyy")).toBeNull();
   });
 });

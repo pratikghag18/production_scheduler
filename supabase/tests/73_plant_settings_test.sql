@@ -427,7 +427,19 @@ BEGIN
     BEGIN v_null := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_null := NULL; END;
   END;
 
-  BEGIN PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'date_format', 'iso');
+  -- ⚠️ AMENDED BY R-333 (migration 0052), AND THE AMENDMENT IS A CONTRACT
+  -- CHANGE RATHER THAN A WRONG CASE BEING QUIETLY RELAXED (CLAUDE.md §4). This
+  -- prong read `set_node_setting(plant_1, 'date_format', 'iso')` and expected
+  -- "unknown setting" -- true of 0050, whose header argued the date format was
+  -- a reader's display convention and not a plant's rule. The maintainer has
+  -- since decided a plant answers it too, so `date_format` is now a KNOWN key
+  -- and this prong was passing for a reason that has stopped being true.
+  -- `capacity_cap` replaces it: a real `orgs.settings` key that 0050 and 0052
+  -- both deliberately leave company-wide, so the prong still asks the thing it
+  -- was written to ask -- an unvalidated key is refused by the FUNCTION, in
+  -- words, before the table CHECK ever sees it. P22 holds the same line from
+  -- the other side.
+  BEGIN PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'capacity_cap', '0.8');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL, v_key_state = RETURNED_SQLSTATE;
     BEGIN v_key := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_key := NULL; END;
@@ -722,6 +734,215 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_P17;
 
+-- ============================================================================
+-- P18-P22 -- THE SECOND KEY (R-333, migration 0052).
+--
+-- The maintainer, session 62: "There is a filter at the top for selecting
+-- plants. Once we select the plant at the top we should be able to assign the
+-- settings to that particular plant, and it should be all types of settings on
+-- the settings tab, not just this one."
+--
+-- ⛔ THIS OVERRULES 0050's OWN HEADER, which recorded `date_format` as
+-- deliberately left company-wide on the reasoning that it is "a reader's
+-- display convention, not a plant's rule". The maintainer has decided
+-- otherwise and that is the answer; the reasoning is left standing in 0050
+-- rather than edited out, because a migration is a record of what was believed
+-- at the time.
+--
+-- ⭐ WHAT THESE CASES ARE FOR IS THE CLAIM 0050 MADE ABOUT ITSELF: "the table,
+-- the resolver and the writers are generic and a second key is one branch in
+-- each of three places." That claim is a promise about a SHAPE, and the only
+-- way to hold it is to add the second key and ask the generic machinery the
+-- same questions the first key was asked. P18 is the resolver, P19 the two
+-- guards (the typed RPC refusal AND the table CHECK behind it), P20 the way
+-- back to inheriting, P21 that the two keys do not read each other, and P22
+-- that "generic" did not become "anything goes".
+--
+-- ⚠️ THE COMPANY BAG HAS NO `date_format` KEY AT ALL in the seed, which makes
+-- this a better test of the resolver than eligibility_policy was: the fallback
+-- chain runs all the way to NULL, and "the plant has an answer" therefore has
+-- to come from node_settings or from nowhere.
+-- ============================================================================
+
+\echo 'P18: a plant answers the date format for everything under it, without touching the company bag'
+SAVEPOINT sp_P18;
+DO $$
+DECLARE v_at_cell text; v_at_root text; v_other_plant text; v_org jsonb;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'date_format', 'iso');
+  RESET ROLE;
+
+  -- Resolved from a CELL four levels down, which is the ancestor walk doing
+  -- real work rather than the root reading its own row.
+  v_at_cell := app_resolve_node_setting('30000000-0000-0000-0000-000000000007', 'date_format');
+  v_at_root := app_resolve_node_setting('30000000-0000-0000-0000-000000000001', 'date_format');
+  -- Plant 2 was never touched. The company bag has no date_format key at all,
+  -- so the honest answer there is NULL and the CLIENT applies its own default
+  -- -- 0050's "the coded default belongs to the KEY, not to the resolver".
+  v_other_plant := app_resolve_node_setting((SELECT v FROM p_fix WHERE k = 'p2_cell'), 'date_format');
+  SELECT settings INTO v_org FROM orgs WHERE id = '10000000-0000-0000-0000-000000000001';
+
+  IF v_at_cell = 'iso' AND v_at_root = 'iso' AND v_other_plant IS NULL
+     AND NOT (v_org ? 'date_format')
+  THEN RAISE NOTICE 'PASS P18';
+  ELSE RAISE NOTICE 'FAIL P18: cell=% root=% other=% org_bag=%',
+    v_at_cell, v_at_root, v_other_plant, v_org; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL P18: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P18;
+
+\echo 'P19: a junk date format is a TYPED refusal naming the key, and the table CHECK refuses it underneath'
+SAVEPOINT sp_P19;
+DO $$
+DECLARE v_raw text; v_detail jsonb; v_state text; v_check_state text; v_rows int;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'date_format', 'warn');
+  EXCEPTION WHEN OTHERS THEN
+    v_state := SQLSTATE;
+    GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
+  RESET ROLE;
+
+  -- ⛔ 'warn' IS THE POINT OF THE CHOSEN JUNK VALUE. It is a perfectly legal
+  -- value for the OTHER key, so a CASE that fell through to a shared
+  -- `p_value IN ('warn','block')` -- the shape a careless second branch takes
+  -- -- would accept it here and store a date format of "warn".
+  SELECT count(*) INTO v_rows FROM node_settings
+   WHERE node_id = '30000000-0000-0000-0000-000000000001' AND key = 'date_format';
+
+  -- And the guard BEHIND the RPC, which is the one that holds when somebody
+  -- writes the table directly. 23514 = check_violation.
+  BEGIN
+    INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'date_format',
+            '10000000-0000-0000-0000-000000000001', 'not_a_format');
+  EXCEPTION WHEN OTHERS THEN v_check_state := SQLSTATE;
+  END;
+
+  IF v_state = 'PT400' AND v_detail->>'error' = 'invalid_argument'
+     AND v_detail->>'field' = 'date_format' AND v_detail->>'value' = 'warn'
+     AND v_rows = 0 AND v_check_state = '23514'
+  THEN RAISE NOTICE 'PASS P19';
+  ELSE RAISE NOTICE 'FAIL P19: state=% detail=% rows=% check_state=%',
+    v_state, v_detail, v_rows, v_check_state; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL P19: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P19;
+
+\echo 'P20: clearing the date format returns the plant to inheriting -- the same separate verb, not a null'
+SAVEPOINT sp_P20;
+DO $$
+DECLARE v_set text; v_after text; v_ret jsonb; v_rows int;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  -- Give the company an answer first, so "inheriting" has something to land on
+  -- and the case cannot pass by everything being NULL.
+  PERFORM set_org_date_format('dmy_slash');
+  PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'date_format', 'iso');
+  v_set := app_resolve_node_setting('30000000-0000-0000-0000-000000000007', 'date_format');
+  v_ret := clear_node_setting('30000000-0000-0000-0000-000000000001', 'date_format');
+  v_after := app_resolve_node_setting('30000000-0000-0000-0000-000000000007', 'date_format');
+  RESET ROLE;
+
+  SELECT count(*) INTO v_rows FROM node_settings
+   WHERE node_id = '30000000-0000-0000-0000-000000000001' AND key = 'date_format';
+
+  IF v_set = 'iso' AND v_after = 'dmy_slash' AND v_rows = 0
+     AND v_ret->>'is_override' = 'false' AND v_ret->>'effective' = 'dmy_slash'
+     AND v_ret->>'org_value' = 'dmy_slash'
+  THEN RAISE NOTICE 'PASS P20';
+  ELSE RAISE NOTICE 'FAIL P20: set=% after=% rows=% ret=%', v_set, v_after, v_rows, v_ret; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL P20: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P20;
+
+\echo 'P21: the two keys at one plant are two answers -- setting one does not move or clear the other'
+SAVEPOINT sp_P21;
+DO $$
+DECLARE v_fmt text; v_pol text; v_fmt_after text; v_pol_after text; v_keys text[];
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'date_format', 'ymd_slash');
+  PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'eligibility_policy', 'block');
+  v_fmt := app_resolve_node_setting('30000000-0000-0000-0000-000000000007', 'date_format');
+  v_pol := app_resolve_node_setting('30000000-0000-0000-0000-000000000007', 'eligibility_policy');
+
+  -- ⛔ THE PRIMARY KEY IS (node_id, key), and this is the case that says so out
+  -- loud. A writer that keyed on the node alone -- the shape an "upsert the
+  -- plant's setting" helper takes -- would have the second write REPLACE the
+  -- first, and the screen would show one setting silently unsetting another.
+  PERFORM clear_node_setting('30000000-0000-0000-0000-000000000001', 'date_format');
+  v_fmt_after := app_resolve_node_setting('30000000-0000-0000-0000-000000000007', 'date_format');
+  v_pol_after := app_resolve_node_setting('30000000-0000-0000-0000-000000000007', 'eligibility_policy');
+  RESET ROLE;
+
+  SELECT array_agg(key ORDER BY key) INTO v_keys FROM node_settings
+   WHERE node_id = '30000000-0000-0000-0000-000000000001';
+
+  IF v_fmt = 'ymd_slash' AND v_pol = 'block'
+     AND v_fmt_after IS NULL AND v_pol_after = 'block'
+     AND v_keys = ARRAY['eligibility_policy']
+  THEN RAISE NOTICE 'PASS P21';
+  ELSE RAISE NOTICE 'FAIL P21: fmt=% pol=% fmt_after=% pol_after=% keys=%',
+    v_fmt, v_pol, v_fmt_after, v_pol_after, v_keys; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL P21: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P21;
+
+\echo 'P22: generic did not become anything-goes -- an unvalidated key is still refused by both writers and by the table'
+SAVEPOINT sp_P22;
+DO $$
+DECLARE v_set_state text; v_clear_state text; v_check_state text;
+        v_set_detail jsonb; v_raw text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  -- `capacity_cap` is a REAL key in orgs.settings that this migration
+  -- deliberately does not move. Storing it here would be a setting nobody
+  -- validates and nobody reads -- 0050's "an unvalidated key would be a value
+  -- nobody checks".
+  BEGIN
+    PERFORM set_node_setting('30000000-0000-0000-0000-000000000001', 'capacity_cap', '0.8');
+  EXCEPTION WHEN OTHERS THEN
+    v_set_state := SQLSTATE;
+    GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_set_detail := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_set_detail := NULL; END;
+  END;
+  BEGIN
+    PERFORM clear_node_setting('30000000-0000-0000-0000-000000000001', 'capacity_cap');
+  EXCEPTION WHEN OTHERS THEN v_clear_state := SQLSTATE;
+  END;
+  RESET ROLE;
+
+  BEGIN
+    INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'capacity_cap',
+            '10000000-0000-0000-0000-000000000001', '0.8');
+  EXCEPTION WHEN OTHERS THEN v_check_state := SQLSTATE;
+  END;
+
+  IF v_set_state = 'PT400' AND v_clear_state = 'PT400' AND v_check_state = '23514'
+     AND v_set_detail->>'field' = 'key' AND v_set_detail->>'value' = 'capacity_cap'
+  THEN RAISE NOTICE 'PASS P22';
+  ELSE RAISE NOTICE 'FAIL P22: set=% clear=% check=% detail=%',
+    v_set_state, v_clear_state, v_check_state, v_set_detail; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL P22: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P22;
+
 ROLLBACK;
 
-\echo '73_plant_settings_test.sql complete (18 cases: P0-P17)'
+\echo '73_plant_settings_test.sql complete (23 cases: P0-P22)'

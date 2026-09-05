@@ -1,4 +1,4 @@
-/* Settings (the system-admin, org-wide preferences section).
+/* Settings (the preferences section: the company's answers, or one plant's).
 
    Sized in `rem`, not px (D84, design plan §19.16): the root font-size scales
    with `--chrome-scale` (global.css), so this whole surface follows the viewport
@@ -72,9 +72,14 @@
   color: var(--crit);
 }
 
-/* THE ONE SENTENCE ABOVE A CARD'S ROWS (R-331). The per-plant card needs to say
-   what inheriting MEANS before the first row is read; the two org-wide cards
-   need nothing, because a single setting explains itself.
+/* THE SENTENCE THAT SAYS WHICH SCOPE THIS TAB IS EDITING (R-331, R-333).
+
+   ⭐ IT IS NOT DECORATION AND IT IS NOT OPTIONAL. The tab now edits the company
+   defaults or ONE plant, decided by a control one screen up
+   (`AdminPage`'s "Showing"), and a screen that silently edits a different scope
+   depending on a control somewhere else is worse than one that lists
+   everything. This paragraph is where the tab says which of the two it is
+   doing, and how to reach the other.
 
    ⚠️ NOT A `.hint`. `SettingRow.module.css`'s `.hint` belongs to a row's TEXT
    cell and is bounded by that cell's reading measure; this sits above the grid

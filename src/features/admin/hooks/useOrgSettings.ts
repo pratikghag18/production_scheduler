@@ -1,8 +1,8 @@
 /**
- * React Query over the org settings bag — one read, one mutation.
+ * The settings seam: the company's answers, and one place's answers.
  *
  * `useDateFormat` is the client half of the calendar-date seam
- * (`src/lib/format/dates.ts`): it resolves the org-wide `date_format` token that
+ * (`src/lib/format/dates.ts`): it resolves the `date_format` token that
  * `formatCalendarDay` takes, defaulting through `coerceDateFormat` so a screen
  * renders correctly before the read lands and against a bag that has never had
  * the key set.
@@ -12,30 +12,51 @@
  * pass `canQueryAsUser(session?.user.id ?? null, sessionLoading)` (D91) — the
  * same contract `useShiftPatterns` keeps.
  *
+ * ---------------------------------------------------------------------------
+ * ⭐ EVERY READER TAKES AN OPTIONAL PLACE, AND OMITTING IT MEANS THE COMPANY'S
+ * ANSWER (R-333). `useDateFormat(canQuery)` is what it always was and answers
+ * `orgs.settings`; `useDateFormat(canQuery, plantNodeId)` answers that plant's
+ * override, falling back to the company's. The argument is optional rather than
+ * required because of what the callers ARE:
+ *
+ *   `BoardPage` shows ONE plant and can resolve that plant's value.
+ *   `AuditPanel` — the Activity screen — lists changes from EVERY plant at
+ *   once, and a per-plant date format has no single answer there. A screen that
+ *   spans plants has no plant to ask, so it uses the COMPANY value and says
+ *   nothing misleading by doing so.
+ *
+ * ⛔ SO THE DEFAULT MUST NOT MOVE. Making the plant argument required, or
+ * defaulting it to "whatever plant is selected somewhere", would put a plant's
+ * display convention on a screen showing three plants' rows.
+ *
  * AUTHOR-ONLY — imports React Query and, through `@/lib/api`, the Supabase
  * client; not runnable under `node --experimental-strip-types`. The logic worth
- * testing (the token mapping and the defensive fallback) is in
- * `src/lib/format/dates.ts`.
+ * testing (the token mapping, the defensive fallbacks, the write gate and the
+ * scope rule) is pure and is exported: `src/lib/format/dates.ts` and the
+ * bottom half of this file, driven by `src/test/plantSettings.test.ts`.
  */
-import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  clearPlantEligibilityPolicy,
-  fetchHierarchyTree,
+  clearPlantSetting,
   fetchOrgSettings,
-  fetchPlantEligibilityPolicies,
+  fetchPlantSettings,
   setOrgDateFormat,
   setOrgEligibilityPolicy,
-  setPlantEligibilityPolicy,
+  setPlantSetting,
   type EligibilityPolicy,
   type Json,
-  type PlantEligibilityPolicy,
+  type NodeSettingKey,
+  type PlantSettingRow,
   type SchedulerError,
 } from "@/lib/api";
-import { coerceDateFormat, DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
+import {
+  coerceDateFormat,
+  DATE_FORMATS,
+  DEFAULT_DATE_FORMAT,
+  type DateFormat,
+} from "@/lib/format/dates";
 import { coveredByAnyGrant, isCompanyAdmin, type EditRights } from "../lib/editRights";
-import { hierarchyKeys } from "./useHierarchyMutations";
-import { useEditRights } from "./useEditRights";
+import { plantControlVisible, type PlantChoice, type PlantOption } from "../lib/plantFilter";
 
 export const orgSettingsKeys = {
   all: ["org-settings"] as const,
@@ -51,11 +72,15 @@ export function useOrgSettings(enabled: boolean) {
 }
 
 /**
- * The org-wide date-display format, resolved defensively. Returns the default
+ * The COMPANY's date-display format, resolved defensively. Returns the default
  * while the read is in flight or absent, and for any unrecognised stored value —
  * so a date is never shown raw because a setting was missing or malformed.
+ *
+ * Exported on its own because the Settings screen needs it even while it is
+ * editing a plant: the plant's "use the company setting" option carries the
+ * company's current answer in its own label.
  */
-export function useDateFormat(enabled: boolean): DateFormat {
+export function useCompanyDateFormat(enabled: boolean): DateFormat {
   const { data } = useOrgSettings(enabled);
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     return coerceDateFormat((data as Record<string, Json | undefined>).date_format);
@@ -64,7 +89,28 @@ export function useDateFormat(enabled: boolean): DateFormat {
 }
 
 /**
- * Set the org-wide format. Refused server-side unless the caller is a system
+ * The date-display format in force — at `plantNodeId` when one is given, and for
+ * the company when one is not. See the file header on why the argument is
+ * optional and why the default must not move.
+ *
+ * ⚠️ THE HOOKS BELOW ARE CALLED UNCONDITIONALLY and the plant read is gated by
+ * `enabled`, not by an `if`. React forbids a conditional hook, and the whole
+ * point of the optional argument is that `useDateFormat(canQuery)` costs the
+ * same one request it always did — the second query never fires.
+ *
+ * ⛔ ONLY CORRECT FOR A ROOT. `fetchPlantSettings`' header carries the argument:
+ * "its own override, else the company's" is the server's rule reduced to a node
+ * with no ancestors. A deeper node must be resolved on the server.
+ */
+export function useDateFormat(enabled: boolean, plantNodeId: string | null = null): DateFormat {
+  const company = useCompanyDateFormat(enabled);
+  const overrides = usePlantOverridesFor(enabled && plantNodeId !== null, "date_format");
+  if (plantNodeId === null) return company;
+  return asDateFormat(ownOverride(overrides.data, plantNodeId)) ?? company;
+}
+
+/**
+ * Set the COMPANY-wide format. Refused server-side unless the caller is a system
  * admin; the Settings screen only offers it to one, but the RPC is the
  * authority. Invalidate-and-refetch, no optimistic update — the write's outcome
  * (a typed refusal) is not something the client should paint over.
@@ -109,10 +155,10 @@ export function coerceEligibilityPolicy(value: unknown): EligibilityPolicy {
 }
 
 /**
- * The org-wide eligibility policy, resolved defensively. Returns the default
+ * The COMPANY's eligibility policy, resolved defensively. Returns the default
  * while the read is in flight or absent, and for any unrecognised stored value.
  */
-export function useEligibilityPolicy(enabled: boolean): EligibilityPolicy {
+export function useCompanyEligibilityPolicy(enabled: boolean): EligibilityPolicy {
   const { data } = useOrgSettings(enabled);
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     return coerceEligibilityPolicy((data as Record<string, Json | undefined>).eligibility_policy);
@@ -121,9 +167,30 @@ export function useEligibilityPolicy(enabled: boolean): EligibilityPolicy {
 }
 
 /**
- * Set the org-wide eligibility policy. Refused server-side unless the caller is
- * a system admin; the Settings screen only offers it to one, but the RPC is the
- * authority. Invalidate-and-refetch, no optimistic update — a setting that
+ * The eligibility policy in force — at `plantNodeId` when one is given, and for
+ * the company when one is not. The same shape as `useDateFormat` above.
+ *
+ * ⚠️ THIS IS A PREVIEW, NOT THE RULE. `check_eligibility`, `create_assignment`,
+ * `move_run` and `apply_split_coverage` resolve the policy on the SERVER,
+ * through `app_resolve_node_setting`, and a supervisor who cannot read the
+ * plant root would get the wrong answer if the browser tried the walk itself
+ * (73's P16/P17, measured). This renders what the server will do; it never
+ * decides it.
+ */
+export function useEligibilityPolicy(
+  enabled: boolean,
+  plantNodeId: string | null = null,
+): EligibilityPolicy {
+  const company = useCompanyEligibilityPolicy(enabled);
+  const overrides = usePlantOverridesFor(enabled && plantNodeId !== null, "eligibility_policy");
+  if (plantNodeId === null) return company;
+  return asEligibilityPolicy(ownOverride(overrides.data, plantNodeId)) ?? company;
+}
+
+/**
+ * Set the COMPANY-wide eligibility policy. Refused server-side unless the caller
+ * is a system admin; the Settings screen only offers it to one, but the RPC is
+ * the authority. Invalidate-and-refetch, no optimistic update — a setting that
  * decides whether the plant can schedule an untrained person must never be
  * painted as changed before the server has said it is.
  */
@@ -138,43 +205,151 @@ export function useSetEligibilityPolicy() {
 }
 
 /* ===========================================================================
- * PER-PLANT SETTINGS — R-331, migration 0050.
+ * PER-PLANT SETTINGS — R-331 (migration 0050), R-333 (migration 0052).
  *
- * The maintainer, session 62: *"These settings I think cannot be applied plant
- * wise which defeats the purpose of both options. Lets make it possible to
- * assign settings individually for each plant."*
+ * The maintainer, session 62: *"There is a filter at the top for selecting
+ * plants. Once we select the plant at the top we should be able to assign the
+ * settings to that particular plant, and it should be all types of settings on
+ * the settings tab, not just this one."*
  *
  * ⛔⛔ THREE STATES, NOT TWO, AND EVERYTHING IN THIS SECTION EXISTS TO KEEP
- * THE FIRST ONE ALIVE. A plant is INHERITING (no `node_settings` row), SET TO
- * ALLOW, or SET TO REFUSE. "Inheriting, currently refuse" and "set to refuse"
- * are different states — the second survives the company changing its mind and
- * the first does not — and migration 0050 spent a whole TABLE rather than a
- * second jsonb bag precisely because `settings->>'k'` cannot tell an absent key
- * from a key holding a JSON null (F-088, measured). `override: null` is the
- * absence and it is load-bearing all the way to the screen.
+ * THE FIRST ONE ALIVE. A plant is INHERITING (no `node_settings` row), or SET
+ * to one of the values. "Inheriting, currently refuse" and "set to refuse" are
+ * different states — the second survives the company changing its mind and the
+ * first does not — and migration 0050 spent a whole TABLE rather than a second
+ * jsonb bag precisely because `settings->>'k'` cannot tell an absent key from a
+ * key holding a JSON null (F-088, measured). `null` is the absence and it is
+ * load-bearing all the way to the screen.
  *
- * ⚠️ SO THE WRITE IS TWO VERBS AND NEVER ONE WITH A NULL. `PlantPolicyChoice`
- * carries `"inherit"` as a token this client understands and the server never
- * sees: `useSetPlantPolicy` turns it into `clear_node_setting`, and every other
- * value into `set_node_setting`. A binding that sent a null would silently
- * return a strict plant to the company's permissive default — the one direction
- * nobody goes and checks.
+ * ⚠️ SO THE WRITE IS TWO VERBS AND NEVER ONE WITH A NULL. `INHERIT_CHOICE` is a
+ * token this client understands and the server never sees: `useSetPlantSetting`
+ * turns it into `clear_node_setting`, and every other value into
+ * `set_node_setting`. A binding that sent a null would silently return a strict
+ * plant to the company's permissive default — the one direction nobody goes and
+ * checks.
  * ======================================================================== */
 
-/** What a reader can choose for one plant. `"inherit"` never reaches the server. */
-export type PlantPolicyChoice = EligibilityPolicy | "inherit";
-
-/** The option value that means "no row — follow the company". */
+/** The option value that means "no row — follow the company". Never sent. */
 export const INHERIT_CHOICE = "inherit";
 
-/** One plant, as the Settings screen renders it. */
-export interface PlantPolicyRow extends PlantEligibilityPolicy {
-  /**
-   * May this reader change THIS plant's answer? A PREVIEW of the server's
-   * decision, never a permission — `canAdministerPlant` below carries the
-   * argument for what it mirrors and why it fails open.
-   */
-  editable: boolean;
+/** What a reader can choose for one plant: a stored value, or back to inheriting. */
+export type PlantSettingChoice = string;
+
+export const plantSettingsKeys = {
+  all: ["plant-settings"] as const,
+  /** ⚠️ PREFIXED BY `all`, so one mutation's invalidate reaches every key. */
+  forKey: (key: NodeSettingKey) => ["plant-settings", key] as const,
+};
+
+/**
+ * Every plant's own answer for ONE setting.
+ *
+ * ⭐ THE COMPANY'S VALUE IS NOT IN THE QUERY KEY, AND THAT IS THE POINT. The
+ * eligibility-only version fetched `effective` — the resolved value — which
+ * meant the company's answer had to be in the cache key or a stale list would
+ * keep showing the OLD company value against every inheriting plant after the
+ * company setting moved. This returns overrides only and lets the caller
+ * resolve, so there is nothing cached that can disagree with the company row
+ * rendered beside it.
+ */
+function usePlantOverridesFor(enabled: boolean, key: NodeSettingKey) {
+  return useQuery<PlantSettingRow[], SchedulerError>({
+    queryKey: plantSettingsKeys.forKey(key),
+    queryFn: () => fetchPlantSettings(key),
+    enabled,
+  });
+}
+
+/** One plant's raw stored answer out of the list, or `null` for "no row". */
+function ownOverride(rows: PlantSettingRow[] | undefined, nodeId: string): string | null {
+  return rows?.find((r) => r.nodeId === nodeId)?.override ?? null;
+}
+
+/* ---------------------------------------------------------------------------
+   THE NULL-RETURNING TWINS OF THE `coerce*` FUNCTIONS.
+
+   ⛔ `coerceDateFormat` AND `coerceEligibilityPolicy` ARE THE WRONG TOOL HERE
+   AND USING THEM WOULD BE A SILENT BUG. They turn anything unrecognised into
+   the DEFAULT, which is exactly right for a company bag that has never had the
+   key set — a date must render somehow. Here, "unrecognised" and "absent" must
+   both come back as `null`, because `null` is the third state: a plant with a
+   junk row read as "set to the default" would show as OVERRIDING when it is
+   not, and would keep that appearance the day the company changed its mind.
+   --------------------------------------------------------------------------- */
+
+/** A stored date-format token, or `null` for absent or unrecognised. */
+export function asDateFormat(value: unknown): DateFormat | null {
+  return typeof value === "string" && (DATE_FORMATS as readonly string[]).includes(value)
+    ? (value as DateFormat)
+    : null;
+}
+
+/** A stored eligibility token, or `null` for absent or unrecognised. */
+export function asEligibilityPolicy(value: unknown): EligibilityPolicy | null {
+  return value === "warn" || value === "block" ? value : null;
+}
+
+/** What one plant has said for itself. `null` on a field means "inheriting". */
+export interface PlantOverrides {
+  dateFormat: DateFormat | null;
+  policy: EligibilityPolicy | null;
+  isLoading: boolean;
+  error: SchedulerError | null;
+}
+
+/**
+ * Both settings' own answers at ONE plant, for the Settings screen.
+ *
+ * ⚠️ ONE QUERY PER KEY, NOT ONE PER PLANT. The reads are keyed by SETTING and
+ * return every plant, so the two hooks here are the same two cache entries
+ * `useDateFormat(enabled, plantId)` uses on the board — switching the plant
+ * filter re-renders from cache rather than refetching.
+ */
+export function usePlantOverrides(enabled: boolean, nodeId: string | null): PlantOverrides {
+  const on = enabled && nodeId !== null;
+  const format = usePlantOverridesFor(on, "date_format");
+  const policy = usePlantOverridesFor(on, "eligibility_policy");
+  return {
+    dateFormat: nodeId === null ? null : asDateFormat(ownOverride(format.data, nodeId)),
+    policy: nodeId === null ? null : asEligibilityPolicy(ownOverride(policy.data, nodeId)),
+    isLoading: on && (format.isLoading || policy.isLoading),
+    error: format.error ?? policy.error ?? null,
+  };
+}
+
+/**
+ * Set or clear ONE place's answer for ONE setting.
+ *
+ * ⭐ ONE MUTATION FOR EVERY ROW, and the screen tells them apart by
+ * `variables.key` — React Query hands the in-flight variables back. One
+ * mutation per row would mean a hook inside a loop, which React forbids; a
+ * single `isPending` painted across both settings would say the date format was
+ * saving when the eligibility rule was.
+ *
+ * ⛔ `INHERIT_CHOICE` IS DISPATCHED TO `clear_node_setting`, THE SEPARATE VERB.
+ * There is no "set to null to clear" on the server and there must not be one
+ * here: the whole of migration 0050 is about a row existing or not.
+ *
+ * Invalidate-and-refetch, no optimistic update — the same reasoning as the
+ * company-wide writers above, and it matters more per plant: a setting that
+ * decides whether an untrained person can be scheduled AT THIS SITE must never
+ * be painted as changed before the server has said it is.
+ */
+export function useSetPlantSetting() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    void,
+    SchedulerError,
+    { nodeId: string; key: NodeSettingKey; choice: PlantSettingChoice }
+  >({
+    mutationFn: ({ nodeId, key, choice }) =>
+      choice === INHERIT_CHOICE
+        ? clearPlantSetting(nodeId, key)
+        : setPlantSetting(nodeId, key, choice),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: plantSettingsKeys.all });
+    },
+  });
 }
 
 /* ---------------------------------------------------------------------------
@@ -222,127 +397,78 @@ export function canAdministerPlant(path: string | null, rights: EditRights): boo
   return coveredByAnyGrant(path, rights.adminPaths); // app_is_admin_on_path(n.path)
 }
 
-/**
- * Join the plants the server described to the paths this client can see, and
- * decide which of them to offer a control for.
+/* ===========================================================================
+ * WHICH SCOPE THE SETTINGS TAB IS EDITING — R-333.
  *
- * Pure and exported so `src/test/plantSettings.test.ts` can drive it without a
- * network — the same split `editRights.ts`/`useEditRights.ts` keeps.
- *
- * ⚠️ THE ORDER AND THE MEMBERSHIP OF `plants` ARE PASSED THROUGH UNTOUCHED.
- * The list is already the roots the reader may READ, ordered by name, decided by
- * `nodes_select` and by `fetchPlantEligibilityPolicies`. Dropping a plant here
- * because it is read-only would be silent hiding; the screen lists it and says
- * why instead.
- */
-export function buildPlantPolicyRows(
-  plants: readonly PlantEligibilityPolicy[],
-  pathByNodeId: ReadonlyMap<string, string>,
-  rights: EditRights,
-): PlantPolicyRow[] {
-  return plants.map((p) => ({
-    ...p,
-    editable: canAdministerPlant(pathByNodeId.get(p.nodeId) ?? null, rights),
-  }));
-}
+ * ⭐⭐ THE TAB DOES NOT ASK ITS OWN QUESTION. `AdminPage` has carried a plant
+ * control since §19.77 and every other admin panel reads it through
+ * `usePlantFilter`; Settings grew a second answer instead — a column of
+ * per-plant rows, one per plant, beneath the company's. The maintainer's
+ * sentence is that the control at the top is the answer: choose a plant and the
+ * tab edits THAT plant; choose All plants and it edits the company defaults.
+ * ======================================================================== */
 
-export const plantSettingsKeys = {
-  all: ["plant-settings"] as const,
-};
-
-/** What `usePlantPolicies` hands the screen. */
-export interface PlantPolicies {
-  rows: PlantPolicyRow[];
-  isLoading: boolean;
-  isError: boolean;
-  error: SchedulerError | null;
-}
+/** What the Settings tab is editing right now. */
+export type SettingsScope =
+  { kind: "company" } | { kind: "plant"; nodeId: string; name: string; path: string };
 
 /**
- * Every plant this reader can see, with its own answer, the answer in force
- * there, and whether they may change it.
+ * The scope the tab edits, from the plant control's answer.
  *
- * ⚠️ `orgPolicy` IS IN THE QUERY KEY, not merely in the closure. It is what
- * `fetchPlantEligibilityPolicies` resolves an INHERITING plant's `effective`
- * from, so a cached list keyed without it would keep showing the old company
- * answer against every inheriting plant after the company setting moved —
- * a screen quietly disagreeing with the server about what a plant is doing.
+ * ⚠️⚠️ THE HARD CASE IS "THE CONTROL IS NOT VISIBLE", and it has to be decided
+ * rather than fallen into. `plantControlVisible` is false below two readable
+ * roots (`plantFilter.ts` decision 2: a control that cannot change anything is
+ * a control named after less than it does), and `resolvePlantChoice` then
+ * collapses the stored choice to `null`. Following that mechanically would make
+ * the tab always edit the company defaults for such a reader — which is right
+ * for one of them and wrong for the other:
  *
- * ⚠️ THE PATHS COME FROM THE ADMIN TREE READ, under the SAME key `AdminPage`,
- * `ProductsPanel` and `CycleTimesPanel` use, so this costs one shared request
- * and one cache entry rather than a fourth round trip. They are needed because
- * `fetchPlantEligibilityPolicies` deliberately does not select `nodes.path` —
- * it is an ltree, typed `unknown`, and a list of plants that wanted a name and
- * an id should not buy a runtime guard for a column it does not render. The
- * PERMISSION does need it, and a plant missing from the tree read resolves to
- * `null`, which fails open.
+ *   A COMPANY ADMIN OF A ONE-PLANT ORG must edit the COMPANY's values, and
+ *   `canWriteCompany` is how this function is told so. Sending them to the
+ *   plant instead would look identical on the board — every node is under that
+ *   one root — and would leave `orgs.settings` untouched, so the ACTIVITY
+ *   screen, which spans plants and therefore reads the company value, would go
+ *   on showing the old date format. A setting that applies everywhere except
+ *   one screen is worse than one that applies nowhere.
+ *
+ *   A SITE ADMIN GRANTED ONE PLANT cannot write `orgs.settings` at all —
+ *   `set_org_date_format` and `set_org_eligibility_policy` are both
+ *   `app_is_admin()`. Handing them the company scope hands them two disabled
+ *   controls and nothing to do, and R-331's whole point was that this person
+ *   can set their own plant's rule. So they get their plant.
+ *
+ * ⭐ THE TEST IS THE WRITE GATE, NOT THE ROLE AS SUCH. `canWriteCompany` is the
+ * same predicate the company rows are disabled by, which is the same predicate
+ * `app_is_admin()` names on the server — CLAUDE.md §4's rule that what a client
+ * offers is decided by the test the server runs. It is deliberately NOT the
+ * "never the role" rule `plantFilter.ts` states, which is about whether the
+ * CONTROL is shown; this is about which of two scopes a reader can actually
+ * change.
  */
-export function usePlantPolicies(
-  enabled: boolean,
-  orgPolicy: EligibilityPolicy,
-  role: string | null,
-): PlantPolicies {
-  const plants = useQuery<PlantEligibilityPolicy[], SchedulerError>({
-    queryKey: [...plantSettingsKeys.all, orgPolicy],
-    queryFn: () => fetchPlantEligibilityPolicies(orgPolicy),
-    enabled,
+export function settingsScope(
+  choice: PlantChoice,
+  plants: readonly PlantOption[],
+  canWriteCompany: boolean,
+): SettingsScope {
+  const asPlant = (p: PlantOption): SettingsScope => ({
+    kind: "plant",
+    nodeId: p.id,
+    name: p.name,
+    path: p.path,
   });
-  const tree = useQuery({
-    queryKey: [...hierarchyKeys.all, "tree"],
-    queryFn: fetchHierarchyTree,
-    enabled,
-  });
-  const { rights } = useEditRights(enabled, role);
 
-  const pathByNodeId = useMemo(
-    () => new Map((tree.data?.nodes ?? []).map((n) => [n.id, n.path])),
-    [tree.data],
-  );
+  if (choice !== null) {
+    const chosen = plants.find((p) => p.id === choice);
+    // A choice naming a plant this reader can no longer see is already
+    // collapsed to `null` by `resolvePlantChoice`; widening here too rather
+    // than throwing keeps the tab on the safe, visible scope if it ever is not.
+    return chosen === undefined ? { kind: "company" } : asPlant(chosen);
+  }
 
-  const rows = useMemo(
-    () => buildPlantPolicyRows(plants.data ?? [], pathByNodeId, rights),
-    [plants.data, pathByNodeId, rights],
-  );
+  // "All plants" is a real answer when there was something to choose.
+  if (plantControlVisible(plants)) return { kind: "company" };
 
-  return {
-    // ⚠️ ONLY THE PLANT LIST DECIDES "loading" AND "error". The tree read and
-    // the grant read are the permission PREVIEW: both fail open on their own
-    // terms, so letting either blank this card would trade a loud refusal for
-    // an empty screen — the trade `editRights.ts` argues against.
-    rows,
-    isLoading: plants.isLoading,
-    isError: plants.isError,
-    error: plants.error ?? null,
-  };
-}
-
-/**
- * Set or clear ONE plant's eligibility policy.
- *
- * ⭐ ONE MUTATION FOR EVERY ROW, and the screen tells them apart by
- * `variables.nodeId` — React Query hands the in-flight variables back. One
- * mutation per row would mean a hook inside a loop, which React forbids; a
- * single `isPending` painted across every plant would say three plants were
- * saving when one was.
- *
- * ⛔ `"inherit"` IS DISPATCHED TO `clear_node_setting`, THE SEPARATE VERB. There
- * is no "set to null to clear" on the server and there must not be one here:
- * the whole of migration 0050 is about a row existing or not.
- *
- * Invalidate-and-refetch, no optimistic update — the same reasoning as the
- * org-wide writer above, and it matters more per plant: a setting that decides
- * whether an untrained person can be scheduled AT THIS SITE must never be
- * painted as changed before the server has said it is.
- */
-export function useSetPlantPolicy() {
-  const queryClient = useQueryClient();
-  return useMutation<void, SchedulerError, { nodeId: string; choice: PlantPolicyChoice }>({
-    mutationFn: ({ nodeId, choice }) =>
-      choice === INHERIT_CHOICE
-        ? clearPlantEligibilityPolicy(nodeId)
-        : setPlantEligibilityPolicy(nodeId, choice),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: plantSettingsKeys.all });
-    },
-  });
+  // No control. See the block above for why this is not simply "company".
+  if (canWriteCompany) return { kind: "company" };
+  return plants.length === 1 ? asPlant(plants[0]) : { kind: "company" };
 }
