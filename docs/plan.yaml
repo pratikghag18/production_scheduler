@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-05'
-  tip: c24bc69
+  tip: 2a43c77
   baseline:
-    app_tests: 2106
-    app_test_files: 75
+    app_tests: 2121
+    app_test_files: 78
     tsc: 0
     eslint: 0
     db_checks: 609
-    migrations: 52
+    migrations: 53
     mutations: 509 of 536
 tracks:
 - id: core
@@ -265,6 +265,16 @@ stages:
     **Applied and green — your 595 matched the prediction exactly.** 41 new checks, 262 in total, 30 of
     32 deliberate breakages caught. **The breakage run deleted three pieces of code I'd written and argued
     for**, and caught me writing a rule that contradicted its own comment — both below.
+
+
+    ⚠️ **R-340 reads `contradicted` since 5 Sept (DEF-0012), so this stage is done with a hole in
+    it.** Session 72 put "admin only at a plant" into `set_site_member` and nowhere else: a direct
+    write to `profile_grants` still stores an admin below a root, and when such a row exists the
+    Access screen draws it as *supervisor* in the same line that calls the person *Admin of Area 1*,
+    because the control's options no longer include the value it holds. The rule needs a home the
+    table itself enforces, the screen needs to draw the row it has, and migration 0053 needs the SQL
+    test file every other migration has. Stays `done` because the rest of the card is untouched;
+    the requirement carries the red until the tester re-runs its reproduction.
 - id: S10
   track: core
   num: 10
@@ -312,6 +322,15 @@ stages:
   state: >-
     Applied and green. 9 new checks, 271 in total, all 8 deliberate breakages caught. Fixed in the database
     first and then on the screen — hiding a button the server still allows would have been a lie.
+
+
+    ⚠️ **R-238 reads `contradicted` since 5 Sept (DEF-0011): migration 0053 undid half of this
+    stage by accident.** It re-emitted `set_site_member` from 0021, the migration BEFORE this one,
+    so the block 0022 added --- a site admin may not re-role a company admin's grant --- is gone from
+    the live function. `remove_site_member` was not re-emitted and still refuses, so the Remove half
+    survives and only the role half is open. The screen still hides the control, which is why nobody
+    stumbles into it. The SQL suite said so on the commit that shipped 0053 (X42 red) and nobody ran
+    it. Stays `done`; the requirement carries the red until the tester re-runs its reproduction.
 - id: S12
   track: core
   num: 12
@@ -1732,16 +1751,16 @@ stages:
     each is answered INDIVIDUALLY. Nothing is written until the list has been been through.
 
 
-    ⛔ WHAT COUNTS AS A CLASH IS NOT DECIDED AND MUST NOT BE GUESSED. An occupied cell and a
-    double-booked operator are the plan colliding with ITSELF; a lapsed certificate and a retired shift
-    pattern are the plan colliding with the RULES. They may not deserve the same control: R-239 says a
-    "keep the copied one" button must never offer something `create_assignment` would refuse, so a rules
-    clash may be a thing to report rather than a thing to choose. That question is the first thing to
-    settle, and it is the maintainer's.
+    ⭐ WHAT COUNTS AS A CLASH IS READ OFF THE SERVER, NOT ASKED AGAIN. The rule above is complete.
+    Four kinds are known --- an occupied cell, an operator already placed at that time, a person no
+    longer certified for the work, a retired shift pattern --- and every one the copy would produce is
+    shown. R-239 adds one build detail, not a question: "take the copied one" is offered only where
+    `create_assignment` would take that write; where the server would refuse it outright the clash is
+    still listed, with the refusal as the reason the prior plan stays. The developer settles that in
+    the build (F-096 records why it was wrongly put back to the maintainer).
   state: >-
-    **Not started.** R-339 is written and `uncovered`; the requirement came before the code on purpose.
-    Blocked on one decision only --- which of the four candidate clashes the screen offers a choice for
-    --- and not on any code.
+    **Not started; next after DEF-0011 and DEF-0012.** R-339 is written and `uncovered`; the
+    requirement came before the code on purpose. Nothing is blocked on a decision.
 - id: M1
   track: matrix
   num: 1
@@ -3149,13 +3168,13 @@ requirements:
     from the queue line's "dry-run conflict preview". A preview informs and then you press on; this
     collects an answer per clash and applies exactly those answers. Nothing is written until the person
     has been through the list.
-    ⛔ WHAT IS NOT YET DECIDED, and must not be guessed: what COUNTS as a conflict. The candidates are
-    an occupied cell in the destination window, the same operator assigned twice at once, a person no
-    longer certified for the work, and a retired shift pattern. These are different questions with
-    different answers --- the first two are about the plan colliding with itself, the second two are
-    about the plan colliding with the RULES, and a rules clash may not be a thing the person should be
-    offered a "keep the copied one" button for at all, since the server would refuse the write.
-    R-239 is the line: a choice offered here must be one `create_assignment` would accept.
+    ⭐ WHAT COUNTS AS A CONFLICT IS SETTLED BY THIS RULE, NOT BY A FURTHER QUESTION. Every kind the
+    copy can produce is presented: an occupied cell in the destination window, the same operator
+    placed twice at once, a person no longer certified for the work, a retired shift pattern. R-239
+    is the one line the build keeps: a "take the copied one" answer is offered only where
+    `create_assignment` would accept that write, and where it would not, the clash is still shown
+    with the refusal as the reason the prior plan stays. Which of the four fall on which side is read
+    off the server by the developer during the build.
   verified_by: []
   status: uncovered
 - id: R-338
@@ -6575,6 +6594,24 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-096
+  title: A rule the maintainer had given in full was put back to them as a question
+  tag: Asked twice
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-339
+  - S35
+  story: >-
+    Session 71 recorded the Copy Week rule in the maintainer's own words: present every conflict and let
+    the person choose the prior plan or the copied one. Session 72 then wrote a ⛔ paragraph into R-339
+    and S35 saying "what counts as a conflict is not decided" and ended its turn asking the maintainer
+    to decide it. The maintainer's reply was a plain *"Did I not tell you what I wanted the copy week
+    to do if there was a conflict?"* --- and the answer was yes.
+    ⚠️ THE MISTAKE WAS TREATING A BUILD DETAIL AS A PRODUCT DECISION. Which clashes the server would
+    refuse outright is a fact in `create_assignment`, readable by the developer, not a preference
+    only the maintainer holds. The rule was complete; the question was mine to answer. Both paragraphs
+    now say so, and the card is no longer marked blocked.
 - id: F-095
   title: The screen invited a grant the rest of the product had no answer for
   tag: A role with nowhere to stand
@@ -8899,6 +8936,34 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 74
+  date: 2026-09-05
+  title: Merged the tester; two defects open against the admin-at-root migration; Copy Week unblocked
+  commits:
+  - 2a43c77
+  numbers:
+    app_tests: 2121
+    app_test_files: 78
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Session 73's run verified DEF-0009 and DEF-0010 and filed DEF-0011 and DEF-0012, both against
+    migration 0053 from session 72, both agreed with. The buildout is brought back into line with
+    them before any code: S11 says 0053 dropped 0022's company-admin guard (R-238 contradicted) and
+    S09 says the admin-at-root rule lives in one function only and the Access row misdraws the person
+    it was meant to prevent (R-340 contradicted).
+    ⚠️ THE ROOT CAUSE OF DEF-0011 IS VERIFIED, NOT SUSPECTED. CLAUDE.md's extraction recipe is
+    `grep -n "function <name>"`, take the last hit. 0022 wrote `CREATE OR REPLACE FUNCTION
+    public.set_site_member` --- upper case, schema-qualified --- so a case-sensitive grep for
+    `function set_site_member` finds 0021 and 0053 only, and the "last hit" was the wrong one. The
+    recipe itself is what failed; it gets fixed with the defect.
+    S35 and R-339 lose their "not decided" paragraph: the maintainer's rule was complete and the
+    remaining question was a build detail (F-096). Session 63's one unquoted sha is quoted.
+    `npm run test` 2119 passed of 2121 in 78 files, the two red being DEF-0011's and DEF-0012's pins,
+    which is the expected state before their fixes. `tsc` and `eslint` not re-run for a yaml-only
+    change; the numbers are session 73's.
+  shipped: []
 - id: 73
   date: 2026-09-05
   title: Tester run
@@ -9487,7 +9552,7 @@ sessions:
   commits:
   - ae86442
   - 5ffbb3d
-  - 869e081
+  - '869e081'
   - a665c7c
   numbers:
     app_tests: 2097
