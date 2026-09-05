@@ -9372,9 +9372,6 @@ next:
   text: A control for shift_templates.active (NEXT item 5)
   why: >-
     skills.active got Retire in session 18; shift patterns still have the column with no control.
-- text: >-
-    Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
-  why: Unchecked Phase 1 item. Large — its own stage, not an afternoon.
 - text: Phase 1 — A way to READ the audit log (the recording half is already done)
   why: >-
     ⚠️ MEASURED, AND THE ITEM AS WRITTEN WAS WRONG. It said the schedule mutations were the gap. They
@@ -9384,9 +9381,20 @@ next:
     type. So this is a client piece, not a migration, and it is bigger than the old line implied.
 - text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: Unchecked Phase 1 item.
-- text: Phase 2 — Eligibility ENFORCEMENT on the board (warn/block org policy)
+- text: A way to CHOOSE warn or block for eligibility (the enforcement itself is built)
   why: >-
-    The admin-side matrix shipped; enforcement on the board is the remaining half of the [~] item.
+    ⚠️ MEASURED, AND THE ITEM AS WRITTEN WAS WRONG — the maintainer said so first: *"one has to give an
+    override decision right now, there is a warning as well and doesn't let you assign a person without
+    a reason, what am I missing?"* Nothing. Enforcement shipped on BOTH sides. `assignments` carries
+    `eligibility_override` and `override_reason`; `CreatePopover` computes `blocked` and `needsOverride`
+    from `eligibilityPolicy` and disables Create until a reason is typed; and the server reads
+    `orgs.settings->>'eligibility_policy'` in `create_assignment`, `move_run`, `apply_split_coverage`
+    and their 0043/0044 successors, with a CHECK constraint pinning it to ('warn','block') since 0001.
+    WHAT IS ACTUALLY MISSING is the switch. `orgs.settings` has exactly ONE write RPC —
+    `set_org_date_format` (0037/0038) — so `eligibility_policy` and `capacity_cap` cannot be changed
+    from the app at all: every org is on 'warn' unless somebody edits jsonb by hand. So this is a
+    Settings control plus one write RPC, in the shape 0037 already established, NOT the Phase 2 board
+    work the old line described.
 - text: Phase 2 — Certification expiry checked against a run's dates on the board
   why: The matrix surfaces expiry; checking it against assignment dates is the remaining half.
 - text: Phase 2 — Copy Week with dry-run conflict preview
@@ -9417,6 +9425,13 @@ next:
     Parked with the rest of S24. The flicker half was fixed in session 18 and the identity half in
     §19.79; what is left is five duplicated `getSession()` round trips — one of which is the "Loading
     session…" flash on the board, deliberately left in place in session 57.
+- text: >-
+    Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
+  why: >-
+    MOVED DOWN BY THE MAINTAINER, 4 Sept. The largest item on the list and it touches every screen;
+    nothing in `src/` subscribes to anything today (no `.channel(`, no `postgres_changes`), so this is
+    a build rather than a completion. It is also worth least until more than one person is using the
+    app at once, which is gated behind invitations — and those are parked below.
 - text: Per-site timezone (D10 / D88)
   why: >-
     DECIDED Aug 25 (D88, §19.21): site-local axis, wall-clock across DST, Phase 2. Do not re-ask; the
