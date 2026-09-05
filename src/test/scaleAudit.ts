@@ -122,6 +122,11 @@ export const REM_SURFACES: readonly string[] = [
   // did not predict, so it is listed here AND in R10's copy in
   // `scaleAudit.test.ts` — the two-place edit `missingRemSurfaces` forces.
   "src/features/admin/components/CycleTimesPanel.module.css",
+  // The Activity section (the audit log, 0007 / 0029 §6). Read-only, and the
+  // §19.62 pre-seat did not predict it either — so it is listed here AND in
+  // R10's copy in `scaleAudit.test.ts`, the two-place edit `missingRemSurfaces`
+  // exists to force.
+  "src/features/admin/components/AuditPanel.module.css",
 ];
 
 /**

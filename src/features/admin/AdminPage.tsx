@@ -27,6 +27,7 @@ import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel"
 import { CycleTimesPanel, CYCLE_TIMES_PANEL_READY } from "./components/CycleTimesPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import { SettingsPanel, SETTINGS_PANEL_READY } from "./components/SettingsPanel";
+import { AuditPanel, AUDIT_PANEL_READY } from "./components/AuditPanel";
 import { PanelToggle } from "@/components/PanelToggle";
 import styles from "./AdminPage.module.css";
 
@@ -56,7 +57,8 @@ type SectionId =
   | "products"
   | "cycletimes"
   | "import"
-  | "settings";
+  | "settings"
+  | "audit";
 
 /*
  * ⭐ §19.62 — `enabled` IS NOT A LITERAL FOR THE QUEUED SECTIONS, AND THAT IS
@@ -111,6 +113,17 @@ const SECTIONS: ReadonlyArray<{
   // System-admin only (see `companyAdminOnly` note above). Org-wide preferences,
   // the first being the date-display format (0037 / `src/lib/format/dates.ts`).
   { id: "settings", label: "Settings", enabled: SETTINGS_PANEL_READY, companyAdminOnly: true },
+  // ⭐⭐ COMPANY-ADMIN ONLY, AND THE FLAG IS DECIDING THE SAME THING THE
+  // POLICY DOES. `audit_log_select` (0008) is `app_is_admin() and org_id =
+  // app_current_org()`, and `app_is_admin()` is `user_profiles.role = 'admin'`
+  // (0018) — the ORG-WIDE role, which is `isCompanyAdmin` below. For a SITE
+  // admin the first term is false, so the read returns ZERO ROWS: not an error,
+  // not a refusal, an empty list indistinguishable from *"nothing has ever
+  // changed here"*. `adminSectionsFor` cannot express that (it returns "all" for
+  // anybody with `adminAnywhere`), which is exactly why this second axis exists
+  // and why Settings already uses it. `auditAccess.test.tsx` holds the two
+  // together.
+  { id: "audit", label: "Activity", enabled: AUDIT_PANEL_READY, companyAdminOnly: true },
 ];
 
 /**
@@ -250,6 +263,16 @@ function sectionIconBody(id: SectionId) {
     // cog: one closed path alternating a tip arc at r=5.9 with a root arc at
     // r=4.3, and a hub. Six teeth, not eight — at 16px eight tips and their
     // gaps fall below a stroke's width apart and silt up into a ring.
+    // A page with ruled lines and one turned corner — a record of what happened,
+    // not a clock (which is Shifts) and not a grid (which is the Matrix).
+    case "audit": // a document with lines: the log
+      return (
+        <>
+          <path d="M4 1.75h5L12.25 5v9.25H4Z" />
+          <path d="M9 1.75V5h3.25" />
+          <path d="M6 8.25h4.25M6 10.75h4.25" />
+        </>
+      );
     case "settings": // a gear: six teeth on the rim, and a hub
       return (
         <>
@@ -809,6 +832,17 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Settings</h1>
             <SettingsPanel />
+          </>
+        )}
+
+        {/* ⚠️ THE HEADING IS "Activity", NOT "Audit log". The rail label and the
+            heading are the same word for the same reason every other section's
+            are, and "activity" is what a person looking for "who changed this"
+            would scan for. The panel itself is `AuditPanel`, after the table. */}
+        {activeSection === "audit" && (
+          <>
+            <h1 className={styles.h1}>Activity</h1>
+            <AuditPanel />
           </>
         )}
       </div>

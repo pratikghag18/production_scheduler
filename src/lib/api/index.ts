@@ -25,6 +25,12 @@ export * from "./imports";
 // their own, added after the four above were laid out.
 export * from "./cycleTimes";
 
+// The audit log (0007 / 0029 §6), read for the first time by the Activity
+// section. Not pre-seated either — §19.62 laid out four sections and this is
+// none of them; it is a READ-ONLY surface over a table with no write policy at
+// all, so the export is one function wide on purpose.
+export * from "./audit";
+
 // 0029 / D110. Not pre-seated — the delete that keeps the past did not exist
 // when §19.62 laid the four admin sections out, and it belongs to none of
 // them: one dialog serves products, people, trainings and shift patterns.

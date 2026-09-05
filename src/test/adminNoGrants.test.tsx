@@ -138,6 +138,10 @@ vi.mock("@/features/admin/components/SettingsPanel", () => ({
   SettingsPanel: () => <div>stub SettingsPanel</div>,
   SETTINGS_PANEL_READY: true,
 }));
+vi.mock("@/features/admin/components/AuditPanel", () => ({
+  AuditPanel: () => <div>stub AuditPanel</div>,
+  AUDIT_PANEL_READY: true,
+}));
 
 const EMPTY_TREE = {
   templates: [],

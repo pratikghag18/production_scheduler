@@ -1,0 +1,203 @@
+/* Activity — the audit log (0007 / 0029 §6).
+
+   Sized in `rem`, not px (D84, design plan §19.16): the root font-size scales
+   with `--chrome-scale`, so the whole surface follows the viewport with nothing
+   to remember per-property. Hairline borders stay in px on purpose — a 1px rule
+   scaled up renders blurry, and `unscaledPxLengths` exempts a border/outline
+   width of <=2px and nothing else.
+
+   ⚠️ LISTED IN `REM_SURFACES` IN BOTH `src/test/scaleAudit.ts` AND its R10 copy
+   in `scaleAudit.test.ts` — a stylesheet in this directory that is not in both
+   is a test failure. Added there in the same change as this file.
+
+   ⚠️ NO FIELD SKIN HERE. `fieldStandard.test.ts` bans a hand-rolled editable box
+   outside `src/components/Field.module.css`, and `FIELD_LEGACY` may only ever
+   shrink. This screen is READ-ONLY — one button and no inputs — so there is
+   nothing to skin, and the button below is deliberately not a copy of the field
+   look.
+
+   NOTHING HERE IS A DRAG SURFACE: no `cursor: grab`, no `user-select: none`, no
+   `touch-action`. No `--ui-scale` either (that token is fitted board content
+   only).
+
+   The table scrolls INSIDE its own container rather than widening the page: a
+   change list can run long horizontally, and the page must never scroll
+   sideways. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.intro {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+.note {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.status {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+.error {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.875rem;
+  color: var(--crit);
+}
+
+.muted {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* The table's own scroller — see the header. */
+.scroll {
+  overflow-x: auto;
+  border: 1px solid var(--grid);
+  border-radius: 0.375rem;
+  background: var(--surface);
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8125rem;
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--page);
+  border-bottom: 1px solid var(--axis);
+  padding: 0.4375rem 0.625rem;
+  white-space: nowrap;
+}
+
+.row {
+  border-bottom: 1px solid var(--grid);
+  vertical-align: top;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.when {
+  padding: 0.4375rem 0.625rem;
+  white-space: nowrap;
+  color: var(--ink-2);
+  /* Tabular figures so a column of timestamps lines up on the colon rather than
+     jittering row to row. */
+  font-variant-numeric: tabular-nums;
+}
+
+.who {
+  padding: 0.4375rem 0.625rem;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.what {
+  padding: 0.4375rem 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 11rem;
+}
+
+/* The kind and the verb — "Product added". The quieter of the two, because the
+   NAME is what a reader scans for. */
+.headline {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* What the thing is called, taken from the snapshot. The most important word on
+   the line, so it is the only one at full ink. */
+.subject {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.changes {
+  padding: 0.4375rem 0.625rem;
+  min-width: 16rem;
+}
+
+.changeList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3125rem;
+}
+
+.field {
+  color: var(--muted);
+}
+
+/* The old value is struck through as well as dimmed: colour alone is not a
+   distinction every reader can make, and "yes no" with no mark between them
+   reads as two current values rather than a before and an after. */
+.from {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.arrow {
+  color: var(--axis);
+}
+
+.to {
+  color: var(--ink);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.more {
+  font: inherit;
+  padding: 0.3125rem 0.75rem;
+  border: 1px solid var(--axis);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.more:hover:not(:disabled) {
+  background: var(--page);
+}
+
+.more:disabled {
+  cursor: default;
+  color: var(--muted);
+}
