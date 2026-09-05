@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-05'
-  tip: 2a43c77
+  tip: 7b58315
   baseline:
-    app_tests: 2121
+    app_tests: 2123
     app_test_files: 78
     tsc: 0
     eslint: 0
-    db_checks: 609
-    migrations: 53
+    db_checks: 607
+    migrations: 54
     mutations: 509 of 536
 tracks:
 - id: core
@@ -245,6 +245,7 @@ stages:
   - §19.51
   - migration 0021
   - session 72
+  - session 74
   delivers:
   - R-220
   - R-225
@@ -275,6 +276,11 @@ stages:
     table itself enforces, the screen needs to draw the row it has, and migration 0053 needs the SQL
     test file every other migration has. Stays `done` because the rest of the card is untouched;
     the requirement carries the red until the tester re-runs its reproduction.
+
+
+    **Fix-claimed in session 74 (`7b58315`).** Migration 0054 puts the rule in the table as a trigger,
+    the Access row draws the role it holds with only the moves the server takes, and
+    `77_admin_only_at_plant_root_test.sql` asks all of it with the row read back each time.
 - id: S10
   track: core
   num: 10
@@ -310,6 +316,7 @@ stages:
   refs:
   - §19.54
   - migration 0022
+  - session 74
   delivers:
   - R-210
   - R-238
@@ -331,6 +338,11 @@ stages:
     survives and only the role half is open. The screen still hides the control, which is why nobody
     stumbles into it. The SQL suite said so on the commit that shipped 0053 (X42 red) and nobody ran
     it. Stays `done`; the requirement carries the red until the tester re-runs its reproduction.
+
+
+    **Fix-claimed in session 74 (`7b58315`).** 0054 re-assembles `set_site_member` from 0022, the
+    last definition, by slicing the file rather than retyping it, and asserts the guard is present
+    before the migration is written. X42 is green; 77's AR8 asks the same of the live function.
 - id: S12
   track: core
   num: 12
@@ -3128,7 +3140,17 @@ requirements:
       A27 admin is not offered below a root, A28 supervisor and viewer still are (so a fix that
       narrowed the whole picker fails), A29 all three at a root, A30 the self-rule still wins below a
       root so no control is left empty, A31 the below-root list is read from the exported constant
-      rather than restated
+      rather than restated, A32 somebody ELSE's below-root admin grant is drawn as admin with the two
+      demotions the server takes, A33 no control ever omits the role its subject holds, walked over
+      every combination
+  - kind: sql
+    file: supabase/tests/77_admin_only_at_plant_root_test.sql
+    cases: >-
+      AR1–AR4 the RPC (admin at a root stored, admin below refused with admin_below_root and the row
+      untouched, supervisor below still stored, a site admin can still give admin at their root);
+      AR5–AR7 the TABLE (a direct INSERT and a direct UPDATE of admin below a root are refused by the
+      trigger, a direct INSERT at a root is not); AR9 the trigger binds what RLS binds and not the
+      owner, and an old below-root admin can still be demoted
   - kind: vitest
     file: src/test/defects/DEF-0012.test.ts
     cases: >-
@@ -3152,6 +3174,14 @@ requirements:
     `<select value="admin">` with neither option and the screen reads "Admin of Area 1 | supervisor".
     ⚠️ The server half has no test of any kind: removing 0053's whole new block on a scratch copy
     leaves the SQL suite identical at 597 passed / 1 failed.
+    ⚠️ FIX-CLAIMED in `7b58315` (session 74). 0054 adds `profile_grants_admin_at_root`, a BEFORE
+    INSERT OR UPDATE OF role, node_id trigger, so the table refuses what the RPC refuses; the two
+    routes DEF-0012 measured were replayed as Dana on the live stack and both raise
+    `admin_below_root`. `allowedRoles` draws the role the row holds with the two demotions the server
+    takes (A32, A33). The sentence "the database says so first" is true now, with one boundary
+    written into the migration: the trigger binds whom the policies bind and not the owner, which is
+    the fixture tool (F-098). 77 is the SQL file 0053 shipped without. Stays `contradicted` until the
+    tester re-runs its own reproduction.
 - id: R-339
   title: Copy Week shows every clash and lets the person choose which plan wins, one by one
   source:
@@ -4991,12 +5021,19 @@ requirements:
       the last definition of `set_site_member` in `supabase/migrations/` still raises `company_admin`;
       an earlier one did, so this is a loss and not an absence; and `remove_site_member`'s copy is
       still found, so a red first case is about the guard and not about the reader
+  - kind: sql
+    file: supabase/tests/77_admin_only_at_plant_root_test.sql
+    cases: AR8 — the company-admin guard is in the SAME function as the admin-at-root rule
   status: contradicted
   note: >-
     ⛔ CONTRADICTED 5 Sept by DEF-0011. Migration 0053 re-emitted `set_site_member` from 0021 rather
     than from 0022 and dropped this rule; `49_company_admin_rows_test.sql` X42 is red on the committed
     tip and a site admin can re-role a company admin's grant again. `remove_site_member` was not
     re-emitted and still refuses, so X41 passes and half the rule survives.
+    ⚠️ FIX-CLAIMED in `7b58315` (session 74): 0054 slices the body out of 0022 by script, inserts
+    0053's block, and asserts all three reasons on the assembled text before writing it. X42 is green
+    again and 77's AR8 asks the same question of the last definition. Stays `contradicted` until the
+    tester re-runs its own reproduction.
     Recorded gap: `profile_grants` RLS is untouched, so a direct PostgREST delete of that row is still
     possible; X46 asserts the gap on purpose.
 - id: R-239
@@ -6594,6 +6631,62 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-098
+  title: The table's rule met fifteen fixtures that build the person it forbids
+  tag: Who a trigger binds
+  status: fixed
+  found_by: agent
+  refs:
+  - R-340
+  - DEF-0012
+  story: >-
+    The first draft of 0054's trigger bound everyone, the table's owner included, and the SQL suite
+    went from 597 passed to 527 passed, 12 failed and 205 hard errors. Eleven cases in
+    `46_scoped_roles_test.sql` and the fixtures of 47, 48, 51, 52, 53 and 56 each build "an admin of
+    a department" as the owner --- the person R-340 retired --- because 0019's predicates must stay
+    right for rows that predate the rule, which 0053 promised to leave alone.
+    ⭐ THE HONEST BOUNDARY WAS ALREADY IN THE SCHEMA. RLS on `profile_grants` does not bind the
+    owner either; the owner is the migration and fixture tool. So the trigger binds exactly whom the
+    policies bind, using 0017's `pg_has_role(current_user, <relowner>)` check --- which is why it is
+    SECURITY INVOKER, since inside a definer `current_user` is the definer and the check passes for
+    everybody. AR5 proves a signed-in COMPANY admin is bound, so the line is owner-versus-everyone
+    and not one role versus another. The alternative, a DISABLE TRIGGER bracket in fifteen places,
+    was tried first and reads as a rule the tests route around rather than one they respect.
+    ⚠️ AND THE SECOND DRAFT FAILED CLOSED ON THE WRONG THING. It tested "no root row is VISIBLE for
+    this node" and 47's W28 went red: a site admin inserting admin on another plant's root was
+    refused by the trigger with PT400 before the policy could refuse it with 42501, because that
+    root is invisible to them. Both refuse; W28 asserts which layer speaks and is right to. The
+    node's shape is now read through `app_node_is_plant_root`, a definer in the shape of
+    `app_node_exists_in_org`, so what the caller can see never decides an answer about the node.
+    One case changed its contract on purpose and says so in place: 47's W29 had a site admin hand
+    out `admin` on Line 1 by direct insert, which R-340 forbids; it hands out `supervisor`, which is
+    what the case was proving.
+- id: F-097
+  title: The extraction recipe took the wrong last hit, and a rule was reverted by a copy
+  tag: Grep is case-sensitive
+  status: fixed
+  found_by: tester
+  refs:
+  - R-238
+  - DEF-0011
+  story: >-
+    CLAUDE.md's rule was `grep -n "function <name>"`, take the LAST hit. Migration 0022 declares
+    `CREATE OR REPLACE FUNCTION public.set_site_member` --- upper case, schema-qualified --- so a
+    case-sensitive grep for the bare name found 0021 and 0053 only, and 0053 re-emitted the function
+    from 0021 while its own header quoted the rule it was breaking. The guard 0022 added was gone
+    from the live function; `remove_site_member`, untouched, kept its copy, so half the rule
+    survived by accident. The SQL suite said so on the commit that shipped 0053 (X42 red) and was
+    not run.
+    ⭐ THE FIX IS TO THE RECIPE AS WELL AS THE FILE. The rule now reads `grep -in` with an optional
+    `public.` and says why, and 0054's body was SLICED out of 0022 by a script, with the three
+    reasons asserted on the assembled text before the file was written --- extraction the grep
+    cannot get wrong. The tester's pin reads every definition off disk with a case-insensitive,
+    schema-tolerant match and runs on every `npm run test`, which is the run that was green while
+    this shipped.
+    ⚠️ A migration is not finished until the SQL suite has run. 0053 reported `npm run test`, `tsc`
+    and `eslint` and said nothing about the database suite, and there is no CI job standing a
+    database up. Whether that becomes a pre-commit step or a CI database is the maintainer's call
+    and is on the queue as S34's second half; until then it is a line in the developer's checklist.
 - id: F-096
   title: A rule the maintainer had given in full was put back to them as a question
   tag: Asked twice
@@ -8938,11 +9031,13 @@ findings:
 sessions:
 - id: 74
   date: 2026-09-05
-  title: Merged the tester; two defects open against the admin-at-root migration; Copy Week unblocked
+  title: The admin-at-root rule is re-assembled whole and put in the table (DEF-0011, DEF-0012)
   commits:
   - 2a43c77
+  - 8c557e7
+  - 7b58315
   numbers:
-    app_tests: 2121
+    app_tests: 2123
     app_test_files: 78
     tsc: 0
     eslint: 0
@@ -8960,10 +9055,27 @@ sessions:
     recipe itself is what failed; it gets fixed with the defect.
     S35 and R-339 lose their "not decided" paragraph: the maintainer's rule was complete and the
     remaining question was a build detail (F-096). Session 63's one unquoted sha is quoted.
-    `npm run test` 2119 passed of 2121 in 78 files, the two red being DEF-0011's and DEF-0012's pins,
-    which is the expected state before their fixes. `tsc` and `eslint` not re-run for a yaml-only
-    change; the numbers are session 73's.
-  shipped: []
+    THEN BOTH DEFECTS, IN ONE MIGRATION, because both are about the same function and the same
+    table and two migrations each re-emitting it is how DEF-0011 happened. 0054's `set_site_member`
+    was sliced out of 0022 by a script, 0053's block inserted, and the three reasons asserted on the
+    text before the file existed (F-097). The same file adds `profile_grants_admin_at_root`, so a
+    direct POST or PATCH to the table gets the answer the RPC gives, and `allowedRoles` draws
+    somebody else's below-root admin as the admin they are, with the two demotions the server will
+    take. 77 is the SQL file 0053 shipped without, nine cases with the row read back each time.
+    ⛔ THE TRIGGER WAS WRONG TWICE BEFORE IT WAS RIGHT, AND THE SUITE CAUGHT BOTH (F-098). Binding
+    the owner broke fifteen fixtures that build the retired person on purpose; failing closed on
+    visibility broke W28, which cares that the POLICY is what refuses a cross-plant insert. It binds
+    whom RLS binds and reads the node's shape through a definer helper. W29 changed its contract
+    on purpose and says so in place.
+    Measured on the live stack as Dana: re-roling the company admin raises `company_admin`, a direct
+    INSERT of admin on Area 1 raises `admin_below_root` from the trigger, and supervisor on Area 1
+    through the RPC still stores. 0054 applied with `psql`; the ledger is still out of sync.
+    SQL suite 607 passed, 0 failed, 0 hard errors across every numbered file; demo world 11 of 11.
+    `npm run test` 2123 passed in 78 files; `tsc` 0 on both configs after `db:types` (one line, the
+    new helper); `eslint` 0.
+  shipped:
+  - S09
+  - S11
 - id: 73
   date: 2026-09-05
   title: Tester run
