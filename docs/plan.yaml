@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: ad2d5c2
+  tip: 2e2bea3
   baseline:
     app_tests: 1788
     app_test_files: 60
     tsc: 0
     eslint: 0
-    db_checks: 540
-    migrations: 45
+    db_checks: 549
+    migrations: 46
     mutations: 509 of 536
 tracks:
 - id: core
@@ -2512,6 +2512,50 @@ requirements:
   - kind: vitest
     file: src/test/apiAuditShape.test.ts
     cases: the read's column list held against its guard
+  status: covered
+- id: R-329
+  title: A change is attributed to a person, and only a company admin may ask who
+  source:
+  - session 61 conversation
+  stated_by: maintainer
+  claim: >-
+    *"the who needs to show a user, it is currently not that helpful."*
+    `audit_actor_identities()` (0046) returns, for the caller's own org, each profile's `auth.uid()`,
+    org-wide role and email address. ⛔ It REFUSES anyone who is not a company admin rather than
+    returning an empty set — an empty table is what a broken function returns, so silence would prove
+    nothing — and its `org_id = app_current_org()` join is the only thing between one company's admin
+    and another's address book, since `auth.users` carries no org of its own. It takes no arguments, so
+    there is no id to widen. The Activity screen shows the address where there is one, "You" for the
+    reader's own changes, and role-plus-tail where there is not.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/69_actor_identities_test.sql
+    cases: >-
+      E0-E8 (E1/E5 pin the org boundary by SET EQUALITY in both directions, E3/E4 that a site admin and
+      a supervisor are REFUSED rather than shown nothing, E8 the grants and the pinned search_path)
+  - kind: vitest
+    file: src/test/apiAuditShape.test.ts
+    cases: the read's columns held against its guard, including the nullable address
+  status: covered
+- id: R-330
+  title: A filtered log says what it searched, never what it did not
+  source:
+  - session 61 conversation
+  stated_by: maintainer
+  claim: >-
+    *"It needs a filter for time period and then on the what column as well."* The Activity list filters
+    by period, kind of change and kind of thing. ⛔ THE LIST IS KEYSET-PAGED, so the screen keeps the
+    SCAN (rows read) and the MATCH (rows kept) apart and may only say "all" when it can prove the scan
+    passed the period's edge — rows inside a now-anchored period are a PREFIX of a newest-first read, so
+    one row older than the cutoff proves nothing unread can match. Periods that do not end at now are
+    therefore not offered at all. The cutoff is frozen when chosen, and a row whose timestamp cannot be
+    parsed is always shown and never counted as proof the window is exhausted.
+  verified_by:
+  - kind: vitest
+    file: src/test/auditPanel.test.tsx
+    cases: >-
+      27 cases including a filtered-empty list that is not called an empty log, the unfinished-search
+      sentence, the self-read bound, and the address actually rendering
   status: covered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
@@ -5759,6 +5803,44 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-085
+  title: The generated types promise a string where the database may send nothing
+  tag: A guard the compiler cannot give you
+  status: open
+  found_by: agent
+  refs:
+  - R-329
+  story: >-
+    `audit_actor_identities()` returns `email text` — nullable, because a profile can exist whose auth
+    row carries no address. `supabase gen types` cannot see nullability THROUGH a `RETURNS TABLE`
+    signature, so the generated type says `email: string`. `tsc` will therefore accept
+    `identity.email.toLowerCase()` and it will throw at runtime on the first person without an address.
+    ⭐ IT IS THE §19.76 SHAPE WITH A NEW ROAD IN. That rule is "a migration that makes a column
+    NULLABLE is a client change `db:types` will not surface, so grep every guard". Here nothing was made
+    nullable — the value was BORN nullable, in a function's return signature, where the generator has
+    never been able to see it. The same silence, arrived at from the other direction.
+    Handled for now by `parseActorIdentity`, which normalises the value and is pinned by a case, so the
+    lie never escapes the api layer. Left OPEN because the generated file still says the wrong thing and
+    the next person to read `database.types.ts` will believe it.
+- id: F-086
+  title: The seed spells the same three addresses two different ways
+  tag: One fact, written twice
+  status: open
+  found_by: agent
+  refs:
+  - R-329
+  story: >-
+    A test hardcoded `admin@northwind.example`, read straight out of `seed.sql`'s `auth.users` insert,
+    and went red. The addresses ARE `@northwind.example` at that point in the file — and the GoTrue
+    dev-login block about 180 lines further down UPDATEs all three to `@example.test`, which is what any
+    reader of the database actually finds.
+    ⚠️ NEITHER SPELLING IS WRONG AND THAT IS THE PROBLEM. Both are in the same committed file, both
+    look authoritative, and which one is true depends on how far down you read. It is the "column list
+    that appears twice" shape applied to data: one fact, two places, and the second quietly wins.
+    The test now reads every address from the database rather than naming one, which also made its leak
+    checks stronger — "none of the other org's addresses, whatever they happen to be" is a better
+    assertion than a literal. Filed rather than fixed because collapsing the two spellings means editing
+    the seed, and eighteen-odd SQL cases sit on that file.
 - id: F-084
   title: Nine migrations the database has but its own ledger does not
   tag: A command nobody should run
@@ -7746,6 +7828,66 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 61
+  date: 2026-09-04
+  title: The Activity screen answers who, what and when — three lanes and an integration
+  commits:
+  - 2e2bea3
+  numbers:
+    app_tests: 1904
+    app_test_files: 67
+    tsc: 0
+    eslint: 0
+    db_checks: 549
+    migrations: 46
+  confirmed: true
+  summary: >-
+    Four things the maintainer asked for after using the screen, built in three parallel lanes on
+    disjoint files and wired together afterwards. 1869 in 67 files to 1904.
+    ⛔ THE GATE ON 0046 IS THE MOST IMPORTANT THING IN THE COMMIT, because `audit_actor_identities()`
+    is a door onto everybody in the company. It refuses a non-company-admin and RAISES rather than
+    returning empty, since an empty table is what a broken function returns; the org join is the only
+    thing between one company's admin and another's address book; and it takes no arguments, so there
+    is no id to widen. ⭐ THE LANE PROVED ITS OWN TEST COULD CATCH A LEAK by breaking the function
+    five ways and measuring each — no gate and no filter fails five cases, either alone fails two or
+    three, and folding the gate into the WHERE so a site admin gets silence instead of a refusal fails
+    two. That is the right standard for a security boundary and it was not asked for. Both headline
+    claims were then re-checked from this session against the running database: company admin 6 rows,
+    site admin refused.
+    ⭐ THE FILTER PROBLEM WAS THE INTERESTING ONE. The list is keyset-paged, so a filter applied to
+    the loaded page answers a question nobody asked: "removals, last 7 days" would show whichever
+    removals happened to be in the most recent fifty rows and an empty list otherwise, under a footer
+    confidently stating a count. The answer is that a NOW-ANCHORED period is a PREFIX of a newest-first
+    read, so one row older than the cutoff proves nothing unread can match — the screen can therefore
+    complete such a period by itself and say so truthfully. Periods that do not end at now cannot, and
+    are not offered; that is written into the file as a decision rather than left as a gap. The
+    unfiltered footer is word-for-word what it always said.
+    ⚠️ THE ANSWER TO "WHO" IS AN EMAIL ADDRESS AND THAT IS A LIMITATION, NOT A DESIGN. `user_profiles`
+    has nowhere to put a name, so the address is the only identity this system holds. The map returns an
+    OBJECT rather than a string precisely so a `display_name` later is one more expression in the
+    migration and no change to any caller.
+    Names replaced ids in the Change column, and the rule there is that the SNAPSHOT wins over a live
+    lookup — which is what keeps a deleted row nameable and stops a rename rewriting the past. Measured
+    on real rows: the denormalised name columns are null on every live row except on the delete path, so
+    the snapshot answers precisely the deletes and the lookups answer everything else. A run gets no
+    invented name, because a run has none; `Run · 000005` rather than "Unknown run", since reporting a
+    failed lookup where there is nothing to look up is its own small lie.
+    Deletions read as a coloured left accent on EVERY row rather than a red border on some, so the width
+    is constant and the reader learns one system instead of one exception, and the word stays beside it
+    so colour never carries the meaning alone. On a delete the per-field strikethrough goes: that row is
+    not the discarded half of a pair, it is the whole of what was lost.
+    `fetchAuditActors` was deleted in the same commit as the screen that called it, being strictly the
+    poorer half of the newer read — the `renameSkill` trap from session 57, not re-set. The address case
+    was verified by removing the wiring and watching it go red.
+    ⚠️ TWO THINGS FOUND ON THE WAY, BOTH FILED. `db:types` cannot see nullability through a
+    `RETURNS TABLE`, so it emits `email: string` for a column that is nullable and `tsc` would accept
+    `.toLowerCase()` on a null. And `seed.sql` spells org 1's three addresses TWICE — inserted as
+    `@northwind.example`, rewritten to `@example.test` by the GoTrue block about 180 lines later — which
+    turned a hardcoded expectation red and is now read from the database instead.
+    OWED AND NAMED: pushing the filters into the query itself (`.gte("at", …)`, `.in("action", …)`)
+    would make a page mean fifty MATCHES rather than fifty rows scanned, and would let a bounded period
+    exist at all. The client half degrades honestly without it and would simplify, not change shape.
+  shipped: []
 - id: 60
   date: 2026-09-04
   title: Two lanes off the cleaned queue — retiring a shift pattern, and reading the audit log
