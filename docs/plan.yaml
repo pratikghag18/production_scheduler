@@ -8164,7 +8164,8 @@ sessions:
 - id: 66
   date: 2026-09-05
   title: The plant admin can reach the settings the server already lets them change (DEF-0007)
-  commits: []
+  commits:
+  - 23ba9aa
   numbers:
     app_tests: 2103
     app_test_files: 75
