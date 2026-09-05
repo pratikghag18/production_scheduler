@@ -71,3 +71,20 @@
   composes: note from "../../../components/SettingRow.module.css";
   color: var(--crit);
 }
+
+/* THE ONE SENTENCE ABOVE A CARD'S ROWS (R-331). The per-plant card needs to say
+   what inheriting MEANS before the first row is read; the two org-wide cards
+   need nothing, because a single setting explains itself.
+
+   ⚠️ NOT A `.hint`. `SettingRow.module.css`'s `.hint` belongs to a row's TEXT
+   cell and is bounded by that cell's reading measure; this sits above the grid
+   entirely. Copying the row's class here would be the hand-rolled row
+   `settingRowStandard.test.ts` fails the build over -- and it would be wrong
+   anyway, since this is card-wide prose and not a column. */
+.lead {
+  margin: -0.25rem 0 0.875rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  max-width: 34rem;
+}

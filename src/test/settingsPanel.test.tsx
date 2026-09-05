@@ -45,8 +45,29 @@ const h = vi.hoisted(() => ({
     policy: "warn" as string,
     policyPending: false,
     policyError: null as unknown,
+    /**
+     * ⛔ THREE STATES PER PLANT, NOT TWO. `override: null` is "this plant
+     * inherits" and it is NOT the same row as `override: "warn"` while the
+     * company happens to be on warn — the second survives the company changing
+     * its mind. `effective` is what the server will actually apply there.
+     */
+    plants: [
+      { nodeId: "a", name: "Plant A", override: null, effective: "warn", editable: true },
+      { nodeId: "b", name: "Plant B", override: "block", effective: "block", editable: true },
+    ] as Array<{
+      nodeId: string;
+      name: string;
+      override: string | null;
+      effective: string;
+      editable: boolean;
+    }>,
+    plantsLoading: false,
+    plantsError: null as unknown,
+    plantPending: null as string | null,
+    plantError: null as unknown,
   },
   setPolicyMutate: vi.fn(),
+  setPlantMutate: vi.fn(),
 }));
 
 vi.mock("@/features/auth/useSession", () => ({
@@ -69,6 +90,10 @@ vi.mock("@/lib/api", () => ({
  * they claim.
  */
 vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
+  // ⚠️ A VALUE, NOT A TYPE: the panel puts it in an `<option value>` and
+  // compares against it, so a mock that left it out would render `value={undefined}`
+  // and every three-state case below would fail for the wrong reason.
+  INHERIT_CHOICE: "inherit",
   useDateFormat: () => h.state.format,
   useSetDateFormat: () => ({
     mutate: h.setMutate,
@@ -82,6 +107,22 @@ vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
     isPending: h.state.policyPending,
     isError: h.state.policyError !== null,
     error: h.state.policyError,
+  }),
+  usePlantPolicies: () => ({
+    rows: h.state.plants,
+    isLoading: h.state.plantsLoading,
+    isError: h.state.plantsError !== null,
+    error: h.state.plantsError,
+  }),
+  useSetPlantPolicy: () => ({
+    mutate: h.setPlantMutate,
+    isPending: h.state.plantPending !== null,
+    isError: h.state.plantError !== null,
+    error: h.state.plantError,
+    // React Query hands the in-flight variables back; the panel uses them to
+    // tell WHICH row is saving, so one shared mutation does not put "Saving…"
+    // under every plant at once.
+    variables: h.state.plantPending === null ? undefined : { nodeId: h.state.plantPending },
   }),
 }));
 
@@ -115,7 +156,21 @@ beforeEach(() => {
   h.state.policy = "warn";
   h.state.policyPending = false;
   h.state.policyError = null;
+  h.setPlantMutate.mockClear();
+  h.state.plants = [
+    { nodeId: "a", name: "Plant A", override: null, effective: "warn", editable: true },
+    { nodeId: "b", name: "Plant B", override: "block", effective: "block", editable: true },
+  ];
+  h.state.plantsLoading = false;
+  h.state.plantsError = null;
+  h.state.plantPending = null;
+  h.state.plantError = null;
 });
+
+/** One plant's picker, found by the name a reader sees on the row. */
+function plantPicker(name: string): HTMLSelectElement {
+  return screen.getByRole("combobox", { name }) as HTMLSelectElement;
+}
 
 describe("R-320: the settings tab is one row per setting", () => {
   /**
@@ -356,16 +411,34 @@ describe("R-332: every setting's control is the same column", () => {
     expect(dateCell!.className).toBe(policyCell!.className);
   });
 
-  it("both settings are the same shared row, with the same text cell", () => {
+  /**
+   * ⚠️ AMENDED FOR R-331, and the amendment is a contract change rather than a
+   * relaxed case. It read `toHaveLength(2)` — true only while the pane held
+   * exactly the two org-wide settings. R-332's claim is "every setting is one
+   * shared row", and a per-plant setting is a setting: the count is now the two
+   * company rows PLUS one row per plant, which is what fails if a plant row is
+   * hand-rolled or given its own container.
+   */
+  it("every setting, company-wide or per-plant, is the same shared row", () => {
     const { container } = render(<SettingsPanel />);
     const rows = container.querySelectorAll(`.${rowStyles.row}`);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(2 + h.state.plants.length);
     const texts = container.querySelectorAll(`.${rowStyles.text}`);
-    expect(texts).toHaveLength(2);
+    expect(texts).toHaveLength(2 + h.state.plants.length);
     for (const row of Array.from(rows)) {
       expect(row.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(1);
       expect(row.querySelectorAll(`.${rowStyles.control}`)).toHaveLength(1);
     }
+  });
+
+  it("a plant's picker sits on the same shared column as the company's", () => {
+    render(<SettingsPanel />);
+    const plantCell = cellOf(plantPicker("Plant A"));
+    const policyCell = cellOf(policyPicker());
+    expect(plantCell).not.toBeNull();
+    expect(plantCell).not.toBe(policyCell);
+    expect(plantCell!.className).toBe(policyCell!.className);
+    expect(plantPicker("Plant A").classList.contains(rowStyles.controlField)).toBe(true);
   });
 
   /**
@@ -392,5 +465,207 @@ describe("R-332: every setting's control is the same column", () => {
     for (const select of [picker(), policyPicker()]) {
       expect(select.classList.contains(rowStyles.controlField)).toBe(true);
     }
+  });
+});
+
+/* ===========================================================================
+ * R-331 — A SETTING IS ANSWERED FOR A PLACE, NOT ONLY FOR THE COMPANY.
+ *
+ * The maintainer, session 62: *"These settings I think cannot be applied plant
+ * wise which defeats the purpose of both options. Lets make it possible to
+ * assign settings individually for each plant."*
+ *
+ * ⛔⛔ THREE STATES, NOT TWO, AND THE FIRST ONE IS THE REASON MIGRATION 0050
+ * SPENT A TABLE. A plant is INHERITING (no `node_settings` row), SET TO ALLOW,
+ * or SET TO REFUSE. A two-option picker cannot express the first, and a plant
+ * nobody has ever touched must not read as though somebody chose its current
+ * behaviour — because the two behave differently the day the company changes
+ * its mind: an inheriting plant follows, a set one does not.
+ *
+ * So the control has THREE options and the first is "use the company setting",
+ * which is also how a plant is returned to inheriting: choosing it calls
+ * `clear_node_setting`, the separate verb, never `set` with a null.
+ *
+ * ⚠️ AND ONLY PLANTS THE READER CAN ACTUALLY WRITE GET A CONTROL. The server's
+ * test is `app_is_admin() or app_is_admin_for(node)`; `src/test/plantSettings.test.ts`
+ * pins the client mirror of it. Here we pin what the screen DOES with the
+ * answer: a picker where it is true, a sentence naming the place where it is
+ * false — D106's rule that a disabled control is a control named after
+ * something it does not do.
+ * ======================================================================== */
+describe("R-331: each plant's own answer, kept apart from the company's", () => {
+  it("offers three states per plant, not two", () => {
+    render(<SettingsPanel />);
+    const select = plantPicker("Plant A");
+    const options = within(select).getAllByRole("option");
+    expect(options.map((o) => o.getAttribute("value"))).toEqual(["inherit", "warn", "block"]);
+  });
+
+  it("labels the plant's options by consequence, never by the stored word", () => {
+    render(<SettingsPanel />);
+    const texts = within(plantPicker("Plant A"))
+      .getAllByRole("option")
+      .map((o) => (o.textContent ?? "").trim());
+    expect(texts[1]).toBe("Allow it, with a reason on record");
+    expect(texts[2]).toBe("Refuse it — no exceptions");
+    for (const t of texts) {
+      expect(t.toLowerCase()).not.toBe("warn");
+      expect(t.toLowerCase()).not.toBe("block");
+    }
+  });
+
+  /**
+   * ⛔ THE CASE THE WHOLE FEATURE TURNS ON. Plant A has no row and resolves to
+   * "warn"; the company is on "warn". The closed control must NOT read as
+   * though somebody chose warn here — it must say the plant is inheriting, and
+   * say what that currently means.
+   */
+  it("an untouched plant reads as inheriting, and says what it currently gets", () => {
+    render(<SettingsPanel />);
+    const select = plantPicker("Plant A");
+    expect(select.value).toBe("inherit");
+    const shown = within(select).getAllByRole("option")[0];
+    expect(shown.textContent).toMatch(/company/i);
+    expect(shown.textContent).toMatch(/Allowed with a reason/);
+    expect(
+      screen.getByText(/Inheriting from the company — currently Allowed with a reason/),
+    ).toBeTruthy();
+  });
+
+  it("says the inheriting plant will follow the company when the company moves", () => {
+    render(<SettingsPanel />);
+    expect(screen.getByText(/Inheriting from the company/)).toBeTruthy();
+    expect(screen.getByText(/follows/i)).toBeTruthy();
+  });
+
+  it("an inheriting plant tracks the company's answer rather than a stored one", () => {
+    h.state.policy = "block";
+    h.state.plants = [
+      { nodeId: "a", name: "Plant A", override: null, effective: "block", editable: true },
+    ];
+    render(<SettingsPanel />);
+    expect(plantPicker("Plant A").value).toBe("inherit");
+    expect(within(plantPicker("Plant A")).getAllByRole("option")[0].textContent).toMatch(/Refused/);
+    expect(screen.getByText(/Inheriting from the company — currently Refused/)).toBeTruthy();
+  });
+
+  it("a plant with its own answer says so, and says it will not follow the company", () => {
+    render(<SettingsPanel />);
+    const select = plantPicker("Plant B");
+    expect(select.value).toBe("block");
+    expect(screen.getByText(/Set for this plant — Refused/)).toBeTruthy();
+    expect(screen.getByText(/does not follow the company/i)).toBeTruthy();
+  });
+
+  /**
+   * ⛔ "SET TO THE SAME VALUE" IS NOT "INHERITING". Plant B below is set to
+   * `warn` while the company is on `warn`; the screen must not show it as
+   * inheriting, because the day the company moves to `block` this plant stays.
+   */
+  it("does not show a plant set to the company's current value as inheriting", () => {
+    h.state.plants = [
+      { nodeId: "b", name: "Plant B", override: "warn", effective: "warn", editable: true },
+    ];
+    render(<SettingsPanel />);
+    expect(plantPicker("Plant B").value).toBe("warn");
+    expect(screen.queryByText(/Inheriting from the company/)).toBeNull();
+    expect(screen.getByText(/Set for this plant — Allowed with a reason/)).toBeTruthy();
+  });
+
+  it("gives a plant its own answer through set_node_setting's value", () => {
+    render(<SettingsPanel />);
+    fireEvent.change(plantPicker("Plant A"), { target: { value: "block" } });
+    expect(h.setPlantMutate).toHaveBeenCalledWith({ nodeId: "a", choice: "block" });
+  });
+
+  /**
+   * ⛔ RETURNING TO INHERITING IS ITS OWN VERB. `clear_node_setting`, never
+   * `set_node_setting(..., null)` — "set to nothing" is precisely the state
+   * migration 0050 spent a table avoiding.
+   */
+  it("returns a plant to inheriting by choosing the company option", () => {
+    render(<SettingsPanel />);
+    fireEvent.change(plantPicker("Plant B"), { target: { value: "inherit" } });
+    expect(h.setPlantMutate).toHaveBeenCalledWith({ nodeId: "b", choice: "inherit" });
+  });
+
+  it("shows saving on the plant being written and not on its neighbour", () => {
+    h.state.plantPending = "b";
+    render(<SettingsPanel />);
+    expect(plantPicker("Plant B").disabled).toBe(true);
+    expect(plantPicker("Plant A").disabled).toBe(false);
+    expect(screen.getAllByText("Saving…")).toHaveLength(1);
+  });
+
+  it("shows a refused plant write rather than leaving the choice looking saved", () => {
+    h.state.plantPending = "b";
+    h.state.plantError = "you are not an admin of that plant";
+    render(<SettingsPanel />);
+    expect(screen.getByText("you are not an admin of that plant")).toBeTruthy();
+  });
+
+  /**
+   * ⚠️ A PLANT THE READER MAY NOT WRITE GETS NO PICKER AT ALL — not a disabled
+   * one. The server refuses `set_node_setting` for it (`app_is_admin_for`), and
+   * D106's rule is that a greyed control is a control named after something it
+   * does not do. It is still LISTED, with what is in force there, because
+   * silently dropping it is `scope.ts`'s invisible-and-permanent failure.
+   */
+  it("lists a plant the reader cannot administer, with no control and a reason", () => {
+    h.state.plants = [
+      { nodeId: "a", name: "Plant A", override: null, effective: "warn", editable: true },
+      { nodeId: "c", name: "Plant C", override: "block", effective: "block", editable: false },
+    ];
+    render(<SettingsPanel />);
+    expect(plantPicker("Plant A")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Plant C" })).toBeNull();
+    expect(screen.getByText("Plant C")).toBeTruthy();
+    expect(screen.getByText(/isn’t a place you manage/)).toBeTruthy();
+    // and what is actually in force there is still readable
+    expect(screen.getByText(/Set for this plant — Refused/)).toBeTruthy();
+  });
+
+  /**
+   * ⚠️ A SITE ADMIN IS THE WHOLE POINT OF R-331. They reach this screen
+   * (`adminSectionsFor` returns "all" for anyone with an admin grant anywhere),
+   * cannot move the COMPANY setting — `set_org_eligibility_policy` is
+   * `app_is_admin()` — and CAN move their own plant's.
+   */
+  it("a site admin cannot move the company setting but can move their own plant", () => {
+    h.state.profile.role = "viewer";
+    h.state.plants = [
+      { nodeId: "a", name: "Plant A", override: null, effective: "warn", editable: true },
+      { nodeId: "b", name: "Plant B", override: null, effective: "warn", editable: false },
+    ];
+    render(<SettingsPanel />);
+    expect(policyPicker().disabled).toBe(true);
+    expect(screen.getByText("Only a system admin can change this.")).toBeTruthy();
+    const mine = plantPicker("Plant A");
+    expect(mine.disabled).toBe(false);
+    fireEvent.change(mine, { target: { value: "block" } });
+    expect(h.setPlantMutate).toHaveBeenCalledWith({ nodeId: "a", choice: "block" });
+    expect(screen.queryByRole("combobox", { name: "Plant B" })).toBeNull();
+  });
+
+  it("offers no control at all for a plant the reader was not offered", () => {
+    h.state.plants = [
+      { nodeId: "c", name: "Plant C", override: null, effective: "warn", editable: false },
+    ];
+    const { container } = render(<SettingsPanel />);
+    expect(container.querySelectorAll("select[id^=settings-plant-policy]")).toHaveLength(0);
+    expect(h.setPlantMutate).not.toHaveBeenCalled();
+  });
+
+  it("says so plainly when the plant list could not be read", () => {
+    h.state.plantsError = "could not read plants";
+    h.state.plants = [];
+    render(<SettingsPanel />);
+    expect(screen.getByText("could not read plants")).toBeTruthy();
+  });
+
+  it("says so when there is no plant to set, rather than showing an empty card", () => {
+    h.state.plants = [];
+    render(<SettingsPanel />);
+    expect(screen.getByText(/no plants/i)).toBeTruthy();
   });
 });
