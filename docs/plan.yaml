@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-04'
-  tip: 2e2bea3
+  tip: 5f19eb8
   baseline:
     app_tests: 1788
     app_test_files: 60
@@ -2572,8 +2572,26 @@ requirements:
     same way: `check_eligibility`, `create_assignment`, `move_run`, `apply_split_coverage` and their
     0043/0044 successors all read `orgs.settings->>'eligibility_policy'` today, and one left behind is a
     plant whose rule is enforced on some paths and not others.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/73_plant_settings_test.sql
+    cases: >-
+      P0-P17 (a plant override beats the company default, an untouched plant still follows it, clearing
+      returns it to inheriting, a non-admin is REFUSED not silently no-op'd, and P16/P17 drive a
+      SUPERVISOR who cannot read the plant root -- the case an invoker resolver passes 16/16 without)
+  - kind: vitest
+    file: src/test/plantSettings.test.ts
+    cases: >-
+      the three states, and which plants a reader may administer, composed from the server's own two
+      arms rather than from `canEditNode`, whose third arm the write policy refuses
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: 15 cases on the three states, returning to inheriting, and what a site admin sees
+  status: covered
+  note: >-
+    ⚠️ THE BOARD IS NOT YET PLANT-AWARE. It still hands one company-wide value to `CreatePopover`, so a
+    plant set to refuse would offer an override tick the server then refuses -- F-087's shape again.
+    Migration 0051 and its test are the remaining half.
 - id: R-332
   title: Every setting's control lines up with every other setting's
   source:
@@ -2586,8 +2604,18 @@ requirements:
     R-318's was: the row is a flex box whose control column is `flex: 0 0 auto`, so each picker is sized
     by its own content and two rows can only align by coincidence. R-318 made the BOX one definition;
     this makes the ROW one.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/settingRowStandard.test.ts
+    cases: >-
+      14 cases on four prongs -- no stylesheet outside the shared module names a rule after a setting
+      and lays it out; the width token is declared exactly once and in rem; the shared module's own
+      shape; and a count in the panel that disagrees the moment a control dodges the shared cell.
+      Eight mutations were applied and each caught by a different case.
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: every setting, company-wide or per-plant, renders in the same shared row and column
+  status: covered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
   source:
@@ -7915,6 +7943,77 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 62
+  date: 2026-09-04
+  title: Settings rows line up, and a rule can be answered for one plant
+  commits:
+  - 3ddb7bc
+  - cbc7c92
+  - 5f19eb8
+  numbers:
+    app_tests: 1998
+    app_test_files: 71
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    Two maintainer observations on the Settings screen, both of which turned out to be structural
+    rather than cosmetic.
+    ⭐ THE PICKERS DID NOT LINE UP BECAUSE THE ROW ASKED EACH ONE HOW WIDE IT WANTED TO BE. The
+    control column was `flex: 0 0 auto`, which is literally "size me by my own longest option", and the
+    eligibility labels are far longer than the date ones — so two rows could only align by coincidence.
+    `SettingRow.module.css` is a second shared module beside `Field.module.css`: that one owns the BOX,
+    this owns the ROW. A grid, because a track is a constant shared by every row rather than a
+    negotiation with whatever text is in one; `minmax(0, 1fr)` and not `1fr`, because a track's
+    automatic minimum is its content width and a long hint would shove the column off the shared edge —
+    the same bug in a different unit. The panel's own `max-width: 20rem` on its consequence paragraph
+    turned out to be a second copy of the column width kept in step by hand, and existed only because
+    of the flex bug.
+    ⚠️ THE AUDIT DELIBERATELY DOES NOT MATCH ON GEOMETRY. `display: flex` plus `justify-content` also
+    builds toolbars and card headers, so matching those would flag half the repo; it matches a
+    stylesheet that NAMES a rule after a setting and then lays it out, plus a token declared exactly
+    once, plus a count in the panel. No legacy exemption list, which is the difference from R-318: the
+    field skin already had thirty copies so naming them was the only honest option, whereas the row
+    existed in one file and a list would be a hole dug in advance.
+    ⛔ THE PER-PLANT WORK TURNED ON ONE DECISION AND IT WAS NOT THE OBVIOUS ONE. Storage is a TABLE,
+    not a jsonb bag on `nodes`, because in a bag "key missing" and "key holds null" read back
+    identically and F-088's CHECK cannot tell them apart. A row means this place was given an answer;
+    no row means it inherits; `value` is NOT NULL, which closes F-088's hole at the column; and
+    clearing is a DELETE rather than a magic value, with two verbs so that `set(…, null)` can never put
+    the ambiguity back.
+    ⭐ AND THE RESOLVER HAD TO BE SECURITY DEFINER, WHICH A COMPANY-ADMIN TEST CANNOT SHOW. `nodes`
+    is RLS-scoped and `move_run` is INVOKER, so a supervisor granted one LINE cannot read the plant root
+    the override sits on — an invoker walk would miss it and fall through to the company default,
+    quietly handing a strict plant a permissive answer. The lane's first draft ran every case as the
+    company admin, who can read everything, and the wrong version passed 16 of 16. Two cases driving a
+    supervisor are what fail. That is the demo-world lesson from session 56 in a second place: a test
+    that cannot fail for the reason it names.
+    Resolution is nearest ancestor-or-self, then the org bag, then the coded default. Per NODE rather
+    than per plant is both cheaper and more general — a rule that stopped at plants would have to know
+    which level is a plant, and since 0014 that is a per-template question with no single answer.
+    ⚠️ THE SCREEN'S PREDICATE WAS THE OTHER TRAP. `node_settings` is written under
+    `app_is_admin() OR app_is_admin_for(node)` — arms one and two. `app_can_edit_node` carries a THIRD
+    arm (`app_can_write()` plus a writable grant) that an org-wide supervisor with a supervisor grant
+    satisfies and that the write policy refuses. Using the familiar `canEditNode` would have offered a
+    control the server rejects. Both bodies were read from the live database rather than argued about.
+    A plant somebody cannot administer is LISTED with no control and a reason, not greyed (a disabled
+    control is named after something it does not do) and not dropped (silently missing is the
+    invisible, permanent failure).
+    ⚠️ TWO CORRECTIONS, ONE OF THEM MINE. I briefed that `apply_split_coverage` inherits eligibility
+    by calling `check_eligibility`; the lane reported it consults eligibility NOT AT ALL and filed that
+    as a gap; neither was right. It writes its row by calling `create_assignment`, which calls
+    `check_eligibility` — enforced one hop further along than I said, and no gap. Read out of the
+    function body rather than settled by argument, and nothing filed. Separately, the panel's own header
+    claimed the section is system-admin-only and that `AdminPage` hides it from a site admin;
+    `adminSectionsFor` returns "all" for anybody with `adminAnywhere`, which every site admin is, so
+    the comment was false and R-331 rests on it.
+    OWED: the board still applies one company-wide value to every plant, so a plant set to refuse would
+    offer an override tick the server then refuses — F-087's shape a third time. ⛔ The obvious fix is
+    wrong and was measured to be: resolving in the browser FAILS OPEN, because `board_window` is
+    INVOKER and a supervisor never receives the plant root's override. It must be server-resolved.
+    Also still open: the write gate was widened so a SITE admin may set their own plant's rule, which
+    hands a safety rule to more people and is the maintainer's to confirm.
+  shipped: []
 - id: 61
   date: 2026-09-04
   title: The Activity screen answers who, what and when — three lanes and an integration
