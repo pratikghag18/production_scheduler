@@ -70,10 +70,25 @@ type SectionId =
  */
 // ⚠️ `companyAdminOnly` IS A SEPARATE AXIS FROM `adminSectionsFor`. That helper
 // returns "all" for a site admin too (adminAnywhere), so it cannot express
-// "system admin ONLY" — and Settings is exactly that: an org-wide preference set
-// once for the whole company (0037). The flag is filtered on `profile.role`
-// below, and the server RPC refuses a non-admin regardless, so this only hides a
-// tab that could tell a site admin nothing but no.
+// "system admin ONLY". The flag is filtered on `profile.role` below — the client
+// mirror of `app_is_admin()`, the same predicate the policy runs.
+//
+// ⛔⛔ ONE TAB CARRIES IT, AND THE SECOND ONE COST A DEFECT (DEF-0007 / R-239).
+// Settings carried this flag too, from 0037, when the tab really was one
+// org-wide preference set once for the whole company. Migration 0050 added
+// `node_settings` and `set_node_setting`, gated `app_is_admin() OR
+// app_is_admin_for(node)`, and 0052 moved the date format under the same shape.
+// From then on the server took a PLANT admin's writes on their OWN plant and
+// this rail hid the tab that makes them — R-239 backwards, and R-333's whole
+// point ("choose a plant and the tab edits THAT plant's values") unreachable for
+// the person who runs one plant. The flag stayed because the comment justifying
+// it stayed true-sounding two migrations after it stopped being true.
+//
+// ⭐ SO THE TEST FOR THIS FLAG IS NOT "is the screen important". It is: would
+// the server REFUSE, or silently do nothing, for every person `adminSectionsFor`
+// lets through? Activity is the only tab where the answer is yes. Anything that
+// varies per node is decided by the panel, against the same predicate the server
+// runs — `SettingsPanel` does exactly that with `canAdministerPlant`.
 const SECTIONS: ReadonlyArray<{
   id: SectionId;
   label: string;
@@ -110,9 +125,18 @@ const SECTIONS: ReadonlyArray<{
   // to show a line's roll-up (R-317).
   { id: "cycletimes", label: "Cycle times", enabled: CYCLE_TIMES_PANEL_READY },
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
-  // System-admin only (see `companyAdminOnly` note above). Org-wide preferences,
-  // the first being the date-display format (0037 / `src/lib/format/dates.ts`).
-  { id: "settings", label: "Settings", enabled: SETTINGS_PANEL_READY, companyAdminOnly: true },
+  // ⭐⭐ NO `companyAdminOnly` — AND ITS ABSENCE IS THE FIX FOR DEF-0007, so it is
+  // worth a sentence rather than a blank. Settings is per-plant (R-333): the tab
+  // follows the plant control at the top, and `set_node_setting` takes a plant
+  // admin's write on their own plant. Every scope this tab can be in is decided
+  // INSIDE the panel, by `canAdministerPlant` on the chosen plant's path — the
+  // same expression as `app_is_admin_for(node)` — which is the only place that
+  // knows which plant is chosen. The rail cannot answer a per-node question, so
+  // it must not try: on the company scope the panel shows the controls disabled
+  // with the reason in words, on a plant they administer it shows working
+  // pickers, and on a plant they may only read it shows no control and says
+  // whose place it is.
+  { id: "settings", label: "Settings", enabled: SETTINGS_PANEL_READY },
   // ⭐⭐ COMPANY-ADMIN ONLY, AND THE FLAG IS DECIDING THE SAME THING THE
   // POLICY DOES. `audit_log_select` (0008) is `app_is_admin() and org_id =
   // app_current_org()`, and `app_is_admin()` is `user_profiles.role = 'admin'`
@@ -321,8 +345,10 @@ export default function AdminPage() {
   const allowedSections = adminSectionsFor(profile?.role, profile?.adminAnywhere);
   // ⚠️ `companyAdminOnly` is the SECOND gate, and it is NOT redundant with
   // `allowedSections`: that returns "all" for a site admin (adminAnywhere), so
-  // without this a site admin would be offered Settings — an org-wide screen the
-  // server then refuses. Only the org-wide role 'admin' is a system admin.
+  // without this a site admin would be offered Activity — a read that hands them
+  // ZERO ROWS rather than a refusal. Only the org-wide role 'admin' is a system
+  // admin. ⛔ Settings used to be filtered here too and must not be again; the
+  // block above `SECTIONS` carries why (DEF-0007).
   const isCompanyAdmin = profile?.role === "admin";
   const visibleSections = SECTIONS.filter(
     (s) =>

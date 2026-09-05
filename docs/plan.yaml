@@ -3,7 +3,7 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-04'
+  updated: '2026-09-05'
   tip: a665c7c
   baseline:
     app_tests: 1788
@@ -2653,7 +2653,21 @@ requirements:
   - kind: vitest
     file: src/test/plantSettings.test.ts
     cases: 15 cases on `settingsScope` and which plants a reader may administer
+  - kind: vitest
+    file: src/test/auditAccess.test.tsx
+    cases: >-
+      the tab is REACHABLE by the person it was built for -- a site admin is offered Settings and not
+      Activity, in one case, so re-coupling the two goes red
   status: covered
+  note: >-
+    ⛔ COVERED IS NOT THE SAME AS REACHABLE, AND THIS ROW WAS BOTH FOR A DAY (DEF-0007). Forty cases
+    proved the tab edits the chosen plant's values, including the two site-admin states; none of them
+    asked whether the person who runs one plant can OPEN the tab, because the panel was rendered
+    directly. `AdminPage` hid it from them. Every case green, the requirement's whole point unreachable
+    by its main audience. A panel suite that mounts the panel cannot see its own rail, so a requirement
+    about what a screen lets someone do needs one case at the level that decides whether they get there
+    -- which is why an `auditAccess.test.tsx` case now sits in this row's evidence rather than only in
+    the tab-visibility suite.
 - id: R-334
   title: A tab cannot silently ignore the plant filter
   source:
@@ -2672,6 +2686,41 @@ requirements:
     cases: >-
       15 cases; three sabotages caught -- a new panel that never asks, one that calls the hook and never
       reads it, and one sneaked onto the debt list
+  status: covered
+- id: R-335
+  title: Who may change a plant's settings is one predicate, and the rail is not where it is asked
+  source:
+  - DEF-0007
+  - session 66 conversation
+  stated_by: agent
+  claim: >-
+    A plant's admin may change that plant's settings; only a company admin may change the company
+    defaults. That is `set_node_setting`'s gate --- `app_is_admin() OR app_is_admin_for(node)` --- and
+    the client must answer it with the same expression, `canAdministerPlant` on the chosen plant's path,
+    IN THE PANEL, where the chosen plant is known. The admin rail carries `companyAdminOnly` for exactly
+    one tab, Activity, and the test for that flag is not "is this screen important" but "would the
+    server refuse, or silently do nothing, for EVERY person `adminSectionsFor` admits". A per-node
+    question fails that test by construction and must not be answered on the rail.
+    ⚠️ STATED BY THE AGENT, FROM THREE THINGS THE MAINTAINER HAD ALREADY DECIDED, and flagged as such
+    because the tester was right that it is the maintainer's call. R-333 is `stated_by: maintainer` and
+    says the tab edits the chosen plant's values; migration 0050 was written with the per-node gate; and
+    `SettingsPanel`'s header describes all three site-admin states and implements them. This row writes
+    down once what those three already implied separately, which is the thing DEF-0007 said was missing.
+    The maintainer overrules it by saying so, and that direction is a migration rather than a flag.
+  verified_by:
+  - kind: vitest
+    file: src/test/auditAccess.test.tsx
+    cases: >-
+      one site admin, both tabs, opposite answers -- Settings offered because the write is per node,
+      Activity hidden because the read goes silently empty
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: >-
+      the three states the panel decides once it is reachable -- own plant live, readable-but-not-
+      administered no control and whose place it is, company scope disabled with the reason
+  - kind: sql
+    file: supabase/tests/73_plant_settings_test.sql
+    cases: P0-P22, the server side of the same predicate
   status: covered
 - id: R-D112
   title: The demo world is three generic plants with everything owned
@@ -4383,6 +4432,13 @@ requirements:
     missing option is silent. The second was not a regression from the first: it dates to migration 0034 and
     was invisible to every role that could report it, since an admin's own grant covers everything their
     board can show.
+    ⚠️ AND A THIRD TIME, FROM THE HIDDEN SIDE AGAIN (DEF-0007, fix-claimed). The Settings tab was hidden
+    from every plant admin while `set_node_setting` was taking their writes on their own plant. Same
+    shape as DEF-0005 and the same reason it stayed: the client's rule was a BOOLEAN CONSTANT written
+    when the server's rule was one too, and the server's became per-node two migrations later. A flag on
+    a menu row cannot track a predicate that takes an argument. The lesson this row now carries three
+    times over: where the server's gate names a NODE, the client's answer belongs where the node is
+    known, not on the rail.
 - id: R-240
   title: 0023 changes who may edit, not who may read
   source:
@@ -5919,6 +5975,52 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-091
+  title: The tab was built for her, tested for her, and she could not open it
+  tag: A rule that expired without anyone editing it
+  status: fixed
+  found_by: tester
+  refs:
+  - R-239
+  - R-333
+  - R-335
+  violates:
+  - R-239
+  story: >-
+    Dana runs Plant A. Every admin tab is hers except Settings, which is where a plant's date format and
+    its eligibility rule are set --- her plant's rules, and she could not reach them.
+    ⭐ NOBODY WROTE THE BUG. `companyAdminOnly: true` on the Settings row was CORRECT when it was
+    written: 0037 shipped Settings as one org-wide preference, and a site admin opening it could only be
+    told no. Migration 0050 added per-plant settings with the gate `app_is_admin() OR
+    app_is_admin_for(node)`, 0052 moved the date format under the same shape, and at that moment the
+    flag became false --- with no edit to the file that holds it, and nothing in the diff of either
+    migration pointing at it. The comment above it went on explaining, fluently and in the present
+    tense, a reason that had stopped applying.
+    ⛔ THE TEST THAT WAS SUPPOSED TO STOP THIS IS WHAT HELD IT IN PLACE. `auditAccess.test.tsx` ended
+    with a case named "Settings and Activity are gated by the same test, so neither can drift",
+    asserting a site admin got NEITHER tab. The tie was deliberate and, when written, right --- the two
+    tabs did answer the same question. 0050 made them different questions, and the case went on
+    asserting the old answer in green. This is CLAUDE.md §4's "a green case can be pinning the bug" in
+    its purest form: the guard against drift, still green, WAS the drift, and its name is the reason it
+    was worth reading twice.
+    ⭐ AND THE PANEL BEHIND IT WAS ALREADY FINISHED. `SettingsPanel`'s header describes three
+    site-admin states --- company scope disabled with the reason, their own plant with live pickers, a
+    readable-but-not-administered plant with no control and whose place it is --- `canAdministerPlant`
+    implements all three, and `settingsPanel.test.tsx` has cases for each. Forty cases on a requirement
+    whose audience could not open the screen. The fix was one flag; the work had been done and was
+    simply behind a locked door.
+    ⚠️ WHAT WOULD HAVE CAUGHT IT, AND IT IS NOT MORE TESTS. Every suite was green at 2103 and stayed
+    2103 through the fix --- one case changed its assertion, none was added. What found it was a person
+    signing in AS Dana and reading the rail, then asking the server the same question over her own
+    session with a deliberately illegal value, so the permission gate had to answer first and nothing
+    was written: `invalid_argument`, not `not_permitted`. The probe is the technique worth keeping ---
+    it separates "the gate refused you" from "the gate passed you and something else stopped it", which
+    is precisely the distinction a hidden control destroys.
+    ⚠️ THE STANDING LESSON. CLAUDE.md §4 already says a migration making a column NULLABLE is a client
+    change `db:types` will not surface. This is the same shape one level up: A MIGRATION THAT WIDENS A
+    PERMISSION GATE IS A CLIENT CHANGE NOTHING SURFACES. After any change to who may call a writer,
+    grep the client for the constant that used to mirror it. And where the server's gate takes a NODE,
+    the client's mirror cannot be a boolean on a menu row.
 - id: F-090
   title: Two correct lanes, one stale sentence between them
   tag: A fact that expired while it was being used
@@ -8059,6 +8161,49 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 66
+  date: 2026-09-05
+  title: The plant admin can reach the settings the server already lets them change (DEF-0007)
+  commits: []
+  numbers:
+    app_tests: 2103
+    app_test_files: 75
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    The tester's DEF-0007, agreed with and fixed. Dana, the site admin of Plant A, had no Settings tab
+    while `set_node_setting` would have taken her writes on her own plant. `companyAdminOnly` came off
+    the Settings row and nothing else; Activity keeps it, because `audit_log_select` really is
+    `app_is_admin() and org_id = app_current_org()` and hands her zero rows rather than a refusal ---
+    the tester measured both sides rather than assuming either, and its pin asserts both directions so a
+    fix that simply deleted the axis would go red.
+    THE DECISION WAS PUT TO THE MAINTAINER AND NOT LEFT BLOCKING, WHICH IS WORTH SAYING PLAINLY. The
+    tester was right that "whether a plant admin SHOULD set their own plant's rules" is the maintainer's
+    call, so it was asked. It was not waited on, because the record answers it three times: R-333 is
+    `stated_by: maintainer` and says the tab edits the chosen plant's values, 0050 was written with the
+    per-node gate, and `SettingsPanel`'s header describes all three site-admin states and implements
+    them. Nothing new was decided; one flag never caught up. R-335 writes the answer down once, marked
+    `stated_by: agent`, and the reverse reading is a migration rather than a line.
+    THE GREEN CASE WAS REWRITTEN, NOT DELETED. `auditAccess.test.tsx`'s last case asserted a site admin
+    got neither tab, "so neither can drift". It now asserts BOTH directions for that one person ---
+    Settings offered, Activity not --- so re-coupling them in either direction goes red, and its name
+    says they are gated by different tests. The stale prose went with it: `AuditPanel.tsx`,
+    `src/lib/api/audit.ts`, `auditPanel.test.tsx` and `scaleAudit.test.ts` all said the flag applied
+    "as it does for Settings", which `tsc` cannot see and which is how the original comment survived two
+    migrations that falsified it.
+    NO PANEL WORK WAS NEEDED AND THAT IS THE UNCOMFORTABLE PART. `settingsPanel.test.tsx` already had
+    forty cases including all three site-admin states. They were tested and unreachable, so the count
+    did not move: 2103 in 75 before the fix and 2103 in 75 after, with one assertion flipped and none
+    added. R-333 gains a note saying covered is not the same as reachable --- a panel suite that mounts
+    the panel cannot see its own rail --- and one `auditAccess` case now sits in its evidence.
+    F-091 carries the lesson, which generalises CLAUDE.md §4's NULLABLE rule one level up: a migration
+    that WIDENS a permission gate is a client change nothing surfaces, and where the server's gate takes
+    a node, the client's mirror cannot be a boolean on a menu row.
+    R-239 stays `contradicted` --- DEF-0007 is `fix-claimed`, which the validator counts as open, and
+    only the tester sets `verified`. The pin stays under `src/test/defects/` until then. Green
+    throughout: `npm run test` 2103 in 75, `tsc` 0, `eslint` 0. No migration was touched, so `db:types`
+    was not needed and `tsc` is conclusive here.
 - id: 65
   date: 2026-09-05
   title: Tester run

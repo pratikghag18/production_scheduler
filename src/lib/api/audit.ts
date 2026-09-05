@@ -22,7 +22,9 @@
  * read returns ZERO ROWS: not an error, not a refusal, an empty list that reads
  * exactly like "nothing has ever changed here". `AdminPage`'s `companyAdminOnly`
  * flag and `AuditPanel`'s own gate both test `profile.role === "admin"`, which
- * is the same predicate — see `auditAccess.test.tsx`.
+ * is the same predicate — see `auditAccess.test.tsx`. ⛔ This tab is the only
+ * user of that flag; Settings shed it in DEF-0007, because a per-node write is
+ * not a question the rail can answer.
  *
  * ⚠️⚠️ THE THOUSAND-ROW CEILING IS REAL AND THIS IS THE FIRST TABLE TO MEET IT.
  * PostgREST caps every response at `max_rows = 1000`, and before this file there

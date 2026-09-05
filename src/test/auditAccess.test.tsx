@@ -16,10 +16,25 @@
  *
  * ⚠️ `adminSectionsFor` CANNOT EXPRESS THIS. It returns "all" for anybody with
  * `adminAnywhere`, which is every site admin. The axis that can is
- * `companyAdminOnly`, already carried by `SECTIONS` for the Settings tab and
- * filtered on `profile.role === "admin"` — the client mirror of
- * `app_is_admin()`, and the SAME predicate the policy runs. This suite is what
- * holds the two together.
+ * `companyAdminOnly`, filtered on `profile.role === "admin"` — the client mirror
+ * of `app_is_admin()`, and the SAME predicate the policy runs.
+ *
+ * ⛔⛔ THIS SUITE USED TO HOLD ACTIVITY AND SETTINGS TOGETHER, AND THAT TIE WAS
+ * ITSELF A DEFECT (DEF-0007). Its last case asserted that a site admin got
+ * NEITHER tab, "so neither can drift" — true while the two tabs answered the
+ * same question, which they stopped doing at migration 0050. `set_node_setting`
+ * is `app_is_admin() OR app_is_admin_for(node)`, so the server takes a plant
+ * admin's writes on their own plant while this suite asserted the client was
+ * right to hide the tab that makes them. A GREEN CASE PINNING THE BUG, exactly
+ * the shape CLAUDE.md §4 warns about: the case written to stop drift is what held
+ * the stale half in place, and the suite named after the narrower tab is where
+ * the wider one quietly acquired its gate.
+ *
+ * ⭐ SO WHAT THIS SUITE GUARDS NOW IS THE SEPARATION, not the tie. Activity is
+ * company-admin-only because its READ goes silently empty; Settings is not,
+ * because its WRITE is per node and the panel decides per node. The last case
+ * below asserts both directions at once, so a change that re-couples them — in
+ * either direction — goes red here.
  *
  * The mocks stop at the network boundary and at the panels, as
  * `adminNoGrants.test.tsx` does: what is under test is AdminPage's own decision
@@ -196,7 +211,21 @@ describe("the Activity tab is offered to exactly the people the policy admits", 
     expect(railButton("Activity")).toBe(null);
   });
 
-  it("Settings and Activity are gated by the same test, so neither can drift", async () => {
+  /**
+   * ⛔⛔ THE CASE THAT REPLACES THE ONE THAT PINNED DEF-0007. It used to read
+   * "Settings and Activity are gated by the same test, so neither can drift"
+   * and assert both were null. They are NOT the same question:
+   *
+   *   Activity  → `audit_log_select` = `app_is_admin() and org_id = ...`
+   *               a site admin gets ZERO ROWS. Hide it.
+   *   Settings  → `set_node_setting` = `app_is_admin() OR app_is_admin_for(n)`
+   *               a site admin's write on their OWN plant is TAKEN. Offer it.
+   *
+   * The same person, the same rail, opposite answers — which is the whole
+   * content of the fix, so it is asserted in ONE case rather than two that
+   * could be changed one at a time.
+   */
+  it("Settings and Activity are gated by DIFFERENT tests, and this person shows why", async () => {
     h.state.profile = {
       id: "p1",
       userId: "u1",
@@ -206,7 +235,10 @@ describe("the Activity tab is offered to exactly the people the policy admits", 
     };
     show();
     await screen.findByRole("button", { name: "Hierarchy" });
-    expect(railButton("Settings")).toBe(null);
+    // The server takes her writes on her own plant (R-333), so the tab exists;
+    // WHICH scope she may edit is the panel's question, not the rail's.
+    expect(railButton("Settings")).not.toBe(null);
+    // The server hands her an empty list, so the tab does not.
     expect(railButton("Activity")).toBe(null);
   });
 });

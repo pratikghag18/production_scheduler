@@ -484,9 +484,10 @@ describe("the panel refuses what the server would refuse", () => {
   /**
    * ⚠️⚠️ `adminSectionsFor` RETURNS "all" FOR A SITE ADMIN, so the rail alone
    * cannot express "company admin only" — `AdminPage`'s `companyAdminOnly` flag
-   * does, exactly as it does for Settings. This is the second gate, in the
-   * panel, so a site admin who reaches this pane by any route is TOLD, not shown
-   * an empty list they would reasonably read as "nothing has ever changed".
+   * does, and this tab is now its only user (DEF-0007 took it off Settings,
+   * whose writer is per-node). This is the second gate, in the panel, so a site
+   * admin who reaches this pane by any route is TOLD, not shown an empty list
+   * they would reasonably read as "nothing has ever changed".
    */
   it("tells a site admin the log is not theirs to read, and fires no query", async () => {
     h.state.profile.role = "viewer";

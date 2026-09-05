@@ -492,16 +492,19 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       // because a cycle time is a fact about a part at a place.
       "cycletimes",
       "import",
-      // 0037: org-wide Settings (date format). System-admin only, filtered on
-      // `profile.role` in AdminPage — the id is still in SECTIONS, so it is
-      // still here and still has a render branch (which is what H2 guards).
+      // Settings. 0037 shipped it org-wide (the date format) and it was
+      // system-admin only; 0050 and 0052 made every setting on it PER-PLANT, so
+      // DEF-0007 took `companyAdminOnly` off it and a plant admin is offered it
+      // like any other tab. The id is in SECTIONS and has a render branch, which
+      // is what H2 guards.
       "settings",
       // The audit log, read for the first time. Company-admin ONLY — a stricter
       // gate than any other section's, because `audit_log_select` (0008) hands a
       // SITE admin zero rows rather than a refusal, and an empty list reads like
-      // "nothing has ever changed here". Filtered on `companyAdminOnly` exactly
-      // as `settings` is; the id is in SECTIONS, so it is here and has a render
-      // branch, which is what H2 guards.
+      // "nothing has ever changed here". The ONLY tab filtered on
+      // `companyAdminOnly` — see `settings` above for why it is no longer the
+      // second; the id is in SECTIONS, so it is here and has a render branch,
+      // which is what H2 guards.
       "audit",
     ]);
   });

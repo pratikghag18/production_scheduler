@@ -15,10 +15,18 @@
    returns ZERO ROWS: no error, no refusal, an empty list that reads exactly like
    *"nothing has ever changed here"*. **That is the quietest possible form of the
    failure `CLAUDE.md` §4 names.** So there are two gates and they test the same
-   predicate the policy does: `AdminPage`'s `companyAdminOnly` hides the tab (as
-   it does for Settings, and for the same reason `adminSectionsFor` cannot
-   express this — it returns "all" for any site admin), and the gate below stops
-   the query and says why to anyone who reaches this pane by another route.
+   predicate the policy does: `AdminPage`'s `companyAdminOnly` hides the tab
+   (`adminSectionsFor` cannot express this — it returns "all" for any site
+   admin), and the gate below stops the query and says why to anyone who reaches
+   this pane by another route.
+
+   ⛔ THIS IS THE ONLY TAB THAT CARRIES THAT FLAG, and Settings is the reason to
+   say so. It carried the flag too until DEF-0007: its writer became
+   `app_is_admin() OR app_is_admin_for(node)` at migration 0050, so the server
+   started taking a plant admin's writes while the rail went on hiding the tab.
+   The difference is READ vs WRITE and whole-org vs per-node — this read is
+   company-wide and goes silently empty, so the rail can answer it; a per-node
+   write can only be answered where the node is known, which is the panel.
 
    ⭐⭐ AND IT NEVER CLAIMS TO BE SHOWING MORE THAN IT IS. PostgREST caps every
    response at `max_rows = 1000`; before `src/lib/api/audit.ts` there was no
