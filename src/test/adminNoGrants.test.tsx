@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import AdminPage from "@/features/admin/AdminPage";
 import { useAdminViewStore } from "@/features/admin/store/adminView";
@@ -32,6 +32,27 @@ import { useAdminViewStore } from "@/features/admin/store/adminView";
  * places yet — a brand-new company, not a permission. Telling them they have
  * not been given access would be false, and would hide the Hierarchy tab where
  * they create the first plant. Case N4 is that difference.
+ *
+ * ⭐⭐ AND THIS FILE OWNS THE THIRD POPULATION OF THE RAIL (N6/N7, DEF-0008).
+ * There are three: a company admin, a site admin, and somebody ADMITTED BUT
+ * NARROWED — a supervisor whose `adminSectionsFor` returns a list rather than
+ * "all". `auditAccess.test.tsx` renders the first two against the tab list.
+ * The third had no case naming the set it gets, so a widening of
+ * `adminSectionsFor` was invisible: offering a supervisor Import, Products and
+ * Settings passed all 2103 cases.
+ *
+ * ⛔ AND N3 ONLY LOOKED LIKE IT COVERED THAT. It asserts which PANEL a
+ * supervisor lands on, and `resolveAdminSection` falls back to the FIRST
+ * allowed section — so allowing "access" changes the landing panel and N3
+ * notices, while allowing anything sorting after "operators" (products, cycle
+ * times, import, settings) leaves it alone and N3 stays green. It was catching
+ * one widening by accident and none of the rest on purpose.
+ *
+ * ⚠️ WHICH IS WHY N6 ASSERTS THE WHOLE LIST, NOT THREE `toBeTruthy()`s. A list
+ * cannot be widened quietly; three truthy checks can. That distinction became
+ * load-bearing at `23ba9aa`: Settings used to have TWO locks, this helper and
+ * `companyAdminOnly`, and DEF-0007 correctly removed the second. A widening of
+ * the first is now stopped by nothing but N6.
  *
  * The mocks stop at the network boundary (`fetchHierarchyTree`) and at the
  * panels, which are other files with their own suites; what is under test is
@@ -154,6 +175,23 @@ const EMPTY_TREE = {
 
 const EMPTY_HEADING = "Nothing has been shared with you yet";
 
+/**
+ * Every SECTION button in the rail, in the order the rail renders them.
+ *
+ * ⚠️ SCOPED TO THE `<nav>`, so a button appearing anywhere else on the page can
+ * neither pad this list nor stand in for a rail that failed to render at all.
+ * The empty-text filter drops `PanelToggle`, which is the rail's collapse
+ * control and is icon-only — it is the one button in here that is not a
+ * section, and it survives a collapse precisely because it is not one.
+ */
+function rail(): string[] {
+  const nav = screen.getByRole("navigation", { name: "Admin sections" });
+  return within(nav)
+    .getAllByRole("button")
+    .map((b) => (b.textContent ?? "").trim())
+    .filter((t) => t.length > 0);
+}
+
 function show(): void {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -224,6 +262,57 @@ describe("the admin screen explains an empty scope instead of showing one", () =
     // read is an empty COMPANY. They must land on Hierarchy and build it.
     expect(await screen.findByRole("heading", { level: 1, name: "Hierarchy" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: EMPTY_HEADING })).toBe(null);
+  });
+
+  /**
+   * ⭐⭐ THE CASE `adminSectionsFor`'S NARROWING NOW RESTS ON (DEF-0008). The
+   * mutation it exists to catch is one line in `src/features/auth/session.ts`:
+   *
+   *     - return ["operators", "trainings", "matrix"];
+   *     + return ["operators", "trainings", "matrix", "import", "products", "settings"];
+   *
+   * The server refuses this person outright — a plain `POST /rest/v1/products`
+   * over their own session is `42501 new row violates row-level security
+   * policy` — so every one of those tabs would be a control shown for something
+   * the server refuses (R-239), and Settings would be one no lock stops.
+   */
+  it("N6 ⭐⭐: a supervisor's rail is Operators, Trainings and Matrix, and nothing else", async () => {
+    h.state.tree = { ...EMPTY_TREE, nodes: [h.node("n1", "Line A", null, "plant_1")] };
+    show();
+    await screen.findByRole("button", { name: "Operators" });
+    // The whole list, in the rail's own order. A widening shows up here as an
+    // extra element with a name, which is what makes the failure readable
+    // without a second set of by-name assertions to maintain beside it.
+    expect(rail()).toEqual(["Operators", "Trainings", "Matrix"]);
+  });
+
+  it("N7: a company admin's rail is the whole of SECTIONS, so N6 cannot pass by emptying it", async () => {
+    h.state.profile = {
+      id: "p1",
+      userId: "u1",
+      orgId: "org-1",
+      role: "admin",
+      adminAnywhere: true,
+    };
+    h.state.tree = { ...EMPTY_TREE, nodes: [h.node("n1", "Line A", null, "plant_1")] };
+    show();
+    await screen.findByRole("button", { name: "Hierarchy" });
+    // ⚠️ SETTINGS IS IN BOTH DIRECTIONS NOW: absent from N6, present here. Before
+    // DEF-0007 it was absent from a site admin's rail too, and the case that
+    // asserted so was pinning the bug — see `auditAccess.test.tsx`.
+    expect(rail()).toEqual([
+      "Hierarchy",
+      "Access",
+      "Shifts",
+      "Operators",
+      "Trainings",
+      "Matrix",
+      "Products",
+      "Cycle times",
+      "Import",
+      "Settings",
+      "Activity",
+    ]);
   });
 
   it("N5: while the session is still resolving, the refusal never flashes", () => {

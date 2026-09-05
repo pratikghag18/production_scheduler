@@ -32,9 +32,21 @@
  *
  * ⭐ SO WHAT THIS SUITE GUARDS NOW IS THE SEPARATION, not the tie. Activity is
  * company-admin-only because its READ goes silently empty; Settings is not,
- * because its WRITE is per node and the panel decides per node. The last case
- * below asserts both directions at once, so a change that re-couples them — in
- * either direction — goes red here.
+ * because its WRITE is per node and the panel decides per node. The last two
+ * cases assert both directions for both populations, so a change that
+ * re-couples them — in either direction — goes red here.
+ *
+ * ⭐ DEF-0007's PIN IS PROMOTED INTO THOSE TWO CASES and its copy under
+ * `src/test/defects/` is deleted, the tester having verified the fix cold at
+ * `23ba9aa`: all four roles driven through the running app, and a LEGAL value
+ * written as the site admin with the row read back out of the database and then
+ * cleared — because a write that reports success can have changed nothing.
+ *
+ * ⚠️ THE THIRD POPULATION IS NOT HERE. A supervisor whose `adminSectionsFor`
+ * returns a LIST rather than "all" is `adminNoGrants.test.tsx` N6/N7, which
+ * asserts their whole rail. This file renders the two populations that get
+ * "all" and asks which of them the second axis removes a tab from; that split
+ * is deliberate, and DEF-0008 is what happens when nobody owns the third.
  *
  * The mocks stop at the network boundary and at the panels, as
  * `adminNoGrants.test.tsx` does: what is under test is AdminPage's own decision
@@ -240,5 +252,26 @@ describe("the Activity tab is offered to exactly the people the policy admits", 
     expect(railButton("Settings")).not.toBe(null);
     // The server hands her an empty list, so the tab does not.
     expect(railButton("Activity")).toBe(null);
+  });
+
+  /**
+   * ⭐ PROMOTED FROM DEF-0007's PIN, and it is not decoration: without it both
+   * cases above could be satisfied by a rail that had stopped rendering
+   * Settings for ANYBODY, which is a different bug wearing this one's answer.
+   * The company admin is the person for whom every gate here is open, so their
+   * rail is where "the tab still exists at all" is asserted.
+   */
+  it("a company admin gets both, so no case above passes by losing a tab entirely", async () => {
+    h.state.profile = {
+      id: "p1",
+      userId: "u1",
+      orgId: "org-1",
+      role: "admin",
+      adminAnywhere: true,
+    };
+    show();
+    await screen.findByRole("button", { name: "Hierarchy" });
+    expect(railButton("Settings")).not.toBe(null);
+    expect(railButton("Activity")).not.toBe(null);
   });
 });

@@ -2721,6 +2721,12 @@ requirements:
   - kind: sql
     file: supabase/tests/73_plant_settings_test.sql
     cases: P0-P22, the server side of the same predicate
+  - kind: vitest
+    file: src/test/adminNoGrants.test.tsx
+    cases: >-
+      N6/N7 (DEF-0008) -- the whole rail as a LIST for a supervisor with no admin grant, and for a
+      company admin so the first cannot pass by the rail emptying; red on the one-line widening of
+      `adminSectionsFor` that the 2103-case suite passed
   status: contradicted
   note: >-
     ⛔ THE CLAUSE ABOUT `adminSectionsFor` HAS NO CASE BEHIND IT (DEF-0008, open). The row says the flag's
@@ -5995,6 +6001,42 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-092
+  title: The lock I removed was doing a second job
+  tag: A guard that was only ever a spare
+  status: fixed
+  found_by: tester
+  refs:
+  - R-335
+  - R-239
+  violates:
+  - R-335
+  story: >-
+    Nothing a user could see was wrong. The rail was correct for all four roles on the running app. What
+    was missing was any way for it to STOP being correct: offering a supervisor with no admin grant the
+    Import, Products and Settings tabs --- one line in `adminSectionsFor` --- passed all 2103 cases.
+    ⛔ AND IT IS A CONSEQUENCE OF THE PREVIOUS FIX, WHICH IS WHY IT IS WORTH A CARD. Before `23ba9aa`
+    the Settings tab had TWO locks, `adminSectionsFor` and `companyAdminOnly`, and a widening of the
+    first was still stopped by the second. DEF-0007 removed the second, correctly --- it was answering a
+    per-node question on a menu row. But a redundant lock is also a SPARE, and nothing checked whether
+    the remaining one was tested before the spare was taken away. It was not. The defect is not in the
+    fix; it is in what the fix stopped covering, and that is a question worth asking every time
+    something is deleted for being redundant: redundant with WHAT, and is that thing pinned?
+    ⛔ THE CASE THAT LOOKED LIKE THE GUARD WAS CATCHING IT BY ACCIDENT. `adminNoGrants` N3 asserts
+    which PANEL a supervisor lands on, and `resolveAdminSection` falls back to the first allowed
+    section --- so allowing "access" changes the landing panel and N3 goes red, while allowing anything
+    sorting after "operators" in `SECTIONS` (products, cycle times, import, settings) leaves it alone
+    and N3 stays green. One widening caught by coincidence, the rest invisible. A test that fails for a
+    reason other than the one its name implies is worse than no test, because it is counted.
+    ⚠️ AND A COMMENT SAID THE CASES EXISTED. `requireAdmin.test.tsx` read *"that is a different
+    question and has its own cases"*. There were none. That sentence was a PLAN when it was written and
+    read like a RECORD ever after --- the same failure as DEF-0007's stale comment, one day later and in
+    a test file rather than a component. Both are now pointers that can be checked: a file name and a
+    case number, which either resolve or do not.
+    ⭐ THE FIX IS THE ASSERTION SHAPE, NOT MORE CASES. Three `toBeTruthy()` checks can be widened
+    quietly; the whole list in the rail's own order cannot. N6 asserts that list for the narrowed
+    population, N7 for a company admin so N6 cannot pass by the rail emptying, and N6 was measured red
+    against the tester's own mutation before being called done.
 - id: F-091
   title: The tab was built for her, tested for her, and she could not open it
   tag: A rule that expired without anyone editing it
@@ -8181,6 +8223,47 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 68
+  date: 2026-09-05
+  title: The rail's narrowed population gets a case, and DEF-0007's pin is promoted
+  commits: []
+  numbers:
+    app_tests: 2106
+    app_test_files: 75
+    tsc: 0
+    eslint: 0
+  confirmed: true
+  summary: >-
+    DEF-0008, agreed with, and it is a criticism of yesterday's fix rather than of the code it fixed.
+    Removing `companyAdminOnly` from the Settings row was right, but that flag had been a SPARE LOCK:
+    a widening of `adminSectionsFor` used to be stopped by it, and after `23ba9aa` nothing stopped one.
+    The tester proved it with a one-line mutation offering a supervisor Import, Products and Settings
+    --- all 2103 cases green. `adminNoGrants.test.tsx` N6/N7 close it by asserting the WHOLE RAIL as a
+    list, for the narrowed population and for a company admin, and N6 was measured RED against that
+    exact mutation before this was called done (N3 and N7 stayed green, which is the tester's point
+    about N3 exactly).
+    THE FILE WAS CHOSEN, NOT DEFAULTED TO. `adminNoGrants` already owns "what a supervisor gets on the
+    admin screen"; `auditAccess` owns the two populations that get "all" and which of them the second
+    axis removes a tab from. The rail has three populations and only two had a file. Both headers now
+    say which they own, so the next tab lands somewhere on purpose.
+    THE ONE THING THE TESTER LEFT TO ME, DECIDED: `adminSectionsFor`'s array is NOT also asserted as a
+    unit in `session.ts`'s own suite. One record, not two. A unit case would be a second copy of the
+    same list, and CLAUDE.md section 4's "a column list that appears twice is a bug with a delay on it"
+    is exactly that shape. The screen is where a person would see it, so the screen is where it is
+    asserted.
+    AND THE COMMENT THAT CLAIMED THE CASES EXISTED IS GONE. `requireAdmin.test.tsx` said the sections
+    question "has its own cases"; there were none, and that sentence is a good part of why nobody went
+    looking. It now names `adminNoGrants.test.tsx` N6/N7 --- a pointer that resolves or does not,
+    rather than a claim that cannot be checked. Second stale-prose defect in two days, both found by
+    reading rather than by a runner.
+    DEF-0007 IS VERIFIED AND ITS PIN IS PROMOTED. The tester re-ran it cold: all four roles driven
+    through the running app, and this time a LEGAL value written as the site admin with the row read
+    back out of the database and then cleared --- "it did not throw" is not evidence that anything was
+    written. Its three cases are now in `auditAccess.test.tsx` and the copy under `src/test/defects/`
+    is deleted, so the file count falls to 75 while the case count holds at 2106.
+    R-239 is back to `covered`, set by the tester when it verified. R-335 stays `contradicted` while
+    DEF-0008 is fix-claimed, and gains the N6/N7 evidence it was written without. Green: `npm run test`
+    2106 in 75, `tsc` 0, `eslint` 0.
 - id: 67
   date: 2026-09-05
   title: Tester run
