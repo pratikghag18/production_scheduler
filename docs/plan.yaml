@@ -1770,9 +1770,43 @@ stages:
     `create_assignment` would take that write; where the server would refuse it outright the clash is
     still listed, with the refusal as the reason the prior plan stays. The developer settles that in
     the build (F-096 records why it was wrongly put back to the maintainer).
+
+
+    **THE PLAN, read off the code on 5 Sept.** What counts as a clash is what the server refuses
+    today: a run already on that cell at that time (`runs_no_overlap_on_node`, `run_overlap`); an
+    operator already placed elsewhere at that time (the assignment writer's double-booking refusal);
+    a person no longer certified for the work (the plant's eligibility policy --- `warn` offers both
+    answers with the warning shown, `block` lists the clash with the prior plan kept and the refusal
+    as the reason). A retired shift pattern drops out: runs and assignments carry their own times and
+    reference no shift, so there is nothing to clash on. Absence does not exist in the app, so a
+    person on leave is not a clash yet; the design notes' Phase 2 question about absence data stays
+    open and is not part of this stage.
+
+
+    Built in this order. **Server first:** one function takes the source week, the target week and
+    the plant and returns the copy plan --- every run and assignment shifted by whole weeks, each
+    marked clean or clash with both candidates. A second function takes the list of decisions and
+    applies it in one transaction through the same writers the board uses, so nothing the screen
+    offers is something the server would refuse (R-239), and a failure half-way writes nothing.
+    Both come with a numbered SQL test file, run before the migration is committed (F-097).
+    **Then the screen:** a Copy Week button on the board toolbar opens a dialog --- pick the weeks,
+    read the count of clean copies and the clash list, answer each clash, Apply. Unit cases for the
+    dialog; a signed-in browser test walks the flow. **Then the record:** R-339 to `covered`, this
+    card to `done`.
+
+
+    ⚠️ TWO CALLS THE DEVELOPER MAKES IN THE BUILD AND WRITES DOWN, not questions for the maintainer:
+    whether a copied run landing on a day with no shift defined is a clash or simply lands; and
+    whether "take the copied one" on an occupied cell removes the prior run whole or only the part
+    that overlaps --- the lean is whole, because half a run is not a plan anyone asked for.
   state: >-
-    **Not started; next after DEF-0011 and DEF-0012.** R-339 is written and `uncovered`; the
-    requirement came before the code on purpose. Nothing is blocked on a decision.
+    **Not started; next in the queue.** R-339 is written and `uncovered`; the requirement came
+    before the code on purpose, and the plan above is the build order. Nothing is blocked on a
+    decision. Sized against what this project has shipped: the plant settings (0050--0052 plus the
+    tab) ran from the first commit to the last in about a day and a half of wall-clock across seven
+    sessions with tester rounds between; cycle times (S27) in under a day. Copy Week is larger than
+    either --- two server functions, a SQL file, a dialog and a browser test --- so expect two
+    calendar days worked steadily, the server half in the first sitting.
 - id: M1
   track: matrix
   num: 1
