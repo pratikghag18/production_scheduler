@@ -244,12 +244,14 @@ stages:
   refs:
   - §19.51
   - migration 0021
+  - session 72
   delivers:
   - R-220
   - R-225
   - R-231
   - R-232
   - R-233
+  - R-340
   what: >-
     Stage 06 let a site admin give someone access to their plant, and then left it unusable: they could
     grant access to a person they weren't allowed to *look up*, so a screen had nobody to offer. This
@@ -1649,6 +1651,7 @@ stages:
   delivers:
   - R-326
   - R-327
+  - R-338
   what: >-
     **Two ways for something to stop being current, which the app had no way to say.** A shift pattern
     can be retired and brought back, and retiring is careful about what it does NOT do: it detaches
@@ -1701,6 +1704,44 @@ stages:
     cases, 3 of them signed in). What is left is the CI half: a database service, the 52 migrations and
     a fixture, so the three signed-in cases stop skipping on a push. Until then a skip is not a pass
     and this stage stays open.
+- id: S35
+  track: core
+  num: 35
+  title: Copy a week forward, and settle every clash by asking
+  status: open
+  owner: agent
+  refs:
+  # ⚠️ A CONVERSATION REF, NOT A SHIPPING ONE, and the difference is load-bearing.
+  # `refs: session <n>` means THAT SESSION SHIPPED THIS, and DEF-0009s pin
+  # checks the session agrees. Copy Week has shipped in no session; session 72
+  # is where the maintainer decided its shape.
+  - session 72 conversation
+  - NEXT Phase 2
+  delivers:
+  - R-339
+  what: >-
+    **Repeating a week means typing it again today.** Nothing in the app copies a schedule forward, and
+    it is the most-used thing on the list once it exists.
+
+
+    ⭐⭐ THE CONFLICT SCREEN IS THE FEATURE, NOT A WARNING IN FRONT OF IT (R-339). The maintainer:
+    *"if there are conflicts lets present them to the user and let them decide what they want to keep,
+    the prior plan or the copied plan."* So it never silently merges, never silently skips, and never
+    refuses the whole copy because one cell clashes. Every clash is listed with its two candidates side
+    by side --- what is on the destination week now, and what the source week would put there --- and
+    each is answered INDIVIDUALLY. Nothing is written until the list has been been through.
+
+
+    ⛔ WHAT COUNTS AS A CLASH IS NOT DECIDED AND MUST NOT BE GUESSED. An occupied cell and a
+    double-booked operator are the plan colliding with ITSELF; a lapsed certificate and a retired shift
+    pattern are the plan colliding with the RULES. They may not deserve the same control: R-239 says a
+    "keep the copied one" button must never offer something `create_assignment` would refuse, so a rules
+    clash may be a thing to report rather than a thing to choose. That question is the first thing to
+    settle, and it is the maintainer's.
+  state: >-
+    **Not started.** R-339 is written and `uncovered`; the requirement came before the code on purpose.
+    Blocked on one decision only --- which of the four candidate clashes the screen offers a choice for
+    --- and not on any code.
 - id: M1
   track: matrix
   num: 1
@@ -8876,6 +8917,22 @@ sessions:
     `db:types` regenerated after the RPC change, per CLAUDE.md: no diff, because the signature did not
     move and only the body did --- so `tsc` is conclusive here rather than inconclusive.
     Green apart from the one pin: `npm run test` 2115 passed of 2117 in 77 files, `tsc` 0, `eslint` 0.
+    AND THE BUILDOUT WAS CHECKED AGAIN RATHER THAN ASSUMED, because it was asked a third time and the
+    first two answers were wrong. Four requirements added since session 69 belonged to no stage. R-340
+    goes to S09, which is literally *"Add someone to your site --- the rules"* over migration 0021, the
+    migration R-340 narrows, so session 72 now names S09 as what it shipped. R-338, an expired
+    certificate, goes to S33 *"Things that can be brought to an end"*. R-339 gets S35 --- a card written
+    before any code and marked `open`, because Copy Week is next and its shape is now decided.
+    ⚠️ AND S35 TAUGHT ME WHAT A `refs` ENTRY MEANS. I first wrote `- session 72` on it and DEF-0009's
+    own pin went red: `refs: session <n>` asserts THAT SESSION SHIPPED THIS, and session 72 shipped no
+    Copy Week. It reads `session 72 conversation` now, which the pin ignores by design and which is the
+    true statement --- a decision was made there, nothing was built. The defect I fixed this morning
+    caught me making a smaller version of the same mistake four hours later, which is the best argument
+    for it existing.
+    R-336 stays unstaged on purpose: it is a rule about the plan document rather than about the
+    product, and belongs to no stage for the same reason the demo-world rows do not.
+  shipped:
+  - S09
 - id: 71
   date: 2026-09-05
   title: The browser tests get past the front door, and find a defect in the first minute
