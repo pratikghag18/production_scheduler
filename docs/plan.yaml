@@ -1887,6 +1887,32 @@ stages:
     placement, clamped to the viewport on every render, and reset when a new pop-up opens. Seven unit
     cases; driven live. Pointer only --- a keyboard user cannot move a pop-up, noted as a follow-up
     if wanted.
+- id: S39
+  track: core
+  num: 39
+  title: One plant's people stay in that plant, and everyone in it can see them
+  status: now
+  owner: agent
+  refs:
+  - session 77 conversation
+  - D113
+  delivers:
+  - R-345
+  - R-346
+  what: >-
+    **Two rules the maintainer stated in one breath, after S36 to S38 shipped.** First, a person is
+    never placed in another plant: the table's guard refuses it override or not, so every writer
+    inherits the rule at once. Second, the board lists the plant's people for everyone who can see
+    the plant's board: a line supervisor was seeing an empty panel because the panel listed only
+    people whose home was one of the places the board had loaded, and the plant's people are homed
+    ABOVE a line. The server now sends the plant's people with each home's path, so the screen can
+    tell "above this cell" from "another area" without seeing nodes above the grant. The "on loan
+    from another plant" reasoning in Copy Week and the pop-ups goes, because such rows can no longer
+    exist.
+  state: >-
+    **In flight, session 77**, as a server lane (the guard, the board's people, the SQL files that
+    built cross-plant rows) and a client lane (the panel, the outside-area decision, the pickers'
+    wording, the browser case as Ana), then the reviewer.
 - id: M1
   track: matrix
   num: 1
@@ -3297,6 +3323,40 @@ requirements:
     written into the migration: the trigger binds whom the policies bind and not the owner, which is
     the fixture tool (F-098). 77 is the SQL file 0053 shipped without. Stays `contradicted` until the
     tester re-runs its own reproduction.
+- id: R-345
+  title: A person works only within their own plant
+  source:
+  - session 77 conversation
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 6 Sept: *"You should be unable to put Plant B operator in Plant A, only operators
+    within the same plant should be assigned within the plant."* So the server refuses a placement
+    whose person belongs to a different plant from the cell, whatever is sent with it: the area
+    override (D113) crosses AREAS inside one plant, with a reason, and never crosses plants. This
+    holds for every writer that places a person --- creating an assignment, changing the person on one,
+    moving a run with its crew, copying a week --- because it is the table's own guard that says so.
+    Rows of that shape cannot exist, so no screen needs to reason about "a person on loan from
+    another plant" any more.
+  verified_by: []
+  status: uncovered
+- id: R-346
+  title: Everyone in the plant is listed for everyone who can see the plant's board
+  source:
+  - session 77 conversation
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 6 Sept, on a supervisor granted only a line seeing an empty Operators panel: *"The
+    operators are assigned at different hierarchy levels, why would they not be visible now? ... Ana
+    can't see any operators on the left panel. What am I missing? Something is definitely wrong."*
+    So the board lists the people of the plant it is showing --- whose home is the plant, an area, a
+    line or a cell in it --- for anyone who can see that board, whatever level their grant sits at. A
+    line supervisor sees the plant's people and places them; a person whose home is another area of
+    the plant is still marked "not from this area (override)" and a reason asked. The list is the
+    server's (`board_window` decides who belongs to the plant, and says where each person's home is so
+    the screen can mark without seeing nodes above the grant), and the panel and every picker render
+    it whole.
+  verified_by: []
+  status: uncovered
 - id: R-342
   title: A person from another plant is not offered on this plant's board at all
   source:
@@ -12277,21 +12337,6 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
-- text: Which people is a supervisor granted only a line offered? (question for the maintainer, session 77)
-  why: >-
-    ⚠️ FROM THE REVIEWER'S ROUND: a supervisor granted only a LINE sees no people at all --- the panel
-    and every picker are empty --- because the board's node map stops at the grant and the people are
-    owned by the plant above it, while the server would accept those placements. This predates session
-    77 (the panel has done it since S21) and R-342's "the same as the left panel" now carries it into
-    every picker. Which people should such a supervisor be offered: everyone owned by the plant their
-    grant sits in (the server's answer), or only people owned inside the grant (the panel's answer
-    today)?
-- text: May the person already on a row be picked again when they are on loan from another plant? (question for the maintainer, session 77)
-  why: >-
-    ⚠️ The person already on a row stays choosable in the assignment pop-up even when they are on loan
-    from another plant, so they can be picked off and put back with an override; the server takes it.
-    "Not shown, period" would drop them from the select once another person is picked. Keep the
-    exception, or apply the rule?
 # ---------------------------------------------------------------------------
 # TASKS, most likely first. Everything below the PARKED marker is deliberately
 # not next: tabled by the maintainer, already decided, or a standing note
