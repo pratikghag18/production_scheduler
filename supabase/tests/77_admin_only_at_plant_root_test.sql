@@ -1,5 +1,5 @@
 -- ============================================================================
--- 77_admin_only_at_plant_root_test.sql — migrations 0053 and 0054.
+-- 77_admin_only_at_plant_root_test.sql — migrations 0053, 0054 and 0056.
 --
 -- The maintainer: "the admin level should only be applied to the plant root."
 -- 0053 put that into `set_site_member` and shipped with no file here, so the
@@ -23,6 +23,10 @@
 -- AR9      the owner is not bound (fixtures and migrations are), and an old
 --          below-root admin can still be demoted: it refuses creating the
 --          state, not repairing it
+-- AR10     DEF-0013 / R-341: the definer helper is org-scoped. Asked about
+--          the other company's root, its leaf and a uuid that exists nowhere,
+--          it says false to all three, and the trigger gives a foreign root
+--          the same refusal as a bogus uuid, so no bit escapes
 -- ============================================================================
 
 BEGIN;
@@ -251,5 +255,63 @@ EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'FAIL AR9: the repair was refused: % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_AR9;
+
+\echo 'AR10 ⚠⚠: the definer helper says nothing about another company: foreign root, foreign leaf and bogus uuid all get the same answer'
+SAVEPOINT sp_AR10;
+DO $$
+DECLARE
+  v_root   boolean;
+  v_leaf   boolean;
+  v_bogus  boolean;
+  v_own    boolean;
+  v_state_root  text;
+  v_state_bogus text;
+  v_n int;
+BEGIN
+  -- Ana (a2): org 1 supervisor on Assembly, no admin grant anywhere --- the
+  -- least-privileged signed-in person the seed has. Org 2's Plant 1 is
+  -- 3000000b-...-0001, its Assembly 3000000b-...-0002 (seed.sql).
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_root  := app_node_is_plant_root('3000000b-0000-0000-0000-000000000001');
+  v_leaf  := app_node_is_plant_root('3000000b-0000-0000-0000-000000000002');
+  v_bogus := app_node_is_plant_root('ffffffff-ffff-4fff-8fff-ffffffffffff');
+  -- And her own company's root, which she cannot administer but which IS a
+  -- root here: true, so the case cannot pass by the helper saying false to all.
+  v_own   := app_node_is_plant_root('30000000-0000-0000-0000-000000000001');
+  RESET ROLE;
+
+  -- The same bit through the trigger, as the site admin g1: a direct INSERT of
+  -- admin on the other company's root and on a bogus uuid must come back with
+  -- the SAME sqlstate, and store nothing.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000c1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
+      ('a0000000-0000-0000-0000-000000000002', '3000000b-0000-0000-0000-000000000001',
+       '10000000-0000-0000-0000-000000000001', 'admin');
+    v_state_root := 'stored';
+  EXCEPTION WHEN OTHERS THEN v_state_root := SQLSTATE;
+  END;
+  BEGIN
+    INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
+      ('a0000000-0000-0000-0000-000000000002', 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+       '10000000-0000-0000-0000-000000000001', 'admin');
+    v_state_bogus := 'stored';
+  EXCEPTION WHEN OTHERS THEN v_state_bogus := SQLSTATE;
+  END;
+  RESET ROLE;
+  SELECT count(*) INTO v_n FROM profile_grants
+   WHERE profile_id = 'a0000000-0000-0000-0000-000000000002' AND role = 'admin';
+
+  IF NOT v_root AND NOT v_leaf AND NOT v_bogus AND v_own
+     AND v_state_root = v_state_bogus AND v_state_root <> 'stored' AND v_n = 0
+  THEN RAISE NOTICE 'PASS AR10';
+  ELSE RAISE NOTICE 'FAIL AR10: foreign_root=% foreign_leaf=% bogus=% own_root=% insert_root=% insert_bogus=% admin_rows=%',
+       v_root, v_leaf, v_bogus, v_own, v_state_root, v_state_bogus, v_n; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FAIL AR10: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AR10;
 
 ROLLBACK;
