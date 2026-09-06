@@ -1890,7 +1890,7 @@ stages:
 - id: S39
   track: core
   num: 39
-  title: One plant's people stay in that plant, and everyone in it can see them
+  title: One plant's people stay in that plant; a person is available under their home, the rest one click away
   status: now
   owner: agent
   refs:
@@ -1900,15 +1900,17 @@ stages:
   - R-345
   - R-346
   what: >-
-    **Two rules the maintainer stated in one breath, after S36 to S38 shipped.** First, a person is
+    **Two rules the maintainer stated after S36 to S38 shipped, then sharpened.** First, a person is
     never placed in another plant: the table's guard refuses it override or not, so every writer
-    inherits the rule at once. Second, the board lists the plant's people for everyone who can see
-    the plant's board: a line supervisor was seeing an empty panel because the panel listed only
-    people whose home was one of the places the board had loaded, and the plant's people are homed
-    ABOVE a line. The server now sends the plant's people with each home's path, so the screen can
-    tell "above this cell" from "another area" without seeing nodes above the grant. The "on loan
-    from another plant" reasoning in Copy Week and the pop-ups goes, because such rows can no longer
-    exist.
+    inherits the rule at once. Second, who is offered where: a person is available by default on
+    every place under their home, and the rest of the plant's people sit behind a "show other people
+    in this plant" click that leads into the existing override with a reason. A line supervisor was
+    seeing an empty panel because the panel listed only people whose home was one of the places the
+    board had loaded, and the plant's people are homed ABOVE a line. The server now sends the plant's
+    people with each home's path, so the screen can tell "above this cell" from "another area" without
+    seeing nodes above the grant, and the panel and the pickers split the list into the two parts.
+    The "on loan from another plant" reasoning in Copy Week and the pop-ups goes, because such rows
+    can no longer exist.
   state: >-
     **In flight, session 77**, as a server lane (the guard, the board's people, the SQL files that
     built cross-plant rows) and a client lane (the panel, the outside-area decision, the pickers'
@@ -3340,7 +3342,7 @@ requirements:
   verified_by: []
   status: uncovered
 - id: R-346
-  title: Everyone in the plant is listed for everyone who can see the plant's board
+  title: A person is available everywhere under their home, and the rest of the plant is one click away
   source:
   - session 77 conversation
   stated_by: maintainer
@@ -3348,13 +3350,21 @@ requirements:
     The maintainer, 6 Sept, on a supervisor granted only a line seeing an empty Operators panel: *"The
     operators are assigned at different hierarchy levels, why would they not be visible now? ... Ana
     can't see any operators on the left panel. What am I missing? Something is definitely wrong."*
-    So the board lists the people of the plant it is showing --- whose home is the plant, an area, a
-    line or a cell in it --- for anyone who can see that board, whatever level their grant sits at. A
-    line supervisor sees the plant's people and places them; a person whose home is another area of
-    the plant is still marked "not from this area (override)" and a reason asked. The list is the
-    server's (`board_window` decides who belongs to the plant, and says where each person's home is so
-    the screen can mark without seeing nodes above the grant), and the panel and every picker render
-    it whole.
+    And then the rule itself, 6 Sept: *"If a operator is assigned to higher hierarchy they should
+    automatically become available to all lower hierarchy within that hierarchy ... That should be the
+    default behaviour. For other operators in the plant we need to give an option to the supervisor to
+    click through something so show remaining operators so they can make that decision to assign
+    someone outside of that area."* So, in two parts. DEFAULT: a person is offered on every place
+    under their home --- homed at the plant, they are offered everywhere in it; homed at an area, on
+    every line and cell in that area. On a line supervisor's board that is everyone homed at the
+    plant, the area above and the line itself. BEHIND A CLICK: the rest of the plant's people ---
+    homed in another area or line --- are shown by a "show other people in this plant" control, and
+    picking one asks for the reason, the existing "not from this area (override)" (D113). The left
+    panel follows the same two parts for the board's place (people whose home covers it or sits
+    inside it by default, the rest behind the click), and each pop-up's picker follows them for its
+    cell. Never another plant's people (R-345). The list and each person's home are the server's
+    (`board_window` sends the plant's people with each home's path), so the screen can tell "above
+    this cell" from "another area" without seeing nodes above the grant.
   verified_by: []
   status: uncovered
 - id: R-342
