@@ -147,6 +147,17 @@ export default function BoardPage() {
   // indicator in the toolbar instead of blanking the board every 30s.
   const hasData = boardQuery.data !== undefined;
 
+  // DEF-0015 / R-239 / R-346: the ONE place the viewer question is decided.
+  // `board_window` computes `can_place` from the same `app_grant_paths(true)`
+  // set the write policies bind (migration 0058), so this single boolean is
+  // the server's own answer for this person on this board. It is read here
+  // once and handed down: to the panel (hidden when false), to `useDragGesture`
+  // (which then refuses to open a write pop-up or start a block/create drag),
+  // and to the assignment/run pop-ups as `readOnly` so a viewer who clicks a
+  // chip or a band still SEES it, with no editable control the server refuses.
+  // No pop-up sprinkles its own check — they render the decision made here.
+  const canPlace = boardQuery.data?.canPlace ?? false;
+
   // P1-4c D45/T17: `density` is part of this dependency array, so a density
   // change produces a brand-new `index` (new `rows` array identity) exactly
   // the way a data refetch or window change does — `BoardGrid`'s existing
@@ -223,6 +234,10 @@ export default function BoardPage() {
     index: emptyIndex,
     defaultCreateMode,
     sessionUserId: session?.user.id ?? null,
+    // DEF-0015: the server's `can_place` for this person, so the gesture layer
+    // refuses to open a create pop-up, start a block move/resize, or begin a
+    // panel drag when it is false. Read-only pop-ups still open on a click.
+    canPlace,
     // P1-4e D65: the panel-drop's default-duration snap needs the active
     // zoom's shift-chip/snap config, same as every other create-drag.
     zoomIndex,
@@ -568,7 +583,7 @@ export default function BoardPage() {
                  renders the answer. "For a viewer, the left panel serves no
                  purpose, so we should hide it, the only thing they see is
                  the board." */}
-              {boardQuery.data.canPlace && (
+              {canPlace && (
                 <OperatorPanel
                   operators={operatorPool}
                   /* R-346: who is offered here by DEFAULT -- everyone whose home
@@ -625,7 +640,12 @@ export default function BoardPage() {
           therefore fall through to the company default and offer an override
           tick on a plant set to refuse. An unknown node falls back to the
           STRICT answer, never the permissive one — see `policyForNode`. */}
-      {popover?.kind === "create" && (
+      {/* DEF-0015 / R-239: the create pop-up is a place to PLACE people, so it
+          is gated on the server's `can_place`. In practice `useDragGesture`
+          already refuses to open it for a viewer (Enter on a track and a
+          click-drag both do nothing), so this guard is belt-and-braces at the
+          render boundary and the single answer the whole board reads. */}
+      {canPlace && popover?.kind === "create" && (
         <CreatePopover
           nodeId={popover.nodeId}
           anchor={popover.anchor}
@@ -656,6 +676,10 @@ export default function BoardPage() {
 
       {popover?.kind === "run" && (
         <RunPopover
+          // DEF-0015 / R-239: a viewer may open a run band read-only (details
+          // shown, no editable field, Save or Delete), so it opens rather than
+          // being gated away, but honours the server's `can_place`.
+          readOnly={!canPlace}
           run={popover.run}
           crew={popover.crew}
           anchor={popover.anchor}
@@ -721,6 +745,11 @@ export default function BoardPage() {
 
       {popover?.kind === "assignment" && (
         <AssignmentPopover
+          /* DEF-0015 / R-239: a viewer may open a chip read-only (the details
+             are shown, but no Person select, no editable field, no Save or
+             Delete -- only Close), so it opens rather than being gated away,
+             and honours the server's `can_place`. */
+          readOnly={!canPlace}
           /* R-343 / R-342: the person picker offers the LEFT PANEL'S list --
              this plant's people, the same variable the panel is given, never a
              second filter that could drift from it. */

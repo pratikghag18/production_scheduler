@@ -45,6 +45,9 @@ const DEV_PROFILES = [
   { label: "Rosa (site admin, Plant C)", email: "rosa@example.test" },
   { label: "Marco (supervisor, Plant B / Area 1)", email: "marco@example.test" },
   { label: "Ana (supervisor, Plant A / Line 1 only)", email: "ana@example.test" },
+  { label: "Viva (viewer, Plant A)", email: "viva@example.test" },
+  { label: "Vito (viewer, Plant B)", email: "vito@example.test" },
+  { label: "Vina (viewer, Plant C)", email: "vina@example.test" },
 ] as const;
 
 const DEV_PASSWORD = "devpassword";

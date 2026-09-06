@@ -243,10 +243,11 @@ DECLARE v_logins int;
 BEGIN
   SELECT count(*) INTO v_logins FROM auth.users
    WHERE email IN ('admin@example.test', 'dana@example.test', 'quinn@example.test',
-                   'rosa@example.test', 'ana@example.test', 'marco@example.test')
+                   'rosa@example.test', 'ana@example.test', 'marco@example.test',
+                   'viva@example.test', 'vito@example.test', 'vina@example.test')
      AND encrypted_password IS NOT NULL;
-  IF v_logins = 6 THEN RAISE NOTICE 'PASS D9';
-  ELSE RAISE NOTICE 'FAIL D9: % of 6 accounts have a password', v_logins; END IF;
+  IF v_logins = 9 THEN RAISE NOTICE 'PASS D9';
+  ELSE RAISE NOTICE 'FAIL D9: % of 9 accounts have a password', v_logins; END IF;
 END $$;
 
 \echo 'D10: org 2 (Contoso) is untouched — it is the cross-tenant fixture'

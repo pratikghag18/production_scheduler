@@ -1,4 +1,9 @@
-import { createElement, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import {
+  createElement,
+  type PointerEvent as ReactPointerEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -152,6 +157,7 @@ function baseArgs(
   index: BoardIndex,
   sessionUserId: string | null = "user-1",
   rootPath = "plant_1",
+  canPlace = true,
 ): UseDragGestureArgs {
   return {
     rootPath,
@@ -162,6 +168,9 @@ function baseArgs(
     // P1-4e: snapping needs the zoom to know its step. 1 = Standard (30 min).
     zoomIndex: 1,
     sessionUserId,
+    // DEF-0015: the server's `can_place`. True (a scheduler) for every case
+    // except the viewer cases below, which pass false.
+    canPlace,
   };
 }
 
@@ -383,5 +392,88 @@ describe("useDragGesture", () => {
     });
     await waitFor(() => expect(api.deleteAssignment).toHaveBeenCalledWith("a-1"));
     expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * DEF-0015 — A VIEWER (can_place: false) OPENS NO WRITE POP-UP AND STARTS NO
+   * DRAG. `board_window` answers `can_place: false` for a viewer, and the
+   * gesture layer is handed that one boolean so the refusal is decided in one
+   * place. Enter on a track (and a click-drag on it) do nothing — the create
+   * pop-up never opens; a block move commits nothing.
+   */
+  describe("DEF-0015: the viewer's gesture layer", () => {
+    function fakeTrackKeyEvent(key: string) {
+      return {
+        key,
+        preventDefault: vi.fn(),
+        currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 0, right: 0 }) },
+      } as unknown as ReactKeyboardEvent;
+    }
+
+    it("Enter on a track opens NOTHING when canPlace is false", () => {
+      const index = buildIndex([]);
+      const { result } = renderHook(
+        () => useDragGesture(baseArgs(index, "user-1", "plant_1", /* canPlace */ false)),
+        { wrapper },
+      );
+      act(() => {
+        result.current.handleTrackKeyDown(fakeTrackKeyEvent("Enter"), {
+          nodeId: "cell-1",
+          template: null,
+          windowMinutes: WINDOW_MINUTES,
+        });
+      });
+      expect(result.current.popover).toBe(null);
+    });
+
+    it("a click-drag on a track opens no create pop-up when canPlace is false", () => {
+      const index = buildIndex([]);
+      const { result } = renderHook(
+        () => useDragGesture(baseArgs(index, "user-1", "plant_1", false)),
+        { wrapper },
+      );
+      act(() => {
+        result.current.beginTrackCreateDrag(
+          {
+            nodeId: "cell-1",
+            pxPerHour: 100,
+            windowMinutes: WINDOW_MINUTES,
+            template: null,
+            dayCount: 1,
+            zoomIndex: 1,
+            trackLeftPx: 0,
+            offsetXPx: 0,
+          },
+          fakePointerEvent(100),
+        );
+      });
+      // No drag began, so there is nothing to update/end and no pop-up appears.
+      expect(result.current.activeDrag).toBe(null);
+      expect(result.current.popover).toBe(null);
+    });
+
+    it("a viewer's block drag commits no mutation and instead opens the read-only pop-up", async () => {
+      const api = await import("@/lib/api");
+      const index = buildIndex([]);
+      const { result } = renderHook(
+        () => useDragGesture(baseArgs(index, "user-1", "plant_1", false)),
+        { wrapper },
+      );
+      act(() => {
+        result.current.beginBlockDrag(runDescriptor([runFixture], []), fakePointerEvent(500, 300));
+      });
+      // A viewer's block never follows the pointer: `moved` stays false...
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+      // ...so the pointerup reads as a click and opens the pop-up (BoardPage
+      // renders it read-only), and no field edit / move is ever sent.
+      expect(result.current.popover?.kind).toBe("run");
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+      expect(api.moveRun).not.toHaveBeenCalled();
+    });
   });
 });

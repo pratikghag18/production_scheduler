@@ -92,6 +92,7 @@ export function AssignmentPopover({
   anchor,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
+  readOnly = false,
   onCancel,
   onSave,
   onReassign,
@@ -137,6 +138,15 @@ export function AssignmentPopover({
   anchor: { x: number; y: number };
   windowStart: Date;
   dateFormat?: DateFormat;
+  /**
+   * DEF-0015 / R-239 / R-346: true for a viewer (someone the server answers
+   * `can_place: false` for). The pop-up then SHOWS the assignment — person,
+   * efficiency, target, time — but offers no Person select, no editable field,
+   * and no Save or Delete, only Close. Every write it would offer is refused by
+   * the `assignments_*` policies, so a control for one must not be drawn
+   * (R-239). Decided in `BoardPage` from the server's own answer, never here.
+   */
+  readOnly?: boolean;
   onCancel: () => void;
   onSave: (
     assignmentId: string,
@@ -354,6 +364,33 @@ export function AssignmentPopover({
   const product = products.find((p) => p.id === currentProductId);
   const name = operator?.displayName ?? "(unknown operator)";
   const timeLabel = `${formatFull(addMinutes(windowStart, assignment.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, assignment.endMin))}${assignment.eligibilityOverride ? " · certification override" : ""}`;
+
+  // DEF-0015 / R-239 / R-346: the viewer's pop-up. The details are shown — who,
+  // how hard, what target, when — but there is no Person select, no editable
+  // field, and no Save or Delete, only Close, because the server refuses every
+  // one of those writes for this person. No `save`/`onReassign`/`onDelete` wiring
+  // is reachable from here.
+  if (readOnly) {
+    const targetLabel =
+      assignment.targetQty == null
+        ? null
+        : `${assignment.targetQty}${assignment.targetUnit ? ` ${assignment.targetUnit}` : ""}`;
+    return (
+      <BoardPopover anchor={anchor} onClose={onCancel} title={`${name} — ${product?.name ?? "—"}`}>
+        <div className={styles.body}>
+          <div className={styles.time}>Person: {name}</div>
+          <div className={styles.time}>Efficiency: {assignment.efficiencyPercent}%</div>
+          {targetLabel !== null && <div className={styles.time}>Target: {targetLabel}</div>}
+          <div className={styles.time}>{timeLabel}</div>
+          <div className={styles.row}>
+            <button type="button" onClick={onCancel}>
+              Close
+            </button>
+          </div>
+        </div>
+      </BoardPopover>
+    );
+  }
 
   return (
     <BoardPopover anchor={anchor} onClose={onCancel} title={`${name} — ${product?.name ?? "—"}`}>

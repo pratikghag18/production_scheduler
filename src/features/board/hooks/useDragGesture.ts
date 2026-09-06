@@ -246,6 +246,15 @@ export interface UseDragGestureArgs {
    *  no mutation sent — the node the drag targeted may not even be visible
    *  to the new identity. */
   sessionUserId: string | null;
+  /**
+   * DEF-0015 / R-239 / R-346: the server's `can_place` for this person on this
+   * board (`board_window`, migration 0058). When false the person is a viewer:
+   * this hook opens no create pop-up (Enter on a track and a click-drag on a
+   * track do nothing), starts no block move/resize and no panel drag. A click
+   * or Enter on an existing block still opens its pop-up — read-only, decided
+   * in `BoardPage` — because seeing a chip is not placing anyone.
+   */
+  canPlace: boolean;
 }
 
 export interface BlockDragDescriptor {
@@ -309,6 +318,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
   // across renders, per §13 item 4 — one add, one matching cleanup).
   const dragRef = useRef<InternalDragState | null>(null);
   dragRef.current = activeDrag;
+
+  // DEF-0015: the viewer answer, mirrored into a ref so the pointer/keyboard
+  // handlers below can read the latest value without listing it as a
+  // dependency (same pattern as `dragRef`, keeping their identity stable).
+  const canPlaceRef = useRef(args.canPlace);
+  canPlaceRef.current = args.canPlace;
 
   // D58: the drop-target row resolver. `BoardGrid` is the one place that
   // owns the scroll container, the row offsets, and the collapse-filtered
@@ -509,6 +524,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
     (e: React.PointerEvent) => {
       const d = dragRef.current;
       if (!d || d.subject.kind === "new" || d.subject.kind === "panel") return;
+      // DEF-0015: a viewer's block never follows the pointer — the move/resize
+      // does not start. `moved` stays false, so the pointerup opens the block's
+      // read-only pop-up (the click fallback) rather than committing anything.
+      if (!canPlaceRef.current) return;
       const movedPx = Math.hypot(e.clientX - d.originClientX, e.clientY - d.originClientY);
       const moved = d.moved || movedPx >= DRAG_THRESHOLD_PX;
       const candidate = computeBlockCandidate(d, e.clientX, e.altKey);
@@ -576,6 +595,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const commitBlockDrag = useCallback(
     (d: InternalDragState, anchor: { x: number; y: number }) => {
+      // DEF-0015: a viewer never commits a move/resize. In practice `moved`
+      // can never become true for them (updateBlockDrag/handleBlockKeyDown are
+      // both gated), so this is defence-in-depth on the one write path.
+      if (!canPlaceRef.current) return;
       const candidate = d.candidate!;
       if (d.subject.kind === "run") {
         const run = d.subject.run;
@@ -824,6 +847,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const beginTrackCreateDrag = useCallback(
     (d: TrackCreateDescriptor, e: React.PointerEvent) => {
+      // DEF-0015: a viewer cannot create — a click-drag on an empty track does
+      // nothing (the quiet choice: no drag begins, no status toast). Guarded
+      // here, before pointer capture, so nothing on the track ever starts.
+      if (!canPlaceRef.current) return;
       setPopover(null);
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       const snap = snapConfigFor(d.zoomIndex, d.template, d.dayCount);
@@ -954,6 +981,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
         return;
       }
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      // DEF-0015: Enter/Space above still opens the block's pop-up (read-only
+      // for a viewer, decided in BoardPage) — but a viewer cannot nudge a block
+      // with the arrow keys, so the move/resize path stops here.
+      if (!canPlaceRef.current) return;
       e.preventDefault();
       const snap = snapConfigFor(
         ctxDescriptor.zoomIndex,
@@ -1022,6 +1053,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
       d: { nodeId: string; template: ShiftTemplate | null; windowMinutes: number },
     ) => {
       if (e.key !== "Enter" && e.key !== " ") return;
+      // DEF-0015: Enter on an empty track opens the create pop-up, which a
+      // viewer may not do — nothing happens (the quiet choice, matching the
+      // click-drag path in beginTrackCreateDrag).
+      if (!canPlaceRef.current) return;
       e.preventDefault();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const defaultRange = defaultShiftRange(d.template, d.windowMinutes);
@@ -1055,6 +1090,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const beginPanelDrag = useCallback(
     (operator: BoardOperator, e: React.PointerEvent) => {
+      // DEF-0015: a viewer has no panel to drag from (BoardPage hides it when
+      // !canPlace), but the gesture layer refuses the drag too, so the answer
+      // is decided in one place rather than resting on the panel being hidden.
+      if (!canPlaceRef.current) return;
       setPopover(null);
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       const next: InternalDragState = {

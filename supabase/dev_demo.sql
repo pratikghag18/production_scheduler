@@ -192,7 +192,15 @@ END $$;
 INSERT INTO auth.users (id, email) VALUES
   ('00000000-0000-0000-0000-00000000dec1', 'dana@example.test'),
   ('00000000-0000-0000-0000-00000000dec2', 'quinn@example.test'),
-  ('00000000-0000-0000-0000-00000000dec3', 'rosa@example.test')
+  ('00000000-0000-0000-0000-00000000dec3', 'rosa@example.test'),
+  -- Three VIEWERS, one per plant (the maintainer, 6 Sept: "create few dummy
+  -- viewers for all plants"). R-346's viewer clause is what they exist to
+  -- show: a viewer sees the board and nothing else -- no Operators panel, no
+  -- create form, read-only pop-ups -- and reads only the people at their own
+  -- places. Their grant is the plant root, role viewer.
+  ('00000000-0000-0000-0000-00000000dec4', 'viva@example.test'),
+  ('00000000-0000-0000-0000-00000000dec5', 'vito@example.test'),
+  ('00000000-0000-0000-0000-00000000dec6', 'vina@example.test')
 ON CONFLICT DO NOTHING;
 
 -- ⭐ ORG-WIDE `viewer`, NOT `admin`, FOR THE THREE SITE ADMINS. One org-wide
@@ -205,7 +213,13 @@ INSERT INTO user_profiles (id, org_id, user_id, role, default_create_mode) VALUE
   ('d0000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001',
    '00000000-0000-0000-0000-00000000dec2', 'viewer', 'run'),
   ('d0000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001',
-   '00000000-0000-0000-0000-00000000dec3', 'viewer', 'run')
+   '00000000-0000-0000-0000-00000000dec3', 'viewer', 'run'),
+  ('d0000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001',
+   '00000000-0000-0000-0000-00000000dec4', 'viewer', 'run'),
+  ('d0000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001',
+   '00000000-0000-0000-0000-00000000dec5', 'viewer', 'run'),
+  ('d0000000-0000-0000-0000-000000000006', '10000000-0000-0000-0000-000000000001',
+   '00000000-0000-0000-0000-00000000dec6', 'viewer', 'run')
 ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role;
 
 DO $$
@@ -217,6 +231,13 @@ BEGIN
   SELECT 'd0000000-0000-0000-0000-000000000002', v, v_org, 'admin' FROM d_fix WHERE k = 'B:plant';
   INSERT INTO profile_grants (profile_id, node_id, org_id, role)
   SELECT 'd0000000-0000-0000-0000-000000000003', v, v_org, 'admin' FROM d_fix WHERE k = 'C:plant';
+  -- The viewers: Viva on Plant A, Vito on Plant B, Vina on Plant C.
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role)
+  SELECT 'd0000000-0000-0000-0000-000000000004', v, v_org, 'viewer' FROM d_fix WHERE k = 'A:plant';
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role)
+  SELECT 'd0000000-0000-0000-0000-000000000005', v, v_org, 'viewer' FROM d_fix WHERE k = 'B:plant';
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role)
+  SELECT 'd0000000-0000-0000-0000-000000000006', v, v_org, 'viewer' FROM d_fix WHERE k = 'C:plant';
 
   -- ⭐ Ana is granted a LINE, not a plant. She must still see Plant A's
   -- plant-wide parts (owner ABOVE her grant) and none of Plant B's.
@@ -469,7 +490,10 @@ UPDATE auth.users AS u SET
 FROM (VALUES
   ('00000000-0000-0000-0000-00000000dec1'::uuid, 'dana@example.test'),
   ('00000000-0000-0000-0000-00000000dec2'::uuid, 'quinn@example.test'),
-  ('00000000-0000-0000-0000-00000000dec3'::uuid, 'rosa@example.test')
+  ('00000000-0000-0000-0000-00000000dec3'::uuid, 'rosa@example.test'),
+  ('00000000-0000-0000-0000-00000000dec4'::uuid, 'viva@example.test'),
+  ('00000000-0000-0000-0000-00000000dec5'::uuid, 'vito@example.test'),
+  ('00000000-0000-0000-0000-00000000dec6'::uuid, 'vina@example.test')
 ) AS v(id, email)
 WHERE u.id = v.id;
 
@@ -483,7 +507,10 @@ SELECT
 FROM auth.users u
 WHERE u.id IN ('00000000-0000-0000-0000-00000000dec1',
                '00000000-0000-0000-0000-00000000dec2',
-               '00000000-0000-0000-0000-00000000dec3')
+               '00000000-0000-0000-0000-00000000dec3',
+               '00000000-0000-0000-0000-00000000dec4',
+               '00000000-0000-0000-0000-00000000dec5',
+               '00000000-0000-0000-0000-00000000dec6')
   AND NOT EXISTS (SELECT 1 FROM auth.identities i
                    WHERE i.user_id = u.id AND i.provider = 'email');
 
@@ -549,7 +576,8 @@ BEGIN
 
   SELECT count(*) INTO v_logins FROM auth.users
    WHERE email IN ('admin@example.test','dana@example.test','quinn@example.test',
-                   'rosa@example.test','ana@example.test','marco@example.test')
+                   'rosa@example.test','ana@example.test','marco@example.test',
+                   'viva@example.test','vito@example.test','vina@example.test')
      AND encrypted_password IS NOT NULL;
 
   IF v_roots <> 3 THEN RAISE EXCEPTION 'dev_demo: % root plants, expected 3', v_roots; END IF;
@@ -563,5 +591,5 @@ BEGIN
   IF v_narrow < 6 THEN RAISE EXCEPTION 'dev_demo: only % product places below a root, expected >= 6 (D109)', v_narrow; END IF;
   IF v_runs <> 36 THEN RAISE EXCEPTION 'dev_demo: % runs, expected 36', v_runs; END IF;
   IF v_orphan <> 0 THEN RAISE EXCEPTION 'dev_demo: % runs use a product owned outside them', v_orphan; END IF;
-  IF v_logins <> 6 THEN RAISE EXCEPTION 'dev_demo: % of 6 accounts have a password', v_logins; END IF;
+  IF v_logins <> 9 THEN RAISE EXCEPTION 'dev_demo: % of 9 accounts have a password', v_logins; END IF;
 END $$;
