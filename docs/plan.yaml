@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-06'
-  tip: 13343f2
+  tip: 89e502b
   baseline:
-    app_tests: 2201
-    app_test_files: 84
+    app_tests: 2230
+    app_test_files: 85
     tsc: 0
     eslint: 0
-    db_checks: 651
-    migrations: 57
+    db_checks: 669
+    migrations: 58
     mutations: 509 of 536
 tracks:
 - id: core
@@ -1891,10 +1891,11 @@ stages:
   track: core
   num: 39
   title: One plant's people stay in that plant; a person is available under their home, the rest one click away
-  status: now
+  status: done
   owner: agent
   refs:
   - session 77 conversation
+  - session 78
   - D113
   delivers:
   - R-345
@@ -1912,9 +1913,17 @@ stages:
     The "on loan from another plant" reasoning in Copy Week and the pop-ups goes, because such rows
     can no longer exist.
   state: >-
-    **In flight, session 77**, as a server lane (the guard, the board's people, the SQL files that
-    built cross-plant rows) and a client lane (the panel, the outside-area decision, the pickers'
-    wording, the browser case as Ana), then the reviewer.
+    **Done in session 78.** Server: 0058 re-emits the scope guard from its LAST definition (0034,
+    not 0030 --- the case-insensitive grep found it), refusing another plant's person before the
+    override door; a person is readable by anyone holding a grant in their plant (a definer helper in
+    the shape of `app_can_read_owned`, stated as a contract change from 0026 for people only);
+    `board_window` sends the plant's people with each home's path through a definer helper, because a
+    line supervisor cannot read the nodes above her grant. Client: one pure split from the home path,
+    the panel and both pop-ups showing the default people with the rest behind "Show other people in
+    this plant (n)", the old "on loan from another plant" reasoning gone. Two SQL files that built
+    cross-plant rows were reworked honestly. Note for R-339: the copy plan's "only prior where a
+    displaced row cannot be edited" branch is now unreachable inside one plant, since the copier is
+    the plant's admin; CW26 measures the premises that make it so.
 - id: M1
   track: matrix
   num: 1
@@ -3339,8 +3348,26 @@ requirements:
     moving a run with its crew, copying a week --- because it is the table's own guard that says so.
     Rows of that shape cannot exist, so no screen needs to reason about "a person on loan from
     another plant" any more.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/81_same_plant_test.sql
+    cases: >-
+      create_assignment refuses a person from another plant with reason other_plant, with and without
+      the area override; reassign_assignment refuses the same; move_run of a run with crew into
+      another plant is refused by the table on the crew's update; a person from another AREA of the
+      same plant is still refused without the override and placed with it (the D113 contract, pinned);
+      grants on the two new helpers
+  - kind: sql
+    file: supabase/tests/57_area_override_test.sql
+    cases: >-
+      the whole file, whose "Foreign Fred" was homed in another plant and is now homed in another
+      department of the same plant --- every D113 claim unchanged and still measured, 17 cases
+  - kind: manual
+    steps: >-
+      Live database as the company admin inside a rolled-back transaction, session 78: Operator B2 on
+      a Plant A cell refused "That person works in a different plant." with and without the area
+      override, rows written 0.
+  status: covered
 - id: R-346
   title: A person is available everywhere under their home, and the rest of the plant is one click away
   source:
@@ -3365,8 +3392,44 @@ requirements:
     cell. Never another plant's people (R-345). The list and each person's home are the server's
     (`board_window` sends the plant's people with each home's path), so the screen can tell "above
     this cell" from "another area" without seeing nodes above the grant.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/81_same_plant_test.sql
+    cases: >-
+      a supervisor granted only a line reads all the plant's people and their trainings, and
+      board_window called as them returns every one with site_path --- the ones homed above the line
+      and the ones homed in another area alike --- while another plant's person is neither readable
+      nor returned; the company admin unchanged
+  - kind: vitest
+    file: src/test/outsideArea.test.ts
+    cases: >-
+      on a line supervisor's board a person homed at the plant, at the area above, at the line and at
+      a cell inside it is offered by default; a person homed in another area is behind the click and
+      marked; a sibling whose slug extends the line's is not confused with it; a person homed at Cell
+      1 is offered on the line's board and marked at Cell 2; a plant admin's board offers everyone
+      with nothing behind the click; an unresolvable place marks nobody; an empty home is neither
+      offered nor waved through
+  - kind: vitest
+    file: src/test/peoplePicker.test.tsx
+    cases: >-
+      the panel lists the default people and the "Show other people in this plant (n)" control names
+      the count, reveals the rest marked "not from this area", hides again, and is absent at zero; a
+      revealed chip is a drag source; the create pop-up and the assignment pop-up open on the default
+      list, the control adds the rest marked "not from this area (override)", picking one asks the
+      reason and sends the area override, a local person is asked nothing, a preset from outside
+      opens revealed and selected, a reassign to a revealed person sends the override, the D110 ghost
+      still names itself
+  - kind: e2e
+    file: e2e/linePeople.spec.ts
+    cases: >-
+      signed in as Ana, supervisor on Line 1: the Operators panel lists Operator A1 to A6 with no
+      "other people" control, and the create pop-up on her cell offers the six with none marked "not
+      from this area"
+  - kind: manual
+    steps: >-
+      Live app as Ana, session 78: six people in the panel over Line 1 (screenshot), the direct
+      assignment picker offers all six, A5 and A6 carrying only the existing "never trained" mark.
+  status: covered
 - id: R-342
   title: A person from another plant is not offered on this plant's board at all
   source:
@@ -7040,6 +7103,48 @@ findings:
     lets the writer's own trigger decide, rolling the whole apply back if it refuses.
     The rule for next time: under RLS, every inner join to a table with a read policy is a filter
     the caller's grants wrote; join outer, or say in a comment why dropping the row is right.
+- id: F-103
+  title: A definer helper with the org term and not the grant term, for the second time in a week
+  tag: Who a definer helper answers
+  status: fixed
+  found_by: agent
+  refs:
+  - R-346
+  - S39
+  - DEF-0013
+  story: >-
+    0058 added `app_operator_homes`, SECURITY DEFINER, so a line supervisor's board could learn the
+    home path of people homed above her grant --- nodes she cannot read. It carried the org term and
+    not a grant term, and it is granted to `authenticated`, so it is a PostgREST route on its own.
+    The reviewer took it the way the tester took `app_node_is_plant_root` in DEF-0013 eight days
+    earlier: as a supervisor granted one line of Plant SA, with a GUESSED slug `'plant_sb'` and no
+    node id at all, it returned Plant SB's operator ids and home paths. The call site was safe
+    (`board_window` is only ever rooted where the caller can read); the function was not; and its
+    own comment claimed the safety of the call site for the function.
+    ⭐ THE FIX IS ONE TERM, as 0056's was: a grant in that plant, or company admin, else nothing ---
+    the same answer as a plant that does not exist. SP13 asks the helper directly, the way 77's AR10
+    asks its helper, with the reviewer's guessed-slug probe as a case. The rule 0056 restated holds
+    for every definer helper and needs a case beside every one of them; this one was written without,
+    and the reviewer's round is what caught it before the tester's.
+- id: F-104
+  title: "A green case that cannot go red: NULL is not false in an IF"
+  tag: What a test asserts
+  status: fixed
+  found_by: agent
+  refs:
+  - R-345
+  - S39
+  story: >-
+    81's SP1, the case whose whole point is "the detail says other_plant", stayed green when the
+    reviewer deleted the plant test from the guard on the scratch database. The old refusal still
+    raised PT409 with no `reason` key, `v_detail->>'reason' = 'other_plant'` was NULL, the
+    conjunction was NULL, and `IF NOT NULL THEN` does not fire --- so `v_ok` stayed true and PASS
+    printed. Six assertions in the file had the shape; the cases whose write SUCCEEDED under the
+    mutation went red (there the state comparison is false, not null), which is why the whole file
+    looked like a tripwire and one sixth of it was not. Every `->>` comparison in the file now reads
+    through `COALESCE(..., '')`, and SP1 goes red under the same mutation.
+    The rule for a plpgsql case: compare a key that may be absent through COALESCE or `?`, never
+    bare, or the case can only ever pass.
 - id: F-102
   title: A new writer on an old nullable column did not read the guard that came with it
   tag: DROP NOT NULL, again
@@ -9505,6 +9610,60 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 78
+  date: 2026-09-06
+  title: One plant's people stay in that plant, available under their home by default, the rest one click away (S39)
+  commits:
+  - 5e858e9
+  - 371501a
+  - 89e502b
+  numbers:
+    app_tests: 2230
+    app_test_files: 85
+    tsc: 0
+    eslint: 0
+    db_checks: 669
+    migrations: 58
+  confirmed: true
+  summary: >-
+    The maintainer answered the two questions session 77 left, and the answers were sharper than the
+    questions: *"You should be unable to put Plant B operator in Plant A"* and *"If a operator is
+    assigned to higher hierarchy they should automatically become available to all lower hierarchy
+    within that hierarchy ... For other operators in the plant we need to give an option to the
+    supervisor to click through something so show remaining operators."* Both written as R-345 and
+    R-346 before a line of code, one stage, two lanes on Opus at the maintainer's request, then the
+    reviewer. The first launch was cut off by a network drop near the end of both lanes; both were
+    resumed from their transcripts with their files intact.
+    ⭐ THE SERVER. The table guard was re-emitted from its last definition --- 0034, not the 0030 the
+    brief named; the recipe CLAUDE.md carries since DEF-0011 is what caught it --- and refuses another
+    plant's person before the override door, so every writer inherits the rule. Reading people is
+    now "any grant in their plant", a stated change from 0026's same-branch contract for people only;
+    the board sends the plant's people with each home's path through a definer helper, because a line
+    supervisor cannot read the plant root above her. Two SQL files that had built cross-plant rows on
+    purpose were reworked with their claims intact.
+    ⭐ THE SCREEN. One pure split from the home path: available by default under the home, the rest
+    of the plant behind "Show other people in this plant (n)" in the panel and both pop-ups, leading
+    into the existing reason. Ana, granted Line 1, sees all six of Plant A's people (screenshot) where
+    she saw none.
+    ⛔ THE REVIEWER'S ROUND, ALL FIXED AND PINNED. The new definer helper that gives a line
+    supervisor the home paths above her grant answered about ANY plant in the company --- the same
+    shape as DEF-0013, a week later, caught this time before the tester (F-103; one grant term, and
+    SP13 asks it directly with the reviewer's guessed-slug probe). 81's marquee case could not go red:
+    a bare `->>` comparison on an absent key is NULL and `IF NOT NULL` does not fire (F-104; every
+    such comparison reads through COALESCE now). The create pop-up split the whole list where the
+    panel and the assignment pop-up split the active people, so it counted a person who had left
+    (fixed, pinned with an inactive person in the picker cases). Four rules with no case got one:
+    a raw UPDATE across plants, the company admin refused alike, no grant means no person, and
+    re-homing an assigned person across plants. Two things were noted and not filed: a viewer
+    granted one cell now reads the whole plant's roster, which R-346 asks for ("anyone who can see
+    the board") and the record states; and a raw UPDATE of a run's node can strand its crew, which
+    predates this stage and sits in the queue.
+    Measured: SQL suite 669 passed, 0 failed, 0 hard errors; demo world 11 of 11; `npm run test`
+    2230 passed in 85 files; `tsc` 0 after `db:types` (eight lines, the two helpers); `eslint`
+    0; Playwright 13 of 13 against the live stack, two of them as Ana. 0058 applied with `psql`; the
+    ledger is still out of sync.
+  shipped:
+  - S39
 - id: 77
   date: 2026-09-06
   title: The picker is the panel's list, the person on a row can be changed, and pop-ups drag (S36, S37, S38)
@@ -12347,6 +12506,14 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
+- text: A raw UPDATE of runs.node_id moves a run into another plant and leaves its crew behind
+  why: >-
+    Found by S39's reviewer on the way, pre-existing and out of that stage's scope. The assignments
+    table enforces "the crew's cell is the run's cell" on its own side, and refuses a cross-plant
+    person (R-345); the runs side has no counterpart, so a plain UPDATE of a run's node under the
+    policies moves the run and strands its crew at the old cell. No cross-plant person results, so
+    R-345 holds, but the run/crew invariant is one-sided. Belongs with 0050's move_run, which
+    already carries the crew: the table should refuse what move_run would refuse.
 # ---------------------------------------------------------------------------
 # TASKS, most likely first. Everything below the PARKED marker is deliberately
 # not next: tabled by the maintainer, already decided, or a standing note
