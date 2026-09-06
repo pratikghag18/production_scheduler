@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-06'
-  tip: b605245
+  tip: 169c7e7
   baseline:
-    app_tests: 2232
-    app_test_files: 85
+    app_tests: 2246
+    app_test_files: 88
     tsc: 0
     eslint: 0
-    db_checks: 671
-    migrations: 58
+    db_checks: 677
+    migrations: 59
     mutations: 509 of 536
 tracks:
 - id: core
@@ -3454,6 +3454,13 @@ requirements:
       Live app as Ana, session 78: six people in the panel over Line 1 (screenshot), the direct
       assignment picker offers all six, A5 and A6 carrying only the existing "never trained" mark.
   status: contradicted
+  note: >-
+    ⛔ CONTRADICTED 6 Sept by DEF-0015 (tester): the panel was hidden for a viewer and the pop-ups were
+    not --- a viewer could open the create form and the write pop-ups the server refuses.
+    ⚠️ FIX-CLAIMED in ~01a2612~ (session 81): the viewer sees the board, the chips, and read-only
+    pop-ups with Close --- nothing to place with (see R-239's note). The demo world now carries a
+    viewer per plant so the tester and the browser case can be that person. Stays ~contradicted~ until
+    the tester re-runs.
 - id: R-342
   title: A person from another plant is not offered on this plant's board at all
   source:
@@ -4334,6 +4341,12 @@ requirements:
     UPDATE of runs.node_id as a site admin moves the run and leaves its crew on the old cell --- rows=1, no
     error, run on cell_5 and crew on cell_1 read back. Nothing on the runs side reads assignments; the
     invariant is enforced on the crew's side only. The pin reads the migrations for a runs-side guard.
+    ⚠️ FIX-CLAIMED in `169c7e7` (session 81). 0059 puts a DEFERRED constraint trigger on the runs side:
+    at commit, a run whose crew is not on its cell is refused with `run_moved_without_crew`. Deferred so
+    `move_run`, which moves the run and then each crew row in one transaction, passes at commit, while a
+    bare update over the network, which is its own transaction, is refused. 6 cases in
+    `82_run_keeps_its_crew_test.sql`; the pin is green; the defect's own reproduction replayed on the
+    live database. Stays `contradicted` until the tester re-runs.
 - id: R-038
   title: Roster entries show assignment count and dim when fully allocated
   source:
@@ -5553,6 +5566,11 @@ requirements:
     Delete --- every one refused by the policies (the DELETE came back 200 with zero rows and the board said
     "You don't have permission to change that. --- reverted."). The panel and Copy week ARE hidden; the pop-ups
     are not decided by can_place at all. Minor: nothing is written and the app says why.
+    ⚠️ FIX-CLAIMED in `01a2612` (session 81). Decided in one place: the board reads `can_place` and hands
+    it to the gesture layer (no create form on Enter or click-drag, no drag) and to the assignment and
+    run pop-ups as read-only (the details and Close). Nine unit cases, the pin green, and a browser case
+    as Viva, the new Plant A viewer, reading it off the screen. Stays `contradicted` until the tester
+    re-runs.
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
     ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0005, fix 808a52d). This row has now been broken in BOTH directions by
@@ -9655,6 +9673,42 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 81
+  date: 2026-09-06
+  title: DEF-0014 and DEF-0015 fixed, and the demo world gains a viewer per plant
+  commits:
+  - 01a2612
+  - 169c7e7
+  numbers:
+    app_tests: 2246
+    app_test_files: 88
+    tsc: 0
+    eslint: 0
+    db_checks: 677
+    migrations: 59
+  confirmed: true
+  summary: >-
+    The tester's session 80 verified DEF-0013 and filed DEF-0014 and DEF-0015, both minor, both agreed
+    with, both handed to the pinned Opus 4.8 lane (`.claude/agents/opus48.md`, usable from this
+    session on) with one defect each and exclusive files.
+    ⭐ DEF-0014, A RUN KEEPS ITS CREW. The crew side of the table refused a crew row that disagreed with
+    its run; nothing on the run side refused a run that walked away. 0059 adds a deferred constraint
+    trigger on runs: at commit, a run whose crew is elsewhere is refused. Deferred is the whole design
+    --- `move_run` moves the run and then each crew row inside one transaction and passes at commit; a
+    bare PATCH is its own transaction and is refused. The defect's reproduction replayed live.
+    ⭐ DEF-0015, A VIEWER SEES THE BOARD AND NOTHING TO WRITE WITH. The board already held the server's
+    `can_place` for the panel; it now hands it to the gesture layer and to the pop-ups, decided in one
+    place. A viewer gets no create form, no drag, and read-only pop-ups.
+    ⭐ DUMMY VIEWERS, at the maintainer's request: Viva, Vito and Vina on Plants A, B and C in the
+    fixture and the dev switcher, plus Vlad on Plant D on the live database only, password
+    `devpassword`. The fixture's own assertion and the demo test count nine accounts now. A browser
+    case signs in as Viva and reads her board: no panel, no Copy week, Enter on a track opens nothing,
+    a chip opens read-only.
+    Measured: SQL suite 677 passed, 0 failed, 0 hard errors; demo world 11 of 11; `npm run test`
+    2246 passed in 88 files, the two pins green; `tsc` 0; `eslint` 0; Playwright 15 of 15
+    against the live stack, two of them as Viva. 0059 applied with `psql`; the ledger is still out of
+    sync. `.claude/settings.json` shows the maintainer's plugin enablement, left uncommitted as theirs.
+  shipped: []
 - id: 80
   date: 2026-09-06
   title: Tester run
