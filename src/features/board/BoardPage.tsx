@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { offeredHere, ownedInScope, productsOfferedAtNode } from "@/features/admin/lib/scope";
+import { ownedInScope, productsOfferedAtNode } from "@/features/admin/lib/scope";
 import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
@@ -13,6 +13,7 @@ import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
 import { useBoardViewStore } from "./store/boardView";
 import { useDragGesture } from "./hooks/useDragGesture";
 import { buildBoardIndex, policyForNode, type BoardIndex } from "./lib/boardIndex";
+import { outsideAreaOperatorIds as outsideAreaFor } from "./lib/outsideArea";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
 import { splitFits } from "./lib/interaction";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
@@ -338,20 +339,14 @@ export default function BoardPage() {
    * — so they stay in the list and are ANNOTATED. Filtering them would delete
    * the feature; offering the product would offer a guaranteed refusal.
    *
-   * Fails open on an unresolvable node for the same reason `offeredHere` does:
-   * an empty set annotates nobody, and the server still decides.
+   * The decision itself lives in `lib/outsideArea.ts` (session 76), so the
+   * assignment pop-up's person picker (R-343) and this one cannot disagree,
+   * and R-342's fix has one place to land.
    */
-  const outsideAreaOperatorIds = useMemo(() => {
-    const out = new Set<string>();
-    if (!boardQuery.data || createNodeId === null || index === null) return out;
-    const path = index.nodeById.get(createNodeId)?.path;
-    if (path === undefined) return out;
-    const belongs = new Set(
-      offeredHere(boardQuery.data.operators, path, index.nodeById).map((o) => o.id),
-    );
-    for (const o of boardQuery.data.operators) if (!belongs.has(o.id)) out.add(o.id);
-    return out;
-  }, [boardQuery.data, index, createNodeId]);
+  const outsideAreaOperatorIds = useMemo(
+    () => outsideAreaFor(boardQuery.data?.operators ?? [], createNodeId, index),
+    [boardQuery.data, index, createNodeId],
+  );
 
   /**
    * R-316: what the cell's standard cycle time makes of a span, for the two

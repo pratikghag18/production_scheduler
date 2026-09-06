@@ -1813,6 +1813,67 @@ stages:
     cases, 3 browser cases against the live stack. The reviewer found four things the green
     cases had not (F-099, F-100) and every one is fixed and pinned. Awaiting the tester's round;
     the design notes' Phase 2 question about absence data stays open and is not part of this stage.
+- id: S36
+  track: core
+  num: 36
+  title: A person from another plant is marked in the picker
+  status: now
+  owner: agent
+  refs:
+  - session 76 conversation
+  - D113
+  delivers:
+  - R-342
+  what: >-
+    **Found by the maintainer on the live app after Copy Week shipped.** On Plant A's board the direct
+    assignment picker lists people from Plant B with no mark at all, where a person from another area
+    of the same plant is marked "not from this area (override)" and asked for a reason. The server
+    refuses the unmarked placement, so the person finds out on Save. The fix is on the screen: the
+    mark must be decided the way the server decides it, for a person owned anywhere, not only for one
+    whose owning node the board happens to have loaded.
+  state: >-
+    **In flight, session 76**, as one lane owning the board page and the create pop-up, briefed with
+    the suspected cause and told to verify it before fixing it.
+- id: S37
+  track: core
+  num: 37
+  title: Change who is on an assignment without deleting it
+  status: now
+  owner: agent
+  refs:
+  - session 76 conversation
+  delivers:
+  - R-343
+  what: >-
+    **The maintainer's words: "this is not practical."** Today the only way to put Operator 2 where
+    Operator 1 was is to delete the assignment and make it again. One writer, `reassign_assignment`,
+    takes the row and the new person and asks every question `create_assignment` asks --- edit rights,
+    eligibility under the plant's policy, capacity, area scope --- then changes only the person. The
+    assignment pop-up gets a person picker that offers what the writer would take, marks a person from
+    outside and asks for the reason, and shows the warned or refused answer the way the create pop-up
+    does. A numbered SQL file proves the writer; unit cases prove the picker.
+  state: >-
+    **In flight, session 76**, as one lane owning migration 0057, its SQL file, the assignment writer
+    in the API, the assignment pop-up and its hook; the board page's wiring was pre-seated by the
+    developer so the lane and S36's never touch the same file.
+- id: S38
+  track: core
+  num: 38
+  title: Pop-ups can be dragged aside
+  status: now
+  owner: agent
+  refs:
+  - session 76 conversation
+  delivers:
+  - R-344
+  what: >-
+    **"Can we be able to move stuff?"** A pop-up sits over the cells the person wants to look at while
+    answering it. The shared shell gets a drag handle on its title: press, move, release, and it stays
+    where it was put until it closes; it cannot be dragged off screen; a click on a control inside is
+    not a drag. One change in one file covers every pop-up in the app, because every pop-up is that
+    shell (the audit enforces it).
+  state: >-
+    **In flight, session 76**, as one lane owning the shared shell and its stylesheet and tests.
 - id: M1
   track: matrix
   num: 1
@@ -3223,6 +3284,55 @@ requirements:
     written into the migration: the trigger binds whom the policies bind and not the owner, which is
     the fixture tool (F-098). 77 is the SQL file 0053 shipped without. Stays `contradicted` until the
     tester re-runs its own reproduction.
+- id: R-342
+  title: A person from another plant is marked as such wherever the board offers them
+  source:
+  - session 76 conversation
+  - D113
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 6 Sept: *"I was assigning plant A, I was able to select operators from any other
+    plants for example plant B in the list and it did not show any warning whatsoever in direct
+    assignment tab."* The server already refuses that placement without an area override
+    (`not_offered_here`, 0030) and takes it with one and a reason (D113), so the picker may keep
+    offering them --- but it must MARK them as not from this plant and ask for the reason, exactly as
+    it does for a person from another area of the same plant. Offering a person from Plant B on Plant
+    A's board with no mark is a screen that shows what the server will refuse (CLAUDE.md section 4).
+    Suspected cause, to be verified in the build: the "outside their area" set is computed from the
+    board's own node map, which holds only the plant being shown, so a person owned by ANOTHER plant
+    resolves to no node at all and the set fails open on them.
+  verified_by: []
+  status: uncovered
+- id: R-343
+  title: The person on an assignment can be changed in place
+  source:
+  - session 76 conversation
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 6 Sept: *"once you assign someone say Operator 1, there is no way to modify that
+    assignment to operator 2 unless you delete existing assignment, this is not practical."* The
+    assignment pop-up offers a person picker; choosing another person keeps the row --- its cell,
+    time, product or run, efficiency and target --- and changes only who. Every check the writer runs
+    on a new placement runs on the change too: edit rights on the cell, eligibility under the plant's
+    policy (with the override and reason under `warn`, refused under `block`), capacity, and area
+    scope (with the D113 override and reason for a person from outside). A plain UPDATE of the
+    person column would skip the eligibility check, which only `create_assignment` runs, so the change
+    goes through a writer of its own that asks the same questions.
+  verified_by: []
+  status: uncovered
+- id: R-344
+  title: A pop-up can be dragged aside to see what is under it
+  source:
+  - session 76 conversation
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 6 Sept: *"The pop window cannot be moved across the screen to see what's
+    underneath, can we be able to move stuff?"* Every pop-up in the app is the one shared shell, so
+    the shell grows a drag handle --- its title bar --- and a pop-up dragged aside stays where it was
+    put until it closes. Dragging never takes it off screen, keyboard and focus behaviour are
+    unchanged, and a click on a control inside is never mistaken for a drag.
+  verified_by: []
+  status: uncovered
 - id: R-341
   title: A SECURITY DEFINER helper says nothing about another company's nodes
   source:
