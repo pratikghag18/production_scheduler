@@ -9655,6 +9655,90 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 80
+  date: 2026-09-06
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2237
+    app_test_files: 87
+    tsc: 0
+    eslint: 0
+    db_checks: 671
+    migrations: 58
+  confirmed: true
+  summary: >-
+    Eighteen commits judged, four migrations, three new SQL files, six new client test files. One
+    defect verified, two filed (both minor), sixteen migration mutations run on scratch databases,
+    and the board driven as a Line 1 supervisor, a plant admin and a viewer that the demo does not
+    have and the run made for itself.
+    ⭐ THE COUNT MATCHES, EXACTLY. At the developer's tip `f75a65e` the runner said *"Test Files 85
+    passed (85) / Tests 2232 passed (2232)"*, which is what session 79 says. Sessions 76, 77 and 78
+    were re-measured at their own tips in throwaway worktrees: *"2159 passed (2159)"* in 80, *"2201
+    passed (2201)"* in 84, *"2230 passed (2230)"* in 85 --- every entry's numbers are the runner's.
+    With this run's two pins the line reads *"Test Files 2 failed | 85 passed (87) / Tests 3 failed
+    | 2234 passed (2237)"*, the three red being DEF-0014 and DEF-0015, red on purpose. SQL suite
+    summed from the report's tally lines: 671 passed, 0 failed, 0 hard errors, plus dev_demo 11 of
+    11; 80_cross_org_test.sql already existed, so 81 is not a gap. Playwright 13 of 13.
+    ⭐ THE TYPECHECK IS CONCLUSIVE. `db:types` regenerated against the live stack and the content
+    diff against the committed file is zero lines (`--ignore-space-at-eol`); the runner's "stale" is
+    CRLF as before. The 36 committed lines are exactly the five new signatures: copy_week_plan,
+    apply_copy_week, reassign_assignment, app_can_read_in_plant, app_operator_homes. `tsc` 0,
+    `eslint` 0. `format:check` fails on 302 files on this checkout and passes every one of them with
+    `--end-of-line auto`: core.autocrlf is true here and .prettierrc sets no endOfLine, so it is the
+    worktree's line endings and not the code; CI runs on Linux and would not see it.
+    ⭐ DEF-0013 VERIFIED at `5e5335c`. My reproduction cold as Ana over PostgREST: the other company's
+    root, its leaf and a bogus uuid all false on BOTH helpers, her own four roots true; the three
+    direct inserts as Dana all PT400 with nothing stored. 0056 is the last definition and differs
+    from 0054 by the one org term. With that term deleted on a scratch copy, 77 reads *"FAIL AR10:
+    foreign_root=t ... insert_root=42501 insert_bogus=PT400"* and 47 and 65 do not move.
+    ⭐ THE FOUR MIGRATIONS, MUTATED SIXTEEN WAYS, EACH ON A FRESH DATABASE. 0055 seven ways --- choices
+    always both (CW13), no undecided check (CW14), no choice-offered check (CW13, CW15), no admin gate
+    (CW2, CW26), no eligibility clash (18 red), crew ignoring a prior run (12 red), prior runs not
+    removed (CW8, CW9, CW23). 0058 four ways --- no other_plant refusal (SP1-4, SP7, SP14, SP15; 57,
+    78 and 79 unchanged), a viewer reading the plant (SP18), homes not per person (SP13, SP16),
+    can_place always true (SP19). 0057 four ways --- block treated as warn (RA4) and a blank override
+    reason accepted (RA3) go red; removing app_can_edit_node and removing the ROW_COUNT belt do NOT,
+    and correctly so: the update policy and the belt still give the same not_permitted, so behaviour
+    did not change. Every function each file emits is the last definition by the CLAUDE.md recipe,
+    and the live policies read with pg_get_expr say what the migration text says.
+    ⭐ WHAT WAS PUSHED AND HELD. copy_week_plan as Ana: not_admin; as Dana on Plant B: not_admin; on
+    the other company's root: not_a_plant, the same as a bogus id; decisions are key and choice only,
+    so a client can name no row. The "plan says clean, apply refuses the whole week" family was
+    hunted --- a re-homed person (the home and re-home guards refuse it while rows exist), a removed
+    product place (guarded), an inactive person (no writer refuses one), a direct row on a cell with
+    a run (the live create_assignment has no such check) --- and nothing was found. The dialog draws
+    the server's counts and choices, Apply stays off until every clash is answered, and the client's
+    shapes are the SQL contract key for key. The panel, the create pop-up and the assignment pop-up
+    take one variable and one split (`splitPeopleFor` over `site_path`), which is the server's
+    `app_owner_covers` in the other direction; Ana sees four by default and two behind the click in
+    all three places, Dana six with no control, both as the server sends. Zero cross-plant assignment
+    rows exist live, so session 77's second question is moot. The edits to 57, 60 and 77 are a fixture
+    that R-345 made impossible rebuilt inside one plant with every D113 claim intact, one boolean
+    admitted to a keys check, and AR10 added; certificateExpiry gained a D113 block and scope.test
+    lost the four cases that pinned the predicate which emptied Ana's panel.
+    ⛔ DEF-0014 FILED (minor). The reviewer's session-78 finding as a defect with a reproduction:
+    as Dana, a plain UPDATE of runs.node_id moves a run to a free cell in Area 2 and its crew stays on
+    Cell 1 --- rows=1, no error, both read back. Nothing on the runs side reads assignments. R-037,
+    which had no case, is contradicted and has a red pin.
+    ⛔ DEF-0015 FILED (minor). A viewer granted one cell gets no panel and no Copy week, as session
+    79 says --- and Enter on the track opens a create form with a four-person picker and an enabled
+    Create, and the chip opens Person, Save and Delete. Every one is refused: the DELETE came back
+    200 with zero rows, requireWritten caught it, and the board said *"You don't have permission to
+    change that. --- reverted."* with the row still there. Shown and refused is R-239's dangerous
+    direction, and the viewer clause says the only thing they see is the board. No pop-up on the
+    board has ever been gated on edit rights; can_place first appears in b605245 and gates the panel
+    alone. The pin is a source audit in pickerPool's shape and accepts either fix.
+    ⚠️ NOTED, NOT FILED. e2e/copyWeek.spec.ts applies a copy onto the week +100 from today on the
+    LIVE database every time it runs; 15 assignment rows now sit at 2028 or later. Two "plan" commits
+    carry code (2cbcff1: BoardPage and outsideArea) or a test reformat (2bb07d1). Sweep 2's
+    audit_log.at is a false positive (audit.ts reads it at three lines); sweep 3's hits are all
+    "company-wide" in comments, the two in the diff describing history. The live ledger still tops
+    out at 0038.
+    ⚠️ ONE MISTAKE OF MY OWN. Measuring the intermediate sessions, `git worktree remove --force` on
+    a worktree holding a junction to node_modules deleted the real node_modules; `npm ci` restored
+    it from the lockfile and the two remaining measurements removed the junction first. Nothing
+    committed was touched. The viewer account the run created (vic@example.test) was deleted again.
 - id: 79
   date: 2026-09-06
   title: Nobody reads more than they are assigned to, and a viewer sees no panel (S39, the viewer clause)
