@@ -56,6 +56,9 @@ function operator(
     employeeRef: null,
     active: true,
     siteNodeId: "n-plant",
+    // S39/0058: the home as a path. Nothing in this file turns on it; the
+    // shape requires it.
+    sitePath: "plant_a",
     skillIds,
     skillExpiries,
   };
@@ -216,6 +219,7 @@ const RAW_OPERATOR = {
   employee_ref: null,
   active: true,
   site_node_id: "n-plant",
+  site_path: "plant_a",
   skill_ids: ["sk-cnc", "sk-weld"],
   skill_expiries: [{ skill_id: "sk-cnc", expires_at: "2026-09-01" }],
 };
@@ -320,6 +324,10 @@ function renderPopover(
         },
       ]}
       operators={operators}
+      // R-346: this file is about certificates, not about where people are
+      // homed, so every person it renders is a default offer here and the
+      // "show other people in this plant" control never appears.
+      hereOperatorIds={new Set(operators.map((o) => o.id))}
       windowStart={new Date("2026-10-01T00:00:00Z")}
       requiredSkills={[CNC]}
       outsideAreaOperatorIds={outsideAreaIds}

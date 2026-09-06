@@ -130,3 +130,16 @@
   font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--ink);
 }
+
+/* ---------------------------------------------------------------------------
+   R-346 — "Show other people in this plant (n)", under the Person select.
+   Word for word the create pop-up's control, and for the same reason: the two
+   pickers answer the same question and a reader must not have to learn it
+   twice. Skin from `Field.module.css` (R-318); placement only here.
+   ------------------------------------------------------------------------ */
+.othersBtn {
+  display: block;
+  width: 100%;
+  margin-top: calc(6px * var(--chrome-scale, 1));
+  text-align: left;
+}

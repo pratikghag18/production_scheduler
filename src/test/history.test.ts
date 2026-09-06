@@ -45,6 +45,8 @@ const MARIA: BoardOperator = {
   employeeRef: "EMP-001",
   active: true,
   siteNodeId: "n1",
+  // S39/0058: the home as a path, required on BoardOperator now.
+  sitePath: "plant1",
   skillIds: [],
   // F-087/0048: required on BoardOperator now — nothing held, nothing dated.
   skillExpiries: [],

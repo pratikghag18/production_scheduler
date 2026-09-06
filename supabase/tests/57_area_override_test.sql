@@ -29,7 +29,10 @@
 -- overrode — and every other case in this file still passes.
 --
 -- FIXTURE, and the reasons:
---   * a whole second PLANT, so "outside your area" is unambiguous;
+--   * a second DEPARTMENT of the same plant, so "outside your area" is
+--     unambiguous and still LEGAL --- R-345 (0058) means it can no longer be a
+--     second plant, and Plant E now exists in this file only for the PRODUCT
+--     half (A6), whose subject is not a person;
 --   * an operator owned by LINE 1, because the interesting move is between two
 --     cells the SAME admin can edit — Cell 1 (inside Line 1) to Cell 4 (under
 --     Line 2). A fixture where the target is unreachable tests the permission
@@ -99,11 +102,24 @@ BEGIN
     ('e3000000-0000-0000-0000-0000000000f2','30000000-0000-0000-0000-000000000001', v_org, 'supervisor'),
     ('e3000000-0000-0000-0000-0000000000f3','30000000-0000-0000-0000-000000000001', v_org, 'viewer');
 
-  -- Three people, three scopes: one in another PLANT, one on LINE 1 only, one
+  -- Three people, three scopes, ALL THREE INSIDE PLANT 1: one owned by the CNC
+  -- Line under Machining (a different DEPARTMENT, so Cell 1 is outside his
+  -- area and no cell in this file is inside it), one on LINE 1 only, one
   -- plant-wide. The middle one is what makes a same-admin cross-line move
   -- possible at all.
+  --
+  -- ⚠️ FRED USED TO BE OWNED BY PLANT E AND CANNOT BE ANY MORE (R-345,
+  -- migration 0058). "Outside your area" now has a ceiling: the area override
+  -- crosses AREAS inside one plant and never crosses a plant, so a fixture
+  -- built on another plant's person measured a placement the table now refuses
+  -- before the door is reached, and A3, A7, A11, A12, A15 and A16 all went red
+  -- on it. The claims D113 makes are unchanged and are all still measured here;
+  -- what changed is the strongest legal example of "outside your area", and
+  -- that is now another department of the same plant. Plant E stays in the
+  -- fixture for A6, whose subject is a PRODUCT and whose half has no door.
+  -- The cross-plant refusal itself is measured in 81_same_plant_test.sql.
   INSERT INTO operators (id, org_id, display_name, employee_ref, site_node_id) VALUES
-    ('f5000000-0000-0000-0000-0000000000f1', v_org, 'Foreign Fred', 'EMP-F01', v_pe),
+    ('f5000000-0000-0000-0000-0000000000f1', v_org, 'Other-Area Fred', 'EMP-F01', '30000000-0000-0000-0000-000000000006'),
     ('f5000000-0000-0000-0000-0000000000f2', v_org, 'Line-1 Lena',  'EMP-F02', '30000000-0000-0000-0000-000000000004'),
     ('f5000000-0000-0000-0000-0000000000f3', v_org, 'Plantwide Pia','EMP-F03', '30000000-0000-0000-0000-000000000001');
 
@@ -471,13 +487,13 @@ BEGIN
       'product_id','60000000-0000-0000-0000-000000000001',
       'timerange','[2099-07-08 06:00+00,2099-07-08 14:00+00)',
       'efficiency', 1.000,
-      'area_override', true, 'area_override_reason', 'splitting cover across plants'));
+      'area_override', true, 'area_override_reason', 'splitting cover across areas'));
     v_with := 'allowed';
   EXCEPTION WHEN OTHERS THEN v_with := SQLSTATE; END;
   RESET ROLE;
   IF v_without = 'PT409' AND v_with = 'allowed'
      AND (v_res->'assignment'->>'area_override')::boolean
-     AND v_res->'assignment'->>'area_override_reason' = 'splitting cover across plants'
+     AND v_res->'assignment'->>'area_override_reason' = 'splitting cover across areas'
   THEN RAISE NOTICE 'PASS A11';
   ELSE RAISE NOTICE 'FAIL A11: without=% with=% row=%', v_without, v_with, v_res->'assignment'; END IF;
 EXCEPTION WHEN OTHERS THEN
@@ -567,7 +583,7 @@ BEGIN
   RESET ROLE;
   v_area := (v_res->'assignment'->>'area_override')::boolean;
   v_elig := (v_res->'assignment'->>'eligibility_override')::boolean;
-  -- A supervisor waving through "not from this plant" must not silently also
+  -- A supervisor waving through "not from this area" must not silently also
   -- record "no Welding ticket" — the weaker permission granting the stronger.
   IF v_area AND v_elig IS FALSE THEN RAISE NOTICE 'PASS A15';
   ELSE RAISE NOTICE 'FAIL A15: area=% eligibility=% (want true/false)', v_area, v_elig; END IF;

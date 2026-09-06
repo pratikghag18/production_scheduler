@@ -156,3 +156,38 @@
 .collapsed .pill {
   display: none;
 }
+
+/* ---------------------------------------------------------------------------
+   R-346 — the rest of the plant, behind one control.
+
+   The button is the app's shared field skin (`Field.module.css`'s `.btn`,
+   R-318); only its placement is here, the same division `.toggle` above makes
+   with `PanelToggle.module.css`. Nothing in this block declares a control's
+   border, radius and font together — `fieldStandard.test.ts` counts that as a
+   thirty-first hand-rolled copy, and this file is on the legacy list only for
+   the copies that predate the standard.
+   ------------------------------------------------------------------------ */
+
+.othersBtn {
+  margin-top: calc(4px * var(--ui-scale, 1));
+  text-align: left;
+  width: 100%;
+}
+
+/* The mark travels with the person, so it must not squeeze the name out of a
+   190px rail: the name keeps `flex: 1` and this shrinks and ellipsises first. */
+.outsideTag {
+  font-size: calc(9px * var(--ui-scale, 1));
+  font-style: italic;
+  color: var(--muted);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsed .othersBtn,
+.collapsed .outsideTag {
+  display: none;
+}

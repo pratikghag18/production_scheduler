@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { ownedInScope, productsOfferedAtNode } from "@/features/admin/lib/scope";
+import { productsOfferedAtNode } from "@/features/admin/lib/scope";
 import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
@@ -13,7 +13,7 @@ import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
 import { useBoardViewStore } from "./store/boardView";
 import { useDragGesture } from "./hooks/useDragGesture";
 import { buildBoardIndex, policyForNode, type BoardIndex } from "./lib/boardIndex";
-import { outsideAreaOperatorIds as outsideAreaFor } from "./lib/outsideArea";
+import { outsideAreaOperatorIds as outsideAreaFor, splitPeopleFor } from "./lib/outsideArea";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
 import { splitFits } from "./lib/interaction";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
@@ -329,23 +329,94 @@ export default function BoardPage() {
   }, [boardQuery.data, createNodeId]);
 
   /**
-   * D113: the people who do NOT belong at this cell.
+   * ⭐⭐ THE PLANT'S PEOPLE, AS THE SERVER SENT THEM. No client filter at all.
+   *
+   * ⚠️ THIS USED TO BE `ownedInScope(all, index.nodeById.keys())` AND IT EMPTIED
+   * A SUPERVISOR'S PANEL. The maintainer, 6 Sept: *"Ana can't see any operators
+   * on the left panel. What am I missing? Something is definitely wrong."* The
+   * cut kept only people whose owner node was on this board, and `board_window`
+   * sends the nodes at or below the READER'S root -- so for Ana, granted Line 1,
+   * the plant node was absent and the five people homed at it were dropped.
+   * Nothing here could have told "another plant" from "above your grant".
+   *
+   * Migration 0058 moved the question to the server: `operators` is now the
+   * people whose home is in the board's PLANT, computed where the whole tree is
+   * visible. R-345's table guard makes that the same set the writers accept, so
+   * the list the screen offers and the list the database takes are one answer.
+   * `productsOfferedAtNode` above is the same move, made once already.
+   */
+  const operatorPool = useMemo(() => boardQuery.data?.operators ?? [], [boardQuery.data]);
+
+  /** A node's ltree path, or `null` when this window does not carry the node. */
+  const pathOf = useCallback(
+    (nodeId: string | null): string | null =>
+      nodeId === null ? null : (index?.nodeById.get(nodeId)?.path ?? null),
+    [index],
+  );
+
+  /**
+   * ⭐⭐ R-346, THE MAINTAINER'S RULE: *"If a operator is assigned to higher
+   * hierarchy they should automatically become available to all lower hierarchy
+   * within that hierarchy ... That should be the default behaviour. For other
+   * operators in the plant we need to give an option to the supervisor to click
+   * through something so show remaining operators."*
+   *
+   * So every person picker gets TWO lists rather than one: `here` for the place
+   * it is about, and `elsewhere` behind a click. The rule lives in
+   * `lib/outsideArea.ts` and is resolved HERE, exactly as `requiredSkills` and
+   * `offeredProducts` are -- the panel and the pop-ups render a decision, they
+   * do not make one, so the three cannot disagree.
+   *
+   * The panel's place is the BOARD'S ROOT (the plant, the area or the line the
+   * reader opened); each pop-up's place is its own cell.
+   */
+  const panelSplit = useMemo(
+    () => splitPeopleFor(operatorPool, rootPath),
+    [operatorPool, rootPath],
+  );
+  const panelHereIds = useMemo(() => new Set(panelSplit.here.map((o) => o.id)), [panelSplit]);
+
+  const createSplit = useMemo(
+    () => splitPeopleFor(operatorPool, pathOf(createNodeId)),
+    [operatorPool, pathOf, createNodeId],
+  );
+  const createHereIds = useMemo(() => new Set(createSplit.here.map((o) => o.id)), [createSplit]);
+
+  const assignmentNodeId = popover?.kind === "assignment" ? popover.assignment.nodeId : null;
+  const assignmentSplit = useMemo(
+    () => splitPeopleFor(operatorPool, pathOf(assignmentNodeId)),
+    [operatorPool, pathOf, assignmentNodeId],
+  );
+  const assignmentHereIds = useMemo(
+    () => new Set(assignmentSplit.here.map((o) => o.id)),
+    [assignmentSplit],
+  );
+  const assignmentOutsideAreaIds = useMemo(
+    () => outsideAreaFor(operatorPool, pathOf(assignmentNodeId)),
+    [operatorPool, pathOf, assignmentNodeId],
+  );
+
+  /**
+   * D113: the people who do NOT belong at this cell -- the ones a picker marks
+   * "not from this area (override)" and asks a reason for.
    *
    * ⚠️ THE OPPOSITE TREATMENT FROM `offeredProducts` ABOVE, AND DELIBERATELY.
    * A product outside its scope is refused by the database with no way through
    * (0030 leaves the product half absolute, because migration 0029's proof
    * depends on it), so it is filtered OUT of the picker. A person outside
    * theirs can be placed anyway by anyone who may schedule here, with a reason
-   * — so they stay in the list and are ANNOTATED. Filtering them would delete
+   * -- so they stay in the list and are ANNOTATED. Filtering them would delete
    * the feature; offering the product would offer a guaranteed refusal.
    *
-   * The decision itself lives in `lib/outsideArea.ts` (session 76), so the
-   * assignment pop-up's person picker (R-343) and this one cannot disagree,
-   * and R-342's fix has one place to land.
+   * ⚠️ AND IT IS NOT THE SAME SET AS `elsewhere` ABOVE. The split is about a
+   * PLACE and is generous downward -- somebody homed at Cell 1 is offered by
+   * default on Line 1's board, because that is their line. The mark is about
+   * THIS CELL and is the write guard transcribed, so that same person is marked
+   * on Cell 2. `outsideArea.ts` states the difference at both definitions.
    */
   const outsideAreaOperatorIds = useMemo(
-    () => outsideAreaFor(boardQuery.data?.operators ?? [], createNodeId, index),
-    [boardQuery.data, index, createNodeId],
+    () => outsideAreaFor(operatorPool, pathOf(createNodeId)),
+    [operatorPool, pathOf, createNodeId],
   );
 
   /**
@@ -372,29 +443,6 @@ export default function BoardPage() {
       secondsPerUnit: index.cycleTimeByKey.get(cycleTimeKey(nodeId, productId)),
     });
   }
-
-  /**
-   * ⭐ THE ASSIGNABLE POOL, CUT TO THE CHOSEN PLANT. Reported from the app: a
-   * system admin who picks one plant still saw every plant's operators in the
-   * left panel. A site admin already sees only their plant's people (RLS scopes
-   * their read); this makes a system admin's chosen plant behave the same.
-   *
-   * ⭐⭐ THE CUT IS MEMBERSHIP IN THE SCOPED NODES, not a path comparison.
-   * `board_window` returns EVERY operator on purpose (S18 — so a cross-plant
-   * assignment can still be DRAWN) but its `nodes` are scoped to the selected
-   * root, so `index.nodeById` IS exactly this plant's subtree. An operator
-   * belongs here iff its owner is one of those nodes. (An earlier version
-   * resolved owner PATHS through `nodeById` and "failed open" on an owner it
-   * could not find — but a different plant's owner is never in the scoped map,
-   * so every out-of-plant operator was kept: the bug this replaces.)
-   * `index.operatorById` still holds every operator, so an out-of-plant
-   * assignment's chip still resolves its name.
-   */
-  const operatorPool = useMemo(() => {
-    const all = boardQuery.data?.operators ?? [];
-    if (index === null) return all;
-    return ownedInScope(all, new Set(index.nodeById.keys()));
-  }, [boardQuery.data, index]);
 
   if (sessionLoading) {
     return <p>Loading session…</p>;
@@ -516,6 +564,11 @@ export default function BoardPage() {
             <div className={styles.body}>
               <OperatorPanel
                 operators={operatorPool}
+                /* R-346: who is offered here by DEFAULT -- everyone whose home
+                   covers the board's own place or sits inside it. The rest of
+                   the plant is the same list minus these, shown by the panel's
+                   own control. Decided in `lib/outsideArea.ts`, never here. */
+                hereOperatorIds={panelHereIds}
                 skillById={index.skillById}
                 nodeById={index.nodeById}
                 assignmentsByOperator={index.assignmentsByOperator}
@@ -577,6 +630,7 @@ export default function BoardPage() {
           // panel." So this is the panel's own list, the same variable, not a
           // second filter that could drift from it.
           operators={operatorPool}
+          hereOperatorIds={createHereIds}
           windowStart={index?.windowStart ?? from}
           requiredSkills={index?.skillsForNode.get(popover.nodeId) ?? []}
           outsideAreaOperatorIds={outsideAreaOperatorIds}
@@ -663,6 +717,9 @@ export default function BoardPage() {
              this plant's people, the same variable the panel is given, never a
              second filter that could drift from it. */
           operators={operatorPool}
+          /* R-346, resolved for THIS chip's cell -- not for `createNodeId`,
+             which belongs to a different pop-up. */
+          hereOperatorIds={assignmentHereIds}
           assignment={popover.assignment}
           homeRun={popover.homeRun}
           operator={
@@ -671,11 +728,7 @@ export default function BoardPage() {
           /* D113: the same helper the create pop-up uses marks the people from
              another AREA of this plant, resolved for THIS chip's cell -- not
              for `createNodeId`, which belongs to a different pop-up. */
-          outsideAreaOperatorIds={outsideAreaFor(
-            boardQuery.data?.operators ?? [],
-            popover.assignment.nodeId,
-            index,
-          )}
+          outsideAreaOperatorIds={assignmentOutsideAreaIds}
           products={boardQuery.data?.products ?? []}
           anchor={popover.anchor}
           windowStart={index?.windowStart ?? from}

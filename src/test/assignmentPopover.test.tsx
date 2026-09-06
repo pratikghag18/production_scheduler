@@ -44,6 +44,10 @@ function operator(
     employeeRef: null,
     active: true,
     siteNodeId: "n-plant",
+    // S39/0058: the home as a PATH. The component never reads it -- `BoardPage`
+    // resolves both sets and hands them down -- but the shape requires it, and
+    // the values here say which set each person belongs in.
+    sitePath: "plant_a",
     skillIds: [],
     skillExpiries: [],
     ...over,
@@ -52,8 +56,16 @@ function operator(
 
 const ANA = operator({ id: "op-ana", displayName: "Ana" });
 const BEN = operator({ id: "op-ben", displayName: "Ben" });
-/** Owned by another AREA of this plant: offered, marked, and asked about. */
-const CARA = operator({ id: "op-cara", displayName: "Cara", siteNodeId: "n-line-9" });
+/**
+ * Homed in another AREA of this plant. R-346: behind the "show other people in
+ * this plant" control, and once revealed, marked and asked for a reason.
+ */
+const CARA = operator({
+  id: "op-cara",
+  displayName: "Cara",
+  siteNodeId: "n-line-9",
+  sitePath: "plant_a.area_9",
+});
 /** Left the company: in the window's list, and not on offer. */
 const DEV = operator({ id: "op-dev", displayName: "Dev", active: false });
 
@@ -132,6 +144,9 @@ function renderPopover(over: Partial<React.ComponentProps<typeof AssignmentPopov
   render(
     <AssignmentPopover
       operators={[ANA, BEN, CARA, DEV]}
+      // R-346: Ana and Ben are homed at or above this cell; Cara is not, so she
+      // is the one behind the control. Dev is inactive and is in neither set.
+      hereOperatorIds={new Set([ANA.id, BEN.id])}
       assignment={assignment()}
       homeRun={null}
       operator={ANA}
@@ -161,6 +176,17 @@ function saveButton(): HTMLButtonElement {
   return within(pop()).getByRole("button", { name: "Save" }) as HTMLButtonElement;
 }
 
+/** R-346's control, whichever way round it is currently worded. */
+function othersButton(): HTMLButtonElement | null {
+  return within(pop()).queryByRole("button", {
+    name: /other people in this plant/,
+  }) as HTMLButtonElement | null;
+}
+
+function optionLabels(): (string | null)[] {
+  return Array.from(personSelect().options).map((o) => o.textContent);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -170,31 +196,59 @@ beforeEach(() => {
  * ======================================================================== */
 
 describe("AP1: the select shows who is on the row now", () => {
-  it("is set to the current person, and lists the active pool", () => {
+  /**
+   * ⭐⭐ R-346 CHANGED WHAT "THE POOL" MEANS HERE. It used to be every active
+   * person the board carried, Cara included and marked. Now the default list is
+   * the people this cell is under -- "a person is available everywhere under
+   * their home" -- and Cara waits behind one press.
+   */
+  it("is set to the current person, and lists only the people offered here", () => {
     renderPopover();
     expect(personSelect().value).toBe(ANA.id);
-    const names = Array.from(personSelect().options).map((o) => o.textContent);
-    expect(names).toEqual([
+    expect(optionLabels()).toEqual([
       "Ana",
       "Ben",
-      "Cara — not from this area (override)",
       // ⚠️ Dev is INACTIVE and is not on offer. He is in `operators` because
       // the window still carries him; a picker that offered him would post a
       // placement the board could not draw.
+      // ⚠️ Cara is ACTIVE and not here either: she is homed in another area,
+      // and R-346 puts her behind the control rather than in this list.
     ]);
   });
 
-  it("keeps the person already on the row in the list even when the pool does not hold them", () => {
-    // Somebody on loan from a plant this board is not showing. Without this the
-    // select would sit on the first pool member while the row held someone
-    // else, and Save would look like a no-op that quietly reassigned the work.
+  it("⭐ the control names how many are behind it, and reveals them marked", () => {
+    renderPopover();
+    const btn = othersButton();
+    expect(btn?.textContent).toBe("Show other people in this plant (1)");
+    fireEvent.click(btn as HTMLButtonElement);
+    expect(optionLabels()).toEqual(["Ana", "Ben", "Cara — not from this area (override)"]);
+  });
+
+  it("and the control is absent when everybody in the plant is already offered", () => {
+    renderPopover({ hereOperatorIds: new Set([ANA.id, BEN.id, CARA.id]) });
+    expect(othersButton()).toBeNull();
+    expect(optionLabels()).toEqual(["Ana", "Ben", "Cara — not from this area (override)"]);
+  });
+
+  /**
+   * ⚠️ AP1b USED TO BE "somebody on loan from a plant this board is not
+   * showing", AND THAT ROW CANNOT EXIST ANY MORE (R-345: the table refuses a
+   * cross-plant placement, override or not). What survives is the real version
+   * of the same worry: the row holds a LIVE person who is behind the control.
+   * A select whose value matches no option shows the FIRST option instead, so
+   * hiding her would silently swap the person on the row -- so she is pinned
+   * into the list whether the control has been pressed or not.
+   */
+  it("pins the person already on the row into the list even before the control is pressed", () => {
     renderPopover({
-      operators: [BEN],
-      assignment: assignment({ operatorId: "op-far" }),
-      operator: operator({ id: "op-far", displayName: "Faye" }),
+      assignment: assignment({ operatorId: CARA.id }),
+      operator: CARA,
     });
-    expect(personSelect().value).toBe("op-far");
-    expect(Array.from(personSelect().options).map((o) => o.textContent)).toEqual(["Faye", "Ben"]);
+    expect(personSelect().value).toBe(CARA.id);
+    expect(optionLabels()).toEqual(["Ana", "Ben", "Cara — not from this area (override)"]);
+    // ...and the control is still offered, because there is nobody else behind
+    // it only when `elsewhere` is empty, which it is not: Cara is in it.
+    expect(othersButton()?.textContent).toBe("Show other people in this plant (1)");
   });
 });
 
@@ -247,6 +301,9 @@ describe("AP2: choosing somebody else and saving sends exactly that", () => {
 describe("AP3: a person outside this area is marked, and the reason is asked for", () => {
   it("reveals the reason box, holds Save until it says something, and sends the area override", async () => {
     const { onReassign } = renderPopover();
+    // R-346: she is behind the control now, and pressing it is the supervisor's
+    // decision to look outside the area. Everything after it is unchanged.
+    fireEvent.click(othersButton() as HTMLButtonElement);
     fireEvent.change(personSelect(), { target: { value: CARA.id } });
 
     expect(

@@ -181,3 +181,20 @@
   width: auto;
   flex: none;
 }
+
+/* ---------------------------------------------------------------------------
+   R-346 — "Show other people in this plant (n)", under the Person select.
+
+   The skin is the app's shared field button (`Field.module.css`'s `.btn`,
+   R-318); only placement is here. ⚠️ IT IS NOT INSIDE `.row`, whose
+   `.row button` rule (0,1,1) would beat any single class the shared module
+   brings and repaint it as a dialog action -- the same specificity trap this
+   file's `.row button.pri` comment records. A plain block above the next label
+   keeps it reading as part of the picker rather than as a third Create button.
+   ------------------------------------------------------------------------ */
+.othersBtn {
+  display: block;
+  width: 100%;
+  margin-top: calc(6px * var(--chrome-scale, 1));
+  text-align: left;
+}

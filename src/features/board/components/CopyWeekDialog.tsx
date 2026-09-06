@@ -435,19 +435,28 @@ function plural(n: number, noun: string): string {
 }
 
 /**
- * A person the server could not name. An assignment always has a person; the
- * name is null only when that person is owned by another plant and the caller
- * cannot read their row -- someone placed here on loan (D113, F-099). Never
- * rendered blank, and never "no person": there is one, and the copy takes them.
+ * A person the server could not name. An assignment always has a person, so
+ * this is never blank and never "no person": there is one, and the copy takes
+ * them.
+ *
+ * ⚠️ IT USED TO READ "a person on loan from another plant", AND THAT SENTENCE
+ * IS NOW UNTRUE OF EVERY LIVE ROW (R-345, migration 0058). It was a reasonable
+ * reading of a null name when a cross-plant placement could exist: the caller
+ * could not read that person's row, so the copy named the situation instead.
+ * The table's own guard refuses such a placement outright now, override or no
+ * override, so no live assignment holds someone from another plant and there is
+ * nothing to be on loan. What is left is a name the read could not resolve for
+ * some other reason, and the honest thing to print is that it is missing rather
+ * than a story about why (F-099's rule: never blank, never invented).
  */
-const ON_LOAN = "a person on loan from another plant";
+const UNNAMED = "(unnamed person)";
 
 function describeItem(item: CopyWeekItem, dateFormat: DateFormat): string {
   const kind = item.kind === "run" ? "Run" : "Assignment";
   const who =
     item.kind === "run"
       ? (item.copied.productName ?? "no product")
-      : (item.copied.operatorName ?? ON_LOAN);
+      : (item.copied.operatorName ?? UNNAMED);
   return `${kind}: ${who} on ${item.copied.nodeName}, ${describeWhen(
     item.copied.start,
     item.copied.end,
@@ -464,12 +473,12 @@ function describeRow(
     end: Date;
   },
   dateFormat: DateFormat,
-  personOnLoan = false,
+  personUnnamed = false,
 ): string {
   const parts = [row.nodeName];
   if (row.productName !== null) parts.push(row.productName);
   if (row.operatorName !== null) parts.push(row.operatorName);
-  else if (personOnLoan) parts.push(ON_LOAN);
+  else if (personUnnamed) parts.push(UNNAMED);
   parts.push(describeWhen(row.start, row.end, dateFormat));
   return parts.join(" · ");
 }
@@ -482,7 +491,7 @@ function describeWhen(start: Date, end: Date, dateFormat: DateFormat): string {
 }
 
 function describeReason(item: CopyWeekItem, clash: CopyWeekClash): string {
-  const person = item.copied.operatorName ?? "A person on loan from another plant";
+  const person = item.copied.operatorName ?? UNNAMED;
   switch (clash.reason) {
     case "run_overlap":
       return `${item.copied.nodeName} already has a run at this time.`;
@@ -496,7 +505,7 @@ function describeReason(item: CopyWeekItem, clash: CopyWeekClash): string {
 }
 
 function describeWarning(item: CopyWeekItem): string {
-  const person = item.copied.operatorName ?? "A person on loan from another plant";
+  const person = item.copied.operatorName ?? UNNAMED;
   return `Warning: ${person} is not certified for this work. Taking the copied plan places them anyway and records an override; keeping the prior plan does not.`;
 }
 

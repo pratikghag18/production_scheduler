@@ -1113,6 +1113,7 @@ export type Database = {
         Args: { p_product_id: string }
         Returns: boolean
       }
+      app_can_read_in_plant: { Args: { p_site_node: string }; Returns: boolean }
       app_can_read_node: { Args: { p_node: string }; Returns: boolean }
       app_can_read_operator: { Args: { p_operator: string }; Returns: boolean }
       app_can_read_owned: { Args: { p_site_node: string }; Returns: boolean }
@@ -1155,6 +1156,13 @@ export type Database = {
         Returns: {
           node_id: string
           product_id: string
+        }[]
+      }
+      app_operator_homes: {
+        Args: { p_root_path: unknown }
+        Returns: {
+          operator_id: string
+          site_path: unknown
         }[]
       }
       app_owner_covers: {

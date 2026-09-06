@@ -100,6 +100,10 @@ const boardWindowJson: Json = {
       // 0025 and `parseOperator` dropped it, so the board could not tell
       // whether somebody belonged at the cell being scheduled. REQUIRED now.
       site_node_id: "30000000-0000-0000-0000-000000000001",
+      // S39/R-346/0058: the same node's ltree PATH. `board_window` sends it so
+      // that the screen can tell "above this cell" from "another area" without
+      // holding a node the reader's grant does not reach. REQUIRED.
+      site_path: "plant_1",
       skill_ids: ["40000000-0000-0000-0000-000000000001"],
       // F-087/0048: `board_window` emits this on EVERY operator (`[]` where
       // nothing is dated) and `parseOperator` REQUIRES it, for the reason
@@ -715,6 +719,23 @@ describe("an operator carries the part of the structure they belong to", () => {
     expect(parseBoardWindow(boardWindowJson)?.operators[0]?.siteNodeId).toBe(
       "30000000-0000-0000-0000-000000000001",
     );
+  });
+
+  it("S39/R-346: and the HOME'S PATH beside it, which is what the split compares", () => {
+    expect(parseBoardWindow(boardWindowJson)?.operators[0]?.sitePath).toBe("plant_1");
+  });
+
+  it("⭐ rejects a row with no site_path rather than reading it as homed nowhere", () => {
+    // Coercing to `""` would be worse than rejecting, and in the opposite
+    // direction from `site_node_id` below: an empty home covers no place, so
+    // `splitPeopleFor` files the person under "the rest of the plant" and the
+    // whole panel disappears behind the click. Same rule as `skill_expiries`:
+    // a payload this client cannot understand is refused, not guessed at.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      operators: Record<string, unknown>[];
+    };
+    delete raw.operators[0].site_path;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
   });
 
   it("and rejects a row without one, rather than coercing it to empty", () => {

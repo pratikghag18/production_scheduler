@@ -6,6 +6,7 @@ import { formatClock, formatFull, addMinutes } from "../lib/time";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
+import fieldStyles from "@/components/Field.module.css";
 import styles from "./AssignmentPopover.module.css";
 
 /**
@@ -85,6 +86,7 @@ export function AssignmentPopover({
   homeRun,
   operator,
   operators,
+  hereOperatorIds,
   outsideAreaOperatorIds,
   products,
   anchor,
@@ -104,19 +106,31 @@ export function AssignmentPopover({
    *
    * ⚠️ THE POOL, NOT EVERY OPERATOR THE WINDOW CARRIES. The maintainer, 6
    * Sept: *"Operators from other plants should not be shown in the list,
-   * period, it is the same as the operators shown on the left panel."*
-   * `board_window` returns every operator in the company on purpose (S18, so a
-   * cross-plant chip can still be DRAWN); `BoardPage` cuts that to the selected
-   * plant's people for the left panel, and hands the same cut list here. A
-   * person from another AREA of THIS plant is still in it — they are marked
-   * and a reason is asked for (D113) — because that refusal has a door and a
-   * person from another plant's does not.
+   * period, it is the same as the operators shown on the left panel."* This is
+   * the left panel's own variable (`operatorPool`), and since migration 0058 it
+   * is the plant's people as the SERVER counted them. A person from another
+   * AREA of THIS plant is still in it — they are marked and a reason is asked
+   * for (D113) — because that refusal has a door and a cross-plant one does
+   * not: R-345's table guard refuses it, override or no override.
    */
   operators: BoardOperator[];
+  /**
+   * ⭐⭐ R-346: of `operators`, the ones offered at THIS CELL by default. The
+   * select opens on exactly these, and the rest of the plant is added by the
+   * "Show other people in this plant" control under it. Resolved in `BoardPage`
+   * by `lib/outsideArea.ts`, the same helper and the same place as the create
+   * pop-up's, so the two pickers and the panel cannot disagree.
+   */
+  hereOperatorIds: ReadonlySet<string>;
   /**
    * D113: the people in `operators` who do not belong at THIS cell. Resolved in
    * `BoardPage` by `lib/outsideArea.ts`, the same helper the create pop-up
    * uses, so the two pickers cannot disagree about who is marked.
+   *
+   * ⚠️ NOT THE COMPLEMENT OF `hereOperatorIds`. Being offered by default and
+   * needing no reason are different questions: somebody homed in a cell under
+   * this line is a default offer on the line's board and still marked on the
+   * cell next door. `outsideArea.ts` states the difference at both definitions.
    */
   outsideAreaOperatorIds: ReadonlySet<string>;
   products: Product[];
@@ -197,17 +211,40 @@ export function AssignmentPopover({
   }
 
   /**
-   * The list the select offers.
+   * ⭐⭐ R-346: THE LIST THE SELECT OFFERS IS `here` PLUS WHAT THE READER ASKED
+   * FOR. The maintainer's rule, 6 Sept: a person is available by default
+   * everywhere under their home, and *"for other operators in the plant we need
+   * to give an option to the supervisor to click through something so show
+   * remaining operators so they can make that decision to assign someone
+   * outside of that area."* Pressing the control below adds them, marked, and
+   * picking one runs the D113 reason flow unchanged.
    *
-   * ⚠️ THE PERSON ALREADY ON THE ROW IS ALWAYS IN IT, even when they are not
-   * in the pool — somebody on loan from another plant, or a row whose operator
-   * has been deleted (D110, `operatorId` null and only a name left). Without
-   * that the select would silently show the FIRST person in the pool while the
-   * row held someone else, and Save would then look like a no-op that quietly
-   * reassigned the work.
+   * ⚠️ THE PERSON ALREADY ON THE ROW IS ALWAYS IN IT, AND THE REASON HAS
+   * NARROWED. It used to cover "somebody on loan from another plant" as well as
+   * D110's ghost; the loan case cannot exist any more (R-345 — the table refuses
+   * a cross-plant placement, so no live row holds one) and `operators` is the
+   * whole plant, so a LIVE person is always somewhere in this list: in `here`,
+   * or pinned out of `elsewhere` by the filter below whether the control has
+   * been pressed or not. What is left is the D110 ghost, `operatorId` null with
+   * only a name remembered, which is in no pool by construction. Without the pin
+   * the select would show the FIRST person while the row held someone else, and
+   * Save would look like a no-op that quietly reassigned the work (AP8).
    */
+  const here = useMemo(
+    () => operators.filter((o) => o.active && hereOperatorIds.has(o.id)),
+    [operators, hereOperatorIds],
+  );
+  const elsewhere = useMemo(
+    () => operators.filter((o) => o.active && !hereOperatorIds.has(o.id)),
+    [operators, hereOperatorIds],
+  );
+  const [showOthers, setShowOthers] = useState(false);
+
   const people = useMemo(() => {
-    const rows = operators.filter((o) => o.active).map((o) => ({ id: o.id, label: o.displayName }));
+    const offered = showOthers
+      ? [...here, ...elsewhere]
+      : [...here, ...elsewhere.filter((o) => o.id === currentOperatorId || o.id === operatorId)];
+    const rows = offered.map((o) => ({ id: o.id, label: o.displayName }));
     if (currentOperatorId === "") {
       // D110: the person was deleted and only their name remains. The select
       // must say so and hold that as its value, or it would show the first
@@ -219,13 +256,26 @@ export function AssignmentPopover({
         label: `${assignment.operatorDisplayName ?? "(unknown operator)"} — no longer in the system`,
       });
     } else if (!rows.some((r) => r.id === currentOperatorId)) {
+      // ⚠️ THE LAST RESORT, AND IT SHOULD NOW BE UNREACHABLE FOR A LIVE PERSON:
+      // `operators` is the whole plant and nobody outside it can be on the row.
+      // It is kept because "unreachable" is a claim about the server, and this
+      // is what the reader sees if it stops being true — a named row rather
+      // than a silent swap.
       rows.unshift({
         id: currentOperatorId,
         label: operator?.displayName ?? assignment.operatorDisplayName ?? "(unknown operator)",
       });
     }
     return rows;
-  }, [operators, currentOperatorId, operator, assignment.operatorDisplayName]);
+  }, [
+    here,
+    elsewhere,
+    showOthers,
+    operatorId,
+    currentOperatorId,
+    operator,
+    assignment.operatorDisplayName,
+  ]);
 
   const personChanged = operatorId !== currentOperatorId;
   const chosenName =
@@ -321,6 +371,21 @@ export function AssignmentPopover({
             </option>
           ))}
         </select>
+        {/* R-346. ABSENT WHEN THERE IS NOBODY BEHIND IT -- on a plant admin's
+            board every home in the plant is covered, so a control reading "(0)"
+            would be a door onto an empty room. Skin from the shared field
+            module (R-318); deliberately not inside `.row`, whose `.row button`
+            rule would repaint it as a dialog action. */}
+        {elsewhere.length > 0 && (
+          <button
+            type="button"
+            className={`${fieldStyles.btn} ${styles.othersBtn}`}
+            aria-expanded={showOthers}
+            onClick={() => setShowOthers((v) => !v)}
+          >
+            {showOthers ? "Hide" : "Show"} other people in this plant ({elsewhere.length})
+          </button>
+        )}
 
         <label htmlFor="ap-eff">Efficiency %</label>
         <input

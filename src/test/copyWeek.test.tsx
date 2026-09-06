@@ -330,7 +330,17 @@ describe("CW2: every clash lists both candidates, prior and copied", () => {
     expect(within(dialog()).queryByRole("group", { name: /Widget A on Line 1/ })).toBeNull();
   });
 
-  it("a person the server could not name is drawn as on loan, never blank (F-099)", async () => {
+  /**
+   * ⚠️ THIS CASE USED TO ASSERT "a person on loan from another plant", AND THAT
+   * SENTENCE WENT WITH R-345. Migration 0058's table guard refuses a
+   * cross-plant placement override or not, so no live assignment holds someone
+   * from another plant and there is nothing to be on loan. F-099's rule is the
+   * part that survives and is what this case is really for: a null name is
+   * never drawn blank and never as "no person" -- an assignment always has one,
+   * and the copy takes them. It now reads as a missing name rather than as a
+   * story about why it is missing.
+   */
+  it("a person the server could not name is drawn as unnamed, never blank (F-099)", async () => {
     const plan = planFixture();
     const busy = plan.items.find((i) => i.key === "assignment:a1");
     if (busy === undefined || busy.clash === null) throw new Error("fixture");
@@ -342,26 +352,20 @@ describe("CW2: every clash lists both candidates, prior and copied", () => {
     h.fetchPlan.mockResolvedValue(plan);
     renderDialog();
     const group = await screen.findByRole("group", {
-      name: /Assignment: a person on loan from another plant on Line 3/,
+      name: /Assignment: \(unnamed person\) on Line 3/,
     });
     expect(
-      within(group).getByText(
-        "Line 4 · Widget A · a person on loan from another plant · Mon Sep 14 06:00–14:00",
-      ),
+      within(group).getByText("Line 4 · Widget A · (unnamed person) · Mon Sep 14 06:00–14:00"),
     ).toBeTruthy();
     expect(
-      within(group).getByText(
-        "Line 3 · a person on loan from another plant · Mon Sep 14 06:00–14:00",
-      ),
+      within(group).getByText("Line 3 · (unnamed person) · Mon Sep 14 06:00–14:00"),
     ).toBeTruthy();
     expect(
-      within(group).getByText(
-        "A person on loan from another plant is already booked at this time.",
-      ),
+      within(group).getByText("(unnamed person) is already booked at this time."),
     ).toBeTruthy();
-    // A run's prior row has no person and must not be called on loan.
+    // A run's prior row has no person and must not be given a person's label.
     const overlap = clashGroup(/Run: Widget C on Line 2/);
-    expect(within(overlap).queryByText(/on loan/)).toBeNull();
+    expect(within(overlap).queryByText(/unnamed person/)).toBeNull();
   });
 
   it("an assignment attached to a copied run says it follows that run", async () => {

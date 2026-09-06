@@ -1,210 +1,211 @@
 import { describe, expect, it } from "vitest";
-import type { BoardWindow } from "@/lib/api";
-import { buildBoardIndex } from "@/features/board/lib/boardIndex";
-import { DENSITIES } from "@/features/board/lib/geometry";
-import { outsideAreaOperatorIds } from "@/features/board/lib/outsideArea";
+import type { BoardOperator } from "@/lib/api";
+import { outsideAreaOperatorIds, splitPeopleFor } from "@/features/board/lib/outsideArea";
 
 /**
- * R-342 / S36 — who the board pickers mark "not from this area (override)".
+ * R-346 / S39 — WHO IS OFFERED WHERE, AND WHO IS MARKED.
  *
- * THE CASE THIS FILE EXISTS FOR IS "another plant", NOT "another area".
- * The maintainer, on the live app: *"I was assigning plant A, I was able to
- * select operators from any other plants for example plant B in the list and
- * it did not show any warning whatsoever in direct assignment tab."*
+ * ⭐⭐ THE MAINTAINER'S RULE, 6 Sept, is the whole of this file: *"If a operator
+ * is assigned to higher hierarchy they should automatically become available to
+ * all lower hierarchy within that hierarchy ... That should be the default
+ * behaviour. For other operators in the plant we need to give an option to the
+ * supervisor to click through something so show remaining operators so they can
+ * make that decision to assign someone outside of that area."*
  *
- * The fixture is built the way `boardIndex.test.ts` builds one, with ONE
- * deliberate difference that is the whole point: `board_window` returns every
- * operator in the org (`FROM operators op WHERE op.org_id = v_org_id`, 0051)
- * but only the SELECTED PLANT'S nodes (`scoped_nodes`, `n.path <@ p_root_path`).
- * So `op-plant2` below is owned by a node that is NOT in `nodes` — exactly the
- * payload the browser gets — and the old implementation asked `offeredHere`,
- * which fails OPEN on an owner it cannot resolve and therefore answered
- * "belongs" for every person in the company.
+ * The board it is judged on is Ana's: a supervisor granted LINE 1, whose board
+ * therefore starts at that line, in a plant whose people are homed ABOVE it.
+ * That board is the one that was broken — an empty panel and a reason asked of
+ * everybody — and it is the one every case here is written from.
  *
- * The server answers the same question with `app_owner_covers_in_org`:
- * `o.path @> n.path` over rows that must both exist in the org. A missing
- * owner row makes that EXISTS false, i.e. NOT covered, i.e. refused with
- * `not_offered_here` — which is what these cases are transcribed from.
+ * ---------------------------------------------------------------------------
+ * ⚠️⚠️ THE FIXTURE IS SEVEN STRINGS AND NO BOARD, AND THAT IS THE POINT OF THE
+ * CHANGE. The previous version of this file built a whole `BoardWindow` and ran
+ * `buildBoardIndex` over it, because the decision was made by resolving each
+ * person's owner through the board's node map. That map is the thing that was
+ * wrong: `board_window` sends the nodes at or below the READER'S root, so a
+ * missing node meant "another plant" for a plant admin and "above your grant"
+ * for a supervisor, and no predicate reading that map could tell the two apart.
+ * Migration 0058 sends each person's home as a PATH, so there is no map, no
+ * index and no fixture left to get wrong — two strings and `isAtOrBelow`, the
+ * same comparison `app_owner_covers_in_org` makes on the server.
+ *
+ * ⛔ THE "ANOTHER PLANT" CASE THAT THIS FILE USED TO EXIST FOR IS DELETED, and
+ * not because it stopped mattering. R-345 moved it out of reach of the screen
+ * entirely: migration 0058's table guard refuses a cross-plant placement
+ * override or not, so no writer can make such a row, and `board_window` sends
+ * only the plant's own people, so no picker is ever handed one. A unit case
+ * here could only prove that a fixture nobody can build is handled — the rule
+ * is the database's now, and `supabase/tests` is where it is proved. What this
+ * file keeps is the half that is still a screen decision: which of the PLANT'S
+ * people are a default offer, and which need the reason.
  */
 
-const CELL = "plant_1.assembly.line_1.cell_1";
+/** Ana's board: she is granted Line 1, so this is the place the panel splits for. */
+const LINE_1 = "plant_a.area_1.line_1";
+/** A cell under it — what a pop-up opened on the board splits for. */
+const CELL_1 = "plant_a.area_1.line_1.cell_1";
+const CELL_2 = "plant_a.area_1.line_1.cell_2";
+/** A plant admin's board. */
+const PLANT = "plant_a";
 
-function makeFixture(): BoardWindow {
-  const levels = [
-    { id: "lvl-plant", templateId: "tpl-a", position: 0, name: "Plant", isSchedulable: false },
-    { id: "lvl-dept", templateId: "tpl-a", position: 1, name: "Department", isSchedulable: false },
-    { id: "lvl-line", templateId: "tpl-a", position: 2, name: "Line", isSchedulable: false },
-    { id: "lvl-cell", templateId: "tpl-a", position: 3, name: "Cell", isSchedulable: true },
-  ];
-
-  // Plant 1's subtree, and ONLY Plant 1's subtree — this is what a board
-  // opened on Plant 1 holds in `index.nodeById`. Plant 2 exists in the
-  // database; it is not here, and that absence is the fixture's subject.
-  const nodes = [
-    {
-      id: "n-plant",
-      parentId: null,
-      levelId: "lvl-plant",
-      name: "Plant 1",
-      path: "plant_1",
-      sortOrder: 0,
-      active: true,
-    },
-    {
-      id: "n-assembly",
-      parentId: "n-plant",
-      levelId: "lvl-dept",
-      name: "Assembly",
-      path: "plant_1.assembly",
-      sortOrder: 0,
-      active: true,
-    },
-    {
-      id: "n-line1",
-      parentId: "n-assembly",
-      levelId: "lvl-line",
-      name: "Line 1",
-      path: "plant_1.assembly.line_1",
-      sortOrder: 0,
-      active: true,
-    },
-    {
-      id: "n-cell1",
-      parentId: "n-line1",
-      levelId: "lvl-cell",
-      name: "Cell 1",
-      path: CELL,
-      sortOrder: 0,
-      active: true,
-    },
-    // ⚠️ A SIBLING WHOSE PATH IS A STRING PREFIX OF NOTHING BUT ITSELF, and a
-    // second line whose slug extends `line_1`'s. `plant_1.assembly.line_1` is
-    // a prefix of the STRING `plant_1.assembly.line_10` and is not an ancestor
-    // of that NODE — `isAtOrBelow`, not `startsWith`.
-    {
-      id: "n-line10",
-      parentId: "n-assembly",
-      levelId: "lvl-line",
-      name: "Line 10",
-      path: "plant_1.assembly.line_10",
-      sortOrder: 1,
-      active: true,
-    },
-    {
-      id: "n-machining",
-      parentId: "n-plant",
-      levelId: "lvl-dept",
-      name: "Machining",
-      path: "plant_1.machining",
-      sortOrder: 1,
-      active: true,
-    },
-  ];
-
-  // ⭐ EVERY OPERATOR IN THE ORG, NOT EVERY OPERATOR IN THE PLANT. `op-plant2`
-  // is owned by `n-p2-cell`, a node of Plant 2 that this window never sent.
-  const operators = [
-    op("op-cell", "At the cell", "n-cell1"),
-    op("op-line", "On the line", "n-line1"),
-    op("op-dept", "In Assembly", "n-assembly"),
-    op("op-plant", "Plant-wide", "n-plant"),
-    op("op-machining", "In Machining", "n-machining"),
-    op("op-line10", "On Line 10", "n-line10"),
-    op("op-plant2", "From Plant 2", "n-p2-cell"),
-  ];
-
-  return {
-    org: { id: "org1", name: "Northwind", settings: {} },
-    levels,
-    nodes,
-    runs: [],
-    assignments: [],
-    operators,
-    products: [],
-    skills: [],
-    nodeSkillRequirements: [],
-    shiftTemplates: [],
-    nodeShiftMap: nodes.map((n) => ({ nodeId: n.id, templateId: null })),
-    cycleTimes: [],
-    nodePolicies: nodes.map((n) => ({ nodeId: n.id, eligibilityPolicy: "warn" })),
-  } as unknown as BoardWindow;
-}
-
-function op(id: string, displayName: string, siteNodeId: string) {
+function op(id: string, sitePath: string): BoardOperator {
   return {
     id,
     homeNodeId: null,
-    displayName,
+    displayName: id,
     employeeRef: null,
     active: true,
-    siteNodeId,
+    siteNodeId: `n-${id}`,
+    sitePath,
     skillIds: [],
     skillExpiries: [],
   };
 }
 
-const windowStart = new Date("2026-09-07T00:00:00Z");
-const windowEnd = new Date("2026-09-08T00:00:00Z");
+/**
+ * The demo plant, as `dev_demo.sql` builds it and 0058 sends it: one person
+ * homed on Line 1 itself and the rest homed at the plant — plus, deliberately,
+ * the two neighbours that decide the interesting cases.
+ */
+const AT_PLANT = op("at the plant", "plant_a");
+const AT_AREA_1 = op("in Area 1", "plant_a.area_1");
+const AT_LINE_1 = op("on Line 1", "plant_a.area_1.line_1");
+const AT_CELL_1 = op("in Cell 1", "plant_a.area_1.line_1.cell_1");
+const AT_AREA_2 = op("in Area 2", "plant_a.area_2");
+/**
+ * ⚠️ A SLUG THAT EXTENDS THIS LINE'S. `plant_a.area_1.line_1` is a prefix of the
+ * STRING `plant_a.area_1.line_10` and is not an ancestor of that NODE. Ten lines
+ * is not an exotic plant, and a `startsWith` here is right on every fixture
+ * anybody would think to build except this one.
+ */
+const AT_LINE_10 = op("on Line 10", "plant_a.area_1.line_10");
 
-function build() {
-  const data = makeFixture();
-  const index = buildBoardIndex(data, windowStart, windowEnd, DENSITIES[1]);
-  return { operators: data.operators, index };
+const PLANT_PEOPLE = [AT_PLANT, AT_AREA_1, AT_LINE_1, AT_CELL_1, AT_AREA_2, AT_LINE_10];
+
+function names(people: readonly BoardOperator[]): string[] {
+  return people.map((o) => o.displayName);
 }
 
 /** The marked names, so a failure reads as people rather than as ids. */
-function markedAt(nodeId: string | null, useIndex = true) {
-  const { operators, index } = build();
-  const ids = outsideAreaOperatorIds(operators, nodeId, useIndex ? index : null);
-  return operators.filter((o) => ids.has(o.id)).map((o) => o.displayName);
+function markedAt(cellPath: string | null): string[] {
+  const ids = outsideAreaOperatorIds(PLANT_PEOPLE, cellPath);
+  return names(PLANT_PEOPLE.filter((o) => ids.has(o.id)));
 }
 
-describe("outsideArea: who the picker marks at a cell", () => {
-  /**
-   * ⭐ THE DEFECT. Red before the fix and green after: the old body handed the
-   * whole roster to `offeredHere`, whose `offeredAt` returns TRUE for an owner
-   * it cannot find in the map, so the one person the server is certain to
-   * refuse was the one person the picker said nothing about.
-   */
-  it("R-342: a person owned by ANOTHER PLANT is marked", () => {
-    expect(markedAt("n-cell1")).toContain("From Plant 2");
-  });
-
-  it("a person from another area of the SAME plant is marked", () => {
-    expect(markedAt("n-cell1")).toContain("In Machining");
-  });
+describe("R-346: a line supervisor's board — the default list, and the click", () => {
+  const split = splitPeopleFor(PLANT_PEOPLE, LINE_1);
 
   /**
-   * `plant_1.assembly.line_1` is a string prefix of `plant_1.assembly.line_10`.
-   * A `startsWith` here would call Line 10's people locals of Line 1's cell.
+   * ⭐⭐ THE DEFECT, IN ONE ASSERTION. Ana saw an empty panel because the pool
+   * kept only people whose owner node was on her board, and her board starts at
+   * Line 1 while five of the six are homed at the plant. "If a operator is
+   * assigned to higher hierarchy they should automatically become available to
+   * all lower hierarchy within that hierarchy."
    */
-  it("a sibling line whose slug extends this one's is still outside", () => {
-    expect(markedAt("n-cell1")).toContain("On Line 10");
+  it("somebody homed at the PLANT is offered here by default", () => {
+    expect(names(split.here)).toContain("at the plant");
+    expect(names(split.elsewhere)).not.toContain("at the plant");
   });
 
-  /**
-   * ⚠️ AT OR BELOW INCLUDES THE NODE ITSELF and every ancestor of it. These
-   * three are the ones `app_owner_covers_in_org`'s `o.path @> n.path` accepts,
-   * so marking any of them would be the screen refusing what the server takes.
-   */
-  it("the plant root, the department above, and the cell itself are NOT marked", () => {
-    const marked = markedAt("n-cell1");
-    expect(marked).not.toContain("Plant-wide");
-    expect(marked).not.toContain("In Assembly");
-    expect(marked).not.toContain("On the line");
-    expect(marked).not.toContain("At the cell");
-    // The whole answer, so a new fixture row cannot slip past the two lists.
-    expect(marked.sort()).toEqual(["From Plant 2", "In Machining", "On Line 10"]);
+  it("so is somebody homed at the AREA above this line, and on the line itself", () => {
+    expect(names(split.here)).toEqual(
+      expect.arrayContaining(["in Area 1", "on Line 1", "at the plant"]),
+    );
   });
 
   /**
-   * The one fail-open that survives: with no cell there is no question to ask,
-   * and an empty set annotates nobody. A popover mid-open, and `emptyIndex`
-   * before the board has loaded, both land here.
+   * The other direction, and it is not symmetry for its own sake: a person
+   * homed at a cell UNDER this line works on this line, so the line's panel has
+   * to list them. Only a home that is neither above nor below is "elsewhere".
    */
-  it("marks nobody when the cell cannot be resolved", () => {
+  it("and somebody homed INSIDE it — at a cell under this line — is here too", () => {
+    expect(names(split.here)).toContain("in Cell 1");
+  });
+
+  it("⭐ another AREA of the same plant is the click, not the default", () => {
+    expect(names(split.elsewhere)).toContain("in Area 2");
+    expect(names(split.here)).not.toContain("in Area 2");
+  });
+
+  it("⚠️ so is a sibling line whose slug merely extends this one's", () => {
+    expect(names(split.elsewhere)).toContain("on Line 10");
+  });
+
+  it("the whole answer, so a new person cannot slip past the two lists above", () => {
+    expect(names(split.here)).toEqual(["at the plant", "in Area 1", "on Line 1", "in Cell 1"]);
+    expect(names(split.elsewhere)).toEqual(["in Area 2", "on Line 10"]);
+  });
+});
+
+describe("R-346: the mark is a different question from the split", () => {
+  /**
+   * ⭐⭐ NOT THE COMPLEMENT OF `elsewhere`, AND CONFLATING THEM WOULD BE WRONG
+   * IN BOTH DIRECTIONS. The split is about a PLACE and is generous downward;
+   * the mark is about a CELL and is the server's write guard transcribed. The
+   * person homed in Cell 1 is a default offer on Line 1's board AND is marked
+   * on Cell 2, because `create_assignment` will ask them for the reason.
+   */
+  it("nobody whose home covers the cell is marked", () => {
+    const marked = markedAt(CELL_1);
+    expect(marked).not.toContain("at the plant");
+    expect(marked).not.toContain("in Area 1");
+    expect(marked).not.toContain("on Line 1");
+    expect(marked).not.toContain("in Cell 1");
+  });
+
+  it("⭐ somebody homed in another area IS marked", () => {
+    expect(markedAt(CELL_1)).toContain("in Area 2");
+  });
+
+  it("and a person homed in Cell 1 is marked on Cell 2, though the panel offers them", () => {
+    expect(markedAt(CELL_2)).toContain("in Cell 1");
+    expect(names(splitPeopleFor(PLANT_PEOPLE, LINE_1).here)).toContain("in Cell 1");
+  });
+
+  it("the whole marked list at Cell 1 — the person homed AT it is not on it", () => {
+    // `@>` is reflexive: a home equal to the cell covers it. Marking that
+    // person would be the screen refusing what the server takes.
+    expect(markedAt(CELL_1).sort()).toEqual(["in Area 2", "on Line 10"]);
+  });
+});
+
+describe("R-346: a plant admin's board", () => {
+  it("⭐ everyone in the plant is a default offer, so there is nothing behind the click", () => {
+    const split = splitPeopleFor(PLANT_PEOPLE, PLANT);
+    expect(names(split.here)).toEqual(names(PLANT_PEOPLE));
+    expect(split.elsewhere).toEqual([]);
+  });
+
+  it("⚠️ and the mark is unchanged by the wider board: Area 2 is still outside a cell in Area 1", () => {
+    // The board the reader chose is a VIEW; the cell's own ancestry is not. A
+    // plant admin scheduling Cell 1 is asked for the same reason Ana is.
+    expect(markedAt(CELL_1)).toContain("in Area 2");
+  });
+});
+
+describe("the one fail-open, and it is the PLACE", () => {
+  it("an unresolvable place offers everyone rather than nobody", () => {
+    // The board before it has loaded, and a pop-up whose node is not in this
+    // window. There is nothing to compare anybody against, and hiding the list
+    // is the invisible failure; the server is the backstop either way.
+    expect(names(splitPeopleFor(PLANT_PEOPLE, null).here)).toEqual(names(PLANT_PEOPLE));
+    expect(splitPeopleFor(PLANT_PEOPLE, "").elsewhere).toEqual([]);
+  });
+
+  it("and marks nobody", () => {
     expect(markedAt(null)).toEqual([]);
-    expect(markedAt("n-cell1", false)).toEqual([]);
-    expect(markedAt("n-not-in-this-window")).toEqual([]);
+    expect(markedAt("")).toEqual([]);
+  });
+
+  /**
+   * ⚠️ THE OPPOSITE FAIL-OPEN IS REFUSED. An empty HOME — D110's synthesised
+   * departed person — covers nothing and is not waved through as belonging
+   * everywhere, which is the mistake `offeredAt`'s fail-open would make if such
+   * a row ever reached a picker.
+   */
+  it("a person with no home at all is marked and is not a default offer", () => {
+    const ghost = op("departed", "");
+    expect(outsideAreaOperatorIds([ghost], CELL_1).has(ghost.id)).toBe(true);
+    expect(splitPeopleFor([ghost], LINE_1).here).toEqual([]);
   });
 });

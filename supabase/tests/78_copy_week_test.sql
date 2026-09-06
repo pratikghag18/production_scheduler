@@ -71,18 +71,45 @@
 -- CW19       an attached assignment follows its run, whatever its own answer
 -- CW20       grants
 -- CW21       the company admin gets the same plan
--- CW22-CW28  the reviewer's round (session 76). A person on loan from a plant
---            the caller cannot read is listed and copied (F-099); the removed
---            count is over DISTINCT ids (F-100); a source row reaching into the
---            target week is listed as prior and follows the answer (CW24 prior,
---            CW25 copied); only ["prior"] where a displaced row cannot be
---            edited; not_eligible under warn with a prior row removes it; null
---            dates are refused
+-- CW22-CW28  the reviewer's round (session 76), CW22 and CW26 rewritten in
+--            session 77 (see below). A person borrowed from another AREA of
+--            this plant is listed with their name and copied with the override
+--            carried (CW22); the removed count is over DISTINCT ids (F-100); a
+--            source row reaching into the target week is listed as prior and
+--            follows the answer (CW24 prior, CW25 copied); the ["prior"]-only
+--            branch for an uneditable displaced row has no live shape and CW26
+--            is the argument for that; not_eligible under warn with a prior row
+--            removes it; null dates are refused
 --
---   Second fixture, for CW22 and CW26: Plant V (another root in org 1, made
---   through create_node by the company admin), Dept V under it, Vera owned by
---   Plant V, and w3 = org-wide viewer, admin on Plant W, viewer on Plant V.
---   w1 cannot read Vera's row at all; w3 can read it and cannot edit Dept V.
+--   Second fixture, for CW22 and CW26: Assembly V, a second DEPARTMENT of Plant
+--   W with Line V under it, Vera owned by Assembly V, and w3 = org-wide
+--   supervisor with a supervisor grant on Assembly V and nothing above it.
+--
+-- ⚠️⚠️ WHAT R-345 TOOK AWAY FROM THIS FILE, SAID ONCE HERE RATHER THAN TWICE
+-- BELOW. That second fixture used to be a second PLANT --- Plant V, Dept V,
+-- Vera owned by Plant V, w3 a viewer there --- and both cases rested on a row
+-- that cannot exist after migration 0058: a person is placeable only inside
+-- their own plant, override or not.
+--
+--   F-099 said "a person the CALLER CANNOT READ is still listed and still
+--   copied", because a copy copies what is there and not what the caller can
+--   see. It has no live shape now, and for two reasons at once. `operators_
+--   select` is per-PLANT (R-346), so whoever administers Plant W reads every
+--   person homed anywhere in Plant W; and nobody from outside Plant W can be
+--   on a Plant W row to be unreadable. CW22 therefore measures the OPPOSITE
+--   half of the same sentence --- the borrowed person from another area is
+--   listed WITH THEIR NAME, and the override is carried onto the copy --- and
+--   `reassign_assignment`'s refusal to ask an EXISTS over `operators` (0057)
+--   stays as the belt whose braces this used to be.
+--
+--   CW26's ["prior"]-only branch (R-239) needed a displaced row on a node the
+--   caller may not edit. `copy_week_plan` refuses anyone who is not
+--   `app_is_admin_for` the PLANT ROOT, which is an admin grant covering every
+--   node under it, and every row a copy can displace is now inside that plant.
+--   Copier implies plant admin implies edit rights on every candidate node, so
+--   the branch is unreachable rather than untested. CW26 measures the two
+--   premises and the consequence; CW13 still measures the OTHER road to
+--   ["prior"], a plant set to `block`, which is alive.
 -- ============================================================================
 
 BEGIN;
@@ -216,24 +243,36 @@ END $$;
 
 RESET ROLE;
 
--- ---- second fixture: another plant, a person on loan, a second site admin ----
+-- ---- second fixture: another AREA of the same plant, and a supervisor who
+-- ---- runs only that area ----
+--
+-- ⚠️ THIS USED TO BE A SECOND PLANT: Plant V, Dept V, Vera owned by Plant V,
+-- and w3 a viewer there. R-345 (migration 0058) makes a person from another
+-- plant unplaceable at Cell W1 with or without the override, so the rows CW22
+-- and CW26 were built on cannot exist and both cases died inside their own
+-- fixture with "That person works in a different plant". What replaces it is
+-- the strongest shape the rule still allows: a second DEPARTMENT of Plant W,
+-- with a line under it, and Vera owned by the department. See this file's
+-- header for what F-099 lost.
 DO $$
-DECLARE v_pv uuid; v_v1 uuid; v_org uuid := '10000000-0000-0000-0000-000000000001';
+DECLARE v_av uuid; v_lv uuid; v_pw uuid; v_org uuid := '10000000-0000-0000-0000-000000000001';
 BEGIN
+  SELECT v INTO v_pw FROM cw_fix WHERE k = 'pw';
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
-  v_pv := (create_node(NULL, 'Plant V', 0, '21000000-0000-0000-0000-000000000001')->>'id')::uuid;
-  v_v1 := (create_node(v_pv, 'Dept V', 0)->>'id')::uuid;
+  v_av := (create_node(v_pw, 'Assembly V', 1)->>'id')::uuid;
+  v_lv := (create_node(v_av, 'Line V',     0)->>'id')::uuid;
   RESET ROLE;
-  INSERT INTO cw_fix (k, v) VALUES ('pv', v_pv), ('v1', v_v1);
+  INSERT INTO cw_fix (k, v) VALUES ('av', v_av), ('lv', v_lv);
   INSERT INTO operators (id, org_id, display_name, employee_ref, site_node_id) VALUES
-    ('d5000000-0000-0000-0000-0000000000f1', v_org, 'Vera', 'EMP-V01', v_pv);
+    ('d5000000-0000-0000-0000-0000000000f1', v_org, 'Vera', 'EMP-V01', v_av);
+  -- w3 runs ONE AREA of this plant and not the plant. She is the person CW26 is
+  -- about: she can see Plant W and she may not copy its week.
   INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-0000000000d3');
   INSERT INTO user_profiles (id, org_id, user_id, role) VALUES
-    ('d0000000-0000-0000-0000-000000000003', v_org, '00000000-0000-0000-0000-0000000000d3', 'viewer');
+    ('d0000000-0000-0000-0000-000000000003', v_org, '00000000-0000-0000-0000-0000000000d3', 'supervisor');
   INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
-    ('d0000000-0000-0000-0000-000000000003', (SELECT v FROM cw_fix WHERE k = 'pw'), v_org, 'admin'),
-    ('d0000000-0000-0000-0000-000000000003', v_pv, v_org, 'viewer');
+    ('d0000000-0000-0000-0000-000000000003', v_av, v_org, 'supervisor');
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE EXCEPTION 'SECOND FIXTURE FAILED: % (%)', SQLERRM, SQLSTATE;
 END $$;
@@ -1142,43 +1181,50 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_CW21;
 
-\echo 'CW22 ⚠⚠: a person on loan from a plant the caller cannot read is LISTED and COPIED, not dropped (F-099)'
+\echo 'CW22 ⚠⚠: a person from another AREA of the same plant, placed with the override, is listed WITH THEIR NAME and copied with the override carried (what is left of F-099)'
 SAVEPOINT sp_CW22;
 DO $$
-DECLARE v_plan1 jsonb; v_plan3 jsonb; v_item1 jsonb; v_item3 jsonb; v_res jsonb; v_c1 uuid;
-        v_org uuid := '10000000-0000-0000-0000-000000000001'; v_copy assignments%ROWTYPE; v_ok boolean := true; v_why text := '';
+DECLARE v_plan jsonb; v_item jsonb; v_res jsonb; v_c1 uuid; v_av uuid;
+        v_org uuid := '10000000-0000-0000-0000-000000000001'; v_copy assignments%ROWTYPE;
+        v_ok boolean := true; v_why text := '';
 BEGIN
   SELECT v INTO v_c1 FROM cw_fix WHERE k = 'c1';
-  -- Vera, owned by Plant V, placed at Cell W1 in the source week on loan (D113).
+  SELECT v INTO v_av FROM cw_fix WHERE k = 'av';
+  -- Vera, owned by Assembly V, placed at Cell W1 (under Assembly W) in the
+  -- source week on the area override (D113). Same plant, another area: the
+  -- only kind of borrowed row that can exist now, and the one R-346 says the
+  -- supervisor reaches by clicking through to "the rest of this plant".
   INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency, area_override, area_override_reason) VALUES
     ('d9000000-0000-0000-0000-0000000000f1', v_org, v_c1, 'd5000000-0000-0000-0000-0000000000f1',
      NULL, 'd6000000-0000-0000-0000-000000000001', tstzrange('2099-06-04 13:00+00', '2099-06-04 17:00+00', '[)'), 1.000, true, 'on loan');
 
-  -- w1 cannot read her row; w3 can. Both must get the same plan, name apart.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', true);
   SET LOCAL ROLE authenticated;
-  IF EXISTS (SELECT 1 FROM operators WHERE id = 'd5000000-0000-0000-0000-0000000000f1') THEN
-    v_ok := false; v_why := v_why || ' premise: w1 can read Vera'; END IF;
-  v_plan1 := copy_week_plan((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08');
+  -- ⭐ THE CONTRACT THAT CHANGED, AND THIS LINE IS THE OPPOSITE OF THE ONE IT
+  -- REPLACES. F-099 was about a plan that must list a person the caller CANNOT
+  -- READ, because the copy is a copy of what is there and not of what the
+  -- caller can see. Vera was owned by another plant then and w1 could not read
+  -- her. `operators_select` is per-PLANT now (R-346, migration 0058), so w1 --
+  -- who administers Plant W -- reads every person homed anywhere in it, and
+  -- the name is simply there. A person the caller cannot read can no longer be
+  -- ON one of this plant's rows at all, so F-099's shape has no live example;
+  -- `reassign_assignment` still translates the composite foreign key rather
+  -- than asking an EXISTS over `operators`, and that belt stays fastened.
+  IF NOT EXISTS (SELECT 1 FROM operators WHERE id = 'd5000000-0000-0000-0000-0000000000f1') THEN
+    v_ok := false; v_why := v_why || ' premise: w1 cannot read Vera'; END IF;
+  v_plan := copy_week_plan((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08');
   RESET ROLE;
-  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d3', true);
-  SET LOCAL ROLE authenticated;
-  v_plan3 := copy_week_plan((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08');
-  RESET ROLE;
-  v_item1 := pg_temp.cw_item(v_plan1, 'assignment:d9000000-0000-0000-0000-0000000000f1');
-  v_item3 := pg_temp.cw_item(v_plan3, 'assignment:d9000000-0000-0000-0000-0000000000f1');
+  v_item := pg_temp.cw_item(v_plan, 'assignment:d9000000-0000-0000-0000-0000000000f1');
 
-  IF NOT (v_item1 IS NOT NULL AND v_item1->>'status' = 'clean'
-          AND v_item1->'copied'->>'operator_id' = 'd5000000-0000-0000-0000-0000000000f1'
-          AND v_item1->'copied'->'operator_name' = 'null'::jsonb
-          AND (v_item1->'copied'->>'area_override')::boolean = true)
-  THEN v_ok := false; v_why := v_why || ' w1_item=' || COALESCE(v_item1::text, 'ABSENT'); END IF;
-  IF NOT (v_item3 IS NOT NULL AND v_item3->'copied'->>'operator_name' = 'Vera')
-  THEN v_ok := false; v_why := v_why || ' w3_item=' || COALESCE(v_item3::text, 'ABSENT'); END IF;
-  IF NOT (v_plan1->'counts' = '{"clean": 3, "clash": 4}'::jsonb AND v_plan1->'counts' = v_plan3->'counts'
-          AND v_plan1->'history' = '{"runs": 1, "assignments": 1}'::jsonb)
-  THEN v_ok := false; v_why := v_why || ' counts1=' || (v_plan1->'counts')::text || ' counts3=' || (v_plan3->'counts')::text
-                                     || ' history1=' || (v_plan1->'history')::text; END IF;
+  IF NOT (v_item IS NOT NULL AND v_item->>'status' = 'clean'
+          AND v_item->'copied'->>'operator_id' = 'd5000000-0000-0000-0000-0000000000f1'
+          AND v_item->'copied'->>'operator_name' = 'Vera'
+          AND (v_item->'copied'->>'area_override')::boolean = true)
+  THEN v_ok := false; v_why := v_why || ' item=' || COALESCE(v_item::text, 'ABSENT'); END IF;
+  IF NOT (v_plan->'counts' = '{"clean": 3, "clash": 4}'::jsonb
+          AND v_plan->'history' = '{"runs": 1, "assignments": 1}'::jsonb)
+  THEN v_ok := false; v_why := v_why || ' counts=' || (v_plan->'counts')::text
+                                     || ' history=' || (v_plan->'history')::text; END IF;
 
   -- And w1 copies her: every clash "prior", Vera clean, the row read back with the override carried.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', true);
@@ -1196,6 +1242,10 @@ BEGIN
   IF NOT (v_copy.id IS NOT NULL AND v_copy.node_id = v_c1 AND v_copy.area_override = true
           AND v_copy.area_override_reason = 'on loan' AND v_copy.product_id = 'd6000000-0000-0000-0000-000000000001')
   THEN v_ok := false; v_why := v_why || ' copy=' || COALESCE(to_jsonb(v_copy)::text, 'ABSENT'); END IF;
+  -- The copy is a real placement and had to pass the same guard the source row
+  -- passed: Vera is still homed in Assembly V and still outside Cell W1's area.
+  IF app_owner_covers_in_org(v_org, v_av, v_c1) THEN
+    v_ok := false; v_why := v_why || ' premise: Assembly V unexpectedly covers Cell W1'; END IF;
 
   IF v_ok THEN RAISE NOTICE 'PASS CW22';
   ELSE RAISE NOTICE 'FAIL CW22:%', v_why; END IF;
@@ -1323,56 +1373,89 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_CW25;
 
-\echo 'CW26 ⭐: only ["prior"] where a displaced prior row sits on a node the caller cannot edit; "copied" refused, "prior" applies (R-239)'
+\echo 'CW26 ⭐: the ["prior"]-only-because-uneditable branch has no live shape inside one plant any more, and this case is the argument for that in three measurements (R-239, R-345)'
 SAVEPOINT sp_CW26;
 DO $$
-DECLARE v_plan jsonb; v_item jsonb; v_res jsonb; v_c1 uuid; v_v1 uuid; v_org uuid := '10000000-0000-0000-0000-000000000001';
-        v_raw text; v_detail jsonb; v_state text := 'allowed'; v_vrow int; v_ok boolean := true; v_why text := '';
+DECLARE v_plan jsonb; v_item jsonb; v_res jsonb; v_c1 uuid; v_lv uuid;
+        v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_raw text; v_detail jsonb; v_state text := 'allowed';
+        v_gone int; v_copy int; v_edit boolean; v_ok boolean := true; v_why text := '';
 BEGIN
+  -- ⚠️ WHAT THIS CASE USED TO BE, AND WHY IT COULD NOT STAY. R-239 says a clash
+  -- offers only ["prior"] when taking the copy would remove a row the caller may
+  -- not edit. The only fixture that ever reached it put the displaced row in
+  -- ANOTHER PLANT, on a person on loan from that plant. R-345 (migration 0058)
+  -- deletes that world: a person is placeable only inside their own plant, so
+  -- every row that a copy could displace sits in the copier's own plant --- and
+  -- `copy_week_plan` refuses anyone who is not `app_is_admin_for` THE PLANT
+  -- ROOT, which by `app_is_admin_on_path` is an admin grant covering every node
+  -- under it. Copier implies plant admin implies `app_can_edit_node` on every
+  -- node any displaced row can be on. The branch is unreachable, not untested,
+  -- and the honest thing is to measure the two premises that make it so rather
+  -- than to keep a case that pins a shape the database no longer permits.
+  -- (The OTHER road to ["prior"] --- a plant set to `block` --- is alive and is
+  -- CW13.)
   SELECT v INTO v_c1 FROM cw_fix WHERE k = 'c1';
-  SELECT v INTO v_v1 FROM cw_fix WHERE k = 'v1';
-  -- Vera on loan at Cell W1 in the source week; in the target week she holds a
-  -- row at Dept V, which w3 can read (viewer on Plant V) and cannot edit.
-  INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency, area_override, area_override_reason) VALUES
-    ('d9000000-0000-0000-0000-0000000000f1', v_org, v_c1, 'd5000000-0000-0000-0000-0000000000f1',
-     NULL, 'd6000000-0000-0000-0000-000000000001', tstzrange('2099-06-04 13:00+00', '2099-06-04 17:00+00', '[)'), 1.000, true, 'on loan');
-  INSERT INTO product_sites (org_id, product_id, node_id) VALUES (v_org, 'd6000000-0000-0000-0000-000000000001', (SELECT v FROM cw_fix WHERE k = 'pv'));
-  INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency) VALUES
-    ('d9000000-0000-0000-0000-0000000000f2', v_org, v_v1, 'd5000000-0000-0000-0000-0000000000f1',
-     NULL, 'd6000000-0000-0000-0000-000000000001', tstzrange('2099-06-11 14:00+00', '2099-06-11 18:00+00', '[)'), 1.000);
+  SELECT v INTO v_lv FROM cw_fix WHERE k = 'lv';
+
+  -- 1. THE FIRST PREMISE: a supervisor who runs ONE AREA of this plant is not
+  --    the copier. w3 holds a supervisor grant on Assembly V and nothing above
+  --    it, and copy_week_plan refuses her at the door.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d3', true);
   SET LOCAL ROLE authenticated;
-  IF app_can_edit_node(v_v1) OR NOT EXISTS (SELECT 1 FROM assignments WHERE id = 'd9000000-0000-0000-0000-0000000000f2') THEN
-    v_ok := false; v_why := v_why || ' premise: w3 edits Dept V or cannot read the row'; END IF;
-  v_plan := copy_week_plan((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08');
-  v_item := pg_temp.cw_item(v_plan, 'assignment:d9000000-0000-0000-0000-0000000000f1');
-  IF NOT (v_item->>'status' = 'clash' AND v_item->'clash'->>'reason' = 'operator_busy'
-          AND v_item->'clash'->'choices' = '["prior"]'::jsonb
-          AND v_item->'clash'->'prior'->0->>'id' = 'd9000000-0000-0000-0000-0000000000f2')
-  THEN v_ok := false; v_why := v_why || ' item=' || COALESCE(v_item::text, 'ABSENT'); END IF;
   BEGIN
-    PERFORM apply_copy_week((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08', '[
-      {"key": "run:d8000000-0000-0000-0000-000000000001", "choice": "prior"},
-      {"key": "assignment:d9000000-0000-0000-0000-000000000002", "choice": "prior"},
-      {"key": "assignment:d9000000-0000-0000-0000-000000000003", "choice": "prior"},
-      {"key": "assignment:d9000000-0000-0000-0000-000000000005", "choice": "prior"},
-      {"key": "assignment:d9000000-0000-0000-0000-0000000000f1", "choice": "copied"}]'::jsonb);
+    PERFORM copy_week_plan((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL, v_state = RETURNED_SQLSTATE;
     BEGIN v_detail := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
   END;
-  IF NOT (v_state = 'PT400' AND v_detail->>'reason' = 'choice_not_offered' AND v_detail->'choices' = '["prior"]'::jsonb)
-  THEN v_ok := false; v_why := v_why || ' copied: state=' || v_state || ' detail=' || COALESCE(v_detail::text, '-'); END IF;
+  RESET ROLE;
+  IF NOT (v_state = 'PT403' AND v_detail->>'reason' = 'not_admin')
+  THEN v_ok := false; v_why := v_why || ' area supervisor: state=' || v_state
+                                     || ' detail=' || COALESCE(v_detail::text, '-'); END IF;
+
+  -- Vera on the area override at Cell W1 in the source week; in the target week
+  -- she holds a row at Line V, in the OTHER area of the same plant --- the
+  -- furthest away a displaced row can now be from the cell being copied.
+  INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency, area_override, area_override_reason) VALUES
+    ('d9000000-0000-0000-0000-0000000000f1', v_org, v_c1, 'd5000000-0000-0000-0000-0000000000f1',
+     NULL, 'd6000000-0000-0000-0000-000000000001', tstzrange('2099-06-04 13:00+00', '2099-06-04 17:00+00', '[)'), 1.000, true, 'on loan');
+  INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency) VALUES
+    ('d9000000-0000-0000-0000-0000000000f2', v_org, v_lv, 'd5000000-0000-0000-0000-0000000000f1',
+     NULL, 'd6000000-0000-0000-0000-000000000001', tstzrange('2099-06-11 14:00+00', '2099-06-11 18:00+00', '[)'), 1.000);
+
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', true);
+  SET LOCAL ROLE authenticated;
+  -- 2. THE SECOND PREMISE: the copier CAN edit that node, asked of the very
+  --    function the plan asks (`app_can_edit_node`), never re-implemented here.
+  v_edit := app_can_edit_node(v_lv);
+  v_plan := copy_week_plan((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08');
+  v_item := pg_temp.cw_item(v_plan, 'assignment:d9000000-0000-0000-0000-0000000000f1');
+  IF NOT v_edit THEN v_ok := false; v_why := v_why || ' premise: w1 cannot edit Line V'; END IF;
+  -- 3. SO BOTH CHOICES ARE OFFERED, where the old world offered ["prior"] only.
+  IF NOT (v_item->>'status' = 'clash' AND v_item->'clash'->>'reason' = 'operator_busy'
+          AND v_item->'clash'->'choices' = '["prior", "copied"]'::jsonb
+          AND v_item->'clash'->'prior'->0->>'id' = 'd9000000-0000-0000-0000-0000000000f2')
+  THEN v_ok := false; v_why := v_why || ' item=' || COALESCE(v_item::text, 'ABSENT'); END IF;
+
+  -- And "copied" applies: the row in the other area goes, the copy lands with
+  -- the override carried.
   v_res := apply_copy_week((SELECT v FROM cw_fix WHERE k = 'pw'), '2099-06-01', '2099-06-08', '[
     {"key": "run:d8000000-0000-0000-0000-000000000001", "choice": "prior"},
     {"key": "assignment:d9000000-0000-0000-0000-000000000002", "choice": "prior"},
     {"key": "assignment:d9000000-0000-0000-0000-000000000003", "choice": "prior"},
     {"key": "assignment:d9000000-0000-0000-0000-000000000005", "choice": "prior"},
-    {"key": "assignment:d9000000-0000-0000-0000-0000000000f1", "choice": "prior"}]'::jsonb);
+    {"key": "assignment:d9000000-0000-0000-0000-0000000000f1", "choice": "copied"}]'::jsonb);
   RESET ROLE;
-  SELECT count(*) INTO v_vrow FROM assignments WHERE id = 'd9000000-0000-0000-0000-0000000000f2';
-  IF NOT (v_vrow = 1 AND v_res->'removed' = '{"runs": 0, "assignments": 0}'::jsonb AND (v_res->>'skipped')::int = 6)
-  THEN v_ok := false; v_why := v_why || ' prior: vrow=' || v_vrow || ' result=' || v_res::text; END IF;
+  SELECT count(*) INTO v_gone FROM assignments WHERE id = 'd9000000-0000-0000-0000-0000000000f2';
+  SELECT count(*) INTO v_copy FROM assignments
+   WHERE operator_id = 'd5000000-0000-0000-0000-0000000000f1'
+     AND lower(timerange) = '2099-06-11 13:00+00' AND area_override
+     AND area_override_reason = 'on loan';
+  IF NOT (v_gone = 0 AND v_copy = 1 AND v_res->'removed' = '{"runs": 0, "assignments": 1}'::jsonb)
+  THEN v_ok := false; v_why := v_why || ' apply: gone=' || v_gone || ' copy=' || v_copy
+                                     || ' result=' || v_res::text; END IF;
+
   IF v_ok THEN RAISE NOTICE 'PASS CW26';
   ELSE RAISE NOTICE 'FAIL CW26:%', v_why; END IF;
 EXCEPTION WHEN OTHERS THEN

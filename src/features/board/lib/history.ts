@@ -99,11 +99,11 @@ export function assignmentProductView(
  * for the same reasons as `deletedProduct`. `skillIds` is empty rather than
  * absent: a departed person holds no qualifications, and an empty list is a
  * true statement where `undefined` would make every eligibility read guess.
- * ⚠️ `siteNodeId` IS EMPTY AND MUST NEVER REACH `offeredAt`, for the same
- * reason as `deletedProduct` above: that predicate FAILS OPEN on an owner it
- * cannot resolve, so a departed person handed to it would read as belonging
- * everywhere. Nothing synthesised here is ever put in the operators array the
- * popover filters — that array comes straight from `board_window`.
+ * ⚠️ `siteNodeId` AND `sitePath` ARE EMPTY AND MUST NEVER REACH `offeredAt`,
+ * for the same reason as `deletedProduct` above: that predicate FAILS OPEN on
+ * an owner it cannot resolve, so a departed person handed to it would read as
+ * belonging everywhere. Nothing synthesised here is ever put in the operators
+ * array the popover splits — that array comes straight from `board_window`.
  */
 export function operatorViewFor(
   a: Pick<Assignment, "operatorId" | "operatorDisplayName">,
@@ -118,6 +118,12 @@ export function operatorViewFor(
     employeeRef: null,
     active: false,
     siteNodeId: "",
+    // S39 / 0058: the home as a PATH. Empty for the same reason `siteNodeId`
+    // is, and `splitPeopleFor` / `outsideAreaOperatorIds` both refuse to read
+    // an empty one as "covers everywhere" -- a departed person is never in the
+    // array a picker splits, and if one ever were they would be marked, not
+    // waved through.
+    sitePath: "",
     skillIds: [],
     // F-087 / 0048. Empty for the same reason `skillIds` is: a departed person
     // holds no certificate, so none of theirs can be expiring, and an empty

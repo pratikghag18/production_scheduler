@@ -6,6 +6,7 @@ import { certificateGaps, type CertificateGap } from "../lib/boardIndex";
 import { DEFAULT_DATE_FORMAT, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
+import fieldStyles from "@/components/Field.module.css";
 import styles from "./CreatePopover.module.css";
 
 /** Shown in place of the product picker when nothing belongs at this cell.
@@ -93,6 +94,7 @@ export function CreatePopover({
   defaultCreateMode,
   products,
   operators,
+  hereOperatorIds,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
   requiredSkills,
@@ -111,16 +113,18 @@ export function CreatePopover({
   defaultCreateMode: "run" | "direct";
   products: Product[];
   /**
-   * ⭐ R-342: THE LEFT PANEL'S OWN LIST — the people owned somewhere in the
-   * plant being shown (`operatorPool` in `BoardPage`). The maintainer, 6 Sept:
-   * *"Operators from other plants should not be shown in the list, period, it
-   * is the same as the operators shown on the left panel."*
+   * ⭐ R-342: THE LEFT PANEL'S OWN LIST — this plant's people (`operatorPool` in
+   * `BoardPage`). The maintainer, 6 Sept: *"Operators from other plants should
+   * not be shown in the list, period, it is the same as the operators shown on
+   * the left panel."*
    *
-   * ⚠️ IT USED TO BE `boardQuery.data.operators`, WHICH IS EVERY PERSON IN THE
-   * COMPANY. `board_window` returns them all on purpose, so that a chip for a
-   * cross-plant assignment can still be DRAWN (S18) — but drawing a name and
-   * offering it are different questions, and this select was answering the
-   * wrong one. `src/test/pickerPool.test.ts` is what stops the two lists
+   * ⚠️ IT USED TO BE `boardQuery.data.operators`, WHICH WAS EVERY PERSON IN THE
+   * COMPANY — `board_window` returned them all so that a chip for a cross-plant
+   * assignment could still be DRAWN (S18), and drawing a name and offering it
+   * are different questions. That is settled at the source now: migration 0058
+   * sends the PLANT'S people and R-345's table guard refuses a placement across
+   * plants outright, so no such assignment can be made and none is left to draw.
+   * `src/test/pickerPool.test.ts` is what stops this list and the panel's
    * drifting apart again.
    *
    * ⚠️ ONLY THE DIRECT-ASSIGNMENT TAB CHOOSES A PERSON. The Product run tab
@@ -129,6 +133,24 @@ export function CreatePopover({
    * afterwards, through the assignment pop-up.
    */
   operators: BoardOperator[];
+  /**
+   * ⭐⭐ R-346: of `operators`, the ones offered at THIS CELL by default —
+   * home covers the cell, or sits inside it. The select opens on exactly these;
+   * the rest of the plant is added by the "Show other people in this plant"
+   * control under it, marked, and taken through the D113 reason below.
+   *
+   * The maintainer, 6 Sept: *"If a operator is assigned to higher hierarchy
+   * they should automatically become available to all lower hierarchy within
+   * that hierarchy ... That should be the default behaviour. For other
+   * operators in the plant we need to give an option to the supervisor to click
+   * through something so show remaining operators."*
+   *
+   * ⚠️ NOT THE COMPLEMENT OF `outsideAreaOperatorIds` BELOW, and the two are
+   * kept apart on purpose. Both are resolved by `lib/outsideArea.ts`, but the
+   * split is about being offered and the mark is about needing a reason — a
+   * person homed inside this cell's own subtree is a default offer AND marked.
+   */
+  hereOperatorIds: ReadonlySet<string>;
   windowStart: Date;
   dateFormat?: DateFormat;
   /** D64/D65: this node's effective required skills (`skillsForNode`, an
@@ -145,13 +167,18 @@ export function CreatePopover({
    * person outside theirs can be placed anyway by anyone who may schedule here,
    * with a reason. Filtering them would delete the feature.
    *
-   * ⚠️⚠️ R-342 PUT A FLOOR UNDER THAT, AND THE TWO STATEMENTS ARE NOT IN
-   * CONFLICT. What is offered-and-marked is ANOTHER AREA OF THIS PLANT. Another
-   * PLANT is not in `operators` at all any more (see that prop above), so this
-   * set never has to speak for one. The mark is still what the maintainer asked
-   * for and the server still asks for the reason: `outsideAreaOperatorIds` now
-   * decides it the way `app_owner_covers_in_org` does, so a person whose owning
-   * node is not on this board can never be waved through as belonging.
+   * ⚠️⚠️ R-342 / R-345 PUT A FLOOR UNDER THAT, AND THE TWO STATEMENTS ARE NOT
+   * IN CONFLICT. What is offered-and-marked is ANOTHER AREA OF THIS PLANT.
+   * Another PLANT is not in `operators` at all (see that prop above) and cannot
+   * be placed here by any writer, so this set never has to speak for one. The
+   * mark is still what the maintainer asked for and the server still asks for
+   * the reason: it is decided from each person's own home PATH against this
+   * cell's, the comparison `app_owner_covers_in_org` makes.
+   *
+   * ⚠️ AND IT IS DECIDED WITHOUT THE BOARD'S NODE MAP NOW (R-346). The map
+   * starts at the reader's grant, so for a supervisor granted a line the plant
+   * above it was missing and everyone homed there was marked — a reason asked
+   * for a placement the server takes without one.
    */
   outsideAreaOperatorIds: ReadonlySet<string>;
   /**
@@ -228,7 +255,44 @@ export function CreatePopover({
   const firstOffered = products[0]?.id ?? "";
   const productId = products.some((p) => p.id === productChoice) ? productChoice : firstOffered;
   const [plannedHeadcount, setPlannedHeadcount] = useState("2");
-  const [operatorId, setOperatorId] = useState(presetOperatorId ?? operators[0]?.id ?? "");
+
+  /**
+   * ⭐⭐ R-346: THE SELECT OPENS ON `here` AND NOTHING ELSE. The rest of the
+   * plant is one press away, and the press is the supervisor's decision --
+   * "we need to give an option to the supervisor to click through something so
+   * show remaining operators so they can make that decision to assign someone
+   * outside of that area."
+   *
+   * ⚠️ A PRESET FROM OUTSIDE THE AREA OPENS THE LIST ALREADY REVEALED. `BoardPage`
+   * sets `presetOperatorId` when this pop-up was opened by dropping a panel chip,
+   * and the panel can drop somebody from the rest of the plant (that is the whole
+   * point of its own control). A `<select>` whose value matches no option shows
+   * the FIRST option instead, so a hidden preset would silently swap the person
+   * the user just dragged -- the same failure mode AP8 records in the assignment
+   * pop-up. The person picked is pinned into the list for the same reason.
+   */
+  // ACTIVE PEOPLE ONLY, the same filter the panel and the assignment pop-up
+  // apply before their own split. The first draft split the whole list here,
+  // so the panel showed no "other people" control while this pop-up counted
+  // one --- a person who had left --- and offered them (the reviewer, session
+  // 78). The three render one decision; they must filter the same way first.
+  const here = useMemo(
+    () => operators.filter((o) => o.active && hereOperatorIds.has(o.id)),
+    [operators, hereOperatorIds],
+  );
+  const elsewhere = useMemo(
+    () => operators.filter((o) => o.active && !hereOperatorIds.has(o.id)),
+    [operators, hereOperatorIds],
+  );
+  // Opens on `here` and nothing else: with nobody homed at or above this cell
+  // the select starts empty rather than on a person from behind the click.
+  const [operatorId, setOperatorId] = useState(presetOperatorId ?? here[0]?.id ?? "");
+  const [showOthers, setShowOthers] = useState(
+    presetOperatorId !== undefined && !hereOperatorIds.has(presetOperatorId),
+  );
+  const offeredPeople = showOthers
+    ? [...here, ...elsewhere]
+    : [...here, ...elsewhere.filter((o) => o.id === operatorId)];
   const [efficiencyPercent, setEfficiencyPercent] = useState("100");
   const [targetQty, setTargetQty] = useState("");
   const [targetUnit, setTargetUnit] = useState("");
@@ -373,7 +437,7 @@ export function CreatePopover({
           <>
             <label htmlFor="cp-op">Operator</label>
             <select id="cp-op" value={operatorId} onChange={(e) => setOperatorId(e.target.value)}>
-              {operators.map((o) => (
+              {offeredPeople.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.displayName}
                   {/* F-087: the list used to say "— not certified (override)"
@@ -385,6 +449,21 @@ export function CreatePopover({
                 </option>
               ))}
             </select>
+            {/* ⚠️ ABSENT WHEN THERE IS NOBODY BEHIND IT -- on a board whose place
+                covers every home in the plant (a plant admin's) the whole plant
+                is already on offer, and a control reading "(0)" would be a door
+                onto an empty room. The skin is the app's shared field button
+                (R-318), not a copy. */}
+            {elsewhere.length > 0 && (
+              <button
+                type="button"
+                className={`${fieldStyles.btn} ${styles.othersBtn}`}
+                aria-expanded={showOthers}
+                onClick={() => setShowOthers((v) => !v)}
+              >
+                {showOthers ? "Hide" : "Show"} other people in this plant ({elsewhere.length})
+              </button>
+            )}
             {products.length === 0 ? (
               <p className={styles.time}>{NO_PRODUCTS_HERE}</p>
             ) : (

@@ -371,6 +371,29 @@ export interface BoardOperator {
    */
   siteNodeId: string;
   /**
+   * S39 / R-346 / migration 0058: the ltree path of the node named by
+   * `siteNodeId`, as text — `"plant_a.area_1"`. The person's HOME, spelled the
+   * way the server spells ancestry.
+   *
+   * ⭐⭐ IT IS HERE BECAUSE THE CLIENT CANNOT DERIVE IT AND WAS GUESSING.
+   * `board_window` sends only the nodes at or below the reader's root, so a
+   * supervisor granted a LINE gets a node map that starts at that line — and
+   * every person homed at the PLANT above it (five of the demo's six) resolved
+   * to no node at all. The panel, which filtered on membership in that map,
+   * showed her nothing; the "not from this area" mark, which resolved the owner
+   * through the same map, marked everyone. Both were reading the absence of a
+   * node ABOVE the grant as "somewhere else" when it means "above you".
+   *
+   * With the path on the row there is no lookup left: `isAtOrBelow` compares
+   * the home to the place directly, in either direction, and answers the same
+   * way `app_owner_covers_in_org` does on the server.
+   *
+   * ⚠️ `""` for a SYNTHESISED row only (a departed person drawn from D110's
+   * snapshot, `history.ts`), exactly as `siteNodeId` is. Such a row is never in
+   * the array the panel or a picker splits.
+   */
+  sitePath: string;
+  /**
    * The trainings this person has EVER held, live or lapsed. It answers
    * "were they ever trained", and that is all it answers — `skillExpiries`
    * below is what says whether a certificate is still good.
@@ -422,6 +445,7 @@ function parseOperator(v: Json): BoardOperator | null {
     employee_ref,
     active,
     site_node_id,
+    site_path,
     skill_ids,
     skill_expiries,
   } = v;
@@ -433,7 +457,14 @@ function parseOperator(v: Json): BoardOperator | null {
     !isBool(active) ||
     // NOT NULL since 0028, so a row without it is a payload from a database
     // this client does not understand — rejected, not coerced.
-    !isStr(site_node_id)
+    !isStr(site_node_id) ||
+    // S39 / 0058. REQUIRED for the same reason `skill_expiries` is: a payload
+    // without it comes from a database that cannot say where a person's home
+    // sits relative to a place, and carrying on regardless would read "no path
+    // sent" as "homed nowhere" — which the split reads as "another area", so
+    // every person in the plant would land behind the click. Rejected, not
+    // coerced to `""`.
+    !isStr(site_path)
   ) {
     return null;
   }
@@ -453,6 +484,7 @@ function parseOperator(v: Json): BoardOperator | null {
     employeeRef: employee_ref,
     active,
     siteNodeId: site_node_id,
+    sitePath: site_path,
     skillIds,
     skillExpiries,
   };

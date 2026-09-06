@@ -86,6 +86,8 @@ function rawPayload(): Json {
         employee_ref: null,
         active: true,
         site_node_id: "n-plant",
+        // S39/0058: the same node's ltree path. Required on the payload now.
+        site_path: "plant_a",
         skill_ids: [],
         skill_expiries: [],
       },
@@ -140,6 +142,9 @@ function openPopoverOn(nodeId: string, index: ReturnType<typeof indexFor>) {
       defaultCreateMode="direct"
       products={[...index.productById.values()]}
       operators={[...index.operatorById.values()]}
+      // R-346: this file is about the eligibility POLICY, not about where
+      // people are homed, so everyone it renders is a default offer here.
+      hereOperatorIds={new Set(index.operatorById.keys())}
       windowStart={WINDOW_START}
       requiredSkills={index.skillsForNode.get(nodeId) ?? []}
       outsideAreaOperatorIds={new Set<string>()}
