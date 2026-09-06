@@ -55,7 +55,12 @@ interface TriggerDef {
 function lastTriggers(): Map<string, TriggerDef> {
   const out = new Map<string, TriggerDef>();
   const re =
-    /create\s+(?:or\s+replace\s+)?trigger\s+(\w+)\s+((?:before|after|instead\s+of)\s+[\s\S]*?)\s+on\s+(?:public\.)?(\w+)[\s\S]*?execute\s+(?:function|procedure)\s+(?:public\.)?(\w+)\s*\(/gi;
+    // `constraint\s+` added by the developer in session 81 with the fix: the only
+    // correct shape for this guard is a DEFERRED constraint trigger (move_run moves
+    // the run and then each crew row in one transaction), and `create constraint
+    // trigger` puts a word where the reader allowed only `or replace`. The claim
+    // the case makes is unchanged; the reader can now see the trigger that meets it.
+    /create\s+(?:or\s+replace\s+|constraint\s+)?trigger\s+(\w+)\s+((?:before|after|instead\s+of)\s+[\s\S]*?)\s+on\s+(?:public\.)?(\w+)[\s\S]*?execute\s+(?:function|procedure)\s+(?:public\.)?(\w+)\s*\(/gi;
   const drop = /drop\s+trigger\s+(?:if\s+exists\s+)?(\w+)\s+on\s+(?:public\.)?(\w+)/gi;
   for (const { sql } of migrationsInOrder()) {
     const text = withoutComments(sql);
@@ -64,7 +69,12 @@ function lastTriggers(): Map<string, TriggerDef> {
       [];
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
-      const def = { name: m[1], events: m[2].replace(/\s+/g, " ").toLowerCase(), table: m[3].toLowerCase(), fn: m[4] };
+      const def = {
+        name: m[1],
+        events: m[2].replace(/\s+/g, " ").toLowerCase(),
+        table: m[3].toLowerCase(),
+        fn: m[4],
+      };
       events.push({ at: m.index, kind: "create", def, key: `${def.table}.${def.name}` });
     }
     while ((m = drop.exec(text)) !== null) {
@@ -106,7 +116,10 @@ function firesOnNodeIdUpdate(t: TriggerDef): boolean {
   // fires only on those.
   const of = /update\s+of\s+([\w\s,]+?)(?:\s+on\b|$)/.exec(t.events + " on");
   if (!of) return true;
-  return of[1].split(",").map((c) => c.trim()).includes("node_id");
+  return of[1]
+    .split(",")
+    .map((c) => c.trim())
+    .includes("node_id");
 }
 
 describe("DEF-0014: the runs side refuses or carries the crew when a run's cell changes", () => {
@@ -120,7 +133,10 @@ describe("DEF-0014: the runs side refuses or carries the crew when a run's cell 
     const onRuns = [...lastTriggers().values()].filter(
       (t) => t.table === "runs" && firesOnNodeIdUpdate(t),
     );
-    expect(onRuns.length, "no trigger on runs fires on an update of node_id at all").toBeGreaterThan(0);
+    expect(
+      onRuns.length,
+      "no trigger on runs fires on an update of node_id at all",
+    ).toBeGreaterThan(0);
     const readers = onRuns.filter((t) => {
       const body = lastFunctionBody(t.fn);
       return body !== null && /\bassignments\b/i.test(body);
