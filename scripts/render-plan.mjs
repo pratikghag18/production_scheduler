@@ -83,6 +83,14 @@ grid-template-columns:34px 1fr auto;gap:4px 15px;align-items:start;border-left:3
 .chip.next{background:var(--accent-soft);color:var(--accent)}
 .chip.q{background:var(--surface-2);color:var(--ink-3)}
 .chip.bad{background:var(--red-soft);color:var(--red)}
+table.idx{width:100%;border-collapse:collapse;margin:12px 0 20px;font-size:13px}
+table.idx th{text-align:left;font-family:Archivo,sans-serif;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding:6px 8px;border-bottom:1px solid var(--line)}
+table.idx td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.idx tr.closed td{color:var(--ink-3)}
+table.idx a{text-decoration:none}
+details.find>summary{cursor:pointer;list-style:none}
+details.find>summary h3{display:inline;margin-left:8px}
+a.stat{text-decoration:none;color:inherit}
 .chip.mine{background:transparent;color:var(--ink-3);border:1px solid var(--line)}
 .chip.yours{background:transparent;color:var(--amber);border:1px solid var(--amber)}
 .band{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);display:grid;
@@ -453,13 +461,51 @@ function findingCard(f) {
 </div>`;
 }
 
+const DEFECT_OPEN = (d) => ["open", "reopened", "fix-claimed"].includes(d.status);
+
+/**
+ * The index the maintainer asked for (session 83): one row per defect, open
+ * ones first, each a link to its card below and to its file. The page is read
+ * by a person deciding what to do next; a wall of closed defects in full was
+ * making it hard to follow, so a verified or wontfix card is folded and opens
+ * on click, while an open one stays open.
+ */
+function defectIndex() {
+  const order = (d) => (DEFECT_OPEN(d) ? 0 : 1);
+  const rows = [...defects]
+    .sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id))
+    .map(
+      (d) => `<tr class="${DEFECT_OPEN(d) ? "open" : "closed"}">
+    <td><a href="#${esc(d.id)}"><code>${esc(d.id)}</code></a></td>
+    <td>${chip(DEFECT_OPEN(d) ? (d.status === "fix-claimed" ? "now" : "bad") : "done", d.status)}</td>
+    <td>${esc(d.severity)}</td>
+    <td>${esc(d.title)}</td>
+    <td>${d.violates.map((r) => `<a href="#${r}">${esc(r)}</a>`).join(", ")}</td>
+    <td class="fine">${esc(iso(d.filed))}${d.fix_commit ? ` · fix ${esc(d.fix_commit)}` : ""} · <a href="defects/${esc(d._file)}">file</a></td>
+  </tr>`,
+    )
+    .join("\n");
+  return `<table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function defectCard(d) {
-  return `<div class="find ${d.status === "verified" ? "fix" : ""}" id="${esc(d.id)}">
-  <span class="tag">${esc(d.id)} · ${esc(d.severity)} · ${esc(d.class)} · ${esc(d.status)}</span>
-  <h3>${esc(d.title)}</h3>
-  <p class="fine">Violates ${d.violates.map((r) => `<a href="#${r}">${esc(r)}</a>`).join(", ")} · filed ${esc(iso(d.filed))} by ${esc(d.filed_by)}${d.fix_commit ? ` · fix ${esc(d.fix_commit)}` : ""}${d.pin ? ` · pinned by <code>${esc(d.pin)}</code>` : ""}</p>
-  ${md(d.body.replace(/^## (.*)$/gm, "**$1**"))}
+  const open = DEFECT_OPEN(d);
+  const head = `<span class="tag">${esc(d.id)} · ${esc(d.severity)} · ${esc(d.class)} · ${esc(d.status)}</span>
+  <h3>${esc(d.title)}</h3>`;
+  const meta = `<p class="fine">Violates ${d.violates.map((r) => `<a href="#${r}">${esc(r)}</a>`).join(", ")} · filed ${esc(iso(d.filed))} by ${esc(d.filed_by)}${d.fix_commit ? ` · fix ${esc(d.fix_commit)}` : ""}${d.pin ? ` · pinned by <code>${esc(d.pin)}</code>` : ""} · <a href="defects/${esc(d._file)}">open the file</a> · <a href="#defects">back to the index</a></p>`;
+  const body = md(d.body.replace(/^## (.*)$/gm, "**$1**"));
+  if (open) {
+    return `<div class="find" id="${esc(d.id)}">
+  ${head}
+  ${meta}
+  ${body}
 </div>`;
+  }
+  return `<details class="find fix" id="${esc(d.id)}">
+  <summary>${head}</summary>
+  ${meta}
+  ${body}
+</details>`;
 }
 
 function requirementRow(r) {
@@ -508,7 +554,7 @@ const band = `<div class="band">
   ${bl.mutations ? `<div class="stat ok"><span class="n">${esc(bl.mutations)}</span><span class="l">deliberate breakages caught</span></div>` : ""}
   ${bl.db_checks != null ? `<div class="stat ok"><span class="n">${esc(bl.db_checks)}</span><span class="l">database checks</span></div>` : ""}
   ${bl.migrations != null ? `<div class="stat"><span class="n">${esc(bl.migrations)}</span><span class="l">database changes (migrations)</span></div>` : ""}
-  <div class="stat ${openDefects.length ? "act" : "ok"}"><span class="n">${openDefects.length}</span><span class="l">open defects</span></div>
+  <a class="stat ${openDefects.length ? "act" : "ok"}" href="#defects"><span class="n">${openDefects.length}</span><span class="l">open defects — index</span></a>
   <div class="stat ${counts.reqs.contradicted ? "act" : ""}"><span class="n">${counts.reqs.covered ?? 0} / ${plan.requirements.length}</span><span class="l">requirements covered by a test${counts.reqs.contradicted ? ` · ${counts.reqs.contradicted} contradicted` : ""}</span></div>
 </div>`;
 
@@ -594,7 +640,8 @@ ${trackSections}
 <section id="defects">
   <span class="eyebrow">Defects</span>
   <h2>${openDefects.length ? `${openDefects.length} open defect${openDefects.length === 1 ? "" : "s"}` : "No open defects"}</h2>
-  <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>.</p>
+  <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
+  ${defects.length ? defectIndex() : ""}
   ${defects.length ? defects.map(defectCard).join("\n") : `<p class="fine">None filed yet.</p>`}
 </section>
 

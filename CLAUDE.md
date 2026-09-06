@@ -90,6 +90,15 @@ it into `requirements` in that turn, before the code.
   a case-sensitive grep for the bare name skipped it, and 0053 re-emitted the function from the
   wrong migration and silently dropped a rule (DEF-0011). Better still, slice the body out of the
   file with a script and assert the guards you expect on the assembled text before writing it.
+- **Anything resolved by walking UP the tree is resolved by the server as a definer, never by
+  the caller's view.** A line supervisor cannot read the plant above her grant, so an INVOKER
+  resolver (a shift pattern, a setting, a person's home) finds nothing and answers NULL for a node
+  that has an answer. DEF-0016 and DEF-0017 were both this, found by the tester after the developer's
+  reviewer had passed the feature. The definer takes a node id and guards the org boundary itself.
+- **Before every commit, walk the changed screens as the LEAST-privileged demo person they touch**
+  (Ana on Line 1, a viewer), not only as the admin who built them. `e2e/roleWalk.spec.ts` drives
+  every demo person through the board and the rail and asserts the facts a line supervisor sees
+  match the plant admin's; run it, and read the screen, before saying done.
 - **Never `npm run db:reset` while the maintainer is using the app.**
 - **Do not stop to report.** Listing what is left is not progress; stop only for a decision
   only the maintainer can make, ask one question, and keep everything else moving. The queue's
