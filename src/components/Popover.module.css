@@ -29,7 +29,20 @@
   max-width: calc(100vw - 2rem);
 }
 
+/* The title is also the drag handle (R-344), so it says so: `grab` at rest and
+   `grabbing` while a drag is running. `user-select: none` stops a drag from
+   selecting the title text instead of moving the box, and `touch-action: none`
+   stops a touch drag from scrolling the page under it -- without it the browser
+   claims the gesture and no pointermove ever reaches us. Nothing else about the
+   title changes; the size stays in rem. */
 .h3 {
   margin: 0 0 0.5rem;
   font-size: 0.8125rem;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.dragging {
+  cursor: grabbing;
 }

@@ -659,17 +659,30 @@ export default function BoardPage() {
 
       {popover?.kind === "assignment" && (
         <AssignmentPopover
+          /* R-343 / R-342: the person picker offers the LEFT PANEL'S list --
+             this plant's people, the same variable the panel is given, never a
+             second filter that could drift from it. */
+          operators={operatorPool}
           assignment={popover.assignment}
           homeRun={popover.homeRun}
           operator={
             index === null ? undefined : operatorViewFor(popover.assignment, index.operatorById)
           }
+          /* D113: the same helper the create pop-up uses marks the people from
+             another AREA of this plant, resolved for THIS chip's cell -- not
+             for `createNodeId`, which belongs to a different pop-up. */
+          outsideAreaOperatorIds={outsideAreaFor(
+            boardQuery.data?.operators ?? [],
+            popover.assignment.nodeId,
+            index,
+          )}
           products={boardQuery.data?.products ?? []}
           anchor={popover.anchor}
           windowStart={index?.windowStart ?? from}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
           onSave={dragApi.saveAssignmentFields}
+          onReassign={dragApi.reassignAssignment}
           onDelete={dragApi.removeAssignment}
           defaultTargetFor={(efficiencyPercent) =>
             standardFor(

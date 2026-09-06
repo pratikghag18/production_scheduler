@@ -278,8 +278,9 @@ function openPopover(
   who: BoardOperator,
   eligibilityPolicy: "warn" | "block" = "warn",
   onSubmitDirect = vi.fn<DirectSubmit>(),
+  outsideAreaIds: ReadonlySet<string> = new Set<string>(),
 ) {
-  renderPopover([who], who.id, eligibilityPolicy, onSubmitDirect);
+  renderPopover([who], who.id, eligibilityPolicy, onSubmitDirect, outsideAreaIds);
   return onSubmitDirect;
 }
 
@@ -297,6 +298,7 @@ function renderPopover(
   presetOperatorId: string,
   eligibilityPolicy: "warn" | "block",
   onSubmitDirect: DirectSubmit,
+  outsideAreaIds: ReadonlySet<string> = new Set<string>(),
 ) {
   render(
     <CreatePopover
@@ -320,7 +322,7 @@ function renderPopover(
       operators={operators}
       windowStart={new Date("2026-10-01T00:00:00Z")}
       requiredSkills={[CNC]}
-      outsideAreaOperatorIds={new Set<string>()}
+      outsideAreaOperatorIds={outsideAreaIds}
       eligibilityPolicy={eligibilityPolicy}
       presetOperatorId={presetOperatorId}
       onCancel={vi.fn()}
@@ -432,3 +434,83 @@ function cleanupAndOpen(who: BoardOperator) {
   cleanup();
   openPopover(who);
 }
+
+/* ===========================================================================
+ * D113 / R-342 — THE OTHER WARNING ON THIS FORM, AND IT IS NOT THE SAME ONE.
+ *
+ * The training override says "they have not got the ticket, and I am signing
+ * for that". The area override says "they do not work in this part of the
+ * plant, and I am signing for that". A supervisor waving through the first must
+ * never silently grant the second, so they are two ticks, two reasons, and two
+ * arguments on `create_assignment` (0030 §3 of "what is deliberately not done").
+ *
+ * ⚠️ WHO IS STILL IN THE LIST AFTER R-342. Another AREA of the same plant —
+ * marked, and asked for a reason, which is what these cases read. Another PLANT
+ * is no longer offered at all: `BoardPage` hands this popover the left panel's
+ * own pool, and `src/test/pickerPool.test.ts` is what keeps the two lists the
+ * same list. `src/test/outsideArea.test.ts` is where the decision itself is
+ * measured; this is only the form on top of it.
+ * ======================================================================== */
+describe("D113: a person from another area of this plant is marked and asked why", () => {
+  const ELSEWHERE = new Set([CURRENT.id]);
+
+  it("⭐ the picker MARKS them, and the mark is not the certificate one", () => {
+    openPopover(CURRENT, "warn", vi.fn<DirectSubmit>(), ELSEWHERE);
+    expect(body()).toContain("not from this area (override)");
+    // CURRENT holds the training, so nothing here is about certification.
+    expect(body()).not.toContain("Never trained");
+    expect(body()).not.toContain("expired");
+  });
+
+  it("⭐ Create is refused until the box is ticked AND a reason is typed", () => {
+    openPopover(CURRENT, "warn", vi.fn<DirectSubmit>(), ELSEWHERE);
+    expect(body()).toContain("doesn’t belong to this part of the structure");
+    expect(createButton().disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Place them here anyway/ }));
+    // The server refuses an override with no reason
+    // (`assignments_area_override_reasoned`), so the button must not offer one.
+    expect(createButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Reason (required)"), {
+      target: { value: "Covering a sickness on Line 1" },
+    });
+    expect(createButton().disabled).toBe(false);
+  });
+
+  it("the area flag and its reason reach the server call in their OWN slots", () => {
+    const onSubmitDirect = openPopover(CURRENT, "warn", vi.fn<DirectSubmit>(), ELSEWHERE);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Place them here anyway/ }));
+    fireEvent.change(screen.getByLabelText("Reason (required)"), {
+      target: { value: "Covering a sickness" },
+    });
+    fireEvent.click(createButton());
+    const args = onSubmitDirect.mock.calls[0] as unknown[];
+    // 10 and 11 — `p_area_override` / `p_area_override_reason`. 8 and 9 are the
+    // TRAINING pair and must stay untouched: the weaker permission may not
+    // grant the stronger one.
+    expect(args[9]).toBe(true);
+    expect(args[10]).toBe("Covering a sickness");
+    expect(args[7]).toBe(false);
+    expect(args[8]).toBeUndefined();
+  });
+
+  it("✅ somebody who belongs here is neither marked nor asked anything", () => {
+    openPopover(CURRENT, "warn", vi.fn<DirectSubmit>(), new Set<string>());
+    expect(body()).not.toContain("not from this area");
+    expect(createButton().disabled).toBe(false);
+  });
+
+  /**
+   * ⚠️ THE PRODUCT RUN TAB CHOOSES NO PERSON AT ALL, so there is nothing on it
+   * to mark. A run carries a planned headcount and its crew is attached
+   * afterwards through the assignment pop-up — which is where R-343's own
+   * person picker has to answer this same question.
+   */
+  it("the Product run tab offers no person, so it asks nothing about areas", () => {
+    openPopover(CURRENT, "warn", vi.fn<DirectSubmit>(), ELSEWHERE);
+    fireEvent.click(screen.getByRole("button", { name: "Product run" }));
+    expect(screen.queryByLabelText("Operator")).toBeNull();
+    expect(body()).not.toContain("not from this area");
+    expect(body()).not.toContain("belong to this part of the structure");
+    expect(createButton().disabled).toBe(false);
+  });
+});

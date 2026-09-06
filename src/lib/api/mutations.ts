@@ -165,6 +165,65 @@ export async function createAssignment(
   return parsed;
 }
 
+export interface ReassignAssignmentInput {
+  assignmentId: string;
+  /** The person who takes the row over. Never null: reassigning to nobody is a delete. */
+  operatorId: string;
+  /**
+   * D64, as `createAssignment` above — waves through a missing or lapsed
+   * certificate, and only under `warn`. ⚠️ THE SERVER REQUIRES THE REASON HERE
+   * even though `create_assignment` does not (migration 0057 asks for it in the
+   * writer rather than leaving it to the screen), so sending `true` with an
+   * empty reason comes back as `invalid_argument` naming `p_override_reason`.
+   */
+  eligibilityOverride?: boolean;
+  overrideReason?: string;
+  /** D113 — a DIFFERENT decision from the one above; see `CreateAssignmentInput`. */
+  areaOverride?: boolean;
+  areaOverrideReason?: string;
+}
+
+/**
+ * `reassign_assignment(p_assignment_id uuid, p_operator_id uuid,
+ * p_eligibility_override boolean DEFAULT false, p_override_reason text DEFAULT
+ * NULL, p_area_override boolean DEFAULT false, p_area_override_reason text
+ * DEFAULT NULL)` (migration 0057, R-343). Returns the same
+ * `{assignment, eligibility}` envelope `create_assignment` returns, so it goes
+ * through the same parser. Raises: invalid_argument (unknown row, unknown
+ * person, an override with no reason), not_permitted, not_eligible,
+ * not_offered_here (via `assignments_scope_guard`), capacity_exceeded (via
+ * `assignments_capacity`).
+ *
+ * ⭐ WHY THIS IS NOT `updateAssignmentFields` WITH ONE MORE FIELD. That
+ * function is a plain PostgREST PATCH, and the eligibility check lives in the
+ * RPC, not in a trigger — a patched `operator_id` would pass RLS, the area
+ * guard and the capacity guard and skip certification entirely. The maintainer,
+ * session 76: *"once you assign someone say Operator 1, there is no way to
+ * modify that assignment to operator 2 unless you delete existing assignment,
+ * this is not practical."* The answer to that is a writer, not a wider patch.
+ */
+export async function reassignAssignment(
+  input: ReassignAssignmentInput,
+): Promise<CreateAssignmentResult> {
+  const { data, error } = await supabase.rpc("reassign_assignment", {
+    p_assignment_id: input.assignmentId,
+    p_operator_id: input.operatorId,
+    p_eligibility_override: input.eligibilityOverride,
+    p_override_reason: input.overrideReason,
+    p_area_override: input.areaOverride,
+    p_area_override_reason: input.areaOverrideReason,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseCreateAssignmentResult(data);
+  if (parsed === null) {
+    throw shapeMismatch(
+      "reassign_assignment",
+      "expected a CreateAssignmentResult object (see shapes.ts)",
+    );
+  }
+  return parsed;
+}
+
 export interface MoveRunInput {
   runId: string;
   nodeId: string;

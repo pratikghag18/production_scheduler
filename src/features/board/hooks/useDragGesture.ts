@@ -25,6 +25,7 @@ import type {
   BoardOperator,
   CreateAssignmentInput,
   AssignmentFieldEdit,
+  ReassignAssignmentInput,
   CapacityProbe,
 } from "@/lib/api";
 import {
@@ -56,6 +57,7 @@ import { useCreateRun, useUpdateRunFields, useDeleteRun, useMoveRun } from "./us
 import {
   useCreateAssignment,
   useDeleteAssignment,
+  useReassignAssignment,
   useUpdateAssignmentFields,
   useApplySplitCoverage,
 } from "./useAssignmentMutations";
@@ -295,6 +297,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const moveRun = useMoveRun(rootPath, from, to); // D57 — first caller (brief §1 item 3)
   const createAssignment = useCreateAssignment(rootPath, from, to);
   const updateAssignmentFields = useUpdateAssignmentFields(rootPath, from, to);
+  const reassign = useReassignAssignment(rootPath, from, to); // R-343, first caller
   const deleteAssignment = useDeleteAssignment(rootPath, from, to);
   const applySplitCoverage = useApplySplitCoverage(rootPath, from, to); // D61/D62 — first caller
   const toast = useSchedulerToast();
@@ -1448,6 +1451,56 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [updateAssignmentFields, failWith, assignmentLabelById],
   );
 
+  /**
+   * ⭐ R-343: CHANGE WHO IS ON THE ROW. The maintainer, session 76: *"once you
+   * assign someone say Operator 1, there is no way to modify that assignment to
+   * operator 2 unless you delete existing assignment, this is not practical."*
+   *
+   * Shaped like `saveAssignmentFields` above — the same revert label, the same
+   * `failWith` (D37's one true path, T12) — with two differences the pop-up
+   * depends on:
+   *
+   * ⭐ IT RETURNS A PROMISE AND RE-THROWS. `mutateAsync`, not `mutate`, because
+   * the assignment pop-up has to know whether the write landed: it applies the
+   * field edits only AFTER the person has actually changed, and it turns a
+   * `not_eligible` answer into the override tick and reason box that
+   * `CreatePopover` shows before it ever asks (D64/F-087). The pop-up has no
+   * `requiredSkills` of its own to predict that answer from, so the server's
+   * refusal IS the question — and its `policy` field is what says whether an
+   * override may be offered at all, which is R-331's rule arriving by post
+   * rather than by prop.
+   *
+   * ⭐ IT DOES NOT TOAST A `NotEligible`. Everything else goes through
+   * `failWith` exactly as an edit does, because the pop-up closing or not, the
+   * person deserves the sentence. But a `not_eligible` under `warn` is not a
+   * failure, it is the screen asking for a reason — and the pop-up is still
+   * open, holding the control that caused it. Toasting there is the dead-end
+   * shape F-087 was filed for: a message about an override against a screen
+   * with no box to supply one, except in reverse.
+   *
+   * ⭐ AND THE POP-UP STAYS OPEN ON A REFUSAL. `setPopover(null)` runs on
+   * success only; a refused reassignment leaves the person picker up with the
+   * choice still in it, which is the natural next step (the same reasoning
+   * `confirmSplit` uses when the capacity probe turns out to have been stale).
+   */
+  const reassignAssignment = useCallback(
+    async (input: ReassignAssignmentInput): Promise<void> => {
+      try {
+        await reassign.mutateAsync(input);
+        setPopover(null);
+      } catch (err) {
+        // No toast here, on purpose. The pop-up is open and prints every
+        // refusal itself (a capacity or area refusal as a sentence, not_eligible
+        // as the override question), so a toast on top was the same refusal
+        // twice, in the split feature's words -- measured on the live app,
+        // session 76. reassignAssignment (mutations.ts) only ever throws a
+        // SchedulerError, so there is no untyped failure to toast either.
+        throw isSchedulerError(err) ? err : toSchedulerError(err);
+      }
+    },
+    [reassign],
+  );
+
   /** ⭐ R-323: THIS DELETES THE ROW. The comment that stood here said there was
    *  "no delete_assignment RPC and no `useDeleteAssignment` hook", and that
    *  `status = "cancelled"` was "the one existing, D36-compliant path" — a gap
@@ -1490,6 +1543,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     saveRunFields,
     deleteRunWithMode,
     saveAssignmentFields,
+    reassignAssignment,
     removeAssignment,
     updateSplitParticipant,
     splitEvenlyAction,

@@ -1,5 +1,6 @@
-import { useState } from "react";
-import type { Product, BoardOperator } from "@/lib/api";
+import { useMemo, useState } from "react";
+import type { Product, BoardOperator, ReassignAssignmentInput, SchedulerError } from "@/lib/api";
+import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
 import type { IndexedAssignment, IndexedRun } from "../lib/boardIndex";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
@@ -37,23 +38,87 @@ import styles from "./AssignmentPopover.module.css";
  *   operator's hours to the capacity guard, and drops the row from every
  *   board map (`boardIndex.ts` rule 17) while keeping it in history. It
  *   was never offered here anyway: Delete is the one path to it.
+ *
+ * ⭐⭐ R-343 — THE PERSON SELECT, AND WHY IT IS NOT AN `AssignmentFieldEdit`.
+ * The maintainer, session 76: *"once you assign someone say Operator 1, there
+ * is no way to modify that assignment to operator 2 unless you delete existing
+ * assignment, this is not practical."* Save's ordinary path is
+ * `updateAssignmentFields`, a plain PostgREST PATCH — and the eligibility
+ * check lives in `create_assignment`, not in a trigger, so a person column
+ * added to that patch would have moved an uncertified operator onto a cell that
+ * requires the ticket with nothing to stop it. Changing the person therefore
+ * goes through its own writer (`reassign_assignment`, migration 0057) and the
+ * field edits follow it, only if there were any.
+ *
+ * ⚠️ THIS POP-UP LEARNS ABOUT INELIGIBILITY FROM THE ANSWER, NOT BEFOREHAND,
+ * AND THAT IS THE ONE PLACE IT DIFFERS FROM `CreatePopover`. That screen is
+ * handed `requiredSkills` and the node's `eligibilityPolicy` and draws the
+ * override tick before it asks anything; this one is opened over an existing
+ * chip and has neither. Rather than grow two more props (and a second place for
+ * F-087's `certificateGaps` rule and R-331's policy lookup to drift), it sends
+ * the change, and a `not_eligible` refusal IS the question: its `policy` field
+ * says whether an override may be offered at all — `warn` draws the same tick
+ * and required reason `CreatePopover` draws, `block` draws the same sentence
+ * and no tick. So a person with no ticket can still be placed with a reason
+ * under `warn`, and never under `block`, which is the rule either way.
+ *
+ * The AREA half is predicted rather than discovered, exactly as `CreatePopover`
+ * predicts it: `outsideAreaOperatorIds` is resolved in `BoardPage` by the same
+ * helper both pop-ups call, so a person from another area is marked in the LIST
+ * before they are picked and the reason is asked for before Save is offered.
  */
+/**
+ * The refusal sentence, with the person named. The contract's own sentence
+ * for a capacity refusal carries the operator's id, because the contract
+ * does not know names; this pop-up does, so it says "Operator A2 would reach
+ * 200%" rather than a uuid (measured on the live app, session 76).
+ */
+export function describeRefusal(refusal: SchedulerError, personName: string): string {
+  if (refusal.kind === "CapacityExceeded") {
+    return `${personName} would reach ${Math.round(refusal.peak * 100)}% of capacity at this time (limit ${Math.round(refusal.cap * 100)}%).`;
+  }
+  return describeSchedulerError(refusal);
+}
+
 export function AssignmentPopover({
   assignment,
   homeRun,
   operator,
+  operators,
+  outsideAreaOperatorIds,
   products,
   anchor,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
   onCancel,
   onSave,
+  onReassign,
   onDelete,
   defaultTargetFor,
 }: {
   assignment: IndexedAssignment;
   homeRun: IndexedRun | null;
   operator: BoardOperator | undefined;
+  /**
+   * R-343: who this row could be given to instead.
+   *
+   * ⚠️ THE POOL, NOT EVERY OPERATOR THE WINDOW CARRIES. The maintainer, 6
+   * Sept: *"Operators from other plants should not be shown in the list,
+   * period, it is the same as the operators shown on the left panel."*
+   * `board_window` returns every operator in the company on purpose (S18, so a
+   * cross-plant chip can still be DRAWN); `BoardPage` cuts that to the selected
+   * plant's people for the left panel, and hands the same cut list here. A
+   * person from another AREA of THIS plant is still in it — they are marked
+   * and a reason is asked for (D113) — because that refusal has a door and a
+   * person from another plant's does not.
+   */
+  operators: BoardOperator[];
+  /**
+   * D113: the people in `operators` who do not belong at THIS cell. Resolved in
+   * `BoardPage` by `lib/outsideArea.ts`, the same helper the create pop-up
+   * uses, so the two pickers cannot disagree about who is marked.
+   */
+  outsideAreaOperatorIds: ReadonlySet<string>;
   products: Product[];
   anchor: { x: number; y: number };
   windowStart: Date;
@@ -65,6 +130,14 @@ export function AssignmentPopover({
     targetQty: number | null,
     targetUnit: string | null,
   ) => void;
+  /**
+   * R-343: change who is on the row. Resolves when the server took it and
+   * REJECTS with the typed refusal when it did not — which is how this pop-up
+   * learns that the new person has no ticket for this cell, and under which
+   * policy. `useDragGesture`'s action closes the pop-up on success and leaves
+   * it open on a refusal.
+   */
+  onReassign: (input: ReassignAssignmentInput) => Promise<void>;
   onDelete: (assignmentId: string) => void;
   /**
    * R-316: the TARGET this assignment works out to at a given efficiency, from
@@ -86,6 +159,137 @@ export function AssignmentPopover({
     assignment.targetQty == null ? "" : String(assignment.targetQty),
   );
   const [targetUnit, setTargetUnit] = useState(assignment.targetUnit ?? "");
+
+  // ---- R-343: the person ------------------------------------------------
+  const currentOperatorId = assignment.operatorId ?? "";
+  const [operatorId, setOperatorId] = useState(currentOperatorId);
+  // The server's last word about THIS choice. Cleared the moment the choice
+  // changes: an answer about Rita says nothing about Ray.
+  const [refusal, setRefusal] = useState<SchedulerError | null>(null);
+  // The eligibility answer, kept APART from the latest refusal. The first
+  // draft derived the override question from `refusal` alone, so when the
+  // resend with the override was then refused for capacity, the training
+  // message and the tick vanished, and the next Save went out without the
+  // override -- the two refusals alternated forever (the reviewer's finding,
+  // session 77; AP9 pins it). An answer about this person's training stands
+  // until a different person is picked.
+  const [notEligibleAnswer, setNotEligibleAnswer] = useState<Extract<
+    SchedulerError,
+    { kind: "NotEligible" }
+  > | null>(null);
+  const [sending, setSending] = useState(false);
+  const [overrideChecked, setOverrideChecked] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
+  // D113. A SECOND pair, deliberately not reusing the one above, for the reason
+  // CreatePopover gives: waving through "no Welding ticket" must not silently
+  // also place somebody in a part of the structure they are not cleared for.
+  const [areaChecked, setAreaChecked] = useState(false);
+  const [areaReason, setAreaReason] = useState("");
+
+  function pickPerson(nextId: string) {
+    setOperatorId(nextId);
+    setRefusal(null);
+    setNotEligibleAnswer(null);
+    setOverrideChecked(false);
+    setOverrideReason("");
+    setAreaChecked(false);
+    setAreaReason("");
+  }
+
+  /**
+   * The list the select offers.
+   *
+   * ⚠️ THE PERSON ALREADY ON THE ROW IS ALWAYS IN IT, even when they are not
+   * in the pool — somebody on loan from another plant, or a row whose operator
+   * has been deleted (D110, `operatorId` null and only a name left). Without
+   * that the select would silently show the FIRST person in the pool while the
+   * row held someone else, and Save would then look like a no-op that quietly
+   * reassigned the work.
+   */
+  const people = useMemo(() => {
+    const rows = operators.filter((o) => o.active).map((o) => ({ id: o.id, label: o.displayName }));
+    if (currentOperatorId === "") {
+      // D110: the person was deleted and only their name remains. The select
+      // must say so and hold that as its value, or it would show the first
+      // person in the pool as if they were on the row, and a Save with
+      // nothing picked would quietly do nothing (the reviewer's first
+      // finding, session 77; AP8). Picking anyone real is a reassignment.
+      rows.unshift({
+        id: "",
+        label: `${assignment.operatorDisplayName ?? "(unknown operator)"} — no longer in the system`,
+      });
+    } else if (!rows.some((r) => r.id === currentOperatorId)) {
+      rows.unshift({
+        id: currentOperatorId,
+        label: operator?.displayName ?? assignment.operatorDisplayName ?? "(unknown operator)",
+      });
+    }
+    return rows;
+  }, [operators, currentOperatorId, operator, assignment.operatorDisplayName]);
+
+  const personChanged = operatorId !== currentOperatorId;
+  const chosenName =
+    operators.find((o) => o.id === operatorId)?.displayName ??
+    operator?.displayName ??
+    "This person";
+  const selectedOutsideArea = outsideAreaOperatorIds.has(operatorId);
+  // The refusal that has an answer on this screen; every other kind is a
+  // sentence and nothing more.
+  const notEligible = notEligibleAnswer;
+  const blocked = notEligible !== null && notEligible.policy === "block";
+  const needsOverride = notEligible !== null && notEligible.policy === "warn";
+  const saveDisabled =
+    sending ||
+    blocked ||
+    (needsOverride && (!overrideChecked || overrideReason.trim() === "")) ||
+    // D113: the server refuses an override with no reason, so the button must
+    // not offer to send one. Same shape as the line above it.
+    (selectedOutsideArea && personChanged && (!areaChecked || areaReason.trim() === ""));
+
+  async function save() {
+    const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
+    const { qty, unit } = normalizeTarget(targetQty, targetUnit);
+    const fieldsChanged =
+      eff !== assignment.efficiencyPercent ||
+      qty !== (assignment.targetQty ?? null) ||
+      unit !== (assignment.targetUnit ?? null);
+
+    if (!personChanged) {
+      onSave(assignment.id, eff, qty, unit);
+      return;
+    }
+    setSending(true);
+    try {
+      // D64's rule, restated: never send an override the user did not tick.
+      // `needsOverride` is only true once the server has actually refused, so
+      // the first attempt for any person carries no flags at all.
+      await onReassign({
+        assignmentId: assignment.id,
+        operatorId,
+        eligibilityOverride: needsOverride && overrideChecked,
+        overrideReason: needsOverride && overrideChecked ? overrideReason.trim() : undefined,
+        areaOverride: selectedOutsideArea && areaChecked,
+        areaOverrideReason: selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
+      });
+      // Only AFTER the person landed, and only if there is anything to say.
+      // The two writes are not one transaction and cannot be made one, so the
+      // order is chosen to fail safe: a refused reassignment leaves the row
+      // exactly as it was rather than half-edited.
+      // The field path closes the pop-up itself (the hook clears it after the
+      // PATCH). A person-only save has no second write, so it closes here --
+      // measured on the live app, session 76: without this line the pop-up
+      // stayed open over a row that had already changed under it.
+      if (fieldsChanged) onSave(assignment.id, eff, qty, unit);
+      else onCancel();
+    } catch (err) {
+      const se = isSchedulerError(err) ? err : toSchedulerError(err);
+      setRefusal(se);
+      if (se.kind === "NotEligible") setNotEligibleAnswer(se);
+    } finally {
+      setSending(false);
+    }
+  }
+
   // R-316: follows the efficiency box as it is typed. An unparseable or empty
   // box falls back to the saved efficiency rather than to 100, so a
   // half-deleted number never makes the standard jump.
@@ -104,6 +308,20 @@ export function AssignmentPopover({
   return (
     <BoardPopover anchor={anchor} onClose={onCancel} title={`${name} — ${product?.name ?? "—"}`}>
       <div className={styles.body}>
+        <label htmlFor="ap-person">Person</label>
+        <select id="ap-person" value={operatorId} onChange={(e) => pickPerson(e.target.value)}>
+          {people.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+              {/* D113, word for word the create pop-up's: a person outside
+                  this area is OFFERED, not hidden, because that refusal has
+                  a door. Somebody from another PLANT is not in this list at
+                  all -- see the `operators` prop. */}
+              {outsideAreaOperatorIds.has(o.id) ? " — not from this area (override)" : ""}
+            </option>
+          ))}
+        </select>
+
         <label htmlFor="ap-eff">Efficiency %</label>
         <input
           id="ap-eff"
@@ -124,6 +342,98 @@ export function AssignmentPopover({
           derivedQty={derivedQty}
         />
 
+        {selectedOutsideArea && personChanged && (
+          <div className={styles.eligWarn}>
+            {/* D113: "the area rule becomes a strong warning rather than a
+                wall, and the audit log carries who waved it through." */}
+            <p>This person doesn&rsquo;t belong to this part of the structure.</p>
+            <label className={styles.overrideLbl}>
+              <input
+                type="checkbox"
+                checked={areaChecked}
+                onChange={(e) => setAreaChecked(e.target.checked)}
+              />
+              Place them here anyway
+            </label>
+            {areaChecked && (
+              <>
+                <label htmlFor="ap-area-reason">Reason (required)</label>
+                <input
+                  id="ap-area-reason"
+                  type="text"
+                  value={areaReason}
+                  onChange={(e) => setAreaReason(e.target.value)}
+                  placeholder="Why are they working here?"
+                />
+              </>
+            )}
+          </div>
+        )}
+
+        {notEligible !== null && (
+          <div className={styles.eligWarn}>
+            {/* ⛔ THE SERVER'S OWN ANSWER, NAMED. `missingSkills` is "never
+                trained"; `expiringSkills` is "trained, and the certificate runs
+                out before this window ends" -- two problems needing a course
+                and a renewal respectively, which F-087 was filed for printing
+                as one sentence and then as none. */}
+            {notEligible.missingSkills.length > 0 && (
+              <p>
+                <strong>Never trained:</strong>{" "}
+                {notEligible.missingSkills.map((sk) => sk.name).join(", ")}. Booking the training is
+                what fixes this.
+              </p>
+            )}
+            {notEligible.expiringSkills.length > 0 && (
+              <p>
+                <strong>Certificate expired:</strong>{" "}
+                {notEligible.expiringSkills.map((sk) => sk.name).join(", ")}. They held this — it
+                needs renewing before this shift ends.
+              </p>
+            )}
+            {notEligible.missingSkills.length === 0 && notEligible.expiringSkills.length === 0 && (
+              <p>This person is not certified for this cell.</p>
+            )}
+            {blocked ? (
+              // R-331: the plant this cell sits in refuses, whatever the plant
+              // next door allows. The server said so; this is not a guess.
+              <p>Certification is required at this place, so there is no override.</p>
+            ) : (
+              <>
+                <label className={styles.overrideLbl}>
+                  <input
+                    type="checkbox"
+                    checked={overrideChecked}
+                    onChange={(e) => setOverrideChecked(e.target.checked)}
+                  />
+                  Override — I&rsquo;m certifying this placement anyway
+                </label>
+                {overrideChecked && (
+                  <>
+                    <label htmlFor="ap-override-reason">Reason (required)</label>
+                    <input
+                      id="ap-override-reason"
+                      type="text"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      placeholder="Why is this OK?"
+                    />
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {refusal !== null && refusal.kind !== "NotEligible" && (
+          // Every other refusal: the sentence the error contract already writes
+          // for it, in the pop-up rather than only in a toast, because the
+          // control that caused it is still on screen.
+          <p className={styles.refusal} role="alert">
+            {describeRefusal(refusal, chosenName)}
+          </p>
+        )}
+
         <div className={styles.time}>{timeLabel}</div>
 
         <div className={styles.row}>
@@ -136,10 +446,9 @@ export function AssignmentPopover({
           <button
             type="button"
             className={styles.pri}
+            disabled={saveDisabled}
             onClick={() => {
-              const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
-              const { qty, unit } = normalizeTarget(targetQty, targetUnit);
-              onSave(assignment.id, eff, qty, unit);
+              void save();
             }}
           >
             Save

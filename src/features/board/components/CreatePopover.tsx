@@ -110,6 +110,24 @@ export function CreatePopover({
   shiftChips: ShiftChip[];
   defaultCreateMode: "run" | "direct";
   products: Product[];
+  /**
+   * ⭐ R-342: THE LEFT PANEL'S OWN LIST — the people owned somewhere in the
+   * plant being shown (`operatorPool` in `BoardPage`). The maintainer, 6 Sept:
+   * *"Operators from other plants should not be shown in the list, period, it
+   * is the same as the operators shown on the left panel."*
+   *
+   * ⚠️ IT USED TO BE `boardQuery.data.operators`, WHICH IS EVERY PERSON IN THE
+   * COMPANY. `board_window` returns them all on purpose, so that a chip for a
+   * cross-plant assignment can still be DRAWN (S18) — but drawing a name and
+   * offering it are different questions, and this select was answering the
+   * wrong one. `src/test/pickerPool.test.ts` is what stops the two lists
+   * drifting apart again.
+   *
+   * ⚠️ ONLY THE DIRECT-ASSIGNMENT TAB CHOOSES A PERSON. The Product run tab
+   * writes a run with a planned headcount and no operator at all, so there is
+   * nothing there to narrow, mark, or ask a reason for; the crew is attached
+   * afterwards, through the assignment pop-up.
+   */
   operators: BoardOperator[];
   windowStart: Date;
   dateFormat?: DateFormat;
@@ -126,6 +144,14 @@ export function CreatePopover({
    * refused by the database with no way through, so it is filtered out; a
    * person outside theirs can be placed anyway by anyone who may schedule here,
    * with a reason. Filtering them would delete the feature.
+   *
+   * ⚠️⚠️ R-342 PUT A FLOOR UNDER THAT, AND THE TWO STATEMENTS ARE NOT IN
+   * CONFLICT. What is offered-and-marked is ANOTHER AREA OF THIS PLANT. Another
+   * PLANT is not in `operators` at all any more (see that prop above), so this
+   * set never has to speak for one. The mark is still what the maintainer asked
+   * for and the server still asks for the reason: `outsideAreaOperatorIds` now
+   * decides it the way `app_owner_covers_in_org` does, so a person whose owning
+   * node is not on this board can never be waved through as belonging.
    */
   outsideAreaOperatorIds: ReadonlySet<string>;
   /**

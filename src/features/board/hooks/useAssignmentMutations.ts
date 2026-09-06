@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-q
 import {
   applySplitCoverage,
   createAssignment,
+  reassignAssignment,
   toEfficiency,
   toTstzRange,
   deleteAssignment,
@@ -10,6 +11,7 @@ import {
   type AssignmentFieldEdit,
   type BoardWindow,
   type CreateAssignmentInput,
+  type ReassignAssignmentInput,
   type SplitCoverageInput,
 } from "@/lib/api";
 import { boardKeys } from "./useBoardWindow";
@@ -164,6 +166,62 @@ export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date
                   ...(edit.timerange
                     ? { timerange: toTstzRange(edit.timerange.start, edit.timerange.end) }
                     : {}),
+                }
+              : a,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/**
+ * R-343: change WHO is on an assignment, in place.
+ *
+ * Same four-step optimistic pattern as `useUpdateAssignmentFields` above and
+ * the same invalidation, with one difference worth stating: the optimistic row
+ * moves `operatorId` and CLEARS BOTH OVERRIDE PAIRS unless this call is the one
+ * setting them. `reassign_assignment` normalises the flags to the placement it
+ * has just made — an override that belonged to the person who has left the row
+ * is not an override any more — so an optimistic row that kept them would badge
+ * the chip "certification override" for the length of one round trip and then
+ * un-badge it.
+ *
+ * ⚠️ `operatorDisplayName` IS SET TO NULL, NOT GUESSED. The board index resolves
+ * a chip's name from `operatorById` (the window's own operator list), and this
+ * field is the D110 fallback for a person who is no longer in it. Writing the
+ * new person's name here would be inventing server data; leaving the OLD name
+ * would draw the previous person on the chip until the refetch lands.
+ */
+export function useReassignAssignment(rootPath: string, from: Date, to: Date) {
+  const queryClient = useQueryClient();
+  const key = boardKeys.window(rootPath, from, to);
+
+  return useMutation({
+    mutationFn: (input: ReassignAssignmentInput) => reassignAssignment(input),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = snapshotBoard(queryClient, key);
+      if (previous) {
+        queryClient.setQueryData<BoardWindow>(key, {
+          ...previous,
+          assignments: previous.assignments.map((a) =>
+            a.id === input.assignmentId
+              ? {
+                  ...a,
+                  operatorId: input.operatorId,
+                  operatorDisplayName: null,
+                  eligibilityOverride: input.eligibilityOverride ?? false,
+                  overrideReason: input.overrideReason ?? null,
+                  areaOverride: input.areaOverride ?? false,
+                  areaOverrideReason: input.areaOverrideReason ?? null,
                 }
               : a,
           ),

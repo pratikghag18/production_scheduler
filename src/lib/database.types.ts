@@ -1364,6 +1364,17 @@ export type Database = {
         Returns: Json
       }
       promote_node: { Args: { p_node_id: string }; Returns: Json }
+      reassign_assignment: {
+        Args: {
+          p_area_override?: boolean
+          p_area_override_reason?: string
+          p_assignment_id: string
+          p_eligibility_override?: boolean
+          p_operator_id: string
+          p_override_reason?: string
+        }
+        Returns: Json
+      }
       remove_site_member: {
         Args: { p_node_id: string; p_profile_id: string }
         Returns: Json

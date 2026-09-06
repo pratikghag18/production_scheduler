@@ -75,3 +75,58 @@
   width: auto;
   flex: 1;
 }
+
+/* R-343: the same warning block CreatePopover uses for D64/D113, copied here
+   rather than imported for `docs/conventions.md`'s one-module-per-component
+   rule (the same reason this file's `.body`/`.row`/`.time` are copies). It has
+   one extra class this pop-up needs and that one does not: `.refusal`, for the
+   answers the server can only give AFTER the write is sent -- a create screen
+   predicts eligibility before asking, an edit screen over an existing chip has
+   no `requiredSkills` to predict it from. */
+.eligWarn {
+  margin-top: calc(8px * var(--chrome-scale, 1));
+  padding: calc(7px * var(--chrome-scale, 1)) calc(8px * var(--chrome-scale, 1));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border: 1px solid var(--warn);
+}
+
+.eligWarn p {
+  margin: 0 0 calc(6px * var(--chrome-scale, 1));
+  font-size: calc(11.5px * var(--chrome-scale, 1));
+  color: var(--ink);
+}
+
+.eligWarn p:last-child {
+  margin-bottom: 0;
+}
+
+/* `.body label` above (0,1,1) sets display/font-size/color/margin for every
+   ordinary field label; `.overrideLbl` needs different values for all four, so
+   the compound `.body label.overrideLbl` (0,2,1) wins outright rather than
+   fighting it property-by-property (§10.1's rule). */
+.body label.overrideLbl {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--chrome-scale, 1));
+  font-size: calc(11.5px * var(--chrome-scale, 1));
+  color: var(--ink);
+  margin: 0 0 calc(4px * var(--chrome-scale, 1));
+  cursor: pointer;
+}
+
+/* Same reasoning for the checkbox itself against `.body input`'s width: 100%
+   -- `.body .overrideLbl input` (0,2,1) beats it outright. */
+.body .overrideLbl input {
+  width: auto;
+  flex: none;
+}
+
+/* A refusal with no control to offer: not_permitted, capacity_exceeded, an
+   unknown row. Bordered rather than filled, so it does not read as the same
+   kind of thing as the warning block above it, which always ASKS something. */
+.refusal {
+  margin: calc(8px * var(--chrome-scale, 1)) 0 0;
+  font-size: calc(11.5px * var(--chrome-scale, 1));
+  color: var(--ink);
+}
