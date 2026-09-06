@@ -788,6 +788,13 @@ export interface BoardWindow {
    *  builds it off the same `scoped_nodes` CTE `nodes` comes from, so the two
    *  lists cover exactly the same ids. */
   nodePolicies: NodePolicy[];
+  /** R-346's viewer clause: may this person place people somewhere on this
+   *  board? The server decides (an edit grant covering the board's place or
+   *  inside it, or the company admin); the screen hides the Operators panel
+   *  and every "other people" control when it is false. Required: a payload
+   *  without it is an un-migrated database, and the board says so rather than
+   *  guessing. */
+  canPlace: boolean;
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -806,6 +813,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     node_shift_map,
     cycle_times,
     node_policies,
+    can_place,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -833,6 +841,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   // anyway would put the board straight back on the company-wide answer and
   // look like it was working — the `silent-empty` defect class again.
   const parsedNodePolicies = parseArrayOf(node_policies, parseNodePolicy);
+  if (typeof can_place !== "boolean") return null;
 
   if (
     parsedOrg === null ||
@@ -866,6 +875,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     nodeShiftMap: parsedNodeShiftMap,
     cycleTimes: parsedCycleTimes,
     nodePolicies: parsedNodePolicies,
+    canPlace: can_place,
   };
 }
 

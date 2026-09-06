@@ -254,16 +254,31 @@ create or replace function app_can_read_in_plant(p_site_node uuid)
 returns boolean
 language sql stable security definer set search_path = public, pg_temp as $$
   SELECT app_is_admin()
+      -- Any grant reads the people available at its own places: homed at or
+      -- above the grant, or inside it (0026's branch rule, unchanged).
       OR EXISTS (
            SELECT 1
              FROM nodes n, app_grant_paths(false) gp
+            WHERE n.id = p_site_node
+              AND n.org_id = app_current_org()
+              AND (n.path <@ gp OR gp <@ n.path)
+         )
+      -- Only a grant that can PLACE people (supervisor or admin) reads the rest
+      -- of its plant: that is what the click-through is for. The maintainer,
+      -- session 79: "No one should see more than they are assigned to ... Why
+      -- would it be sensible to hide a line 2 from a supervisor who only has
+      -- line 1 access, but show everything to a viewer who only has cell 1
+      -- access in Line 1?" A viewer grant stops at the first clause.
+      OR EXISTS (
+           SELECT 1
+             FROM nodes n, app_grant_paths(true) gp
             WHERE n.id = p_site_node
               AND n.org_id = app_current_org()
               AND subpath(n.path, 0, 1) = subpath(gp, 0, 1)
          );
 $$;
 comment on function app_can_read_in_plant(uuid) is
-  'R-346 / 0058: may the caller read a PERSON owned by this node? They must hold a grant --- of any role --- somewhere in the same PLANT, the plant being the first label of the ltree path; company admins read all. Strictly wider than app_can_read_owned (same branch implies same plant) and exactly as tight at the plant boundary (S21). Used by operators_select and, through app_can_read_operator, by operator_skills_select. NOT used for products, trainings or shift patterns: those keep 0026''s branch rule, and 0045''s cross-plant certification argument depends on skills_select keeping it.';
+  'R-346 / 0058: may the caller read a PERSON owned by this node? Any grant reads the people at its own places (the owner and the grant on one branch, either direction, 0026''s rule); a grant that can PLACE people (supervisor or admin) also reads the rest of its plant, the plant being the first label of the ltree path; company admins read all. A viewer reads no more than they are assigned to (the maintainer, session 79). Exactly as tight at the plant boundary as before (S21). Used by operators_select and, through app_can_read_operator, by operator_skills_select. NOT used for products, trainings or shift patterns: those keep 0026''s branch rule, and 0045''s cross-plant certification argument depends on skills_select keeping it.';
 
 -- The policy the maintainer's empty panel came from.
 drop policy operators_select on operators;
@@ -351,12 +366,13 @@ language sql stable security definer set search_path = public, pg_temp as $$
     JOIN nodes n ON n.id = o.site_node_id AND n.org_id = o.org_id
    WHERE o.org_id = app_current_org()
      AND subpath(n.path, 0, 1) = subpath(p_root_path, 0, 1)
-     AND (app_is_admin()
-          OR EXISTS (SELECT 1 FROM app_grant_paths(false) gp
-                      WHERE subpath(gp, 0, 1) = subpath(p_root_path, 0, 1)));
+     -- Person by person, the same answer operators_select gives: a viewer
+     -- granted one cell learns the homes of the people at their own places
+     -- and nobody else's (session 79; SP18 asks it directly).
+     AND app_can_read_in_plant(o.site_node_id);
 $$;
 comment on function app_operator_homes(ltree) is
-  'R-346 / 0058. Every person in the caller''s org whose home is in the same PLANT as this path, with the home''s ltree path. SECURITY DEFINER because nodes_select is `path <@ grant` --- descendants only --- so a line supervisor cannot resolve the home of anyone owned by the plant or by the area above them, and board_window is SECURITY INVOKER. Org-scoped internally (app_current_org, never a parameter) AND answers only about a plant the caller holds a grant in, or any plant for a company admin --- a plant with no grant gets nothing, the same as a plant that does not exist (session 78, the reviewer; SP13). Joined to the RLS-filtered `operators` at its one call site, so it narrows the list to a plant and never widens who is readable; operators_select decides that.';
+  'R-346 / 0058. Every person in the caller''s org whose home is in the same PLANT as this path, with the home''s ltree path. SECURITY DEFINER because nodes_select is `path <@ grant` --- descendants only --- so a line supervisor cannot resolve the home of anyone owned by the plant or by the area above them, and board_window is SECURITY INVOKER. Org-scoped internally (app_current_org, never a parameter) AND answers person by person exactly what operators_select would let the caller read --- a plant with no grant gets nothing, the same as a plant that does not exist (session 78, the reviewer; SP13), and a viewer granted one cell gets only the people at their own places (session 79; SP18). Joined to the RLS-filtered `operators` at its one call site, so it narrows the list to a plant and never widens who is readable; operators_select decides that.';
 
 revoke execute on function app_operator_homes(ltree) from public;
 do $$ begin
@@ -417,6 +433,16 @@ BEGIN
   SELECT jsonb_build_object(
     'org', (SELECT jsonb_build_object('id', o.id, 'name', o.name, 'settings', o.settings)
             FROM orgs o WHERE o.id = v_org_id),
+
+    -- R-346, the viewer clause (session 79): may this person PLACE people
+    -- somewhere on this board? An edit grant (supervisor or admin) covering
+    -- the board's place or inside it, or the company admin. The screen hides
+    -- the Operators panel and every "other people" control when this is
+    -- false --- "for a viewer, the left panel serves no purpose". Decided here,
+    -- with app_grant_paths(true), the same set the write policies bind.
+    'can_place', (app_is_admin()
+                  OR EXISTS (SELECT 1 FROM app_grant_paths(true) gp
+                              WHERE p_root_path <@ gp OR gp <@ p_root_path)),
 
     'levels', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(

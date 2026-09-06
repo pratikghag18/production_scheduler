@@ -562,33 +562,41 @@ export default function BoardPage() {
             <BoardEmptyState />
           ) : (
             <div className={styles.body}>
-              <OperatorPanel
-                operators={operatorPool}
-                /* R-346: who is offered here by DEFAULT -- everyone whose home
-                   covers the board's own place or sits inside it. The rest of
-                   the plant is the same list minus these, shown by the panel's
-                   own control. Decided in `lib/outsideArea.ts`, never here. */
-                hereOperatorIds={panelHereIds}
-                skillById={index.skillById}
-                nodeById={index.nodeById}
-                assignmentsByOperator={index.assignmentsByOperator}
-                windowStart={index.windowStart}
-                windowMinutes={index.windowMinutes}
-                capacityCap={index.capacityCap}
-                open={operatorPanelOpen}
-                onToggleOpen={() => setOperatorPanelOpen(!operatorPanelOpen)}
-                draggingOperatorId={
-                  dragApi.activeDrag?.subject.kind === "panel"
-                    ? dragApi.activeDrag.subject.operator.id
-                    : null
-                }
-                dragApi={{
-                  beginPanelDrag: dragApi.beginPanelDrag,
-                  updatePanelDrag: dragApi.updatePanelDrag,
-                  endPanelDrag: dragApi.endPanelDrag,
-                  cancelDrag: dragApi.cancelDrag,
-                }}
-              />
+              {/* R-346, the viewer clause: the panel is a place to pick people
+                 from, so someone who cannot place anyone on this board does
+                 not get one. The server says who can (`can_place`); the board
+                 renders the answer. "For a viewer, the left panel serves no
+                 purpose, so we should hide it, the only thing they see is
+                 the board." */}
+              {boardQuery.data.canPlace && (
+                <OperatorPanel
+                  operators={operatorPool}
+                  /* R-346: who is offered here by DEFAULT -- everyone whose home
+                     covers the board's own place or sits inside it. The rest of
+                     the plant is the same list minus these, shown by the panel's
+                     own control. Decided in `lib/outsideArea.ts`, never here. */
+                  hereOperatorIds={panelHereIds}
+                  skillById={index.skillById}
+                  nodeById={index.nodeById}
+                  assignmentsByOperator={index.assignmentsByOperator}
+                  windowStart={index.windowStart}
+                  windowMinutes={index.windowMinutes}
+                  capacityCap={index.capacityCap}
+                  open={operatorPanelOpen}
+                  onToggleOpen={() => setOperatorPanelOpen(!operatorPanelOpen)}
+                  draggingOperatorId={
+                    dragApi.activeDrag?.subject.kind === "panel"
+                      ? dragApi.activeDrag.subject.operator.id
+                      : null
+                  }
+                  dragApi={{
+                    beginPanelDrag: dragApi.beginPanelDrag,
+                    updatePanelDrag: dragApi.updatePanelDrag,
+                    endPanelDrag: dragApi.endPanelDrag,
+                    cancelDrag: dragApi.cancelDrag,
+                  }}
+                />
+              )}
               <BoardGrid
                 index={index}
                 levelById={levelById}

@@ -111,6 +111,7 @@ function rawPayload(): Json {
     shift_templates: [],
     node_shift_map: [],
     cycle_times: [],
+    can_place: true,
     node_policies: [
       { node_id: "n-plant", eligibility_policy: "warn" },
       { node_id: "n-strict", eligibility_policy: "block" },

@@ -100,6 +100,10 @@
 -- SP15  the company admin is refused the same way
 -- SP16  no grant anywhere: no person, no training row, nothing from the helper
 -- SP17  re-homing an assigned person into the other plant is refused
+-- SP18 ⭐ a VIEWER granted one cell reads the people at their own places and
+--       nobody else in the plant, and the helper says the same
+-- SP19  board_window says can_place: false to that viewer and true to the line
+--       supervisor and the site admin
 -- ============================================================================
 
 BEGIN;
@@ -841,6 +845,69 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_SP17;
 
+\echo 'SP18 ⭐ (R-346, the viewer clause): a viewer granted Cell SA1 reads Pam, Ada and Lena --- homed above the cell --- and not Ola from the other area; the helper answers the same three'
+SAVEPOINT sp_SP18;
+DO $$
+DECLARE v_ca1 uuid; v_sa ltree; v_names text[]; v_homes text[]; v_skills int; v_ok boolean := true; v_why text := '';
+BEGIN
+  SELECT v INTO v_ca1 FROM sp_fix WHERE k = 'ca1';
+  SELECT path INTO v_sa FROM nodes WHERE id = (SELECT v FROM sp_fix WHERE k = 'sa');
+  INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-0000000000cd');
+  INSERT INTO user_profiles (id, org_id, user_id, role) VALUES
+    ('c0000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000cd', 'viewer');
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
+    ('c0000000-0000-0000-0000-000000000004', v_ca1, '10000000-0000-0000-0000-000000000001', 'viewer');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000cd', true);
+  SET LOCAL ROLE authenticated;
+  SELECT array_agg(display_name ORDER BY display_name) INTO v_names FROM operators WHERE id::text LIKE 'c5000000-%';
+  SELECT array_agg(o.display_name ORDER BY o.display_name) INTO v_homes
+    FROM app_operator_homes(v_sa) h JOIN operators o ON o.id = h.operator_id;
+  SELECT count(*) INTO v_skills FROM operator_skills WHERE operator_id = 'c5000000-0000-0000-0000-000000000004';
+  RESET ROLE;
+  IF NOT (v_names = ARRAY['Ada', 'Lena', 'Pam'] AND v_homes = ARRAY['Ada', 'Lena', 'Pam'] AND v_skills = 0)
+  THEN v_ok := false; v_why := v_why || format(' people=%s homes=%s ola_skill_rows=%s', v_names, v_homes, v_skills); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS SP18';
+  ELSE RAISE NOTICE 'FAIL SP18:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL SP18: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_SP18;
+
+\echo 'SP19 (R-346, the viewer clause): board_window says can_place false to the viewer and true to the line supervisor and the site admin'
+SAVEPOINT sp_SP19;
+DO $$
+DECLARE v_ca1 uuid; v_path ltree; v_viewer boolean; v_super boolean; v_admin boolean; v_ok boolean := true; v_why text := '';
+BEGIN
+  SELECT v INTO v_ca1 FROM sp_fix WHERE k = 'ca1';
+  INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-0000000000cd');
+  INSERT INTO user_profiles (id, org_id, user_id, role) VALUES
+    ('c0000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000cd', 'viewer');
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role) VALUES
+    ('c0000000-0000-0000-0000-000000000004', v_ca1, '10000000-0000-0000-0000-000000000001', 'viewer');
+  SELECT path INTO v_path FROM nodes WHERE id = v_ca1;
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000cd', true);
+  SET LOCAL ROLE authenticated;
+  v_viewer := (board_window(v_path, '2099-08-03 00:00+00', '2099-08-10 00:00+00')->>'can_place')::boolean;
+  RESET ROLE;
+  SELECT path INTO v_path FROM nodes WHERE id = (SELECT v FROM sp_fix WHERE k = 'la1');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000cb', true);
+  SET LOCAL ROLE authenticated;
+  v_super := (board_window(v_path, '2099-08-03 00:00+00', '2099-08-10 00:00+00')->>'can_place')::boolean;
+  RESET ROLE;
+  SELECT path INTO v_path FROM nodes WHERE id = (SELECT v FROM sp_fix WHERE k = 'sa');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000ca', true);
+  SET LOCAL ROLE authenticated;
+  v_admin := (board_window(v_path, '2099-08-03 00:00+00', '2099-08-10 00:00+00')->>'can_place')::boolean;
+  RESET ROLE;
+  IF NOT (v_viewer = false AND v_super = true AND v_admin = true)
+  THEN v_ok := false; v_why := v_why || format(' viewer=%s supervisor=%s admin=%s', v_viewer, v_super, v_admin); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS SP19';
+  ELSE RAISE NOTICE 'FAIL SP19:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL SP19: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_SP19;
+
 ROLLBACK;
 
-\echo '81_same_plant_test.sql complete (18 cases: SP0-SP17)'
+\echo '81_same_plant_test.sql complete (20 cases: SP0-SP19)'

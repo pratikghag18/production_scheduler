@@ -63,89 +63,92 @@ function mondayPlusWeeks(weeks: number): string {
   return new Date(monday).toISOString().slice(0, 10);
 }
 
-test("a line supervisor sees the whole plant's people, with nothing behind a click", async ({
+/**
+ * ⚠️ THE SPLIT IS READ OFF THE SCREEN, NOT ASSUMED FROM THE FIXTURE. This runs
+ * against the maintainer's live demo database, and the maintainer re-homes
+ * people from the Admin rail to try the rule out (on 6 Sept, A5 and A6 were
+ * moved from Plant A into Area 2 minutes after this case was first written,
+ * and a case that had assumed "all six by default" went red for the right
+ * behaviour). So the case asserts the RULE: the default list plus the list
+ * behind the click is exactly the plant's six people, nobody appears in both
+ * halves, and nobody from another plant appears anywhere. Which six are on
+ * which side is the data's business.
+ */
+async function readSplit(scope: import("@playwright/test").Locator, nameOf: (t: string) => string) {
+  const control = scope.getByRole("button", { name: /other people in this plant/ });
+  const before = (await scope.getByText(/^Operator A\d/).allTextContents()).map(nameOf);
+  let behind: string[] = [];
+  if ((await control.count()) > 0) {
+    const label = (await control.textContent()) ?? "";
+    const n = Number(/\((\d+)\)/.exec(label)?.[1] ?? "0");
+    await control.click();
+    const after = (await scope.getByText(/^Operator A\d/).allTextContents()).map(nameOf);
+    behind = after.filter((name) => !before.includes(name));
+    expect(behind.length, "the control's count is the number it reveals").toBe(n);
+  }
+  return { here: before, behind };
+}
+
+test("a line supervisor sees the whole plant's people: the default list plus the click", async ({
   page,
 }) => {
   await signIn(page, SUPERVISOR, "/");
-  // The demo's runs sit in the current week; the window opens wherever it last
-  // was, so it is put somewhere with data before anything is read off it.
   await page.locator("#board-window-start").fill(mondayPlusWeeks(0));
 
   const panel = page.getByRole("complementary", { name: "Operators" });
   await expect(panel).toBeVisible({ timeout: 15_000 });
+  await expect(panel.getByText(/^Operator A\d/).first()).toBeVisible({ timeout: 15_000 });
 
-  /**
-   * ⭐⭐ ALL SIX, AND THAT IS THE WHOLE REQUIREMENT. `dev_demo.sql` homes
-   * Operator A1 inside Area 1 and A2-A6 at Plant A — every one of them at or
-   * ABOVE Ana's line, so every one of them is a default offer under the
-   * maintainer's rule. Before 0058 she saw none of them.
-   */
-  for (const name of PLANT_A_PEOPLE) {
-    await expect(panel.getByText(name, { exact: true })).toBeVisible({ timeout: 15_000 });
-  }
+  const { here, behind } = await readSplit(panel, (t) =>
+    t.trim().split(/\s/).slice(0, 2).join(" "),
+  );
+  expect([...here, ...behind].sort()).toEqual([...PLANT_A_PEOPLE].sort());
+  expect(here.filter((name) => behind.includes(name))).toEqual([]);
+  // Before 0058 she saw nobody at all; at least the people homed at the plant
+  // and the area above her line are hers by default.
+  expect(here.length).toBeGreaterThan(0);
 
-  /**
-   * ⭐ AND NO CONTROL, because there is nobody behind it: Plant A's people are
-   * all homed at or above this line, so `elsewhere` is empty. A control here
-   * would mean the split had put somebody in the wrong half — the failure that
-   * asks a supervisor for a reason the server does not want.
-   */
-  await expect(panel.getByRole("button", { name: /other people in this plant/ })).toHaveCount(0);
-
-  /**
-   * ⚠️ NOBODY FROM ANOTHER PLANT (R-345/R-342). Plant B's people are named the
-   * same way with a B, and one of them appearing here would be the older defect
-   * back — cheap to assert while the panel is open.
-   */
-  await expect(panel.getByText(/Operator [BC]\d/)).toHaveCount(0);
+  // ⚠️ NOBODY FROM ANOTHER PLANT (R-345/R-342).
+  await expect(panel.getByText(/Operator [BCD]\d/)).toHaveCount(0);
 });
 
-test("the cell pop-up offers the same six, none of them marked", async ({ page }) => {
+test("the cell pop-up splits the same six the same way, marking only the ones behind the click", async ({
+  page,
+}) => {
   await signIn(page, SUPERVISOR, "/");
   await page.locator("#board-window-start").fill(mondayPlusWeeks(0));
 
-  /**
-   * ⚠️ ANY CELL TRACK ON HER BOARD, NOT A NAMED ONE. Ana's grant is Line 1, so
-   * her board carries Cells 1 and 2; `dev_demo.sql` puts Cell 3 under Line 2,
-   * which she cannot read. Naming a cell here would be asserting the demo's
-   * shape rather than the requirement, and would go red the day the fixture
-   * moves a cell. The first schedulable track is what a person would click.
-   */
-  // ⚠️ `getByLabel`, NOT `getByRole("button")`: a track is a focusable div with
-  // an `aria-label` and deliberately NO button role, because it CONTAINS
-  // role="button" blocks and ARIA forbids nesting those (TrackRow says so at
-  // the element).
+  // Any cell track on her board, not a named one: her grant is Line 1 and the
+  // demo may move cells; a track is a focusable div with an aria-label and no
+  // button role (TrackRow says why at the element).
   const track = page.getByLabel(/Cell \d+ track/).first();
   await expect(track).toBeVisible({ timeout: 15_000 });
   await track.press("Enter");
 
   const pop = page.getByRole("dialog");
   await expect(pop).toBeVisible({ timeout: 15_000 });
-  // The create pop-up opens on whichever tab was last used; the person picker
-  // is on the direct-assignment one.
   const direct = pop.getByRole("button", { name: "Direct assignment" });
   if (await direct.isVisible()) await direct.click();
 
   const person = pop.getByLabel("Operator");
   await expect(person).toBeVisible();
-  const labels = await person.locator("option").allTextContents();
+  // The name half only: suffixes answer two unrelated questions (F-087's
+  // training one and D113's area one), and this case is about the area.
+  const nameOf = (t: string) => t.trim().split(" — ")[0];
+  const defaults = (await person.locator("option").allTextContents()).map(nameOf);
+  expect(defaults.join(" ")).not.toContain("not from this area");
 
-  /**
-   * ⚠️ THE NAMES, WITH ANY SUFFIX STRIPPED, AND THAT IS DELIBERATE RATHER THAN
-   * LOOSE. An option reads `"<name> — <suffix>"`, and the suffixes answer TWO
-   * unrelated questions: F-087's certification one ("Never trained for this
-   * (override)" -- Line 1 carries a `Line 1 Cert` requirement that not all six
-   * hold) and D113's area one. Comparing the raw text to the bare names asserts
-   * both at once, so this case would go red the day somebody's certificate
-   * lapsed in the demo data -- reporting an area failure for a training fact.
-   * The name half is checked here; the area half is the negative below.
-   */
-  const names = labels.map((t) => t.trim().split(" — ")[0]).sort();
-  expect(names).toEqual([...PLANT_A_PEOPLE].sort());
-
-  // ⭐ NONE MARKED FOR THE AREA: every one of them is homed at or above this
-  // cell, so asking any of them for an area reason would be the screen refusing
-  // what the server takes without one.
-  expect(labels.join(" ")).not.toContain("not from this area");
-  await expect(pop.getByRole("button", { name: /other people in this plant/ })).toHaveCount(0);
+  const control = pop.getByRole("button", { name: /other people in this plant/ });
+  let behind: string[] = [];
+  if ((await control.count()) > 0) {
+    await control.click();
+    const all = await person.locator("option").allTextContents();
+    behind = all.map(nameOf).filter((name) => !defaults.includes(name));
+    // Every revealed person is marked, and only they are.
+    for (const raw of all) {
+      const marked = raw.includes("not from this area");
+      expect(marked, raw).toBe(behind.includes(nameOf(raw)));
+    }
+  }
+  expect([...defaults, ...behind].sort()).toEqual([...PLANT_A_PEOPLE].sort());
 });

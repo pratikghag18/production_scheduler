@@ -176,6 +176,7 @@ const boardWindowJson: Json = {
   // R-331 / migration 0051: one RESOLVED answer per node. Two nodes, two
   // different answers, because that is the shape a company-wide scalar cannot
   // carry and the reason this key exists at all.
+  can_place: true,
   node_policies: [
     { node_id: "30000000-0000-0000-0000-000000000007", eligibility_policy: "block" },
     { node_id: "30000000-0000-0000-0000-000000000001", eligibility_policy: "warn" },
@@ -747,5 +748,19 @@ describe("an operator carries the part of the structure they belong to", () => {
     };
     delete raw.operators[0].site_node_id;
     expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+describe("parseBoardWindow: can_place (R-346, the viewer clause)", () => {
+  it("keeps the server's answer, true or false", () => {
+    expect(parseBoardWindow(boardWindowJson)?.canPlace).toBe(true);
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), can_place: false } as Json)?.canPlace,
+    ).toBe(false);
+  });
+
+  it("refuses a payload without it, rather than guessing for an un-migrated database", () => {
+    const { can_place: _dropped, ...without } = boardWindowJson as { can_place: boolean };
+    expect(parseBoardWindow(without as Json)).toBeNull();
   });
 });

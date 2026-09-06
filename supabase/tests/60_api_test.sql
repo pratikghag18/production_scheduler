@@ -117,8 +117,10 @@ BEGIN
   bw := board_window('plant_1', '2030-01-01', '2030-01-08');
   IF bw->'runs' <> '[]'::jsonb THEN RAISE EXCEPTION 'FAIL: runs not empty array: %', bw->'runs'; END IF;
   IF bw->'assignments' <> '[]'::jsonb THEN RAISE EXCEPTION 'FAIL: assignments not empty array: %', bw->'assignments'; END IF;
+  -- 'org' is an object and 'can_place' (0058, R-346) is the one boolean the
+  -- payload carries: may this person place people on this board.
   FOR k IN SELECT jsonb_object_keys(bw) LOOP
-    IF k <> 'org' AND jsonb_typeof(bw->k) <> 'array' THEN
+    IF k NOT IN ('org', 'can_place') AND jsonb_typeof(bw->k) <> 'array' THEN
       RAISE EXCEPTION 'FAIL: key % is not array-valued (%), or is null', k, jsonb_typeof(bw->k);
     END IF;
   END LOOP;
