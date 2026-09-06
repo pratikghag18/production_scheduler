@@ -430,7 +430,11 @@ check("A33 ⭐: a control never offers a list that omits the role its subject ho
     for (const isPlantRoot of [true, false]) {
       for (const isSelf of [true, false]) {
         for (const directRole of ["admin", "supervisor", "viewer"] as const) {
-          const got = allowedRoles(stranger({ isSelf, directRole }), viewerIsCompanyAdmin, isPlantRoot);
+          const got = allowedRoles(
+            stranger({ isSelf, directRole }),
+            viewerIsCompanyAdmin,
+            isPlantRoot,
+          );
           if (!got.includes(directRole)) {
             return `viewer=${viewerIsCompanyAdmin} root=${isPlantRoot} self=${isSelf} holds=${directRole} offered=${got.join(",")}`;
           }
@@ -460,7 +464,9 @@ check("A21 ⭐: your own SUPERVISOR grant is not locked", () => {
   // The narrowing. A broad "never your own row" rule passes A19 and fails
   // here — and it is the rule migration 0021 shipped first, contradicting its
   // own comment (§19.51, rule 17).
-  const got = allowedRoles(stranger({ isSelf: true, directRole: "supervisor" }), false, true).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "supervisor" }), false, true).join(
+    ",",
+  );
   return got === "admin,supervisor,viewer" || got;
 });
 

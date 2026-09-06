@@ -4,13 +4,13 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-05'
-  tip: 7b58315
+  tip: 40d4fbc
   baseline:
-    app_tests: 2123
-    app_test_files: 78
+    app_tests: 2159
+    app_test_files: 80
     tsc: 0
     eslint: 0
-    db_checks: 607
+    db_checks: 637
     migrations: 56
     mutations: 509 of 536
 tracks:
@@ -1739,14 +1739,12 @@ stages:
   track: core
   num: 35
   title: Copy a week forward, and settle every clash by asking
-  status: now
+  status: done
   owner: agent
   refs:
-  # ⚠️ A CONVERSATION REF, NOT A SHIPPING ONE, and the difference is load-bearing.
-  # `refs: session <n>` means THAT SESSION SHIPPED THIS, and DEF-0009s pin
-  # checks the session agrees. Copy Week has shipped in no session; session 72
-  # is where the maintainer decided its shape.
+  # Session 72 is where the maintainer decided its shape; session 76 shipped it.
   - session 72 conversation
+  - session 76
   - NEXT Phase 2
   delivers:
   - R-339
@@ -1795,21 +1793,26 @@ stages:
     card to `done`.
 
 
-    ⚠️ TWO CALLS THE DEVELOPER MAKES IN THE BUILD AND WRITES DOWN, not questions for the maintainer:
-    whether a copied run landing on a day with no shift defined is a clash or simply lands; and
-    whether "take the copied one" on an occupied cell removes the prior run whole or only the part
-    that overlaps --- the lean is whole, because half a run is not a plan anyone asked for.
+    ⚠️ THE CALLS THE DEVELOPER MADE IN THE BUILD, written into 0055's header and pinned in 78, none
+    of them a question for the maintainer: a copied run landing on a day with no shift defined simply
+    lands (runs reference no shift, and nothing the writers refuse is about shifts); "take the copied
+    one" on an occupied cell removes the prior run WHOLE with its crew, through `delete_run`; a week
+    is the rows that START inside it, so a night row that starts the previous Sunday belongs to the
+    previous week's copy, and a source row that reaches into the target week can itself appear as a
+    prior row of a copied one and is listed like any other; a person on loan from another plant
+    (D113) is listed with no name when the caller cannot read their row, and copied with the
+    override carried, because the writer takes that placement; rows that remember a deleted product
+    or person are not copied and are counted, not hidden. The button is offered by the server's own
+    per-plant answer (`app_is_admin_for`), not by "administers something".
   state: >-
-    **In flight, session 75, as two parallel lanes against one written contract** (CLAUDE.md section 5):
-    the server lane owns migration 0055 and `78_copy_week_test.sql`; the client lane owns the API
-    module, the dialog, the toolbar button, the unit cases and the browser spec. A third agent with
-    one job, break it, reviews both before anything is called done. R-339 is written and
-    `uncovered`; the requirement came before the code on purpose, and the plan above is the build order. Nothing is blocked on a
-    decision. Sized against what this project has shipped: the plant settings (0050--0052 plus the
-    tab) ran from the first commit to the last in about a day and a half of wall-clock across seven
-    sessions with tester rounds between; cycle times (S27) in under a day. Copy Week is larger than
-    either --- two server functions, a SQL file, a dialog and a browser test --- so expect two
-    calendar days worked steadily, the server half in the first sitting.
+    **Done in session 76**, in one sitting rather than the two days sized for, as two lanes against one
+    written contract plus a reviewer whose one job was to break it (CLAUDE.md section 5). Server:
+    0055's `copy_week_plan` and `apply_copy_week`, 29 cases in `78_copy_week_test.sql` with the
+    rows read back after every write and a mutation check on the attached-assignment rule. Client:
+    `copyWeek.ts`, the dialog in the shared shell's new wide variant, the toolbar button, 33 unit
+    cases, 3 browser cases against the live stack. The reviewer found four things the green
+    cases had not (F-099, F-100) and every one is fixed and pinned. Awaiting the tester's round;
+    the design notes' Phase 2 question about absence data stays open and is not part of this stage.
 - id: M1
   track: matrix
   num: 1
@@ -3289,8 +3292,46 @@ requirements:
     `create_assignment` would accept that write, and where it would not, the clash is still shown
     with the refusal as the reason the prior plan stays. Which of the four fall on which side is read
     off the server by the developer during the build.
-  verified_by: []
-  status: uncovered
+    ⭐ READ OFF THE SERVER IN SESSION 76: an occupied cell and a double-booked person offer both
+    answers; a person no longer certified offers both under `warn` (the copy carries the override
+    and a reason) and only "prior" under `block`; a retired shift pattern is not a clash at all,
+    because runs and assignments carry their own times and reference no shift. One more case the
+    rule did not name: a displaced prior row on a node the caller cannot edit offers only "prior",
+    since the writer would refuse the removal.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/78_copy_week_test.sql
+    cases: >-
+      CW0-CW28: the four refusals (not a plant, not its admin, same week, not whole weeks, null
+      dates); the plan item by item with both candidates; a clean copy read back row by row; every
+      clash kind answered "prior" and answered "copied", with the rows removed and created as stated;
+      only "prior" offered under block and where a displaced row cannot be edited; undecided,
+      choice-not-offered, unknown-key, duplicate-key and non-array refused with nothing written; one
+      bad write leaves the target week untouched; an attached assignment follows its run; a loaned
+      person is listed and copied by a caller who cannot read them; a source row reaching into the
+      target week is listed as prior; the removed count equals the rows actually gone; grants
+  - kind: vitest
+    file: src/test/copyWeek.test.tsx
+    cases: >-
+      the counts and history render; every clash row shows both candidates and the reason; a
+      ["prior"] item has no copied control and says why; Apply is disabled with one clash unanswered
+      and enabled with all answered; Apply sends exactly one decision per clash and none for clean
+      items; a server refusal is shown by its sentence and the dialog stays open; a clean plan applies
+      at once; the parser accepts the server's wire shape and refuses a malformed one; the button is
+      offered by the server's per-plant answer alone; a person the caller cannot read is named as on
+      loan
+  - kind: e2e
+    file: e2e/copyWeek.spec.ts
+    cases: >-
+      the plant admin opens Copy week and reads the counts; applies onto a week nothing else touches
+      (answering "copied" wherever the server offers it on a second run); a supervisor with no admin
+      grant is not offered the button
+  - kind: manual
+    steps: >-
+      Signed in as Dana on the live stack, the demo week against the week the browser spec had
+      written to: 0 clean, 27 clashes, each with the prior and copied candidates side by side and both
+      choices drawn; the wide shell reads in two columns (screenshot, session 76).
+  status: covered
 - id: R-338
   title: An expired certificate is a warning you can act on, not a save that fails
   source:
@@ -6715,6 +6756,55 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-099
+  title: An inner join under row-level security is a silent filter
+  tag: What a join hides
+  status: fixed
+  found_by: agent
+  refs:
+  - R-339
+  - S35
+  story: >-
+    The first draft of `copy_week_plan` read each assignment's person with `JOIN operators`. The
+    operators table is read through `app_can_read_owned` (0028), so a person owned by another plant
+    and placed here on loan with an area override (D113) has a row the plant's admin cannot see ---
+    and an inner join against a row you cannot see is a WHERE clause. Her assignment dropped out of
+    the plan, out of the counts and out of the history line; apply reported success with one row
+    fewer than the week held, and two admins of the same plant got different plans depending on
+    whether one of them happened to hold a viewer grant on her plant. Twenty-two green cases did not
+    see it because the fixture had nobody on loan. The reviewer with one job, break it, built her.
+    ⭐ THE WRITER ALREADY ANSWERED THE QUESTION. Probed before deciding: `create_assignment` takes
+    that placement from a caller who cannot read the person (state allowed, row written, override
+    carried), so the copy must take it too and the fix is a LEFT JOIN with the name null, which the
+    screen reads as "a person on loan from another plant". The busy probe returns a null `fits` for
+    such a person and a null `NOT` was silently skipping the branch; it now says so in the code and
+    lets the writer's own trigger decide, rolling the whole apply back if it refuses.
+    The rule for next time: under RLS, every inner join to a table with a read policy is a filter
+    the caller's grants wrote; join outer, or say in a comment why dropping the row is right.
+- id: F-100
+  title: Fifty-one green cases, and the reviewer found four things in an hour
+  tag: What a reviewer is for
+  status: fixed
+  found_by: agent
+  refs:
+  - R-339
+  - S35
+  story: >-
+    Two lanes built Copy Week against one written contract and each reported green: 22 SQL cases,
+    29 unit cases, the browser flow against the live stack. A third agent, told only "break it" and
+    given the writers to read, found four things in one pass: the loaned person above (F-099); a
+    "removed" count that read back a list with duplicates in it, so "removed 3 assignments" when 2
+    were gone (the contract said counted from the tables, and it was --- over an array that named
+    one row twice); a header claim that a source row could be displaced by its own copy "only for a
+    row a week or longer", false for a four-hour night row crossing Sunday midnight; and the toolbar
+    offering the button by "administers something" where the server asks "administers THIS plant",
+    the exact gap CLAUDE.md section 4 names. Each had a green case near it that was pinning the
+    happy path and nothing else.
+    ⭐ WHAT MADE THE REVIEW BITE was the brief: attack the server first, with probes inside a
+    transaction on the scratch database built from the test file's own fixture, and report every
+    finding with the probe's exact output or call it a suspicion. It also listed six rules with no
+    case, and those are cases now. The cost was one agent's run against a build two agents had
+    already called done; the alternative was the tester finding the same four as defects.
 - id: F-098
   title: The table's rule met fifteen fixtures that build the person it forbids
   tag: Who a trigger binds
@@ -9113,6 +9203,57 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 76
+  date: 2026-09-05
+  title: Copy Week ships, settling every clash by asking (S35), and the plant-root helper is org-scoped (DEF-0013)
+  commits:
+  - 5e5335c
+  - 8e419ea
+  - 40d4fbc
+  numbers:
+    app_tests: 2159
+    app_test_files: 80
+    tsc: 0
+    eslint: 0
+    db_checks: 637
+    migrations: 56
+  confirmed: true
+  summary: >-
+    The tester's session 75 verified DEF-0011 and DEF-0012 and filed DEF-0013, agreed with: 0054's
+    definer helper answered about another company's root. 0056 adds 0020's one org term and nothing
+    else; 77's AR10 asks the helper directly and was run against 0054's helper first, where it reads
+    foreign_root=t and 42501 versus PT400, then 10 of 10. Replayed live as Ana: the other company's
+    root false, her own four roots true. Fix-claimed; R-341 stays contradicted until the tester
+    re-runs.
+    ⭐ COPY WEEK, THE MAINTAINER'S RULE VERBATIM: *"if there are conflicts lets present them to the
+    user and let them decide what they want to keep, the prior plan or the copied plan."* Built as
+    two lanes against one written contract (CLAUDE.md section 5), then a reviewer with one job. The
+    first launch was cut off by a rate limit after each lane had written its first file; both files
+    were complete drafts, checked against the writers' signatures, and the second launch started
+    from them. Server: `copy_week_plan` marks every run and assignment that starts in the source week
+    clean or clash, reading what counts as a clash off the writers and nothing else --- an occupied
+    cell (`create_run`), a double-booked person (the 0043 capacity trigger, asked through
+    `capacity_probe`), a person no longer certified (`check_eligibility` with the plant's policy) ---
+    and offers exactly the answers the writers would take (R-239): both, except only "prior" under
+    block or where a displaced row cannot be edited. `apply_copy_week` recomputes the plan, refuses
+    an undecided clash, an answer not offered, an unknown key, a duplicate, then writes every row
+    through `create_run`, `create_assignment` and `delete_run` in one transaction; a prior run goes
+    whole with its crew; an attached assignment follows its run. Counts are read back from the
+    tables. Client: the dialog in the shared shell's new wide variant, both candidates side by side
+    per clash, a control drawing exactly `choices`, Apply disabled until every clash is answered,
+    the server's sentence on refusal; the toolbar button offered by the server's per-plant answer.
+    ⛔ THE REVIEWER FOUND FOUR THINGS FIFTY-ONE GREEN CASES HAD NOT (F-099, F-100): a loaned person
+    dropped by an inner join under RLS; a removed count over a list with duplicates; a false header
+    claim about which source rows can be displaced; the button offered by a coarser test than the
+    server runs. All four fixed and pinned, plus the six rules it listed with no case. Its
+    suspicion --- the board shows rows that OVERLAP the week and the copy takes rows that START in
+    it --- is written into S35 as the developer's call, for the maintainer to overturn.
+    Measured: SQL suite 637 passed, 0 failed, 0 hard errors across every numbered file; demo world
+    11 of 11. `npm run test` 2159 passed in 80 files; `tsc` 0 after `db:types` (seventeen
+    lines, the two new RPCs); `eslint` 0; Playwright: every browser case green against the live
+    stack. 0055 and 0056 applied with `psql`; the ledger is still out of sync.
+  shipped:
+  - S35
 - id: 75
   date: 2026-09-05
   title: Tester run
