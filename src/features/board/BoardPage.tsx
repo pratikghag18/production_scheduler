@@ -572,7 +572,11 @@ export default function BoardPage() {
           shiftChips={popover.shiftChips}
           defaultCreateMode={defaultCreateMode}
           products={offeredProducts}
-          operators={boardQuery.data?.operators ?? []}
+          // R-342, the maintainer: "Operators from other plants should not be shown
+          // in the list, period, it is the same as the operators shown on the left
+          // panel." So this is the panel's own list, the same variable, not a
+          // second filter that could drift from it.
+          operators={operatorPool}
           windowStart={index?.windowStart ?? from}
           requiredSkills={index?.skillsForNode.get(popover.nodeId) ?? []}
           outsideAreaOperatorIds={outsideAreaOperatorIds}

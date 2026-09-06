@@ -1816,7 +1816,7 @@ stages:
 - id: S36
   track: core
   num: 36
-  title: A person from another plant is marked in the picker
+  title: A person from another plant is not offered in the picker
   status: now
   owner: agent
   refs:
@@ -1826,11 +1826,12 @@ stages:
   - R-342
   what: >-
     **Found by the maintainer on the live app after Copy Week shipped.** On Plant A's board the direct
-    assignment picker lists people from Plant B with no mark at all, where a person from another area
-    of the same plant is marked "not from this area (override)" and asked for a reason. The server
-    refuses the unmarked placement, so the person finds out on Save. The fix is on the screen: the
-    mark must be decided the way the server decides it, for a person owned anywhere, not only for one
-    whose owning node the board happens to have loaded.
+    assignment picker lists people from Plant B, unmarked, and the server refuses the placement on
+    Save. The maintainer's rule: they are not shown at all --- the picker is the left panel's list.
+    The create pop-up is handed the panel's own list, the same variable, so the two cannot drift; the
+    assignment pop-up's new person control (S37) takes the same list. The "outside their area" mark
+    for a person from another area of the same plant stays, and its decision is fixed so a person
+    whose owning node is not on this board is never waved through by mistake.
   state: >-
     **In flight, session 76**, as one lane owning the board page and the create pop-up, briefed with
     the suspected cause and told to verify it before fixing it.
@@ -3285,7 +3286,7 @@ requirements:
     the fixture tool (F-098). 77 is the SQL file 0053 shipped without. Stays `contradicted` until the
     tester re-runs its own reproduction.
 - id: R-342
-  title: A person from another plant is marked as such wherever the board offers them
+  title: A person from another plant is not offered on this plant's board at all
   source:
   - session 76 conversation
   - D113
@@ -3293,14 +3294,18 @@ requirements:
   claim: >-
     The maintainer, 6 Sept: *"I was assigning plant A, I was able to select operators from any other
     plants for example plant B in the list and it did not show any warning whatsoever in direct
-    assignment tab."* The server already refuses that placement without an area override
-    (`not_offered_here`, 0030) and takes it with one and a reason (D113), so the picker may keep
-    offering them --- but it must MARK them as not from this plant and ask for the reason, exactly as
-    it does for a person from another area of the same plant. Offering a person from Plant B on Plant
-    A's board with no mark is a screen that shows what the server will refuse (CLAUDE.md section 4).
-    Suspected cause, to be verified in the build: the "outside their area" set is computed from the
-    board's own node map, which holds only the plant being shown, so a person owned by ANOTHER plant
-    resolves to no node at all and the set fails open on them.
+    assignment tab."* And then, the same day, the rule itself: *"Operators from other plants should
+    not be shown in the list, period, it is the same as the operators shown on the left panel."* So
+    every person picker on the board --- the create pop-up's two tabs and the assignment pop-up's
+    person control (R-343) --- offers exactly the left panel's list: the people owned somewhere in
+    the plant being shown. A person from another AREA of the same plant stays in the list and stays
+    marked "not from this area (override)" with a reason asked, as today (D113). A person from
+    another plant is not in the list. The server's own refusal (`not_offered_here`, 0030) remains
+    the backstop and is not the screen's excuse.
+    Cause, verified in the build: the pickers were handed every operator the caller could read,
+    while the panel is handed the plant's own; and the "outside their area" mark was computed from
+    the board's node map, which holds only this plant, so a person owned elsewhere resolved to no
+    node and the mark failed open on them.
   verified_by: []
   status: uncovered
 - id: R-343
