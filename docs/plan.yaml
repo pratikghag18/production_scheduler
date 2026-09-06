@@ -3199,7 +3199,7 @@ requirements:
       Measured over a real session before the client was touched, on the local stack: admin at a plant
       root returns the stored role; admin one level down raises invalid_argument with reason
       admin_below_root; supervisor one level down still succeeds.
-  status: contradicted
+  status: covered
   note: >-
     ⛔ CONTRADICTED 5 Sept by DEF-0012, on the two sentences above it rather than on the narrowing
     itself. The narrowing is right and holds at both ends. What is not true is "the database says so
@@ -3219,6 +3219,37 @@ requirements:
     written into the migration: the trigger binds whom the policies bind and not the owner, which is
     the fixture tool (F-098). 77 is the SQL file 0053 shipped without. Stays `contradicted` until the
     tester re-runs its own reproduction.
+- id: R-341
+  title: A SECURITY DEFINER helper says nothing about another company's nodes
+  source:
+  - migration 0020 §8.0
+  - migration 0054
+  - DEF-0013
+  stated_by: agent
+  claim: >-
+    A helper that runs as its definer so the caller's row-level view cannot get in the way still answers
+    only about the caller's own company: for another company's node, or a uuid that exists nowhere, it
+    gives the same answer. 0020 wrote the rule on `app_node_exists_in_org` (*"it grants nothing and is
+    org-scoped, so it says nothing about another tenant"*), 65's X4–X6 hold `app_offered_product_nodes`
+    to it, and session 73's adversarial pass held `set_node_setting` to it. 0054's `app_node_is_plant_root`
+    says it is in that shape and has no org term, and it is granted to `authenticated`, so any signed-in
+    person can ask over PostgREST whether a uuid is a plant root in some other company (DEF-0013). One bit,
+    about a uuid the caller already holds --- `minor` --- but it is the bit every other definer helper
+    here is written not to give.
+  verified_by:
+  - kind: vitest
+    file: src/test/defects/DEF-0013.test.ts
+    cases: >-
+      the last definition of app_node_is_plant_root carries an app_current_org() term (or the helper is
+      gone); the reader finds app_node_exists_in_org and sees its term, so a red first case is a loss and
+      not a blind reader; and the helper stays SECURITY DEFINER, because dropping the definer is the
+      repair 0054's header measured as breaking 47's W28
+  - kind: manual
+    steps: >-
+      As ana@example.test (supervisor, no admin grant) call rpc/app_node_is_plant_root and
+      rpc/app_node_exists_in_org over PostgREST with the other company's plant root, its Assembly node
+      and a bogus uuid; the two helpers must agree, and both must say false for all three.
+  status: contradicted
 - id: R-339
   title: Copy Week shows every clash and lets the person choose which plan wins, one by one
   source:
@@ -5061,7 +5092,7 @@ requirements:
   - kind: sql
     file: supabase/tests/77_admin_only_at_plant_root_test.sql
     cases: AR8 — the company-admin guard is in the SAME function as the admin-at-root rule
-  status: contradicted
+  status: covered
   note: >-
     ⛔ CONTRADICTED 5 Sept by DEF-0011. Migration 0053 re-emitted `set_site_member` from 0021 rather
     than from 0022 and dropped this rule; `49_company_admin_rows_test.sql` X42 is red on the committed
@@ -5096,7 +5127,7 @@ requirements:
     cases: >-
       the rail offers what the server permits, tab by tab -- a site admin IS offered Settings, is NOT
       offered Activity, and a company admin gets both, so no case passes by hiding everything
-  status: contradicted
+  status: covered
   note: >-
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
@@ -9066,6 +9097,98 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 75
+  date: 2026-09-05
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2126
+    app_test_files: 79
+    tsc: 0
+    eslint: 0
+    db_checks: 607
+    migrations: 54
+  confirmed: true
+  summary: >-
+    Five commits judged, one migration, one trigger, one client line. Two defects verified, one filed
+    (minor), and the server rule that had no test now has two cases that go red when it is stripped.
+    ⭐ THE COUNT MATCHES, EXACTLY. At the developer's tip `b1a75b5` the runner said *"Test Files 78
+    passed (78) / Tests 2123 passed (2123)"* --- 2123 in 78, which is what session 74 says. After this
+    run's one new pin it says *"Test Files 1 failed | 78 passed (79) / Tests 1 failed | 2125 passed
+    (2126)"*, and the one red is DEF-0013's pin, red on purpose. Read off the runner's output by hand:
+    the run script's regex cannot read a total line with failures in it.
+    ⭐ THE TYPECHECK IS CONCLUSIVE. `db:types` was regenerated against the live stack, which has 0054
+    applied; `diff --strip-trailing-cr` against the committed file reports NO CONTENT DIFFERENCE, so
+    the one committed line (`app_node_is_plant_root`) is the whole of what the generator sees --- the
+    trigger function is not emitted and `set_site_member`'s signature did not move. The runner's
+    "stale" warning is CRLF, as before; the file was restored, not committed. `tsc` 0, `eslint` 0.
+    SQL suite, summed by script from the report's tally lines: 607 passed, 0 failed, 0 hard errors
+    across the numbered files, plus `dev_demo_test.sql : 11 passed, 0 failed`. X42 reads *"PASS X42"*
+    and 49 is *"9 passed, 0 failed"*. Playwright 8 passed. The live ledger still tops out at 0038 ---
+    0039 to 0054 were applied by psql --- which is the developer's housekeeping and not new.
+    ⭐ DEF-0011 VERIFIED. My reproduction cold as Dana (org-wide viewer, admin of Plant A): the RPC
+    raises `not_permitted / company_admin`, no row is stored, and the guard is at position 920 in the
+    live `set_site_member` and still at 1082 in `remove_site_member`. 0054 was read clause by clause
+    against 0022 and 0053 and it is the union: 0022's body with 0053's block inserted after the role
+    check and before the self-rule, both definitions SECURITY INVOKER by default. `remove_site_member`
+    was not re-emitted and its last definition is still 0022's. CLAUDE.md's recipe is SHARPENED, not
+    softened: `grep -in "function \(public\.\)\?<name>("`; run against the tree the old recipe skips
+    0022 and the new one finds it and puts 0054 last, so the new line would have prevented DEF-0011.
+    ⭐ DEF-0012 VERIFIED, both halves, over Dana's real PostgREST session with every row read back:
+    POST admin on Area 1 refused with `admin_below_root`, PATCH of a supervisor grant up to admin
+    refused, PATCH of her own root grant's `node_id` down to Area 1 refused. The rule is a BEFORE
+    INSERT OR UPDATE OF role, node_id trigger, `profile_grants_admin_at_root`. Pushed past the two
+    routes I filed: the company admin is bound (PT400, 0 rows), the service role cannot reach the
+    table at all (`permission denied for table profile_grants`), the owner is exempt exactly as the
+    header says and no RPC reaches that exemption because the only writer is SECURITY INVOKER, and
+    `anon` cannot call the helper. The screen, with the row 0053 leaves alone made as the owner: as
+    the company admin and as Dana, Ana's Area 1 row reads *"Admin of Area 1"* with the control showing
+    `admin` and offering `admin, supervisor, viewer`; Dana's demotion to supervisor saved and read
+    back, no alert. Nothing shown the server refuses; nothing hidden it allows.
+    ⭐⭐ THE SERVER RULE NOW HAS A TEST THAT CAN FAIL, measured the same way as last run. On a scratch
+    copy of 0054 with the `create trigger` deleted, the scratch database rebuilt and every file the
+    runner runs re-run: *"FAIL AR5: detail=<NULL> rows=1"* and *"FAIL AR6: detail=<NULL>
+    role_now=admin"*, 605 / 2 / 0, nothing else moves. With 0022's company-admin block deleted
+    instead: *"FAIL AR8"* and *"FAIL X42"*, 605 / 2 / 0. With the RPC's OWN `admin_below_root` block
+    deleted and the trigger kept: 607 / 0 / 0 --- NOT CAUGHT, and correctly so, because the trigger
+    answers the RPC's INSERT with the same reason; that block is now a second copy of a rule the table
+    owns. Not filed; recorded so nobody reads it as a hole. Client side, three mutants of
+    `allowedRoles`: reverting the fix reds A32, A33 and my pin; narrowing to `["admin"]` alone reds
+    A32; removing the narrowing reds A27, A28 and the pin's guard. All three restored, zero changed
+    files.
+    ⭐ 47's W29 WAS CHANGED LEGITIMATELY. It handed a site admin `admin` on Line 1 by direct insert and
+    expected it stored; R-340 forbids that and the table now refuses it for every signed-in session, so
+    the case was proving something the product no longer allows. It hands out `supervisor` now, says
+    so in place, and can still fail: a policy that refused the site admin leaves `rows=0`, and the
+    EXCEPTION clause reports a refusal by name. The contract changed, not the case's honesty.
+    ⛔ DEF-0013 FILED, MINOR, CROSS-TENANT, WITH A NEW REQUIREMENT R-341 (`stated_by: agent`). The
+    definer helper 0054 added, `app_node_is_plant_root`, has no org term and is granted to
+    `authenticated`, though its header says it is *"in the shape of `app_node_exists_in_org`"*, whose
+    own comment says *"org-scoped, so it says nothing about another tenant."* Measured over PostgREST
+    as Ana, a supervisor with no admin grant anywhere: the other company's plant root answers `true`
+    where `app_node_exists_in_org` answers `false`. The trigger gives out the same bit --- a foreign
+    leaf is refused by the trigger (PT400), a foreign root by the policy (42501). One bit about a uuid
+    the caller already holds, which is why it is `minor`; filed because the schema has a standing rule
+    for definer helpers and the suite proves it everywhere but here. The pin reads the last definition
+    off disk and is red for that reason; the lead is 0020's one term.
+    WHAT ELSE I READ AND FOUND FINE. Sweep 1 said "no migrations since the plan's tip" because the tip
+    IS the migration's commit, so 0054 was swept by hand: functions and a trigger only, no DROP NOT
+    NULL, no ADD COLUMN. Sweep 2's `audit_log.at` is a false dark: `git grep "at"` returns 16,291
+    lines and the runner's `grepSrc` returns nothing on the overflow; the column is read in
+    `src/lib/api/audit.ts` (322, 361, 454, 456). Sweep 3's hits inside the diff are prose about the
+    client's own behaviour, not server rules. The plan: R-339 stays `uncovered` with nothing behind it,
+    which is the right word; S35 is `open`, a status the format allows; S09 carries `session 72` and
+    `session 74` and both sessions list S09 in `shipped`; S33 delivers R-338; the validator and
+    DEF-0009's pin both pass on the tree. `migrations: 54` matches the directory. `meta.tip` is
+    `7b58315` with HEAD one plan-only commit later. R-340's claim still says `allowedRoles` returns
+    `["admin"]` "under the self-rule" for an existing below-root admin; the code now leads with the
+    held role for anyone's row, so that sentence is a little behind the fix --- the developer's text,
+    noted and not edited. The adversarial pass on the trigger turned up nothing in the write-no-op
+    category (every refusal raises, every row was read back) and nothing in the privilege category
+    (0022 and 0054 agree on INVOKER; the helper is DEFINER and revoked from anon).
+    Pins: DEF-0011's and DEF-0012's are green, 3 of 3 each, and were not promoted; 77's AR8 and A32/A33
+    now cover the same ground, so promote or retire is the developer's call. Both defects read
+    `verified` with `fix_commit: 7b58315` kept.
 - id: 74
   date: 2026-09-05
   title: The admin-at-root rule is re-assembled whole and put in the table (DEF-0011, DEF-0012)
