@@ -52,7 +52,7 @@ const sb = vi.hoisted(() => {
         calls.push([table, name, ...args]);
         return builder;
       };
-    for (const method of ["select", "order", "eq", "is", "in", "limit"]) {
+    for (const method of ["select", "order", "eq", "is", "in", "limit", "range"]) {
       builder[method] = record(method);
     }
     builder.then = (onFulfilled: (v: unknown) => unknown) =>

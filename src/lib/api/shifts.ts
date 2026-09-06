@@ -54,6 +54,7 @@
  */
 import { supabase } from "@/lib/supabase";
 import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+import { fetchAll } from "./paging";
 
 /* ===========================================================================
  * ROW SHAPES + RUNTIME GUARDS
@@ -249,28 +250,62 @@ export interface ShiftPatternsPayload {
  * list is a claim ("this company has no shift patterns") rather than a gap.
  */
 export async function fetchShiftPatterns(): Promise<ShiftPatternsPayload> {
-  const [templatesRes, shiftsRes, breaksRes, attachmentsRes, nodesRes] = await Promise.all([
-    supabase.from("shift_templates").select(SHIFT_TEMPLATE_COLUMNS).order("name"),
-    supabase.from("shifts").select("id, template_id, name, start_min, end_min").order("start_min"),
-    supabase
-      .from("shift_breaks")
-      .select("id, shift_id, name, start_min, end_min")
-      .order("start_min"),
-    supabase.from("node_shift_templates").select("node_id, template_id"),
-    supabase.from("nodes").select("id, name, parent_id, path").order("path"),
+  // All five are paged to exhaustion through `fetchAll`, which THROWS on a
+  // failed OR a short read (paging.ts) — the same "every one throws" contract as
+  // before, now also proof against `max_rows = 1000` truncating any of them.
+  // ⚠️ EVERY ORDER ENDS IN A UNIQUE KEY. `.range()` pages an ordered list, and
+  // `name`/`start_min`/`path` are non-unique, so each read ends in `id` (the PK)
+  // as a tie-breaker; `node_shift_templates` is keyed by `node_id` alone and is
+  // ordered on it. Without this a page past 1000 rows can skip or repeat a row
+  // and still look complete (paging.ts).
+  const [templateRows, shiftRows, breakRows, attachmentRows, nodeRows] = await Promise.all([
+    fetchAll((from, to) =>
+      supabase
+        .from("shift_templates")
+        .select(SHIFT_TEMPLATE_COLUMNS)
+        .order("name")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAll((from, to) =>
+      supabase
+        .from("shifts")
+        .select("id, template_id, name, start_min, end_min")
+        .order("start_min")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAll((from, to) =>
+      supabase
+        .from("shift_breaks")
+        .select("id, shift_id, name, start_min, end_min")
+        .order("start_min")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAll((from, to) =>
+      supabase
+        .from("node_shift_templates")
+        .select("node_id, template_id")
+        .order("node_id")
+        .range(from, to),
+    ),
+    fetchAll((from, to) =>
+      supabase
+        .from("nodes")
+        .select("id, name, parent_id, path")
+        .order("path")
+        .order("id")
+        .range(from, to),
+    ),
   ]);
-  if (templatesRes.error) throw toSchedulerError(templatesRes.error);
-  if (shiftsRes.error) throw toSchedulerError(shiftsRes.error);
-  if (breaksRes.error) throw toSchedulerError(breaksRes.error);
-  if (attachmentsRes.error) throw toSchedulerError(attachmentsRes.error);
-  if (nodesRes.error) throw toSchedulerError(nodesRes.error);
 
   return {
-    templates: (templatesRes.data ?? []).map(parseShiftTemplateRow),
-    shifts: (shiftsRes.data ?? []).map(parseShiftRow),
-    breaks: (breaksRes.data ?? []).map(parseShiftBreakRow),
-    attachments: (attachmentsRes.data ?? []).map(parseNodeShiftTemplateRow),
-    nodes: (nodesRes.data ?? []).map(parseShiftNodeRow),
+    templates: templateRows.map(parseShiftTemplateRow),
+    shifts: shiftRows.map(parseShiftRow),
+    breaks: breakRows.map(parseShiftBreakRow),
+    attachments: attachmentRows.map(parseNodeShiftTemplateRow),
+    nodes: nodeRows.map(parseShiftNodeRow),
   };
 }
 

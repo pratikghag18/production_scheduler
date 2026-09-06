@@ -32,6 +32,7 @@
 import { supabase } from "@/lib/supabase";
 import type { Json } from "@/lib/database.types";
 import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+import { fetchAll } from "./paging";
 import type { BoardNode, HierarchyLevel } from "./shapes";
 import type { BoardRoot } from "@/features/board/lib/rootSelection";
 
@@ -699,38 +700,59 @@ export async function fetchHierarchyTree(): Promise<{
    */
   sumsChildren: Record<string, boolean | null>;
 }> {
-  const [templatesRes, levelsRes, nodesRes, editableRes] = await Promise.all([
-    supabase.from("hierarchy_templates").select("id, name, site_node_id").order("name"),
-    supabase
-      .from("hierarchy_levels")
-      .select("id, template_id, position, name, is_schedulable")
-      .order("position"),
-    supabase
-      .from("nodes")
-      .select("id, parent_id, level_id, name, path, sort_order, active, sums_children")
-      .order("sort_order"),
+  // The three table reads are paged to exhaustion through `fetchAll` (throws on
+  // a failed or short read — paging.ts), so a large structure's nodes cannot
+  // stop at `max_rows = 1000` and be drawn as the whole tree. The RPC stays a
+  // single call: `editable_shape_ids` returns one Json value, not SETOF rows,
+  // and is unaffected by `max_rows`.
+  const [templateRows, levelRows, nodeRows, editableRes] = await Promise.all([
+    // ⚠️ EACH ORDER ENDS IN `id` (the PK). `name`, `position` and `sort_order`
+    // are all non-unique, and `.range()` over a non-unique order lets rows swap
+    // pages between requests — a skip or a repeat that still reads as complete
+    // past 1000 rows (paging.ts).
+    fetchAll((from, to) =>
+      supabase
+        .from("hierarchy_templates")
+        .select("id, name, site_node_id")
+        .order("name")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAll((from, to) =>
+      supabase
+        .from("hierarchy_levels")
+        .select("id, template_id, position, name, is_schedulable")
+        .order("position")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAll((from, to) =>
+      supabase
+        .from("nodes")
+        .select("id, parent_id, level_id, name, path, sort_order, active, sums_children")
+        .order("sort_order")
+        .order("id")
+        .range(from, to),
+    ),
     // ⭐ IN THE SAME `Promise.all`, DELIBERATELY, AND NOT A SECOND `useQuery`.
     // §19.47 settled this one level up: a second unresolved window is a second
     // thing to fold into the loading state, and D91 is the standing reminder
     // that `enabled: false` leaves `isLoading` FALSE. One read, one spinner.
     supabase.rpc("editable_shape_ids"),
   ]);
-  if (templatesRes.error) throw toSchedulerError(templatesRes.error);
-  if (levelsRes.error) throw toSchedulerError(levelsRes.error);
-  if (nodesRes.error) throw toSchedulerError(nodesRes.error);
 
-  const templates: HierarchyTemplateSummary[] = (templatesRes.data ?? []).map((r) => ({
+  const templates: HierarchyTemplateSummary[] = templateRows.map((r) => ({
     id: r.id,
     name: r.name,
   }));
-  const levels: HierarchyLevel[] = (levelsRes.data ?? []).map((r) => ({
+  const levels: HierarchyLevel[] = levelRows.map((r) => ({
     id: r.id,
     templateId: r.template_id,
     position: r.position,
     name: r.name,
     isSchedulable: r.is_schedulable,
   }));
-  const nodes: BoardNode[] = (nodesRes.data ?? []).map((r) => ({
+  const nodes: BoardNode[] = nodeRows.map((r) => ({
     id: r.id,
     parentId: r.parent_id,
     levelId: r.level_id,
@@ -756,14 +778,14 @@ export async function fetchHierarchyTree(): Promise<{
       : (editableRes.data as unknown[]).filter((v): v is string => typeof v === "string");
 
   const siteNodeIds: Record<string, string | null> = {};
-  for (const r of templatesRes.data ?? []) {
+  for (const r of templateRows) {
     siteNodeIds[r.id] = r.site_node_id ?? null;
   }
 
   // R-319. `?? null` rather than `|| null`: `false` is a real, chosen answer
   // here ("do not add these up") and must not collapse into "nobody has said".
   const sumsChildren: Record<string, boolean | null> = {};
-  for (const r of nodesRes.data ?? []) {
+  for (const r of nodeRows) {
     sumsChildren[r.id] = r.sums_children ?? null;
   }
 

@@ -191,33 +191,40 @@ BEGIN
 END $$;
 ROLLBACK TO SAVEPOINT sp_X45;
 
-\echo 'X46 ⭐: the gap this migration does NOT close, asserted rather than left to be found'
+\echo 'X46 ⭐: the gap this migration named is now CLOSED at the table -- a direct DELETE is refused'
 SAVEPOINT sp_X46;
 DO $$
-DECLARE v_left int;
+DECLARE v_raw text; v_detail jsonb; v_left int;
 BEGIN
-  -- ⭐ A CASE THAT PINS A LIMITATION, the way 0020's W24 does. `profile_grants`'
-  -- RLS is untouched, so a caller reaching PostgREST directly -- not through
-  -- the RPC -- can still delete a company admin's grant on a node they
-  -- administer. 0022 §3 records why the policy was left alone: putting it
-  -- there means `profile_grants_delete` reading `user_profiles`, and a policy
-  -- that delegates into another table's contents greps clean and inherits
-  -- every hole of the thing it reads (verification rule 9).
-  --
-  -- Whoever closes that gap deletes this case deliberately, rather than
-  -- discovering the hole.
+  -- ⭐ THIS CASE ONCE PINNED A LIMITATION and now asserts its close. 0022 §3
+  -- named the gap: `profile_grants`' RLS was untouched, so a caller reaching
+  -- PostgREST directly -- not through the RPC -- could delete a company admin's
+  -- grant on a node they administer. Migration 0060 §1 closes it with a
+  -- BEFORE DELETE trigger that carries remove_site_member's own company_admin
+  -- guard into the table (the shape 0054 used for admin-at-root), so the direct
+  -- DELETE gets the same typed refusal the RPC gives -- reason company_admin,
+  -- measured as authenticated, and the row survives (read back as the owner).
+  -- The trigger reuses app_profile_is_company_admin, so it cannot drift from
+  -- the RPC, and it does NOT delegate a policy into another table's contents,
+  -- which is the shape verification rule 9 warned 0022 away from. X50-X54 in
+  -- 83_hardening_test.sql pin the close and its non-over-reach.
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000f1', true);
   SET LOCAL ROLE authenticated;
-  DELETE FROM profile_grants
-   WHERE profile_id = 'a0000000-0000-0000-0000-000000000001'
-     AND node_id    = '30000000-0000-0000-0000-000000000001';
+  BEGIN
+    DELETE FROM profile_grants
+     WHERE profile_id = 'a0000000-0000-0000-0000-000000000001'
+       AND node_id    = '30000000-0000-0000-0000-000000000001';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_raw = PG_EXCEPTION_DETAIL;
+    BEGIN v_detail := v_raw::jsonb; EXCEPTION WHEN OTHERS THEN v_detail := NULL; END;
+  END;
   RESET ROLE;
   SELECT count(*) INTO v_left FROM profile_grants
    WHERE profile_id = 'a0000000-0000-0000-0000-000000000001'
      AND node_id    = '30000000-0000-0000-0000-000000000001';
-  IF v_left = 0
+  IF v_detail->>'error' = 'not_permitted' AND v_detail->>'reason' = 'company_admin' AND v_left = 1
   THEN RAISE NOTICE 'PASS X46';
-  ELSE RAISE NOTICE 'FAIL X46: the direct DELETE was refused -- the policy now guards this, so 0022 §3 and this case are both out of date'; END IF;
+  ELSE RAISE NOTICE 'FAIL X46: the direct DELETE was NOT refused as expected -- detail=% rows_left=% (want 1)', v_detail, v_left; END IF;
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'FAIL X46: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
 END $$;

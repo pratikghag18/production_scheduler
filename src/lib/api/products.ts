@@ -37,6 +37,7 @@
 import type { TablesInsert } from "@/lib/database.types";
 import { supabase } from "@/lib/supabase";
 import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+import { fetchAll } from "./paging";
 
 /**
  * One `products` row as the admin screen needs it.
@@ -146,9 +147,16 @@ export function parseAdminProduct(row: unknown): AdminProduct | null {
  * split for the same reason).
  */
 export async function fetchAdminProducts(): Promise<ReadonlyArray<AdminProduct | null>> {
-  const { data, error } = await supabase.from("products").select(PRODUCT_COLUMNS).order("sku");
-  if (error) throw toSchedulerError(error);
-  return (data ?? []).map((row) => parseAdminProduct(row));
+  // Paged to exhaustion (paging.ts): a company's catalogue can pass 1000 parts,
+  // and a truncated list shown as complete is the ceiling bug this guards.
+  // Ordered `sku` then `id` (the PK). `sku` is unique per org, but the terminal
+  // `id` makes the paging stability independent of that reasoning: `.range()`
+  // pages an ordered list and a tie in the sort key would let rows swap pages
+  // between requests past 1000 rows (paging.ts).
+  const data = await fetchAll((from, to) =>
+    supabase.from("products").select(PRODUCT_COLUMNS).order("sku").order("id").range(from, to),
+  );
+  return data.map((row) => parseAdminProduct(row));
 }
 
 export interface CreateProductInput {

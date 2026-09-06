@@ -19,6 +19,7 @@
     "plan": "node scripts/render-plan.mjs",
     "tester": "node scripts/tester-run.mjs",
     "e2e": "playwright test",
+    "e2e:ci": "bash scripts/ci-e2e.sh",
     "db:start": "supabase start",
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",

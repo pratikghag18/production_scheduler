@@ -31,6 +31,7 @@ import { supabase } from "@/lib/supabase";
 import type { Json } from "@/lib/database.types";
 import type { DateFormat } from "@/lib/format/dates";
 import { toSchedulerError } from "./errors";
+import { fetchAll } from "./paging";
 
 export async function fetchAdminAnywhere(): Promise<boolean> {
   const { data, error } = await supabase.rpc("app_is_admin_anywhere");
@@ -45,7 +46,7 @@ export async function fetchAdminAnywhere(): Promise<boolean> {
  * argument shapes are READ rather than predicted (doc-drift rule 2 / brief
  * rule 12):
  *
- *     site_people:        { Args: { p_node_id: string };                                   Returns: Json }
+ *     site_people:        { Args: { p_node_id: string; p_search?: string; p_limit?: number };  Returns: Json }
  *     set_site_member:    { Args: { p_node_id: string; p_profile_id: string; p_role: string }; Returns: Json }
  *     remove_site_member: { Args: { p_node_id: string; p_profile_id: string };             Returns: Json }
  *
@@ -379,6 +380,9 @@ export interface PlantSettingRow {
  * default silently rendered next to the word "block".
  */
 export async function fetchPlantSettings(key: NodeSettingKey): Promise<PlantSettingRow[]> {
+  // Paged to exhaustion through `fetchAll` (throws on a failed or short read),
+  // so the plant list and the overrides cannot stop at `max_rows = 1000` and be
+  // shown as complete — see paging.ts.
   const [plants, overrides] = await Promise.all([
     // ⚠️ NO `path` IN THE COLUMN LIST, and that is a decision rather than an
     // omission: `nodes.path` is a Postgres ltree, which `supabase gen types`
@@ -388,18 +392,38 @@ export async function fetchPlantSettings(key: NodeSettingKey): Promise<PlantSett
     // buy a guard and nothing else is how a screen ends up silently dropping a
     // plant whose row failed to parse. The PERMISSION preview does need the
     // path, and takes it from the shared hierarchy read instead.
-    supabase.from("nodes").select("id, name").is("parent_id", null).order("name"),
-    supabase.from("node_settings").select("node_id, value").eq("key", key),
+    // ⚠️ `.order(...)` ENDS IN A UNIQUE KEY OR PAGING IS A LIE. `.range()` slices
+    // an ordered list, and an order on a non-unique column (or none at all) lets
+    // rows swap places between page requests, so past 1000 rows a page can skip
+    // or repeat and still look complete. `name` is not unique, so `id` (the PK)
+    // is the tie-breaker; `node_settings` has composite PK `(node_id, key)` and
+    // is ordered on both.
+    fetchAll((from, to) =>
+      supabase
+        .from("nodes")
+        .select("id, name")
+        .is("parent_id", null)
+        .order("name")
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAll((from, to) =>
+      supabase
+        .from("node_settings")
+        .select("node_id, value")
+        .eq("key", key)
+        .order("node_id")
+        .order("key")
+        .range(from, to),
+    ),
   ]);
-  if (plants.error) throw toSchedulerError(plants.error);
-  if (overrides.error) throw toSchedulerError(overrides.error);
 
   const byNode = new Map<string, string | null>();
-  for (const row of overrides.data ?? []) {
+  for (const row of overrides) {
     byNode.set(row.node_id, typeof row.value === "string" ? row.value : null);
   }
 
-  return (plants.data ?? []).map((n) => ({
+  return plants.map((n) => ({
     nodeId: n.id,
     name: n.name,
     override: byNode.get(n.id) ?? null,

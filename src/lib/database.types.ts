@@ -1410,7 +1410,10 @@ export type Database = {
         Args: { p_node_id: string; p_profile_id: string; p_role: string }
         Returns: Json
       }
-      site_people: { Args: { p_node_id: string }; Returns: Json }
+      site_people: {
+        Args: { p_limit?: number; p_node_id: string; p_search?: string }
+        Returns: Json
+      }
       slugify: { Args: { input: string }; Returns: string }
       text2ltree: { Args: { "": string }; Returns: unknown }
       visible_board_roots: {

@@ -40,6 +40,11 @@ export * from "./deletion";
 // pre-seated either -- it belongs to the board, not to an admin section.
 export * from "./copyWeek";
 
+// The 1000-row pager. Every table/view read in this folder runs through
+// `fetchAll` so `max_rows = 1000` cannot silently truncate a catalogue; see
+// paging.ts's header and `apiReadPaging.test.ts`.
+export * from "./paging";
+
 // Re-exported so callers that need the raw `Json` type (e.g. shapes.test.ts
 // building RPC-payload fixtures) never have to import database.types.ts
 // themselves (self-review §9 item 5: nothing outside src/lib imports it).

@@ -43,6 +43,7 @@
    --------------------------------------------------------------------------- */
 import { supabase } from "@/lib/supabase";
 import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+import { fetchAll } from "./paging";
 import type { BoardNode, HierarchyLevel } from "./shapes";
 
 // ---------------------------------------------------------------------------
@@ -297,12 +298,27 @@ export interface OperatorsAdminData {
 }
 
 export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
-  const [operatorsRes, skillsRes, operatorSkillsRes, requirementsRes, nodesRes, levelsRes] =
+  // All six are paged to exhaustion through `fetchAll`, which THROWS on a failed
+  // OR a short read (paging.ts) — the same "all six throw" contract as before,
+  // now also proof against `max_rows = 1000` silently truncating any of them.
+  // Every one is this screen's content: without any of them the answer to
+  // "where can this person work" is not a shorter list, it is a WRONG list, and
+  // a wrong list here reads as a tick.
+  const [operatorRows, skillRows, operatorSkillRows, requirementRows, nodeRows, levelRows] =
     await Promise.all([
-      supabase
-        .from("operators")
-        .select("id, display_name, employee_ref, active, site_node_id, source, external_id")
-        .order("display_name"),
+      // ⚠️ EVERY ORDER ENDS IN A UNIQUE KEY. `.range()` pages an ordered list,
+      // and a non-unique order (or none) lets rows change pages between requests
+      // — a skip or repeat past 1000 rows that still looks complete (paging.ts).
+      // The entity reads end in `id` (the PK); the two join tables carry no `id`
+      // and are ordered on their full composite PK instead.
+      fetchAll((from, to) =>
+        supabase
+          .from("operators")
+          .select("id, display_name, employee_ref, active, site_node_id, source, external_id")
+          .order("display_name")
+          .order("id")
+          .range(from, to),
+      ),
       // ⚠⚠ `SKILL_COLUMNS`, NEVER A SECOND COPY OF THE SAME LIST. This read
       // spelled the columns out inline, so when `active` was added to the
       // constant and `parseSkillRecord` began REQUIRING it, this call kept
@@ -311,7 +327,9 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
       // Operators screen with nothing to grant. §19.76's rule with the
       // arrow reversed: there, a nullable COLUMN broke a hand-written guard;
       // here, a stricter GUARD broke a hand-written column list.
-      supabase.from("skills").select(SKILL_COLUMNS).order("name"),
+      fetchAll((from, to) =>
+        supabase.from("skills").select(SKILL_COLUMNS).order("name").order("id").range(from, to),
+      ),
       // ⚠⚠ `OPERATOR_SKILL_COLUMNS`, AND THIS IS THE SAME BUG TWICE IN ONE
       // FILE. The `skills` read a few lines up spelled its columns out inline
       // too; when `active` was added to the constant and the parser began
@@ -322,35 +340,46 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
       // rather than by anything the suite could see.
       // ⭐ **A column list that appears twice is a bug with a delay on it.**
       // `apiSkillShape.test.ts` now holds both pairs to each other.
-      supabase.from("operator_skills").select(OPERATOR_SKILL_COLUMNS),
-      supabase.from("node_skill_requirements").select("node_id, skill_id"),
-      supabase
-        .from("nodes")
-        .select("id, parent_id, level_id, name, path, sort_order, active")
-        .order("sort_order"),
-      supabase
-        .from("hierarchy_levels")
-        .select("id, template_id, position, name, is_schedulable")
-        .order("position"),
+      fetchAll((from, to) =>
+        supabase
+          .from("operator_skills")
+          .select(OPERATOR_SKILL_COLUMNS)
+          .order("operator_id")
+          .order("skill_id")
+          .range(from, to),
+      ),
+      fetchAll((from, to) =>
+        supabase
+          .from("node_skill_requirements")
+          .select("node_id, skill_id")
+          .order("node_id")
+          .order("skill_id")
+          .range(from, to),
+      ),
+      fetchAll((from, to) =>
+        supabase
+          .from("nodes")
+          .select("id, parent_id, level_id, name, path, sort_order, active")
+          .order("sort_order")
+          .order("id")
+          .range(from, to),
+      ),
+      fetchAll((from, to) =>
+        supabase
+          .from("hierarchy_levels")
+          .select("id, template_id, position, name, is_schedulable")
+          .order("position")
+          .order("id")
+          .range(from, to),
+      ),
     ]);
 
-  // All six THROW on error, with no `editable_shape_ids`-style exception.
-  // Every one of them is this screen's content: without any of them the
-  // answer to "where can this person work" is not a shorter list, it is a
-  // WRONG list — and a wrong list here reads as a tick.
-  if (operatorsRes.error) throw toSchedulerError(operatorsRes.error);
-  if (skillsRes.error) throw toSchedulerError(skillsRes.error);
-  if (operatorSkillsRes.error) throw toSchedulerError(operatorSkillsRes.error);
-  if (requirementsRes.error) throw toSchedulerError(requirementsRes.error);
-  if (nodesRes.error) throw toSchedulerError(nodesRes.error);
-  if (levelsRes.error) throw toSchedulerError(levelsRes.error);
+  const operators = parseList(operatorRows, parseOperatorRecord);
+  const skills = parseList(skillRows, parseSkillRecord);
+  const operatorSkills = parseList(operatorSkillRows, parseOperatorSkillRecord);
+  const requirements = parseList(requirementRows, parseNodeSkillRequirementRecord);
 
-  const operators = parseList(operatorsRes.data, parseOperatorRecord);
-  const skills = parseList(skillsRes.data, parseSkillRecord);
-  const operatorSkills = parseList(operatorSkillsRes.data, parseOperatorSkillRecord);
-  const requirements = parseList(requirementsRes.data, parseNodeSkillRequirementRecord);
-
-  const nodes: BoardNode[] = (nodesRes.data ?? []).map((r) => ({
+  const nodes: BoardNode[] = nodeRows.map((r) => ({
     id: r.id,
     parentId: r.parent_id,
     levelId: r.level_id,
@@ -364,7 +393,7 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
     sortOrder: r.sort_order,
     active: r.active,
   }));
-  const levels: HierarchyLevel[] = (levelsRes.data ?? []).map((r) => ({
+  const levels: HierarchyLevel[] = levelRows.map((r) => ({
     id: r.id,
     templateId: r.template_id,
     position: r.position,

@@ -47,8 +47,22 @@ function loadDotEnvLocal(): Record<string, string> {
 
 const dotEnvLocal = loadDotEnvLocal();
 
-export const supabaseUrl = dotEnvLocal.VITE_SUPABASE_URL ?? DUMMY_URL;
-export const supabaseAnonKey = dotEnvLocal.VITE_SUPABASE_ANON_KEY ?? DUMMY_ANON_KEY;
+/**
+ * ⭐ PROCESS ENV WINS, THEN `.env.local`, THEN THE DUMMY. CI has no `.env.local`
+ * and must not grow one: `scripts/ci-e2e.sh` stands up a real stack and exports
+ * the VITE_SUPABASE_* values that stack prints, so reading `process.env` FIRST is
+ * what lets a push run the signed-in specs — without committing a secret and
+ * without a file the script would have to write over a developer's own
+ * `.env.local`. Locally, with nothing exported, `.env.local` still answers
+ * exactly as it did before, and a developer with neither still gets the dummy and
+ * the honest skip below.
+ */
+function pick(name: string, fallback: string): string {
+  return process.env[name] || dotEnvLocal[name] || fallback;
+}
+
+export const supabaseUrl = pick("VITE_SUPABASE_URL", DUMMY_URL);
+export const supabaseAnonKey = pick("VITE_SUPABASE_ANON_KEY", DUMMY_ANON_KEY);
 
 /**
  * ⭐ THE VERDICT, AND IT IS DELIBERATELY ABOUT THE URL RATHER THAN ABOUT `CI`.

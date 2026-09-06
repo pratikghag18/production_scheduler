@@ -14,9 +14,15 @@ on:
     branches: [main, Development]
   pull_request:
 
-# Dummy Supabase values so the build and e2e smoke test run without secrets.
-# Real project values arrive later as repository secrets once a deploy job
-# is added.
+# Dummy Supabase values for every step EXCEPT the e2e run. They are load-bearing
+# for the unit suite, typecheck and lint: `src/lib/supabase.ts` reads `@/env` at
+# module top level and `src/env.ts` THROWS on a missing VITE_SUPABASE_URL, and 17
+# unit files import it without mocking -- with these unset, `npm run test` goes red
+# before the e2e step ever runs (the gitignored `.env.local` masks this locally).
+# The e2e step does NOT want the dummies: scripts/ci-e2e.sh stands up a real
+# Supabase stack and exports the VITE_SUPABASE_* the stack prints (e2e/env.ts reads
+# process.env first), so the browser suite signs in for real instead of skipping
+# (stage S34). Real values for a deploy job, when one is added, arrive as secrets.
 env:
   VITE_SUPABASE_URL: https://example.supabase.co
   VITE_SUPABASE_ANON_KEY: dummy-anon-key
@@ -50,7 +56,12 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
-      - run: npm run e2e
+      # Stand up a real Supabase stack (Docker is present on ubuntu runners), load
+      # migrations + seed.sql + dev_demo.sql, point the app at it, and run every
+      # browser case -- so the signed-in specs run instead of skipping and a skip
+      # stops counting as a pass. All of that lives in one script a developer can
+      # also run locally. See scripts/ci-e2e.sh (stage S34).
+      - run: bash scripts/ci-e2e.sh
 
       - uses: actions/upload-artifact@v4
         if: failure()
