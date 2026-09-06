@@ -3,15 +3,15 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-05'
-  tip: 40d4fbc
+  updated: '2026-09-06'
+  tip: 13343f2
   baseline:
-    app_tests: 2159
-    app_test_files: 80
+    app_tests: 2201
+    app_test_files: 84
     tsc: 0
     eslint: 0
-    db_checks: 637
-    migrations: 56
+    db_checks: 651
+    migrations: 57
     mutations: 509 of 536
 tracks:
 - id: core
@@ -1817,10 +1817,11 @@ stages:
   track: core
   num: 36
   title: A person from another plant is not offered in the picker
-  status: now
+  status: done
   owner: agent
   refs:
   - session 76 conversation
+  - session 77
   - D113
   delivers:
   - R-342
@@ -1833,16 +1834,20 @@ stages:
     for a person from another area of the same plant stays, and its decision is fixed so a person
     whose owning node is not on this board is never waved through by mistake.
   state: >-
-    **In flight, session 76**, as one lane owning the board page and the create pop-up, briefed with
-    the suspected cause and told to verify it before fixing it.
+    **Done in session 77.** The cause was verified, not suspected: the board is sent every operator in
+    the company but only the shown plant's nodes, and the "outside their area" decision waved through
+    anyone whose owning node it could not find. The pop-ups now take the panel's own list (one
+    variable, audited), and the decision is the server's predicate transcribed, with a red-then-green
+    case for a person from another plant.
 - id: S37
   track: core
   num: 37
   title: Change who is on an assignment without deleting it
-  status: now
+  status: done
   owner: agent
   refs:
   - session 76 conversation
+  - session 77
   delivers:
   - R-343
   what: >-
@@ -1854,17 +1859,21 @@ stages:
     outside and asks for the reason, and shows the warned or refused answer the way the create pop-up
     does. A numbered SQL file proves the writer; unit cases prove the picker.
   state: >-
-    **In flight, session 76**, as one lane owning migration 0057, its SQL file, the assignment writer
-    in the API, the assignment pop-up and its hook; the board page's wiring was pre-seated by the
-    developer so the lane and S36's never touch the same file.
+    **Done in session 77.** 0057's `reassign_assignment` mirrors `create_assignment`'s guards in
+    order and both table triggers fire on the update of the person column (measured, not assumed);
+    twelve SQL cases with the row photographed before and after. The pop-up's Person control offers
+    the panel's list, marks a person from another area, turns a not-eligible answer into the override
+    question under warn and a closed door under block, prints every other refusal by name, and
+    closes on its own after a person-only save. Driven live both ways.
 - id: S38
   track: core
   num: 38
   title: Pop-ups can be dragged aside
-  status: now
+  status: done
   owner: agent
   refs:
   - session 76 conversation
+  - session 77
   delivers:
   - R-344
   what: >-
@@ -1874,7 +1883,10 @@ stages:
     not a drag. One change in one file covers every pop-up in the app, because every pop-up is that
     shell (the audit enforces it).
   state: >-
-    **In flight, session 76**, as one lane owning the shared shell and its stylesheet and tests.
+    **Done in session 77.** The title is the handle; the offset is kept apart from the computed
+    placement, clamped to the viewport on every render, and reset when a new pop-up opens. Seven unit
+    cases; driven live. Pointer only --- a keyboard user cannot move a pop-up, noted as a follow-up
+    if wanted.
 - id: M1
   track: matrix
   num: 1
@@ -3306,8 +3318,32 @@ requirements:
     while the panel is handed the plant's own; and the "outside their area" mark was computed from
     the board's node map, which holds only this plant, so a person owned elsewhere resolved to no
     node and the mark failed open on them.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/pickerPool.test.ts
+    cases: >-
+      a source-reading audit: BoardPage hands the operator panel, the create pop-up and the
+      assignment pop-up the same variable, operatorPool; the matcher's own cases show it reads a bare
+      identifier, refuses an expression, and is not fooled by a comment or a same-prefix element
+  - kind: vitest
+    file: src/test/outsideArea.test.ts
+    cases: >-
+      a person owned by another plant (owner node absent from the board's map) is marked --- red
+      before the fix, green after; a person from another area of the same plant is marked; a sibling
+      whose slug extends this one's is still outside; the plant root, the department above, the line
+      and the cell itself are not marked; an unresolvable cell marks nobody
+  - kind: vitest
+    file: src/test/certificateExpiry.test.tsx
+    cases: >-
+      the create pop-up marks a same-plant other-area person and asks the reason, refuses Create
+      until tick and reason, sends the flag and reason in the writer's own slots, asks nothing of a
+      person who belongs, and the run tab offers no person control at all
+  - kind: manual
+    steps: >-
+      Signed in as the company admin on Plant A's board in the live app (session 76): the create
+      pop-up's person list is Operator A1 to A6 and nobody from B, C or D; the assignment pop-up's
+      person list is the same six.
+  status: covered
 - id: R-343
   title: The person on an assignment can be changed in place
   source:
@@ -3323,8 +3359,35 @@ requirements:
     scope (with the D113 override and reason for a person from outside). A plain UPDATE of the
     person column would skip the eligibility check, which only `create_assignment` runs, so the change
     goes through a writer of its own that asks the same questions.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/79_reassign_assignment_test.sql
+    cases: >-
+      RA0 premises; RA1 the person changes and every other column is byte-identical; RA2 not
+      certified under warn refused; RA3 the override needs a reason, is accepted with one, and clears
+      when a certified person is chosen again; RA4 under block refused even with the override; RA5 a
+      busy person refused through the capacity trigger; RA6 a person from another area refused
+      without the area override; RA7 accepted with it and the reason stored; RA8 no edit rights
+      refused by name; RA9 unknown row, null row, null person, unknown person each refused with
+      nothing written; RA10 a run-attached row keeps its run and a direct row its product; RA11
+      grants
+  - kind: vitest
+    file: src/test/assignmentPopover.test.tsx
+    cases: >-
+      AP1 the select shows the current person and the active pool, with an out-of-pool current person
+      kept; AP2 changing the person sends exactly the row and the person, closes the pop-up, and sends
+      field edits only after and only when they changed; AP3 an outside-area person reveals the reason
+      and sends the area override; AP4 a not-eligible answer under warn offers the tick and resends
+      with it, and picking another person forgets it; AP5 under block no tick and Save stays off; AP6
+      any other refusal is printed in the pop-up and the field edit is not sent; AP7 a capacity refusal
+      names the person with the peak and the limit
+  - kind: manual
+    steps: >-
+      Live app as the company admin, demo week, session 76: Operator A3 on Cell 3 changed to Operator
+      A5 --- the chip moved, the pop-up closed, no toast; A1 on Cell 1 changed to A2, who is already
+      on Cell 2 those hours --- "Operator A2 would reach 200% of capacity at this time (limit 100%)"
+      inside the pop-up and no toast; changed back to A3.
+  status: covered
 - id: R-344
   title: A pop-up can be dragged aside to see what is under it
   source:
@@ -3336,8 +3399,19 @@ requirements:
     the shell grows a drag handle --- its title bar --- and a pop-up dragged aside stays where it was
     put until it closes. Dragging never takes it off screen, keyboard and focus behaviour are
     unchanged, and a click on a control inside is never mistaken for a drag.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/popoverDrag.test.tsx
+    cases: >-
+      moves by exactly the pointer's travel; stays where it was put after release; a press with no
+      movement changes nothing; a drag past the right or bottom edge clamps; past the left or top edge
+      clamps; Escape still closes after a drag; a different anchor resets the offset
+  - kind: manual
+    steps: >-
+      Live app, session 76: the assignment pop-up dragged by its title 200 px right and 120 px down
+      landed 157 px right (stopped at the viewport's edge) and 120 px down, and stayed there while its
+      controls were used.
+  status: covered
 - id: R-341
   title: A SECURITY DEFINER helper says nothing about another company's nodes
   source:
@@ -6896,6 +6970,49 @@ findings:
     lets the writer's own trigger decide, rolling the whole apply back if it refuses.
     The rule for next time: under RLS, every inner join to a table with a read policy is a filter
     the caller's grants wrote; join outer, or say in a comment why dropping the row is right.
+- id: F-102
+  title: A new writer on an old nullable column did not read the guard that came with it
+  tag: DROP NOT NULL, again
+  status: fixed
+  found_by: agent
+  refs:
+  - R-343
+  - S37
+  story: >-
+    0029 made `assignments.operator_id` nullable so a deleted person's rows could stay as history
+    with only a name remembered (D110), and shipped a check with it: exactly one of the id and the
+    name is set. 0057's `reassign_assignment` set the id and left the name, so re-staffing any such
+    row failed with the raw constraint error --- "That value isn't allowed here" --- and there was no
+    way through. CLAUDE.md section 4's first bullet names this shape exactly: a migration that makes a
+    column nullable is a client change nothing surfaces, and every writer that touches the column
+    has to be read against its guard. The reviewer found it by building the row `delete_operator`
+    leaves and pressing Save.
+    ⭐ THE SCREEN HAD THE SAME HOLE FROM THE OTHER SIDE: with no id on the row, the person select
+    fell to the first person in the pool and showed them as if they were on it, and a Save with
+    nothing picked quietly wrote nothing. Now the writer clears the memory when a person is identified
+    by id again (RA12), and the select holds the remembered name as its value, marked "no longer in
+    the system", so picking anyone real is a reassignment (AP8).
+- id: F-101
+  title: A live check that counts what was already there proves nothing
+  tag: How to measure by hand
+  status: fixed
+  found_by: agent
+  refs:
+  - R-343
+  - S37
+  story: >-
+    The first hand-driven check of the reassign flow changed Operator A1 to Operator A2 on Cell 1,
+    counted one "Operator A2 on Housing A" chip afterwards, and called it proven. The screenshot said
+    otherwise: the change had been REFUSED for capacity, because A2 already works those hours on
+    Cell 2 --- and that existing chip was the one the count had found. The reversal "back to A1"
+    then passed for the same reason. Two green lines, nothing measured.
+    ⭐ THE HONEST DRIVE was a row whose cell needs no training (Cell 3) changed to a person with no
+    chip that week (A5): count zero before, one after, the pop-up closed, then back. It also found
+    what the false one had hidden in plain sight on the screenshot: the refusal was printed twice
+    (in the pop-up, and as a toast in the split feature's words) and named the person by uuid. Both
+    fixed and pinned (AP2, AP7).
+    The rule: a hand check must read a value that could not have been true beforehand --- a count
+    that starts at zero, a row that did not exist --- and must read the screen, not only the number.
 - id: F-100
   title: Fifty-one green cases, and the reviewer found four things in an hour
   tag: What a reviewer is for
@@ -9318,6 +9435,68 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 77
+  date: 2026-09-06
+  title: The picker is the panel's list, the person on a row can be changed, and pop-ups drag (S36, S37, S38)
+  commits:
+  - 2cbcff1
+  - 1b8ff5c
+  - 13343f2
+  numbers:
+    app_tests: 2201
+    app_test_files: 84
+    tsc: 0
+    eslint: 0
+    db_checks: 651
+    migrations: 57
+  confirmed: true
+  summary: >-
+    Driving Copy Week on the live app, the maintainer found three things, and each was a requirement
+    before it was code (R-342, R-343, R-344; S36, S37, S38). R-342 was rewritten within minutes when
+    the maintainer settled the rule: *"Operators from other plants should not be shown in the list,
+    period, it is the same as the operators shown on the left panel."* Three lanes on Opus rather than
+    Fable, at the maintainer's request, each with exclusive files, one pre-seat so two of them never
+    shared one; then a reviewer with one job.
+    ⭐ THE PICKER (S36). Cause verified: `board_window` sends every operator in the company and only
+    the shown plant's nodes, and the "outside their area" decision waved through anyone whose owning
+    node it could not find. The pop-ups take the panel's own variable now, audited from the source;
+    the decision transcribes the server's predicate; a person from another area of the same plant is
+    still marked and asked for a reason.
+    ⭐ CHANGING THE PERSON (S37). 0057's `reassign_assignment` asks every question
+    `create_assignment` asks, in its order, and both table triggers fire on the update (measured
+    through the writer, RA5 and RA6); the person must exist by the composite foreign key rather than
+    by a read the caller's grants would filter (F-099's lesson). The pop-up's Person control offers
+    the panel's list, turns a warn answer into the override question and a block answer into a closed
+    door, prints every other refusal by name, and closes after a person-only save.
+    ⭐ DRAGGING (S38). The shared shell's title is the handle for every pop-up in the app; the offset
+    is kept apart from the computed placement and clamped on every render.
+    ⛔ THE FIRST HAND CHECK PROVED NOTHING (F-101): it counted a chip that was already there. The
+    honest one found a refusal printed twice and a person named by uuid, both fixed.
+    ⛔ THE REVIEWER FOUND FOUR MORE, ALL FIXED AND PINNED. Re-staffing a row whose person had been
+    deleted failed with a raw constraint error, because the writer never read the guard 0029 shipped
+    with the nullable column (F-102; the pop-up also showed the first person in the pool as if they
+    were on that row --- RA12, AP8). The override tick vanished when a second refusal of another kind
+    arrived, so two refusals alternated forever (AP9). A pop-up shoved past an edge remembered the
+    overshoot and would not come back (a clamp on the stored offset, one more drag case). A dead toast
+    branch. It also found that the source audit's own doc was false about arrow props, corrected in
+    place, and that the scope guard's normalisation on a reassign was proven by a probe and pinned by
+    nothing (RA13 now).
+    ⚠️ TWO THINGS FOR THE MAINTAINER, NOT FIXED. A supervisor granted only a LINE sees no people at
+    all --- not in the panel, not in any picker --- because the board's node map stops at the grant
+    and every person is owned by the plant above it, while the server would accept those placements;
+    this predates this session (the panel has done it since S21) and R-342's "the same as the left
+    panel" now carries it into every picker. And the person already on a row stays choosable even
+    when they are on loan from another plant, so they can be picked off and put back with an
+    override; the code argues for it, the rule says "not shown, period". Both are in the queue as
+    questions.
+    Measured: SQL suite 651 passed, 0 failed, 0 hard errors; demo world 11 of 11; `npm run test`
+    2201 passed in 84 files; `tsc` 0 after `db:types` (eleven lines, the one RPC); `eslint`
+    0; Playwright 11 of 11 against the live stack; the three flows driven by hand in the browser
+    as the company admin. 0057 applied with `psql`; the ledger is still out of sync.
+  shipped:
+  - S36
+  - S37
+  - S38
 - id: 76
   date: 2026-09-05
   title: Copy Week ships, settling every clash by asking (S35), and the plant-root helper is org-scoped (DEF-0013)
@@ -12098,6 +12277,21 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
+- text: Which people is a supervisor granted only a line offered? (question for the maintainer, session 77)
+  why: >-
+    ⚠️ FROM THE REVIEWER'S ROUND: a supervisor granted only a LINE sees no people at all --- the panel
+    and every picker are empty --- because the board's node map stops at the grant and the people are
+    owned by the plant above it, while the server would accept those placements. This predates session
+    77 (the panel has done it since S21) and R-342's "the same as the left panel" now carries it into
+    every picker. Which people should such a supervisor be offered: everyone owned by the plant their
+    grant sits in (the server's answer), or only people owned inside the grant (the panel's answer
+    today)?
+- text: May the person already on a row be picked again when they are on loan from another plant? (question for the maintainer, session 77)
+  why: >-
+    ⚠️ The person already on a row stays choosable in the assignment pop-up even when they are on loan
+    from another plant, so they can be picked off and put back with an override; the server takes it.
+    "Not shown, period" would drop them from the select once another person is picked. Keep the
+    exception, or apply the rule?
 # ---------------------------------------------------------------------------
 # TASKS, most likely first. Everything below the PARKED marker is deliberately
 # not next: tabled by the maintainer, already decided, or a standing note
