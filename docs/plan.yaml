@@ -1891,7 +1891,7 @@ stages:
   track: core
   num: 39
   title: One plant's people stay in that plant; a person is available under their home, the rest one click away
-  status: done
+  status: now
   owner: agent
   refs:
   - session 77 conversation
@@ -1913,6 +1913,8 @@ stages:
     The "on loan from another plant" reasoning in Copy Week and the pop-ups goes, because such rows
     can no longer exist.
   state: >-
+    **Reopened in session 79 for the viewer clause** (R-346's last paragraph): the read rule widened
+    to the plant for every grant, and a viewer must read only their own places and see no panel.
     **Done in session 78.** Server: 0058 re-emits the scope guard from its LAST definition (0034,
     not 0030 --- the case-insensitive grep found it), refusing another plant's person before the
     override door; a person is readable by anyone holding a grant in their plant (a definer helper in
@@ -3392,6 +3394,15 @@ requirements:
     cell. Never another plant's people (R-345). The list and each person's home are the server's
     (`board_window` sends the plant's people with each home's path), so the screen can tell "above
     this cell" from "another area" without seeing nodes above the grant.
+    ⛔ AND NOBODY READS MORE THAN THEY ARE ASSIGNED TO. The maintainer, 6 Sept, on session 78's
+    note that a viewer granted one cell could read the plant's roster: *"No one should see more than
+    they are assigned to ... Why would it be sensible to hide a line 2 from a supervisor who only has
+    line 1 access, but show everything to a viewer who only has cell 1 access in Line 1?"* So the
+    click-through exists for someone who can PLACE people: a supervisor or admin grant reads the rest
+    of their plant's people; a viewer grant reads only the people available at its own places (homed
+    at or above the grant, or inside it), and the left panel and its control are not shown to a
+    viewer at all --- *"for a viewer, the left panel serves no purpose, so we should hide it, the only
+    thing they see is the board."*
   verified_by:
   - kind: sql
     file: supabase/tests/81_same_plant_test.sql
