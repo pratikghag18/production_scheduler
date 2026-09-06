@@ -3197,8 +3197,14 @@ requirements:
     cases: >-
       the tab is REACHABLE by the person it was built for -- a site admin is offered Settings and not
       Activity, in one case, so re-coupling the two goes red
-  status: covered
+  status: contradicted
   note: >-
+    ⛔ CONTRADICTED 6 Sept by DEF-0017 (tester, minor): Plant A sets date_format = ymd_slash, Dana's board
+    reads `Mon 2026/08/31`, and Ana's board of Line 1 inside the same plant reads `Mon Aug 31` --- the company
+    value. The server says her line uses the plant's (`app_resolve_node_setting(line_1,'date_format')` =
+    ymd_slash as Ana); `useDateFormat` reads only the root node's own node_settings row, which for a line does
+    not exist and whose plant row above her grant she cannot read. The pin reads the hook and the last
+    board_window for a server-resolved answer.
     ⛔ COVERED IS NOT THE SAME AS REACHABLE, AND THIS ROW WAS BOTH FOR A DAY (DEF-0007). Forty cases
     proved the tab edits the chosen plant's values, including the two site-admin states; none of them
     asked whether the person who runs one plant can OPEN the tab, because the panel was rendered
@@ -3448,14 +3454,16 @@ requirements:
     steps: >-
       Live app as Ana, session 78: six people in the panel over Line 1 (screenshot), the direct
       assignment picker offers all six, A5 and A6 carrying only the existing "never trained" mark.
-  status: contradicted
+  status: covered
   note: >-
     ⛔ CONTRADICTED 6 Sept by DEF-0015 (tester): the panel was hidden for a viewer and the pop-ups were
     not --- a viewer could open the create form and the write pop-ups the server refuses.
     ⚠️ FIX-CLAIMED in ~01a2612~ (session 81): the viewer sees the board, the chips, and read-only
     pop-ups with Close --- nothing to place with (see R-239's note). The demo world now carries a
-    viewer per plant so the tester and the browser case can be that person. Stays ~contradicted~ until
-    the tester re-runs.
+    viewer per plant so the tester and the browser case can be that person.
+    ✅ VERIFIED 6 Sept by the tester (session 82): Viva, Vito and Vina each see the board, the chips and
+    read-only pop-ups and nothing to place with; the demo seed re-applied on a scratch copy leaves every
+    persona's grants as they were (Dana one admin grant on plant_a, Ana one supervisor grant on line_1).
 - id: R-342
   title: A person from another plant is not offered on this plant's board at all
   source:
@@ -4324,8 +4332,19 @@ requirements:
     A run moves to another cell like any block. The target must have no overlapping run, the crew moves
     with it, every crew member is re-checked for eligibility, and capacity is unaffected because times
     do not change.
-  verified_by: []
-  status: contradicted
+  verified_by:
+  - kind: sql
+    file: supabase/tests/82_run_keeps_its_crew_test.sql
+    cases: >-
+      RK1 a raw UPDATE of a run's cell with crew attached is refused at commit with
+      run_moved_without_crew and the run stays; RK2 a crewless run still moves; RK3 move_run carries the
+      crew and passes the deferred check; RK4 move_run refused under block leaves run and crew in place
+  - kind: vitest
+    file: src/test/defects/DEF-0014.test.ts
+    cases: >-
+      the last trigger set on runs includes one firing on UPDATE OF node_id whose function reads
+      assignments (the migration-text half; RK1 is the behaviour)
+  status: covered
   note: >-
     ⛔ CONTRADICTED 6 Sept by DEF-0014 (tester, found first by the developer's reviewer in session 78): a plain
     UPDATE of runs.node_id as a site admin moves the run and leaves its crew on the old cell --- rows=1, no
@@ -4336,7 +4355,14 @@ requirements:
     `move_run`, which moves the run and then each crew row in one transaction, passes at commit, while a
     bare update over the network, which is its own transaction, is refused. 6 cases in
     `82_run_keeps_its_crew_test.sql`; the pin is green; the defect's own reproduction replayed on the
-    live database. Stays `contradicted` until the tester re-runs.
+    live database.
+    ✅ VERIFIED 6 Sept by the tester (session 82): the reproduction run TO COMMIT as Dana --- rows=1 at
+    statement time, then `ERROR ... 1 crew row(s) did not follow` with reason `run_moved_without_crew`
+    at COMMIT, run and crew both read back on cell_1; over PostgREST the same PATCH is `HTTP/1.1 409`
+    with the PT409 body. 0059 with the trigger stripped: 82 reads `FAIL RK1`; not deferred: `FAIL RK3`
+    (move_run itself refused mid-move). move_run still carries the crew through the area door, flags an
+    ineligible member under warn, refuses under block, and refuses a cross-plant target with nothing
+    moved.
 - id: R-038
   title: Roster entries show assignment count and dim when fully allocated
   source:
@@ -4357,7 +4383,16 @@ requirements:
     A shift template is a named daily pattern of shifts, each with breaks. It attaches to any node and
     inherits downward; the nearest ancestor with a template wins.
   verified_by: []
-  status: uncovered
+  status: contradicted
+  note: >-
+    ⛔ CONTRADICTED 6 Sept by DEF-0016 (tester, major): Plant A's template is attached at plant_a and Line 1
+    inherits it for Dana --- break band, dashed boundary, three shift chips in the create form --- but for Ana,
+    granted only Line 1, `resolve_shift_template(line_1)` answers NULL and `board_window` sends
+    `node_shift_map` and `shift_templates` empty, so her board has no pattern at all and the create form
+    defaults to 00:00–04:00. The resolver is SECURITY INVOKER and the ancestor node and its attachment row are
+    filtered away by RLS; the same question was answered for settings by making `app_resolve_node_setting`
+    definer (0050) and for people by `app_operator_homes` (0058). The pin reads the migrations for the
+    resolver's security clause.
 - id: R-040
   title: Shift times are minutes from midnight; overnight starts the day
   source:
@@ -5549,7 +5584,7 @@ requirements:
     cases: >-
       the rail offers what the server permits, tab by tab -- a site admin IS offered Settings, is NOT
       offered Activity, and a company admin gets both, so no case passes by hiding everything
-  status: contradicted
+  status: covered
   note: >-
     ⛔ CONTRADICTED 6 Sept by DEF-0015 (tester): a viewer granted one cell presses Enter on the track and gets a
     create form with a four-person picker and an enabled Create, and clicks the chip and gets Person, Save and
@@ -5559,8 +5594,12 @@ requirements:
     ⚠️ FIX-CLAIMED in `01a2612` (session 81). Decided in one place: the board reads `can_place` and hands
     it to the gesture layer (no create form on Enter or click-drag, no drag) and to the assignment and
     run pop-ups as read-only (the details and Close). Nine unit cases, the pin green, and a browser case
-    as Viva, the new Plant A viewer, reading it off the screen. Stays `contradicted` until the tester
-    re-runs.
+    as Viva, the new Plant A viewer, reading it off the screen.
+    ✅ VERIFIED 6 Sept by the tester (session 82), in the browser as Viva, Vito and Vina with every write
+    intercepted: no panel, no Copy week, Enter on a track opens nothing, the chip and the run band open
+    read-only with Close only, a drag and an arrow nudge attempt no request. Ana and Dana lost nothing:
+    the create form, Person/Save/Delete, the run's fields, the drag and the nudge all still fire. The
+    gate is the server's `can_place`, read once; six mutations of it each caught by name.
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
     ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0005, fix 808a52d). This row has now been broken in BOTH directions by
@@ -9663,6 +9702,107 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 82
+  date: 2026-09-06
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2246
+    app_test_files: 88
+    tsc: 0
+    eslint: 0
+    db_checks: 688
+    migrations: 59
+  confirmed: true
+  summary: >-
+    Three commits judged at `aca40d5`, one migration, one new SQL file, one new client test file and a
+    browser spec. Both fix-claimed defects re-verified cold and set `verified`; migration 0059 mutated
+    three ways and the DEF-0015 gate seven ways on scratch copies; the board driven as three viewers, a
+    line supervisor and a plant admin with every write intercepted; the demo seed applied twice and
+    the grants recounted; two defects filed from what the screens showed.
+    ⭐ THE COUNT MATCHES, EXACTLY. The runner said *"Test Files 88 passed (88) / Tests 2246 passed
+    (2246)"*, which is what session 81 says, the two earlier pins green inside it. With this run's two
+    new pins the line reads *"Test Files 2 failed | 88 passed (90) / Tests 2 failed | 2248 passed
+    (2250)"*, the two red being DEF-0016 and DEF-0017, red on purpose. SQL suite summed from the
+    report's 46 tally lines: 688 passed, 0 failed, 0 hard errors (session 81's 677 plus 82's six and
+    the demo's eleven, which the developer counted apart); Playwright 15 of 15, two as Viva.
+    ⭐ THE TYPECHECK IS CONCLUSIVE. `db:types` regenerated against the live stack with 0059 applied
+    and the content diff against the committed file is zero lines (`--ignore-space-at-eol`); the
+    runner's "dirty" is the CRLF rewrite, restored with `git checkout`. `tsc` 0, `eslint` 0.
+    `format:check` fails on 306 files for the line-ending reason session 80 measured.
+    ⭐ THE DEF-0014 PIN WAS EDITED BY THE DEVELOPER, AND THE EDIT WAS NECESSARY. One alternation widened
+    in the trigger reader (`create constraint trigger`) plus Prettier; no assertion changed. With my
+    original reader restored against the committed 0059 the pin is red --- *"none of their functions
+    reads assignments"* --- because it could not see a constraint trigger at all. Legitimate
+    re-pointing at the new shape, said at the line and in the defect; still an edit to a file the
+    brief reserves, noted here so the record has it.
+    ⭐ DEF-0014 VERIFIED at `169c7e7`. The reproduction as written could not have said anything: a
+    deferred constraint trigger never fires on ROLLBACK. Run to COMMIT as Dana it reads *"raw UPDATE
+    runs.node_id as Dana: rows=1"* at statement time and then *"ERROR: run d80b2135-... moved to node
+    5ac19c06-... but 1 crew row(s) did not follow"* with `run_moved_without_crew` at COMMIT, run and
+    crew both read back on cell_1. Over PostgREST as Dana the same PATCH is *"HTTP/1.1 409"* with the
+    PT409 body naming the stranded row, and the run and its crew read back on cell_1 --- so a
+    commit-time refusal reaches the client as an ordinary error, not as a 204 with an unmoved row,
+    because PostgREST's request is its own transaction. `move_run` is still the one mover and carries
+    the crew: through the D113 area door with the crew flagged, under warn with an ineligible member
+    flagged `eligibility_override` and the warning returned, under block refused before any write, and
+    a cross-plant target refused by the product-place guard or the D113 pre-check with nothing moved.
+    A hand-made run-then-crew transaction passes at commit, which is the invariant holding. 0059 on
+    scratch databases: trigger stripped, 82 reads *"FAIL RK1: refusal=allowed/null the run moved"*;
+    `deferrable initially deferred` removed, *"FAIL RK3: move_run was refused: PT409/..."*; `security
+    invoker`, nothing red, and correctly so --- the crew rows the guard reads sit on the old cell the
+    caller already had to be able to edit. The trigger function cannot be called as an RPC (*"trigger
+    functions can only be called as triggers"*), its refusal names only rows the caller can read, and
+    every function 0059 emits is the last definition. dev_demo_test.sql's edit is D9's count 6 to 9,
+    only the new viewers.
+    ⭐ DEF-0015 VERIFIED at `01a2612`. In the browser with every non-GET to assignments, runs and the
+    write RPCs aborted at the network: Viva *"panel=0 copyWeek=0 showOthers=0"*, Enter on a track
+    *"dialogs=0"*, the chip *"person=0 save=0 del=0 close=1"*, the run band the same, a 120px drag
+    *"writesAttempted=[]"* with the read-only pop-up opened instead, an arrow nudge nothing. Vito and
+    Vina the same on Plants B and C. Nothing over-corrected: Ana keeps the create form (Product run /
+    Direct assignment, four products, Create), Person with *"Show other people in this plant (2)"*,
+    Save and Delete, the run's headcount and notes, and her drag and her arrow both fire *"PATCH
+    /rest/v1/assignments?id=eq.4ed986a4-..."*; Dana the same plus Copy week. The gate is
+    `board_window`'s `can_place`, read once in BoardPage and handed down, not a client copy. Seven
+    mutations: the create guard, the assignment `readOnly` prop, the two read-only branches, the Enter
+    gate and the pointer-move gate each caught by name (pin, viewerBoard, dragGesture); `canPlace ??
+    true` while the board has no data is not caught and is the loading state. dragGesture.test.ts
+    gained a fourth `baseArgs` parameter defaulting to true and three viewer cases; no existing case
+    weakened.
+    ⭐ THE DEMO WORLD. dev_demo.sql applied twice on a scratch database: 10 grants, 11 profiles, 11
+    users, 37 runs, 37 assignments, 41 nodes, 20 operators before and after, and the grant list
+    identical --- Dana one admin grant on plant_a, Ana one supervisor grant on line_1, Quinn, Rosa,
+    Marco as before, the two Contoso rows, and Viva, Vito, Vina one viewer grant on their plant root
+    each. Live the org has one more, Vlad on plant_d, both made by hand on the live database only
+    (plant_d on 3 Sept, Vlad today); a `db:reset` removes them and nothing in the repo knows them.
+    ⛔ DEF-0016 FILED (major). Opening the board as Ana beside Dana's: Plant A's shift pattern is on
+    Dana's board (break band at 02:00, boundary at 06:00, three shift chips in the create form) and
+    absent from Ana's, whose create form defaults to 00:00–04:00. `board_window` for her line sends
+    `node_shift_map` and `shift_templates` empty; `resolve_shift_template(line_1)` is NULL as Ana and
+    the template id as Dana, because the resolver is SECURITY INVOKER and the plant node and its
+    attachment row are filtered away above her grant --- the same "owned above the grant" question
+    0050 answered for settings and 0058 for people. R-039 contradicted; the pin reads the resolver's
+    security clause.
+    ⛔ DEF-0017 FILED (minor). The same two screens, two date formats: Dana `Mon 2026/08/31`, Ana `Mon
+    Aug 31`, and the server says Ana's line uses the plant's (`app_resolve_node_setting` = ymd_slash
+    as her). `useDateFormat` reads the root node's own node_settings row, which a line does not have
+    and whose plant row she cannot read. R-333 contradicted; the pin reads the hook and the last
+    board_window.
+    ⚠️ NOTED, NOT FILED, ONE QUESTION FOR THE MAINTAINER. A bare `UPDATE runs SET timerange` as Dana
+    (shift +1h, forced immediate) lands with *"rows=1 no refusal; run now 07:00–15:00; crew still
+    06:00–14:00"* --- the time-axis twin of DEF-0014, which 0059 (UPDATE OF node_id) does not cover.
+    `move_run` shifts the crew by the run's start delta and its own comment says "clamp nothing", so a
+    crew row is allowed to extend past its run and no trigger could tell a stranded crew from a
+    legitimate one at commit; whether a bare time move should carry the crew is a decision, not a
+    finding. Also: the e2e copyWeek spec still writes onto the live week +100 (15 rows at 2028+,
+    unchanged); sweep 2's audit_log.at is the same false positive (audit.ts orders by id and says why
+    at line 44); sweep 3's twenty hits are "company-wide" in comments outside this diff; the live
+    migration ledger still tops out at 0038 with 0059 applied by psql.
+    ⚠️ PROMOTION. Neither earlier pin was promoted. DEF-0014's pin is the migration-text half of R-037
+    beside 82's RK1 and can stay or be promoted whole; DEF-0015's pin is the only case that reads
+    BoardPage's hand-down, which viewerBoard.test.tsx does not, so it should be promoted rather than
+    retired.
+  shipped: []
 - id: 81
   date: 2026-09-06
   title: DEF-0014 and DEF-0015 fixed, and the demo world gains a viewer per plant
