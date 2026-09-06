@@ -1,14 +1,27 @@
-import type { Product } from "@/lib/api";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchIsAdminFor, isSchedulerError, type Product } from "@/lib/api";
 import { productColorCss } from "@/lib/productColor";
 import { ZOOMS, type ZoomIndex } from "../lib/geometry";
-import { formatDayLabel, addMinutes } from "../lib/time";
+import { formatDayLabel, addMinutes, MINUTES_PER_DAY } from "../lib/time";
 import { shouldOfferRootPicker, type BoardRoot } from "../lib/rootSelection";
+import { boardKeys } from "../hooks/useBoardWindow";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { Chevron } from "@/components/icons";
+import { CopyWeekDialog } from "./CopyWeekDialog";
 import styles from "./BoardToolbar.module.css";
 
 /** 92-day cap: `board_window` raises `invalid_argument` past it (T6, docs/api.md §2). */
 const MAX_WINDOW_DAYS = 92;
+
+/**
+ * The one key for "does the caller administer this plant", keyed by plant id
+ * the way `boardKeys.window` is keyed by what it loads, so nothing hand-builds
+ * it and a grant change can invalidate it by prefix.
+ */
+export const copyWeekKeys = {
+  adminFor: (plantId: string) => ["copy-week", "admin-for", plantId] as const,
+};
 
 /**
  * Zoom buttons, density buttons, date-range control, snap note, legend
@@ -48,6 +61,30 @@ export function BoardToolbar({
 }) {
   const startInputValue = windowStartDate.toISOString().slice(0, 10);
   const windowEnd = addMinutes(windowStartDate, windowDayCount * 1440);
+
+  // R-339 / S35: Copy Week. The plant is the board's chosen root; the dialog
+  // is anchored under the button that opened it, like every other popover.
+  //
+  // ⚠️ THE PREDICATE IS THE SERVER'S. `copy_week_plan` refuses anyone who is
+  // not `app_is_admin_for(plant)`, so the button is offered on that exact
+  // answer, asked for THIS plant, and on nothing the session carries: a site
+  // admin of one plant who can only view another has `adminAnywhere` and no
+  // right to copy here, and a company admin gets `true` from the server
+  // anyway. CLAUDE.md section 4: whatever a client offers is decided by the
+  // same test the server runs. Nothing is offered while the answer is loading
+  // or after the ask failed -- "we could not ask" is not "yes".
+  const queryClient = useQueryClient();
+  const [copyWeekAnchor, setCopyWeekAnchor] = useState<{ x: number; y: number } | null>(null);
+  const plant = roots.find((r) => r.path === rootPath) ?? null;
+  const adminFor = useQuery({
+    queryKey: copyWeekKeys.adminFor(plant?.id ?? ""),
+    queryFn: () => fetchIsAdminFor(plant?.id ?? ""),
+    enabled: plant !== null,
+    staleTime: 30_000,
+    // A typed refusal is an answer, not a flake (the board's own retry rule).
+    retry: (count, err) => !isSchedulerError(err) && count < 1,
+  });
+  const offerCopyWeek = plant !== null && adminFor.data === true;
 
   return (
     <header className={styles.header}>
@@ -100,6 +137,39 @@ export function BoardToolbar({
           Next day <Chevron direction="right" />
         </button>
       </div>
+
+      {offerCopyWeek && (
+        <div className={styles.copyWeek}>
+          <button
+            type="button"
+            title="Copy this week's plan into another week, deciding every clash yourself"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setCopyWeekAnchor({ x: r.left, y: r.bottom + 4 });
+            }}
+          >
+            Copy week
+          </button>
+        </div>
+      )}
+      {copyWeekAnchor !== null && plant !== null && (
+        <CopyWeekDialog
+          plantId={plant.id}
+          plantName={plant.name}
+          windowStart={windowStartDate}
+          anchor={copyWeekAnchor}
+          dateFormat={dateFormat}
+          onClose={() => setCopyWeekAnchor(null)}
+          onApplied={() => {
+            // The same refresh every writer on the board triggers: invalidate
+            // the loaded window's key (useRunMutations / useAssignmentMutations).
+            const to = addMinutes(windowStartDate, windowDayCount * MINUTES_PER_DAY);
+            void queryClient.invalidateQueries({
+              queryKey: boardKeys.window(plant.path, windowStartDate, to),
+            });
+          }}
+        />
+      )}
 
       <div className={styles.range}>
         <label htmlFor="board-window-start" className={styles.rangeLabel}>

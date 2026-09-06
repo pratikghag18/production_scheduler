@@ -1196,6 +1196,15 @@ export type Database = {
         Returns: string
       }
       app_trim_ws: { Args: { input: string }; Returns: string }
+      apply_copy_week: {
+        Args: {
+          p_decisions: Json
+          p_plant_id: string
+          p_source_start: string
+          p_target_start: string
+        }
+        Returns: Json
+      }
       apply_split_coverage: {
         Args: { p_adjustments: Json; p_new_assignment: Json }
         Returns: Json
@@ -1233,6 +1242,14 @@ export type Database = {
       }
       copy_plant_structure: {
         Args: { p_new_name: string; p_source_root: string }
+        Returns: Json
+      }
+      copy_week_plan: {
+        Args: {
+          p_plant_id: string
+          p_source_start: string
+          p_target_start: string
+        }
         Returns: Json
       }
       create_assignment: {

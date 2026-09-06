@@ -36,6 +36,10 @@ export * from "./audit";
 // them: one dialog serves products, people, trainings and shift patterns.
 export * from "./deletion";
 
+// R-339 / S35. Copy Week: the plan-then-apply pair over migration 0055. Not
+// pre-seated either -- it belongs to the board, not to an admin section.
+export * from "./copyWeek";
+
 // Re-exported so callers that need the raw `Json` type (e.g. shapes.test.ts
 // building RPC-payload fixtures) never have to import database.types.ts
 // themselves (self-review §9 item 5: nothing outside src/lib imports it).

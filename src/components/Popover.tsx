@@ -25,7 +25,10 @@ const FOCUSABLE_SELECTOR =
  * The measurement/placement mechanics below are the hard-won board version
  * (design plan §19.10/§19.11), carried verbatim:
  *   - CSS owns the width (`.pop` in the module); no `width` prop — an inline
- *     width used to outrank the CSS so the popover never scaled.
+ *     width used to outrank the CSS so the popover never scaled. The one
+ *     variant, `variant="wide"`, is a second class in the same module (`.wide`),
+ *     for a dialog that lays two candidates side by side (Copy Week, R-339);
+ *     the width still lives in CSS and still scales through the root size.
  *   - `useLayoutEffect` + `getBoundingClientRect()` measures the RENDERED box and
  *     feeds one `{width,height}` into `resolvePopoverPlacement` (no probe).
  *   - The viewport is STATE behind a `window` resize listener, not a
@@ -39,11 +42,14 @@ export function Popover({
   onClose,
   title,
   children,
+  variant,
 }: {
   anchor: { x: number; y: number };
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  /** `"wide"` for a dialog that sets two things side by side; default is the one 17rem shell. */
+  variant?: "wide";
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -139,7 +145,7 @@ export function Popover({
   const node = (
     <div
       ref={ref}
-      className={styles.pop}
+      className={variant === "wide" ? `${styles.pop} ${styles.wide}` : styles.pop}
       style={{ left, top }}
       role="dialog"
       aria-modal="true"

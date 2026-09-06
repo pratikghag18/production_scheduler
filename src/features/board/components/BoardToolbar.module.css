@@ -227,3 +227,28 @@
 .daynav button + button {
   border-left: 1px solid var(--grid);
 }
+
+/* R-339: the Copy week button. Same segmented shape as `.daynav` beside it,
+   one button wide, so it reads as a sibling of the day controls rather than a
+   stray control -- and on `--chrome-scale` for the reason at the top of this
+   file. */
+.copyWeek {
+  display: flex;
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.copyWeek button {
+  border: 0;
+  background: var(--surface);
+  padding: calc(5px * var(--chrome-scale, 1)) calc(10px * var(--chrome-scale, 1));
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.copyWeek button:hover {
+  background: var(--page);
+}

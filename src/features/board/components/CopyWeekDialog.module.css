@@ -1,0 +1,162 @@
+/* Copy Week (R-339 / S35). Rendered inside the shared pop-up shell
+   (src/components/Popover.module.css) in its one wide variant (34rem), so the
+   two candidates sit in two readable columns; every line may still wrap.
+
+   Sized in rem (D84): the shell is rem-sized and portaled to document.body,
+   so `--chrome-scale`/`--ui-scale` do not reach it. Hairline borders stay in
+   px. The date inputs and the two buttons are the shared field skin
+   (src/components/Field.module.css, R-318) -- nothing here declares a control
+   of its own, which is what keeps `fieldStandard.test.ts` green without adding
+   this file to its legacy list. */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.plant {
+  margin: 0 0 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.label {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+  margin: 0.375rem 0 0.125rem;
+}
+
+.note {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.error {
+  margin: 0.375rem 0 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}
+
+.counts {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.clashes {
+  list-style: none;
+  margin: 0.375rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* One clash. A fieldset so the two radios are grouped under one legend --
+   the copied row's identity -- which is also how a test finds the row. */
+.clash {
+  margin: 0;
+  padding: 0.5rem 0.5rem 0.375rem;
+  border: 1px solid var(--grid);
+  border-radius: 0.5rem;
+  min-width: 0;
+}
+
+.legend {
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.reason {
+  margin: 0 0 0.375rem;
+  font-size: 0.71875rem;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* Prior on the left, copied on the right: the two candidates a person is
+   choosing between, side by side. */
+.candidates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.375rem;
+  border-radius: 0.375rem;
+  background: var(--page);
+}
+
+.candidateTitle {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.line {
+  margin: 0;
+  font-size: 0.71875rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  margin-top: auto;
+  font-size: 0.71875rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.choice input {
+  margin: 0.125rem 0 0;
+  flex: none;
+}
+
+/* R-239: the server offered only the prior plan, and the gap says why. */
+.notOffered {
+  margin: auto 0 0;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+/* not_eligible under warn: shown beside both choices, spanning the row. */
+.warn {
+  margin: 0.375rem 0 0;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border: 1px solid var(--warn);
+  font-size: 0.6875rem;
+  color: var(--ink);
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
+}
+
+.row button {
+  flex: 1;
+}

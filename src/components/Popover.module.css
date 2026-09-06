@@ -21,6 +21,14 @@
   padding: 0.75rem 0.875rem;
 }
 
+/* The one variant: twice the shell, for a dialog that sets two candidates side
+   by side (Copy Week, R-339). Still rem, still CSS-owned; capped so it never
+   runs off a narrow viewport. */
+.wide {
+  width: 34rem;
+  max-width: calc(100vw - 2rem);
+}
+
 .h3 {
   margin: 0 0 0.5rem;
   font-size: 0.8125rem;
