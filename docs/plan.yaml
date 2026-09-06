@@ -3607,8 +3607,14 @@ requirements:
       true (so the case cannot pass by the helper saying false to everything); then a site admin's
       direct INSERT of admin on the foreign root and on the bogus uuid must come back with the SAME
       sqlstate and store nothing. Against 0054's helper it reads foreign_root=t, 42501 versus PT400.
-  status: contradicted
+  status: covered
   note: >-
+    ⭐ VERIFIED BY THE TESTER 6 Sept at `5e5335c` (tree `f75a65e`): the reproduction re-run cold as Ana
+    over PostgREST reads false for the other company's root, its leaf and a bogus uuid on BOTH helpers
+    and true for her own company's four roots; the three direct INSERTs as Dana all come back PT400
+    with nothing stored. 0056 is the last definition and differs from 0054 by the one org term. With
+    that term deleted on a scratch copy, 77 reads "FAIL AR10: foreign_root=t ... insert_root=42501
+    insert_bogus=PT400" and 47 and 65 do not move. DEF-0013 is `verified`.
     ⚠️ FIX-CLAIMED in `5e5335c` (session 76). 0056 re-emits the helper with 0020's org term and nothing
     else changed; it stays SECURITY DEFINER, for the reason the 0054 header measured (W28). AR10 was
     run against 0054's helper on the scratch database first and failed the way the defect describes,
