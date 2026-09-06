@@ -1914,22 +1914,17 @@ stages:
     The "on loan from another plant" reasoning in Copy Week and the pop-ups goes, because such rows
     can no longer exist.
   state: >-
-    **Done in session 79, after the viewer clause.** The read rule is two clauses now: any grant reads
-    the people at its own places (0026's branch rule), and only a grant that can place people reads
-    the rest of its plant; the homes helper answers person by person through the same rule; and
-    `board_window` says `can_place`, on which the board hides the Operators panel for a viewer. SP18
-    and SP19 pin the viewer; the shape test pins the flag.
-    **Done in session 78.** Server: 0058 re-emits the scope guard from its LAST definition (0034,
-    not 0030 --- the case-insensitive grep found it), refusing another plant's person before the
-    override door; a person is readable by anyone holding a grant in their plant (a definer helper in
-    the shape of `app_can_read_owned`, stated as a contract change from 0026 for people only);
-    `board_window` sends the plant's people with each home's path through a definer helper, because a
-    line supervisor cannot read the nodes above her grant. Client: one pure split from the home path,
-    the panel and both pop-ups showing the default people with the rest behind "Show other people in
-    this plant (n)", the old "on loan from another plant" reasoning gone. Two SQL files that built
-    cross-plant rows were reworked honestly. Note for R-339: the copy plan's "only prior where a
-    displaced row cannot be edited" branch is now unreachable inside one plant, since the copier is
-    the plant's admin; CW26 measures the premises that make it so.
+    **Done in sessions 78 and 79.** Server: 0058 re-emits the scope guard from its last definition
+    (0034, found by the case-insensitive grep) and refuses another plant's person before the override
+    door. Reading people is two clauses: any grant reads the people at its own places, and only a grant
+    that can place people reads the rest of its plant; the homes helper answers person by person
+    through the same rule; `board_window` sends the plant's people with each home's path and says
+    `can_place`. Client: one pure split from the home path, the panel and both pop-ups showing the
+    default people with the rest behind "Show other people in this plant (n)", the panel hidden for a
+    viewer, the "on loan from another plant" reasoning gone. Two SQL files that built cross-plant rows
+    were reworked with their claims intact. Note for R-339: the copy plan's "only prior where a
+    displaced row cannot be edited" branch is unreachable inside one plant, since the copier is the
+    plant's admin; CW26 measures why.
 - id: M1
   track: matrix
   num: 1
@@ -3616,11 +3611,6 @@ requirements:
       sqlstate and store nothing. Against 0054's helper it reads foreign_root=t, 42501 versus PT400.
   status: covered
   note: >-
-    ⛔ CONTRADICTED 6 Sept by DEF-0015 (tester): a viewer granted one cell presses Enter on the track and gets a
-    create form with a four-person picker and an enabled Create, and clicks the chip and gets Person, Save and
-    Delete --- every one refused by the policies (the DELETE came back 200 with zero rows and the board said
-    "You don't have permission to change that. --- reverted."). The panel and Copy week ARE hidden; the pop-ups
-    are not decided by can_place at all. Minor: nothing is written and the app says why.
     ⭐ VERIFIED BY THE TESTER 6 Sept at `5e5335c` (tree `f75a65e`): the reproduction re-run cold as Ana
     over PostgREST reads false for the other company's root, its leaf and a bogus uuid on BOTH helpers
     and true for her own company's four roots; the three direct INSERTs as Dana all come back PT400
@@ -12732,14 +12722,6 @@ sessions:
     checks are the migration brief's acceptance items.
   shipped: []
 next:
-- text: A raw UPDATE of runs.node_id moves a run into another plant and leaves its crew behind
-  why: >-
-    Found by S39's reviewer on the way, pre-existing and out of that stage's scope. The assignments
-    table enforces "the crew's cell is the run's cell" on its own side, and refuses a cross-plant
-    person (R-345); the runs side has no counterpart, so a plain UPDATE of a run's node under the
-    policies moves the run and strands its crew at the old cell. No cross-plant person results, so
-    R-345 holds, but the run/crew invariant is one-sided. Belongs with 0050's move_run, which
-    already carries the crew: the table should refuse what move_run would refuse.
 # ---------------------------------------------------------------------------
 # TASKS, most likely first. Everything below the PARKED marker is deliberately
 # not next: tabled by the maintainer, already decided, or a standing note
@@ -12806,8 +12788,6 @@ next:
     rather than a shared file, which splitting by file does not prevent. A beside Copy Week is safe (A
     never touches `src/` and never asserts about a screen); B belongs after the board has stopped
     moving, and can then cover Copy Week too.
-- text: Phase 2 — Copy Week with dry-run conflict preview
-  why: Unchecked Phase 2 item.
 # ------------------------------- PARKED ------------------------------------
 - stage: S24
   text: 'Debt: useSession() called in five components; one SessionProvider at the root'
