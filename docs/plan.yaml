@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-06'
-  tip: 169c7e7
+  tip: 0f2383e
   baseline:
-    app_tests: 2246
-    app_test_files: 88
+    app_tests: 2272
+    app_test_files: 92
     tsc: 0
     eslint: 0
-    db_checks: 677
-    migrations: 59
+    db_checks: 704
+    migrations: 62
     mutations: 509 of 536
 tracks:
 - id: core
@@ -1731,10 +1731,13 @@ stages:
     case could have found it — they mock `useSession`, and the bug is two instances of `useSession`
     disagreeing.
   state: >-
-    **Half done, and the halves are different jobs.** The specs exist and are green locally (8 e2e
-    cases, 3 of them signed in). What is left is the CI half: a database service, the 52 migrations and
-    a fixture, so the three signed-in cases stop skipping on a push. Until then a skip is not a pass
-    and this stage stays open.
+    **Built in session 83; proven by the next push.** Twenty browser cases are green locally, fifteen of
+    them signed in. `scripts/ci-e2e.sh` stands up a fresh Supabase stack, loads the migrations, the seed
+    and the demo world, exports the stack's own URL and key, and runs every case; the workflow calls it
+    for the e2e step and keeps the dummy values for the unit, typecheck, lint and build steps, which the
+    reviewer proved read them at import time. The script resets and stops only a stack it started. The
+    database half was proven on an isolated scratch database; the runner half is proven when the next
+    push's e2e step reports the cases as run, not skipped, and green. Until then this stage stays `now`.
 - id: S35
   track: core
   num: 35
@@ -3213,6 +3216,12 @@ requirements:
     about what a screen lets someone do needs one case at the level that decides whether they get there
     -- which is why an `auditAccess.test.tsx` case now sits in this row's evidence rather than only in
     the tab-visibility suite.
+    ⚠️ FIX-CLAIMED in `eff6fff` (session 83). 0062 re-emits `board_window` whole from 0058 with one key
+    added beside `can_place`: `date_format`, resolved for the board's root by `app_resolve_node_setting`,
+    coalesced to the client's default so the payload never carries null. The board reads the payload
+    and no longer asks the hook for the root's own row. Four cases in `85_board_date_format_test.sql`;
+    the pin green; Ana's header reads the same as Dana's on the live app, and the role walk asserts it.
+    Stays `contradicted` until the tester re-runs.
 - id: R-334
   title: A tab cannot silently ignore the plant filter
   source:
@@ -4393,6 +4402,13 @@ requirements:
     filtered away by RLS; the same question was answered for settings by making `app_resolve_node_setting`
     definer (0050) and for people by `app_operator_homes` (0058). The pin reads the migrations for the
     resolver's security clause.
+    ⚠️ FIX-CLAIMED in `eff6fff` (session 83). 0061 re-emits the resolver whole from its last definition
+    (0005) as a SECURITY DEFINER with a pinned search path and the org term first, so a line supervisor
+    resolves the plant's pattern for her line and cells, another company's node answers NULL, and a
+    bogus uuid answers NULL. Eight cases in `84_shift_pattern_resolves_upward_test.sql`, red before and
+    green after; the pin green; replayed live and driven in the browser as Ana, bands and boundaries
+    drawn and the three shift chips offered. The role walk (`e2e/roleWalk.spec.ts`) now asserts Ana's
+    board offers exactly Dana's shift chips. Stays `contradicted` until the tester re-runs.
 - id: R-040
   title: Shift times are minutes from midnight; overnight starts the day
   source:
@@ -7195,6 +7211,34 @@ findings:
     lets the writer's own trigger decide, rolling the whole apply back if it refuses.
     The rule for next time: under RLS, every inner join to a table with a read policy is a filter
     the caller's grants wrote; join outer, or say in a comment why dropping the row is right.
+- id: F-105
+  title: The reviewer walks in through the other door, and the tester through the other role
+  tag: What review is for
+  status: fixed
+  found_by: agent
+  refs:
+  - R-238
+  - R-039
+  - R-333
+  - S34
+  story: >-
+    Session 83's reviewer took wave one apart three ways. The hardening lane closed a site admin's
+    direct DELETE of a company admin's grant at the table and left UPDATE open: the same caller could
+    demote the grant to viewer or re-point it onto a supervisor, silently --- "the same door from the
+    side". The CI lane removed the dummy backend values from the workflow with a comment saying the
+    unit suite never read them; 17 unit files read them at import time, and CI would have gone red at
+    the unit step before the new browser run ever started. The paging lane's helper assumed every read
+    was ordered; five reads had no order at all and eight more were ordered on a non-unique column,
+    which lets offset paging skip or repeat rows past a thousand while looking complete. All three
+    fixed by the lanes that made them, each with a case that fails the way the reviewer broke it.
+    ⛔ AND THE TESTER FOUND WHAT THE REVIEWER DID NOT, BY BEING SOMEONE ELSE. DEF-0016 and DEF-0017
+    were both old code the new read rule exposed --- a shift pattern and a date format resolved through
+    the caller's own view, which a line supervisor does not have above her grant. The reviewer had
+    driven the feature as the plant admin, for whom both resolve. The maintainer's words: "This has
+    to stop." The net is `e2e/roleWalk.spec.ts`: every demo person, every screen, and the facts that
+    must agree asserted across people; and CLAUDE.md section 4 carries the two rules --- anything
+    resolved by walking up the tree is resolved by the server as a definer, and every changed screen
+    is walked as the least-privileged person before a commit.
 - id: F-103
   title: A definer helper with the org term and not the grant term, for the second time in a week
   tag: Who a definer helper answers
@@ -9702,6 +9746,45 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 83
+  date: 2026-09-06
+  title: Two defects from a line supervisor's board, the role walk, a defects index, and wave one (S34, the queue)
+  commits:
+  - 61fbf1e
+  - eff6fff
+  - 0f2383e
+  numbers:
+    app_tests: 2272
+    app_test_files: 92
+    tsc: 0
+    eslint: 0
+    db_checks: 704
+    migrations: 62
+  confirmed: true
+  summary: >-
+    The tester's session 82 verified DEF-0014 and DEF-0015 and filed DEF-0016 and DEF-0017 from a
+    line supervisor's board: no shift pattern at all, and the company date format where the plant's
+    applies. The maintainer: the reviewer passes the code and the tester keeps finding things, and the
+    buildout was getting hard to follow because of the defects. Three answers in this session.
+    ⭐ THE INDEX. The plan page opens its Defects section with one row per defect, open ones first,
+    each a link to its card and its file; a closed defect is folded and opens on a click; the
+    open-defects figure at the top links to the index.
+    ⭐ THE TWO DEFECTS, one cause. 0061 makes the shift resolver a definer with the org term first;
+    0062 carries the board's resolved date format in its payload. Both fixed on the pinned Opus 4.8
+    lane, pinned by SQL cases red-then-green, replayed live and driven in the browser as Ana.
+    ⭐ THE NET. `e2e/roleWalk.spec.ts` signs in as all nine demo people, opens the board on the demo
+    week, the create form and every admin tab they are offered, and asserts across people the facts
+    that must agree: Ana's chips and date format against Dana's, Marco's against Quinn's, a viewer's
+    board against the admin's with no panel. Five cases, green now, red on the tip before the fixes.
+    CLAUDE.md section 4 carries the two rules (F-105).
+    ⭐ WAVE ONE, three lanes and a reviewer. The browser tests get their CI database (S34 built, proven
+    by the next push); every table read pages to the end with a stable order and a typed refusal on a
+    short read; three hardening notes close at the table. The reviewer found three real things ---
+    the delete-only guard, the CI env, the unordered pages --- and each lane closed its own (F-105).
+    Measured: SQL suite 704 passed, 0 failed, 0 hard errors; demo world 11 of 11; `npm run test`
+    2272 passed in 92 files, every pin green; `tsc` 0; `eslint` 0; Playwright 20 of 20 against
+    the live stack. 0060, 0061 and 0062 applied with `psql`; the ledger is still out of sync.
+  shipped: []
 - id: 82
   date: 2026-09-06
   title: Tester run
@@ -12947,11 +13030,7 @@ next:
     DECIDED Aug 25 (D88, §19.21): site-local axis, wall-clock across DST, Phase 2. Do not re-ask; the
     cost is in board/lib/time.ts and geometry.ts.
   decided: true
-- text: The 1000-row ceiling — page every read to exhaustion; refuse to compute on a short read
-  why: >-
-    DECIDED, NOT OPEN. Do not put this back to the maintainer as a choice. max_rows = 1000 and no
-    `.range(` anywhere in src/lib/api/.
-  decided: true
+
 - text: Dark theme — app-wide colour tokens first, then the matrix
   why: >-
     MOVED TO THE END BY THE MAINTAINER, 4 Sept: *"this is going to be much bigger and different than
@@ -12991,10 +13070,14 @@ next:
     parents/children CSV. Not deferred; do not re-ask.
   decided: true
 - text: >-
-    STANDING NOTE, not a task — open and flagged: X46 direct DELETE on profile_grants; site_people
-    unbounded; department admin gets no-place; .eligible means adoption parent only; touch acceptance
+    STANDING NOTE, not a task — open and flagged: .eligible means adoption parent only; touch acceptance
     pass on both drags
-  why: The roadmap's standing list so none of it goes quiet.
+  why: >-
+    The roadmap's standing list so none of it goes quiet. Three of its five closed in session 83 (0060):
+    the direct DELETE of a company admin's grant is refused at the table, and so is an UPDATE that
+    demotes or re-points it; site_people takes a search and a limit with total and returned counts,
+    unbounded by default, for the client to adopt; the department-admin note is moot since R-340 put
+    admin at the plant root, with a case that goes red if such a grant reappears.
 - text: >-
     STANDING NOTE, not a task — not driven in a browser: the reworked Products panel (plant chips,
     add-picker, per-plant remove) and the document-number surfaces
