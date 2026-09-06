@@ -11,7 +11,7 @@ meta:
     tsc: 0
     eslint: 0
     db_checks: 607
-    migrations: 54
+    migrations: 56
     mutations: 509 of 536
 tracks:
 - id: core
@@ -3167,9 +3167,10 @@ requirements:
     server permits.
     ⚠️ AN EXISTING BELOW-ROOT ADMIN IS LEFT ALONE, not deleted. 0053 refuses new ones and changes to
     them; it backfills nothing, because taking someone's access away silently during a migration is
-    worse than an inconsistency somebody can see on the Access tab. `allowedRoles` therefore still
-    returns `["admin"]` for such a row under the self-rule, so no control is ever rendered with nothing
-    selected.
+    worse than an inconsistency somebody can see on the Access tab. `allowedRoles` therefore leads
+    with the role the row holds for anyone's row, so such a person is drawn as the admin they are with
+    the two demotions the server takes, and no control is ever rendered with nothing selected (A32,
+    A33, since 0054).
   verified_by:
   - kind: vitest
     file: src/test/siteAccess.test.ts
@@ -3249,7 +3250,22 @@ requirements:
       As ana@example.test (supervisor, no admin grant) call rpc/app_node_is_plant_root and
       rpc/app_node_exists_in_org over PostgREST with the other company's plant root, its Assembly node
       and a bogus uuid; the two helpers must agree, and both must say false for all three.
+  - kind: sql
+    file: supabase/tests/77_admin_only_at_plant_root_test.sql
+    cases: >-
+      AR10 asks the helper directly as the least-privileged signed-in person the seed has: the other
+      company's root, its leaf and a bogus uuid all answer false and her own company's root answers
+      true (so the case cannot pass by the helper saying false to everything); then a site admin's
+      direct INSERT of admin on the foreign root and on the bogus uuid must come back with the SAME
+      sqlstate and store nothing. Against 0054's helper it reads foreign_root=t, 42501 versus PT400.
   status: contradicted
+  note: >-
+    ⚠️ FIX-CLAIMED in `5e5335c` (session 76). 0056 re-emits the helper with 0020's org term and nothing
+    else changed; it stays SECURITY DEFINER, for the reason the 0054 header measured (W28). AR10 was
+    run against 0054's helper on the scratch database first and failed the way the defect describes,
+    then 10 of 10 with 0056; 47, 48, 49, 65 and 78 unchanged. Applied live and the reproduction's
+    loop replayed as Ana: the other company's root is false, her own four roots are true. Stays
+    `contradicted` until the tester re-runs its own reproduction.
 - id: R-339
   title: Copy Week shows every clash and lets the person choose which plan wins, one by one
   source:
