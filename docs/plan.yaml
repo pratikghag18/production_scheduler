@@ -3453,7 +3453,7 @@ requirements:
     steps: >-
       Live app as Ana, session 78: six people in the panel over Line 1 (screenshot), the direct
       assignment picker offers all six, A5 and A6 carrying only the existing "never trained" mark.
-  status: covered
+  status: contradicted
 - id: R-342
   title: A person from another plant is not offered on this plant's board at all
   source:
@@ -3609,6 +3609,11 @@ requirements:
       sqlstate and store nothing. Against 0054's helper it reads foreign_root=t, 42501 versus PT400.
   status: covered
   note: >-
+    ⛔ CONTRADICTED 6 Sept by DEF-0015 (tester): a viewer granted one cell presses Enter on the track and gets a
+    create form with a four-person picker and an enabled Create, and clicks the chip and gets Person, Save and
+    Delete --- every one refused by the policies (the DELETE came back 200 with zero rows and the board said
+    "You don't have permission to change that. --- reverted."). The panel and Copy week ARE hidden; the pop-ups
+    are not decided by can_place at all. Minor: nothing is written and the app says why.
     ⭐ VERIFIED BY THE TESTER 6 Sept at `5e5335c` (tree `f75a65e`): the reproduction re-run cold as Ana
     over PostgREST reads false for the other company's root, its leaf and a bogus uuid on BOTH helpers
     and true for her own company's four roots; the three direct INSERTs as Dana all come back PT400
@@ -4323,7 +4328,12 @@ requirements:
     with it, every crew member is re-checked for eligibility, and capacity is unaffected because times
     do not change.
   verified_by: []
-  status: uncovered
+  status: contradicted
+  note: >-
+    ⛔ CONTRADICTED 6 Sept by DEF-0014 (tester, found first by the developer's reviewer in session 78): a plain
+    UPDATE of runs.node_id as a site admin moves the run and leaves its crew on the old cell --- rows=1, no
+    error, run on cell_5 and crew on cell_1 read back. Nothing on the runs side reads assignments; the
+    invariant is enforced on the crew's side only. The pin reads the migrations for a runs-side guard.
 - id: R-038
   title: Roster entries show assignment count and dim when fully allocated
   source:
@@ -5536,8 +5546,13 @@ requirements:
     cases: >-
       the rail offers what the server permits, tab by tab -- a site admin IS offered Settings, is NOT
       offered Activity, and a company admin gets both, so no case passes by hiding everything
-  status: covered
+  status: contradicted
   note: >-
+    ⛔ CONTRADICTED 6 Sept by DEF-0015 (tester): a viewer granted one cell presses Enter on the track and gets a
+    create form with a four-person picker and an enabled Create, and clicks the chip and gets Person, Save and
+    Delete --- every one refused by the policies (the DELETE came back 200 with zero rows and the board said
+    "You don't have permission to change that. --- reverted."). The panel and Copy week ARE hidden; the pop-ups
+    are not decided by can_place at all. Minor: nothing is written and the app says why.
     An invariant stated in `shapePicker.ts`, `siteAccess.ts` and verification rule 8c; individual instances
     are covered by their own entries.
     ⚠️ FIX CLAIMED, NOT VERIFIED (DEF-0005, fix 808a52d). This row has now been broken in BOTH directions by
