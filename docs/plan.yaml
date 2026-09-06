@@ -4,13 +4,13 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-06'
-  tip: 89e502b
+  tip: b605245
   baseline:
-    app_tests: 2230
+    app_tests: 2232
     app_test_files: 85
     tsc: 0
     eslint: 0
-    db_checks: 669
+    db_checks: 671
     migrations: 58
     mutations: 509 of 536
 tracks:
@@ -1891,11 +1891,12 @@ stages:
   track: core
   num: 39
   title: One plant's people stay in that plant; a person is available under their home, the rest one click away
-  status: now
+  status: done
   owner: agent
   refs:
   - session 77 conversation
   - session 78
+  - session 79
   - D113
   delivers:
   - R-345
@@ -1913,8 +1914,11 @@ stages:
     The "on loan from another plant" reasoning in Copy Week and the pop-ups goes, because such rows
     can no longer exist.
   state: >-
-    **Reopened in session 79 for the viewer clause** (R-346's last paragraph): the read rule widened
-    to the plant for every grant, and a viewer must read only their own places and see no panel.
+    **Done in session 79, after the viewer clause.** The read rule is two clauses now: any grant reads
+    the people at its own places (0026's branch rule), and only a grant that can place people reads
+    the rest of its plant; the homes helper answers person by person through the same rule; and
+    `board_window` says `can_place`, on which the board hides the Operators panel for a viewer. SP18
+    and SP19 pin the viewer; the shape test pins the flag.
     **Done in session 78.** Server: 0058 re-emits the scope guard from its LAST definition (0034,
     not 0030 --- the case-insensitive grep found it), refusing another plant's person before the
     override door; a person is readable by anyone holding a grant in their plant (a definer helper in
@@ -3410,7 +3414,14 @@ requirements:
       a supervisor granted only a line reads all the plant's people and their trainings, and
       board_window called as them returns every one with site_path --- the ones homed above the line
       and the ones homed in another area alike --- while another plant's person is neither readable
-      nor returned; the company admin unchanged
+      nor returned; the company admin unchanged; SP18 a VIEWER granted one cell reads the people at
+      their own places and not the other area's, and the homes helper answers the same three; SP19
+      board_window says can_place false to that viewer and true to the line supervisor and the site
+      admin
+  - kind: vitest
+    file: src/test/shapes.test.ts
+    cases: >-
+      can_place is kept true or false, and a payload without it is refused rather than guessed at
   - kind: vitest
     file: src/test/outsideArea.test.ts
     cases: >-
@@ -3433,9 +3444,11 @@ requirements:
   - kind: e2e
     file: e2e/linePeople.spec.ts
     cases: >-
-      signed in as Ana, supervisor on Line 1: the Operators panel lists Operator A1 to A6 with no
-      "other people" control, and the create pop-up on her cell offers the six with none marked "not
-      from this area"
+      signed in as Ana, supervisor on Line 1: the panel's default list plus what the "other people"
+      control reveals is exactly Plant A's six people, nobody in both halves, nobody from another
+      plant; the cell pop-up splits the same six the same way and marks only the revealed ones ---
+      read off the screen rather than assumed from the fixture, because the maintainer re-homes
+      people on the live database to try the rule (A5 and A6 moved into Area 2 on 6 Sept)
   - kind: manual
     steps: >-
       Live app as Ana, session 78: six people in the panel over Line 1 (screenshot), the direct
@@ -9621,6 +9634,49 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 79
+  date: 2026-09-06
+  title: Nobody reads more than they are assigned to, and a viewer sees no panel (S39, the viewer clause)
+  commits:
+  - cb93837
+  - b605245
+  numbers:
+    app_tests: 2232
+    app_test_files: 85
+    tsc: 0
+    eslint: 0
+    db_checks: 671
+    migrations: 58
+  confirmed: true
+  summary: >-
+    Session 78's record said a viewer granted one cell could now read the whole plant's roster, and
+    the maintainer answered: *"No one should see more than they are assigned to ... Why would it be
+    sensible to hide a line 2 from a supervisor who only has line 1 access, but show everything to a
+    viewer who only has cell 1 access in Line 1?"* and *"for a viewer, the left panel serves no
+    purpose, so we should hide it, the only thing they see is the board."* Written into R-346 first,
+    then built by the developer alone, being small.
+    ⭐ THE READ RULE IS TWO CLAUSES. Any grant reads the people available at its own places --- homed
+    at or above the grant, or inside it, which is 0026's branch rule unchanged. Only a grant that can
+    PLACE people, supervisor or admin, also reads the rest of its plant, because that is what the
+    click-through is for. The homes helper answers person by person through the same rule, so it
+    can no longer say more than the policy does. `board_window` now says `can_place` --- an edit
+    grant covering the board's place or inside it, or the company admin --- and the board renders
+    the Operators panel only when it is true. The pop-ups need no change: a viewer's "other people"
+    list is empty by the read rule, so the control never draws for them.
+    ⭐ THE MAINTAINER TRIED IT LIVE. Minutes after S39 shipped, Operator A5 and A6 were re-homed
+    from Plant A into Area 2 on the live database; Ana's panel now shows four by default and "Show
+    other people in this plant (2)", which is the rule working, and the browser case that had
+    assumed six by default went red for the right behaviour. It reads the split off the screen now.
+    The API file's "every key is an array" check learned the one boolean the payload carries.
+    ⭐ THE MODEL QUESTION. The maintainer asked for lanes on Opus 4.8; the hand-off switch offers
+    only the family name, which resolves to the newest Opus. A project agent definition pinned to
+    Opus 4.8 (`.claude/agents/opus48.md`) is added for the next session, when the harness reads it;
+    whether the exact version is honoured is to be confirmed on first use.
+    Measured: SQL suite 671 passed, 0 failed, 0 hard errors (81 is 20 cases now); demo world 11 of
+    11; `npm run test` 2232 passed in 85 files; `tsc` 0; `eslint` 0; Playwright 13 of 13 against
+    the live stack. 0058 re-applied with `psql`; the ledger is still out of sync.
+  shipped:
+  - S39
 - id: 78
   date: 2026-09-06
   title: One plant's people stay in that plant, available under their home by default, the rest one click away (S39)
