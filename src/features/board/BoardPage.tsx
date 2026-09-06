@@ -5,7 +5,7 @@ import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { productsOfferedAtNode } from "@/features/admin/lib/scope";
-import { useDateFormat } from "@/features/admin/hooks/useOrgSettings";
+import { DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useRootPath } from "./hooks/useRootPath";
@@ -115,25 +115,6 @@ export default function BoardPage() {
   // Do not query as nobody: until the session resolves, an RLS-scoped read can
   // only come back 401. One shared predicate, never re-derived inline (§19.8).
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
-  // R-309: the org-wide date format for the board's day labels. Same shared
-  // React Query cache as the Settings screen, so a change there re-renders the
-  // board without a board refetch. Gated on `canQuery` (D91).
-  /**
-   * ⚠️ THE BOARD SHOWS EXACTLY ONE PLANT, so it asks that plant for its format.
-   * It did not until F-090: the token was read company-wide, which was the only
-   * possible answer until settings became per-plant, and afterwards was simply
-   * the wrong one on every plant that had chosen otherwise.
-   *
-   * `rootPath` is a path and `useDateFormat` wants a node id, so the id comes
-   * off the root already loaded rather than from a second read. Null while the
-   * roots are still resolving, which falls back to the company answer — the
-   * board renders no dates before it knows where it is.
-   */
-  const rootNodeId = useMemo(
-    () => roots.find((r) => r.path === rootPath)?.id ?? null,
-    [roots, rootPath],
-  );
-  const dateFormat = useDateFormat(canQuery, rootNodeId);
   // ⚠️ AND NOT UNTIL WE KNOW WHERE. `rootPath` is null while the places read is
   // in flight and stays null for someone with no access to any of them; asking
   // `board_window` for `""` would be the old hardcoded constant with extra
@@ -157,6 +138,27 @@ export default function BoardPage() {
   // chip or a band still SEES it, with no editable control the server refuses.
   // No pop-up sprinkles its own check — they render the decision made here.
   const canPlace = boardQuery.data?.canPlace ?? false;
+
+  /**
+   * R-333 / migration 0062 (DEF-0017): the date format for the board's day
+   * labels, RESOLVED FOR THIS BOARD'S OWN ROOT ON THE SERVER.
+   *
+   * IT IS READ OFF THE PAYLOAD, not from `useDateFormat(canQuery, root)` any
+   * more. That hook answered the ROOT node's OWN `node_settings` row, else the
+   * company value -- and a board rooted at a LINE has no row of its own, while
+   * the plant's row above the grant is not readable by a supervisor
+   * (`node_settings_select`). So her board showed the company format on a plant
+   * that had chosen otherwise. `board_window` now carries the value
+   * `app_resolve_node_setting` walked to under SECURITY DEFINER, the same way it
+   * already carried `nodePolicies` (R-331), so the board reads one resolved
+   * answer instead of re-deriving a wrong one. The admin rail keeps its own
+   * `useDateFormat` for the Settings screen -- untouched.
+   *
+   * Falls back to `DEFAULT_DATE_FORMAT` only while the window is still loading
+   * (no payload yet); once it lands, the payload's token is always one of the
+   * eight (`board_window` COALESCEs the resolver's NULL at the call site).
+   */
+  const dateFormat = boardQuery.data?.dateFormat ?? DEFAULT_DATE_FORMAT;
 
   // P1-4c D45/T17: `density` is part of this dependency array, so a density
   // change produces a brand-new `index` (new `rows` array identity) exactly

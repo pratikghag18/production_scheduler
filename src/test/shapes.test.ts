@@ -181,6 +181,9 @@ const boardWindowJson: Json = {
     { node_id: "30000000-0000-0000-0000-000000000007", eligibility_policy: "block" },
     { node_id: "30000000-0000-0000-0000-000000000001", eligibility_policy: "warn" },
   ],
+  // R-333 / migration 0062 (DEF-0017): the date format RESOLVED for the board's
+  // own root, carried as a top-level token beside can_place.
+  date_format: "ymd_slash",
 };
 
 describe("parseBoardWindow", () => {
@@ -762,5 +765,36 @@ describe("parseBoardWindow: can_place (R-346, the viewer clause)", () => {
   it("refuses a payload without it, rather than guessing for an un-migrated database", () => {
     const { can_place: _dropped, ...without } = boardWindowJson as { can_place: boolean };
     expect(parseBoardWindow(without as Json)).toBeNull();
+  });
+});
+
+describe("parseBoardWindow: date_format (R-333 / migration 0062, DEF-0017)", () => {
+  it("keeps the resolved token off the payload", () => {
+    // The fixture carries ymd_slash -- the plant's own choice, resolved for the
+    // board's root on the server. The board reads THIS, not useDateFormat.
+    expect(parseBoardWindow(boardWindowJson)?.dateFormat).toBe("ymd_slash");
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), date_format: "iso" } as Json)?.dateFormat,
+    ).toBe("iso");
+  });
+
+  it("refuses a payload without it, rather than falling back to the company answer", () => {
+    // Strict like can_place: an absent key is an un-migrated board_window, and
+    // silently defaulting would put the board back on the company-wide format --
+    // the very DEF-0017 bug, made quiet (the silent-empty class).
+    const { date_format: _dropped, ...without } = boardWindowJson as { date_format: string };
+    expect(parseBoardWindow(without as Json)).toBeNull();
+  });
+
+  it("refuses a token outside the closed DateFormat enum", () => {
+    // A well-formed string that is not one of the eight tokens is a payload this
+    // client does not understand; it rejects rather than coercing.
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), date_format: "MM-DD-YYYY" } as Json),
+    ).toBeNull();
+    // A JSON null (what the resolver would return uncoalesced) is refused too.
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), date_format: null } as Json),
+    ).toBeNull();
   });
 });

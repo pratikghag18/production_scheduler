@@ -17,6 +17,7 @@
  * docs/api.md's worked examples — not guessed from the prose alone.
  */
 import type { Json } from "@/lib/database.types";
+import { DATE_FORMATS, type DateFormat } from "@/lib/format/dates";
 
 type JsonRecord = { [key: string]: Json | undefined };
 
@@ -764,6 +765,28 @@ function parseNodeShiftMapEntry(v: Json): NodeShiftMapEntry | null {
   return { nodeId: node_id, templateId: template_id };
 }
 
+/**
+ * R-333 / migration 0062 (DEF-0017): the calendar-date format RESOLVED for the
+ * board's own root -- `app_resolve_node_setting(root, 'date_format')`, walked on
+ * the server so a supervisor sees the plant's choice even though she cannot read
+ * the plant's own `node_settings` row. It is the date-format twin of
+ * `nodePolicies` above.
+ *
+ * STRICT, AND THAT IS THE POINT -- NOT `coerceDateFormat`. This narrows into
+ * the CLOSED `DateFormat` enum and rejects the row on anything else, exactly as
+ * `can_place` rejects a non-boolean. `board_window` COALESCEs the resolver's
+ * NULL to `'d_mon_yyyy'` at the call site, so a well-formed payload always
+ * carries one of the eight tokens; an ABSENT key is an un-migrated database and
+ * an UNKNOWN string is a payload this client does not understand -- both are the
+ * `silent-empty` trap `nodePolicies` warns of, where quietly defaulting would
+ * put the board back on the company-wide answer and look like it was working.
+ * `coerceDateFormat` (dates.ts) is right for the company bag, which may honestly
+ * never have had the key; it is the wrong tool at a boundary that must be loud.
+ */
+function parseDateFormat(v: Json | undefined): DateFormat | null {
+  return isStr(v) && (DATE_FORMATS as readonly string[]).includes(v) ? (v as DateFormat) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Top-level RPC results.
 // ---------------------------------------------------------------------------
@@ -795,6 +818,13 @@ export interface BoardWindow {
    *  without it is an un-migrated database, and the board says so rather than
    *  guessing. */
   canPlace: boolean;
+  /** R-333 / migration 0062 (DEF-0017): the calendar-date format resolved for
+   *  the board's own root, walked on the server through
+   *  `app_resolve_node_setting`. The board reads THIS, not `useDateFormat(...,
+   *  root)`, which could only see the root's own override and fell through to the
+   *  company value for a board rooted at a line. Strict: a payload without it, or
+   *  with a token outside the closed `DateFormat` enum, is a shape mismatch. */
+  dateFormat: DateFormat;
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -814,6 +844,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     cycle_times,
     node_policies,
     can_place,
+    date_format,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -842,6 +873,11 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   // look like it was working — the `silent-empty` defect class again.
   const parsedNodePolicies = parseArrayOf(node_policies, parseNodePolicy);
   if (typeof can_place !== "boolean") return null;
+  // R-333 / 0062: strict, the same reasoning as `can_place` above and
+  // `nodePolicies` behind it -- see `parseDateFormat`. A null here would blank
+  // the board rather than let it silently fall back to the company answer.
+  const parsedDateFormat = parseDateFormat(date_format);
+  if (parsedDateFormat === null) return null;
 
   if (
     parsedOrg === null ||
@@ -876,6 +912,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     cycleTimes: parsedCycleTimes,
     nodePolicies: parsedNodePolicies,
     canPlace: can_place,
+    dateFormat: parsedDateFormat,
   };
 }
 

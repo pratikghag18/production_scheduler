@@ -319,6 +319,9 @@ function makeFixture(): BoardWindow {
     nodeShiftMap,
     cycleTimes,
     nodePolicies,
+    // R-333 / 0062 (DEF-0017): the board's resolved date format. buildBoardIndex
+    // does not read it, but the fixture carries it so it is an honest payload.
+    dateFormat: "d_mon_yyyy",
   } as unknown as BoardWindow;
 }
 

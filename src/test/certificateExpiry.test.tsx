@@ -210,6 +210,9 @@ function payload(operators: Json[]): Json {
     cycle_times: [],
     can_place: true,
     node_policies: [],
+    // R-333 / 0062 (DEF-0017): strict on parse, so every board payload fixture
+    // carries it now.
+    date_format: "d_mon_yyyy",
   } as Json;
 }
 

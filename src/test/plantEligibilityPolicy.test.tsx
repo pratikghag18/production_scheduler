@@ -119,6 +119,9 @@ function rawPayload(): Json {
       { node_id: "n-open", eligibility_policy: "warn" },
       { node_id: "n-open-cell", eligibility_policy: "warn" },
     ],
+    // R-333 / 0062 (DEF-0017): strict on parse, so every board payload fixture
+    // carries it now.
+    date_format: "d_mon_yyyy",
   } as Json;
 }
 
@@ -245,5 +248,22 @@ describe("R-331: the eligibility rule follows the cell, not the company", () => 
     const raw = rawPayload() as unknown as Record<string, unknown>;
     delete raw.node_policies;
     expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+
+  it("DEF-0017: BoardPage reads the board's dateFormat off the payload, not from useDateFormat", () => {
+    // ⚠️ THE SAME DEVICE AS THE eligibilityPolicy CASE ABOVE, and for the same
+    // reason: no test renders the real BoardPage (viewerBoard.test.tsx records
+    // why -- a session, a router and a query client), so the join is asserted at
+    // the source. DEF-0017: the board took its date format from
+    // `useDateFormat(canQuery, root)`, which could only see the root's OWN
+    // node_settings row and fell through to the company value for a board rooted
+    // at a line. It now reads the value board_window resolved for the root.
+    const src = fs.readFileSync(`${process.cwd()}/src/features/board/BoardPage.tsx`, "utf8");
+    const withoutComments = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    // The date format comes off the payload...
+    expect(withoutComments).toMatch(/boardQuery\.data\?\.dateFormat\s*\?\?\s*DEFAULT_DATE_FORMAT/);
+    // ...and the board no longer calls useDateFormat at all (the admin rail's
+    // own use lives under src/features/admin/ and is untouched).
+    expect(withoutComments).not.toContain("useDateFormat(");
   });
 });
