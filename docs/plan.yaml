@@ -3200,8 +3200,21 @@ requirements:
     cases: >-
       the tab is REACHABLE by the person it was built for -- a site admin is offered Settings and not
       Activity, in one case, so re-coupling the two goes red
-  status: contradicted
+  - kind: sql
+    file: supabase/tests/85_board_date_format_test.sql
+    cases: >-
+      B0-B3 -- B1 as a supervisor granted the department below the plant root: her board carries the
+      plant's ymd_slash, the same answer app_resolve_node_setting reaches asked as her
+  - kind: vitest
+    file: src/test/shapes.test.ts
+    cases: parseBoardWindow keeps date_format and refuses an absent key, a null and an unknown token
+  status: covered
   note: >-
+    ⭐ VERIFIED BY THE TESTER 7 Sept at `19f0903`: Ana's board window carries `date_format: ymd_slash` and
+    her header reads `Mon 2026/08/31 – Wed 2026/09/02`, the same as Dana's, driven in the browser. 0062's
+    body is 0058's plus the one key; on a scratch database the key removed and the root's-own-row variant
+    each turn 85 red by case name. DEF-0017 is `verified`. The resolver the key leans on has no company
+    boundary of its own, filed as DEF-0018 against R-341.
     ⛔ CONTRADICTED 6 Sept by DEF-0017 (tester, minor): Plant A sets date_format = ymd_slash, Dana's board
     reads `Mon 2026/08/31`, and Ana's board of Line 1 inside the same plant reads `Mon Aug 31` --- the company
     value. The server says her line uses the plant's (`app_resolve_node_setting(line_1,'date_format')` =
@@ -3626,8 +3639,16 @@ requirements:
       true (so the case cannot pass by the helper saying false to everything); then a site admin's
       direct INSERT of admin on the foreign root and on the bogus uuid must come back with the SAME
       sqlstate and store nothing. Against 0054's helper it reads foreign_root=t, 42501 versus PT400.
-  status: covered
+  status: contradicted
   note: >-
+    ⛔ CONTRADICTED 7 Sept by DEF-0018 and DEF-0019 (tester, both minor, both cross-tenant).
+    `app_resolve_node_setting` (0050, SECURITY DEFINER, granted to authenticated) names the caller's company
+    nowhere: as Ana it answers the other company's `date_format` (iso) and `eligibility_policy` (block) by
+    uuid while `app_node_exists_in_org` says false for the same uuid; 0062 made it the board's authority for
+    the date format. And 0061's `resolve_shift_template` switches its boundary off when `app_current_org()`
+    is NULL, which is every authenticated session with no `user_profiles` row and not only the owner --- such
+    a session resolves both companies' templates while the two older helpers answer false. Two pins read the
+    last definitions.
     ⭐ VERIFIED BY THE TESTER 6 Sept at `5e5335c` (tree `f75a65e`): the reproduction re-run cold as Ana
     over PostgREST reads false for the other company's root, its leaf and a bogus uuid on BOTH helpers
     and true for her own company's four roots; the three direct INSERTs as Dana all come back PT400
@@ -4391,9 +4412,26 @@ requirements:
   claim: >-
     A shift template is a named daily pattern of shifts, each with breaks. It attaches to any node and
     inherits downward; the nearest ancestor with a template wins.
-  verified_by: []
-  status: contradicted
+  verified_by:
+  - kind: sql
+    file: supabase/tests/84_shift_pattern_resolves_upward_test.sql
+    cases: >-
+      ST0-ST7 -- ST1 and ST6 as a supervisor granted only her line resolve the plant's pattern past her
+      grant and carry it in board_window; ST3 nearest ancestor; ST4/ST5 the other company and a bogus uuid
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: Ana's create form offers exactly Dana's shift chips; Marco's exactly Quinn's
+  - kind: vitest
+    file: src/test/defects/DEF-0016.test.ts
+    cases: the last definition of resolve_shift_template is SECURITY DEFINER (the text half; retire or promote)
+  status: covered
   note: >-
+    ⭐ VERIFIED BY THE TESTER 7 Sept at `19f0903`: as Ana `resolve_shift_template(line_1)` is the plant's
+    template and her board window carries three mapped nodes and the template; in the browser her create
+    form offers the three chips and defaults to 06:00-14:00, the same as Dana's. On a scratch database the
+    resolver back to invoker, the walk stripped to self-only and the org term removed each turn 84 red by
+    case name. DEF-0016 is `verified`. One thing the fix carries is filed apart: 0061's owner exemption
+    (`app_current_org() IS NULL`) admits any signed-in session with no profile row (DEF-0019, R-341).
     ⛔ CONTRADICTED 6 Sept by DEF-0016 (tester, major): Plant A's template is attached at plant_a and Line 1
     inherits it for Dana --- break band, dashed boundary, three shift chips in the create form --- but for Ana,
     granted only Line 1, `resolve_shift_template(line_1)` answers NULL and `board_window` sends
