@@ -9823,6 +9823,130 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 84
+  date: 2026-09-07
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2272
+    app_test_files: 92
+    tsc: 0
+    eslint: 0
+    db_checks: 704
+    migrations: 62
+  confirmed: true
+  summary: >-
+    Six commits judged at `19f0903` (Development's tip; the code tip is `0f2383e`), three migrations,
+    three new SQL files, two edited ones, a pager under every catalogue read, a role walk in the
+    browser and a CI database. Both fix-claimed defects re-verified cold with my own reproductions
+    and set `verified`; eleven strips on scratch copies of 0060, 0061 and 0062; the trigger and
+    site_people driven live as four roles with rows read back; two defects filed from the
+    adversarial pass on the resolvers' company boundary.
+    ⭐ THE COUNT MATCHES, EXACTLY. The runner said *"Test Files 92 passed (92) / Tests 2272 passed
+    (2272)"*, which is what session 83 says. With this run's two new pins the line reads *"Test
+    Files 2 failed | 92 passed (94) / Tests 2 failed | 2274 passed (2276)"*, the two red being
+    DEF-0018 and DEF-0019, red on purpose. SQL suite summed from the report's 49 tally lines: 715
+    passed, 0 failed, 0 hard errors (session 83's 704 plus the demo's 11, counted apart as the
+    developer counts them). Playwright 18 of 20, below.
+    ⭐ THE TYPECHECK IS CONCLUSIVE. `db:types` regenerated against the live stack with 0060-0062
+    applied; the content diff against the committed file is zero lines (`--ignore-space-at-eol`),
+    the runner's "stale" is the CRLF rewrite, restored with `git checkout`. The five committed type
+    lines are `site_people` gaining `p_search?` and `p_limit?`, and that is all three migrations
+    change in the types: 0061 keeps its signature and 0062's board_window still returns Json. `tsc`
+    0, `eslint` 0; `format:check` fails on the CRLF checkout for session 80's reason.
+    ⭐ DEF-0016 VERIFIED at `eff6fff`. As Ana `resolve_shift_template(line_1)` is the plant's
+    template and her board window carries `nodes array(3) node_shift_map array(3) shift_templates
+    array(1)`; in my own Playwright pass at week 2026-08-31 her create form reads the three chips
+    and *"Mon 2026/08/31 06:00 – 14:00"*, the same as Dana's, two break bands on both. 0061 is the
+    last definition and its body is 0005's with the two edits the header names. Scratch strips:
+    invoker again, 84 reads *"FAIL ST1: line=null cell1=null cell2=null"* and ST6; the walk cut to
+    self-only, ST1, ST2, ST3 and ST6; the org term removed, *"FAIL ST4: Sup crossed the tenant
+    boundary"*. The upward walk discloses, within her own company, the template id of a node she
+    cannot read (`plant_b` by literal uuid answers `9e2162f4-...` while she reads zero of its
+    template rows) --- one uuid about a uuid she would have to guess, the shape 0050 gave the
+    settings resolver on purpose; noted, not filed, the maintainer's call.
+    ⭐ DEF-0017 VERIFIED at `eff6fff`. Her board window carries `"date_format": "ymd_slash"` and
+    both headers read *"Mon 2026/08/31 – Wed 2026/09/02"*. 0062's extracted body diffed against
+    0058's is the one key and its comment, nothing else moved; the client parses it strictly and
+    BoardPage no longer calls `useDateFormat` (the admin panels still do, with a plant id, which is
+    the case the hook was right for). Strips: 0058's body back, *"FAIL B1: payload_date_format=<NULL>"*,
+    B2, B3; the root's own row instead of the resolver, *"FAIL B1: payload_date_format=d_mon_yyyy
+    (want ymd_slash)"* and B2. Neither pin was promoted; both notes say they can be retired.
+    ⭐ 0060, BLOCK BY BLOCK. §1 a BEFORE DELETE OR UPDATE OF role, node_id, profile_id trigger,
+    SECURITY INVOKER with 0017's owner check, refusing a non-company-admin's edit of a company
+    admin's row and a re-point onto one; §2 site_people(uuid) dropped and re-created as
+    site_people(uuid, text, integer) with an email ILIKE filter, a LIMIT and a `total` counted
+    before it, grants re-stated; §3 no DDL, the department-admin note recorded as moot after
+    R-340. No policy, no NOT NULL, no new definer: pg_policies on profile_grants reads as before.
+    Live as Dana with a fixture grant for the company admin on plant_a: DELETE, role to viewer
+    and profile_id to Ana each *"not_permitted / company_admin"* with the row read back, node_id
+    to line_1 refused by 0054's admin-at-root trigger first, the RPC refused the same way; the
+    company admin peer demotes it, *"UPDATE 1"*; Ana, Viva and the other tenant's admin reach no
+    row; site_people(plant_a, null, 2) is *"total 10 returned 2"*, a search for ana finds two, for
+    contoso finds zero, Ana and Viva get *"you do not administer this place"*, the other tenant *"no
+    such node"*. Strips: trigger dropped, 83 X51, X60, X61, X64 and 49's X46 red; delete-only, X60,
+    X61, X64; the new-row guard removed, X64; LIMIT removed, *"FAIL X56: returned=5 arr=5 total=5"*;
+    filter removed, X57; total counted after the limit, X56. Every function 0060 emits is the
+    last definition. Test 49's edit flips X46 from asserting the gap to asserting the close, which
+    the old case asked for by name; X42 still passes (*"PASS X42"*). Test 60's edit admits the one
+    string key. What turned up nothing: a PostgREST session cannot be a member of the table owner,
+    so the owner check does not open; org_id cannot be moved because the UPDATE policy's WITH
+    CHECK pins it; INSERT of a grant onto a company admin is unwatched and additive, as documented.
+    ⛔ DEF-0018 FILED (minor, cross-tenant, R-341). `app_resolve_node_setting` (0050) names the
+    caller's company nowhere: as Ana the other company's root answers `date_format = iso` and
+    `eligibility_policy = block` by uuid, its leaf inherits the block, and `app_node_exists_in_org`
+    says false for the same uuid. Older than this diff; 0061's header names it and leaves it, and
+    0062 makes it every board's authority. Pinned on the migration text.
+    ⛔ DEF-0019 FILED (minor, cross-tenant, R-341). 0061's `app_current_org() IS NULL OR ...`
+    exempts more than the owner: an authenticated session with no user_profiles row (a sign-up,
+    which config.toml permits) resolves *"7000000b-..."* for Contoso's root and *"ac127431-..."*
+    for Plant A while `app_node_exists_in_org` and `app_node_is_plant_root` answer false. The
+    subselect trap is worth writing down: a subselect on `nodes` under the session is RLS-filtered
+    and hands the resolver NULL, which reads as the boundary holding; only a literal uuid measures
+    it. 84's ST4 runs its owner case as the superuser and never as such a session.
+    ⭐ PAGING. `paging.ts` pages by `.range(from, to)` in steps of 1000, ends only on a short page,
+    throws past 50 pages or on any page error, and depends on each call site's order ending in the
+    primary key. Eighteen list reads across five files are routed; the two exemptions (audit's
+    keyset pager, the org's single row) are argued; `useSession`'s profile read is a single row
+    outside the folder. The loop cut to one page turns four `paging.test.ts` cases red by name and
+    nothing else moves --- every screen fixture is under a thousand rows, so no screen test can tell
+    a pager from a bare read; an un-routed products read turns two `apiReadPaging.test.ts` cases
+    red. Before this, every catalogue screen stopped at a thousand rows silently, and no database
+    this project has run was large enough to show it (nodes 53, assignments 59 on the live demo);
+    F-106 records it. R-253 still reads `uncovered` with `verified_by: []`; the developer should
+    name the two files.
+    ⭐ THE ROLE WALK asserts three real things and one tautology. Real: no role=alert and no
+    "Something went wrong" for nine people; the operator panel present exactly when the person can
+    place; and the cross-person facts --- Ana's chips equal Dana's, Marco's equal Quinn's, Ana's
+    header shape equals Dana's, and Viva has no panel. The tautology is `viva.canPlace` being
+    false, which is the PEOPLE constant asserting itself. The rail walk asserts only that each
+    offered tab opens with no alert; that a refused tab is ABSENT is signedIn.spec's job, not this
+    file's. It cannot see a stale permission (nothing here attempts a write the server would
+    refuse); DEF-0015's e2e does that.
+    ⚠️ PLAYWRIGHT 18 OF 20, AND THE TWO ARE THE CALENDAR. Both viewerBoard cases wait for an
+    *"Operator A1 on ..."* chip at `mondayOfThisWeek()`; the runner started at 03:13 UTC on Monday
+    7 Sept, so that is 2026-09-07, and the live demo world was seeded when `date_trunc('week',
+    now())` was 31 Aug (dev_demo.sql line 419 anchors on seed time). Viva at 31 Aug in my own pass:
+    four chips, no panel, Enter opens nothing. A fresh CI stack reseeds and does not drift; a
+    developer's live stack fails these two every UTC-Monday after the seed until a db:reset.
+    ⚠️ CI now runs against a seeded database (ci-e2e.sh: supabase start, db reset with migrations,
+    seed.sql and dev_demo.sql, credentials exported over the job's dummies) and every browser case,
+    with plan check, typecheck, lint, format:check, test and build before it. It does NOT run the
+    SQL suite: the 715 database checks run only on this machine. The plan page's defects index
+    lists all 19 with the right statuses, open first; a verified one is folded.
+    ⚠️ THE TWO NEW CLAUDE.md RULES against my last five runs: rule 2 (walk the screens as the
+    least-privileged person) would have caught DEF-0015, DEF-0016 and DEF-0017; rule 1's last
+    clause ("the definer guards the org boundary itself") is DEF-0013's lesson, and 0061 got it half
+    right in the same session the rule was written --- the rule is right and not yet followed.
+    DEF-0011/12 (retyped from the wrong migration) and DEF-0014 (a duplicated write path) sit under
+    older rules. The lesson still missing from the list is the one under DEF-0013 and DEF-0019
+    alike: a case run as the superuser cannot see a tenant boundary.
+    ⚠️ SWEEPS. Sweep 1 none since the tip. Sweep 2's `audit_log.at` is the same false positive
+    (audit.ts orders by id and says why at line 44). Sweep 3's hits inside this diff (shapes.ts
+    782, 872) are comments about the client default and are true. Also: the live migration ledger
+    still tops out at 0038 with 0060-0062 applied by psql; copyWeek's e2e rows at 2028 unchanged;
+    `package.json` gained only a script, so the lockfile rightly did not move.
+  shipped: []
 - id: 83
   date: 2026-09-06
   title: Two defects from a line supervisor's board, the role walk, a defects index, and wave one (S34, the queue)
