@@ -7224,6 +7224,45 @@ requirements:
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
 findings:
+- id: F-106
+  title: Every catalogue screen stopped at a thousand rows and said nothing, for the whole life of the product until wave one
+  tag: The ceiling nobody hit
+  status: fixed
+  found_by: tester
+  refs:
+  - R-253
+  - S34
+  story: >-
+    Recorded by the tester in session 84 because the plan carried the rule (R-253, "reads page to
+    exhaustion", uncovered since 5 Sept) and the fix (0f2383e, "every list read pages to the end") but no
+    card saying what had been wrong. `supabase/config.toml` sets `max_rows = 1000`, so before
+    `src/lib/api/paging.ts` every `.from(...).select(...)` in the API layer returned at most the first
+    thousand rows and reported nothing --- eighteen list reads across five files: the hierarchy tree's
+    templates, levels and nodes; the Operators screen's people, trainings, training records, cell
+    requirements, nodes and levels; the Products catalogue; the cycle-time grid; the Shifts panel's
+    templates, shifts, breaks, attachments and nodes; and the Settings tab's plant list and overrides. None
+    of them was ordered on a unique key, so even a paged read would have been able to skip or repeat a row
+    across a page boundary. The board was never in this class: `board_window` is one RPC returning one
+    jsonb, and the audit log had its own keyset pager since 0038.
+    ⭐ COULD A SCREEN HAVE SHOWN FEWER ROWS THAN THE SERVER HELD? Not on any database this project has run:
+    the live demo world's largest table in that list is `nodes` at 53 rows, and every SQL fixture is
+    smaller. It is a finding about a rule, not about a screen anyone saw wrong --- which is exactly why
+    nothing went red. `fetchAll` pages by `.range(from, to)` in steps of 1000, stops only on a SHORT page
+    (a full page is never trusted as the end, so exactly 1000 rows costs one extra request that returns
+    zero), throws a typed SchedulerError on any page error or past 50 pages rather than returning what it
+    has, and relies on each call site's `.order(...)` ending in the primary key for stability, which
+    `apiReadPaging.test.ts` checks for presence and order but cannot check for uniqueness. Offset paging
+    still has the ordinary hole: a row inserted below the cursor between two requests shifts the list by
+    one, and the next page repeats a row; a deletion makes it skip one. A catalogue read is a single
+    render, so that costs one duplicate or one gap until the next refetch, and the screens dedupe by id.
+    An RLS-filtered read cannot end the loop early by mistake: a policy filters before the range is
+    applied, so "you cannot see these" and "there are no more" both arrive as a short page of what you CAN
+    see, which is the right answer.
+    ⚠️ WHAT THE SUITE CAN AND CANNOT SEE. The loop cut to one page turns four `paging.test.ts` cases red by
+    name and moves nothing else --- every screen fixture is under a thousand rows, so no screen test can
+    tell a pager from a bare read, and the audit in `apiReadPaging.test.ts` is what catches a new read
+    that skips the pager (an un-routed products read turns two of its cases red). R-253 should now name
+    those two files and leave `uncovered`; the tester does not set `covered` on the developer's tests.
 - id: F-099
   title: An inner join under row-level security is a silent filter
   tag: What a join hides
