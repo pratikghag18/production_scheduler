@@ -7582,7 +7582,7 @@ requirements:
   - kind: sql
     file: supabase/tests/86_invite_test.sql
     cases: G4 the site_people refusal guards still fire (non-admin not_permitted, bad node invalid_argument)
-  status: covered
+  status: contradicted
 - id: R-352
   title: An invited person sets a password from the link and shows as invited until first sign-in
   source:
