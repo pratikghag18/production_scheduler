@@ -10467,6 +10467,134 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 87
+  date: 2026-09-07
+  title: Tester run
+  commits:
+  - 49f28e5
+  - 7700129
+  - 9025613
+  - 3c8cdaf
+  - 35d5157
+  numbers:
+    app_tests: 2454
+    app_test_files: 109
+    tsc: 0
+    eslint: 0
+    db_checks: 758
+    migrations: 66
+  confirmed: true
+  summary: >-
+    The largest batch judged yet: wave two (647495f, password reset/change, one SessionProvider at
+    the root, the touch pass) and wave three (935ba6b, invitations, plant-local time, week
+    templates, absence, the queue's kind field), four new migrations, four new SQL suites, a new
+    Edge Function. Started dirty by branch divergence, not tree: tester and Development had each
+    added sessions since the last merge, so the run opened with a real merge (49f28e5) rather than
+    a fast-forward -- two verified_by lists reworded back to mine (the actual test case names), an
+    F-106 id collision (mine renumbered F-112), and a session-84 id collision (mine renumbered 86,
+    placed by actual chronology). No open or fix-claimed defects carried in from the maintainer's
+    briefing turned out to be true: DEF-0018 and DEF-0019 were still open from my own last run,
+    untouched by either wave, and stayed open.
+    ⭐ THE COUNT. `Test Files 4 failed | 105 passed (109)` / `Tests 5 failed | 2449 passed (2454)`,
+    exactly session 85's 2446/105 plus my four pin files (DEF-0018/19 carried, DEF-0020/21 new),
+    all four red by name and nothing else. SQL suite summed from the report's 54 tally lines: 758
+    passed, 0 failed, 0 hard errors. Playwright 41 of 43, chromium and touch; the two failures are
+    viewerBoard.spec.ts's calendar-anchor case, the same UTC-Monday demo-seed drift session 84
+    already recorded (today is Monday 2026-09-07 and the live stack has not been reseeded), not a
+    new defect. `tsc` 0, `eslint` 0; `db:types` regenerated content-identical to committed
+    (CRLF-only diff, the recurring false "stale" the runner cannot tell apart from a real one).
+    ⭐ STAGE 1, passwords. Read passwordFlow.ts, SessionProvider/session.ts, RequireAuth,
+    ResetPasswordPage/ChangePasswordPage/ForgotPasswordPage against CLAUDE.md's new rule: the
+    `recovery` flag comes from the PASSWORD_RECOVERY/USER_UPDATED/SIGNED_OUT event stream, seeded
+    once from the landing hash and sessionStorage for the two documented races, never from the path
+    landed on. Live against GoTrue: requested a real reset link for Ana, consumed it once, replayed
+    the same token -- refused server-side (otp_expired) and the app reads that into the terminal
+    "failed" screen, never a blank form. The 000065 gap in the migration numbering is recorded and
+    deliberate (0067's own header: lane D's 0066 re-emits copy_week_plan, so a template branch
+    numbered 0065 would be clobbered by the later re-emit on every fresh build). Nothing filed.
+    ⭐ STAGE 2, SessionProvider. Exactly one mount (App.tsx), useSession() only reads context, the
+    module-scoped lastUserId documented and intentional. Mutated nextRecoveryFlag and
+    initialRecoveryFlag on scratch copies: P1/S9 and P5/S10 go red by name. session.test.ts's 61
+    added lines and sessionProvider.test.tsx's 339 are pure additions, nothing reworded. Rail and
+    board unchanged per stage 1's e2e run (41 of 43). Nothing filed.
+    ⭐ STAGE 3, touch. geometry.ts and useDragGesture.ts moved to a DayAxis; mutated wallToOffset
+    back to day*1440+m and geometryDst.test.ts's spring/fall cases go red by name with real numbers
+    (420 vs 480, 540 vs 480). useDragGesture.ts carries no touch-specific branch at all -- one
+    PointerEvent path for mouse, pen and touch, so there is no second copy of the canPlace gate to
+    drift; T5 in the live touch project measures pixels and passed. Nothing filed.
+    ⛔ STAGE 4, the invite function, DEF-0020. Read the whole of supabase/functions/invite/index.ts:
+    verify_jwt, identity from the caller's own bearer token, the cheap admin-anywhere check first,
+    orgId from the caller's own profile, the one privileged write run AS THE CALLER through
+    set_site_member so the database keeps the final say -- and it does, live: an admin invited as
+    admin below a plant root she doesn't administer, at a node in another company, both refused
+    correctly with no orphan. But findAuthUser pages GoTrue's own admin.auth.admin.listUsers, which
+    does not see a row whose instance_id isn't the local instance's -- every auth.users row this
+    project creates by raw SQL fixture unless a migration upgrades it, which is exactly both of org
+    2's people. Inviting sofia@contoso.example from Dana does not answer the intended other_org
+    refusal; it falls through to the brand-new branch and GoTrue's own uniqueness constraint answers
+    a raw, distinguishable error -- a live side channel for "does this email exist anywhere in this
+    Supabase project" against R-351's own words. No orphan (GoTrue's insert fails before this
+    function writes anything), so severity is minor: no path this app's own code takes creates that
+    shape of row, so it is not reachable against a real tenant today. Filed DEF-0020, pinned live
+    against the served function. R-351 set to contradicted.
+    ⭐ STAGE 5, plant-local time. Read 0063 in full: every writer (set_node_setting,
+    clear_node_setting, set_org_timezone) checks app_node_exists_in_org before anything privileged,
+    so a foreign node and a bogus uuid refuse identically -- the standard holds. board_window's new
+    timezone key is resolved through app_resolve_node_setting but only ever handed a node id already
+    confirmed in the caller's own org via scoped_nodes, the same indirection 0062 used for
+    date_format. The one function without its own boundary is app_resolve_node_setting itself --
+    DEF-0018, pre-existing; confirmed live it now also leaks a timezone override the same way,
+    recorded as an update on DEF-0018.md rather than a new filing. DST: only the client computes
+    wall-clock geometry, through one shared Intl primitive, so there is no second implementation to
+    drift from the first; geometryDst.test.ts's five cases hold. One adversarial pass: stripped the
+    org filter from board_window's scoped_nodes CTE and ran the whole cross-org/board SQL suite --
+    nothing went red, because board_window is SECURITY INVOKER and nodes_select's own RLS policy
+    already ANDs org_id = app_current_org() ahead of the grant check, so the explicit filter is
+    defense in depth over a boundary that already holds. Restored; turned up nothing, and said why.
+    ⛔ STAGE 6, week templates, DEF-0021. Read 0067 in full, section by section: the tables, the two
+    definer resolvers (app_can_place_in_plant, app_plant_root_of, both org-bounded), save/list/
+    rename/delete, and copy_week_plan/apply_copy_week's template branch. A template is bound to the
+    specific plant row it was saved from and cannot be applied to a different plant at all -- the
+    (org_id, plant_id) composite FK makes a cross-org plant_id match structurally impossible, closing
+    the cross-shape question by construction. But rename_week_template and delete_week_template are
+    SECURITY DEFINER with NO org filter on their existence lookup, unlike list_week_templates two
+    functions above them in the same file: a bogus template id answers no_such_template, a real id
+    belonging to another company answers not_permitted/not_admin instead -- two different answers,
+    live-verified by fabricating an org-2 row and calling both as Dana, row confirmed to survive
+    either call. Filed DEF-0021, pinned on the migration text (both lookups lack the org term, red
+    today; a third case proves the reader is not blind to the pattern on list_week_templates). R-356
+    set to contradicted.
+    ⭐ STAGE 7, absence. Read 0066 in full: the table (GiST exclusion, D3 FK), absence_overlap
+    (definer, org-scoped, day-touching arithmetic matching the client mirror by name on both
+    boundary cases), and the three writers, each gated on app_can_edit_node and reading its row
+    back. import_absences re-validates existence, org and per-row permission for every row --
+    holds to the same standard the operator and certification imports already set. Stripped
+    absence_overlap's result to a constant in each of the four schedulers the migration names
+    (create_assignment, move_run, reassign_assignment, copy_week_plan), one at a time, rebuilding
+    the scratch database each time: every one turns a named case in test 88 red; none silently
+    passed. One writer the migration does NOT touch, and deliberately so: updateRunFields/
+    updateAssignmentFields (docs/api.md §4) are plain PostgREST PATCHes for a resize or an in-place
+    time move, guarded only by the capacity trigger -- eligibility was never re-checked there
+    either, by the same long-standing documented design, predating absence. Not filed: R-357's own
+    claim names exactly the four functions above and no more, and widening this is a product
+    decision, not a broken promise. Recorded plainly for the maintainer's call.
+    ⭐ STAGE 8. Every next[] entry carries kind (task/parked/note), the validator confirms it and
+    both new kinds render in their own sections on the page. All eleven edited test files
+    (boardGeometry, settingsPanel, adminNoGrants, apiPlantSettingsShape, apiReadPaging, auditPanel,
+    boardIndex, dateSeam, dragGesture, scaleAudit.ts/.test.ts, shapes) are additive widenings that
+    match the new keys and panels one for one -- REM_SURFACES gained both new stylesheets in both
+    copies, the two-place edit CLAUDE.md asks for. Read both review briefs against the four fixed
+    findings (F-108-111): every item the reviewer's own brief told it to try (cross-plant apply,
+    cross-plant delete, an email already in the demo org) was fixed and re-verified; neither brief's
+    checklist named a cross-COMPANY rename/delete or a cross-COMPANY invite probe, which is exactly
+    where DEF-0020 and DEF-0021 live -- a real gap in what the review round was asked to try, not
+    something caught and dismissed. meta.tip 935ba6b (the developer's own tip, unchanged by a
+    tester run); migrations 66, matching the file count. Requirement statuses: R-341, R-351, R-356
+    set to contradicted against the three open defects; nothing else these two waves touched needed
+    a status change. One "Wave three's loose ends" queue item still describes two things (the fetch
+    window, the drag toast) that F-111 already fixed the same session that named them -- a stale
+    queue entry, noted here rather than edited, since next[] is the developer's own list.
+  shipped: []
 - id: 85
   date: 2026-09-07
   title: 'Wave three, five lanes and a reviewer: invitations, plant-local time, week templates, absence, and the page counts what is open'
