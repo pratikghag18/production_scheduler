@@ -113,8 +113,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">747</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">66</span><span class="l">database changes (migrations)</span></div>
-  <a class="stat act" href="#defects"><span class="n">3</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">181 / 300</span><span class="l">requirements covered by a test · 2 contradicted</span></div>
+  <a class="stat act" href="#defects"><span class="n">4</span><span class="l">open defects — index</span></a>
+  <div class="stat act"><span class="n">180 / 300</span><span class="l">requirements covered by a test · 3 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>935ba6b</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -626,7 +626,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <hr class="rule">
 <section id="defects">
   <span class="eyebrow">Defects</span>
-  <h2>3 open defects</h2>
+  <h2>4 open defects</h2>
   <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
   <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="open">
     <td><a href="#DEF-0018"><code>DEF-0018</code></a></td>
@@ -651,6 +651,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
     <td>Inviting an email that belongs to another org, but whose auth row GoTrue's admin API cannot list, answers a raw database error instead of the silent other_org refusal -- a live cross-tenant email side channel</td>
     <td><a href="#R-351">R-351</a></td>
     <td class="fine">2026-09-07 · <a href="defects/DEF-0020.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0021"><code>DEF-0021</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>minor</td>
+    <td>Renaming or deleting a week template by id answers not_permitted for a real id in another company and no_such_template for a bogus one -- the two are distinguishable, a cross-tenant existence leak</td>
+    <td><a href="#R-356">R-356</a></td>
+    <td class="fine">2026-09-07 · <a href="defects/DEF-0021.md">file</a></td>
   </tr>
 <tr class="closed">
     <td><a href="#DEF-0001"><code>DEF-0001</code></a></td>
@@ -1664,6 +1672,27 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <p>A suspicion, not a fact. <code>findAuthUser</code> (<code>supabase/functions/invite/index.ts</code>) locates an existing account by paging <code>admin.auth.admin.listUsers</code> and matching on email client-side. GoTrue's <code>listUsers</code> appears to filter (or simply never index) rows whose <code>instance_id</code> is not the local instance's zero-uuid, which is exactly the shape every row this project creates by raw SQL fixture (rather than through <code>signUp</code>/<code>inviteUserByEmail</code>) has, unless a migration explicitly upgrades it the way <code>dev_demo.sql</code> §7 does for nine named accounts. <code>findAuthUser</code> returning <code>null</code> for an address that in fact exists is indistinguishable, inside the function, from the address being genuinely free, so the brand-new branch runs and <code>admin.auth.admin.inviteUserByEmail</code> is the first thing to notice, via Postgres's own uniqueness constraint on <code>auth.users.email</code>, surfacing as an opaque <code>invErr.message</code> the function currently passes straight through as <code>invalidArgument(&quot;email&quot;, invErr?.message)</code>.</p>
 <p>Two ways to close it, for the developer to weigh: (1) <code>findAuthUser</code> reads <code>auth.users</code> directly with the service-role client (<code>admin.from(&quot;auth.users&quot;)...</code> is not exposed via PostgREST, but a <code>SECURITY DEFINER</code> RPC scoped to exactly &quot;does an auth user exist for this email&quot; would see every row regardless of <code>instance_id</code>); or (2) treat <code>invErr</code> from <code>inviteUserByEmail</code> whose message matches a duplicate/uniqueness shape as the SAME branch as &quot;known auth user, no profile&quot;, not as <code>invalid_argument</code> -- re-deriving <code>existing</code> from the failure rather than trusting <code>findAuthUser</code>'s emptiness. Either way, the <code>other_org</code> promise should not depend on every row in <code>auth.users</code> having been created through GoTrue's own write path. Practical severity is minor: no path this app's own product code takes creates an <code>auth.users</code> row with a NULL <code>instance_id</code> (only <code>seed.sql</code>'s fixture block does, for org 2's two people, deliberately never credentialed since nobody is meant to sign in as them), so this does not appear reachable against a real tenant's own data today -- filed because the invariant itself measurably breaks, and because a future bulk-import or migration that touches <code>auth.users</code> directly would walk into it silently.</p>
 </div>
+<div class="find" id="DEF-0021">
+  <span class="tag">DEF-0021 · minor · cross-tenant · open</span>
+  <h3>Renaming or deleting a week template by id answers not_permitted for a real id in another company and no_such_template for a bogus one -- the two are distinguishable, a cross-tenant existence leak</h3>
+  <p class="fine">Violates <a href="#R-356">R-356</a> · filed 2026-09-07 by tester · pinned by <code>src/test/defects/DEF-0021.test.ts</code> · <a href="defects/DEF-0021.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>At the committed tip <code>3c8cdaf</code>, on the local stack (or the scratch SQL database <code>run-sql-test.sh</code> builds). <code>rename_week_template</code> and <code>delete_week_template</code> (migration 0067) are <code>SECURITY DEFINER</code>; their first statement, <code>SELECT plant_id, org_id FROM week_templates WHERE id = p_template_id</code>, bypasses <code>week_templates_select</code>'s RLS and can find a row in ANY org. Fabricate one for org 2 (Contoso), then call both functions as Dana (org 1's Plant A site admin) with a bogus id and with the real other-org id:</p>
+<p>``` docker exec -i supabase_db_production_scheduler psql -U postgres -d postgres &lt;&lt;'SQL' BEGIN; insert into week_templates (id, org_id, plant_id, name, saved_from, created_by) values ('99999999-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002',         '3000000b-0000-0000-0000-000000000001', 'Contoso Template', '2026-09-07', null);</p>
+<p>select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000dec1', true); SET LOCAL ROLE authenticated;</p>
+<p>DO $$ BEGIN   PERFORM rename_week_template('88888888-0000-0000-0000-000000000000','x'); EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'bogus id -&gt; %', SQLERRM; END $$;</p>
+<p>DO $$ BEGIN   PERFORM rename_week_template('99999999-0000-0000-0000-000000000001','x'); EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'org-2 id -&gt; %', SQLERRM; END $$;</p>
+<p>ROLLBACK; SQL ```</p>
+<p>The pin, which runs on every <code>npm run test</code>:</p>
+<p>``<code> npx vitest run src/test/defects/DEF-0021.test.ts </code>``</p>
+<p><b>Expected</b></p>
+<p>R-356 (<code>stated_by: maintainer</code>): <em>&quot;A template is listed, renamed and deleted by the plant's admins.&quot;</em> An admin who is not that plant's admin should be refused the same way whether the template id is real (in a plant or company she does not administer) or entirely made up -- the same standard DEF-0016/17/18/19 name for every server-side resolver: a foreign row and a bogus id give the same answer. <code>list_week_templates</code> already gets this right (its own query carries <code>wt.org_id = app_current_org()</code>); rename and delete should match it.</p>
+<p><b>Actual</b></p>
+<p>``<code> NOTICE:  bogus id -&gt; no such template NOTICE:  org-2 id -&gt; only this plant's admins may rename a template </code>``</p>
+<p>The two refusals are different sentences with different <code>reason</code> codes (<code>invalid_argument/no_such_template</code> versus <code>not_permitted/not_admin</code>), so a caller who holds or guesses a template id can learn &quot;this id belongs to a real template, outside my company&quot; from the shape of the refusal alone. Repeated for <code>delete_week_template</code> with the same result; the row survives either way (confirmed by count after the call, inside the same transaction, before rollback) -- this is a pure information leak, not a write hole.</p>
+<p><b>Lead</b></p>
+<p>A suspicion, not a fact. Both functions' existence check is <code>SELECT plant_id [, org_id] FROM week_templates WHERE id = p_template_id</code> with no <code>org_id = app_current_org()</code> term, unlike <code>list_week_templates</code>'s own query two functions above them in the same file. Adding that term to the lookup (so a row in another org is invisible to it, the same as a row that does not exist) would make both branches converge on <code>invalid_argument / no_such_template</code> for a foreign id, matching the bogus-id answer. The org-scoped column is already selected in <code>rename_week_template</code> (<code>v_org</code> is read and used for the duplicate-name check further down), so the fix may be as small as adding the term to the initial <code>WHERE</code> clause and re-checking that <code>v_plant IS NULL</code> after it.</p>
+</div>
 </section>
 
 <hr class="rule">
@@ -2472,7 +2501,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>300 requirements · 181 covered · 103 uncovered · 2 contradicted · 14 superseded</caption>
+<caption>300 requirements · 180 covered · 103 uncovered · 3 contradicted · 14 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -4524,12 +4553,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">e2e · <code>e2e/touch.spec.ts</code> T1 create on empty track, not scroll; T2 a block move is a drag, not a scroll, scrollLeft unchanged; T3 the roster-chip drag onto a track; T4 the pop-up's title-bar drag and a tap through to a button inside; T5 a viewer's finger is refused on a block and on empty track and scrolls nothing; T6 the tree row body does not reorder on touch; T7 the tree grip drags on touch; T8 the level-list grip drags on touch</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-covered" id="R-356">
+<tr class="r-contradicted" id="R-356">
   <td class="g-n">R-356</td>
   <td class="reqmain"><b>A named template is a whole week, jobs and people, saved relative to Monday and applied through Copy Week</b><br><span class="fine">The maintainer, 7 Sept, from three options put side by side (a whole week with its people; jobs only; a daily pattern per line): a template is a NAMED COPY OF ONE WEEK'S RUNS WITH THEIR ASSIGNMENTS, stored relative to that week's Monday, belonging to the plant it was saved from. Saving one is &quot;Save this week as a template&quot; from the board; applying one is Copy Week with the template as the source instead of another week, so every clash rule, the preview, and the choose-per-clash flow apply unchanged, and nothing is written that Copy Week would not write. A template is listed, renamed and deleted by the plant's admins; a supervisor can apply one to a week they can place on and cannot delete one. ⭐ LANDED IN SESSION 85 as migration 0067 (not 0065: lane D's 0066 re-emits copy_week_plan, and a template-aware re-emission must run after it, built from the live definition). &quot;Copy week&quot; gains a source picker, another week or a template; &quot;Save this week as a template&quot; and &quot;Apply a template&quot; sit beside it, offered to anyone who can place in the plant, while Copy Week from a week stays admin-only as S35 decided. The board opens a supervisor at the top of HER forest, a line below the plant, so the template paths resolve the plant upward as a definer (<code>app_plant_root_of</code>), the F-110 lesson.</span>
       <br><span class="fine">session 85 conversation, queue item &quot;Named templates (relative-time placements)&quot; · maintainer</span></td>
   <td class="fine">sql · <code>supabase/tests/89_week_templates_test.sql</code> TP0-TP6 with TP-EQ, TP-ON and TP-APPLY: save then list; a duplicate name refused case-insensitively; a supervisor who can place may save from and apply to a week and may not delete (TP3), and one whose board root is a line below the plant resolves to the plant, saves only the rows she can read, and applies (TP6); a viewer refused at save, apply, rename and delete (TP4); a plan from a template equals a plan from the week it was saved from, item for item, on the same target (TP-EQ); an overnight item crosses the day boundary with end_min past 1440 (TP-ON); apply-from-template writes exactly what Copy Week writes, rows compared in relative time (TP-APPLY); execute granted to authenticated and revoked from anon and public on the writers (TP5)<br>vitest · <code>src/test/weekTemplates.test.ts</code> save, list, rename and delete parse from one column constant and surface a refusal; the template source is threaded through copy_week_plan and apply_copy_week with a null source; the counts sentence names the template as the source<br>vitest · <code>src/test/copyWeekDialogTemplate.test.tsx</code> the source picker, another week or a template, and the same preview path with a template id; a supervisor gets only the template source; Copy week is admin-only while Apply a template and Save are offered to a placing supervisor and to no viewer<br>e2e · <code>e2e/weekTemplates.spec.ts</code> an admin saves this week and applies it through Copy Week onto a scratch week, then deletes it in the admin Templates tab; a supervisor is offered Save and Apply a template, template source only, and never Copy week; a viewer is offered none</td>
-  <td class="chipcol"><span class="chip done">covered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-covered" id="R-357">
   <td class="g-n">R-357</td>

@@ -7470,7 +7470,7 @@ requirements:
       an admin saves this week and applies it through Copy Week onto a scratch week, then deletes
       it in the admin Templates tab; a supervisor is offered Save and Apply a template, template
       source only, and never Copy week; a viewer is offered none
-  status: covered
+  status: contradicted
 - id: R-357
   title: An absence is recorded in the app or imported by file, and the board and Copy Week treat it as a clash
   source:
