@@ -3,11 +3,11 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-06'
-  tip: 0f2383e
+  updated: '2026-09-07'
+  tip: 647495f
   baseline:
-    app_tests: 2272
-    app_test_files: 92
+    app_tests: 2342
+    app_test_files: 96
     tsc: 0
     eslint: 0
     db_checks: 704
@@ -7228,15 +7228,17 @@ requirements:
     ⭐ AND THE RESET SCREEN IS REACHED WHEREVER THE TOKENS LAND (F-106). A reset link's tokens make a
     full session the moment they are read, and the auth server drops them on `/` whenever the app's
     origin is not the project's site_url. The session remembers the PASSWORD_RECOVERY event
-    (`useSession().recovery`), and the route gate sends a recovery session to `/reset-password`
-    before the board and before the no-access dead-end, until the password is set or the person
-    signs out.
+    (`useSession().recovery`), seeded from the landing URL's own recovery fragment and remembered
+    for the tab so a reload keeps it, and the route gate sends a recovery session to
+    `/reset-password` before the board and before the no-access dead-end, until the password is set
+    or the person signs out. Re-entering the current password is refused with its own sentence.
   verified_by:
   - kind: vitest
     file: src/test/passwordFlow.test.ts
     cases: >-
       P1-P6 the two-field validation; M1-M5 the recovery state machine, a bad link ends failed and
-      never on a blank form; H1-H4 parseRecoveryHash; E1-E5 describePasswordError, every branch;
+      never on a blank form; H1-H4 parseRecoveryHash; E1-E6 describePasswordError, every branch,
+      the current password re-entered being its own sentence;
       R1-R6 attemptReset, the neutral ok on success and on an unknown address alike, network and
       rate-limit failures described
   - kind: vitest
@@ -7261,12 +7263,14 @@ requirements:
     file: src/test/session.test.ts
     cases: >-
       P1-P4 nextRecoveryFlag: PASSWORD_RECOVERY raises it, USER_UPDATED and SIGNED_OUT clear it, a
-      token refresh or sign-in leaves it alone
+      token refresh or sign-in leaves it alone; P5-P7 initialRecoveryFlag: the landing hash seeds
+      it, any other hash does not, and the tab's memory outranks the hash
   - kind: vitest
     file: src/test/sessionProvider.test.tsx
     cases: >-
       S9 the provider raises `recovery` on PASSWORD_RECOVERY and clears it on USER_UPDATED with no
-      reset and no loading
+      reset and no loading; S10 the landing hash seeds it before any event and it is written down for
+      the tab; S11 the tab's memory keeps it across a mount and USER_UPDATED forgets it
   - kind: e2e
     file: e2e/passwordReset.spec.ts
     cases: >-
@@ -7327,7 +7331,10 @@ requirements:
     about who you are, which was the R-337 flicker. Calling it outside the provider throws, naming
     the provider. The identity term (`lastUserId`) stays module-scoped and a token refresh still
     resets nothing; a genuine identity change still resets the query cache exactly once. The
-    AdminPage guard (R-337) is unchanged and correct with or without the provider.
+    AdminPage guard (R-337) is unchanged and correct with or without the provider. INITIAL_SESSION,
+    which supabase-js fires from its own start-up before getSession resolves, is not a change: the
+    reviewer counted the profile read twice on a hard reload before that line existed, and once
+    after.
   verified_by:
   - kind: vitest
     file: src/test/sessionProvider.test.tsx
@@ -7337,7 +7344,7 @@ requirements:
       and refetches nothing; S5 an identity change resets the cache exactly once; S6 a failed profile
       read gives null and never calls the RPC; S7 useSession() outside the provider throws naming
       it; S8 five consumers share exactly one getSession, one subscription, one profile read and one
-      RPC
+      RPC; S12 INITIAL_SESSION arriving before getSession resolves does not read the profile twice
   - kind: e2e
     file: e2e/signedIn.spec.ts
     cases: >-
@@ -7382,6 +7389,23 @@ requirements:
       touch; T8 the level-list grip drags on touch
   status: covered
 findings:
+- id: F-107
+  title: A green case went red at ten past midnight, because it had asked the wall clock what day it was
+  tag: The clock is an input
+  status: fixed
+  found_by: agent
+  refs:
+  - R-349
+  story: >-
+    The final full run of wave two, started a few minutes after midnight, failed one case in the
+    audit panel's suite --- "finishes a bounded period the same way it finishes a now-anchored one"
+    --- that had passed every run that day. It served one entry "one hour ago" as today's row and one
+    inside yesterday, filtered to yesterday, and expected today's row to vanish. For the first hour
+    of every day one hour ago IS yesterday, so the panel was right to keep the row and the case was
+    wrong to expect otherwise. Nothing in wave two touches that panel. The row is now anchored one
+    second after today's local midnight, the same anchor the case already used for its yesterday row,
+    so it means "today" at every hour. The rule is the one the repo already keeps for the server's
+    `now()`: the clock is an input to a test, never a thing it reads.
 - id: F-106
   title: The reset link landed on the board, not the reset screen, because the auth server strips the path when the app's host is not its site_url
   tag: What config can strip
@@ -7417,6 +7441,25 @@ findings:
     not to do while the maintainer uses the app. The flag closes a second hole the config never
     would: without it, anyone holding a reset link could browse the whole app without ever setting a
     password.
+    ⛔ AND THE FIRST FIX HAD TWO HOLES THE REVIEWER FOUND BY DRIVING IT. One: the flag lived in one
+    render's memory, raised only by the event, so F5 on the reset screen replayed INITIAL_SESSION and
+    nothing else, and `/` then rendered the board for a person who had set no password --- measured,
+    "board rendered without a password set? true". Two: supabase-js emits PASSWORD_RECOVERY on a
+    setTimeout(0) after its own round trip, to whoever has subscribed by then, and the provider
+    subscribes from an effect after first render; on this machine the subscription won ten times out
+    of ten, and with the client instantiated ahead of the tree it lost four times out of four and the
+    person landed on the no-access page, silently. So the flag is now SEEDED from the landing URL's
+    own `type=recovery` fragment, which is still there when the provider first renders, and
+    REMEMBERED for the tab in sessionStorage under one key, cleared by USER_UPDATED and SIGNED_OUT;
+    the event only confirms. Pinned: session.test.ts P5-P7 (the seed), sessionProvider.test.tsx
+    S10-S11 (seeded, written down, kept across a mount, forgotten on USER_UPDATED).
+    ⚠️ THE CONFIG HALF IS ALSO DONE, FOR THE NEXT STACK START. `supabase/config.toml` now lists
+    `http://localhost:5173/**` in `additional_redirect_urls`, so the emailed link itself lands on
+    the reset screen locally; until the stack is restarted the link still goes to `127.0.0.1:5173`,
+    where nothing answers on this machine (the dev server listens on `localhost` only), which is why
+    the browser spec pastes the recovery hash rather than clicking the mail. The reviewer also found
+    that re-entering the current password read as "too weak": GoTrue's 422 `same_password` now has
+    its own sentence (passwordFlow.test.ts E6).
 - id: F-099
   title: An inner join under row-level security is a silent filter
   tag: What a join hides
@@ -9977,6 +10020,53 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 84
+  date: 2026-09-06
+  title: 'Wave two, three lanes and a reviewer: password reset and change, one session at the root, and the touch pass (S24, the queue)'
+  commits:
+  - 647495f
+  numbers:
+    app_tests: 2342
+    app_test_files: 96
+    tsc: 0
+    eslint: 0
+    db_checks: 704
+    migrations: 62
+  confirmed: true
+  summary: >-
+    The tester's session 84 verified DEF-0016 and DEF-0017 cold at 19f0903 (R-039 and R-333 back to
+    covered, with the pin, the SQL file and the role walk as R-039's proof). Then the maintainer:
+    *"Launch wave 2"* --- the three items the session 83 plan had marked ready with nothing to
+    decide, three Opus 4.8 lanes from three briefs (`docs/agent-briefs/wave2-*`), each with exclusive
+    files, and a reviewer of a different model with one job.
+    ⭐ PASSWORDS (lane A, R-347, R-348). "Forgot your password?" on sign-in, a forgot screen that says
+    the same neutral sentence for a known and an unknown address, a reset screen the email link lands
+    on, and change-password next to Sign out; pure first (`passwordFlow.ts`), every failure a
+    sentence, walked as Vina the Plant C viewer with her password put back. Lane A found F-106 on the
+    way and stopped at the file it did not own.
+    ⭐ ONE SESSION (lane B, R-349). `SessionProvider` at the root; `useSession()` reads context with
+    its signature unchanged, so no caller and no mocked suite moved. Measured: one getSession, one
+    subscription, one profile read, one RPC for five consumers; the board's "Loading session" flash
+    gone on the signed-in path; signedIn.spec six warm runs in a row.
+    ⭐ TOUCH (lane C, R-350). A second Playwright project on a tablet profile driving real touch
+    through CDP: eight gestures, nothing broke, no code changed. One decision left for the
+    maintainer, recorded in the standing note: a finger on empty track creates, as the mouse does, at
+    the cost of panning only from the rail.
+    ⭐ F-106 FIXED BY THE DEVELOPER BETWEEN THE LANES AND THE REVIEW: the auth server drops a reset
+    link's tokens on `/` when the app's host is not its site_url, so the session remembers the
+    PASSWORD_RECOVERY event and the gate sends a recovery session to the reset screen. The reviewer
+    then broke that fix two ways --- a reload forgot the flag, and the flag depended on subscribing
+    before supabase-js emitted --- so it is now seeded from the landing hash and remembered for the
+    tab; the reviewer also found the "same password" 422 reading as "too weak", the profile read
+    twice on a hard reload (INITIAL_SESSION treated as a change), and the emailed link dead on this
+    machine (the dev server answers on localhost only; the dev origin is now on the redirect
+    allow-list for the next stack start). All fixed, each with a case. The field-standard audit
+    caught the three new screens copying the input skin; they use `Field.module.css` now. And one
+    green case went red at ten past midnight for asking the wall clock what day it was (F-107).
+    CLAUDE.md section 4 carries the F-106 rule. Measured: `npm run test` 2342 in 96
+    files; `tsc` 0; `eslint` 0; Playwright chromium 25 of 25 and touch 8 of 8 against the live
+    stack. No migration; the SQL suite and the ledger are as session 83 left them.
+  shipped: []
 - id: 83
   date: 2026-09-06
   title: Two defects from a line supervisor's board, the role walk, a defects index, and wave one (S34, the queue)
