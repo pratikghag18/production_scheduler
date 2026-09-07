@@ -115,3 +115,42 @@ test("an unknown route is gated too, not 404'd to a signed-out visitor", async (
   await expect(page).toHaveURL(signInUrlFor("/no-such-page"));
   await expect(page.getByRole("heading", { level: 1, name: "Not found" })).toHaveCount(0);
 });
+
+/**
+ * ⭐ P1-6d (S24): THE TWO PASSWORD-RECOVERY DOORS MUST STAY OUTSIDE THE GATE. A
+ * person arriving on a reset link carries a real recovery SESSION, so if
+ * `/reset-password` sat inside `RequireAuth` the gate would bounce them to the
+ * board (or the no-access dead-end) before they set the password. `/forgot-
+ * password` likewise must be reachable while signed out. Both are asserted here
+ * the same way the sign-in screen is: they render their OWN chrome with no
+ * shell, and — the load-bearing part — they do NOT redirect to /sign-in.
+ *
+ * ⚠️ There is no backend here, so `/reset-password` finds no recovery session
+ * and no tokens in the URL and shows its "invalid or expired link" terminal
+ * state — which is exactly right for a bare visit and, for this test, still
+ * proves the route rendered its own screen rather than the gate intercepting.
+ */
+test("/forgot-password renders without the shell and does not redirect to sign-in", async ({
+  page,
+}) => {
+  await page.goto("/forgot-password");
+  await expect(page).toHaveURL("/forgot-password");
+  await expect(page.getByRole("heading", { level: 1, name: "Reset your password" })).toBeVisible();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  // No shell: neither nav link exists to condition.
+  await expect(page.getByRole("link", { name: "Board", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
+});
+
+test("/reset-password renders without the shell and does not redirect to sign-in", async ({
+  page,
+}) => {
+  await page.goto("/reset-password");
+  await expect(page).toHaveURL("/reset-password");
+  await expect(page.getByRole("heading", { level: 1, name: "Set a new password" })).toBeVisible();
+  // The gate never intercepted: this is the recovery screen, not the sign-in one.
+  await expect(page.getByRole("heading", { level: 1, name: "Production Scheduler" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("link", { name: "Board", exact: true })).toHaveCount(0);
+});

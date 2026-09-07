@@ -77,6 +77,61 @@ export function canQueryAsUser(userId: string | null, loading: boolean): boolean
   return !loading && userId !== null;
 }
 
+/**
+ * Whether the current session is a PASSWORD-RECOVERY session: one that came
+ * from a reset-email link and has not yet had its password set (F-106).
+ *
+ * A recovery link's tokens make a FULL session the moment supabase-js reads
+ * them from the URL, and GoTrue drops them wherever the redirect rules put
+ * them -- on `/reset-password` when the app's origin matches the project's
+ * site_url, on `/` when it does not (the local stack's `127.0.0.1` against the
+ * dev server's `localhost` is exactly that case). So the app must not rely on
+ * the LANDING PATH to know a password is owed; it must remember the EVENT.
+ *
+ *   PASSWORD_RECOVERY -> true      the link was just consumed
+ *   USER_UPDATED      -> false     `updateUser({ password })` succeeded
+ *   SIGNED_OUT        -> false     nothing owed by nobody
+ *   anything else     -> unchanged (TOKEN_REFRESHED, SIGNED_IN, INITIAL_SESSION)
+ *
+ * Takes the event name as a string so this module stays import-free of
+ * @supabase/supabase-js, like `decideSessionUpdate` above.
+ */
+export function nextRecoveryFlag(current: boolean, event: string): boolean {
+  if (event === "PASSWORD_RECOVERY") return true;
+  if (event === "USER_UPDATED" || event === "SIGNED_OUT") return false;
+  return current;
+}
+
+/**
+ * Where the recovery flag STARTS, before any event has fired (F-106, the
+ * reviewer's two holes in the first fix).
+ *
+ *   1. supabase-js emits PASSWORD_RECOVERY on a `setTimeout(0)` after its own
+ *      round trip, to whoever has subscribed BY THEN. The provider subscribes
+ *      from an effect after first render. On this machine the subscription
+ *      wins by hundreds of milliseconds; with the client instantiated ahead of
+ *      the tree it lost four times out of four and the person landed on the
+ *      board, silently. So the landing URL's own hash seeds the flag: the
+ *      `type=recovery` fragment is still there when the provider first
+ *      renders, and the event then only confirms.
+ *   2. A reload replays INITIAL_SESSION only, never PASSWORD_RECOVERY, so a
+ *      flag held in one render's memory is gone after F5 and the board opens
+ *      with a password nobody chose. The flag is therefore remembered for the
+ *      tab (`sessionStorage`, one key) and read back here.
+ *
+ * Pure over its two inputs, so the provider passes `window.location.hash` and
+ * the stored value and a test passes strings.
+ */
+export const RECOVERY_STORAGE_KEY = "scheduler.passwordRecovery";
+
+export function initialRecoveryFlag(
+  hash: string | null | undefined,
+  stored: string | null,
+): boolean {
+  if (stored === "1") return true;
+  return typeof hash === "string" && /(^#|[&#])type=recovery(&|$)/.test(hash);
+}
+
 /* ===========================================================================
  * D97 — who may open the admin screen (design plan §19.38).
  * ======================================================================== */

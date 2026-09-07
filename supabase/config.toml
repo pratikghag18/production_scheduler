@@ -85,7 +85,11 @@ file_size_limit = "50MiB"
 [auth]
 enabled = true
 site_url = "http://127.0.0.1:5173"
-additional_redirect_urls = ["https://127.0.0.1:5173"]
+# F-106: the dev server answers on `localhost`, site_url says `127.0.0.1`, and a
+# reset link's redirect to a host not listed here is silently sent to site_url's
+# ROOT with its path stripped. Listing the dev origin keeps the emailed link on
+# /reset-password locally. Takes effect at the next `supabase start`.
+additional_redirect_urls = ["https://127.0.0.1:5173", "http://localhost:5173/**"]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10

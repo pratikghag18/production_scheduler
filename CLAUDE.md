@@ -99,6 +99,11 @@ it into `requirements` in that turn, before the code.
   (Ana on Line 1, a viewer), not only as the admin who built them. `e2e/roleWalk.spec.ts` drives
   every demo person through the board and the rail and asserts the facts a line supervisor sees
   match the plant admin's; run it, and read the screen, before saying done.
+- **Where an auth redirect lands is configuration, not a fact.** The auth server drops a reset
+  link's tokens on whatever URL its `site_url` and redirect allow-list permit, and strips the path
+  when the app's host is not on that list; locally that is the board, not the reset screen. The app
+  remembers the EVENT (`PASSWORD_RECOVERY`, held as `useSession().recovery`) and the route gate acts
+  on it; nothing may infer "this is a recovery" from the URL it happens to be on (F-106).
 - **Never `npm run db:reset` while the maintainer is using the app.**
 - **Do not stop to report.** Listing what is left is not progress; stop only for a decision
   only the maintainer can make, ask one question, and keep everything else moving. The queue's

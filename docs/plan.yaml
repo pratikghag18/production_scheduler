@@ -1401,6 +1401,14 @@ stages:
     one, so the buildout's visible half said the front door was being worked on, every day for two
     weeks, while the work went elsewhere. **Unpark it by moving its queue items back above the PARKED
     marker, not by editing this line.**
+
+
+    **★ SESSION 84 (6 Sept): PASSWORD RESET AND CHANGE ARE IN (P1-6d, R-347, R-348), and the
+    `useSession` debt is paid (R-349).** A "Forgot your password?" link on sign-in, a reset screen the
+    email link lands on wherever the auth server drops its tokens (F-106), and a change-password page
+    next to Sign out; one `SessionProvider` at the root so every screen reads the same answer about who
+    is signed in. What is left of this card is invitations (P1-6c) alone, still tabled by the
+    maintainer, which is why it stays parked.
 - id: S25
   track: core
   num: 25
@@ -3200,7 +3208,7 @@ requirements:
     cases: >-
       the tab is REACHABLE by the person it was built for -- a site admin is offered Settings and not
       Activity, in one case, so re-coupling the two goes red
-  status: contradicted
+  status: covered
   note: >-
     ⛔ CONTRADICTED 6 Sept by DEF-0017 (tester, minor): Plant A sets date_format = ymd_slash, Dana's board
     reads `Mon 2026/08/31`, and Ana's board of Line 1 inside the same plant reads `Mon Aug 31` --- the company
@@ -4391,8 +4399,24 @@ requirements:
   claim: >-
     A shift template is a named daily pattern of shifts, each with breaks. It attaches to any node and
     inherits downward; the nearest ancestor with a template wins.
-  verified_by: []
-  status: contradicted
+  verified_by:
+  - kind: sql
+    file: supabase/tests/84_shift_pattern_resolves_upward_test.sql
+    cases: >-
+      migration 0061 (DEF-0016): resolve_shift_template as a line supervisor granted only her line
+      answers the plant's template for the line and its cells, board_window carries the shift
+      templates and the node-shift map for her, and the resolver still refuses a node outside her
+      org
+  - kind: vitest
+    file: src/test/defects/DEF-0016.test.ts
+    cases: >-
+      the last definition of resolve_shift_template in the migrations is SECURITY DEFINER, and the
+      reader can see the existing definer on app_resolve_node_setting
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: >-
+      Ana's board carries the same shift chips as Dana's, and Marco's the same as Quinn's
+  status: covered
   note: >-
     ⛔ CONTRADICTED 6 Sept by DEF-0016 (tester, major): Plant A's template is attached at plant_a and Line 1
     inherits it for Dana --- break band, dashed boundary, three shift chips in the create form --- but for Ana,
@@ -7185,7 +7209,214 @@ requirements:
     Development reached R-304, so both sides wrote that id for different requirements; Development's
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
+- id: R-347
+  title: A forgotten password is reset by an email link, and the request leaks nothing
+  source:
+  - queue item "P1-6d password reset and change-password"
+  - session 84 conversation
+  stated_by: maintainer
+  claim: >-
+    A person who has forgotten their password can request a reset from the sign-in screen: a
+    "Forgot your password?" link opens `/forgot-password`, which takes an email and asks Supabase for
+    the reset email, and shows the SAME neutral sentence ("If that address has an account, a reset
+    link is on its way.") whether or not the address has an account, because "no account with that
+    email" is a leak. The link in the email lands on `/reset-password`, which sits OUTSIDE the route
+    gate beside `/sign-in`, waits for the recovery session, and takes a new password twice; after
+    that the person is signed in and sent to the board. An expired or already-used link lands on a
+    terminal "request a new one" screen, never a blank form. Every failure is a described sentence
+    (`describePasswordError`), never a raw provider string. Nothing new reads `?redirect=`.
+    ⭐ AND THE RESET SCREEN IS REACHED WHEREVER THE TOKENS LAND (F-106). A reset link's tokens make a
+    full session the moment they are read, and the auth server drops them on `/` whenever the app's
+    origin is not the project's site_url. The session remembers the PASSWORD_RECOVERY event
+    (`useSession().recovery`), and the route gate sends a recovery session to `/reset-password`
+    before the board and before the no-access dead-end, until the password is set or the person
+    signs out.
+  verified_by:
+  - kind: vitest
+    file: src/test/passwordFlow.test.ts
+    cases: >-
+      P1-P6 the two-field validation; M1-M5 the recovery state machine, a bad link ends failed and
+      never on a blank form; H1-H4 parseRecoveryHash; E1-E5 describePasswordError, every branch;
+      R1-R6 attemptReset, the neutral ok on success and on an unknown address alike, network and
+      rate-limit failures described
+  - kind: vitest
+    file: src/test/passwordPages.test.tsx
+    cases: >-
+      F1-F3 the forgot screen shows the neutral sentence on success and on "user not found" alike,
+      a rate limit shows a described error; R1-R4 the reset screen shows no form until the recovery
+      session exists, appears on PASSWORD_RECOVERY, lands on the failed screen for a bad link, goes
+      to the board on success
+  - kind: vitest
+    file: src/test/authFlow.test.ts
+    cases: >-
+      D5 a recovery session outranks app and no-access; D6 the flag changes nothing while loading or
+      signed out, and absent reads as no
+  - kind: vitest
+    file: src/test/recoveryGate.test.tsx
+    cases: >-
+      G1 with the flag up, landing on / goes to the reset screen; G2 with no profile the reset
+      screen still comes before the dead-end; G3-G4 with the flag down the board and the dead-end
+      are unchanged
+  - kind: vitest
+    file: src/test/session.test.ts
+    cases: >-
+      P1-P4 nextRecoveryFlag: PASSWORD_RECOVERY raises it, USER_UPDATED and SIGNED_OUT clear it, a
+      token refresh or sign-in leaves it alone
+  - kind: vitest
+    file: src/test/sessionProvider.test.tsx
+    cases: >-
+      S9 the provider raises `recovery` on PASSWORD_RECOVERY and clears it on USER_UPDATED with no
+      reset and no loading
+  - kind: e2e
+    file: e2e/passwordReset.spec.ts
+    cases: >-
+      "a forgotten password is reset by email and the new one works" (a throwaway account, the
+      emailed token exchanged live, the new password set on /reset-password and then used to sign
+      in); "a recovery session dropped on the board's URL is sent to the reset screen" (the tokens
+      landed on /, the gate sends them to /reset-password, the password is set and the gate lets
+      them through)
+  - kind: e2e
+    file: e2e/smoke.spec.ts
+    cases: >-
+      /forgot-password and /reset-password render without the shell and do not redirect to sign-in
+  status: covered
+- id: R-348
+  title: A signed-in person changes their own password and stays signed in
+  source:
+  - queue item "P1-6d password reset and change-password"
+  - session 84 conversation
+  stated_by: maintainer
+  claim: >-
+    A signed-in person changes their own password from `/change-password`, reached from a link in
+    the shell's header next to Sign out. It takes a new password twice, shows a sentence on success,
+    and leaves them signed in and where they were: no navigation, so the session is untouched. A
+    mismatch or a too-short password is refused before any round trip; a provider error is a
+    described sentence, never a raw string. Walked as Vina, the Plant C viewer, the least-privileged
+    demo person, with her password put back afterwards.
+  verified_by:
+  - kind: vitest
+    file: src/test/passwordFlow.test.ts
+    cases: >-
+      C1-C5 attemptChange: success, a short password and a mismatch short-circuit without touching
+      the network, a provider error and a thrown network error are described
+  - kind: vitest
+    file: src/test/passwordPages.test.tsx
+    cases: >-
+      A2/A3 both fields render with autoComplete=new-password; C1 a successful change shows the
+      sentence and does NOT navigate; C2 a mismatch is refused before the network; C3 a provider
+      error is shown as a sentence
+  - kind: e2e
+    file: e2e/passwordReset.spec.ts
+    cases: >-
+      "a signed-in viewer changes her own password and stays signed in", driven as Vina; the success
+      sentence shows, the URL stays on /change-password with Sign out present, and devpassword is
+      restored in a finally
+  status: covered
+- id: R-349
+  title: The app resolves who is signed in once, at the root, and every screen reads that one answer
+  source:
+  - queue item "Debt: useSession() called in five components; one SessionProvider at the root"
+  - the finding "The first browser test that ever signed in failed on its first full run" (R-337)
+  stated_by: agent
+  claim: >-
+    Who is signed in is resolved ONCE, by a single `SessionProvider` mounted at the root of the app
+    (inside the query client, outside the router): one getSession round trip, one user_profiles
+    read, one app_is_admin_anywhere RPC, one auth listener, one `loading` and one `profile`.
+    `useSession()` keeps its signature and return type but reads that single object from context,
+    so every one of its thirty-odd call sites shares the same answer and no two copies can disagree
+    about who you are, which was the R-337 flicker. Calling it outside the provider throws, naming
+    the provider. The identity term (`lastUserId`) stays module-scoped and a token refresh still
+    resets nothing; a genuine identity change still resets the query cache exactly once. The
+    AdminPage guard (R-337) is unchanged and correct with or without the provider.
+  verified_by:
+  - kind: vitest
+    file: src/test/sessionProvider.test.tsx
+    cases: >-
+      S1 loading starts true; S2 a signed-out initial load clears loading with no profile and no RPC;
+      S3 a signed-in load reads the profile and calls the RPC once; S4 a token refresh resets, spins
+      and refetches nothing; S5 an identity change resets the cache exactly once; S6 a failed profile
+      read gives null and never calls the RPC; S7 useSession() outside the provider throws naming
+      it; S8 five consumers share exactly one getSession, one subscription, one profile read and one
+      RPC
+  - kind: e2e
+    file: e2e/signedIn.spec.ts
+    cases: >-
+      the three signed-in rail cases, which failed intermittently under load before one session
+      existed and pass warm run after run after it, six in a row measured
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: >-
+      every demo person signs in and gets a board with no alert; a supervisor's board matches the
+      admin above them, now read from the single session
+  status: covered
+- id: R-350
+  title: Every drag on the board and in the admin tree works under a finger, and a finger on a scrollable surface scrolls
+  source:
+  - queue item "touch acceptance pass on both drags"
+  - session 84 conversation
+  stated_by: agent
+  claim: >-
+    Driven with real touch input (Chromium's Input.dispatchTouchEvent on a tablet profile with
+    hasTouch, as a second Playwright project named `touch`), every pointer-event drag behaves under
+    a finger. On the board: create on empty track, move a block, and the roster-chip drag from the
+    panel onto a track; the pop-up moves by its title bar and a tap on a control inside it still
+    works. A viewer's finger starts no board drag and creates nothing, and does not scroll the board
+    either. In the admin tree and the level list, on touch ONLY the grip drags (`rowIsDragSource`
+    refuses "touch"), so the row body stays for scrolling. A block and a track carry
+    `touch-action: none`, so a finger on them drags rather than scrolls; the board's own touch-scroll
+    surface is the sticky rail and the grid margins.
+    ⚠️ ONE ANSWER HERE IS THE LANE'S RECOMMENDATION, NOT YET THE MAINTAINER'S DECISION: a finger on
+    EMPTY track CREATES, it does not scroll, because that matches the mouse exactly and keeps the
+    board's main gesture reachable by touch. The cost is that on a tablet the board can be panned
+    only from the narrow rail column. If tablet use becomes primary, the alternative is
+    `touch-action: pan-x pan-y` on the track with creation behind a long-press or a control: a
+    design change, not a bug. Recorded as the lane found it, for the maintainer to confirm or turn.
+  verified_by:
+  - kind: e2e
+    file: e2e/touch.spec.ts
+    cases: >-
+      T1 create on empty track, not scroll; T2 a block move is a drag, not a scroll, scrollLeft
+      unchanged; T3 the roster-chip drag onto a track; T4 the pop-up's title-bar drag and a tap
+      through to a button inside; T5 a viewer's finger is refused on a block and on empty track and
+      scrolls nothing; T6 the tree row body does not reorder on touch; T7 the tree grip drags on
+      touch; T8 the level-list grip drags on touch
+  status: covered
 findings:
+- id: F-106
+  title: The reset link landed on the board, not the reset screen, because the auth server strips the path when the app's host is not its site_url
+  tag: What config can strip
+  status: fixed
+  found_by: agent
+  refs:
+  - R-347
+  - R-349
+  story: >-
+    Lane A's forgot-password screen asked Supabase to send the reset link back to
+    `window.location.origin + "/reset-password"`, which is the right production code: there the app's
+    origin equals the project's site_url, so GoTrue keeps the path and the link lands on the reset
+    screen. Locally the two disagree --- `supabase/config.toml` sets `site_url` to `127.0.0.1:5173`
+    while the dev app is served on `localhost:5173` --- and a reset started from localhost is where it
+    showed. Measured against the running stack: a redirect to a host that is neither site_url nor in
+    `additional_redirect_urls` is rejected, GoTrue falls back to the site_url ROOT and strips the
+    path, the recovery tokens land on `/`, supabase-js reads them into a full session, and the board
+    (or the no-access dead-end) renders for a person who never chose the password they are now signed
+    in with. The reset form never appears. From `127.0.0.1:5173` the same request keeps the path and
+    works end to end, which is how the lane proved the page.
+    ⭐ THE FIX IS TO REMEMBER THE EVENT, NOT THE PATH. A recovery session is indistinguishable from a
+    signed-in one by anything but the event that made it, so the session provider (lane B's, landed
+    the same hour) keeps a `recovery` flag: raised on PASSWORD_RECOVERY, cleared on USER_UPDATED
+    (the password was set) and on SIGNED_OUT, untouched by a token refresh. `decideAuthScreen` gains
+    a "recovery" answer that outranks app AND no-access, and the route gate turns it into a redirect
+    to `/reset-password`, which sits outside the gate so it cannot loop. Pinned pure (session.test.ts
+    P1-P4, authFlow.test.ts D5-D6), at the gate (recoveryGate.test.tsx G1-G4), in the provider
+    (sessionProvider.test.tsx S9), and live: a recovery session dropped on `/` is sent to the reset
+    screen, sets its password, and only then reaches the app.
+    ⚠️ THE OTHER CURE WAS NOT TAKEN, AND WHY. Listing `localhost:5173/reset-password` in
+    `additional_redirect_urls` would have made the local link land right and left production on the
+    same one-line assumption about hosts; it also needs the stack restarted, which the lane was told
+    not to do while the maintainer uses the app. The flag closes a second hole the config never
+    would: without it, anyone holding a reset link could browse the whole app without ever setting a
+    password.
 - id: F-099
   title: An inner join under row-level security is a silent filter
   tag: What a join hides
@@ -13012,12 +13243,6 @@ next:
     never touches `src/` and never asserts about a screen); B belongs after the board has stopped
     moving, and can then cover Copy Week too.
 # ------------------------------- PARKED ------------------------------------
-- stage: S24
-  text: 'Debt: useSession() called in five components; one SessionProvider at the root'
-  why: >-
-    Parked with the rest of S24. The flicker half was fixed in session 18 and the identity half in
-    §19.79; what is left is five duplicated `getSession()` round trips — one of which is the "Loading
-    session…" flash on the board, deliberately left in place in session 57.
 - text: >-
     Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
   why: >-
@@ -13053,16 +13278,6 @@ next:
     ⭐ MOVED TO THE ACTUAL END OF THE QUEUE 5 SEPT at the maintainer's word — *"Move #3,#4,#5 at the end
     of the list"* — having claimed since 4 Sept to be there already.
   decided: true
-- stage: S24
-  text: P1-6d password reset and change-password
-  why: >-
-    Same browser-only shape as the sign-in screen. Sits behind invitations, which is tabled.
-    ⚠️ IT IS THE CHEAPEST THING ON THE WHOLE LIST AND IT IS LAST BY ASSOCIATION, not by cost: one
-    browser call, no server piece, no migration — the sign-in screen's own shape. It sits here because
-    it was grouped with invitations, which need the project's first Edge Function. Worth unparking on
-    its own if a quick win is ever wanted; moved to the end 5 Sept with the rest of the group at the
-    maintainer's word.
-  decided: true
 - stage: S23
   text: Tree CSV importer
   why: >-
@@ -13070,14 +13285,20 @@ next:
     parents/children CSV. Not deferred; do not re-ask.
   decided: true
 - text: >-
-    STANDING NOTE, not a task — open and flagged: .eligible means adoption parent only; touch acceptance
-    pass on both drags
+    STANDING NOTE, not a task — open and flagged: .eligible means adoption parent only; and a decision
+    owed on touch: a finger on EMPTY track creates (as the mouse does) or scrolls
   why: >-
     The roadmap's standing list so none of it goes quiet. Three of its five closed in session 83 (0060):
     the direct DELETE of a company admin's grant is refused at the table, and so is an UPDATE that
     demotes or re-points it; site_people takes a search and a limit with total and returned counts,
     unbounded by default, for the client to adopt; the department-admin note is moot since R-340 put
     admin at the plant root, with a case that goes red if such a grant reappears.
+    ⭐ THE TOUCH PASS CLOSED IN SESSION 84 (R-350): every drag on the board and in the admin tree was
+    driven with real touch input under a tablet profile and nothing broke; `e2e/touch.spec.ts` keeps
+    it so. What it left is a DECISION, not a defect: a finger on empty track creates a block, which
+    matches the mouse, and means a tablet can pan the board only from the sticky rail. The lane
+    recommends keeping create; the alternative is pan on the track with creation behind a long-press.
+    The maintainer has not been asked yet.
 - text: >-
     STANDING NOTE, not a task — not driven in a browser: the reworked Products panel (plant chips,
     add-picker, per-plant remove) and the document-number surfaces
@@ -13188,15 +13409,15 @@ backlog:
   stage: S24
 - phase: 1
   text: P1-6d — password reset and change-password. Same browser-only shape as P1-6b
-  status: open
+  status: done
   stage: S24
 - phase: 1
   text: >-
     Debt found while reading for P1-6b: useSession() is called in five components, each with its own useEffect
-  status: partial
+  status: done
   note: >-
-    The identity-change reset flicker was fixed in session 18; the single SessionProvider is not recorded
-    as built.
+    The identity-change reset flicker was fixed in session 18; the single SessionProvider landed in
+    session 84 (R-349).
   stage: S24
 - phase: 1
   text: >-
