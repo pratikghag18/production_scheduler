@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-07'
-  tip: 647495f
+  tip: 935ba6b
   baseline:
-    app_tests: 2342
-    app_test_files: 96
+    app_tests: 2446
+    app_test_files: 105
     tsc: 0
     eslint: 0
-    db_checks: 704
-    migrations: 62
+    db_checks: 747
+    migrations: 66
     mutations: 509 of 536
 tracks:
 - id: core
@@ -1343,7 +1343,7 @@ stages:
   track: core
   num: 24
   title: 'The front door: getting people into the system at all'
-  status: parked
+  status: done
   owner: agent
   refs:
   - P1-6b
@@ -1407,8 +1407,15 @@ stages:
     `useSession` debt is paid (R-349).** A "Forgot your password?" link on sign-in, a reset screen the
     email link lands on wherever the auth server drops its tokens (F-106), and a change-password page
     next to Sign out; one `SessionProvider` at the root so every screen reads the same answer about who
-    is signed in. What is left of this card is invitations (P1-6c) alone, still tabled by the
-    maintainer, which is why it stays parked.
+    is signed in.
+
+
+    **★ SESSION 85 (7 Sept): INVITATIONS ARE IN (P1-6c, R-351, R-352), AND THE FRONT DOOR IS BUILT.**
+    The maintainer's "launch wave 3" was the fresh go-ahead this card asked for. An admin invites by
+    email from the Access panel; the project's first Edge Function does the one call a browser cannot
+    and hands the grant back to the database to decide; the invited person sets a password from the
+    link and lands with their grants, marked "invited" until they first sign in. Nothing of the front
+    door is left open.
 - id: S25
   track: core
   num: 25
@@ -7683,6 +7690,30 @@ requirements:
     cases: NODE_SETTING_KEYS is exactly eligibility_policy, date_format, timezone
   status: covered
 findings:
+- id: F-111
+  title: Four things the lanes could see and could not reach, closed by the reviewer's walk and one fix lane
+  tag: What a fence costs
+  status: fixed
+  found_by: agent
+  refs:
+  - R-351
+  - R-353
+  - R-356
+  - R-357
+  story: >-
+    Wave three ran five lanes with exclusive files, and three of the four things the reviewer found
+    were things a lane had seen and written down rather than fixed, because the file belonged to a
+    neighbour: the plant-local-time lane named the fetch window still keyed on UTC midnight; the
+    absence-on-the-board lane named the crew-drag toast that never says "on leave"; the templates lane
+    added a rail tab and updated one rail pin but not the browser spec's. The fourth the reviewer found
+    by calling the invite function directly with a grant the database refuses: the brand-new branch
+    invited first and granted second, so a refusal left an auth user behind who had already been
+    emailed, and a corrected invite of the same address then sent no mail. Each is small; together they
+    are the cost of the fence that lets five lanes work at once, and the reviewer after the wave is
+    where that cost is paid. All four closed in one fix lane: the fetch bounds follow the plant-local
+    day boundaries the axis uses; the drag toast names the absent person; the spec lists Templates; a
+    refused grant deletes the auth user it created and says so in the function's own header. Each with
+    a case that fails the way the reviewer broke it.
 - id: F-110
   title: A supervisor's board root sits below the plant root, and an invoker cannot read the plant above her grant
   tag: The same door, a third time
@@ -10375,6 +10406,61 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 85
+  date: 2026-09-07
+  title: 'Wave three, five lanes and a reviewer: invitations, plant-local time, week templates, absence, and the page counts what is open'
+  commits:
+  - 935ba6b
+  numbers:
+    app_tests: 2446
+    app_test_files: 105
+    tsc: 0
+    eslint: 0
+    db_checks: 747
+    migrations: 66
+  confirmed: true
+  summary: >-
+    The maintainer, in order: *"Launch wave 3"*, then three decisions from options put side by side
+    (touch creates on empty track; a template is a whole week with its people; absence is both entered
+    and imported), then *"spin opus 4.8 agents, do not do it yourself"* --- so every lane, every fix
+    and the reviewer ran on Opus 4.8, and this session wrote briefs, placed rows and committed. Five
+    lanes from five briefs (`docs/agent-briefs/wave3-*`), two of them stopped twice by the session
+    limit and resumed with their context intact.
+    ⭐ INVITATIONS (lane A, R-351, R-352): the first Edge Function, migration 0064, the Access panel's
+    invite control, "Set your password" from the link, "invited" until first sign-in; F-108, the
+    service role had never been granted a write. The front door is built and S24 closes.
+    ⭐ PLANT-LOCAL TIME (lane B, R-353 to R-355): migration 0063, the zone on the board payload
+    resolved upward as a definer, a zone-aware time seam, DST geometry pinned on Chicago's two
+    changeover days, a Time zone row in Settings; F-109 found on the lane's own walk.
+    ⭐ WEEK TEMPLATES (lane C, R-356): migration 0067, numbered after 0066 on purpose; save, apply
+    through Copy Week, rename and delete; row equality with Copy Week proven in SQL; F-110, the
+    upward-resolution trap of DEF-0016 found by the lane in its own build.
+    ⭐ ABSENCE (lanes D and E, R-357): migration 0066, the writers consulting `absence_overlap`
+    beside eligibility under the plant's policy, an Absences tab and a CSV importer, and the board
+    naming the leave before a save with Create refused in place under block.
+    ⭐ THE PAGE COUNTS OPEN WORK. The maintainer asked why the buildout showed eight open tasks; the
+    queue's parked marker was a comment the page could not see. Every queue entry now carries a
+    `kind` (task, parked, note), validated, and the heading counts tasks alone.
+    ⭐ THE SEAMS. Two unit cases went red between lanes (the paging inventory, the DEF-0008 rail pin)
+    and seven typecheck errors stood after the types were regenerated; three small lanes closed
+    them. THE REVIEWER, a different Opus 4.8 lane, read every re-emitted function from the live container
+    and drove the screens as the least-privileged people, and found four real things, three of
+    which the lanes had flagged themselves and stopped short of because the file belonged to
+    another lane (F-111): the signed-in browser spec's admin-rail assertion had no Templates; a
+    refused grant on a brand-new invite left an orphaned auth user who had already received the
+    email; the board's fetch window was still keyed on UTC midnight under a plant-local axis, so a
+    run saved at 22:00 on the last visible day vanished on reload; and a crew drag under warn never
+    said someone was on leave. One fix lane closed all four, each with a case that fails the way
+    the reviewer broke it. The reviewer also confirmed what mattered most: the double re-emission
+    of copy_week_plan dropped no rule (the live text carries both the template source and the
+    absent reason), absence block is enforced server-side when the screen is bypassed, every new
+    auth gate refused the person it should, and the service role's new grant is the narrowest set
+    the function uses.
+    Measured: `npm run test` 2446 in 105 files; `tsc` 0; `eslint` 0; the SQL suite
+    747 passed; Playwright green on every project against the live stack. Migrations 0063,
+    0064, 0066 and 0067 applied with `psql`; there is no 0065; the ledger is still out of sync.
+  shipped:
+  - S24
 - id: 84
   date: 2026-09-06
   title: 'Wave two, three lanes and a reviewer: password reset and change, one session at the root, and the touch pass (S24, the queue)'
@@ -13688,6 +13774,16 @@ next:
     rather than a shared file, which splitting by file does not prevent. A beside Copy Week is safe (A
     never touches `src/` and never asserts about a screen); B belongs after the board has stopped
     moving, and can then cover Copy Week too.
+- kind: task
+  text: Wave three's loose ends — the board's fetch window under a plant zone, the crew-drag absence toast, and the emailed reset link locally
+  why: >-
+    Three small things the lanes and the reviewer named rather than reached across a fence for. The
+    board's fetch window is still keyed on the UTC day marker while its axis is plant-local (R-353), so
+    under a western zone runs in the last hours of a window may be missing until scrolled: widen the
+    fetch by a day or key it on the plant-local origin. After a successful crew drag, `move_run`'s
+    `absence_warnings` are parsed but not yet shown in the drag toast beside the eligibility warnings
+    (R-357; two lines in useDragGesture.ts). And the emailed reset link lands on 127.0.0.1 where the
+    dev server does not answer until the stack restarts with the allow-list from F-106.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   text: >-
@@ -13697,12 +13793,6 @@ next:
     nothing in `src/` subscribes to anything today (no `.channel(`, no `postgres_changes`), so this is
     a build rather than a completion. It is also worth least until more than one person is using the
     app at once, which is gated behind invitations — and those are parked below.
-- kind: parked
-  text: Per-site timezone (D10 / D88)
-  why: >-
-    DECIDED Aug 25 (D88, §19.21): site-local axis, wall-clock across DST, Phase 2. Do not re-ask; the
-    cost is in board/lib/time.ts and geometry.ts.
-  decided: true
 
 - kind: parked
   text: Dark theme — app-wide colour tokens first, then the matrix
@@ -13716,17 +13806,6 @@ next:
     sitting at the TOP of the parked block, above three items that were more live than it — the same
     shape as S24 reading `now` for parked work, and the third sentence in three days found standing in
     for the change it describes. It is now below real-time, the timezone and the row ceiling.
-  decided: true
-- kind: parked
-  stage: S24
-  text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
-  why: >-
-    TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept — do not pick this up without a
-    fresh go-ahead. The gate on a second human using the product; needs the project's first server-side
-    code. ⭐ S24's card now reads `parked` to match this, corrected 5 Sept; the warning that used to sit
-    on this line said the two disagreed and left them disagreeing.
-    ⭐ MOVED TO THE ACTUAL END OF THE QUEUE 5 SEPT at the maintainer's word — *"Move #3,#4,#5 at the end
-    of the list"* — having claimed since 4 Sept to be there already.
   decided: true
 - kind: parked
   stage: S23
@@ -13840,8 +13919,8 @@ backlog:
   text: >-
     Auth — THE FRONT DOOR IS NOT BUILT, and this line is how that hid. Profiles, subtree grants and RLS
     wiring all shipped
-  status: partial
-  note: Unticked. P1-6b shipped Sep 1; P1-6c and P1-6d open.
+  status: done
+  note: P1-6b shipped Sep 1; P1-6d in session 84; P1-6c in session 85. The front door is built.
   stage: S24
 - phase: 1
   text: >-
@@ -13855,7 +13934,7 @@ backlog:
   text: >-
     P1-6c — invitations. This is the gate on a SECOND person using the product, and the bigger half: it
     needs a privileged server-side piece
-  status: open
+  status: done
   stage: S24
 - phase: 1
   text: P1-6d — password reset and change-password. Same browser-only shape as P1-6b
@@ -13914,7 +13993,7 @@ backlog:
   status: open
 - phase: 2
   text: Named templates (relative-time placements)
-  status: open
+  status: done
 - phase: 2
   text: >-
     Shift admin UI in product (templates/breaks editor, node attachment) + target keep-or-scale prompt
@@ -13926,7 +14005,7 @@ backlog:
   stage: S17
 - phase: 2
   text: PTO/absence source decision + conflict surfacing
-  status: open
+  status: done
 - phase: 3
   text: ERP/MES connector framework + first adapter (SAP) over the CSV upsert pipeline
   status: open
