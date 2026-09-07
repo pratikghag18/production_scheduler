@@ -6,8 +6,11 @@ import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { productsOfferedAtNode } from "@/features/admin/lib/scope";
 import { DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
+import { DEFAULT_TIMEZONE } from "@/lib/format/timezones";
 import { operatorViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
+import { useAbsences } from "./hooks/useAbsences";
+import type { AbsenceRow } from "@/lib/absence";
 import { useRootPath } from "./hooks/useRootPath";
 import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
 import { useBoardViewStore } from "./store/boardView";
@@ -17,7 +20,7 @@ import { outsideAreaOperatorIds as outsideAreaFor, splitPeopleFor } from "./lib/
 import { DENSITIES, scaleDensity } from "./lib/geometry";
 import { splitFits } from "./lib/interaction";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
-import { addMinutes, MINUTES_PER_DAY } from "./lib/time";
+import { addMinutes, boardFetchBounds, buildDayAxis, MINUTES_PER_DAY } from "./lib/time";
 import { BoardToolbar } from "./components/BoardToolbar";
 import { BoardGrid } from "./components/BoardGrid";
 import { OperatorPanel } from "./components/OperatorPanel";
@@ -104,12 +107,40 @@ export default function BoardPage() {
     [densityMode, fitScale],
   );
 
-  // D14: the board window is always whole UTC days — from = 00:00:00.000Z
-  // of the start date, to = 00:00:00.000Z of the day after the end date.
+  // D14/D88a: `from`/`to` are the UTC "which day" MARKERS the store produces (the
+  // zone is unknown at store-init). `buildBoardIndex` re-anchors `from` into the
+  // plant zone for the axis origin (`zonedTimeToInstant`), so these stay the UTC
+  // markers the index and axis have always been built from — that half did not
+  // move. The QUERY's own bounds are `fetchFrom`/`fetchTo` below.
   const from = windowStartDate;
   const to = useMemo(
     () => addMinutes(windowStartDate, windowDayCount * MINUTES_PER_DAY),
     [windowStartDate, windowDayCount],
+  );
+
+  // ⭐ THE QUERY'S BOUNDS FOLLOW THE PLANT'S ZONE, NOT UTC. The axis is anchored
+  // at plant-local midnight (`zonedTimeToInstant`, boardIndex.ts) while
+  // `board_window` was still asked for whole UTC days: under America/Chicago a
+  // run at 22:00 local on the last visible day fell PAST the UTC `p_to`, so
+  // `board_window` omitted it — it saved, then vanished on reload.
+  // `boardFetchBounds` places `p_from`/`p_to` on the same local midnights the
+  // axis uses. Kept SEPARATE from `from`/`to` above on purpose: `buildBoardIndex`
+  // re-derives its origin from `from`'s UTC calendar day, so feeding it a
+  // local-midnight instant would double-shift the axis for a zone whose local
+  // midnight lands on another UTC date. Only the fetch moves.
+  //
+  // ⚠️ The zone rides on the very payload these bounds fetch, so it is unknown on
+  // the first load (and until fresh data lands after a plant switch): `fetchZone`
+  // is null then and `boardFetchBounds` pads a whole day each side — a safe
+  // superset (every IANA zone is within ±14h of UTC), never a miss. The effect
+  // below sets the zone once the payload lands, tightening the bounds to the exact
+  // local midnights and refetching on the narrower key — the same settle the axis
+  // makes. `fetchFrom`/`fetchTo` feed BOTH the query and `useDragGesture`'s cache
+  // keys, so the optimistic patches touch the same key the query reads.
+  const [fetchZone, setFetchZone] = useState<string | null>(null);
+  const { from: fetchFrom, to: fetchTo } = useMemo(
+    () => boardFetchBounds(windowStartDate, windowDayCount, fetchZone),
+    [windowStartDate, windowDayCount, fetchZone],
   );
 
   // Do not query as nobody: until the session resolves, an RLS-scoped read can
@@ -121,7 +152,31 @@ export default function BoardPage() {
   // steps. The empty string can never reach the server because `enabled` is
   // false whenever it would be used — it exists only to keep the query key a
   // stable shape.
-  const boardQuery = useBoardWindow(rootPath ?? "", from, to, canQuery && rootPath !== null);
+  const boardQuery = useBoardWindow(
+    rootPath ?? "",
+    fetchFrom,
+    fetchTo,
+    canQuery && rootPath !== null,
+  );
+
+  // Keep `fetchZone` in step with the payload's own resolved zone. Reset to null
+  // on a place change so a plant switch re-pads (the safe superset) until the new
+  // plant's payload lands, rather than fetching one render in the previous
+  // plant's zone; then adopt the payload's zone to tighten the bounds.
+  useEffect(() => {
+    setFetchZone(null);
+  }, [rootPath]);
+  useEffect(() => {
+    const z = boardQuery.data?.timezone ?? null;
+    if (z !== null) setFetchZone((prev) => (prev === z ? prev : z));
+  }, [boardQuery.data]);
+
+  // R-357: who is on leave, read beside the board (never a browser-side walk up
+  // the tree — see `useAbsences`). RLS scopes it to exactly the people the board
+  // shows, so `absenceGaps` in the pop-ups and the panel judges against the same
+  // rows the server would. Gated identically to the board read.
+  const absencesQuery = useAbsences(canQuery && rootPath !== null);
+  const absences = useMemo<AbsenceRow[]>(() => absencesQuery.data ?? [], [absencesQuery.data]);
 
   // T4: spinner only on "pending" with no cached data; keep rendering
   // stale data during a background refetch (isFetching), with a subtle
@@ -160,6 +215,18 @@ export default function BoardPage() {
    */
   const dateFormat = boardQuery.data?.dateFormat ?? DEFAULT_DATE_FORMAT;
 
+  /**
+   * D88a / migration 0063 (R-353): the IANA zone the board's axis renders in,
+   * READ OFF THE PAYLOAD exactly as `dateFormat` is — resolved for this board's
+   * own root on the server (`app_resolve_node_setting`, SECURITY DEFINER), so a
+   * line supervisor sees her PLANT's zone though she cannot read the plant's own
+   * `node_settings` row. The client never walks the ancestry for it. Falls back
+   * to 'UTC' only while the window is still loading; `buildBoardIndex` uses this
+   * same token off `data` to build the day axis, so the axis and every label
+   * agree.
+   */
+  const zone = boardQuery.data?.timezone ?? DEFAULT_TIMEZONE;
+
   // P1-4c D45/T17: `density` is part of this dependency array, so a density
   // change produces a brand-new `index` (new `rows` array identity) exactly
   // the way a data refetch or window change does — `BoardGrid`'s existing
@@ -194,6 +261,13 @@ export default function BoardPage() {
         windowStart: from,
         windowMinutes: (to.getTime() - from.getTime()) / 60_000,
         dayCount: windowDayCount,
+        // D88a: a not-yet-loaded board has no payload zone, so its axis is the
+        // pre-D88 UTC one — `from` is a UTC midnight and every day is 1440 min.
+        // The moment data lands, `index` (built with the payload's zone) takes
+        // over. No drag can start against an empty board, so the axis here only
+        // needs to be shaped right.
+        zone: DEFAULT_TIMEZONE,
+        dayAxis: buildDayAxis(from, windowDayCount, DEFAULT_TIMEZONE),
         rows: [],
         runsByNode: new Map(),
         assignmentsByNode: new Map(),
@@ -231,10 +305,17 @@ export default function BoardPage() {
     // Only ever used to build cache keys, and unreachable while null: with no
     // place to open there is no board and nothing to drag.
     rootPath: rootPath ?? "",
-    from,
-    to,
+    // The QUERY'S bounds (`board_window`'s `p_from`/`p_to`), so the mutation
+    // hooks' optimistic patches touch the same react-query key the board read
+    // populates — not the UTC axis markers, which no longer bound the fetch.
+    from: fetchFrom,
+    to: fetchTo,
     index: emptyIndex,
     defaultCreateMode,
+    // R-357: the drag success toast names the leave a warn-move went ahead over
+    // in the plant's own date format, the same seam the create/reassign pop-ups
+    // read it through (`leaveLine`).
+    dateFormat,
     sessionUserId: session?.user.id ?? null,
     // DEF-0015: the server's `can_place` for this person, so the gesture layer
     // refuses to open a create pop-up, start a block move/resize, or begin a
@@ -553,6 +634,7 @@ export default function BoardPage() {
         products={boardQuery.data?.products ?? []}
         isFetching={boardQuery.isFetching && hasData}
         dateFormat={dateFormat}
+        zone={zone}
       />
 
       {boardQuery.status === "pending" && !hasData && (
@@ -593,11 +675,15 @@ export default function BoardPage() {
                      the plant is the same list minus these, shown by the panel's
                      own control. Decided in `lib/outsideArea.ts`, never here. */
                   hereOperatorIds={panelHereIds}
+                  /* R-357: the panel marks anyone on leave over the shown window
+                     the way it marks someone from another area. */
+                  absences={absences}
                   skillById={index.skillById}
                   nodeById={index.nodeById}
                   assignmentsByOperator={index.assignmentsByOperator}
                   windowStart={index.windowStart}
                   windowMinutes={index.windowMinutes}
+                  zone={zone}
                   capacityCap={index.capacityCap}
                   open={operatorPanelOpen}
                   onToggleOpen={() => setOperatorPanelOpen(!operatorPanelOpen)}
@@ -665,6 +751,10 @@ export default function BoardPage() {
           requiredSkills={index?.skillsForNode.get(popover.nodeId) ?? []}
           outsideAreaOperatorIds={outsideAreaOperatorIds}
           eligibilityPolicy={policyForNode(index, popover.nodeId)}
+          /* R-357: the leave check runs beside the certificate check, under the
+             same resolved policy — a line before Save, the same predicate the
+             server runs (`absenceGaps`). */
+          absences={absences}
           presetOperatorId={popover.presetOperatorId}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
@@ -687,6 +777,7 @@ export default function BoardPage() {
           anchor={popover.anchor}
           windowStart={index?.windowStart ?? from}
           dateFormat={dateFormat}
+          zone={zone}
           products={boardQuery.data?.products ?? []}
           onCancel={dragApi.closePopover}
           onSave={dragApi.saveRunFields}
@@ -772,6 +863,13 @@ export default function BoardPage() {
           anchor={popover.anchor}
           windowStart={index?.windowStart ?? from}
           dateFormat={dateFormat}
+          zone={zone}
+          /* R-357: the leave line for the CHOSEN person, over this row's own
+             window, refused in place under `block`. The policy is resolved for
+             this chip's cell exactly as the create pop-up resolves its own, so
+             the two pop-ups cannot disagree about who is refused. */
+          absences={absences}
+          eligibilityPolicy={policyForNode(index, popover.assignment.nodeId)}
           onCancel={dragApi.closePopover}
           onSave={dragApi.saveAssignmentFields}
           onReassign={dragApi.reassignAssignment}

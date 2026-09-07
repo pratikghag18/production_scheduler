@@ -173,6 +173,11 @@ interface BoardFacts {
   /** The header's date range string, e.g. "Mon 2026/08/31 - Wed 2026/09/02".
    *  Its SHAPE is the date format the header shows (DEF-0017). */
   headerDate: string;
+  /** The first few hour-tick clock labels on the header axis (e.g.
+   *  "00:00,01:00,02:00"). Its VALUES are the plant-local time the axis renders
+   *  in (R-353 / D88a): a supervisor's board must draw the SAME axis as the
+   *  admin's, resolved from the plant's zone on the server. */
+  headerClock: string;
   /** Break bands the shift layer draws on the first track (DEF-0016). Coupled to
    *  scroll position and track viewport (the layer draws only what is in view),
    *  so it is compared as PRESENCE, not to the unit; recorded for the walk log. */
@@ -260,6 +265,17 @@ async function observeBoard(page: Page, person: Person): Promise<BoardFacts> {
   const breaksFirstTrack = await firstTrack.locator('[class*="shiftBreak"]').count();
   const boundsFirstTrack = await firstTrack.locator('[class*="shiftbound"]').count();
 
+  // R-353 / D88a: the header's hour-tick clock labels, from the left of the
+  // window. Their VALUES are the plant-local time the axis draws in; both people
+  // are on Plant A, so a supervisor whose board fell back to a different zone
+  // than the admin's would show a different first tick here. Read after the
+  // left-anchor above, so the same leading ticks are on screen for everyone.
+  const headerClock = (await page.locator('[class*="hourTick"]').allTextContents())
+    .map(collapseWhitespace)
+    .filter((t) => /^\d{2}:\d{2}$/.test(t))
+    .slice(0, 6)
+    .join(",");
+
   const panelPresent = (await page.getByRole("complementary", { name: "Operators" }).count()) > 0;
 
   let shiftChips: string[] = [];
@@ -289,6 +305,7 @@ async function observeBoard(page: Page, person: Person): Promise<BoardFacts> {
     label: person.label,
     rootName,
     headerDate,
+    headerClock,
     breaksFirstTrack,
     boundsFirstTrack,
     shiftChips,
@@ -440,6 +457,21 @@ test("Ana (Plant A / Line 1) and Dana (Plant A): the same shift pattern and the 
         `(Ana="${ana.headerDate}", Dana="${dana.headerDate}")`,
     )
     .toBe(formatShapeOf(dana.headerDate));
+
+  // R-353 / D88a. And now the AXIS too: Ana's board is one line inside Plant A,
+  // so the zone it draws in is the plant's, resolved on the server -- the same
+  // axis Dana's Plant A board shows. A supervisor whose board fell back to a
+  // different zone than the admin's would show a different first hour tick.
+  expect
+    .soft(
+      ana.headerClock,
+      `R-353: Ana's board axis must render in the same zone as Dana's ` +
+        `(Ana="${ana.headerClock}", Dana="${dana.headerClock}")`,
+    )
+    .toBe(dana.headerClock);
+  expect
+    .soft(dana.headerClock.length, `Dana's Plant A board draws hour-tick labels`)
+    .toBeGreaterThan(0);
 });
 
 test("Marco (Plant B / Area 1) and Quinn (Plant B): the same shift pattern", async ({

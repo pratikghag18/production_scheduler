@@ -28,6 +28,7 @@ import type {
 } from "@/lib/api";
 import { parseTstzRange, fromEfficiency } from "@/lib/api";
 import { packLanes, trackRowHeight, type Density } from "./geometry";
+import { buildDayAxis, zonedTimeToInstant, type DayAxis } from "./time";
 import { buildCycleTimeIndex, cycleTimeKey, standardTargetQty } from "./standardTarget";
 
 export interface BoardRow {
@@ -62,9 +63,22 @@ export type IndexedAssignment = Assignment & {
 };
 
 export interface BoardIndex {
+  /** D88a: the window's local-midnight instant IN THE PLANT'S ZONE (`zone`
+   *  below), not UTC — the x = 0 origin every minute coordinate is measured
+   *  from. Runs/assignments (absolute instants) are turned into real minutes
+   *  against this, so their positions follow the plant's clock. */
   windowStart: Date;
   windowMinutes: number;
   dayCount: number;
+  /** D88a / migration 0063 (R-353): the IANA zone the board draws in, off the
+   *  payload. Handed to the formatters (`formatClock(d, zone)`) and used to
+   *  build `dayAxis`. */
+  zone: string;
+  /** D88a: the per-window day grid (local midnights as instants + real-minute
+   *  offsets + `wallToOffset`). Every board geometry call that used to multiply
+   *  by 1440 goes through this, so a DST changeover day is 1380/1500 min wide
+   *  and a shift keeps its wall-clock start (D88b). */
+  dayAxis: DayAxis;
   rows: BoardRow[];
   runsByNode: Map<string, IndexedRun[]>;
   assignmentsByNode: Map<string, IndexedAssignment[]>;
@@ -210,14 +224,19 @@ export function policyForNode(
  * The calendar day an instant falls on IN THE BOARD'S OWN FRAME —
  * `"YYYY-MM-DD"`, the same text a Postgres `date` arrives as.
  *
- * ⚠️ THIS IS A SEAM, NOT A CONVENIENCE. `check_eligibility` compares
- * `expires_at < upper(p_timerange)::date`, and that cast happens in the
- * database session's timezone, which is UTC. The board renders in UTC too
- * (`BOARD_ZONE`, `./time.ts`). So the client's day must be the UTC day, and
- * `toISOString().slice(0, 10)` is exactly that — where a local-time
- * `getFullYear()/getMonth()/getDate()` would put every window that ends near
- * midnight on the wrong day for anybody west of Greenwich, and would disagree
- * with the server on precisely the shifts that run to the end of a day.
+ * ⚠️ THIS IS A SEAM, NOT A CONVENIENCE, AND D88a DID NOT MOVE IT. It STAYS UTC,
+ * and that is a decision made WITH THE SERVER, not against it. `check_eligibility`
+ * compares `expires_at < upper(p_timerange)::date`, and that `::date` cast
+ * happens in the DATABASE SESSION's timezone — which is UTC for PostgREST and is
+ * NOT set per plant. So the server decides the certificate "end day" in UTC. The
+ * two sides of this comparison are a contract, and CLAUDE.md's rule is that they
+ * must never be in different zones: since the server stays UTC, the client stays
+ * UTC. D88a changed how an instant is DRAWN on the axis (`zone`), not which day
+ * the server counts a certificate against — so a plant-local `boardDay` here
+ * would silently disagree with `check_eligibility` for exactly the shifts that
+ * run to the end of a day. `toISOString().slice(0, 10)` is the UTC day and is
+ * kept. (If the DB session tz is ever set to the plant zone, BOTH sides move
+ * together — never one.)
  */
 export function boardDay(instant: Date): string {
   return instant.toISOString().slice(0, 10);
@@ -306,8 +325,29 @@ export function buildBoardIndex(
   windowEnd: Date,
   density: Density,
 ): BoardIndex {
-  const windowMinutes = (windowEnd.getTime() - windowStart.getTime()) / 60_000;
-  const dayCount = windowMinutes / 1440;
+  // D88a: the board's ORIGIN is the plant-local midnight of the day the user
+  // navigated to. `windowStart` arrives as the store's UTC-midnight "which day"
+  // marker (kept UTC because the zone is unknown at store-init); its UTC
+  // calendar day IS that day, and `zonedTimeToInstant` turns it into that day's
+  // LOCAL midnight in the payload's zone — computed HERE from `data.timezone`,
+  // synchronously, so the axis origin never lags the zone by a render. For a UTC
+  // zone this is `windowStart` unchanged and every number below is pixel-
+  // identical to the pre-D88 output.
+  // `?? "UTC"` guards a hand-built fixture that omits the key; a real payload
+  // always carries it (`parseBoardWindow` defaults it to 'UTC' via
+  // `coerceTimezone`), so this only bites in tests.
+  const zone = (data.timezone as string | undefined) ?? "UTC";
+  const dayCount = Math.round((windowEnd.getTime() - windowStart.getTime()) / 60_000 / 1440);
+  const origin = zonedTimeToInstant(
+    zone,
+    windowStart.getUTCFullYear(),
+    windowStart.getUTCMonth() + 1,
+    windowStart.getUTCDate(),
+    0,
+    0,
+  );
+  const dayAxis = buildDayAxis(origin, dayCount, zone);
+  const windowMinutes = dayAxis.windowMinutes;
 
   const nodeById = new Map<string, BoardNode>();
   for (const n of data.nodes) nodeById.set(n.id, n);
@@ -326,8 +366,8 @@ export function buildBoardIndex(
     try {
       const { start, end } = parseTstzRange(timerange);
       return {
-        startMin: (start.getTime() - windowStart.getTime()) / 60_000,
-        endMin: (end.getTime() - windowStart.getTime()) / 60_000,
+        startMin: (start.getTime() - origin.getTime()) / 60_000,
+        endMin: (end.getTime() - origin.getTime()) / 60_000,
       };
     } catch {
       droppedRanges += 1;
@@ -530,9 +570,11 @@ export function buildBoardIndex(
   });
 
   return {
-    windowStart,
+    windowStart: origin,
     windowMinutes,
     dayCount,
+    zone,
+    dayAxis,
     rows,
     runsByNode,
     assignmentsByNode,

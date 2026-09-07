@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchIsAdminFor, isSchedulerError, type Product } from "@/lib/api";
+import { fetchCanPlaceInPlant, fetchIsAdminFor, isSchedulerError, type Product } from "@/lib/api";
 import { productColorCss } from "@/lib/productColor";
 import { ZOOMS, type ZoomIndex } from "../lib/geometry";
-import { formatDayLabel, addMinutes, MINUTES_PER_DAY } from "../lib/time";
+import { formatDayLabel, addMinutes, zonedTimeToInstant, MINUTES_PER_DAY } from "../lib/time";
 import { shouldOfferRootPicker, type BoardRoot } from "../lib/rootSelection";
 import { boardKeys } from "../hooks/useBoardWindow";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { Chevron } from "@/components/icons";
 import { CopyWeekDialog } from "./CopyWeekDialog";
+import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import styles from "./BoardToolbar.module.css";
 
 /** 92-day cap: `board_window` raises `invalid_argument` past it (T6, docs/api.md §2). */
@@ -21,6 +22,9 @@ const MAX_WINDOW_DAYS = 92;
  */
 export const copyWeekKeys = {
   adminFor: (plantId: string) => ["copy-week", "admin-for", plantId] as const,
+  // R-356: whether the caller may place on this plant (admin, or a supervisor
+  // whose grant overlaps it) — the predicate for saving/applying a template.
+  canPlace: (plantId: string) => ["copy-week", "can-place", plantId] as const,
 };
 
 /**
@@ -44,6 +48,7 @@ export function BoardToolbar({
   products,
   isFetching,
   dateFormat = DEFAULT_DATE_FORMAT,
+  zone,
 }: {
   roots: BoardRoot[];
   rootPath: string | null;
@@ -58,9 +63,33 @@ export function BoardToolbar({
   products: Product[];
   isFetching: boolean;
   dateFormat?: DateFormat;
+  zone?: string;
 }) {
   const startInputValue = windowStartDate.toISOString().slice(0, 10);
-  const windowEnd = addMinutes(windowStartDate, windowDayCount * 1440);
+
+  // D88a (R-353): the displayed range must read the PLANT's days, the same ones
+  // the board axis draws. `windowStartDate` is the store's UTC-midnight "which
+  // day" marker; formatting it directly in a western zone would print the
+  // PREVIOUS day (UTC midnight is the evening before, locally). So reinterpret
+  // its calendar day as that day's LOCAL midnight in `zone` — exactly what
+  // `buildBoardIndex` does for the axis origin — and label from there. For a UTC
+  // zone this is `windowStartDate` unchanged.
+  const localStart = zonedTimeToInstant(
+    zone ?? "UTC",
+    windowStartDate.getUTCFullYear(),
+    windowStartDate.getUTCMonth() + 1,
+    windowStartDate.getUTCDate(),
+    0,
+    0,
+  );
+  const localLastDay = zonedTimeToInstant(
+    zone ?? "UTC",
+    windowStartDate.getUTCFullYear(),
+    windowStartDate.getUTCMonth() + 1,
+    windowStartDate.getUTCDate() + windowDayCount - 1,
+    0,
+    0,
+  );
 
   // R-339 / S35: Copy Week. The plant is the board's chosen root; the dialog
   // is anchored under the button that opened it, like every other popover.
@@ -75,6 +104,7 @@ export function BoardToolbar({
   // or after the ask failed -- "we could not ask" is not "yes".
   const queryClient = useQueryClient();
   const [copyWeekAnchor, setCopyWeekAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [saveAnchor, setSaveAnchor] = useState<{ x: number; y: number } | null>(null);
   const plant = roots.find((r) => r.path === rootPath) ?? null;
   const adminFor = useQuery({
     queryKey: copyWeekKeys.adminFor(plant?.id ?? ""),
@@ -84,7 +114,23 @@ export function BoardToolbar({
     // A typed refusal is an answer, not a flake (the board's own retry rule).
     retry: (count, err) => !isSchedulerError(err) && count < 1,
   });
-  const offerCopyWeek = plant !== null && adminFor.data === true;
+  // R-356: a supervisor who can place on this plant may save a week as a
+  // template and apply one, though only an admin may copy from another WEEK.
+  const canPlace = useQuery({
+    queryKey: copyWeekKeys.canPlace(plant?.id ?? ""),
+    queryFn: () => fetchCanPlaceInPlant(plant?.id ?? ""),
+    enabled: plant !== null,
+    staleTime: 30_000,
+    retry: (count, err) => !isSchedulerError(err) && count < 1,
+  });
+  const isAdmin = adminFor.data === true;
+  const canPlaceHere = canPlace.data === true;
+  // "Copy week" stays ADMIN-ONLY (S35): only an admin copies from another week.
+  // A placing supervisor reaches the SAME dialog through "Apply a template",
+  // which opens it locked to the template source. Both open one anchor.
+  const offerCopyWeek = plant !== null && isAdmin;
+  const offerApplyTemplate = plant !== null && canPlaceHere && !isAdmin;
+  const offerSaveTemplate = plant !== null && canPlaceHere;
 
   return (
     <header className={styles.header}>
@@ -118,8 +164,8 @@ export function BoardToolbar({
         roots.length === 1 && <span className={styles.rootName}>{roots[0].name}</span>
       )}
       <span className={styles.date}>
-        {formatDayLabel(windowStartDate, dateFormat)} –{" "}
-        {formatDayLabel(addMinutes(windowEnd, -1440), dateFormat)}
+        {formatDayLabel(localStart, dateFormat, zone)} –{" "}
+        {formatDayLabel(localLastDay, dateFormat, zone)}
       </span>
 
       {/* Day navigation, ported from the mockup's `.daynav`. Without it the
@@ -138,18 +184,44 @@ export function BoardToolbar({
         </button>
       </div>
 
-      {offerCopyWeek && (
+      {(offerCopyWeek || offerApplyTemplate || offerSaveTemplate) && (
         <div className={styles.copyWeek}>
-          <button
-            type="button"
-            title="Copy this week's plan into another week, deciding every clash yourself"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              setCopyWeekAnchor({ x: r.left, y: r.bottom + 4 });
-            }}
-          >
-            Copy week
-          </button>
+          {offerCopyWeek && (
+            <button
+              type="button"
+              title="Copy this week's plan, or a template, into another week, deciding every clash yourself"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setCopyWeekAnchor({ x: r.left, y: r.bottom + 4 });
+              }}
+            >
+              Copy week
+            </button>
+          )}
+          {offerApplyTemplate && (
+            <button
+              type="button"
+              title="Copy a saved template into a week, deciding every clash yourself"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setCopyWeekAnchor({ x: r.left, y: r.bottom + 4 });
+              }}
+            >
+              Apply a template
+            </button>
+          )}
+          {offerSaveTemplate && (
+            <button
+              type="button"
+              title="Save this week's runs and people as a named template"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setSaveAnchor({ x: r.left, y: r.bottom + 4 });
+              }}
+            >
+              Save this week as a template
+            </button>
+          )}
         </div>
       )}
       {copyWeekAnchor !== null && plant !== null && (
@@ -159,6 +231,8 @@ export function BoardToolbar({
           windowStart={windowStartDate}
           anchor={copyWeekAnchor}
           dateFormat={dateFormat}
+          zone={zone}
+          isAdmin={isAdmin}
           onClose={() => setCopyWeekAnchor(null)}
           onApplied={() => {
             // The same refresh every writer on the board triggers: invalidate
@@ -168,6 +242,15 @@ export function BoardToolbar({
               queryKey: boardKeys.window(plant.path, windowStartDate, to),
             });
           }}
+        />
+      )}
+      {saveAnchor !== null && plant !== null && (
+        <SaveTemplateDialog
+          plantId={plant.id}
+          plantName={plant.name}
+          windowStart={windowStartDate}
+          anchor={saveAnchor}
+          onClose={() => setSaveAnchor(null)}
         />
       )}
 

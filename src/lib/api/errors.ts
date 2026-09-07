@@ -37,6 +37,15 @@ export interface ExpiringSkillRef extends SkillRef {
   expiresAt: string;
 }
 
+/** One person named in an `absent` refusal (R-357). `from`/`to` are inclusive
+ *  `YYYY-MM-DD`, each null when the raise carried no dated absence. */
+export interface AbsentOperator {
+  operatorId: string;
+  from: string | null;
+  to: string | null;
+  reason: string | null;
+}
+
 /** The closed set of machine error codes P1-3a/P1-5b can raise (docs/api.md §1). */
 export type SchedulerErrorCode =
   | "capacity_exceeded"
@@ -53,7 +62,11 @@ export type SchedulerErrorCode =
   | "schedulable_level_locked"
   // Migration 0028 / D109. The closed set is fourteen now, not twelve.
   | "not_offered_here"
-  | "owner_change_blocked";
+  | "owner_change_blocked"
+  // Migration 0066 / R-357. A person placed onto a window they are on leave for,
+  // under a plant whose policy is `block`. The warn-path carries the same absence
+  // as a payload key, not this code — see `AbsenceInfo` in shapes.ts.
+  | "absent";
 
 export type SchedulerError =
   | {
@@ -216,6 +229,25 @@ export type SchedulerError =
    * should refetch and retry once (see useMoveRun).
    */
   | { kind: "RaceLost" }
+  /**
+   * Migration 0066 / R-357: a placement refused because the person is on leave
+   * for the window, under a plant whose eligibility policy is `block`.
+   *
+   * ⚠️ TWO RAISE SHAPES, ONE KIND. `create_assignment`/`reassign_assignment`
+   * raise it for ONE person (`operator_id` + an `absence` object); `move_run`
+   * raises it for the whole crew it could not move (`operators: [{operator_id,
+   * absence}]`), so the refusal names every absent member exactly as its
+   * eligibility pre-check names every ineligible one. `operators` below is the
+   * common shape: a single-person refusal is a one-entry list. `from`/`to` are
+   * the inclusive `YYYY-MM-DD` bounds `absence_overlap` already stepped in for,
+   * each null when the server sent a bare answer.
+   */
+  | {
+      kind: "Absent";
+      nodeId: string;
+      policy: "warn" | "block";
+      operators: AbsentOperator[];
+    }
   /*
    * ⭐ §19.63 — THE FIVE BELOW EXIST BECAUSE NOT EVERY WRITE IS AN RPC.
    *
@@ -280,6 +312,7 @@ const SCHEDULER_ERROR_KINDS: ReadonlySet<SchedulerError["kind"]> = new Set([
   "SchedulableLevelLocked",
   "NotOfferedHere",
   "OwnerChangeBlocked",
+  "Absent",
   "RaceLost",
   "WriteRefused",
   "DuplicateValue",
@@ -546,11 +579,50 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
       }
       return undefined;
     }
+    case "absent": {
+      // R-357. Two raise shapes (see the `Absent` variant): one `operator_id`
+      // with an `absence` object (create/reassign), or an `operators` array of
+      // `{operator_id, absence}` (move_run). `node_id` and a `warn`/`block`
+      // `policy` are on both; anything else is a malformed payload -> Unknown.
+      const policy =
+        detail.policy === "block" ? "block" : detail.policy === "warn" ? "warn" : undefined;
+      if (!hasStringProp(detail, "node_id") || policy === undefined) return undefined;
+      if (hasStringProp(detail, "operator_id")) {
+        return {
+          kind: "Absent",
+          nodeId: detail.node_id,
+          policy,
+          operators: [absentOperatorFrom(detail.operator_id, detail.absence)],
+        };
+      }
+      if (Array.isArray(detail.operators)) {
+        const operators: AbsentOperator[] = [];
+        for (const o of detail.operators) {
+          if (isPlainObject(o) && hasStringProp(o, "operator_id")) {
+            operators.push(absentOperatorFrom(o.operator_id, o.absence));
+          }
+        }
+        return { kind: "Absent", nodeId: detail.node_id, policy, operators };
+      }
+      return undefined;
+    }
     default:
       // Unrecognised `error` value in an otherwise well-formed DETAIL —
       // falls through to Unknown in the caller.
       return undefined;
   }
+}
+
+/** Lifts `{from, to, reason}` off an `absence_overlap` answer, tolerating a
+ *  bare or absent object (each field then null). R-357. */
+function absentOperatorFrom(operatorId: string, absence: unknown): AbsentOperator {
+  const a = isPlainObject(absence) ? absence : {};
+  return {
+    operatorId,
+    from: typeof a.from === "string" ? a.from : null,
+    to: typeof a.to === "string" ? a.to : null,
+    reason: typeof a.reason === "string" ? a.reason : null,
+  };
 }
 
 /**
@@ -835,6 +907,22 @@ export function describeSchedulerError(e: SchedulerError): string {
       return `That would leave ${what} on a level that can't hold scheduled work — move ${
         many ? "them" : "it"
       } first.`;
+    }
+    case "Absent": {
+      // R-357. Names the person and the leave, the way NotEligible names the
+      // person and the missing ticket. The contract carries ids, not names, so
+      // a caller holding the operator list (a pop-up, `buildSchedulerErrorToast`)
+      // builds a nicer sentence itself; this is the fallback that still says the
+      // true thing. Dates are the server's raw `YYYY-MM-DD` — a surface with the
+      // org's date format reformats them.
+      if (e.operators.length === 1) {
+        const o = e.operators[0];
+        const range = o.from !== null && o.to !== null ? ` ${o.from} – ${o.to}` : "";
+        const reason = o.reason !== null ? `: ${o.reason}` : "";
+        return `Operator ${o.operatorId} is on leave${range}${reason}.`;
+      }
+      const n = e.operators.length;
+      return `${n} crew members are on leave for this window.`;
     }
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";

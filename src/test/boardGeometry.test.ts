@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ShiftTemplate } from "@/lib/api";
+import { buildDayAxis } from "@/features/board/lib/time";
 import {
   ZOOMS,
   DENSITIES,
@@ -52,6 +53,11 @@ const t210: ShiftTemplate = {
   ],
 };
 
+// D88a: geometry now takes a DayAxis, not a bare dayCount. A UTC axis is the
+// pre-D88 world -- every day 1440 min, wallToOffset(day,m) === day*1440+m -- so
+// every number below is unchanged. `geometryDst.test.ts` covers the changeover.
+const AX3 = buildDayAxis(new Date(Date.UTC(2026, 0, 1)), 3, "UTC");
+
 describe("geometry.ts", () => {
   it("minutesToPx / pxToMinutes round-trip at all three zooms (case 4)", () => {
     expect(minutesToPx(60, 104)).toBe(104);
@@ -92,7 +98,7 @@ describe("geometry.ts", () => {
   });
 
   it("shiftInstances produces a day -1 tail (case 7)", () => {
-    const insts = shiftInstances(t38, 3);
+    const insts = shiftInstances(t38, AX3);
     const tail = insts.find((i) => i.shift.id === "s3" && i.rawStartMin < 0);
     expect(tail).toBeDefined();
     expect(tail?.startMin).toBe(0);
@@ -100,15 +106,15 @@ describe("geometry.ts", () => {
   });
 
   it("offShiftGaps: 3x8h has no interior gap, 2x10h has one 240min gap per day (case 8)", () => {
-    expect(offShiftGaps(t38, 3)).toEqual([]);
-    const gaps = offShiftGaps(t210, 3);
+    expect(offShiftGaps(t38, AX3)).toEqual([]);
+    const gaps = offShiftGaps(t210, AX3);
     expect(gaps.length).toBeGreaterThan(0);
     for (const [s, e] of gaps) expect(e - s).toBe(240);
   });
 
   it("shiftBoundaries has no multiple of 1440 and no window edge (case 9)", () => {
     const windowMinutes = 3 * 1440;
-    const bounds = shiftBoundaries(t38, 3);
+    const bounds = shiftBoundaries(t38, AX3);
     expect(bounds.every((m) => m % 1440 !== 0)).toBe(true);
     expect(bounds).not.toContain(0);
     expect(bounds).not.toContain(windowMinutes);

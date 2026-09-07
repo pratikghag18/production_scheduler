@@ -322,6 +322,9 @@ function makeFixture(): BoardWindow {
     // R-333 / 0062 (DEF-0017): the board's resolved date format. buildBoardIndex
     // does not read it, but the fixture carries it so it is an honest payload.
     dateFormat: "d_mon_yyyy",
+    // R-353 / 0063 (D88a): the board's resolved zone. A UTC payload keeps the
+    // axis at day*1440 and every number in this suite unchanged.
+    timezone: "UTC",
   } as unknown as BoardWindow;
 }
 

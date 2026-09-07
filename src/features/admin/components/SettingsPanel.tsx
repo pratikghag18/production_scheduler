@@ -95,16 +95,19 @@ import {
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { DATE_FORMATS, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
+import { supportedTimezones, timezoneLabel } from "@/lib/format/timezones";
 import {
   canAdministerPlant,
   INHERIT_CHOICE,
   settingsScope,
   useCompanyDateFormat,
   useCompanyEligibilityPolicy,
+  useCompanyTimezone,
   usePlantOverrides,
   useSetDateFormat,
   useSetEligibilityPolicy,
   useSetPlantSetting,
+  useSetTimezone,
 } from "../hooks/useOrgSettings";
 import { useEditRights } from "../hooks/useEditRights";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
@@ -272,18 +275,25 @@ export function SettingsPanel() {
 
   const companyFormat = useCompanyDateFormat(canQuery);
   const companyPolicy = useCompanyEligibilityPolicy(canQuery);
+  const companyTimezone = useCompanyTimezone(canQuery);
+  // The offered zones — the browser's full IANA list where the runtime has it,
+  // else the curated ~60 (see `timezones.ts`). Cheap enough to build per render
+  // on a panel this rarely mounted.
+  const timezoneOptions = supportedTimezones();
   // `null` on a field is INHERITING, and it is not the same as the resolved
   // value happening to equal the company's today.
   const own = usePlantOverrides(canQuery, scope.kind === "plant" ? scope.nodeId : null);
 
   const format = own.dateFormat ?? companyFormat;
   const policy = own.policy ?? companyPolicy;
+  const timezone = own.timezone ?? companyTimezone;
   const currentPolicy = POLICY_CHOICES.find((c) => c.value === policy) ?? POLICY_CHOICES[0];
 
   /* -- the writers, and which row each in-flight write belongs to -------- */
 
   const setOrgFormat = useSetDateFormat();
   const setOrgPolicy = useSetEligibilityPolicy();
+  const setOrgTz = useSetTimezone();
   // ⚠️ ONE MUTATION SERVES BOTH PLANT ROWS (a hook per row is not allowed), so
   // the in-flight and failed states have to be attributed to the SETTING they
   // belong to. React Query hands `variables` back; without this, the date
@@ -294,6 +304,14 @@ export function SettingsPanel() {
 
   const formatBusy = onPlant ? plantBusyKey === "date_format" : setOrgFormat.isPending;
   const policyBusy = onPlant ? plantBusyKey === "eligibility_policy" : setOrgPolicy.isPending;
+  const timezoneBusy = onPlant ? plantBusyKey === "timezone" : setOrgTz.isPending;
+  const timezoneError: SchedulerError | null = onPlant
+    ? plantFailedKey === "timezone"
+      ? setPlant.error
+      : null
+    : setOrgTz.isError
+      ? setOrgTz.error
+      : null;
   const formatError: SchedulerError | null = onPlant
     ? plantFailedKey === "date_format"
       ? setPlant.error
@@ -320,12 +338,14 @@ export function SettingsPanel() {
   // ⛔ `INHERIT_CHOICE` NEVER REACHES THE SERVER. `useSetPlantSetting`
   // dispatches it to `clear_node_setting`, the separate verb — there is no "set
   // to nothing" here because there is none on the server.
-  function write(key: "date_format" | "eligibility_policy", value: string): void {
+  function write(key: "date_format" | "eligibility_policy" | "timezone", value: string): void {
     if (!mayEdit) return;
     if (scope.kind === "plant") {
       setPlant.mutate({ nodeId: scope.nodeId, key, choice: value });
     } else if (key === "date_format") {
       setOrgFormat.mutate(value as DateFormat);
+    } else if (key === "timezone") {
+      setOrgTz.mutate(value);
     } else {
       setOrgPolicy.mutate(value as EligibilityPolicy);
     }
@@ -429,6 +449,68 @@ export function SettingsPanel() {
             {formatBusy && <p className={styles.status}>Saving…</p>}
             {formatError !== null && (
               <p className={styles.error}>{describeSchedulerError(formatError)}</p>
+            )}
+          </div>
+        </div>
+
+        {/* R-353/R-355: the TIME ZONE. A display setting like the date format —
+            it decides the zone the board's axis and every shift band render in,
+            per plant, with a company fallback of UTC. Same ONE-`<select>`,
+            TWO-OPTION-LISTS rule the row audit counts: a plant offers "use the
+            company setting" first (its third state and the way back), then the
+            IANA zones; the company scope offers just the zones. */}
+        <div className={rowStyles.row}>
+          <div className={rowStyles.text}>
+            <label className={rowStyles.name} htmlFor="settings-timezone">
+              Time zone
+            </label>
+            <p className={rowStyles.hint}>
+              The zone the schedule board reads in — a 06:00 shift shows at 06:00 to the people
+              working it. Times are stored as absolute instants regardless; this only changes how
+              the board’s axis is drawn.
+            </p>
+          </div>
+
+          <div className={rowStyles.control}>
+            {showControl && (
+              <select
+                id="settings-timezone"
+                className={`${fieldStyles.select} ${rowStyles.controlField}`}
+                value={onPlant ? (own.timezone ?? INHERIT_CHOICE) : companyTimezone}
+                disabled={!mayEdit || timezoneBusy}
+                onChange={(e) => write("timezone", e.target.value)}
+              >
+                {onPlant && (
+                  <option value={INHERIT_CHOICE}>
+                    Use the company setting (currently {timezoneLabel(companyTimezone)})
+                  </option>
+                )}
+                {/* Keep the company's current zone offerable even when it is not
+                    one of the curated ~60 (a hand-set org value), so the closed
+                    control can always show what is in force. */}
+                {!timezoneOptions.includes(companyTimezone) && (
+                  <option value={companyTimezone}>{timezoneLabel(companyTimezone)}</option>
+                )}
+                {timezoneOptions.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {timezoneLabel(tz)}
+                  </option>
+                ))}
+              </select>
+            )}
+            {onPlant && (
+              <p className={styles.consequence}>
+                {own.timezone === null
+                  ? inheritingNote(timezoneLabel(timezone))
+                  : setHereNote(timezoneLabel(timezone), timezoneLabel(companyTimezone))}
+              </p>
+            )}
+            {!onPlant && !mayEdit && (
+              <p className={styles.status}>Only a system admin can change the time zone.</p>
+            )}
+            {timezoneBusy && <p className={styles.status}>Saving…</p>}
+            {timezoneError !== null && (
+              <p className={styles.error}>{describeSchedulerError(timezoneError)}</p>
             )}
           </div>
         </div>

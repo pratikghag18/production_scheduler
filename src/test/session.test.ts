@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { adminAccess, canQueryAsUser, decideSessionUpdate } from "@/features/auth/session";
+import {
+  adminAccess,
+  canQueryAsUser,
+  decideSessionUpdate,
+  initialRecoveryFlag,
+  nextRecoveryFlag,
+} from "@/features/auth/session";
 import type { AuthEvent } from "@/features/auth/session";
 
 /**
@@ -326,5 +332,58 @@ describe("useSession.ts: the signed-in identity is app-wide, not per hook instan
     expect(asRef).not.toBe(src);
     expect(/^let lastUserId: string \| null = null;$/m.test(asRef)).toBe(false);
     expect(asRef).toMatch(/lastUserId\s*=\s*useRef/);
+  });
+});
+
+/* ===========================================================================
+ * Group P -- `nextRecoveryFlag` (F-106): the app remembers the EVENT that made
+ * a session a recovery one, never the path the tokens landed on.
+ * ======================================================================== */
+describe("session.ts: nextRecoveryFlag", () => {
+  it("P1: PASSWORD_RECOVERY raises the flag", () => {
+    expect(nextRecoveryFlag(false, "PASSWORD_RECOVERY")).toBe(true);
+  });
+
+  it("P2: USER_UPDATED clears it -- the password was set", () => {
+    expect(nextRecoveryFlag(true, "USER_UPDATED")).toBe(false);
+  });
+
+  it("P3: SIGNED_OUT clears it", () => {
+    expect(nextRecoveryFlag(true, "SIGNED_OUT")).toBe(false);
+  });
+
+  it("P4: a token refresh, a sign-in or the initial session leave it alone either way", () => {
+    for (const event of ["TOKEN_REFRESHED", "SIGNED_IN", "INITIAL_SESSION"]) {
+      expect(nextRecoveryFlag(true, event)).toBe(true);
+      expect(nextRecoveryFlag(false, event)).toBe(false);
+    }
+  });
+});
+
+describe("session.ts: initialRecoveryFlag (F-106, the seed)", () => {
+  it("P5: the landing hash with type=recovery seeds the flag before any event", () => {
+    expect(initialRecoveryFlag("#access_token=a&refresh_token=b&type=recovery", null)).toBe(true);
+    expect(initialRecoveryFlag("#type=recovery", null)).toBe(true);
+  });
+
+  it("P6: any other hash, or none, does not", () => {
+    expect(initialRecoveryFlag("#access_token=a&type=signup", null)).toBe(false);
+    expect(initialRecoveryFlag("#type=recoveryx", null)).toBe(false);
+    expect(initialRecoveryFlag("", null)).toBe(false);
+    expect(initialRecoveryFlag(undefined, null)).toBe(false);
+  });
+
+  it("P7: the tab's memory outranks the hash, so a reload keeps the gate", () => {
+    expect(initialRecoveryFlag("", "1")).toBe(true);
+    expect(initialRecoveryFlag("", "0")).toBe(false);
+    expect(initialRecoveryFlag("", null)).toBe(false);
+  });
+
+  it("P8: an invite hash (type=invite) seeds the flag too, so an invited person owes a password (P1-6c)", () => {
+    expect(initialRecoveryFlag("#access_token=a&refresh_token=b&type=invite", null)).toBe(true);
+    expect(initialRecoveryFlag("#type=invite", null)).toBe(true);
+    // and only these two types: a signup confirmation or a magic link does not.
+    expect(initialRecoveryFlag("#type=invitex", null)).toBe(false);
+    expect(initialRecoveryFlag("#type=magiclink", null)).toBe(false);
   });
 });

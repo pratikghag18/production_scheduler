@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { BoardOperator, Skill, BoardNode } from "@/lib/api";
+import { absenceGaps, type AbsenceRow } from "@/lib/absence";
 import type { IndexedAssignment } from "../lib/boardIndex";
 import { isFullyAllocated } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
@@ -48,11 +49,13 @@ function initials(name: string): string {
 export function OperatorPanel({
   operators,
   hereOperatorIds,
+  absences = [],
   skillById,
   nodeById,
   assignmentsByOperator,
   windowStart,
   windowMinutes,
+  zone,
   capacityCap,
   open,
   onToggleOpen,
@@ -73,11 +76,20 @@ export function OperatorPanel({
    * of the plant" and appears only after the control below is pressed.
    */
   hereOperatorIds: ReadonlySet<string>;
+  /**
+   * R-357: every absence the board can see (RLS-scoped to this board's people
+   * upstream, so nothing here is filtered by grant). The chip is marked when the
+   * person is on leave for ANY part of the shown window — `absenceGaps` answers
+   * exactly that overlap, the same predicate the server refuses on. Optional
+   * with an empty default so a test with no absences renders the pre-R-357 panel.
+   */
+  absences?: readonly AbsenceRow[];
   skillById: Map<string, Skill>;
   nodeById: Map<string, BoardNode>;
   assignmentsByOperator: Map<string, IndexedAssignment[]>;
   windowStart: Date;
   windowMinutes: number;
+  zone?: string;
   capacityCap: number;
   open: boolean;
   onToggleOpen: () => void;
@@ -94,6 +106,20 @@ export function OperatorPanel({
   };
 }) {
   const [showOthers, setShowOthers] = useState(false);
+
+  // R-357: who is on leave for ANY part of the shown window. The window is the
+  // board's whole span — [windowStart, windowStart + windowMinutes) — and
+  // `absenceGaps` returns a hit exactly when an absence overlaps the days it
+  // touches, so this is the same overlap the server would refuse a placement on.
+  const absentIds = useMemo(() => {
+    const end = addMinutes(windowStart, windowMinutes);
+    const ids = new Set<string>();
+    for (const o of operators) {
+      if (absenceGaps(absences, o.id, { start: windowStart, end }) !== null) ids.add(o.id);
+    }
+    return ids;
+    // The window instants are what the answer turns on; key on their time.
+  }, [operators, absences, windowStart.getTime(), windowMinutes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visible = useMemo(
     () =>
@@ -116,7 +142,7 @@ export function OperatorPanel({
       ? mine
           .map((a) => {
             const nodeName = nodeById.get(a.nodeId)?.name ?? a.nodeId;
-            return `${nodeName} · ${formatFull(addMinutes(windowStart, a.startMin))}–${formatClock(addMinutes(windowStart, a.endMin))} · ${a.efficiencyPercent}%`;
+            return `${nodeName} · ${formatFull(addMinutes(windowStart, a.startMin), undefined, zone)}–${formatClock(addMinutes(windowStart, a.endMin), zone)} · ${a.efficiencyPercent}%`;
           })
           .join("\n")
       : undefined;
@@ -138,6 +164,10 @@ export function OperatorPanel({
             wording is the panel's plain half of the pop-ups' "not from this
             area (override)" — the panel asks for nothing, the drop does. */}
         {outside && <span className={styles.outsideTag}>not from this area</span>}
+        {/* R-357: the plain half of the pop-ups' "On leave" line — the panel
+            says who is away over the shown window; placing them is where the
+            warning or the refusal actually fires. */}
+        {absentIds.has(o.id) && <span className={styles.leaveTag}>on leave</span>}
         {o.skillIds.map((sid) => {
           const skill = skillById.get(sid);
           return skill ? (

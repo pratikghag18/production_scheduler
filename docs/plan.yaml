@@ -3,15 +3,15 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-06'
-  tip: 0f2383e
+  updated: '2026-09-07'
+  tip: 935ba6b
   baseline:
-    app_tests: 2272
-    app_test_files: 92
+    app_tests: 2446
+    app_test_files: 105
     tsc: 0
     eslint: 0
-    db_checks: 704
-    migrations: 62
+    db_checks: 747
+    migrations: 66
     mutations: 509 of 536
 tracks:
 - id: core
@@ -1343,7 +1343,7 @@ stages:
   track: core
   num: 24
   title: 'The front door: getting people into the system at all'
-  status: parked
+  status: done
   owner: agent
   refs:
   - P1-6b
@@ -1401,6 +1401,21 @@ stages:
     one, so the buildout's visible half said the front door was being worked on, every day for two
     weeks, while the work went elsewhere. **Unpark it by moving its queue items back above the PARKED
     marker, not by editing this line.**
+
+
+    **★ SESSION 84 (6 Sept): PASSWORD RESET AND CHANGE ARE IN (P1-6d, R-347, R-348), and the
+    `useSession` debt is paid (R-349).** A "Forgot your password?" link on sign-in, a reset screen the
+    email link lands on wherever the auth server drops its tokens (F-106), and a change-password page
+    next to Sign out; one `SessionProvider` at the root so every screen reads the same answer about who
+    is signed in.
+
+
+    **★ SESSION 85 (7 Sept): INVITATIONS ARE IN (P1-6c, R-351, R-352), AND THE FRONT DOOR IS BUILT.**
+    The maintainer's "launch wave 3" was the fresh go-ahead this card asked for. An admin invites by
+    email from the Access panel; the project's first Edge Function does the one call a browser cannot
+    and hands the grant back to the database to decide; the invited person sets a password from the
+    link and lands with their grants, marked "invited" until they first sign in. Nothing of the front
+    door is left open.
 - id: S25
   track: core
   num: 25
@@ -7223,8 +7238,637 @@ requirements:
     Development reached R-304, so both sides wrote that id for different requirements; Development's
     R-304 (the matrix remembering its window and scope) keeps it and this one moved to R-321.
     `docs/defects/DEF-0001.md` follows the id here, which is the only edit made to that file.
+- id: R-347
+  title: A forgotten password is reset by an email link, and the request leaks nothing
+  source:
+  - queue item "P1-6d password reset and change-password"
+  - session 84 conversation
+  stated_by: maintainer
+  claim: >-
+    A person who has forgotten their password can request a reset from the sign-in screen: a
+    "Forgot your password?" link opens `/forgot-password`, which takes an email and asks Supabase for
+    the reset email, and shows the SAME neutral sentence ("If that address has an account, a reset
+    link is on its way.") whether or not the address has an account, because "no account with that
+    email" is a leak. The link in the email lands on `/reset-password`, which sits OUTSIDE the route
+    gate beside `/sign-in`, waits for the recovery session, and takes a new password twice; after
+    that the person is signed in and sent to the board. An expired or already-used link lands on a
+    terminal "request a new one" screen, never a blank form. Every failure is a described sentence
+    (`describePasswordError`), never a raw provider string. Nothing new reads `?redirect=`.
+    ⭐ AND THE RESET SCREEN IS REACHED WHEREVER THE TOKENS LAND (F-106). A reset link's tokens make a
+    full session the moment they are read, and the auth server drops them on `/` whenever the app's
+    origin is not the project's site_url. The session remembers the PASSWORD_RECOVERY event
+    (`useSession().recovery`), seeded from the landing URL's own recovery fragment and remembered
+    for the tab so a reload keeps it, and the route gate sends a recovery session to
+    `/reset-password` before the board and before the no-access dead-end, until the password is set
+    or the person signs out. Re-entering the current password is refused with its own sentence.
+  verified_by:
+  - kind: vitest
+    file: src/test/passwordFlow.test.ts
+    cases: >-
+      P1-P6 the two-field validation; M1-M5 the recovery state machine, a bad link ends failed and
+      never on a blank form; H1-H4 parseRecoveryHash; E1-E6 describePasswordError, every branch,
+      the current password re-entered being its own sentence;
+      R1-R6 attemptReset, the neutral ok on success and on an unknown address alike, network and
+      rate-limit failures described
+  - kind: vitest
+    file: src/test/passwordPages.test.tsx
+    cases: >-
+      F1-F3 the forgot screen shows the neutral sentence on success and on "user not found" alike,
+      a rate limit shows a described error; R1-R4 the reset screen shows no form until the recovery
+      session exists, appears on PASSWORD_RECOVERY, lands on the failed screen for a bad link, goes
+      to the board on success
+  - kind: vitest
+    file: src/test/authFlow.test.ts
+    cases: >-
+      D5 a recovery session outranks app and no-access; D6 the flag changes nothing while loading or
+      signed out, and absent reads as no
+  - kind: vitest
+    file: src/test/recoveryGate.test.tsx
+    cases: >-
+      G1 with the flag up, landing on / goes to the reset screen; G2 with no profile the reset
+      screen still comes before the dead-end; G3-G4 with the flag down the board and the dead-end
+      are unchanged
+  - kind: vitest
+    file: src/test/session.test.ts
+    cases: >-
+      P1-P4 nextRecoveryFlag: PASSWORD_RECOVERY raises it, USER_UPDATED and SIGNED_OUT clear it, a
+      token refresh or sign-in leaves it alone; P5-P7 initialRecoveryFlag: the landing hash seeds
+      it, any other hash does not, and the tab's memory outranks the hash
+  - kind: vitest
+    file: src/test/sessionProvider.test.tsx
+    cases: >-
+      S9 the provider raises `recovery` on PASSWORD_RECOVERY and clears it on USER_UPDATED with no
+      reset and no loading; S10 the landing hash seeds it before any event and it is written down for
+      the tab; S11 the tab's memory keeps it across a mount and USER_UPDATED forgets it
+  - kind: e2e
+    file: e2e/passwordReset.spec.ts
+    cases: >-
+      "a forgotten password is reset by email and the new one works" (a throwaway account, the
+      emailed token exchanged live, the new password set on /reset-password and then used to sign
+      in); "a recovery session dropped on the board's URL is sent to the reset screen" (the tokens
+      landed on /, the gate sends them to /reset-password, the password is set and the gate lets
+      them through)
+  - kind: e2e
+    file: e2e/smoke.spec.ts
+    cases: >-
+      /forgot-password and /reset-password render without the shell and do not redirect to sign-in
+  status: covered
+- id: R-348
+  title: A signed-in person changes their own password and stays signed in
+  source:
+  - queue item "P1-6d password reset and change-password"
+  - session 84 conversation
+  stated_by: maintainer
+  claim: >-
+    A signed-in person changes their own password from `/change-password`, reached from a link in
+    the shell's header next to Sign out. It takes a new password twice, shows a sentence on success,
+    and leaves them signed in and where they were: no navigation, so the session is untouched. A
+    mismatch or a too-short password is refused before any round trip; a provider error is a
+    described sentence, never a raw string. Walked as Vina, the Plant C viewer, the least-privileged
+    demo person, with her password put back afterwards.
+  verified_by:
+  - kind: vitest
+    file: src/test/passwordFlow.test.ts
+    cases: >-
+      C1-C5 attemptChange: success, a short password and a mismatch short-circuit without touching
+      the network, a provider error and a thrown network error are described
+  - kind: vitest
+    file: src/test/passwordPages.test.tsx
+    cases: >-
+      A2/A3 both fields render with autoComplete=new-password; C1 a successful change shows the
+      sentence and does NOT navigate; C2 a mismatch is refused before the network; C3 a provider
+      error is shown as a sentence
+  - kind: e2e
+    file: e2e/passwordReset.spec.ts
+    cases: >-
+      "a signed-in viewer changes her own password and stays signed in", driven as Vina; the success
+      sentence shows, the URL stays on /change-password with Sign out present, and devpassword is
+      restored in a finally
+  status: covered
+- id: R-349
+  title: The app resolves who is signed in once, at the root, and every screen reads that one answer
+  source:
+  - queue item "Debt: useSession() called in five components; one SessionProvider at the root"
+  - the finding "The first browser test that ever signed in failed on its first full run" (R-337)
+  stated_by: agent
+  claim: >-
+    Who is signed in is resolved ONCE, by a single `SessionProvider` mounted at the root of the app
+    (inside the query client, outside the router): one getSession round trip, one user_profiles
+    read, one app_is_admin_anywhere RPC, one auth listener, one `loading` and one `profile`.
+    `useSession()` keeps its signature and return type but reads that single object from context,
+    so every one of its thirty-odd call sites shares the same answer and no two copies can disagree
+    about who you are, which was the R-337 flicker. Calling it outside the provider throws, naming
+    the provider. The identity term (`lastUserId`) stays module-scoped and a token refresh still
+    resets nothing; a genuine identity change still resets the query cache exactly once. The
+    AdminPage guard (R-337) is unchanged and correct with or without the provider. INITIAL_SESSION,
+    which supabase-js fires from its own start-up before getSession resolves, is not a change: the
+    reviewer counted the profile read twice on a hard reload before that line existed, and once
+    after.
+  verified_by:
+  - kind: vitest
+    file: src/test/sessionProvider.test.tsx
+    cases: >-
+      S1 loading starts true; S2 a signed-out initial load clears loading with no profile and no RPC;
+      S3 a signed-in load reads the profile and calls the RPC once; S4 a token refresh resets, spins
+      and refetches nothing; S5 an identity change resets the cache exactly once; S6 a failed profile
+      read gives null and never calls the RPC; S7 useSession() outside the provider throws naming
+      it; S8 five consumers share exactly one getSession, one subscription, one profile read and one
+      RPC; S12 INITIAL_SESSION arriving before getSession resolves does not read the profile twice
+  - kind: e2e
+    file: e2e/signedIn.spec.ts
+    cases: >-
+      the three signed-in rail cases, which failed intermittently under load before one session
+      existed and pass warm run after run after it, six in a row measured
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: >-
+      every demo person signs in and gets a board with no alert; a supervisor's board matches the
+      admin above them, now read from the single session
+  status: covered
+- id: R-350
+  title: Every drag on the board and in the admin tree works under a finger, and a finger on a scrollable surface scrolls
+  source:
+  - queue item "touch acceptance pass on both drags"
+  - session 84 conversation
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    Driven with real touch input (Chromium's Input.dispatchTouchEvent on a tablet profile with
+    hasTouch, as a second Playwright project named `touch`), every pointer-event drag behaves under
+    a finger. On the board: create on empty track, move a block, and the roster-chip drag from the
+    panel onto a track; the pop-up moves by its title bar and a tap on a control inside it still
+    works. A viewer's finger starts no board drag and creates nothing, and does not scroll the board
+    either. In the admin tree and the level list, on touch ONLY the grip drags (`rowIsDragSource`
+    refuses "touch"), so the row body stays for scrolling. A block and a track carry
+    `touch-action: none`, so a finger on them drags rather than scrolls; the board's own touch-scroll
+    surface is the sticky rail and the grid margins.
+    ⭐ DECIDED BY THE MAINTAINER, 7 Sept, from three options put side by side (create as the mouse
+    does; scroll with create behind a long-press; scroll with create only by keyboard or a control):
+    a finger on EMPTY track CREATES, it does not scroll, because that matches the mouse exactly and
+    keeps the board's main gesture reachable by touch. The cost, accepted: on a tablet the board is
+    panned from the sticky rail column. No work followed; the spec already pins this answer.
+  verified_by:
+  - kind: e2e
+    file: e2e/touch.spec.ts
+    cases: >-
+      T1 create on empty track, not scroll; T2 a block move is a drag, not a scroll, scrollLeft
+      unchanged; T3 the roster-chip drag onto a track; T4 the pop-up's title-bar drag and a tap
+      through to a button inside; T5 a viewer's finger is refused on a block and on empty track and
+      scrolls nothing; T6 the tree row body does not reorder on touch; T7 the tree grip drags on
+      touch; T8 the level-list grip drags on touch
+  status: covered
+- id: R-356
+  title: A named template is a whole week, jobs and people, saved relative to Monday and applied through Copy Week
+  source:
+  - session 85 conversation
+  - queue item "Named templates (relative-time placements)"
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 7 Sept, from three options put side by side (a whole week with its people; jobs
+    only; a daily pattern per line): a template is a NAMED COPY OF ONE WEEK'S RUNS WITH THEIR
+    ASSIGNMENTS, stored relative to that week's Monday, belonging to the plant it was saved from.
+    Saving one is "Save this week as a template" from the board; applying one is Copy Week with the
+    template as the source instead of another week, so every clash rule, the preview, and the
+    choose-per-clash flow apply unchanged, and nothing is written that Copy Week would not write. A
+    template is listed, renamed and deleted by the plant's admins; a supervisor can apply one to a
+    week they can place on and cannot delete one.
+    ⭐ LANDED IN SESSION 85 as migration 0067 (not 0065: lane D's 0066 re-emits copy_week_plan, and
+    a template-aware re-emission must run after it, built from the live definition). "Copy week"
+    gains a source picker, another week or a template; "Save this week as a template" and "Apply a
+    template" sit beside it, offered to anyone who can place in the plant, while Copy Week from a
+    week stays admin-only as S35 decided. The board opens a supervisor at the top of HER forest,
+    a line below the plant, so the template paths resolve the plant upward as a definer
+    (`app_plant_root_of`), the F-110 lesson.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/89_week_templates_test.sql
+    cases: >-
+      TP0-TP6 with TP-EQ, TP-ON and TP-APPLY: save then list; a duplicate name refused
+      case-insensitively; a supervisor who can place may save from and apply to a week and may not
+      delete (TP3), and one whose board root is a line below the plant resolves to the plant, saves
+      only the rows she can read, and applies (TP6); a viewer refused at save, apply, rename and
+      delete (TP4); a plan from a template equals a plan from the week it was saved from, item for
+      item, on the same target (TP-EQ); an overnight item crosses the day boundary with end_min
+      past 1440 (TP-ON); apply-from-template writes exactly what Copy Week writes, rows compared in
+      relative time (TP-APPLY); execute granted to authenticated and revoked from anon and public
+      on the writers (TP5)
+  - kind: vitest
+    file: src/test/weekTemplates.test.ts
+    cases: >-
+      save, list, rename and delete parse from one column constant and surface a refusal; the
+      template source is threaded through copy_week_plan and apply_copy_week with a null source;
+      the counts sentence names the template as the source
+  - kind: vitest
+    file: src/test/copyWeekDialogTemplate.test.tsx
+    cases: >-
+      the source picker, another week or a template, and the same preview path with a template id;
+      a supervisor gets only the template source; Copy week is admin-only while Apply a template and
+      Save are offered to a placing supervisor and to no viewer
+  - kind: e2e
+    file: e2e/weekTemplates.spec.ts
+    cases: >-
+      an admin saves this week and applies it through Copy Week onto a scratch week, then deletes
+      it in the admin Templates tab; a supervisor is offered Save and Apply a template, template
+      source only, and never Copy week; a viewer is offered none
+  status: covered
+- id: R-357
+  title: An absence is recorded in the app or imported by file, and the board and Copy Week treat it as a clash
+  source:
+  - session 85 conversation
+  - queue item "PTO/absence source decision + conflict surfacing"
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 7 Sept, from three options put side by side (entered in the app; CSV import;
+    both): BOTH. An absence is a person, a date range and a reason, recorded on an Absences tab in
+    admin by a supervisor or admin of the person's place, and also imported by file through the
+    existing import pipeline in the same shape as operators and trainings. On the board and in Copy
+    Week an assignment that overlaps a person's absence is a clash of its own kind, decided by the
+    same server function that decides eligibility and surfaced the way an expired certificate is
+    (R-338): the screen shows it before the save, the server refuses or warns under the plant's
+    existing warn-or-block policy, and the client's picture of it is the same predicate the server
+    runs.
+    ⭐ THE SERVER AND ADMIN HALVES LANDED IN SESSION 85 (migration 0066: the table, the writers gated
+    on the person's home, the definer predicate `absence_overlap`, and `create_assignment`,
+    `move_run`, `reassign_assignment` and `copy_week_plan` consulting it beside eligibility; the
+    Absences tab and the CSV importer; `absenceGaps` as the client mirror). THE BOARD'S OWN
+    SURFACING LANDED THE SAME SESSION: an "on leave" mark on the operator panel for anyone away
+    over the shown window, the leave named on a line in the create and reassign pop-ups before the
+    save (a warning under warn, Create disabled in place under block, the R-338 shape), and a
+    sentence for the `absent` refusal. The board reads absences with a second query rather than a
+    re-emitted board_window, on the evidence that `absences_select` and `operators_select` gate on
+    the same predicate, so the set of people with absences shown is exactly the set of people drawn;
+    nothing is resolved upward, so no definer is needed. Two edges left named for the queue: the
+    warn-path warnings after a successful crew drag (`absence_warnings`) are parsed but not yet
+    shown in the drag toast, and the Copy Week dialog's `absent` clash sentence belongs to the
+    templates lane.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/88_absences_test.sql
+    cases: >-
+      AB0-AB14 (19 with the b cases): the exclusion constraint; a supervisor of the person's place
+      may record and one of another place may not (AB2-AB4); remove gated the same way (AB5); a
+      viewer reads and cannot write and a direct INSERT is refused (AB6-AB7); the absence_overlap
+      boundary both ways, an absence ending on the shift's start day clashes and a shift ending at
+      midnight on the absence's start day does not (AB8, AB8b); an assignment over an absence
+      refused under block and warned under warn for create, move, reassign and the copy plan
+      (AB9-AB12); the definer predicate answers for a supervisor and is null-safe (AB13);
+      authenticated-only grants (AB14)
+  - kind: vitest
+    file: src/test/absence.test.ts
+    cases: absenceGaps boundary cases mirrored on the SQL cases by name (AB8, AB8b), earliest first, per operator, open-ended window
+  - kind: vitest
+    file: src/test/absenceImport.test.ts
+    cases: column detection; person match by import id, employee ref or name with a non-unique match an error; bad date, inverted range, blank reason; insert versus update on the derived id; mixed-file counts
+  - kind: vitest
+    file: src/test/absencesPanel.test.tsx
+    cases: the section is offered to a supervisor and a viewer is denied admin; the panel records and removes through the api and shows a refusal as a sentence; an inverted range is refused client-side
+  - kind: e2e
+    file: e2e/absences.spec.ts
+    cases: Ana records, sees and removes an absence; Viva is never offered the tab; Dana imports a CSV and a bad row is refused
+  - kind: vitest
+    file: src/test/absenceOnBoard.test.tsx
+    cases: >-
+      the board's own surfacing, each named for its 88_absences_test.sql twin: the create pop-up
+      names the leave before Create and refuses in place under block or warns under warn (AB8,
+      AB8b, AB9); the reassign pop-up does the same for the chosen person and never walls a
+      field-only edit (AB11); the operator panel marks whoever is away over the shown window; the
+      `absent` describer names one person or the whole crew (AB10) and falls through to Unknown on
+      a malformed payload; the warn-path keys parse, defaulting to not-absent on an older payload
+  - kind: e2e
+    file: e2e/absenceOnBoard.spec.ts
+    cases: >-
+      Ana records an absence over the shown week, the board marks the person on leave on the
+      operator panel and names it in the create pop-up's line, then the absence is removed
+  status: covered
+- id: R-351
+  title: An admin invites a person by email and they land with their grants
+  source:
+  - queue item "P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    On the Access panel, an admin who searches by an email that matches nobody in the company is
+    offered "Invite <email> to <place> as viewer / supervisor / admin": the same three roles
+    set_site_member accepts, gated by the same predicate (admin only at a plant root). The
+    project's first Edge Function (`supabase/functions/invite`) does the one call a browser cannot:
+    it checks app_is_admin_anywhere AS THE CALLER (an unauthorised caller costs no email), invites
+    the person by email with the service role, with a redirect to <origin>/reset-password checked
+    against an allow-list, inserts their user_profiles row for the caller's org (role viewer), then
+    grants the role AS THE CALLER through set_site_member, so the database keeps the final say. It
+    reads the profile and the grant back before answering ok, and deletes the profile again if the
+    grant is refused, returning the refusal verbatim in the SchedulerError shape. An email already
+    in this org answers already_member; one in another org is refused and nothing is said about
+    the other org. A supervisor is refused directly and is never offered the control.
+  verified_by:
+  - kind: e2e
+    file: e2e/invite.spec.ts
+    cases: >-
+      an admin invites by email, the person sets a password and lands with their grant (Dana
+      invites a throwaway to Plant A, the emailed token is exchanged live, the password is set
+      and the person lands on the board, not the no-access dead-end); a supervisor cannot invite,
+      the function refuses her directly
+  - kind: vitest
+    file: src/test/inviteFlow.test.ts
+    cases: >-
+      O1-O5 canOfferInvite only when an email matches nobody and the caller may grant; R1-R2
+      inviteRoles reuse siteAccess's menu, admin only at a root; B1-B2 the request body; L1-L2
+      looksLikeEmail; S1-S2 and E1-E2 the outcome sentences, other_org saying nothing about the
+      other org
+  - kind: vitest
+    file: src/test/siteAccessInvite.test.tsx
+    cases: >-
+      the invite control is offered for an unmatched email search and not for a matched one or a
+      non-email name search
+  - kind: sql
+    file: supabase/tests/86_invite_test.sql
+    cases: G4 the site_people refusal guards still fire (non-admin not_permitted, bad node invalid_argument)
+  status: covered
+- id: R-352
+  title: An invited person sets a password from the link and shows as invited until first sign-in
+  source:
+  - queue item "P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    The auth server sends an invite link with type=invite; supabase-js turns it into a session and
+    fires SIGNED_IN, not PASSWORD_RECOVERY. initialRecoveryFlag is widened so a type=invite
+    fragment seeds the recovery flag too, and the same route gate sends the session to
+    /reset-password, where the copy reads "Set your password" instead of "Set a new password".
+    After the password is set the person is signed in and lands on the board of the place they
+    were granted. In the Access panel the person is marked "invited" (site_people carries
+    invitedPending, last_sign_in_at IS NULL, migration 0064) until their first sign-in; a profile
+    whose auth row is absent reads as invited as well, the safe direction.
+  verified_by:
+  - kind: vitest
+    file: src/test/session.test.ts
+    cases: P8 initialRecoveryFlag, a type=invite hash seeds the flag, type=invitex and magiclink do not
+  - kind: vitest
+    file: src/test/siteAccessInvite.test.tsx
+    cases: the invited mark shows on a member who has never signed in and not on one who has
+  - kind: sql
+    file: supabase/tests/86_invite_test.sql
+    cases: >-
+      I1 invited reads invitedPending true and a signed-in person false in the same payload; I2 a
+      profile with no auth row reads true; I3 the invited person still carries their grant and
+      email; G1-G3 and G5 0060's search, limit, total and grant guards survive the re-emit
+  - kind: e2e
+    file: e2e/invite.spec.ts
+    cases: the invited person's link shows the "Set your password" heading and lands them on the board
+  status: covered
+- id: R-353
+  title: The board's axis is the plant's local time, resolved upward and carried in the payload
+  source:
+  - D88 §19.21
+  - queue item "Per-site timezone (D10 / D88)"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    The board renders in the plant's local time (D88a): a 06:00 shift reads 06:00 to the people
+    working it. The zone hangs off a NODE and resolves nearest-ancestor with a company fallback
+    (orgs.settings.timezone, default UTC), the same mechanic as date_format: the third key of
+    node_settings, an IANA name validated against pg_timezone_names. It is resolved on the SERVER
+    for the board's own root (app_resolve_node_setting, a definer) and carried on board_window as a
+    top-level `timezone` token, so a line supervisor who cannot read her plant root still gets the
+    plant's zone; the client never walks the ancestry for it (DEF-0016, DEF-0017).
+    ⚠️ ONE EDGE LEFT OPEN BY THE LANE, FOR THE REVIEWER AND THE QUEUE: the board's fetch window is
+    still keyed on the UTC day marker while the axis is plant-local, so at the far edge of the
+    window up to the zone's offset of runs can fall outside the fetched range until the person
+    scrolls. Nothing in the demo world reaches it; it is a follow-up (widen the fetch by a day, or
+    key it on the plant-local origin once the zone is known).
+  verified_by:
+  - kind: sql
+    file: supabase/tests/87_plant_timezone_test.sql
+    cases: >-
+      T1 an invalid IANA name is refused invalid_argument; T2 a plant override beats the company
+      default and a child inherits it; T3 an untouched plant follows the company and the zero state
+      coalesces to UTC, never null; T3b the supervisor can read neither the plant root nor its
+      timezone row; T4 her board payload nevertheless carries the plant's America/Chicago; T5 a
+      supervisor is refused not_permitted on the write and nothing is stored
+  - kind: sql
+    file: supabase/tests/60_api_test.sql
+    cases: the board_window shape check allows `timezone` as a resolved-for-root scalar key beside date_format
+  - kind: vitest
+    file: src/test/shapes.test.ts
+    cases: parseBoardWindow carries timezone, lenient, an absent or unusable name falling back to UTC
+  - kind: vitest
+    file: src/test/boardTime.test.ts
+    cases: formatClock, formatDayLabel, startOfDay and mondayOfWeek are zone-aware and default to UTC
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: Ana's board axis (the header clock) equals Dana's, as her shift chips and date format do, and Dana's axis is not empty
+  status: covered
+- id: R-354
+  title: A shift keeps its posted wall-clock start across a DST change, and the geometry follows
+  source:
+  - D88 §19.21
+  - queue item "Per-site timezone (D10 / D88)"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    Under a plant-local axis a local day is 1380 or 1500 minutes on the two changeover days a year
+    (D88b). A shift keeps its posted wall-clock start across the change, so a 22:00 to 06:00 shift
+    is 7 hours on the spring-forward night and 9 on the fall-back night. Board geometry maps each
+    day's shifts at that day's local midnight plus the wall-clock time, through a per-window axis
+    of local-midnight instants, not day times 1440; every minutes-per-day multiplication in the
+    board's geometry, header and hit-testing goes through that axis. A window not crossing a
+    changeover is pixel-identical to the output before this change.
+  verified_by:
+  - kind: vitest
+    file: src/test/geometryDst.test.ts
+    cases: >-
+      America/Chicago 2026-03-08 is 1380 minutes wide and its 22:00 to 06:00 night is 420 minutes;
+      2026-11-01 is 1500 wide and its long night is 540; the day labels stay on their days; a
+      non-crossing June window and a UTC axis are day times 1440 exactly
+  - kind: vitest
+    file: src/test/boardGeometry.test.ts
+    cases: the existing shift-geometry cases pass unchanged with a UTC day axis
+  status: covered
+- id: R-355
+  title: A plant's time zone is set in Settings under the same rules as its date format
+  source:
+  - D88 §19.21
+  - queue item "Per-site timezone (D10 / D88)"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    The Settings tab gains a third row, "Time zone", following the plant filter like the date
+    format and the eligibility policy: choose a plant and it edits that plant's zone, choose all
+    plants and it edits the company default. The one-select-two-option-lists rule holds (a plant
+    offers "use the company setting" first, then the zones); the option list is a curated list of
+    about sixty common zones with the browser's full list when it can supply one. Company scope
+    writes set_org_timezone; plant scope writes set_node_setting or clears it.
+  verified_by:
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: >-
+      three settings each with the three states (inheriting, set here, set here to the other);
+      choosing a zone on a plant writes set_node_setting with the timezone key; an inheriting plant
+      names the company zone
+  - kind: vitest
+    file: src/test/settingRowStandard.test.ts
+    cases: three rows, one control each, the shared-row audit still holds with the third setting
+  - kind: vitest
+    file: src/test/apiPlantSettingsShape.test.ts
+    cases: NODE_SETTING_KEYS is exactly eligibility_policy, date_format, timezone
+  status: covered
 findings:
+- id: F-111
+  title: Four things the lanes could see and could not reach, closed by the reviewer's walk and one fix lane
+  tag: What a fence costs
+  status: fixed
+  found_by: agent
+  refs:
+  - R-351
+  - R-353
+  - R-356
+  - R-357
+  story: >-
+    Wave three ran five lanes with exclusive files, and three of the four things the reviewer found
+    were things a lane had seen and written down rather than fixed, because the file belonged to a
+    neighbour: the plant-local-time lane named the fetch window still keyed on UTC midnight; the
+    absence-on-the-board lane named the crew-drag toast that never says "on leave"; the templates lane
+    added a rail tab and updated one rail pin but not the browser spec's. The fourth the reviewer found
+    by calling the invite function directly with a grant the database refuses: the brand-new branch
+    invited first and granted second, so a refusal left an auth user behind who had already been
+    emailed, and a corrected invite of the same address then sent no mail. Each is small; together they
+    are the cost of the fence that lets five lanes work at once, and the reviewer after the wave is
+    where that cost is paid. All four closed in one fix lane: the fetch bounds follow the plant-local
+    day boundaries the axis uses; the drag toast names the absent person; the spec lists Templates; a
+    refused grant deletes the auth user it created and says so in the function's own header. Each with
+    a case that fails the way the reviewer broke it.
+- id: F-110
+  title: A supervisor's board root sits below the plant root, and an invoker cannot read the plant above her grant
+  tag: The same door, a third time
+  status: fixed
+  found_by: agent
+  refs:
+  - R-356
+  - R-039
+  - R-333
+  story: >-
+    The board opens a supervisor on the top of HER visible forest, a line or a department, never
+    the plant root above her grant. A template belongs to the plant, so saving and applying one
+    had to resolve upward, and copy_week_plan is SECURITY INVOKER: its own read of the plant node
+    came back with no org and no path for her, and the template-existence check failed silently.
+    The same shape as DEF-0016 and DEF-0017, found this time by the lane itself in its own build
+    rather than by the tester afterwards, which is what CLAUDE.md section 4's rule was written to
+    make happen. Fixed with a SECURITY DEFINER `app_plant_root_of(node)` that resolves upward and
+    guards the org boundary itself (the week source stays strict on a plant root), the template
+    check keyed on id and plant only, and the template loops joining nodes on the left so an
+    out-of-scope node is never dropped silently: the writer refuses it at apply and the whole copy
+    rolls back. Pinned by TP6 as a supervisor granted only a line.
+- id: F-109
+  title: A display seam formatted the UTC day marker in the plant zone, and the toolbar named the day before
+  tag: A calendar day is not an instant
+  status: fixed
+  found_by: agent
+  refs:
+  - R-353
+  - R-333
+  story: >-
+    Found on the lane's own walk as Dana with Plant A set to America/Chicago: the board's toolbar
+    date range read "Sun 2026/09/06 to Tue 2026/09/08" while the axis and the header's day strip
+    correctly started on Monday the 7th. The toolbar formatted the store's UTC-midnight "which day"
+    marker directly in the plant zone, and UTC midnight is the previous evening anywhere west of
+    Greenwich, so the label printed the day before. Fixed by reinterpreting the marker's calendar
+    day as that day's LOCAL midnight in the zone, the same origin the board index uses for the axis,
+    before labelling; toolbar and axis now agree. The class is the one D88 is full of: a UTC instant
+    is fine to store and to key a query on, but the moment it is shown it must be resolved in the
+    display zone, and a marker that stands for a calendar day is not an instant. For a UTC plant
+    nothing moved. Caught because two halves of one screen disagreed, the shape of R-333.
+- id: F-108
+  title: The service role could write nothing, and the invite function was the first to try
+  tag: A server-side write with no grant behind it
+  status: fixed
+  found_by: agent
+  refs:
+  - R-351
+  - S24
+  story: >-
+    This project had never had server-side code, so its migrations grant table DML only to
+    `authenticated` and `anon`; `service_role`, which bypasses RLS but still needs table grants,
+    was left with the bare default and no insert, select or delete on any table. The invite Edge
+    Function is the first thing to write as the service role --- the invited person's
+    `user_profiles` row, which a site admin's own grants cannot make --- and its first real call
+    came back "permission denied for table user_profiles". Migration 0064 grants the service role
+    select, insert and delete on `user_profiles` and select on `profile_grants`, scoped to exactly
+    the two tables the function touches, not the platform-default GRANT ALL this repo never
+    adopted. Separately, the scratch SQL harness (`00_harness.sql`) lacked the real
+    `auth.users.last_sign_in_at` column the re-emitted `site_people` reads, which would have
+    errored every SQL suite that calls it; added there as an additive column, the way P1-3b
+    reconciled the shim with the other real columns.
+- id: F-107
+  title: A green case went red at ten past midnight, because it had asked the wall clock what day it was
+  tag: The clock is an input
+  status: fixed
+  found_by: agent
+  refs:
+  - R-349
+  story: >-
+    The final full run of wave two, started a few minutes after midnight, failed one case in the
+    audit panel's suite --- "finishes a bounded period the same way it finishes a now-anchored one"
+    --- that had passed every run that day. It served one entry "one hour ago" as today's row and one
+    inside yesterday, filtered to yesterday, and expected today's row to vanish. For the first hour
+    of every day one hour ago IS yesterday, so the panel was right to keep the row and the case was
+    wrong to expect otherwise. Nothing in wave two touches that panel. The row is now anchored one
+    second after today's local midnight, the same anchor the case already used for its yesterday row,
+    so it means "today" at every hour. The rule is the one the repo already keeps for the server's
+    `now()`: the clock is an input to a test, never a thing it reads.
 - id: F-106
+  title: The reset link landed on the board, not the reset screen, because the auth server strips the path when the app's host is not its site_url
+  tag: What config can strip
+  status: fixed
+  found_by: agent
+  refs:
+  - R-347
+  - R-349
+  story: >-
+    Lane A's forgot-password screen asked Supabase to send the reset link back to
+    `window.location.origin + "/reset-password"`, which is the right production code: there the app's
+    origin equals the project's site_url, so GoTrue keeps the path and the link lands on the reset
+    screen. Locally the two disagree --- `supabase/config.toml` sets `site_url` to `127.0.0.1:5173`
+    while the dev app is served on `localhost:5173` --- and a reset started from localhost is where it
+    showed. Measured against the running stack: a redirect to a host that is neither site_url nor in
+    `additional_redirect_urls` is rejected, GoTrue falls back to the site_url ROOT and strips the
+    path, the recovery tokens land on `/`, supabase-js reads them into a full session, and the board
+    (or the no-access dead-end) renders for a person who never chose the password they are now signed
+    in with. The reset form never appears. From `127.0.0.1:5173` the same request keeps the path and
+    works end to end, which is how the lane proved the page.
+    ⭐ THE FIX IS TO REMEMBER THE EVENT, NOT THE PATH. A recovery session is indistinguishable from a
+    signed-in one by anything but the event that made it, so the session provider (lane B's, landed
+    the same hour) keeps a `recovery` flag: raised on PASSWORD_RECOVERY, cleared on USER_UPDATED
+    (the password was set) and on SIGNED_OUT, untouched by a token refresh. `decideAuthScreen` gains
+    a "recovery" answer that outranks app AND no-access, and the route gate turns it into a redirect
+    to `/reset-password`, which sits outside the gate so it cannot loop. Pinned pure (session.test.ts
+    P1-P4, authFlow.test.ts D5-D6), at the gate (recoveryGate.test.tsx G1-G4), in the provider
+    (sessionProvider.test.tsx S9), and live: a recovery session dropped on `/` is sent to the reset
+    screen, sets its password, and only then reaches the app.
+    ⚠️ THE OTHER CURE WAS NOT TAKEN, AND WHY. Listing `localhost:5173/reset-password` in
+    `additional_redirect_urls` would have made the local link land right and left production on the
+    same one-line assumption about hosts; it also needs the stack restarted, which the lane was told
+    not to do while the maintainer uses the app. The flag closes a second hole the config never
+    would: without it, anyone holding a reset link could browse the whole app without ever setting a
+    password.
+    ⛔ AND THE FIRST FIX HAD TWO HOLES THE REVIEWER FOUND BY DRIVING IT. One: the flag lived in one
+    render's memory, raised only by the event, so F5 on the reset screen replayed INITIAL_SESSION and
+    nothing else, and `/` then rendered the board for a person who had set no password --- measured,
+    "board rendered without a password set? true". Two: supabase-js emits PASSWORD_RECOVERY on a
+    setTimeout(0) after its own round trip, to whoever has subscribed by then, and the provider
+    subscribes from an effect after first render; on this machine the subscription won ten times out
+    of ten, and with the client instantiated ahead of the tree it lost four times out of four and the
+    person landed on the no-access page, silently. So the flag is now SEEDED from the landing URL's
+    own `type=recovery` fragment, which is still there when the provider first renders, and
+    REMEMBERED for the tab in sessionStorage under one key, cleared by USER_UPDATED and SIGNED_OUT;
+    the event only confirms. Pinned: session.test.ts P5-P7 (the seed), sessionProvider.test.tsx
+    S10-S11 (seeded, written down, kept across a mount, forgotten on USER_UPDATED).
+    ⚠️ THE CONFIG HALF IS ALSO DONE, FOR THE NEXT STACK START. `supabase/config.toml` now lists
+    `http://localhost:5173/**` in `additional_redirect_urls`, so the emailed link itself lands on
+    the reset screen locally; until the stack is restarted the link still goes to `127.0.0.1:5173`,
+    where nothing answers on this machine (the dev server listens on `localhost` only), which is why
+    the browser spec pastes the recovery hash rather than clicking the mail. The reviewer also found
+    that re-entering the current password read as "too weak": GoTrue's 422 `same_password` now has
+    its own sentence (passwordFlow.test.ts E6).
+- id: F-112
   title: Every catalogue screen stopped at a thousand rows and said nothing, for the whole life of the product until wave one
   tag: The ceiling nobody hit
   status: fixed
@@ -9823,7 +10467,109 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 85
+  date: 2026-09-07
+  title: 'Wave three, five lanes and a reviewer: invitations, plant-local time, week templates, absence, and the page counts what is open'
+  commits:
+  - 935ba6b
+  numbers:
+    app_tests: 2446
+    app_test_files: 105
+    tsc: 0
+    eslint: 0
+    db_checks: 747
+    migrations: 66
+  confirmed: true
+  summary: >-
+    The maintainer, in order: *"Launch wave 3"*, then three decisions from options put side by side
+    (touch creates on empty track; a template is a whole week with its people; absence is both entered
+    and imported), then *"spin opus 4.8 agents, do not do it yourself"* --- so every lane, every fix
+    and the reviewer ran on Opus 4.8, and this session wrote briefs, placed rows and committed. Five
+    lanes from five briefs (`docs/agent-briefs/wave3-*`), two of them stopped twice by the session
+    limit and resumed with their context intact.
+    ⭐ INVITATIONS (lane A, R-351, R-352): the first Edge Function, migration 0064, the Access panel's
+    invite control, "Set your password" from the link, "invited" until first sign-in; F-108, the
+    service role had never been granted a write. The front door is built and S24 closes.
+    ⭐ PLANT-LOCAL TIME (lane B, R-353 to R-355): migration 0063, the zone on the board payload
+    resolved upward as a definer, a zone-aware time seam, DST geometry pinned on Chicago's two
+    changeover days, a Time zone row in Settings; F-109 found on the lane's own walk.
+    ⭐ WEEK TEMPLATES (lane C, R-356): migration 0067, numbered after 0066 on purpose; save, apply
+    through Copy Week, rename and delete; row equality with Copy Week proven in SQL; F-110, the
+    upward-resolution trap of DEF-0016 found by the lane in its own build.
+    ⭐ ABSENCE (lanes D and E, R-357): migration 0066, the writers consulting `absence_overlap`
+    beside eligibility under the plant's policy, an Absences tab and a CSV importer, and the board
+    naming the leave before a save with Create refused in place under block.
+    ⭐ THE PAGE COUNTS OPEN WORK. The maintainer asked why the buildout showed eight open tasks; the
+    queue's parked marker was a comment the page could not see. Every queue entry now carries a
+    `kind` (task, parked, note), validated, and the heading counts tasks alone.
+    ⭐ THE SEAMS. Two unit cases went red between lanes (the paging inventory, the DEF-0008 rail pin)
+    and seven typecheck errors stood after the types were regenerated; three small lanes closed
+    them. THE REVIEWER, a different Opus 4.8 lane, read every re-emitted function from the live container
+    and drove the screens as the least-privileged people, and found four real things, three of
+    which the lanes had flagged themselves and stopped short of because the file belonged to
+    another lane (F-111): the signed-in browser spec's admin-rail assertion had no Templates; a
+    refused grant on a brand-new invite left an orphaned auth user who had already received the
+    email; the board's fetch window was still keyed on UTC midnight under a plant-local axis, so a
+    run saved at 22:00 on the last visible day vanished on reload; and a crew drag under warn never
+    said someone was on leave. One fix lane closed all four, each with a case that fails the way
+    the reviewer broke it. The reviewer also confirmed what mattered most: the double re-emission
+    of copy_week_plan dropped no rule (the live text carries both the template source and the
+    absent reason), absence block is enforced server-side when the screen is bypassed, every new
+    auth gate refused the person it should, and the service role's new grant is the narrowest set
+    the function uses.
+    Measured: `npm run test` 2446 in 105 files; `tsc` 0; `eslint` 0; the SQL suite
+    747 passed; Playwright green on every project against the live stack. Migrations 0063,
+    0064, 0066 and 0067 applied with `psql`; there is no 0065; the ledger is still out of sync.
+  shipped:
+  - S24
 - id: 84
+  date: 2026-09-06
+  title: 'Wave two, three lanes and a reviewer: password reset and change, one session at the root, and the touch pass (S24, the queue)'
+  commits:
+  - 647495f
+  numbers:
+    app_tests: 2342
+    app_test_files: 96
+    tsc: 0
+    eslint: 0
+    db_checks: 704
+    migrations: 62
+  confirmed: true
+  summary: >-
+    The tester's session 84 verified DEF-0016 and DEF-0017 cold at 19f0903 (R-039 and R-333 back to
+    covered, with the pin, the SQL file and the role walk as R-039's proof). Then the maintainer:
+    *"Launch wave 2"* --- the three items the session 83 plan had marked ready with nothing to
+    decide, three Opus 4.8 lanes from three briefs (`docs/agent-briefs/wave2-*`), each with exclusive
+    files, and a reviewer of a different model with one job.
+    ⭐ PASSWORDS (lane A, R-347, R-348). "Forgot your password?" on sign-in, a forgot screen that says
+    the same neutral sentence for a known and an unknown address, a reset screen the email link lands
+    on, and change-password next to Sign out; pure first (`passwordFlow.ts`), every failure a
+    sentence, walked as Vina the Plant C viewer with her password put back. Lane A found F-106 on the
+    way and stopped at the file it did not own.
+    ⭐ ONE SESSION (lane B, R-349). `SessionProvider` at the root; `useSession()` reads context with
+    its signature unchanged, so no caller and no mocked suite moved. Measured: one getSession, one
+    subscription, one profile read, one RPC for five consumers; the board's "Loading session" flash
+    gone on the signed-in path; signedIn.spec six warm runs in a row.
+    ⭐ TOUCH (lane C, R-350). A second Playwright project on a tablet profile driving real touch
+    through CDP: eight gestures, nothing broke, no code changed. One decision left for the
+    maintainer, recorded in the standing note: a finger on empty track creates, as the mouse does, at
+    the cost of panning only from the rail.
+    ⭐ F-106 FIXED BY THE DEVELOPER BETWEEN THE LANES AND THE REVIEW: the auth server drops a reset
+    link's tokens on `/` when the app's host is not its site_url, so the session remembers the
+    PASSWORD_RECOVERY event and the gate sends a recovery session to the reset screen. The reviewer
+    then broke that fix two ways --- a reload forgot the flag, and the flag depended on subscribing
+    before supabase-js emitted --- so it is now seeded from the landing hash and remembered for the
+    tab; the reviewer also found the "same password" 422 reading as "too weak", the profile read
+    twice on a hard reload (INITIAL_SESSION treated as a change), and the emailed link dead on this
+    machine (the dev server answers on localhost only; the dev origin is now on the redirect
+    allow-list for the next stack start). All fixed, each with a case. The field-standard audit
+    caught the three new screens copying the input skin; they use `Field.module.css` now. And one
+    green case went red at ten past midnight for asking the wall clock what day it was (F-107).
+    CLAUDE.md section 4 carries the F-106 rule. Measured: `npm run test` 2342 in 96
+    files; `tsc` 0; `eslint` 0; Playwright chromium 25 of 25 and touch 8 of 8 against the live
+    stack. No migration; the SQL suite and the ledger are as session 83 left them.
+  shipped: []
+- id: 86
   date: 2026-09-07
   title: Tester run
   commits: []
@@ -13176,7 +13922,8 @@ next:
 # finding it came from (F-087) had never been flipped off `open` and the work had
 # no requirement; both are fixed, and the requirement is R-338.
 # ---------------------------------------------------------------------------
-- text: Phase 1 — E2E test pass (Playwright) + load sanity
+- kind: task
+  text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: >-
     ⚠️ MEASURED 5 SEPT, AND IT IS TWO JOBS RATHER THAN ONE. This line used to read, in full,
     *"Unchecked Phase 1 item."* — five words, which is why it was described to the maintainer as a
@@ -13212,27 +13959,28 @@ next:
     rather than a shared file, which splitting by file does not prevent. A beside Copy Week is safe (A
     never touches `src/` and never asserts about a screen); B belongs after the board has stopped
     moving, and can then cover Copy Week too.
-# ------------------------------- PARKED ------------------------------------
-- stage: S24
-  text: 'Debt: useSession() called in five components; one SessionProvider at the root'
+- kind: task
+  text: Wave three's loose ends — the board's fetch window under a plant zone, the crew-drag absence toast, and the emailed reset link locally
   why: >-
-    Parked with the rest of S24. The flicker half was fixed in session 18 and the identity half in
-    §19.79; what is left is five duplicated `getSession()` round trips — one of which is the "Loading
-    session…" flash on the board, deliberately left in place in session 57.
-- text: >-
+    Three small things the lanes and the reviewer named rather than reached across a fence for. The
+    board's fetch window is still keyed on the UTC day marker while its axis is plant-local (R-353), so
+    under a western zone runs in the last hours of a window may be missing until scrolled: widen the
+    fetch by a day or key it on the plant-local origin. After a successful crew drag, `move_run`'s
+    `absence_warnings` are parsed but not yet shown in the drag toast beside the eligibility warnings
+    (R-357; two lines in useDragGesture.ts). And the emailed reset link lands on 127.0.0.1 where the
+    dev server does not answer until the stack restarts with the allow-list from F-106.
+# ------------------------------- PARKED ------------------------------------
+- kind: parked
+  text: >-
     Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
   why: >-
     MOVED DOWN BY THE MAINTAINER, 4 Sept. The largest item on the list and it touches every screen;
     nothing in `src/` subscribes to anything today (no `.channel(`, no `postgres_changes`), so this is
     a build rather than a completion. It is also worth least until more than one person is using the
     app at once, which is gated behind invitations — and those are parked below.
-- text: Per-site timezone (D10 / D88)
-  why: >-
-    DECIDED Aug 25 (D88, §19.21): site-local axis, wall-clock across DST, Phase 2. Do not re-ask; the
-    cost is in board/lib/time.ts and geometry.ts.
-  decided: true
 
-- text: Dark theme — app-wide colour tokens first, then the matrix
+- kind: parked
+  text: Dark theme — app-wide colour tokens first, then the matrix
   why: >-
     MOVED TO THE END BY THE MAINTAINER, 4 Sept: *"this is going to be much bigger and different than
     what you have right, I'm still thinking over it."* Do not start it without a fresh go-ahead, and
@@ -13244,42 +13992,28 @@ next:
     shape as S24 reading `now` for parked work, and the third sentence in three days found standing in
     for the change it describes. It is now below real-time, the timezone and the row ceiling.
   decided: true
-- stage: S24
-  text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
-  why: >-
-    TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept — do not pick this up without a
-    fresh go-ahead. The gate on a second human using the product; needs the project's first server-side
-    code. ⭐ S24's card now reads `parked` to match this, corrected 5 Sept; the warning that used to sit
-    on this line said the two disagreed and left them disagreeing.
-    ⭐ MOVED TO THE ACTUAL END OF THE QUEUE 5 SEPT at the maintainer's word — *"Move #3,#4,#5 at the end
-    of the list"* — having claimed since 4 Sept to be there already.
-  decided: true
-- stage: S24
-  text: P1-6d password reset and change-password
-  why: >-
-    Same browser-only shape as the sign-in screen. Sits behind invitations, which is tabled.
-    ⚠️ IT IS THE CHEAPEST THING ON THE WHOLE LIST AND IT IS LAST BY ASSOCIATION, not by cost: one
-    browser call, no server piece, no migration — the sign-in screen's own shape. It sits here because
-    it was grouped with invitations, which need the project's first Edge Function. Worth unparking on
-    its own if a quick win is ever wanted; moved to the end 5 Sept with the rest of the group at the
-    maintainer's word.
-  decided: true
-- stage: S23
+- kind: parked
+  stage: S23
   text: Tree CSV importer
   why: >-
     DROPPED by agreement — the starter library copies structure and the visual editor beats a
     parents/children CSV. Not deferred; do not re-ask.
   decided: true
-- text: >-
-    STANDING NOTE, not a task — open and flagged: .eligible means adoption parent only; touch acceptance
-    pass on both drags
+- kind: note
+  text: >-
+    STANDING NOTE, not a task — open and flagged: .eligible means adoption parent only
   why: >-
     The roadmap's standing list so none of it goes quiet. Three of its five closed in session 83 (0060):
     the direct DELETE of a company admin's grant is refused at the table, and so is an UPDATE that
     demotes or re-points it; site_people takes a search and a limit with total and returned counts,
     unbounded by default, for the client to adopt; the department-admin note is moot since R-340 put
     admin at the plant root, with a case that goes red if such a grant reappears.
-- text: >-
+    ⭐ THE TOUCH PASS CLOSED IN SESSION 84 (R-350): every drag on the board and in the admin tree was
+    driven with real touch input under a tablet profile and nothing broke; `e2e/touch.spec.ts` keeps
+    it so. The one question it left --- a finger on empty track creates or scrolls --- the maintainer
+    settled on 7 Sept: it creates, as the mouse does (R-350).
+- kind: note
+  text: >-
     STANDING NOTE, not a task — not driven in a browser: the reworked Products panel (plant chips,
     add-picker, per-plant remove) and the document-number surfaces
   why: Five of the last six defects came from the maintainer using a screen, not a green suite.
@@ -13370,8 +14104,8 @@ backlog:
   text: >-
     Auth — THE FRONT DOOR IS NOT BUILT, and this line is how that hid. Profiles, subtree grants and RLS
     wiring all shipped
-  status: partial
-  note: Unticked. P1-6b shipped Sep 1; P1-6c and P1-6d open.
+  status: done
+  note: P1-6b shipped Sep 1; P1-6d in session 84; P1-6c in session 85. The front door is built.
   stage: S24
 - phase: 1
   text: >-
@@ -13385,19 +14119,19 @@ backlog:
   text: >-
     P1-6c — invitations. This is the gate on a SECOND person using the product, and the bigger half: it
     needs a privileged server-side piece
-  status: open
+  status: done
   stage: S24
 - phase: 1
   text: P1-6d — password reset and change-password. Same browser-only shape as P1-6b
-  status: open
+  status: done
   stage: S24
 - phase: 1
   text: >-
     Debt found while reading for P1-6b: useSession() is called in five components, each with its own useEffect
-  status: partial
+  status: done
   note: >-
-    The identity-change reset flicker was fixed in session 18; the single SessionProvider is not recorded
-    as built.
+    The identity-change reset flicker was fixed in session 18; the single SessionProvider landed in
+    session 84 (R-349).
   stage: S24
 - phase: 1
   text: >-
@@ -13444,7 +14178,7 @@ backlog:
   status: open
 - phase: 2
   text: Named templates (relative-time placements)
-  status: open
+  status: done
 - phase: 2
   text: >-
     Shift admin UI in product (templates/breaks editor, node attachment) + target keep-or-scale prompt
@@ -13456,7 +14190,7 @@ backlog:
   stage: S17
 - phase: 2
   text: PTO/absence source decision + conflict surfacing
-  status: open
+  status: done
 - phase: 3
   text: ERP/MES connector framework + first adapter (SAP) over the CSV upsert pipeline
   status: open

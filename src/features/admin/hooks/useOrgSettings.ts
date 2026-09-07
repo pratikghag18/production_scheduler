@@ -42,6 +42,7 @@ import {
   fetchPlantSettings,
   setOrgDateFormat,
   setOrgEligibilityPolicy,
+  setOrgTimezone,
   setPlantSetting,
   type EligibilityPolicy,
   type Json,
@@ -55,6 +56,7 @@ import {
   DEFAULT_DATE_FORMAT,
   type DateFormat,
 } from "@/lib/format/dates";
+import { coerceTimezone, DEFAULT_TIMEZONE, isUsableTimezone } from "@/lib/format/timezones";
 import { coveredByAnyGrant, isCompanyAdmin, type EditRights } from "../lib/editRights";
 import { plantControlVisible, type PlantChoice, type PlantOption } from "../lib/plantFilter";
 
@@ -119,6 +121,38 @@ export function useSetDateFormat() {
   const queryClient = useQueryClient();
   return useMutation<void, SchedulerError, DateFormat>({
     mutationFn: (format) => setOrgDateFormat(format),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: orgSettingsKeys.all });
+    },
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   THE TIME ZONE (R-353, migration 0063) — the same shape as the date format
+   above, because it is the same KIND of setting: a per-plant display choice the
+   client reads (here, the board's axis zone) with a company fallback. The
+   default must not move for a single-zone customer, so it is 'UTC' throughout.
+   --------------------------------------------------------------------------- */
+
+/** The COMPANY-wide fallback zone in `orgs.settings.timezone`, coerced to a zone
+ *  this runtime can format with (else 'UTC'). Read for the plant row's "use the
+ *  company setting" label, exactly as `useCompanyDateFormat` is. */
+export function useCompanyTimezone(enabled: boolean): string {
+  const { data } = useOrgSettings(enabled);
+  if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+    const v = (data as Record<string, Json | undefined>).timezone;
+    return v === undefined ? DEFAULT_TIMEZONE : coerceTimezone(v);
+  }
+  return DEFAULT_TIMEZONE;
+}
+
+/** Set the COMPANY-wide fallback zone. Refused server-side unless a system
+ *  admin; invalidate-and-refetch, no optimistic update — the twin of
+ *  `useSetDateFormat`. */
+export function useSetTimezone() {
+  const queryClient = useQueryClient();
+  return useMutation<void, SchedulerError, string>({
+    mutationFn: (tz) => setOrgTimezone(tz),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: orgSettingsKeys.all });
     },
@@ -289,10 +323,18 @@ export function asEligibilityPolicy(value: unknown): EligibilityPolicy | null {
   return value === "warn" || value === "block" ? value : null;
 }
 
+/** A stored zone this runtime can format with, or `null` for absent/unusable —
+ *  the null-returning twin of `coerceTimezone`, so an inheriting plant reads as
+ *  inheriting rather than as the company value. */
+export function asTimezone(value: unknown): string | null {
+  return isUsableTimezone(value) ? value : null;
+}
+
 /** What one plant has said for itself. `null` on a field means "inheriting". */
 export interface PlantOverrides {
   dateFormat: DateFormat | null;
   policy: EligibilityPolicy | null;
+  timezone: string | null;
   isLoading: boolean;
   error: SchedulerError | null;
 }
@@ -309,11 +351,13 @@ export function usePlantOverrides(enabled: boolean, nodeId: string | null): Plan
   const on = enabled && nodeId !== null;
   const format = usePlantOverridesFor(on, "date_format");
   const policy = usePlantOverridesFor(on, "eligibility_policy");
+  const timezone = usePlantOverridesFor(on, "timezone");
   return {
     dateFormat: nodeId === null ? null : asDateFormat(ownOverride(format.data, nodeId)),
     policy: nodeId === null ? null : asEligibilityPolicy(ownOverride(policy.data, nodeId)),
-    isLoading: on && (format.isLoading || policy.isLoading),
-    error: format.error ?? policy.error ?? null,
+    timezone: nodeId === null ? null : asTimezone(ownOverride(timezone.data, nodeId)),
+    isLoading: on && (format.isLoading || policy.isLoading || timezone.isLoading),
+    error: format.error ?? policy.error ?? timezone.error ?? null,
   };
 }
 

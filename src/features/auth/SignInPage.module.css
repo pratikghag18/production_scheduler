@@ -89,6 +89,12 @@
   margin: 0;
 }
 
+/* P1-6d: the "Forgot your password?" link under the submit button. */
+.forgot {
+  font-size: calc(12px * var(--chrome-scale, 1));
+  margin: 0;
+}
+
 /* The dev switcher, when it rides along on this screen in a dev build. */
 .devZone {
   margin-top: 4px;

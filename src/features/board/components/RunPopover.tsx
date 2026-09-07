@@ -36,6 +36,7 @@ export function RunPopover({
   anchor,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
+  zone,
   products,
   readOnly = false,
   onCancel,
@@ -47,6 +48,7 @@ export function RunPopover({
   anchor: { x: number; y: number };
   windowStart: Date;
   dateFormat?: DateFormat;
+  zone?: string;
   products: Product[];
   /**
    * DEF-0015 / R-239 / R-346: true for a viewer. The run's details are shown —
@@ -66,7 +68,7 @@ export function RunPopover({
 
   const staffedHc = crew.reduce((sum, a) => sum + a.efficiencyPercent / 100, 0);
   const product = products.find((p) => p.id === productId);
-  const timeLabel = `${formatFull(addMinutes(windowStart, run.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, run.endMin))} · staffed ${formatNumber(staffedHc)}/${run.plannedHeadcount ?? "—"}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, run.startMin), dateFormat, zone)} – ${formatClock(addMinutes(windowStart, run.endMin), zone)} · staffed ${formatNumber(staffedHc)}/${run.plannedHeadcount ?? "—"}`;
 
   // DEF-0015 / R-239 / R-346: the viewer's pop-up. Details shown, no editable
   // field and no Save or Delete, only Close — the server refuses those writes.

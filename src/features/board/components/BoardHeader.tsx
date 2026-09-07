@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ZOOMS } from "../lib/geometry";
 import { minutesToPx } from "../lib/geometry";
-import { formatClock, formatDayLabel, addMinutes } from "../lib/time";
+import { formatClock, formatDayLabel, addMinutes, type DayAxis } from "../lib/time";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import styles from "./BoardHeader.module.css";
 
@@ -9,19 +9,25 @@ import styles from "./BoardHeader.module.css";
  * Sticky day strip + hour ticks + day-boundary rules (brief §7 "Header").
  * `railWidth` is passed in so the sticky corner cell and the rail column of
  * every row line up exactly.
+ *
+ * ⭐ D88a — EVERY x-POSITION COMES FROM THE DAY AXIS, not `day * 1440`. Under a
+ * plant-local axis a day is 1380 or 1500 real minutes twice a year, so the day
+ * boxes have UNEQUAL widths on a changeover day and the hour ticks are placed at
+ * each wall-hour's REAL-minute offset (`dayAxis.wallToOffset`) — which is why the
+ * clock labels on the spring-forward day jump 01:00 → 03:00 with no 02:00 box,
+ * exactly as the wall clock does. For a UTC axis every offset is `day*1440 + m`,
+ * so this is pixel-identical to the pre-D88 header.
  */
 export function BoardHeader({
-  windowStart,
-  dayCount,
-  windowMinutes,
+  dayAxis,
+  zone,
   zoomIndex,
   railWidth,
   visibleMinRange,
   dateFormat = DEFAULT_DATE_FORMAT,
 }: {
-  windowStart: Date;
-  dayCount: number;
-  windowMinutes: number;
+  dayAxis: DayAxis;
+  zone?: string;
   zoomIndex: 0 | 1 | 2;
   railWidth: number;
   visibleMinRange: [number, number];
@@ -29,24 +35,26 @@ export function BoardHeader({
 }) {
   const pxPerHour = ZOOMS[zoomIndex].pxPerHour;
   const compact = ZOOMS[zoomIndex].name === "Compact";
-  const trackWidth = minutesToPx(windowMinutes, pxPerHour);
+  const windowStart = dayAxis.windowStart;
+  const dayCount = dayAxis.dayCount;
+  const trackWidth = minutesToPx(dayAxis.windowMinutes, pxPerHour);
 
   const dayBoxes = useMemo(() => {
     const boxes: { key: number; left: number; width: number; label: string }[] = [];
     for (let day = 0; day < dayCount; day++) {
-      const left = minutesToPx(day * 1440, pxPerHour);
-      const width = minutesToPx((day + 1) * 1440, pxPerHour) - left;
-      const label = formatDayLabel(addMinutes(windowStart, day * 1440), dateFormat);
-      boxes.push({ key: day, left, width, label });
+      const left = minutesToPx(dayAxis.dayOffsets[day], pxPerHour);
+      const right = minutesToPx(dayAxis.dayOffsets[day + 1], pxPerHour);
+      const label = formatDayLabel(dayAxis.dayStarts[day], dateFormat, zone);
+      boxes.push({ key: day, left, width: right - left, label });
     }
     return boxes;
-  }, [dayCount, pxPerHour, windowStart, dateFormat]);
+  }, [dayAxis, dayCount, pxPerHour, dateFormat, zone]);
 
   const dayBoundaries = useMemo(() => {
     const out: number[] = [];
-    for (let day = 1; day < dayCount; day++) out.push(day * 1440);
+    for (let day = 1; day < dayCount; day++) out.push(dayAxis.dayOffsets[day]);
     return out;
-  }, [dayCount]);
+  }, [dayAxis, dayCount]);
 
   const hourTicks = useMemo(() => {
     const [visStart, visEnd] = visibleMinRange;
@@ -54,17 +62,21 @@ export function BoardHeader({
     for (let day = 0; day < dayCount; day++) {
       for (let hr = 0; hr < 24; hr++) {
         if (compact && hr % 2 !== 0) continue;
-        const m = day * 1440 + hr * 60;
+        // D88a: the wall-hour's REAL-minute offset in the plant zone. On a
+        // changeover day this is not `day*1440 + hr*60`, and the skipped hour
+        // resolves to the same offset as the hour that replaced it (deduped
+        // by `key`, which is the offset).
+        const m = dayAxis.wallToOffset(day, hr * 60);
         if (m < visStart - 60 || m > visEnd + 60) continue;
         ticks.push({
           key: m,
           left: minutesToPx(m, pxPerHour),
-          label: formatClock(addMinutes(windowStart, m)),
+          label: formatClock(addMinutes(windowStart, m), zone),
         });
       }
     }
     return ticks;
-  }, [dayCount, compact, pxPerHour, visibleMinRange, windowStart]);
+  }, [dayAxis, dayCount, compact, pxPerHour, visibleMinRange, windowStart, zone]);
 
   return (
     <div className={styles.hdrRow}>

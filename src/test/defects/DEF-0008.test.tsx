@@ -116,6 +116,10 @@ vi.mock("@/features/admin/components/OperatorsPanel", () => ({
   OperatorsPanel: () => <div>stub OperatorsPanel</div>,
   OPERATORS_PANEL_READY: true,
 }));
+vi.mock("@/features/admin/components/AbsencesPanel", () => ({
+  AbsencesPanel: () => <div>stub AbsencesPanel</div>,
+  ABSENCES_PANEL_READY: true,
+}));
 vi.mock("@/features/admin/components/TrainingsPanel", () => ({
   TrainingsPanel: () => <div>stub TrainingsPanel</div>,
   TRAININGS_PANEL_READY: true,
@@ -177,10 +181,11 @@ beforeEach(() => {
 });
 
 describe("DEF-0008: the rail a person with no admin grant is offered, as a whole list", () => {
-  it("a supervisor gets Operators, Trainings and Matrix, and NOTHING else", async () => {
+  it("a supervisor gets Operators, Absences, Trainings and Matrix, and NOTHING else", async () => {
     show();
     await screen.findByRole("button", { name: "Operators" });
-    expect(rail()).toEqual(["Operators", "Trainings", "Matrix"]);
+    // R-357 widened adminSectionsFor to add Absences beside Operators.
+    expect(rail()).toEqual(["Operators", "Absences", "Trainings", "Matrix"]);
   });
 
   it("and specifically not Settings, Products or Import — the server refuses all three", async () => {
@@ -205,11 +210,13 @@ describe("DEF-0008: the rail a person with no admin grant is offered, as a whole
       "Access",
       "Shifts",
       "Operators",
+      "Absences",
       "Trainings",
       "Matrix",
       "Products",
       "Cycle times",
       "Import",
+      "Templates",
       "Settings",
       "Activity",
     ]);

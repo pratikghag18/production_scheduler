@@ -187,7 +187,22 @@
   white-space: nowrap;
 }
 
+/* R-357: the "on leave" mark. A warm accent rather than the muted grey of
+   `.outsideTag`, because being away is a stronger signal than being from the
+   next area over — the placement warns or is refused, it is not merely a door. */
+.leaveTag {
+  font-size: calc(9px * var(--ui-scale, 1));
+  font-weight: 600;
+  color: var(--warn-fg, #9a5b00);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .collapsed .othersBtn,
-.collapsed .outsideTag {
+.collapsed .outsideTag,
+.collapsed .leaveTag {
   display: none;
 }

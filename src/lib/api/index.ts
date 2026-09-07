@@ -49,3 +49,12 @@ export * from "./paging";
 // building RPC-payload fixtures) never have to import database.types.ts
 // themselves (self-review §9 item 5: nothing outside src/lib imports it).
 export type { Json } from "@/lib/database.types";
+
+// R-357 / migration 0066. Absences: read a plant's, record one, remove one,
+// import a file. The pure predicate `absenceGaps` lives at src/lib/absence.ts.
+export * from "./absences";
+
+// R-356 / migration 0067. Named week templates: list, save, rename, delete. A
+// template is APPLIED through Copy Week (copyWeek.ts with a templateId), so its
+// clash rules and preview are shared with the week source, not copied here.
+export * from "./weekTemplates";

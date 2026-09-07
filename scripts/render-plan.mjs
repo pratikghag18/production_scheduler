@@ -269,8 +269,13 @@ for (const s of plan.sessions) {
 if (!confirmedSeen)
   fail("sessions", "no session has `confirmed: true`; the numbers band has no source");
 
+const NEXT_KINDS = ["task", "parked", "note"];
 for (const [i, n] of (plan.next ?? []).entries()) {
-  const w = `next[${i}]`;
+  // Name the offending entry by its text/stage, not just its index, so a bad `kind`
+  // points a reader straight at the line to fix.
+  const label = n.text ?? n.stage ?? n.requirement ?? `#${i}`;
+  const w = `next[${i}] (${label})`;
+  if (!NEXT_KINDS.includes(n.kind)) fail(w, `\`kind\` must be one of ${NEXT_KINDS.join(" | ")}`);
   if (n.stage && !stageIds.has(n.stage)) fail(w, `stage ${n.stage} does not exist`);
   if (n.requirement && !reqIds.has(n.requirement))
     fail(w, `requirement ${n.requirement} does not exist`);
@@ -558,18 +563,40 @@ const band = `<div class="band">
   <div class="stat ${counts.reqs.contradicted ? "act" : ""}"><span class="n">${counts.reqs.covered ?? 0} / ${plan.requirements.length}</span><span class="l">requirements covered by a test${counts.reqs.contradicted ? ` · ${counts.reqs.contradicted} contradicted` : ""}</span></div>
 </div>`;
 
-const nextRows = (plan.next ?? [])
-  .map((n, i) => {
-    const s = n.stage ? plan.stages.find((x) => x.id === n.stage) : null;
-    const link = s
-      ? `<a href="#${s.id}">${esc(s.id)}</a> `
-      : n.requirement
-        ? `<a href="#${n.requirement}">${esc(n.requirement)}</a> `
-        : "";
-    const label = link + esc(n.text ?? (s ? s.title : ""));
-    return `<tr class="${i === 0 ? "g-now" : "g-next"}"><td class="g-n">${i + 1}</td><td>${label}<br><span class="fine">${esc(n.why)}</span>${n.decided ? " " + chip("mine", "decided — do not re-ask") : ""}</td></tr>`;
-  })
+// The queue is split by `kind`: only `task` entries are live work and get numbered, so
+// the count on the page means open work. `parked` (tabled or decided by the maintainer)
+// and `note` (a standing note, never a task) are shown for the record, unnumbered. The
+// `# ---- PARKED ----` comment in the YAML is a reading aid; the grouping is by `kind`.
+const nextByKind = { task: [], parked: [], note: [] };
+for (const n of plan.next ?? []) (nextByKind[n.kind] ?? []).push(n);
+
+const nextLabel = (n) => {
+  const s = n.stage ? plan.stages.find((x) => x.id === n.stage) : null;
+  const link = s
+    ? `<a href="#${s.id}">${esc(s.id)}</a> `
+    : n.requirement
+      ? `<a href="#${n.requirement}">${esc(n.requirement)}</a> `
+      : "";
+  return link + esc(n.text ?? (s ? s.title : ""));
+};
+const nextRow = (n, cls, num) =>
+  `<tr class="${cls}"><td class="g-n">${num}</td><td>${nextLabel(n)}<br><span class="fine">${esc(n.why)}</span>${n.decided ? " " + chip("mine", "decided — do not re-ask") : ""}</td></tr>`;
+
+const taskCount = nextByKind.task.length;
+const taskRows = nextByKind.task
+  .map((n, i) => nextRow(n, i === 0 ? "g-now" : "g-next", i + 1))
   .join("\n");
+const parkedRows = nextByKind.parked.map((n) => nextRow(n, "", "")).join("\n");
+const noteRows = nextByKind.note.map((n) => nextRow(n, "", "")).join("\n");
+const nextGroups =
+  `<h3 class="grouphead">Next, in order</h3>` +
+  `<div class="glance"><table><tbody>${taskRows || `<tr><td class="g-n"></td><td class="fine">Nothing queued.</td></tr>`}</tbody></table></div>` +
+  (parkedRows
+    ? `<h3 class="grouphead">Parked, by decision</h3><div class="glance"><table><tbody>${parkedRows}</tbody></table></div>`
+    : "") +
+  (noteRows
+    ? `<h3 class="grouphead">Standing notes</h3><div class="glance"><table><tbody>${noteRows}</tbody></table></div>`
+    : "");
 
 const backlogRows = (plan.backlog ?? [])
   .filter((b) => b.status !== "done")
@@ -626,9 +653,9 @@ const html = `<!doctype html>
 
 <section>
   <span class="eyebrow">Next</span>
-  <h2>What comes next, in order</h2>
-  <p class="fine">The order is a guess about priority, not a fact. If it has drifted from what the maintainer wants, ask rather than working down the list.</p>
-  <div class="glance"><table><tbody>${nextRows}</tbody></table></div>
+  <h2>What comes next: ${taskCount} task${taskCount === 1 ? "" : "s"}</h2>
+  <p class="fine">The order is a guess about priority, not a fact. If it has drifted from what the maintainer wants, ask rather than working down the list. Only the numbered items are live work; the rest are parked by the maintainer's decision or are standing notes.</p>
+  ${nextGroups}
 </section>
 
 ${backlogSection}

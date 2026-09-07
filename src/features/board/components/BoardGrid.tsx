@@ -539,9 +539,8 @@ export function BoardGrid({
       <div ref={railProbeRef} className={styles.railProbe} aria-hidden="true" />
       <div className={styles.canvas} style={{ width: railWidth + trackWidth }}>
         <BoardHeader
-          windowStart={index.windowStart}
-          dayCount={index.dayCount}
-          windowMinutes={index.windowMinutes}
+          dayAxis={index.dayAxis}
+          zone={index.zone}
           zoomIndex={zoomIndex}
           railWidth={railWidth}
           visibleMinRange={visibleMinRange}
@@ -571,6 +570,8 @@ export function BoardGrid({
                     windowStart={index.windowStart}
                     windowMinutes={index.windowMinutes}
                     dayCount={index.dayCount}
+                    dayAxis={index.dayAxis}
+                    zone={index.zone}
                     zoomIndex={zoomIndex}
                     railWidth={railWidth}
                     trackWidth={trackWidth}
@@ -586,7 +587,7 @@ export function BoardGrid({
                   row={row}
                   level={levelById.get(row.node.levelId)}
                   template={index.templateForNode.get(row.node.id) ?? null}
-                  dayCount={index.dayCount}
+                  dayAxis={index.dayAxis}
                   zoomIndex={zoomIndex}
                   trackWidth={trackWidth}
                   railWidth={railWidth}

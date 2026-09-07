@@ -832,8 +832,12 @@ describe("a filter never claims to have searched more of the log than it has", (
   it("finishes a bounded period the same way it finishes a now-anchored one", async () => {
     const until = localMidnight();
     const inYesterday = new Date(until.getTime() - 3600_000).toISOString();
+    // Anchored to today's midnight, NOT to the wall clock: one hour ago is
+    // still yesterday for the first hour of every day, and this case went red
+    // at ten past midnight for exactly that reason (session 84).
+    const inToday = new Date(until.getTime() + 1000).toISOString();
     serve([
-      entry({ id: 300, at: agoIso(1) }),
+      entry({ id: 300, at: inToday }),
       entry({ id: 250, at: inYesterday, tableName: "runs", action: "delete" }),
     ]);
     show();

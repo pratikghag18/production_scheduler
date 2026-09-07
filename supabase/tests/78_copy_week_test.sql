@@ -1149,12 +1149,15 @@ SAVEPOINT sp_CW20;
 DO $$
 DECLARE v_pa boolean; v_pn boolean; v_pp boolean; v_aa boolean; v_an boolean; v_ap boolean;
 BEGIN
-  SELECT has_function_privilege('authenticated', 'copy_week_plan(uuid, date, date)', 'EXECUTE'),
-         has_function_privilege('anon',          'copy_week_plan(uuid, date, date)', 'EXECUTE'),
-         has_function_privilege('public',        'copy_week_plan(uuid, date, date)', 'EXECUTE'),
-         has_function_privilege('authenticated', 'apply_copy_week(uuid, date, date, jsonb)', 'EXECUTE'),
-         has_function_privilege('anon',          'apply_copy_week(uuid, date, date, jsonb)', 'EXECUTE'),
-         has_function_privilege('public',        'apply_copy_week(uuid, date, date, jsonb)', 'EXECUTE')
+  -- 0067 (R-356): both functions gained `p_template_id` (copy_week_plan ->
+  -- 4-arg, apply_copy_week -> 5-arg). The grant contract is unchanged; only the
+  -- signature the privilege is asked about moved.
+  SELECT has_function_privilege('authenticated', 'copy_week_plan(uuid, date, date, uuid)', 'EXECUTE'),
+         has_function_privilege('anon',          'copy_week_plan(uuid, date, date, uuid)', 'EXECUTE'),
+         has_function_privilege('public',        'copy_week_plan(uuid, date, date, uuid)', 'EXECUTE'),
+         has_function_privilege('authenticated', 'apply_copy_week(uuid, date, date, jsonb, uuid)', 'EXECUTE'),
+         has_function_privilege('anon',          'apply_copy_week(uuid, date, date, jsonb, uuid)', 'EXECUTE'),
+         has_function_privilege('public',        'apply_copy_week(uuid, date, date, jsonb, uuid)', 'EXECUTE')
     INTO v_pa, v_pn, v_pp, v_aa, v_an, v_ap;
   IF v_pa AND NOT v_pn AND NOT v_pp AND v_aa AND NOT v_an AND NOT v_ap
   THEN RAISE NOTICE 'PASS CW20';

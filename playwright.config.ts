@@ -27,6 +27,24 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // The touch acceptance pass (`touch.spec.ts`, wave 2 lane C) drives real
+      // finger input through CDP and needs a `hasTouch` tablet context, so it
+      // runs ONLY under the `touch` project below. Ignoring it here is what
+      // stops it double-running: every other spec runs under `chromium`, this
+      // one runs under `touch`, so `npx playwright test` (what `scripts/ci-e2e.sh`
+      // calls) still runs each file exactly once.
+      testIgnore: /touch\.spec\.ts/,
+    },
+    {
+      // A Chromium tablet profile: `hasTouch: true` and `isMobile: true` so
+      // `touch-action` and a pointer type of `touch` behave as on a real
+      // tablet, and Chromium so `Input.dispatchTouchEvent` (CDP, Chromium-only)
+      // can drive the drags. Landscape (1138x712) so the board keeps its
+      // desktop layout — the operator panel and the full track are on screen,
+      // which the panel-drag and create cases need.
+      name: "touch",
+      use: { ...devices["Galaxy Tab S4 landscape"] },
+      testMatch: /touch\.spec\.ts/,
     },
   ],
   webServer: {

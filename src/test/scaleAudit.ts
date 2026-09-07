@@ -127,6 +127,15 @@ export const REM_SURFACES: readonly string[] = [
   // R10's copy in `scaleAudit.test.ts`, the two-place edit `missingRemSurfaces`
   // exists to force.
   "src/features/admin/components/AuditPanel.module.css",
+  // R-357 / 0066, the Absences section. A new admin surface the §19.62 pre-seat
+  // did not predict, so it is listed here AND in R10's copy in
+  // `scaleAudit.test.ts` — the two-place edit `missingRemSurfaces` exists to
+  // force (CLAUDE.md section 4).
+  "src/features/admin/components/AbsencesPanel.module.css",
+  // R-356 / 0067, the Templates section. A new admin surface, so it is listed
+  // here AND in R10's copy in `scaleAudit.test.ts` — the two-place edit
+  // `missingRemSurfaces` exists to force (CLAUDE.md section 4).
+  "src/features/admin/components/TemplatesPanel.module.css",
 ];
 
 /**

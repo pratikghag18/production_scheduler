@@ -12,6 +12,7 @@ import { useDragGesture, type UseDragGestureArgs } from "@/features/board/hooks/
 import { useToastStore } from "@/features/board/hooks/useSchedulerToast";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
+import { buildDayAxis } from "@/features/board/lib/time";
 
 /**
  * Authored, not run in this container (no npm — see the agent report).
@@ -111,6 +112,9 @@ function buildIndex(crew: IndexedAssignment[]): BoardIndex {
     windowStart: WINDOW_START,
     windowMinutes: WINDOW_MINUTES,
     dayCount: 1,
+    // D88a: a UTC axis reproduces the pre-D88 geometry exactly.
+    zone: "UTC",
+    dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
     rows: [],
     runsByNode: new Map([["cell-1", [runFixture]]]),
     assignmentsByNode: new Map([["cell-1", crew]]),
@@ -171,6 +175,9 @@ function baseArgs(
     // DEF-0015: the server's `can_place`. True (a scheduler) for every case
     // except the viewer cases below, which pass false.
     canPlace,
+    // R-357: the plant's date format, used only to phrase a warn-move's absence
+    // warnings in the success toast (`leaveLine`). The default token is fine here.
+    dateFormat: "d_mon_yyyy",
   };
 }
 
@@ -183,6 +190,7 @@ function runDescriptor(runsOnNode: IndexedRun[], crew: IndexedAssignment[]) {
     windowMinutes: WINDOW_MINUTES,
     template: null,
     dayCount: 1,
+    dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
     zoomIndex: 1 as const,
     handlePx: 8,
     blockWidthPx: 200,
@@ -253,6 +261,9 @@ describe("useDragGesture", () => {
       run: {} as Run,
       assignments: [],
       eligibilityWarnings: [],
+      // R-357: `parseMoveRunResult` always fills this (defaulting to []), so the
+      // mock reflects the real contract the success handler reads.
+      absenceWarnings: [],
     } as never);
     const crew = [crewFixture()];
     const index = buildIndex(crew); // T10: commitBlockDrag reads this fresh map, not the descriptor
@@ -280,6 +291,63 @@ describe("useDragGesture", () => {
     expect(
       useToastStore.getState().toasts.some((t) => t.message.includes("Moving a staffed run")),
     ).toBe(false);
+  });
+
+  /**
+   * R-357 — A WARN-MOVE'S ABSENCE WARNINGS REACH THE DRAG TOAST. The create and
+   * reassign pop-ups already show the leave a warn-placement went ahead over; the
+   * drag path was the one silent place. `move_run` returns `absence_warnings` for
+   * every crew member carried onto a window they are away for (informational, D60
+   * — the move already succeeded), and the success toast now names them the way
+   * the pop-ups do (`leaveLine`: the person, then "On leave <dates>: reason").
+   */
+  it("R-357: a staffed warn-move whose result carries absence_warnings toasts the person and the leave", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.moveRun).mockResolvedValue({
+      run: {} as Run,
+      assignments: [],
+      eligibilityWarnings: [],
+      absenceWarnings: [
+        {
+          operatorId: "op-1",
+          absence: { absent: true, from: "2026-08-24", to: "2026-08-25", reason: "sick" },
+        },
+      ],
+    } as never);
+    const crew = [crewFixture()]; // staffed → the move goes through move_run
+    const index = buildIndex(crew);
+    // Name the person on the index so the toast can render a display name rather
+    // than the bare id fallback — the pop-ups name the person, so this must too.
+    index.operatorById.set("op-1", {
+      id: "op-1",
+      homeNodeId: null,
+      displayName: "Ana Operator",
+      employeeRef: null,
+      active: true,
+      siteNodeId: "cell-1",
+      sitePath: "plant_1.cell_1",
+      skillIds: [],
+      skillExpiries: [],
+    });
+    const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+    act(() => {
+      result.current.beginBlockDrag(runDescriptor([runFixture], []), fakePointerEvent(500, 300));
+    });
+    act(() => {
+      result.current.updateBlockDrag(fakePointerEvent(560, 300));
+    });
+    act(() => {
+      result.current.endBlockDrag(fakePointerEvent(560, 300));
+    });
+
+    await waitFor(() => expect(api.moveRun).toHaveBeenCalledTimes(1));
+    // The one thing the drag path used to swallow: the person, and the leave in
+    // `leaveLine`'s own words.
+    await waitFor(() => {
+      const messages = useToastStore.getState().toasts.map((t) => t.message);
+      expect(messages.some((m) => m.includes("Ana Operator") && m.includes("On leave"))).toBe(true);
+    });
   });
 
   it("T13: a session identity change cancels an in-flight drag with no mutation sent", async () => {
@@ -440,6 +508,7 @@ describe("useDragGesture", () => {
             windowMinutes: WINDOW_MINUTES,
             template: null,
             dayCount: 1,
+            dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
             zoomIndex: 1,
             trackLeftPx: 0,
             offsetXPx: 0,

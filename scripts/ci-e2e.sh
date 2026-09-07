@@ -33,7 +33,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 STARTED_STACK=0
+FUNCTIONS_PID=""
 cleanup() {
+  if [ -n "$FUNCTIONS_PID" ]; then
+    echo "ci-e2e: stopping the invite function server ($FUNCTIONS_PID)"
+    kill "$FUNCTIONS_PID" 2>/dev/null || true
+  fi
   if [ "$STARTED_STACK" = "1" ]; then
     echo "ci-e2e: stopping the stack this script started"
     npx supabase stop || true
@@ -78,6 +83,35 @@ if [ -z "${VITE_SUPABASE_URL:-}" ] || [ -z "${VITE_SUPABASE_ANON_KEY:-}" ]; then
   exit 1
 fi
 echo "ci-e2e: app will use VITE_SUPABASE_URL=$VITE_SUPABASE_URL"
+
+# 3b. Serve the invite Edge Function (P1-6c) so e2e/invite.spec.ts runs instead
+#     of skipping. ONLY when this script started the stack -- against a
+#     developer's own live stack the developer serves it themselves (or the spec
+#     skips with its named reason), exactly as the reset/change specs run against
+#     whatever is up. The function reads the stack's own keys from a .env written
+#     here from `supabase status`; SUPABASE_URL/ANON/SERVICE are also injected by
+#     the Edge runtime, so this .env mainly carries SITE_URL for the local serve.
+if [ "$STARTED_STACK" = "1" ]; then
+  echo "ci-e2e: writing supabase/functions/.env and serving the invite function"
+  eval "$(npx supabase status -o env \
+    --override-name auth.service_role_key=SR_KEY \
+    --override-name api.url=API_URL \
+    --override-name auth.anon_key=ANON_KEY 2>/dev/null)"
+  {
+    echo "SUPABASE_URL=${API_URL}"
+    echo "SUPABASE_ANON_KEY=${ANON_KEY}"
+    echo "SUPABASE_SERVICE_ROLE_KEY=${SR_KEY}"
+    echo "SITE_URL=http://localhost:5173"
+  } > supabase/functions/.env
+  npx supabase functions serve invite --env-file supabase/functions/.env >/tmp/ci-invite-serve.log 2>&1 &
+  FUNCTIONS_PID=$!
+  echo "ci-e2e: invite function serving as pid $FUNCTIONS_PID; waiting for it to answer"
+  for i in $(seq 1 60); do
+    code=$(curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$VITE_SUPABASE_URL/functions/v1/invite" 2>/dev/null || true)
+    if [ "$code" = "200" ] || [ "$code" = "204" ]; then echo "ci-e2e: invite function is up after ${i}s"; break; fi
+    sleep 1
+  done
+fi
 
 # 4. Every browser case. playwright.config.ts starts `npm run dev` with these
 #    values, tunes retries/workers off process.env.CI, and the signed-in specs now

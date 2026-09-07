@@ -3,6 +3,7 @@ import type { HierarchyLevel } from "@/lib/api";
 import type { BoardRow } from "../lib/boardIndex";
 import type { ShiftTemplate } from "@/lib/api";
 import { minutesToPx, shiftBoundaries, shiftInstances, ZOOMS, intersects } from "../lib/geometry";
+import type { DayAxis } from "../lib/time";
 import { Chevron } from "@/components/icons";
 import styles from "./GroupRow.module.css";
 
@@ -16,7 +17,7 @@ export function GroupRow({
   row,
   level,
   template,
-  dayCount,
+  dayAxis,
   zoomIndex,
   trackWidth,
   railWidth,
@@ -27,7 +28,7 @@ export function GroupRow({
   row: BoardRow;
   level: HierarchyLevel | undefined;
   template: ShiftTemplate | null;
-  dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: 0 | 1 | 2;
   trackWidth: number;
   railWidth: number;
@@ -41,12 +42,12 @@ export function GroupRow({
 
   const boundaries = useMemo(() => {
     if (!template) return [];
-    return shiftBoundaries(template, dayCount).filter((m) => m >= visStart - 1 && m <= visEnd + 1);
-  }, [template, dayCount, visStart, visEnd]);
+    return shiftBoundaries(template, dayAxis).filter((m) => m >= visStart - 1 && m <= visEnd + 1);
+  }, [template, dayAxis, visStart, visEnd]);
 
   const labels = useMemo(() => {
     if (!template || !compact) return [];
-    return shiftInstances(template, dayCount)
+    return shiftInstances(template, dayAxis)
       .filter(
         (inst) =>
           inst.rawStartMin === inst.startMin &&
@@ -57,7 +58,7 @@ export function GroupRow({
         left: minutesToPx(inst.startMin, pxPerHour) + 4,
         name: inst.shift.name,
       }));
-  }, [template, compact, dayCount, pxPerHour, visStart, visEnd]);
+  }, [template, compact, dayAxis, pxPerHour, visStart, visEnd]);
 
   return (
     <div className={styles.grpRow} style={{ height: row.height }}>

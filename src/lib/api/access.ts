@@ -30,7 +30,7 @@
 import { supabase } from "@/lib/supabase";
 import type { Json } from "@/lib/database.types";
 import type { DateFormat } from "@/lib/format/dates";
-import { toSchedulerError } from "./errors";
+import { toSchedulerError, type SchedulerError } from "./errors";
 import { fetchAll } from "./paging";
 
 export async function fetchAdminAnywhere(): Promise<boolean> {
@@ -92,6 +92,84 @@ export async function fetchSitePeople(nodeId: string): Promise<unknown> {
   const { data, error } = await supabase.rpc("site_people", { p_node_id: nodeId });
   if (error) throw toSchedulerError(error);
   return data;
+}
+
+/* ===========================================================================
+ * INVITATIONS — the `invite` Edge Function (P1-6c, S24).
+ *
+ * ⭐ THE ONE WRAPPER IN THIS FILE THAT IS NOT AN RPC. Inviting a person by
+ * email needs `auth.admin.inviteUserByEmail`, which needs the service-role key
+ * and so can never run in a browser. The privileged half lives in a Deno Edge
+ * Function (`supabase/functions/invite/index.ts`); this is the typed call to it.
+ *
+ * ⚠️ THE FUNCTION AUTHORISES NOTHING BY ITSELF. It checks `app_is_admin_anywhere`
+ * as the caller, then puts the ONE grant through `set_site_member` as the
+ * caller — the same RPC `setSiteMember` above calls — so the database keeps the
+ * final say. A refusal comes back in the SchedulerError shape this file's other
+ * wrappers already produce, via `toSchedulerError`.
+ *
+ * ⚠️ THE FUNCTION ANSWERS HTTP 200 EVEN FOR A HANDLED REFUSAL, on purpose:
+ * `functions.invoke` surfaces a non-2xx body only through `error.context`, so a
+ * 200 with `{ ok: false, ... }` lets this read the refusal directly. A genuine
+ * crash still arrives as `error` and is mapped to `Unknown`.
+ * =========================================================================== */
+
+/** Why the invite was refused; drives which sentence the panel shows. */
+export type InviteRefusalReason = "not_admin" | "other_org" | "invalid" | "grant_refused";
+
+export interface InviteInput {
+  email: string;
+  nodeId: string;
+  role: SiteMemberRole;
+}
+
+export type InviteResult =
+  | { ok: true; userId: string; invited: boolean }
+  | { ok: false; reason: InviteRefusalReason; error: SchedulerError };
+
+interface InviteOkBody {
+  ok: true;
+  userId: string;
+  invited: boolean;
+}
+interface InviteRefusalBody {
+  ok: false;
+  reason: InviteRefusalReason;
+  error?: unknown;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+/**
+ * `POST /functions/v1/invite`. Invites `email` to `nodeId` as `role`, or
+ * grants an existing member, or refuses. The caller's bearer token is attached
+ * by supabase-js from the current session.
+ *
+ * NEVER THROWS FOR A HANDLED OUTCOME — it returns a discriminated result the
+ * panel switches on, the same shape `set_site_member`'s refusals reach the UI
+ * as. Only a genuinely malformed transport reply falls through to
+ * `{ ok:false, reason:"invalid", ... }`.
+ */
+export async function invite(input: InviteInput): Promise<InviteResult> {
+  const { data, error } = await supabase.functions.invoke("invite", {
+    body: { email: input.email, nodeId: input.nodeId, role: input.role },
+  });
+  if (error) {
+    // Transport error or an unexpected non-2xx (a crash). No readable body.
+    return { ok: false, reason: "invalid", error: toSchedulerError(error) };
+  }
+  if (isRecord(data) && data.ok === true) {
+    const body = data as unknown as InviteOkBody;
+    return { ok: true, userId: body.userId, invited: body.invited === true };
+  }
+  const body = (isRecord(data) ? data : {}) as unknown as InviteRefusalBody;
+  const reason: InviteRefusalReason =
+    body.reason === "not_admin" || body.reason === "other_org" || body.reason === "grant_refused"
+      ? body.reason
+      : "invalid";
+  return { ok: false, reason, error: toSchedulerError(body.error) };
 }
 
 /**
@@ -244,6 +322,18 @@ export async function setOrgDateFormat(format: DateFormat): Promise<void> {
 }
 
 /**
+ * `set_org_timezone(p_tz)` (migration 0063, R-353). Sets the company-wide
+ * fallback IANA time zone in `orgs.settings.timezone` — the twin of
+ * `setOrgDateFormat`, same `app_is_admin()` gate. The zone is validated on the
+ * server against `pg_timezone_names`; an unknown name comes back
+ * `invalid_argument` carrying `field: "timezone"`, a non-admin `not_permitted`.
+ */
+export async function setOrgTimezone(timezone: string): Promise<void> {
+  const { error } = await supabase.rpc("set_org_timezone", { p_tz: timezone });
+  if (error) throw toSchedulerError(error);
+}
+
+/**
  * What the org does when somebody is scheduled onto work they are not
  * certified for. Mirrors migration 0001's
  * `check (settings->>'eligibility_policy' in ('warn','block'))` — the same
@@ -332,10 +422,14 @@ export async function setOrgEligibilityPolicy(policy: EligibilityPolicy): Promis
  * without a matching migration is a control the server refuses. 0052's header
  * carries the full list of what a third key costs on the server side.
  */
-export type NodeSettingKey = "eligibility_policy" | "date_format";
+export type NodeSettingKey = "eligibility_policy" | "date_format" | "timezone";
 
 /** Every key, so a caller can loop rather than restate the union. */
-export const NODE_SETTING_KEYS: readonly NodeSettingKey[] = ["eligibility_policy", "date_format"];
+export const NODE_SETTING_KEYS: readonly NodeSettingKey[] = [
+  "eligibility_policy",
+  "date_format",
+  "timezone",
+];
 
 /** One plant's own answer for one setting, as the Settings screen has to show it. */
 export interface PlantSettingRow {

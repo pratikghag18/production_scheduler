@@ -255,3 +255,73 @@
   padding: 0.3125rem 0.5rem;
   font-size: 0.8125rem;
 }
+
+/* ---------------------------------------------------------------------------
+   INVITE (P1-6c). The one control on this panel that is NOT in the shared
+   grid: it appears only when a search matched nobody, so it sizes to its own
+   content rather than borrowing the member-row columns. Same token palette and
+   rem sizing as the rest of the file.
+   --------------------------------------------------------------------------- */
+.inviteBox {
+  margin-top: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px dashed var(--axis);
+  border-radius: 0.4375rem;
+  background: var(--page);
+}
+
+.inviteLead {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+
+.inviteRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.inviteEmail {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.inviteBtn {
+  flex: none;
+  font-size: 0.7188rem;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 0.4375rem;
+  border: 1px solid var(--accent, var(--axis));
+  background: var(--accent, var(--surface));
+  color: #fff;
+  cursor: pointer;
+}
+
+.inviteBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.inviteOk {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+/* The "invited, not yet signed in" mark beside an address. Small, quiet, and
+   only on a member row whose person has never signed in (0064). */
+.invitedTag {
+  margin-left: 0.4375rem;
+  padding: 0.0625rem 0.3125rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}

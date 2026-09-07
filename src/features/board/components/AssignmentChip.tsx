@@ -2,6 +2,7 @@ import type { Product, BoardOperator, ShiftTemplate } from "@/lib/api";
 import type { IndexedAssignment, IndexedRun } from "../lib/boardIndex";
 import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import type { DayAxis } from "../lib/time";
 import { targetDisplay } from "../lib/standardTarget";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import styles from "./AssignmentChip.module.css";
@@ -25,11 +26,13 @@ export function AssignmentChip({
   product,
   productColorVar,
   windowStart,
+  zone,
   pxPerHour,
   windowMinutes,
   homeRun,
   template,
   dayCount,
+  dayAxis,
   zoomIndex,
   activeDrag,
   onPointerDown,
@@ -47,11 +50,13 @@ export function AssignmentChip({
   product: Product | undefined;
   productColorVar: string;
   windowStart: Date;
+  zone?: string;
   pxPerHour: number;
   windowMinutes: number;
   homeRun: IndexedRun | null;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: 0 | 1 | 2;
   activeDrag: ActiveDrag | null;
   onPointerDown: (descriptor: BlockDragDescriptor, e: React.PointerEvent) => void;
@@ -80,8 +85,8 @@ export function AssignmentChip({
   const { suffix: tgtSfx, tip: tgtTip } = targetDisplay(assignment);
 
   const title =
-    `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin))}` +
-    `–${formatClock(addMinutes(windowStart, range.endMin))}${effSfx}${tgtTip}` +
+    `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin), undefined, zone)}` +
+    `–${formatClock(addMinutes(windowStart, range.endMin), zone)}${effSfx}${tgtTip}` +
     (assignment.eligibilityOverride ? " · certification override" : "");
 
   const descriptorBase = {
@@ -92,6 +97,7 @@ export function AssignmentChip({
     windowMinutes,
     template,
     dayCount,
+    dayAxis,
     zoomIndex,
     runsOnNode: [],
     crew: [],
@@ -109,7 +115,7 @@ export function AssignmentChip({
       title={title}
       tabIndex={0}
       role="button"
-      aria-label={`${name} on ${productName}, ${formatClock(addMinutes(windowStart, range.startMin))} to ${formatClock(addMinutes(windowStart, range.endMin))}`}
+      aria-label={`${name} on ${productName}, ${formatClock(addMinutes(windowStart, range.startMin), zone)} to ${formatClock(addMinutes(windowStart, range.endMin), zone)}`}
       onPointerDown={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         onPointerDown(
@@ -135,8 +141,8 @@ export function AssignmentChip({
         {tgtSfx}
       </span>
       <span className={styles.tm}>
-        {formatClock(addMinutes(windowStart, range.startMin))}–
-        {formatClock(addMinutes(windowStart, range.endMin))}
+        {formatClock(addMinutes(windowStart, range.startMin), zone)}–
+        {formatClock(addMinutes(windowStart, range.endMin), zone)}
         {effSfx}
       </span>
       <span

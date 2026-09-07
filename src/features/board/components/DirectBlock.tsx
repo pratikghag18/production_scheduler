@@ -2,6 +2,7 @@ import type { Product, BoardOperator, ShiftTemplate } from "@/lib/api";
 import type { IndexedAssignment } from "../lib/boardIndex";
 import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import type { DayAxis } from "../lib/time";
 import { targetDisplay } from "../lib/standardTarget";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import styles from "./DirectBlock.module.css";
@@ -25,10 +26,12 @@ export function DirectBlock({
   product,
   productColorVar,
   windowStart,
+  zone,
   pxPerHour,
   windowMinutes,
   template,
   dayCount,
+  dayAxis,
   zoomIndex,
   activeDrag,
   onPointerDown,
@@ -46,10 +49,12 @@ export function DirectBlock({
   product: Product | undefined;
   productColorVar: string;
   windowStart: Date;
+  zone?: string;
   pxPerHour: number;
   windowMinutes: number;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: 0 | 1 | 2;
   activeDrag: ActiveDrag | null;
   onPointerDown: (descriptor: BlockDragDescriptor, e: React.PointerEvent) => void;
@@ -78,8 +83,8 @@ export function DirectBlock({
   const { suffix: tgtSfx, tip: tgtTip } = targetDisplay(assignment);
 
   const title =
-    `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin))}` +
-    `–${formatClock(addMinutes(windowStart, range.endMin))}${effSfx}${tgtTip}` +
+    `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin), undefined, zone)}` +
+    `–${formatClock(addMinutes(windowStart, range.endMin), zone)}${effSfx}${tgtTip}` +
     (assignment.eligibilityOverride ? " · certification override" : "");
 
   const descriptorBase = {
@@ -90,6 +95,7 @@ export function DirectBlock({
     windowMinutes,
     template,
     dayCount,
+    dayAxis,
     zoomIndex,
     runsOnNode: [],
     crew: [],
@@ -107,7 +113,7 @@ export function DirectBlock({
       title={title}
       tabIndex={0}
       role="button"
-      aria-label={`${name} direct assignment on ${productName}, ${formatClock(addMinutes(windowStart, range.startMin))} to ${formatClock(addMinutes(windowStart, range.endMin))}`}
+      aria-label={`${name} direct assignment on ${productName}, ${formatClock(addMinutes(windowStart, range.startMin), zone)} to ${formatClock(addMinutes(windowStart, range.endMin), zone)}`}
       onPointerDown={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         onPointerDown(
@@ -133,8 +139,8 @@ export function DirectBlock({
         {tgtSfx}
       </span>
       <span className={styles.what}>
-        {productName} · {formatClock(addMinutes(windowStart, range.startMin))}–
-        {formatClock(addMinutes(windowStart, range.endMin))}
+        {productName} · {formatClock(addMinutes(windowStart, range.startMin), zone)}–
+        {formatClock(addMinutes(windowStart, range.endMin), zone)}
         {effSfx}
       </span>
       <span

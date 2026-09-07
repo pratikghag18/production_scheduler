@@ -84,11 +84,13 @@ test("a company admin signs in and gets the whole admin rail", async ({ page }) 
     "Access",
     "Shifts",
     "Operators",
+    "Absences",
     "Trainings",
     "Matrix",
     "Products",
     "Cycle times",
     "Import",
+    "Templates",
     "Settings",
     "Activity",
   ]);
@@ -117,7 +119,8 @@ test("a site admin is offered Settings and not Activity", async ({ page }) => {
  * keeping Settings away from her. The whole list is asserted rather than three
  * presence checks, because a list cannot be widened quietly.
  */
-test("a supervisor with no admin grant gets exactly three tabs", async ({ page }) => {
+test("a supervisor with no admin grant gets exactly four tabs", async ({ page }) => {
   await signIn(page, SUPERVISOR, "/admin");
-  expect(await rail(page)).toEqual(["Operators", "Trainings", "Matrix"]);
+  // R-357 added Absences beside Operators (adminSectionsFor widened for it).
+  expect(await rail(page)).toEqual(["Operators", "Absences", "Trainings", "Matrix"]);
 });

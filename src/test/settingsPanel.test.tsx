@@ -40,6 +40,7 @@ import rowStyles from "@/components/SettingRow.module.css";
 const h = vi.hoisted(() => ({
   setOrgFormat: vi.fn(),
   setOrgPolicy: vi.fn(),
+  setOrgTz: vi.fn(),
   setPlant: vi.fn(),
   usePlantFilterSpy: vi.fn(),
   state: {
@@ -79,6 +80,7 @@ const h = vi.hoisted(() => ({
     },
     companyFormat: "d_mon_yyyy" as string,
     companyPolicy: "warn" as string,
+    companyTimezone: "UTC" as string,
     /**
      * ⛔ `null` IS "INHERITING" AND IS NOT THE SAME AS THE COMPANY'S VALUE.
      * A plant deliberately set to `warn` while the company is on `warn` keeps
@@ -87,6 +89,7 @@ const h = vi.hoisted(() => ({
     own: {
       dateFormat: null as string | null,
       policy: null as string | null,
+      timezone: null as string | null,
       isLoading: false,
       error: null as unknown,
     },
@@ -94,6 +97,8 @@ const h = vi.hoisted(() => ({
     orgFormatError: null as unknown,
     orgPolicyPending: false,
     orgPolicyError: null as unknown,
+    orgTzPending: false,
+    orgTzError: null as unknown,
     /** Which SETTING a per-plant write is in flight for, if any. */
     plantPendingKey: null as string | null,
     plantErrorKey: null as string | null,
@@ -116,6 +121,7 @@ vi.mock("@/lib/api", () => ({
   fetchOrgSettings: vi.fn(),
   setOrgDateFormat: vi.fn(),
   setOrgEligibilityPolicy: vi.fn(),
+  setOrgTimezone: vi.fn(),
   fetchPlantSettings: vi.fn(),
   setPlantSetting: vi.fn(),
   clearPlantSetting: vi.fn(),
@@ -168,12 +174,14 @@ vi.mock("@/features/admin/hooks/useOrgSettings", async (importOriginal) => {
     ...actual,
     useCompanyDateFormat: () => h.state.companyFormat,
     useCompanyEligibilityPolicy: () => h.state.companyPolicy,
+    useCompanyTimezone: () => h.state.companyTimezone,
     usePlantOverrides: (_enabled: boolean, nodeId: string | null) =>
       nodeId === null
-        ? { dateFormat: null, policy: null, isLoading: false, error: null }
+        ? { dateFormat: null, policy: null, timezone: null, isLoading: false, error: null }
         : {
             dateFormat: h.state.own.dateFormat,
             policy: h.state.own.policy,
+            timezone: h.state.own.timezone,
             isLoading: h.state.own.isLoading,
             error: h.state.own.error,
           },
@@ -188,6 +196,12 @@ vi.mock("@/features/admin/hooks/useOrgSettings", async (importOriginal) => {
       isPending: h.state.orgPolicyPending,
       isError: h.state.orgPolicyError !== null,
       error: h.state.orgPolicyError,
+    }),
+    useSetTimezone: () => ({
+      mutate: h.setOrgTz,
+      isPending: h.state.orgTzPending,
+      isError: h.state.orgTzError !== null,
+      error: h.state.orgTzError,
     }),
     useSetPlantSetting: () => ({
       mutate: h.setPlant,
@@ -218,6 +232,11 @@ function policyPicker(): HTMLSelectElement {
   return screen.getByRole("combobox", {
     name: "Putting someone on a job they are not certified for",
   }) as HTMLSelectElement;
+}
+
+/** The time-zone control, by the words a reader sees. */
+function timezonePicker(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "Time zone" }) as HTMLSelectElement;
 }
 
 /** Today the way the panel builds it: LOCAL, not the UTC day. */
@@ -265,7 +284,7 @@ beforeEach(() => {
   h.state.rights = { role: "admin", adminPaths: [], writablePaths: [], known: true };
   h.state.companyFormat = "d_mon_yyyy";
   h.state.companyPolicy = "warn";
-  h.state.own = { dateFormat: null, policy: null, isLoading: false, error: null };
+  h.state.own = { dateFormat: null, policy: null, timezone: null, isLoading: false, error: null };
   h.state.orgFormatPending = false;
   h.state.orgFormatError = null;
   h.state.orgPolicyPending = false;
@@ -586,7 +605,8 @@ describe("R-331: a plant's own answers, kept apart from the company's", () => {
     expect(
       screen.getByText(/Inheriting from the company — currently Allowed with a reason/),
     ).toBeTruthy();
-    expect(screen.getAllByText(/this plant follows/i)).toHaveLength(2);
+    // R-355: three settings inherit now — date format, time zone, eligibility.
+    expect(screen.getAllByText(/this plant follows/i)).toHaveLength(3);
   });
 
   it("an inheriting plant tracks the company's answer rather than a stored one", () => {
@@ -603,12 +623,33 @@ describe("R-331: a plant's own answers, kept apart from the company's", () => {
   it("a plant with its own answers says so, and says it will not follow the company", () => {
     h.state.own.dateFormat = "iso";
     h.state.own.policy = "block";
+    h.state.own.timezone = "America/Chicago";
     render(<SettingsPanel />);
     expect(picker().value).toBe("iso");
     expect(policyPicker().value).toBe("block");
+    expect(timezonePicker().value).toBe("America/Chicago");
     expect(screen.getByText(/Set for this plant — ISO \(Year-Month-Day\)/)).toBeTruthy();
     expect(screen.getByText(/Set for this plant — Refused/)).toBeTruthy();
-    expect(screen.getAllByText(/does not follow the company/i)).toHaveLength(2);
+    // R-355: all three settings now say "does not follow the company" when set.
+    expect(screen.getAllByText(/does not follow the company/i)).toHaveLength(3);
+  });
+
+  it("R-355: the time zone is a per-plant setting with the same three states", () => {
+    // Inheriting: the picker sits on the inherit option and names the company zone.
+    h.state.companyTimezone = "UTC";
+    render(<SettingsPanel />);
+    expect(timezonePicker().value).toBe(INHERIT);
+    expect(screen.getByText(/Inheriting from the company — currently UTC/)).toBeTruthy();
+  });
+
+  it("R-355: choosing a zone on a plant writes it through set_node_setting", () => {
+    render(<SettingsPanel />);
+    fireEvent.change(timezonePicker(), { target: { value: "America/Chicago" } });
+    expect(h.setPlant).toHaveBeenCalledWith({
+      nodeId: "a",
+      key: "timezone",
+      choice: "America/Chicago",
+    });
   });
 
   /**
@@ -619,6 +660,9 @@ describe("R-331: a plant's own answers, kept apart from the company's", () => {
   it("does not show a plant set to the company's current value as inheriting", () => {
     h.state.own.dateFormat = "d_mon_yyyy";
     h.state.own.policy = "warn";
+    // All three set (timezone to the company's own value), so nothing on the
+    // tab is inheriting — the whole point of this case.
+    h.state.own.timezone = "UTC";
     render(<SettingsPanel />);
     expect(picker().value).toBe("d_mon_yyyy");
     expect(policyPicker().value).toBe("warn");
@@ -782,8 +826,9 @@ describe("R-332: every setting's control is the same column", () => {
       h.state.plantFilter.choice = choice;
       const { container, unmount } = render(<SettingsPanel />);
       const rows = container.querySelectorAll(`.${rowStyles.row}`);
-      expect(rows).toHaveLength(2);
-      expect(container.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(2);
+      // R-355: three settings now -- date format, time zone, eligibility.
+      expect(rows).toHaveLength(3);
+      expect(container.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(3);
       for (const row of Array.from(rows)) {
         expect(row.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(1);
         expect(row.querySelectorAll(`.${rowStyles.control}`)).toHaveLength(1);
