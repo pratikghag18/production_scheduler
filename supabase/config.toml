@@ -103,3 +103,10 @@ enable_confirmations = false
 
 [analytics]
 enabled = false
+
+# Wave 3 lane A (P1-6c, S24): the invite Edge Function. verify_jwt = true so
+# GoTrue rejects an unauthenticated caller before the function's own code runs;
+# the function then re-asks the database, AS THE CALLER, whether the grant is
+# allowed (app_is_admin_anywhere, then set_site_member).
+[functions.invite]
+verify_jwt = true

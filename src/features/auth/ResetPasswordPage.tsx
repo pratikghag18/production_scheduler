@@ -34,8 +34,24 @@ import fieldStyles from "@/components/Field.module.css";
  * `failed` for a link that expired, was used, or was malformed — a terminal
  * screen offering a fresh link, never a blank form that submits into nothing.
  */
+/**
+ * Did we arrive from an INVITE rather than a password reset? Read from the
+ * landing hash's `type=invite` (P1-6c). Only the COPY differs — the recovery
+ * lifecycle, the gate and `updateUser` are identical, because an invite owes a
+ * password exactly as a reset does. Captured in the `useState` initializer so
+ * it is read at first render, the same point the recovery hash is still present
+ * (supabase-js consumes it on a later tick); when the F-106 redirect drops the
+ * tokens on `/` and the gate forwards here without the hash, this reads false
+ * and the copy falls back to the reset wording, which is a safe default.
+ */
+function landedFromInvite(): boolean {
+  if (typeof window === "undefined") return false;
+  return /(^#|[&#])type=invite(&|$)/.test(window.location.hash ?? "");
+}
+
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
+  const [fromInvite] = useState(landedFromInvite);
   const [status, setStatus] = useState<RecoveryStatus>("waiting");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -109,7 +125,11 @@ export default function ResetPasswordPage() {
   return (
     <div className={styles.screen}>
       <div className={styles.card}>
-        <h1 className={styles.title}>Set a new password</h1>
+        <h1 className={styles.title}>{fromInvite ? "Set your password" : "Set a new password"}</h1>
+
+        {fromInvite && status === "ready" && (
+          <p className={styles.subtitle}>Welcome — choose a password to finish joining.</p>
+        )}
 
         {status === "failed" && (
           <>

@@ -378,4 +378,12 @@ describe("session.ts: initialRecoveryFlag (F-106, the seed)", () => {
     expect(initialRecoveryFlag("", "0")).toBe(false);
     expect(initialRecoveryFlag("", null)).toBe(false);
   });
+
+  it("P8: an invite hash (type=invite) seeds the flag too, so an invited person owes a password (P1-6c)", () => {
+    expect(initialRecoveryFlag("#access_token=a&refresh_token=b&type=invite", null)).toBe(true);
+    expect(initialRecoveryFlag("#type=invite", null)).toBe(true);
+    // and only these two types: a signup confirmation or a magic link does not.
+    expect(initialRecoveryFlag("#type=invitex", null)).toBe(false);
+    expect(initialRecoveryFlag("#type=magiclink", null)).toBe(false);
+  });
 });

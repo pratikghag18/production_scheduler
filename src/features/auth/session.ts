@@ -121,6 +121,16 @@ export function nextRecoveryFlag(current: boolean, event: string): boolean {
  *
  * Pure over its two inputs, so the provider passes `window.location.hash` and
  * the stored value and a test passes strings.
+ *
+ * ⭐ WIDENED FOR INVITES (P1-6c). GoTrue sends an invite link with
+ * `type=invite`, and supabase-js turns its tokens into a session and fires
+ * `SIGNED_IN`, not `PASSWORD_RECOVERY` — so `nextRecoveryFlag` never raises the
+ * flag from the event, and without seeding it here an invited person would land
+ * on the board (or the no-access dead-end) with a password nobody set. An
+ * invite owes a password exactly as a reset does, so a `type=invite` fragment
+ * seeds the same flag and the same gate then sends them to `/reset-password`.
+ * The two `type=` values are the only owed-password cases; anything else (a
+ * `signup` confirmation, a magic link) is not, and stays false.
  */
 export const RECOVERY_STORAGE_KEY = "scheduler.passwordRecovery";
 
@@ -129,7 +139,7 @@ export function initialRecoveryFlag(
   stored: string | null,
 ): boolean {
   if (stored === "1") return true;
-  return typeof hash === "string" && /(^#|[&#])type=recovery(&|$)/.test(hash);
+  return typeof hash === "string" && /(^#|[&#])type=(recovery|invite)(&|$)/.test(hash);
 }
 
 /* ===========================================================================
@@ -257,8 +267,11 @@ export function adminSectionsFor(
   if (role === "admin" || adminAnywhere === true) return "all";
   // The Matrix is a third view of the same operators-and-trainings data those
   // two screens show, scoped to what the reader can already see, so a supervisor
-  // gets it for the same reason they get Operators and Trainings.
-  return ["operators", "trainings", "matrix"];
+  // gets it for the same reason they get Operators and Trainings. Absences joins
+  // the list for the same reason (R-357): a supervisor records an absence for a
+  // person of their own place, and `set_absence` gates each write on exactly
+  // that, so the tab is worth offering wherever Operators is.
+  return ["operators", "absences", "trainings", "matrix"];
 }
 
 /**

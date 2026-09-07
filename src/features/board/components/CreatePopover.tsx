@@ -3,6 +3,8 @@ import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import { certificateGaps, type CertificateGap } from "../lib/boardIndex";
+import { absenceGaps, type AbsenceRow, type AbsenceHit } from "@/lib/absence";
+import { leaveLine } from "../lib/leave";
 import { DEFAULT_DATE_FORMAT, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
@@ -97,9 +99,11 @@ export function CreatePopover({
   hereOperatorIds,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
+  zone,
   requiredSkills,
   outsideAreaOperatorIds,
   eligibilityPolicy,
+  absences = [],
   presetOperatorId,
   onCancel,
   onSubmitRun,
@@ -153,6 +157,7 @@ export function CreatePopover({
   hereOperatorIds: ReadonlySet<string>;
   windowStart: Date;
   dateFormat?: DateFormat;
+  zone?: string;
   /** D64/D65: this node's effective required skills (`skillsForNode`, an
    *  ancestor-inherited union — already resolved by `boardIndex.ts`). */
   requiredSkills: Skill[];
@@ -195,6 +200,21 @@ export function CreatePopover({
    * before it gets here: the popover holds no rule, it only renders one.
    */
   eligibilityPolicy: "warn" | "block";
+  /**
+   * R-357: every absence the board can see (RLS-scoped upstream to this board's
+   * own people). `absenceGaps` narrows it to the selected person and the window
+   * being written — the same predicate `create_assignment` runs — so a person on
+   * leave is named BEFORE Create, and Create is refused in place under `block`,
+   * exactly as the expired-certificate case is (R-338). There is no override:
+   * the server takes no absence override, so under `warn` this is a warning only
+   * and Create stays enabled (offering a reason box the server ignores would be
+   * the screen refusing what the server allows — CLAUDE.md §4).
+   *
+   * Optional with an empty default so a test or a caller that has no absences
+   * loaded renders exactly the pre-R-357 pop-up; `BoardPage` always passes the
+   * board's own list.
+   */
+  absences?: readonly AbsenceRow[];
   /** D65: set only when this popover was opened by a panel drop. */
   presetOperatorId?: string;
   onCancel: () => void;
@@ -304,7 +324,7 @@ export function CreatePopover({
   const [areaChecked, setAreaChecked] = useState(false);
   const [areaReason, setAreaReason] = useState("");
 
-  const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, range.endMin))}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin), dateFormat, zone)} – ${formatClock(addMinutes(windowStart, range.endMin), zone)}`;
 
   // R-316: recomputed as the part, the span or the efficiency changes. Only
   // meaningful in direct mode — a run carries no target of its own.
@@ -345,8 +365,26 @@ export function CreatePopover({
     // turns on, so the memo keys on that rather than on object identity.
   }, [operators, requiredSkills, windowEnd.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // R-357: the leave check, the twin of `gapsByOperator` right above and keyed
+  // the same way. The window is the one being written — start AND end move while
+  // the form is open (the shift chips and drag handles change them), so both
+  // instants key the memo, exactly as the certificate check keys on the end.
+  const windowStartInstant = addMinutes(windowStart, range.startMin);
+  const absenceByOperator = useMemo(() => {
+    const m = new Map<string, AbsenceHit>();
+    for (const o of operators) {
+      const hit = absenceGaps(absences, o.id, { start: windowStartInstant, end: windowEnd });
+      if (hit !== null) m.set(o.id, hit);
+    }
+    return m;
+  }, [operators, absences, windowStartInstant.getTime(), windowEnd.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectedOutsideArea = outsideAreaOperatorIds.has(operatorId);
   const selectedGaps = gapsByOperator.get(operatorId) ?? [];
+  const selectedAbsence = absenceByOperator.get(operatorId) ?? null;
+  // Under `block` the person cannot be placed (no absence override exists);
+  // under `warn` it is a warning only and Create is still offered.
+  const absenceBlocked = selectedAbsence !== null && eligibilityPolicy === "block";
   const selectedUntrained = selectedGaps.filter((g) => g.state === "never-trained");
   const selectedLapsed = selectedGaps.filter(
     (g): g is Extract<CertificateGap, { state: "lapsed" }> => g.state === "lapsed",
@@ -362,6 +400,8 @@ export function CreatePopover({
     productId === "" ||
     (mode === "direct" &&
       (blocked ||
+        // R-357: a person on leave cannot be placed under `block` — no override.
+        absenceBlocked ||
         (needsOverride && (!overrideChecked || overrideReason.trim() === "")) ||
         // D113: the server refuses an override with no reason, so the button
         // must not offer to send one. Same shape as the line above it.
@@ -396,8 +436,8 @@ export function CreatePopover({
                 className={styles.shiftChipBtn}
                 onClick={() => setRange({ startMin: c.startMin, endMin: c.endMin })}
               >
-                {c.name} {formatClock(addMinutes(windowStart, c.startMin))}–
-                {formatClock(addMinutes(windowStart, c.endMin))}
+                {c.name} {formatClock(addMinutes(windowStart, c.startMin), zone)}–
+                {formatClock(addMinutes(windowStart, c.endMin), zone)}
               </button>
             ))}
           </div>
@@ -445,6 +485,10 @@ export function CreatePopover({
                       one. Two problems, two labels, so the difference is
                       visible before anybody is selected. */}
                   {operatorLabelSuffix(gapsByOperator.get(o.id) ?? [])}
+                  {/* R-357: the leave mark travels in the list too, so it is
+                      visible before anybody is picked — like the certificate
+                      suffix beside it. */}
+                  {absenceByOperator.has(o.id) ? " — on leave" : ""}
                   {outsideAreaOperatorIds.has(o.id) ? " — not from this area (override)" : ""}
                 </option>
               ))}
@@ -586,6 +630,24 @@ export function CreatePopover({
                       </>
                     )}
                   </>
+                )}
+              </div>
+            )}
+
+            {selectedAbsence !== null && (
+              <div className={styles.eligWarn}>
+                {/* R-357: named and dated through the app's date seam, the way
+                    the expired-certificate line is (R-338). No override box:
+                    the server takes no absence override, so under `warn` this
+                    is a warning the planner reads and Create stays enabled;
+                    under `block` there is nothing to tick and Create is off. */}
+                <p>
+                  <strong>{leaveLine(selectedAbsence, dateFormat)}</strong>
+                </p>
+                {absenceBlocked ? (
+                  <p>This person is on leave for this window, so there is no override.</p>
+                ) : (
+                  <p>Placing them anyway records the assignment over their leave.</p>
                 )}
               </div>
             )}

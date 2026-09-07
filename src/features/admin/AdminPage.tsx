@@ -21,12 +21,14 @@ import { SiteAccessPanel } from "./components/SiteAccessPanel";
 // OWN file and never this one. See any of the four for why.
 import { ShiftsPanel, SHIFTS_PANEL_READY } from "./components/ShiftsPanel";
 import { OperatorsPanel, OPERATORS_PANEL_READY } from "./components/OperatorsPanel";
+import { AbsencesPanel, ABSENCES_PANEL_READY } from "./components/AbsencesPanel";
 import { TrainingsPanel, TRAININGS_PANEL_READY } from "./components/TrainingsPanel";
 import { MatrixPanel, MATRIX_PANEL_READY } from "./components/MatrixPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
 import { CycleTimesPanel, CYCLE_TIMES_PANEL_READY } from "./components/CycleTimesPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import { SettingsPanel, SETTINGS_PANEL_READY } from "./components/SettingsPanel";
+import { TemplatesPanel, TEMPLATES_PANEL_READY } from "./components/TemplatesPanel";
 import { AuditPanel, AUDIT_PANEL_READY } from "./components/AuditPanel";
 import { PanelToggle } from "@/components/PanelToggle";
 import styles from "./AdminPage.module.css";
@@ -52,11 +54,13 @@ type SectionId =
   | "access"
   | "shifts"
   | "operators"
+  | "absences"
   | "trainings"
   | "matrix"
   | "products"
   | "cycletimes"
   | "import"
+  | "templates"
   | "settings"
   | "audit";
 
@@ -99,6 +103,10 @@ const SECTIONS: ReadonlyArray<{
   { id: "access", label: "Access", enabled: true },
   { id: "shifts", label: "Shifts", enabled: SHIFTS_PANEL_READY },
   { id: "operators", label: "Operators", enabled: OPERATORS_PANEL_READY },
+  // R-357: Absences sits with the people sections and is offered to the same
+  // supervisors Operators is (adminSectionsFor). Who may actually record one is
+  // the server's per-person-place call; this only offers the tab.
+  { id: "absences", label: "Absences", enabled: ABSENCES_PANEL_READY },
   // ⭐⭐ TRAININGS IS ITS OWN SECTION, AND IT SITS BESIDE OPERATORS BECAUSE
   // THAT IS WHERE IT USED TO LIVE. It was a "Ticket types" toggle INSIDE the
   // Operators panel, reachable only after picking a person — so managing the
@@ -125,6 +133,10 @@ const SECTIONS: ReadonlyArray<{
   // to show a line's roll-up (R-317).
   { id: "cycletimes", label: "Cycle times", enabled: CYCLE_TIMES_PANEL_READY },
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
+  // R-356: named week templates for the chosen plant. Admins only — it is NOT
+  // in `adminSectionsFor`'s supervisor list, and "all" covers admins. Saving
+  // and applying live on the board; this section renames and deletes.
+  { id: "templates", label: "Templates", enabled: TEMPLATES_PANEL_READY },
   // ⭐⭐ NO `companyAdminOnly` — AND ITS ABSENCE IS THE FIX FOR DEF-0007, so it is
   // worth a sentence rather than a blank. Settings is per-plant (R-333): the tab
   // follows the plant control at the top, and `set_node_setting` takes a plant
@@ -243,6 +255,14 @@ function sectionIconBody(id: SectionId) {
           <path d="M3.4 13.5c0-2.6 2.05-4.15 4.6-4.15s4.6 1.55 4.6 4.15" />
         </>
       );
+    case "absences": // a calendar with a day crossed out — someone away
+      return (
+        <>
+          <rect x="2.5" y="3" width="11" height="10.5" rx="1" />
+          <path d="M2.5 6h11M5.5 2v2.4M10.5 2v2.4" />
+          <path d="M6.2 8.7l3.6 3.2M9.8 8.7l-3.6 3.2" />
+        </>
+      );
     case "trainings": // a mortarboard — the training catalogue
       return (
         <>
@@ -302,6 +322,13 @@ function sectionIconBody(id: SectionId) {
         <>
           <path d="M13.77 6.77 A5.90 5.90 0 0 1 13.77 9.23 L12.04 9.47 A4.30 4.30 0 0 1 11.29 10.76 L11.95 12.38 A5.90 5.90 0 0 1 9.82 13.61 L8.75 12.23 A4.30 4.30 0 0 1 7.25 12.23 L6.18 13.61 A5.90 5.90 0 0 1 4.05 12.38 L4.71 10.76 A4.30 4.30 0 0 1 3.96 9.47 L2.23 9.23 A5.90 5.90 0 0 1 2.23 6.77 L3.96 6.53 A4.30 4.30 0 0 1 4.71 5.24 L4.05 3.62 A5.90 5.90 0 0 1 6.18 2.39 L7.25 3.77 A4.30 4.30 0 0 1 8.75 3.77 L9.82 2.39 A5.90 5.90 0 0 1 11.95 3.62 L11.29 5.24 A4.30 4.30 0 0 1 12.04 6.53 L13.77 6.77 Z" />
           <circle cx="8" cy="8" r="1.85" />
+        </>
+      );
+    case "templates": // stacked sheets: a saved week to stamp again
+      return (
+        <>
+          <rect x="4.5" y="2.5" width="8" height="9.5" rx="1" />
+          <path d="M3.5 4.5 L3.5 13 A0.5 0.5 0 0 0 4 13.5 L10.5 13.5" fill="none" />
         </>
       );
   }
@@ -858,6 +885,13 @@ export default function AdminPage() {
           </>
         )}
 
+        {activeSection === "absences" && (
+          <>
+            <h1 className={styles.h1}>Absences</h1>
+            <AbsencesPanel />
+          </>
+        )}
+
         {activeSection === "trainings" && (
           <>
             <h1 className={styles.h1}>Trainings</h1>
@@ -890,6 +924,13 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Import</h1>
             <ImportPanel />
+          </>
+        )}
+
+        {activeSection === "templates" && (
+          <>
+            <h1 className={styles.h1}>Templates</h1>
+            <TemplatesPanel />
           </>
         )}
 

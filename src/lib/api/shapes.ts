@@ -18,6 +18,7 @@
  */
 import type { Json } from "@/lib/database.types";
 import { DATE_FORMATS, type DateFormat } from "@/lib/format/dates";
+import { coerceTimezone } from "@/lib/format/timezones";
 
 type JsonRecord = { [key: string]: Json | undefined };
 
@@ -787,6 +788,24 @@ function parseDateFormat(v: Json | undefined): DateFormat | null {
   return isStr(v) && (DATE_FORMATS as readonly string[]).includes(v) ? (v as DateFormat) : null;
 }
 
+/**
+ * D88a / migration 0063 (R-353): the IANA time zone RESOLVED for the board's own
+ * root on the server, the twin of `parseDateFormat` above.
+ *
+ * ⚠️ LENIENT, NOT STRICT — unlike `date_format`. `board_window` COALESCEs the
+ * resolver's NULL to 'UTC' at the call site, so the key is always a string; but
+ * the zone name is an OPEN vocabulary (the server validates against
+ * `pg_timezone_names`, which the client cannot carry). `coerceTimezone` accepts
+ * any name this runtime's `Intl` can format with and falls back to 'UTC' on a
+ * missing key or a zone the engine rejects — because an unusable zone would make
+ * every `Intl.DateTimeFormat({ timeZone })` on the board throw and blank it. A
+ * bad token here is a display fallback, not a shape mismatch: the axis stays in
+ * UTC rather than the board disappearing.
+ */
+function parseTimezone(v: Json | undefined): string {
+  return coerceTimezone(v);
+}
+
 // ---------------------------------------------------------------------------
 // Top-level RPC results.
 // ---------------------------------------------------------------------------
@@ -825,6 +844,12 @@ export interface BoardWindow {
    *  company value for a board rooted at a line. Strict: a payload without it, or
    *  with a token outside the closed `DateFormat` enum, is a shape mismatch. */
   dateFormat: DateFormat;
+  /** D88a / migration 0063 (R-353): the IANA time zone the board's axis renders
+   *  in, resolved for the board's own root on the server (the twin of
+   *  `dateFormat`). Lenient: an absent key or an unusable name falls back to
+   *  'UTC' via `coerceTimezone`, because a zone `Intl` cannot format would blank
+   *  the board — a display fallback, not a shape mismatch. */
+  timezone: string;
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -845,6 +870,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     node_policies,
     can_place,
     date_format,
+    timezone,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -878,6 +904,10 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   // the board rather than let it silently fall back to the company answer.
   const parsedDateFormat = parseDateFormat(date_format);
   if (parsedDateFormat === null) return null;
+  // Lenient (never null): an absent key or an unusable zone becomes 'UTC'. See
+  // `parseTimezone` — the zone is an open vocabulary and a bad token is a
+  // display fallback, not the shape mismatch a null `date_format` is.
+  const parsedTimezone = parseTimezone(timezone);
 
   if (
     parsedOrg === null ||
@@ -913,6 +943,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     nodePolicies: parsedNodePolicies,
     canPlace: can_place,
     dateFormat: parsedDateFormat,
+    timezone: parsedTimezone,
   };
 }
 
@@ -992,9 +1023,46 @@ export function parseCreateRunResult(json: Json): CreateRunResult | null {
   return { run };
 }
 
+/**
+ * R-357 / migration 0066: `absence_overlap`'s answer, as it rides back on the
+ * warn-path of `create_assignment` and `reassign_assignment` (the `absence`
+ * key) and inside each `move_run` `absence_warnings` entry. `from`/`to` are the
+ * inclusive `YYYY-MM-DD` bounds the server already stepped in for; both are null
+ * when `absent` is false. The board's own picture of the same thing is
+ * `absenceGaps` (`src/lib/absence.ts`) — this is only what the WRITE reports
+ * back, so a warn placement carries the leave it went ahead over instead of a
+ * bare key.
+ */
+export interface AbsenceInfo {
+  absent: boolean;
+  from: string | null;
+  to: string | null;
+  reason: string | null;
+}
+
+/**
+ * LENIENT, and deliberately so: a database that has not run 0066 sends no
+ * `absence` key at all, and the placement still succeeded — its ABSENCE of an
+ * absence is `{absent:false}`, not a shape mismatch that would blank a write
+ * that really happened. A malformed object (present but not the expected shape)
+ * is the same "nobody is absent" answer rather than a throw. When it IS absent,
+ * all three of `from`/`to`/`reason` are read; a partial one falls back to false.
+ */
+export function parseAbsenceInfo(v: Json | undefined): AbsenceInfo {
+  const none: AbsenceInfo = { absent: false, from: null, to: null, reason: null };
+  if (!isJsonObject(v)) return none;
+  if (v.absent !== true) return none;
+  const { from, to, reason } = v;
+  if (!isStr(from) || !isStr(to) || !isStr(reason)) return none;
+  return { absent: true, from, to, reason };
+}
+
 export interface CreateAssignmentResult {
   assignment: Assignment;
   eligibility: EligibilityResult;
+  /** R-357: the leave this placement went ahead over under `warn`, or
+   *  `{absent:false}`. Present on every 0066 payload; defaulted for older ones. */
+  absence: AbsenceInfo;
 }
 
 export function parseCreateAssignmentResult(json: Json): CreateAssignmentResult | null {
@@ -1002,7 +1070,7 @@ export function parseCreateAssignmentResult(json: Json): CreateAssignmentResult 
   const assignment = parseAssignment(json.assignment as Json);
   const eligibility = parseEligibilityResult(json.eligibility as Json);
   if (assignment === null || eligibility === null) return null;
-  return { assignment, eligibility };
+  return { assignment, eligibility, absence: parseAbsenceInfo(json.absence) };
 }
 
 export interface MoveRunEligibilityWarning {
@@ -1019,10 +1087,28 @@ function parseMoveRunEligibilityWarning(v: Json): MoveRunEligibilityWarning | nu
   return { operatorId: operator_id, missingSkills: parsedMissing };
 }
 
+/** R-357: one crew member `move_run` carried onto a window they are absent for,
+ *  under `warn`. The twin of `MoveRunEligibilityWarning` — informational, the
+ *  move already happened. */
+export interface MoveRunAbsenceWarning {
+  operatorId: string;
+  absence: AbsenceInfo;
+}
+
+function parseMoveRunAbsenceWarning(v: Json): MoveRunAbsenceWarning | null {
+  if (!isJsonObject(v)) return null;
+  const { operator_id } = v;
+  if (!isStr(operator_id)) return null;
+  return { operatorId: operator_id, absence: parseAbsenceInfo(v.absence) };
+}
+
 export interface MoveRunResult {
   run: Run;
   assignments: Assignment[];
   eligibilityWarnings: MoveRunEligibilityWarning[];
+  /** R-357: crew moved onto a window they are absent for, under `warn`. Empty on
+   *  older payloads (the key is absent), and empty when nobody is away. */
+  absenceWarnings: MoveRunAbsenceWarning[];
 }
 
 export function parseMoveRunResult(json: Json): MoveRunResult | null {
@@ -1034,7 +1120,10 @@ export function parseMoveRunResult(json: Json): MoveRunResult | null {
     parseMoveRunEligibilityWarning,
   );
   if (run === null || assignments === null || eligibilityWarnings === null) return null;
-  return { run, assignments, eligibilityWarnings };
+  // Lenient like `AbsenceInfo`: an absent key (older DB) or a malformed entry
+  // becomes "nobody is away", never a mismatch that discards a move that ran.
+  const absenceWarnings = parseArrayOf(json.absence_warnings, parseMoveRunAbsenceWarning) ?? [];
+  return { run, assignments, eligibilityWarnings, absenceWarnings };
 }
 
 export interface SplitCoverageResult {

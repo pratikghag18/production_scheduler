@@ -28,7 +28,7 @@ import { parseTstzRange } from "./serde";
 
 export type CopyWeekItemKind = "run" | "assignment";
 export type CopyWeekItemStatus = "clean" | "clash";
-export type CopyWeekClashReason = "run_overlap" | "operator_busy" | "not_eligible";
+export type CopyWeekClashReason = "run_overlap" | "operator_busy" | "not_eligible" | "absent";
 export type CopyWeekChoice = "prior" | "copied";
 export type CopyWeekPolicy = "warn" | "block";
 
@@ -115,9 +115,19 @@ export interface CopyWeekResult {
 
 export interface CopyWeekPlanInput {
   plantId: string;
-  /** Midnight UTC of the week's first day, the way the board holds its window start. */
-  sourceStart: Date;
+  /**
+   * Midnight UTC of the week's first day, the way the board holds its window
+   * start. Ignored (and may be null) when `templateId` is set: a template
+   * source carries its own relative placements (R-356).
+   */
+  sourceStart: Date | null;
   targetStart: Date;
+  /**
+   * R-356: when set, the source is this named template instead of another
+   * week. `sourceStart` is ignored; every clash rule, the preview and the
+   * per-clash flow are unchanged.
+   */
+  templateId?: string | null;
 }
 
 export interface ApplyCopyWeekInput extends CopyWeekPlanInput {
@@ -252,7 +262,14 @@ function parseChoice(v: Json): CopyWeekChoice | null {
 function parseClash(v: Json | undefined): CopyWeekClash | null {
   if (!isJsonObject(v)) return null;
   const reason = v.reason;
-  if (reason !== "run_overlap" && reason !== "operator_busy" && reason !== "not_eligible") {
+  if (
+    reason !== "run_overlap" &&
+    reason !== "operator_busy" &&
+    reason !== "not_eligible" &&
+    // R-357 / migration 0066: an assignment over a person's absence is a clash
+    // of its own kind, under the plant's resolved warn-or-block policy.
+    reason !== "absent"
+  ) {
     return null;
   }
   const policy = v.policy;
@@ -367,14 +384,30 @@ export async function fetchIsAdminFor(plantId: string): Promise<boolean> {
 }
 
 /**
+ * `app_can_place_in_plant(p_plant_id uuid) returns boolean` (0067) -- admin, or
+ * a supervisor whose edit grant overlaps the plant. This is the exact predicate
+ * `save_week_template` and a TEMPLATE `copy_week_plan`/`apply_copy_week` run, so
+ * the toolbar offers "Save this week as a template" and the template-apply flow
+ * on this answer and nothing coarser (R-356; CLAUDE.md section 4). Like
+ * `fetchIsAdminFor` a failure THROWS, so a refused read never reads as "no".
+ */
+export async function fetchCanPlaceInPlant(plantId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("app_can_place_in_plant", { p_plant_id: plantId });
+  if (error) throw toSchedulerError(error);
+  return data === true;
+}
+
+/**
  * `copy_week_plan(p_plant_id uuid, p_source_start date, p_target_start date)`.
  * Read-only: nothing is written until `applyCopyWeek`.
  */
 export async function fetchCopyWeekPlan(input: CopyWeekPlanInput): Promise<CopyWeekPlan> {
   const { data, error } = await supabase.rpc("copy_week_plan", {
     p_plant_id: input.plantId,
-    p_source_start: toDateArg(input.sourceStart),
+    // A template source ignores the week; the server takes null (R-356).
+    p_source_start: (input.sourceStart === null ? null : toDateArg(input.sourceStart)) as string,
     p_target_start: toDateArg(input.targetStart),
+    p_template_id: input.templateId ?? undefined,
   });
   if (error) throw toSchedulerError(error);
   const parsed = parseCopyWeekPlan(data);
@@ -394,9 +427,10 @@ export async function applyCopyWeek(input: ApplyCopyWeekInput): Promise<CopyWeek
   const decisions: Json = input.decisions.map((d) => ({ key: d.key, choice: d.choice }));
   const { data, error } = await supabase.rpc("apply_copy_week", {
     p_plant_id: input.plantId,
-    p_source_start: toDateArg(input.sourceStart),
+    p_source_start: (input.sourceStart === null ? null : toDateArg(input.sourceStart)) as string,
     p_target_start: toDateArg(input.targetStart),
     p_decisions: decisions,
+    p_template_id: input.templateId ?? undefined,
   });
   if (error) throw toSchedulerError(error);
   const parsed = parseCopyWeekResult(data);

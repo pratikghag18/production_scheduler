@@ -4,11 +4,13 @@ import {
   describeSchedulerError,
   fetchCopyWeekPlan,
   isSchedulerError,
+  listWeekTemplates,
   type CopyWeekChoice,
   type CopyWeekClash,
   type CopyWeekItem,
   type CopyWeekPlan,
   type CopyWeekResult,
+  type WeekTemplate,
 } from "@/lib/api";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import fieldStyles from "@/components/Field.module.css";
@@ -51,6 +53,8 @@ export function CopyWeekDialog({
   windowStart,
   anchor,
   dateFormat = DEFAULT_DATE_FORMAT,
+  zone,
+  isAdmin = true,
   onClose,
   onApplied,
 }: {
@@ -60,16 +64,55 @@ export function CopyWeekDialog({
   windowStart: Date;
   anchor: { x: number; y: number };
   dateFormat?: DateFormat;
+  zone?: string;
+  /**
+   * R-356: whether the caller may copy from another WEEK (admin only, the
+   * server's `app_is_admin_for`). A placing supervisor gets the dialog too, but
+   * only the "a template" source: Copy Week from a week stays admin-only, so
+   * offering it here would be a control the server refuses (CLAUDE.md section 4).
+   */
+  isAdmin?: boolean;
   onClose: () => void;
   /** Called after a successful apply, before the dialog closes, so the board can refresh. */
   onApplied: (result: CopyWeekResult) => void;
 }) {
   const toast = useSchedulerToast();
+  // R-356: the source is another WEEK (today's flow) or a TEMPLATE. A caller
+  // who cannot copy a week (a placing supervisor) starts on the template source.
+  const [sourceMode, setSourceMode] = useState<"week" | "template">(isAdmin ? "week" : "template");
+  const [templates, setTemplates] = useState<WeekTemplate[] | null>(null);
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [sourceStart, setSourceStart] = useState<Date>(windowStart);
   const [targetStart, setTargetStart] = useState<Date>(() =>
     addMinutes(windowStart, 7 * MINUTES_PER_DAY),
   );
-  const weekProblem = describeWeekProblem(sourceStart, targetStart);
+  const usingTemplate = sourceMode === "template";
+  const selectedTemplate = templates?.find((t) => t.id === templateId) ?? null;
+  // The week-pair rule only governs a WEEK source; a template needs a chosen id.
+  const weekProblem = usingTemplate ? null : describeWeekProblem(sourceStart, targetStart);
+  const templateProblem = usingTemplate && templateId === null ? "Pick a template to copy." : null;
+
+  // Fetch the plant's templates once the template source is chosen.
+  useEffect(() => {
+    if (!usingTemplate || templates !== null) return;
+    let live = true;
+    listWeekTemplates(plantId).then(
+      (rows) => {
+        if (!live) return;
+        setTemplates(rows);
+        setTemplateId((id) => id ?? rows[0]?.id ?? null);
+      },
+      (err: unknown) => {
+        if (!live) return;
+        setTemplates([]);
+        setTemplatesError(describeCopyWeekError(err));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [usingTemplate, templates, plantId]);
 
   const [plan, setPlan] = useState<CopyWeekPlan | null>(null);
   const [loading, setLoading] = useState(false);
@@ -86,7 +129,7 @@ export function CopyWeekDialog({
   const requestRef = useRef(0);
 
   useEffect(() => {
-    if (weekProblem !== null) {
+    if (weekProblem !== null || templateProblem !== null) {
       setPlan(null);
       setDecisions({});
       return;
@@ -94,7 +137,11 @@ export function CopyWeekDialog({
     const request = ++requestRef.current;
     setLoading(true);
     setPlanError(null);
-    fetchCopyWeekPlan({ plantId, sourceStart, targetStart }).then(
+    fetchCopyWeekPlan(
+      usingTemplate
+        ? { plantId, sourceStart: null, targetStart, templateId }
+        : { plantId, sourceStart, targetStart },
+    ).then(
       (next) => {
         if (request !== requestRef.current) return;
         setPlan(next);
@@ -109,7 +156,16 @@ export function CopyWeekDialog({
         setLoading(false);
       },
     );
-  }, [plantId, sourceStart, targetStart, weekProblem, planNonce]);
+  }, [
+    plantId,
+    sourceStart,
+    targetStart,
+    weekProblem,
+    templateProblem,
+    usingTemplate,
+    templateId,
+    planNonce,
+  ]);
 
   const clashes = plan === null ? [] : plan.items.filter((i) => i.status === "clash");
   const unanswered = clashes.filter((i) => decisions[i.key] === undefined);
@@ -120,15 +176,13 @@ export function CopyWeekDialog({
     setApplying(true);
     setApplyError(null);
     try {
-      const result = await applyCopyWeek({
-        plantId,
-        sourceStart,
-        targetStart,
-        // One decision per clash item and none for a clean one: the server
-        // refuses an answer for something that is not a clash (unknown_key).
-        decisions: clashes.map((i) => ({ key: i.key, choice: decisions[i.key] })),
-      });
-      toast.info(describeCopyWeekResult(result, targetStart, dateFormat));
+      const decisionList = clashes.map((i) => ({ key: i.key, choice: decisions[i.key] }));
+      const result = await applyCopyWeek(
+        usingTemplate
+          ? { plantId, sourceStart: null, targetStart, templateId, decisions: decisionList }
+          : { plantId, sourceStart, targetStart, decisions: decisionList },
+      );
+      toast.info(describeCopyWeekResult(result, targetStart, dateFormat, zone));
       onApplied(result);
       onClose();
     } catch (err) {
@@ -143,21 +197,78 @@ export function CopyWeekDialog({
       <div className={styles.body}>
         <p className={styles.plant}>{plantName}</p>
 
-        <label htmlFor="cw-source" className={styles.label}>
-          Copy the week starting
-        </label>
-        <input
-          id="cw-source"
-          type="date"
-          className={fieldStyles.field}
-          value={toInputValue(sourceStart)}
-          onChange={(e) => {
-            const next = fromInputValue(e.target.value);
-            if (next === null) return;
-            setSourceStart(next);
-            setApplyError(null);
-          }}
-        />
+        {/* R-356: the source is another week (admin) or a template. A
+            supervisor who cannot copy a week only ever sees the template
+            source, so the picker appears only where there is a real choice. */}
+        {isAdmin && (
+          <>
+            <label htmlFor="cw-mode" className={styles.label}>
+              Copy from
+            </label>
+            <select
+              id="cw-mode"
+              className={fieldStyles.field}
+              value={sourceMode}
+              onChange={(e) => {
+                setSourceMode(e.target.value === "template" ? "template" : "week");
+                setApplyError(null);
+              }}
+            >
+              <option value="week">another week</option>
+              <option value="template">a template</option>
+            </select>
+          </>
+        )}
+
+        {usingTemplate ? (
+          <>
+            <label htmlFor="cw-template" className={styles.label}>
+              Template
+            </label>
+            <select
+              id="cw-template"
+              className={fieldStyles.field}
+              value={templateId ?? ""}
+              disabled={templates === null || templates.length === 0}
+              onChange={(e) => {
+                setTemplateId(e.target.value || null);
+                setApplyError(null);
+              }}
+            >
+              {templates !== null && templates.length === 0 && (
+                <option value="">No templates saved for this plant yet</option>
+              )}
+              {(templates ?? []).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            {templatesError !== null && (
+              <p role="alert" className={styles.error}>
+                {templatesError}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <label htmlFor="cw-source" className={styles.label}>
+              Copy the week starting
+            </label>
+            <input
+              id="cw-source"
+              type="date"
+              className={fieldStyles.field}
+              value={toInputValue(sourceStart)}
+              onChange={(e) => {
+                const next = fromInputValue(e.target.value);
+                if (next === null) return;
+                setSourceStart(next);
+                setApplyError(null);
+              }}
+            />
+          </>
+        )}
         <label htmlFor="cw-target" className={styles.label}>
           Into the week starting
         </label>
@@ -175,6 +286,7 @@ export function CopyWeekDialog({
         />
 
         {weekProblem !== null && <p className={styles.note}>{weekProblem}</p>}
+        {templateProblem !== null && <p className={styles.note}>{templateProblem}</p>}
         {loading && <p className={styles.note}>Working out what the copy would do…</p>}
         {planError !== null && (
           <p role="alert" className={styles.error}>
@@ -189,7 +301,9 @@ export function CopyWeekDialog({
 
         {plan !== null && !loading && (
           <>
-            <p className={styles.counts}>{describeCounts(plan)}</p>
+            <p className={styles.counts}>
+              {describeCounts(plan, usingTemplate ? (selectedTemplate?.name ?? null) : null)}
+            </p>
             {plan.history.runs + plan.history.assignments > 0 && (
               <p className={styles.note}>{describeHistory(plan)}</p>
             )}
@@ -200,6 +314,7 @@ export function CopyWeekDialog({
                     <ClashRow
                       item={item}
                       dateFormat={dateFormat}
+                      zone={zone}
                       choice={decisions[item.key]}
                       onChoose={(choice) => setDecisions((d) => ({ ...d, [item.key]: choice }))}
                     />
@@ -236,11 +351,13 @@ export function CopyWeekDialog({
 function ClashRow({
   item,
   dateFormat,
+  zone,
   choice,
   onChoose,
 }: {
   item: CopyWeekItem;
   dateFormat: DateFormat;
+  zone?: string;
   choice: CopyWeekChoice | undefined;
   onChoose: (choice: CopyWeekChoice) => void;
 }) {
@@ -248,10 +365,13 @@ function ClashRow({
   // for the type, not for a case that can happen.
   const clash = item.clash;
   if (clash === null) return null;
-  const legend = describeItem(item, dateFormat);
+  const legend = describeItem(item, dateFormat, zone);
   const offersPrior = clash.choices.includes("prior");
   const offersCopied = clash.choices.includes("copied");
-  const warn = clash.reason === "not_eligible" && clash.policy === "warn";
+  // A warn-policy clash (uncertified, or on leave) records an override when the
+  // copied plan is taken; the banner says so (R-338 / R-357).
+  const warn =
+    (clash.reason === "not_eligible" || clash.reason === "absent") && clash.policy === "warn";
 
   return (
     <fieldset className={styles.clash}>
@@ -262,7 +382,7 @@ function ClashRow({
           <p className={styles.candidateTitle}>Prior plan</p>
           {clash.prior.map((p) => (
             <p key={p.id} className={styles.line}>
-              {describeRow(p, dateFormat, p.kind === "assignment" && p.operatorName === null)}
+              {describeRow(p, dateFormat, p.kind === "assignment" && p.operatorName === null, zone)}
             </p>
           ))}
           {offersPrior && (
@@ -285,6 +405,7 @@ function ClashRow({
               item.copied,
               dateFormat,
               item.kind === "assignment" && item.copied.operatorName === null,
+              zone,
             )}
           </p>
           {offersCopied ? (
@@ -335,9 +456,15 @@ export function describeWeekProblem(source: Date, target: Date): string | null {
   return null;
 }
 
-export function describeCounts(plan: CopyWeekPlan): string {
+export function describeCounts(plan: CopyWeekPlan, templateName?: string | null): string {
   const { clean, clash } = plan.counts;
-  if (clean + clash === 0) return "Nothing is scheduled in that week, so there is nothing to copy.";
+  // R-356: name the template as the source where a week source would be implied.
+  const from = templateName ? `From the template ${templateName}: ` : "";
+  if (clean + clash === 0) {
+    return templateName
+      ? `The template ${templateName} is empty, so there is nothing to copy.`
+      : "Nothing is scheduled in that week, so there is nothing to copy.";
+  }
   const cleanText = `${clean} ${clean === 1 ? "item copies" : "items copy"} cleanly`;
   const clashText =
     clash === 0
@@ -345,7 +472,7 @@ export function describeCounts(plan: CopyWeekPlan): string {
       : `${clash} ${clash === 1 ? "clashes" : "clash"} with the prior plan and ${
           clash === 1 ? "needs" : "need"
         } an answer`;
-  return `${cleanText}; ${clashText}.`;
+  return `${from}${cleanText}; ${clashText}.`;
 }
 
 export function describeHistory(plan: CopyWeekPlan): string {
@@ -359,8 +486,9 @@ export function describeCopyWeekResult(
   result: CopyWeekResult,
   targetStart: Date,
   dateFormat: DateFormat,
+  zone?: string,
 ): string {
-  const week = `the week of ${formatDayLabel(targetStart, dateFormat)}`;
+  const week = `the week of ${formatDayLabel(targetStart, dateFormat, zone)}`;
   const created = result.created.runs + result.created.assignments;
   const parts: string[] = [];
   parts.push(
@@ -451,7 +579,7 @@ function plural(n: number, noun: string): string {
  */
 const UNNAMED = "(unnamed person)";
 
-function describeItem(item: CopyWeekItem, dateFormat: DateFormat): string {
+function describeItem(item: CopyWeekItem, dateFormat: DateFormat, zone?: string): string {
   const kind = item.kind === "run" ? "Run" : "Assignment";
   const who =
     item.kind === "run"
@@ -461,6 +589,7 @@ function describeItem(item: CopyWeekItem, dateFormat: DateFormat): string {
     item.copied.start,
     item.copied.end,
     dateFormat,
+    zone,
   )}`;
 }
 
@@ -474,19 +603,20 @@ function describeRow(
   },
   dateFormat: DateFormat,
   personUnnamed = false,
+  zone?: string,
 ): string {
   const parts = [row.nodeName];
   if (row.productName !== null) parts.push(row.productName);
   if (row.operatorName !== null) parts.push(row.operatorName);
   else if (personUnnamed) parts.push(UNNAMED);
-  parts.push(describeWhen(row.start, row.end, dateFormat));
+  parts.push(describeWhen(row.start, row.end, dateFormat, zone));
   return parts.join(" · ");
 }
 
-function describeWhen(start: Date, end: Date, dateFormat: DateFormat): string {
+function describeWhen(start: Date, end: Date, dateFormat: DateFormat, zone?: string): string {
   const sameDay = start.toISOString().slice(0, 10) === end.toISOString().slice(0, 10);
-  return `${formatFull(start, dateFormat)}–${
-    sameDay ? formatClock(end) : formatFull(end, dateFormat)
+  return `${formatFull(start, dateFormat, zone)}–${
+    sameDay ? formatClock(end, zone) : formatFull(end, dateFormat, zone)
   }`;
 }
 
@@ -501,18 +631,28 @@ function describeReason(item: CopyWeekItem, clash: CopyWeekClash): string {
       return clash.policy === "block"
         ? `${person} is not certified for ${item.copied.nodeName}, and this plant refuses that placement.`
         : `${person} is not certified for ${item.copied.nodeName}.`;
+    case "absent":
+      // R-357: an assignment over the person's absence, under the plant's policy.
+      return clash.policy === "block"
+        ? `${person} is on leave at this time, and this plant refuses that placement.`
+        : `${person} is on leave at this time.`;
   }
 }
 
 function describeWarning(item: CopyWeekItem): string {
   const person = item.copied.operatorName ?? UNNAMED;
-  return `Warning: ${person} is not certified for this work. Taking the copied plan places them anyway and records an override; keeping the prior plan does not.`;
+  const what =
+    item.clash?.reason === "absent" ? "is on leave at this time" : "is not certified for this work";
+  return `Warning: ${person} ${what}. Taking the copied plan places them anyway and records an override; keeping the prior plan does not.`;
 }
 
 /** Why the server offered only the prior plan (R-239). */
 function describeNotOffered(clash: CopyWeekClash): string {
   if (clash.reason === "not_eligible" && clash.policy === "block") {
     return "Not offered: this plant refuses uncertified placements, so only the prior plan can be kept.";
+  }
+  if (clash.reason === "absent" && clash.policy === "block") {
+    return "Not offered: this plant refuses placing someone who is on leave, so only the prior plan can be kept.";
   }
   return "Not offered: the prior plan is somewhere you cannot edit, so only the prior plan can be kept.";
 }

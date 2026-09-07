@@ -201,6 +201,25 @@ describe("parseBoardWindow", () => {
   });
 
   /**
+   * R-353 / migration 0063 (D88a): the board's zone, carried as a top-level
+   * token. LENIENT, unlike `date_format` — the zone is an open vocabulary the
+   * client cannot validate exhaustively, so an absent key or an unusable name is
+   * a display fallback ('UTC'), not a shape mismatch that would blank the board.
+   */
+  it("carries the board's timezone, defaulting to UTC when absent or unusable", () => {
+    // The fixture omits `timezone` -> the resolver's absence becomes 'UTC'.
+    expect(parseBoardWindow(boardWindowJson)?.timezone).toBe("UTC");
+    // A real IANA name is kept verbatim.
+    expect(
+      parseBoardWindow({ ...boardWindowJson, timezone: "America/Chicago" } as Json)?.timezone,
+    ).toBe("America/Chicago");
+    // A name `Intl` cannot format falls back to 'UTC' rather than nulling the parse.
+    const bad = parseBoardWindow({ ...boardWindowJson, timezone: "Mars/Phobos" } as Json);
+    expect(bad).not.toBeNull();
+    expect(bad?.timezone).toBe("UTC");
+  });
+
+  /**
    * D86. `template_id` on a level is not decoration: with two shapes in one
    * org it is the only thing that says which vocabulary a level belongs to,
    * and `canDropOn` refuses a cross-template parent on the strength of it.

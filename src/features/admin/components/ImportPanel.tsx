@@ -16,18 +16,20 @@ import { ProductsImport } from "./ProductsImport";
 import { OperatorsImport } from "./OperatorsImport";
 import { TrainingsImport } from "./TrainingsImport";
 import { CertificationsImport } from "./CertificationsImport";
+import { AbsencesImport } from "./AbsencesImport";
 import styles from "./ImportPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
 export const IMPORT_PANEL_READY = true;
 
-type ImportEntity = "products" | "operators" | "trainings" | "certifications";
+type ImportEntity = "products" | "operators" | "trainings" | "certifications" | "absences";
 
 const TABS: { key: ImportEntity; label: string }[] = [
   { key: "products", label: "Products" },
   { key: "operators", label: "People" },
   { key: "trainings", label: "Trainings" },
   { key: "certifications", label: "Certifications" },
+  { key: "absences", label: "Absences" },
 ];
 
 export function ImportPanel() {
@@ -55,6 +57,7 @@ export function ImportPanel() {
       {entity === "operators" && <OperatorsImport />}
       {entity === "trainings" && <TrainingsImport />}
       {entity === "certifications" && <CertificationsImport />}
+      {entity === "absences" && <AbsencesImport />}
     </div>
   );
 }

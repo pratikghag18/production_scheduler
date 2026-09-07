@@ -7361,7 +7361,8 @@ requirements:
   source:
   - queue item "touch acceptance pass on both drags"
   - session 84 conversation
-  stated_by: agent
+  - session 85 conversation
+  stated_by: maintainer
   claim: >-
     Driven with real touch input (Chromium's Input.dispatchTouchEvent on a tablet profile with
     hasTouch, as a second Playwright project named `touch`), every pointer-event drag behaves under
@@ -7372,12 +7373,11 @@ requirements:
     refuses "touch"), so the row body stays for scrolling. A block and a track carry
     `touch-action: none`, so a finger on them drags rather than scrolls; the board's own touch-scroll
     surface is the sticky rail and the grid margins.
-    ⚠️ ONE ANSWER HERE IS THE LANE'S RECOMMENDATION, NOT YET THE MAINTAINER'S DECISION: a finger on
-    EMPTY track CREATES, it does not scroll, because that matches the mouse exactly and keeps the
-    board's main gesture reachable by touch. The cost is that on a tablet the board can be panned
-    only from the narrow rail column. If tablet use becomes primary, the alternative is
-    `touch-action: pan-x pan-y` on the track with creation behind a long-press or a control: a
-    design change, not a bug. Recorded as the lane found it, for the maintainer to confirm or turn.
+    ⭐ DECIDED BY THE MAINTAINER, 7 Sept, from three options put side by side (create as the mouse
+    does; scroll with create behind a long-press; scroll with create only by keyboard or a control):
+    a finger on EMPTY track CREATES, it does not scroll, because that matches the mouse exactly and
+    keeps the board's main gesture reachable by touch. The cost, accepted: on a tablet the board is
+    panned from the sticky rail column. No work followed; the spec already pins this answer.
   verified_by:
   - kind: e2e
     file: e2e/touch.spec.ts
@@ -7388,7 +7388,362 @@ requirements:
       scrolls nothing; T6 the tree row body does not reorder on touch; T7 the tree grip drags on
       touch; T8 the level-list grip drags on touch
   status: covered
+- id: R-356
+  title: A named template is a whole week, jobs and people, saved relative to Monday and applied through Copy Week
+  source:
+  - session 85 conversation
+  - queue item "Named templates (relative-time placements)"
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 7 Sept, from three options put side by side (a whole week with its people; jobs
+    only; a daily pattern per line): a template is a NAMED COPY OF ONE WEEK'S RUNS WITH THEIR
+    ASSIGNMENTS, stored relative to that week's Monday, belonging to the plant it was saved from.
+    Saving one is "Save this week as a template" from the board; applying one is Copy Week with the
+    template as the source instead of another week, so every clash rule, the preview, and the
+    choose-per-clash flow apply unchanged, and nothing is written that Copy Week would not write. A
+    template is listed, renamed and deleted by the plant's admins; a supervisor can apply one to a
+    week they can place on and cannot delete one.
+    ⭐ LANDED IN SESSION 85 as migration 0067 (not 0065: lane D's 0066 re-emits copy_week_plan, and
+    a template-aware re-emission must run after it, built from the live definition). "Copy week"
+    gains a source picker, another week or a template; "Save this week as a template" and "Apply a
+    template" sit beside it, offered to anyone who can place in the plant, while Copy Week from a
+    week stays admin-only as S35 decided. The board opens a supervisor at the top of HER forest,
+    a line below the plant, so the template paths resolve the plant upward as a definer
+    (`app_plant_root_of`), the F-110 lesson.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/89_week_templates_test.sql
+    cases: >-
+      TP0-TP6 with TP-EQ, TP-ON and TP-APPLY: save then list; a duplicate name refused
+      case-insensitively; a supervisor who can place may save from and apply to a week and may not
+      delete (TP3), and one whose board root is a line below the plant resolves to the plant, saves
+      only the rows she can read, and applies (TP6); a viewer refused at save, apply, rename and
+      delete (TP4); a plan from a template equals a plan from the week it was saved from, item for
+      item, on the same target (TP-EQ); an overnight item crosses the day boundary with end_min
+      past 1440 (TP-ON); apply-from-template writes exactly what Copy Week writes, rows compared in
+      relative time (TP-APPLY); execute granted to authenticated and revoked from anon and public
+      on the writers (TP5)
+  - kind: vitest
+    file: src/test/weekTemplates.test.ts
+    cases: >-
+      save, list, rename and delete parse from one column constant and surface a refusal; the
+      template source is threaded through copy_week_plan and apply_copy_week with a null source;
+      the counts sentence names the template as the source
+  - kind: vitest
+    file: src/test/copyWeekDialogTemplate.test.tsx
+    cases: >-
+      the source picker, another week or a template, and the same preview path with a template id;
+      a supervisor gets only the template source; Copy week is admin-only while Apply a template and
+      Save are offered to a placing supervisor and to no viewer
+  - kind: e2e
+    file: e2e/weekTemplates.spec.ts
+    cases: >-
+      an admin saves this week and applies it through Copy Week onto a scratch week, then deletes
+      it in the admin Templates tab; a supervisor is offered Save and Apply a template, template
+      source only, and never Copy week; a viewer is offered none
+  status: covered
+- id: R-357
+  title: An absence is recorded in the app or imported by file, and the board and Copy Week treat it as a clash
+  source:
+  - session 85 conversation
+  - queue item "PTO/absence source decision + conflict surfacing"
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 7 Sept, from three options put side by side (entered in the app; CSV import;
+    both): BOTH. An absence is a person, a date range and a reason, recorded on an Absences tab in
+    admin by a supervisor or admin of the person's place, and also imported by file through the
+    existing import pipeline in the same shape as operators and trainings. On the board and in Copy
+    Week an assignment that overlaps a person's absence is a clash of its own kind, decided by the
+    same server function that decides eligibility and surfaced the way an expired certificate is
+    (R-338): the screen shows it before the save, the server refuses or warns under the plant's
+    existing warn-or-block policy, and the client's picture of it is the same predicate the server
+    runs.
+    ⭐ THE SERVER AND ADMIN HALVES LANDED IN SESSION 85 (migration 0066: the table, the writers gated
+    on the person's home, the definer predicate `absence_overlap`, and `create_assignment`,
+    `move_run`, `reassign_assignment` and `copy_week_plan` consulting it beside eligibility; the
+    Absences tab and the CSV importer; `absenceGaps` as the client mirror). THE BOARD'S OWN
+    SURFACING LANDED THE SAME SESSION: an "on leave" mark on the operator panel for anyone away
+    over the shown window, the leave named on a line in the create and reassign pop-ups before the
+    save (a warning under warn, Create disabled in place under block, the R-338 shape), and a
+    sentence for the `absent` refusal. The board reads absences with a second query rather than a
+    re-emitted board_window, on the evidence that `absences_select` and `operators_select` gate on
+    the same predicate, so the set of people with absences shown is exactly the set of people drawn;
+    nothing is resolved upward, so no definer is needed. Two edges left named for the queue: the
+    warn-path warnings after a successful crew drag (`absence_warnings`) are parsed but not yet
+    shown in the drag toast, and the Copy Week dialog's `absent` clash sentence belongs to the
+    templates lane.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/88_absences_test.sql
+    cases: >-
+      AB0-AB14 (19 with the b cases): the exclusion constraint; a supervisor of the person's place
+      may record and one of another place may not (AB2-AB4); remove gated the same way (AB5); a
+      viewer reads and cannot write and a direct INSERT is refused (AB6-AB7); the absence_overlap
+      boundary both ways, an absence ending on the shift's start day clashes and a shift ending at
+      midnight on the absence's start day does not (AB8, AB8b); an assignment over an absence
+      refused under block and warned under warn for create, move, reassign and the copy plan
+      (AB9-AB12); the definer predicate answers for a supervisor and is null-safe (AB13);
+      authenticated-only grants (AB14)
+  - kind: vitest
+    file: src/test/absence.test.ts
+    cases: absenceGaps boundary cases mirrored on the SQL cases by name (AB8, AB8b), earliest first, per operator, open-ended window
+  - kind: vitest
+    file: src/test/absenceImport.test.ts
+    cases: column detection; person match by import id, employee ref or name with a non-unique match an error; bad date, inverted range, blank reason; insert versus update on the derived id; mixed-file counts
+  - kind: vitest
+    file: src/test/absencesPanel.test.tsx
+    cases: the section is offered to a supervisor and a viewer is denied admin; the panel records and removes through the api and shows a refusal as a sentence; an inverted range is refused client-side
+  - kind: e2e
+    file: e2e/absences.spec.ts
+    cases: Ana records, sees and removes an absence; Viva is never offered the tab; Dana imports a CSV and a bad row is refused
+  - kind: vitest
+    file: src/test/absenceOnBoard.test.tsx
+    cases: >-
+      the board's own surfacing, each named for its 88_absences_test.sql twin: the create pop-up
+      names the leave before Create and refuses in place under block or warns under warn (AB8,
+      AB8b, AB9); the reassign pop-up does the same for the chosen person and never walls a
+      field-only edit (AB11); the operator panel marks whoever is away over the shown window; the
+      `absent` describer names one person or the whole crew (AB10) and falls through to Unknown on
+      a malformed payload; the warn-path keys parse, defaulting to not-absent on an older payload
+  - kind: e2e
+    file: e2e/absenceOnBoard.spec.ts
+    cases: >-
+      Ana records an absence over the shown week, the board marks the person on leave on the
+      operator panel and names it in the create pop-up's line, then the absence is removed
+  status: covered
+- id: R-351
+  title: An admin invites a person by email and they land with their grants
+  source:
+  - queue item "P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    On the Access panel, an admin who searches by an email that matches nobody in the company is
+    offered "Invite <email> to <place> as viewer / supervisor / admin": the same three roles
+    set_site_member accepts, gated by the same predicate (admin only at a plant root). The
+    project's first Edge Function (`supabase/functions/invite`) does the one call a browser cannot:
+    it checks app_is_admin_anywhere AS THE CALLER (an unauthorised caller costs no email), invites
+    the person by email with the service role, with a redirect to <origin>/reset-password checked
+    against an allow-list, inserts their user_profiles row for the caller's org (role viewer), then
+    grants the role AS THE CALLER through set_site_member, so the database keeps the final say. It
+    reads the profile and the grant back before answering ok, and deletes the profile again if the
+    grant is refused, returning the refusal verbatim in the SchedulerError shape. An email already
+    in this org answers already_member; one in another org is refused and nothing is said about
+    the other org. A supervisor is refused directly and is never offered the control.
+  verified_by:
+  - kind: e2e
+    file: e2e/invite.spec.ts
+    cases: >-
+      an admin invites by email, the person sets a password and lands with their grant (Dana
+      invites a throwaway to Plant A, the emailed token is exchanged live, the password is set
+      and the person lands on the board, not the no-access dead-end); a supervisor cannot invite,
+      the function refuses her directly
+  - kind: vitest
+    file: src/test/inviteFlow.test.ts
+    cases: >-
+      O1-O5 canOfferInvite only when an email matches nobody and the caller may grant; R1-R2
+      inviteRoles reuse siteAccess's menu, admin only at a root; B1-B2 the request body; L1-L2
+      looksLikeEmail; S1-S2 and E1-E2 the outcome sentences, other_org saying nothing about the
+      other org
+  - kind: vitest
+    file: src/test/siteAccessInvite.test.tsx
+    cases: >-
+      the invite control is offered for an unmatched email search and not for a matched one or a
+      non-email name search
+  - kind: sql
+    file: supabase/tests/86_invite_test.sql
+    cases: G4 the site_people refusal guards still fire (non-admin not_permitted, bad node invalid_argument)
+  status: covered
+- id: R-352
+  title: An invited person sets a password from the link and shows as invited until first sign-in
+  source:
+  - queue item "P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    The auth server sends an invite link with type=invite; supabase-js turns it into a session and
+    fires SIGNED_IN, not PASSWORD_RECOVERY. initialRecoveryFlag is widened so a type=invite
+    fragment seeds the recovery flag too, and the same route gate sends the session to
+    /reset-password, where the copy reads "Set your password" instead of "Set a new password".
+    After the password is set the person is signed in and lands on the board of the place they
+    were granted. In the Access panel the person is marked "invited" (site_people carries
+    invitedPending, last_sign_in_at IS NULL, migration 0064) until their first sign-in; a profile
+    whose auth row is absent reads as invited as well, the safe direction.
+  verified_by:
+  - kind: vitest
+    file: src/test/session.test.ts
+    cases: P8 initialRecoveryFlag, a type=invite hash seeds the flag, type=invitex and magiclink do not
+  - kind: vitest
+    file: src/test/siteAccessInvite.test.tsx
+    cases: the invited mark shows on a member who has never signed in and not on one who has
+  - kind: sql
+    file: supabase/tests/86_invite_test.sql
+    cases: >-
+      I1 invited reads invitedPending true and a signed-in person false in the same payload; I2 a
+      profile with no auth row reads true; I3 the invited person still carries their grant and
+      email; G1-G3 and G5 0060's search, limit, total and grant guards survive the re-emit
+  - kind: e2e
+    file: e2e/invite.spec.ts
+    cases: the invited person's link shows the "Set your password" heading and lands them on the board
+  status: covered
+- id: R-353
+  title: The board's axis is the plant's local time, resolved upward and carried in the payload
+  source:
+  - D88 §19.21
+  - queue item "Per-site timezone (D10 / D88)"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    The board renders in the plant's local time (D88a): a 06:00 shift reads 06:00 to the people
+    working it. The zone hangs off a NODE and resolves nearest-ancestor with a company fallback
+    (orgs.settings.timezone, default UTC), the same mechanic as date_format: the third key of
+    node_settings, an IANA name validated against pg_timezone_names. It is resolved on the SERVER
+    for the board's own root (app_resolve_node_setting, a definer) and carried on board_window as a
+    top-level `timezone` token, so a line supervisor who cannot read her plant root still gets the
+    plant's zone; the client never walks the ancestry for it (DEF-0016, DEF-0017).
+    ⚠️ ONE EDGE LEFT OPEN BY THE LANE, FOR THE REVIEWER AND THE QUEUE: the board's fetch window is
+    still keyed on the UTC day marker while the axis is plant-local, so at the far edge of the
+    window up to the zone's offset of runs can fall outside the fetched range until the person
+    scrolls. Nothing in the demo world reaches it; it is a follow-up (widen the fetch by a day, or
+    key it on the plant-local origin once the zone is known).
+  verified_by:
+  - kind: sql
+    file: supabase/tests/87_plant_timezone_test.sql
+    cases: >-
+      T1 an invalid IANA name is refused invalid_argument; T2 a plant override beats the company
+      default and a child inherits it; T3 an untouched plant follows the company and the zero state
+      coalesces to UTC, never null; T3b the supervisor can read neither the plant root nor its
+      timezone row; T4 her board payload nevertheless carries the plant's America/Chicago; T5 a
+      supervisor is refused not_permitted on the write and nothing is stored
+  - kind: sql
+    file: supabase/tests/60_api_test.sql
+    cases: the board_window shape check allows `timezone` as a resolved-for-root scalar key beside date_format
+  - kind: vitest
+    file: src/test/shapes.test.ts
+    cases: parseBoardWindow carries timezone, lenient, an absent or unusable name falling back to UTC
+  - kind: vitest
+    file: src/test/boardTime.test.ts
+    cases: formatClock, formatDayLabel, startOfDay and mondayOfWeek are zone-aware and default to UTC
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: Ana's board axis (the header clock) equals Dana's, as her shift chips and date format do, and Dana's axis is not empty
+  status: covered
+- id: R-354
+  title: A shift keeps its posted wall-clock start across a DST change, and the geometry follows
+  source:
+  - D88 §19.21
+  - queue item "Per-site timezone (D10 / D88)"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    Under a plant-local axis a local day is 1380 or 1500 minutes on the two changeover days a year
+    (D88b). A shift keeps its posted wall-clock start across the change, so a 22:00 to 06:00 shift
+    is 7 hours on the spring-forward night and 9 on the fall-back night. Board geometry maps each
+    day's shifts at that day's local midnight plus the wall-clock time, through a per-window axis
+    of local-midnight instants, not day times 1440; every minutes-per-day multiplication in the
+    board's geometry, header and hit-testing goes through that axis. A window not crossing a
+    changeover is pixel-identical to the output before this change.
+  verified_by:
+  - kind: vitest
+    file: src/test/geometryDst.test.ts
+    cases: >-
+      America/Chicago 2026-03-08 is 1380 minutes wide and its 22:00 to 06:00 night is 420 minutes;
+      2026-11-01 is 1500 wide and its long night is 540; the day labels stay on their days; a
+      non-crossing June window and a UTC axis are day times 1440 exactly
+  - kind: vitest
+    file: src/test/boardGeometry.test.ts
+    cases: the existing shift-geometry cases pass unchanged with a UTC day axis
+  status: covered
+- id: R-355
+  title: A plant's time zone is set in Settings under the same rules as its date format
+  source:
+  - D88 §19.21
+  - queue item "Per-site timezone (D10 / D88)"
+  - session 85 conversation
+  stated_by: maintainer
+  claim: >-
+    The Settings tab gains a third row, "Time zone", following the plant filter like the date
+    format and the eligibility policy: choose a plant and it edits that plant's zone, choose all
+    plants and it edits the company default. The one-select-two-option-lists rule holds (a plant
+    offers "use the company setting" first, then the zones); the option list is a curated list of
+    about sixty common zones with the browser's full list when it can supply one. Company scope
+    writes set_org_timezone; plant scope writes set_node_setting or clears it.
+  verified_by:
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: >-
+      three settings each with the three states (inheriting, set here, set here to the other);
+      choosing a zone on a plant writes set_node_setting with the timezone key; an inheriting plant
+      names the company zone
+  - kind: vitest
+    file: src/test/settingRowStandard.test.ts
+    cases: three rows, one control each, the shared-row audit still holds with the third setting
+  - kind: vitest
+    file: src/test/apiPlantSettingsShape.test.ts
+    cases: NODE_SETTING_KEYS is exactly eligibility_policy, date_format, timezone
+  status: covered
 findings:
+- id: F-110
+  title: A supervisor's board root sits below the plant root, and an invoker cannot read the plant above her grant
+  tag: The same door, a third time
+  status: fixed
+  found_by: agent
+  refs:
+  - R-356
+  - R-039
+  - R-333
+  story: >-
+    The board opens a supervisor on the top of HER visible forest, a line or a department, never
+    the plant root above her grant. A template belongs to the plant, so saving and applying one
+    had to resolve upward, and copy_week_plan is SECURITY INVOKER: its own read of the plant node
+    came back with no org and no path for her, and the template-existence check failed silently.
+    The same shape as DEF-0016 and DEF-0017, found this time by the lane itself in its own build
+    rather than by the tester afterwards, which is what CLAUDE.md section 4's rule was written to
+    make happen. Fixed with a SECURITY DEFINER `app_plant_root_of(node)` that resolves upward and
+    guards the org boundary itself (the week source stays strict on a plant root), the template
+    check keyed on id and plant only, and the template loops joining nodes on the left so an
+    out-of-scope node is never dropped silently: the writer refuses it at apply and the whole copy
+    rolls back. Pinned by TP6 as a supervisor granted only a line.
+- id: F-109
+  title: A display seam formatted the UTC day marker in the plant zone, and the toolbar named the day before
+  tag: A calendar day is not an instant
+  status: fixed
+  found_by: agent
+  refs:
+  - R-353
+  - R-333
+  story: >-
+    Found on the lane's own walk as Dana with Plant A set to America/Chicago: the board's toolbar
+    date range read "Sun 2026/09/06 to Tue 2026/09/08" while the axis and the header's day strip
+    correctly started on Monday the 7th. The toolbar formatted the store's UTC-midnight "which day"
+    marker directly in the plant zone, and UTC midnight is the previous evening anywhere west of
+    Greenwich, so the label printed the day before. Fixed by reinterpreting the marker's calendar
+    day as that day's LOCAL midnight in the zone, the same origin the board index uses for the axis,
+    before labelling; toolbar and axis now agree. The class is the one D88 is full of: a UTC instant
+    is fine to store and to key a query on, but the moment it is shown it must be resolved in the
+    display zone, and a marker that stands for a calendar day is not an instant. For a UTC plant
+    nothing moved. Caught because two halves of one screen disagreed, the shape of R-333.
+- id: F-108
+  title: The service role could write nothing, and the invite function was the first to try
+  tag: A server-side write with no grant behind it
+  status: fixed
+  found_by: agent
+  refs:
+  - R-351
+  - S24
+  story: >-
+    This project had never had server-side code, so its migrations grant table DML only to
+    `authenticated` and `anon`; `service_role`, which bypasses RLS but still needs table grants,
+    was left with the bare default and no insert, select or delete on any table. The invite Edge
+    Function is the first thing to write as the service role --- the invited person's
+    `user_profiles` row, which a site admin's own grants cannot make --- and its first real call
+    came back "permission denied for table user_profiles". Migration 0064 grants the service role
+    select, insert and delete on `user_profiles` and select on `profile_grants`, scoped to exactly
+    the two tables the function touches, not the platform-default GRANT ALL this repo never
+    adopted. Separately, the scratch SQL harness (`00_harness.sql`) lacked the real
+    `auth.users.last_sign_in_at` column the re-emitted `site_people` reads, which would have
+    errored every SQL suite that calls it; added there as an additive column, the way P1-3b
+    reconciled the shim with the other real columns.
 - id: F-107
   title: A green case went red at ten past midnight, because it had asked the wall clock what day it was
   tag: The clock is an input
@@ -13296,7 +13651,8 @@ next:
 # finding it came from (F-087) had never been flipped off `open` and the work had
 # no requirement; both are fixed, and the requirement is R-338.
 # ---------------------------------------------------------------------------
-- text: Phase 1 — E2E test pass (Playwright) + load sanity
+- kind: task
+  text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: >-
     ⚠️ MEASURED 5 SEPT, AND IT IS TWO JOBS RATHER THAN ONE. This line used to read, in full,
     *"Unchecked Phase 1 item."* — five words, which is why it was described to the maintainer as a
@@ -13333,20 +13689,23 @@ next:
     never touches `src/` and never asserts about a screen); B belongs after the board has stopped
     moving, and can then cover Copy Week too.
 # ------------------------------- PARKED ------------------------------------
-- text: >-
+- kind: parked
+  text: >-
     Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
   why: >-
     MOVED DOWN BY THE MAINTAINER, 4 Sept. The largest item on the list and it touches every screen;
     nothing in `src/` subscribes to anything today (no `.channel(`, no `postgres_changes`), so this is
     a build rather than a completion. It is also worth least until more than one person is using the
     app at once, which is gated behind invitations — and those are parked below.
-- text: Per-site timezone (D10 / D88)
+- kind: parked
+  text: Per-site timezone (D10 / D88)
   why: >-
     DECIDED Aug 25 (D88, §19.21): site-local axis, wall-clock across DST, Phase 2. Do not re-ask; the
     cost is in board/lib/time.ts and geometry.ts.
   decided: true
 
-- text: Dark theme — app-wide colour tokens first, then the matrix
+- kind: parked
+  text: Dark theme — app-wide colour tokens first, then the matrix
   why: >-
     MOVED TO THE END BY THE MAINTAINER, 4 Sept: *"this is going to be much bigger and different than
     what you have right, I'm still thinking over it."* Do not start it without a fresh go-ahead, and
@@ -13358,7 +13717,8 @@ next:
     shape as S24 reading `now` for parked work, and the third sentence in three days found standing in
     for the change it describes. It is now below real-time, the timezone and the row ceiling.
   decided: true
-- stage: S24
+- kind: parked
+  stage: S24
   text: P1-6c invitations — an Edge Function calling auth.admin.inviteUserByEmail
   why: >-
     TABLED BY THE MAINTAINER, session 22, and moved to the end 4 Sept — do not pick this up without a
@@ -13368,15 +13728,16 @@ next:
     ⭐ MOVED TO THE ACTUAL END OF THE QUEUE 5 SEPT at the maintainer's word — *"Move #3,#4,#5 at the end
     of the list"* — having claimed since 4 Sept to be there already.
   decided: true
-- stage: S23
+- kind: parked
+  stage: S23
   text: Tree CSV importer
   why: >-
     DROPPED by agreement — the starter library copies structure and the visual editor beats a
     parents/children CSV. Not deferred; do not re-ask.
   decided: true
-- text: >-
-    STANDING NOTE, not a task — open and flagged: .eligible means adoption parent only; and a decision
-    owed on touch: a finger on EMPTY track creates (as the mouse does) or scrolls
+- kind: note
+  text: >-
+    STANDING NOTE, not a task — open and flagged: .eligible means adoption parent only
   why: >-
     The roadmap's standing list so none of it goes quiet. Three of its five closed in session 83 (0060):
     the direct DELETE of a company admin's grant is refused at the table, and so is an UPDATE that
@@ -13385,11 +13746,10 @@ next:
     admin at the plant root, with a case that goes red if such a grant reappears.
     ⭐ THE TOUCH PASS CLOSED IN SESSION 84 (R-350): every drag on the board and in the admin tree was
     driven with real touch input under a tablet profile and nothing broke; `e2e/touch.spec.ts` keeps
-    it so. What it left is a DECISION, not a defect: a finger on empty track creates a block, which
-    matches the mouse, and means a tablet can pan the board only from the sticky rail. The lane
-    recommends keeping create; the alternative is pan on the track with creation behind a long-press.
-    The maintainer has not been asked yet.
-- text: >-
+    it so. The one question it left --- a finger on empty track creates or scrolls --- the maintainer
+    settled on 7 Sept: it creates, as the mouse does (R-350).
+- kind: note
+  text: >-
     STANDING NOTE, not a task — not driven in a browser: the reworked Products panel (plant chips,
     add-picker, per-plant remove) and the document-number surfaces
   why: Five of the last six defects came from the maintainer using a screen, not a green suite.

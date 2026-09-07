@@ -48,6 +48,10 @@ export const INTL_NEEDLES: readonly string[] = [
 export const INTL_ALLOWLIST: readonly string[] = [
   "src/lib/format/dates.ts",
   "src/features/board/lib/time.ts",
+  // R-353 / D88a: the zone vocabulary is a time-formatting seam module — it
+  // validates IANA names and labels them with their offset through `Intl`, the
+  // one legitimate use outside `time.ts` (which resolves the zoned instants).
+  "src/lib/format/timezones.ts",
 ];
 
 export const MONTH_ALLOWLIST: readonly string[] = [

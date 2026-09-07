@@ -7,8 +7,13 @@ import {
   formatNumber,
   startOfUtcDay,
   utcMondayOfWeek,
+  startOfDay,
+  mondayOfWeek,
+  zonedTimeToInstant,
   addMinutes,
   minutesBetween,
+  boardFetchBounds,
+  MINUTES_PER_DAY,
 } from "@/features/board/lib/time";
 
 /**
@@ -88,5 +93,76 @@ describe("time.ts", () => {
     expect(formatNumber(1)).toBe("1");
     expect(formatNumber(1.5)).toBe("1.5");
     expect(formatNumber(1.25)).toBe("1.25");
+  });
+});
+
+/**
+ * D88a (R-353): the formatters and calendar primitives are ZONE-AWARE now, and
+ * default to UTC so every case above (and every pre-D88 caller) is unchanged.
+ */
+describe("time.ts, zone-aware (D88a)", () => {
+  it("formatClock/formatDayLabel render the PLANT's wall clock, and default to UTC", () => {
+    // 2026-08-17 06:00 UTC is 01:00 in Chicago (CDT, UTC-5) the SAME day.
+    const inst = new Date("2026-08-17T06:00:00Z");
+    expect(formatClock(inst)).toBe("06:00"); // default UTC, unchanged
+    expect(formatClock(inst, "America/Chicago")).toBe("01:00");
+    expect(formatDayLabel(inst, "iso", "America/Chicago")).toBe("Mon 2026-08-17");
+    // 2026-08-17 02:00 UTC is 21:00 Chicago the PREVIOUS day — the label follows.
+    const late = new Date("2026-08-17T02:00:00Z");
+    expect(formatDayLabel(late, "iso", "America/Chicago")).toBe("Sun 2026-08-16");
+  });
+
+  it("startOfDay/mondayOfWeek resolve local midnight in the zone", () => {
+    const inst = new Date("2026-08-17T06:00:00Z"); // Mon, 01:00 Chicago
+    // Chicago local midnight of the 17th = 05:00 UTC (CDT is UTC-5).
+    expect(startOfDay(inst, "America/Chicago").toISOString()).toBe("2026-08-17T05:00:00.000Z");
+    // The Monday of that ISO week is the 17th itself.
+    expect(mondayOfWeek(inst, "America/Chicago").getTime()).toBe(
+      zonedTimeToInstant("America/Chicago", 2026, 8, 17, 0, 0).getTime(),
+    );
+    // UTC default matches the legacy helper.
+    expect(startOfDay(inst).getTime()).toBe(startOfUtcDay(inst).getTime());
+    expect(mondayOfWeek(inst).getTime()).toBe(utcMondayOfWeek(inst).getTime());
+  });
+});
+
+/**
+ * The board's FETCH bounds — `board_window`'s `p_from`/`p_to` — follow the
+ * plant's zone, not UTC, so a run late on the last visible LOCAL day is inside
+ * the range the server filters on rather than past a UTC midnight (the DEF that
+ * saved then vanished on reload). `windowStartDate` is the store's UTC "which
+ * day" marker.
+ */
+describe("boardFetchBounds (fetch bounds follow the plant zone)", () => {
+  const windowStartDate = new Date("2026-08-24T00:00:00.000Z"); // Mon, a UTC marker
+  const dayCount = 7;
+
+  it("UTC: the bounds equal the old whole-UTC-day values exactly", () => {
+    const { from, to } = boardFetchBounds(windowStartDate, dayCount, "UTC");
+    expect(from.getTime()).toBe(windowStartDate.getTime());
+    // The pre-fix computation: `addMinutes(windowStartDate, dayCount*1440)`.
+    expect(to.getTime()).toBe(addMinutes(windowStartDate, dayCount * MINUTES_PER_DAY).getTime());
+  });
+
+  it("America/Chicago: the bounds are the local-midnight instants the axis is anchored at", () => {
+    const { from, to } = boardFetchBounds(windowStartDate, dayCount, "America/Chicago");
+    // Local midnight of Aug 24 in Chicago (CDT, UTC-5) is 05:00 UTC — the same
+    // instant `zonedTimeToInstant` (and the axis origin) resolves.
+    expect(from.getTime()).toBe(zonedTimeToInstant("America/Chicago", 2026, 8, 24, 0, 0).getTime());
+    expect(from.toISOString()).toBe("2026-08-24T05:00:00.000Z");
+    // p_to is the local midnight `dayCount` days later, not a UTC midnight, so a
+    // 22:00-local run on the last visible day (Aug 30) falls inside [from, to).
+    expect(to.getTime()).toBe(
+      zonedTimeToInstant("America/Chicago", 2026, 8, 24 + dayCount, 0, 0).getTime(),
+    );
+    expect(to.toISOString()).toBe("2026-08-31T05:00:00.000Z");
+  });
+
+  it("first load (zone unknown): a whole-day pad each side — a safe superset", () => {
+    const { from, to } = boardFetchBounds(windowStartDate, dayCount, null);
+    expect(from.getTime()).toBe(addMinutes(windowStartDate, -MINUTES_PER_DAY).getTime());
+    expect(to.getTime()).toBe(
+      addMinutes(windowStartDate, (dayCount + 1) * MINUTES_PER_DAY).getTime(),
+    );
   });
 });

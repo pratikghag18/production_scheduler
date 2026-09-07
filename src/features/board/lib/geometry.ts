@@ -12,6 +12,7 @@
  * `./time.ts`.
  */
 import type { Shift, ShiftBreak, ShiftTemplate } from "@/lib/api";
+import type { DayAxis } from "./time";
 
 const MINUTES_PER_DAY = 1440;
 
@@ -301,20 +302,24 @@ export interface ShiftInstance {
 /**
  * Instantiate every shift of a template across day offsets `-1..dayCount`,
  * clipped to `[0, windowMinutes]`. D15: the `-1` is load-bearing (lets a
- * previous day's overnight shift tail show up on the first rendered
- * morning) and so, per the brief, is running one iteration past the last
- * day — though for any template with `startMin >= 0` (guaranteed by the
- * DB schema) that final iteration can never actually contribute an
- * instance, since its raw start always lands at or past `windowMinutes`.
+ * previous day's overnight shift tail show up on the first rendered morning) and
+ * so, per the brief, is running one iteration past the last day.
+ *
+ * ⭐ D88a — POSITIONS COME FROM THE DAY AXIS, not `day * 1440`. A shift's
+ * wall-clock `start_min`/`end_min` are turned into REAL-minute x-positions by
+ * `axis.wallToOffset`, so each day's band sits at that day's local midnight plus
+ * the posted wall-clock (D88b: the start is kept across a DST change, and the
+ * band is 7 or 9 hours wide on the changeover day). For a UTC axis
+ * `wallToOffset(day, m) === day*1440 + m`, so this is pixel-identical to the
+ * pre-D88 output on every non-changeover window.
  */
-export function shiftInstances(t: ShiftTemplate, dayCount: number): ShiftInstance[] {
-  const windowMinutes = dayCount * MINUTES_PER_DAY;
+export function shiftInstances(t: ShiftTemplate, axis: DayAxis): ShiftInstance[] {
+  const windowMinutes = axis.windowMinutes;
   const out: ShiftInstance[] = [];
   for (const sh of t.shifts) {
-    for (let day = -1; day <= dayCount; day++) {
-      const off = day * MINUTES_PER_DAY;
-      const rawStartMin = off + sh.startMin;
-      const rawEndMin = off + sh.endMin;
+    for (let day = -1; day <= axis.dayCount; day++) {
+      const rawStartMin = axis.wallToOffset(day, sh.startMin);
+      const rawEndMin = axis.wallToOffset(day, sh.endMin);
       if (rawEndMin <= 0 || rawStartMin >= windowMinutes) continue;
       out.push({
         shift: sh,
@@ -335,15 +340,14 @@ export interface BreakInstance {
   endMin: number;
 }
 
-export function breakInstances(t: ShiftTemplate, dayCount: number): BreakInstance[] {
-  const windowMinutes = dayCount * MINUTES_PER_DAY;
+export function breakInstances(t: ShiftTemplate, axis: DayAxis): BreakInstance[] {
+  const windowMinutes = axis.windowMinutes;
   const out: BreakInstance[] = [];
   for (const sh of t.shifts) {
     for (const br of sh.breaks) {
-      for (let day = -1; day <= dayCount; day++) {
-        const off = day * MINUTES_PER_DAY;
-        const rawStart = off + br.startMin;
-        const rawEnd = off + br.endMin;
+      for (let day = -1; day <= axis.dayCount; day++) {
+        const rawStart = axis.wallToOffset(day, br.startMin);
+        const rawEnd = axis.wallToOffset(day, br.endMin);
         if (rawEnd <= 0 || rawStart >= windowMinutes) continue;
         out.push({
           shiftBreak: br,
@@ -358,13 +362,13 @@ export function breakInstances(t: ShiftTemplate, dayCount: number): BreakInstanc
 }
 
 /** Every shift start/end instant across all rendered days — Compact-zoom snapping. */
-export function shiftSnapPoints(t: ShiftTemplate, dayCount: number): number[] {
-  const windowMinutes = dayCount * MINUTES_PER_DAY;
+export function shiftSnapPoints(t: ShiftTemplate, axis: DayAxis): number[] {
+  const windowMinutes = axis.windowMinutes;
   const out = new Set<number>();
   for (const sh of t.shifts) {
-    for (let day = -1; day <= dayCount; day++) {
-      const s = day * MINUTES_PER_DAY + sh.startMin;
-      const e = day * MINUTES_PER_DAY + sh.endMin;
+    for (let day = -1; day <= axis.dayCount; day++) {
+      const s = axis.wallToOffset(day, sh.startMin);
+      const e = axis.wallToOffset(day, sh.endMin);
       if (s >= 0 && s <= windowMinutes) out.add(s);
       if (e >= 0 && e <= windowMinutes) out.add(e);
     }
@@ -373,31 +377,32 @@ export function shiftSnapPoints(t: ShiftTemplate, dayCount: number): number[] {
 }
 
 /**
- * Boundary lines: shift starts + ends, deduped, skipping any that coincide
- * with a day boundary. `m % 1440 !== 0` generalizes the mockup's
- * `s !== 1440 && s !== 2880`, and — because `windowMinutes` is itself
- * always a multiple of 1440 — the same test also excludes `m === 0` and
- * `m === windowMinutes`, so no separate check is needed for the window
- * edges.
+ * Boundary lines: shift starts + ends, deduped, skipping any that coincide with
+ * a day boundary. D88a: the day-boundary test is now on the WALL minute
+ * (`start_min % 1440 !== 0`), not the pixel offset — under a plant-local axis a
+ * day boundary no longer lands on a multiple of 1440 pixels, but a shift that
+ * begins or ends at local midnight still should not draw a line over the day
+ * rule. A shift that begins/ends at local midnight has `start_min`/`end_min` a
+ * multiple of 1440; every other boundary is kept.
  */
-export function shiftBoundaries(t: ShiftTemplate, dayCount: number): number[] {
-  const windowMinutes = dayCount * MINUTES_PER_DAY;
+export function shiftBoundaries(t: ShiftTemplate, axis: DayAxis): number[] {
+  const windowMinutes = axis.windowMinutes;
   const out = new Set<number>();
   for (const sh of t.shifts) {
-    for (let day = -1; day <= dayCount; day++) {
-      const s = day * MINUTES_PER_DAY + sh.startMin;
-      const e = day * MINUTES_PER_DAY + sh.endMin;
-      if (s >= 0 && s <= windowMinutes && s % MINUTES_PER_DAY !== 0) out.add(s);
-      if (e >= 0 && e <= windowMinutes && e % MINUTES_PER_DAY !== 0) out.add(e);
+    for (let day = -1; day <= axis.dayCount; day++) {
+      const s = axis.wallToOffset(day, sh.startMin);
+      const e = axis.wallToOffset(day, sh.endMin);
+      if (s >= 0 && s <= windowMinutes && sh.startMin % MINUTES_PER_DAY !== 0) out.add(s);
+      if (e >= 0 && e <= windowMinutes && sh.endMin % MINUTES_PER_DAY !== 0) out.add(e);
     }
   }
   return [...out].sort((a, b) => a - b);
 }
 
 /** Gaps not covered by any shift instance -> off-shift wash. Merges overlapping instances first. */
-export function offShiftGaps(t: ShiftTemplate, dayCount: number): number[][] {
-  const windowMinutes = dayCount * MINUTES_PER_DAY;
-  const insts = shiftInstances(t, dayCount)
+export function offShiftGaps(t: ShiftTemplate, axis: DayAxis): number[][] {
+  const windowMinutes = axis.windowMinutes;
+  const insts = shiftInstances(t, axis)
     .map((x): [number, number] => [x.startMin, x.endMin])
     .sort((a, b) => a[0] - b[0]);
   const merged: [number, number][] = [];

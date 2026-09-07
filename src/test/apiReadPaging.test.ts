@@ -259,6 +259,7 @@ describe("every list read in src/lib/api goes through the pager", () => {
       .sort();
     expect(routed).toEqual(
       [
+        "absences.ts:absences",
         "access.ts:nodes",
         "access.ts:node_settings",
         "cycleTimes.ts:node_product_cycle_times",

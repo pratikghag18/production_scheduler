@@ -34,6 +34,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      absences: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          daterange: unknown
+          external_id: string | null
+          id: string
+          operator_id: string
+          org_id: string
+          reason: string
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          daterange: unknown
+          external_id?: string | null
+          id?: string
+          operator_id: string
+          org_id: string
+          reason: string
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          daterange?: unknown
+          external_id?: string | null
+          id?: string
+          operator_id?: string
+          org_id?: string
+          reason?: string
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "absences_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "absences_org_id_operator_id_fkey"
+            columns: ["org_id", "operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
       assignments: {
         Row: {
           area_override: boolean
@@ -1095,11 +1149,134 @@ export type Database = {
           },
         ]
       }
+      week_template_items: {
+        Row: {
+          area_override: boolean
+          area_override_reason: string | null
+          day_offset: number
+          efficiency: number | null
+          end_min: number
+          id: string
+          item_ref: string
+          kind: string
+          node_id: string
+          notes: string | null
+          operator_id: string | null
+          planned_headcount: number | null
+          product_id: string | null
+          run_ref: string | null
+          start_min: number
+          target_qty: number | null
+          target_unit: string | null
+          template_id: string
+        }
+        Insert: {
+          area_override?: boolean
+          area_override_reason?: string | null
+          day_offset: number
+          efficiency?: number | null
+          end_min: number
+          id?: string
+          item_ref: string
+          kind: string
+          node_id: string
+          notes?: string | null
+          operator_id?: string | null
+          planned_headcount?: number | null
+          product_id?: string | null
+          run_ref?: string | null
+          start_min: number
+          target_qty?: number | null
+          target_unit?: string | null
+          template_id: string
+        }
+        Update: {
+          area_override?: boolean
+          area_override_reason?: string | null
+          day_offset?: number
+          efficiency?: number | null
+          end_min?: number
+          id?: string
+          item_ref?: string
+          kind?: string
+          node_id?: string
+          notes?: string | null
+          operator_id?: string | null
+          planned_headcount?: number | null
+          product_id?: string | null
+          run_ref?: string | null
+          start_min?: number
+          target_qty?: number | null
+          target_unit?: string | null
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "week_template_items_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "week_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      week_templates: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          org_id: string
+          plant_id: string
+          saved_from: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          org_id: string
+          plant_id: string
+          saved_from: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          org_id?: string
+          plant_id?: string
+          saved_from?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "week_templates_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "week_templates_org_id_plant_id_fkey"
+            columns: ["org_id", "plant_id"]
+            isOneToOne: false
+            referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      absence_overlap: {
+        Args: { p_operator_id: string; p_timerange: unknown }
+        Returns: Json
+      }
       api_raise: {
         Args: { p_detail: Json; p_error: string; p_message: string }
         Returns: undefined
@@ -1113,6 +1290,7 @@ export type Database = {
         Args: { p_product_id: string }
         Returns: boolean
       }
+      app_can_place_in_plant: { Args: { p_plant_id: string }; Returns: boolean }
       app_can_read_in_plant: { Args: { p_site_node: string }; Returns: boolean }
       app_can_read_node: { Args: { p_node: string }; Returns: boolean }
       app_can_read_operator: { Args: { p_operator: string }; Returns: boolean }
@@ -1178,6 +1356,7 @@ export type Database = {
         Returns: boolean
       }
       app_pick_product_color: { Args: { p_org_id: string }; Returns: string }
+      app_plant_root_of: { Args: { p_node_id: string }; Returns: string }
       app_product_offered_at: {
         Args: { p_node: string; p_product: string }
         Returns: boolean
@@ -1210,6 +1389,7 @@ export type Database = {
           p_plant_id: string
           p_source_start: string
           p_target_start: string
+          p_template_id?: string
         }
         Returns: Json
       }
@@ -1257,6 +1437,7 @@ export type Database = {
           p_plant_id: string
           p_source_start: string
           p_target_start: string
+          p_template_id?: string
         }
         Returns: Json
       }
@@ -1331,6 +1512,7 @@ export type Database = {
         Returns: Json
       }
       delete_run: { Args: { p_mode?: string; p_run_id: string }; Returns: Json }
+      delete_week_template: { Args: { p_template_id: string }; Returns: Json }
       deletion_preview: {
         Args: { p_id: string; p_kind: string }
         Returns: Json
@@ -1340,6 +1522,8 @@ export type Database = {
         Returns: Json
       }
       editable_shape_ids: { Args: never; Returns: Json }
+      import_absences: { Args: { p_rows: Json }; Returns: Json }
+      list_week_templates: { Args: { p_plant_id: string }; Returns: Json }
       move_node: {
         Args: {
           p_new_parent_id: string
@@ -1383,6 +1567,7 @@ export type Database = {
         }
         Returns: Json
       }
+      remove_absence: { Args: { p_id: string }; Returns: Json }
       remove_site_member: {
         Args: { p_node_id: string; p_profile_id: string }
         Returns: Json
@@ -1395,9 +1580,27 @@ export type Database = {
         Args: { p_name: string; p_node_id: string }
         Returns: Json
       }
+      rename_week_template: {
+        Args: { p_name: string; p_template_id: string }
+        Returns: Json
+      }
       resolve_shift_template: { Args: { p_node_id: string }; Returns: string }
       save_hierarchy_levels: {
         Args: { p_levels: Json; p_template_id: string }
+        Returns: Json
+      }
+      save_week_template: {
+        Args: { p_name: string; p_plant_id: string; p_source_start: string }
+        Returns: Json
+      }
+      set_absence: {
+        Args: {
+          p_external_id?: string
+          p_from: string
+          p_operator_id: string
+          p_reason: string
+          p_to: string
+        }
         Returns: Json
       }
       set_node_setting: {
@@ -1406,6 +1609,7 @@ export type Database = {
       }
       set_org_date_format: { Args: { p_format: string }; Returns: Json }
       set_org_eligibility_policy: { Args: { p_policy: string }; Returns: Json }
+      set_org_timezone: { Args: { p_tz: string }; Returns: Json }
       set_site_member: {
         Args: { p_node_id: string; p_profile_id: string; p_role: string }
         Returns: Json

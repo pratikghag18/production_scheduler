@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import type { Product, BoardOperator, ReassignAssignmentInput, SchedulerError } from "@/lib/api";
 import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
 import type { IndexedAssignment, IndexedRun } from "../lib/boardIndex";
+import { absenceGaps, type AbsenceRow } from "@/lib/absence";
+import { leaveLine } from "../lib/leave";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
@@ -78,6 +80,15 @@ export function describeRefusal(refusal: SchedulerError, personName: string): st
   if (refusal.kind === "CapacityExceeded") {
     return `${personName} would reach ${Math.round(refusal.peak * 100)}% of capacity at this time (limit ${Math.round(refusal.cap * 100)}%).`;
   }
+  // R-357: this pop-up reassigns one person, so an `absent` refusal names that
+  // one. Say it with the name it knows rather than the id `describeSchedulerError`
+  // is left with; the dates are the server's own `YYYY-MM-DD`.
+  if (refusal.kind === "Absent" && refusal.operators.length === 1) {
+    const o = refusal.operators[0];
+    const range = o.from !== null && o.to !== null ? ` ${o.from} – ${o.to}` : "";
+    const reason = o.reason !== null ? `: ${o.reason}` : "";
+    return `${personName} is on leave${range}${reason}.`;
+  }
   return describeSchedulerError(refusal);
 }
 
@@ -92,6 +103,9 @@ export function AssignmentPopover({
   anchor,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
+  zone,
+  absences = [],
+  eligibilityPolicy = "warn",
   readOnly = false,
   onCancel,
   onSave,
@@ -138,6 +152,32 @@ export function AssignmentPopover({
   anchor: { x: number; y: number };
   windowStart: Date;
   dateFormat?: DateFormat;
+  zone?: string;
+  /**
+   * R-357: every absence the board can see (RLS-scoped upstream to this board's
+   * own people). `absenceGaps` narrows it to the CHOSEN person and this row's
+   * own window — the window `reassign_assignment` re-checks — so a person on
+   * leave is named before Save and Save is refused in place under `block`, the
+   * same shape as the certificate gap. Only the picked person and only when the
+   * person is actually being changed: an already-placed person's leave is not a
+   * reason to block a plain field edit the server never re-checks.
+   *
+   * Optional with an empty default so a caller or test with no absences loaded
+   * renders exactly the pre-R-357 pop-up; `BoardPage` always passes the list.
+   */
+  absences?: readonly AbsenceRow[];
+  /**
+   * R-357: the eligibility policy resolved FOR THIS CHIP'S CELL (the twin of the
+   * value the create pop-up is handed), so this pop-up can refuse an absent
+   * placement in place under `block` instead of offering a Save the server would
+   * reject. Unlike the certificate gap — which this pop-up learns from the
+   * server's answer because it has no `requiredSkills` — absence needs no
+   * required-skill context, so it is decided here with the same predicate the
+   * create pop-up uses. Optional, defaulting to `warn` (no absence block) so a
+   * caller or test that does not set it keeps the pre-R-357 behaviour;
+   * `BoardPage` resolves and passes the cell's real policy.
+   */
+  eligibilityPolicy?: "warn" | "block";
   /**
    * DEF-0015 / R-239 / R-346: true for a viewer (someone the server answers
    * `can_place: false` for). The pop-up then SHOWS the assignment — person,
@@ -293,6 +333,21 @@ export function AssignmentPopover({
     operator?.displayName ??
     "This person";
   const selectedOutsideArea = outsideAreaOperatorIds.has(operatorId);
+  // R-357: is the CHOSEN person on leave for this row's own window? Only asked
+  // when the person is being changed — a field-only edit is not re-checked by
+  // the server, so an already-placed person's leave is not a wall to it. The
+  // window is the assignment's own [start, end); `absenceGaps` answers the same
+  // overlap `reassign_assignment` refuses on.
+  const selectedAbsence =
+    personChanged && operatorId !== ""
+      ? absenceGaps(absences, operatorId, {
+          start: addMinutes(windowStart, assignment.startMin),
+          end: addMinutes(windowStart, assignment.endMin),
+        })
+      : null;
+  // Under `block` the reassignment cannot go through (no absence override);
+  // under `warn` it is a warning and Save is still offered.
+  const absenceBlocked = selectedAbsence !== null && eligibilityPolicy === "block";
   // The refusal that has an answer on this screen; every other kind is a
   // sentence and nothing more.
   const notEligible = notEligibleAnswer;
@@ -301,6 +356,8 @@ export function AssignmentPopover({
   const saveDisabled =
     sending ||
     blocked ||
+    // R-357: a person on leave cannot be placed under `block` — no override.
+    absenceBlocked ||
     (needsOverride && (!overrideChecked || overrideReason.trim() === "")) ||
     // D113: the server refuses an override with no reason, so the button must
     // not offer to send one. Same shape as the line above it.
@@ -363,7 +420,7 @@ export function AssignmentPopover({
 
   const product = products.find((p) => p.id === currentProductId);
   const name = operator?.displayName ?? "(unknown operator)";
-  const timeLabel = `${formatFull(addMinutes(windowStart, assignment.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, assignment.endMin))}${assignment.eligibilityOverride ? " · certification override" : ""}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, assignment.startMin), dateFormat, zone)} – ${formatClock(addMinutes(windowStart, assignment.endMin), zone)}${assignment.eligibilityOverride ? " · certification override" : ""}`;
 
   // DEF-0015 / R-239 / R-346: the viewer's pop-up. The details are shown — who,
   // how hard, what target, when — but there is no Person select, no editable
@@ -527,10 +584,29 @@ export function AssignmentPopover({
           </div>
         )}
 
+        {selectedAbsence !== null && (
+          <div className={styles.eligWarn}>
+            {/* R-357: named and dated through the app's date seam (R-338). No
+                override box — the server takes no absence override, so under
+                `warn` this is a warning and Save stays enabled; under `block`
+                there is nothing to tick and Save is off. */}
+            <p>
+              <strong>{leaveLine(selectedAbsence, dateFormat)}</strong>
+            </p>
+            {absenceBlocked ? (
+              <p>This person is on leave for this window, so there is no override.</p>
+            ) : (
+              <p>Placing them anyway records the assignment over their leave.</p>
+            )}
+          </div>
+        )}
+
         {refusal !== null && refusal.kind !== "NotEligible" && (
           // Every other refusal: the sentence the error contract already writes
           // for it, in the pop-up rather than only in a toast, because the
-          // control that caused it is still on screen.
+          // control that caused it is still on screen. `Absent` is one of these
+          // — a race backstop, since Save is already refused in place under
+          // block; `describeRefusal` names the person and the leave (R-357).
           <p className={styles.refusal} role="alert">
             {describeRefusal(refusal, chosenName)}
           </p>

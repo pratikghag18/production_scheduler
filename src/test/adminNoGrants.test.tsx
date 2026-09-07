@@ -135,6 +135,10 @@ vi.mock("@/features/admin/components/OperatorsPanel", () => ({
   OperatorsPanel: () => <div>stub OperatorsPanel</div>,
   OPERATORS_PANEL_READY: true,
 }));
+vi.mock("@/features/admin/components/AbsencesPanel", () => ({
+  AbsencesPanel: () => <div>stub AbsencesPanel</div>,
+  ABSENCES_PANEL_READY: true,
+}));
 vi.mock("@/features/admin/components/TrainingsPanel", () => ({
   TrainingsPanel: () => <div>stub TrainingsPanel</div>,
   TRAININGS_PANEL_READY: true,
@@ -276,14 +280,15 @@ describe("the admin screen explains an empty scope instead of showing one", () =
    * policy` — so every one of those tabs would be a control shown for something
    * the server refuses (R-239), and Settings would be one no lock stops.
    */
-  it("N6 ⭐⭐: a supervisor's rail is Operators, Trainings and Matrix, and nothing else", async () => {
+  it("N6 ⭐⭐: a supervisor's rail is Operators, Absences, Trainings and Matrix, and nothing else", async () => {
     h.state.tree = { ...EMPTY_TREE, nodes: [h.node("n1", "Line A", null, "plant_1")] };
     show();
     await screen.findByRole("button", { name: "Operators" });
     // The whole list, in the rail's own order. A widening shows up here as an
     // extra element with a name, which is what makes the failure readable
     // without a second set of by-name assertions to maintain beside it.
-    expect(rail()).toEqual(["Operators", "Trainings", "Matrix"]);
+    // R-357 added Absences beside Operators (adminSectionsFor widened for it).
+    expect(rail()).toEqual(["Operators", "Absences", "Trainings", "Matrix"]);
   });
 
   it("N7: a company admin's rail is the whole of SECTIONS, so N6 cannot pass by emptying it", async () => {
@@ -305,11 +310,13 @@ describe("the admin screen explains an empty scope instead of showing one", () =
       "Access",
       "Shifts",
       "Operators",
+      "Absences",
       "Trainings",
       "Matrix",
       "Products",
       "Cycle times",
       "Import",
+      "Templates",
       "Settings",
       "Activity",
     ]);

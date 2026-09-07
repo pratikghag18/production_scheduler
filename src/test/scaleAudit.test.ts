@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the eighteen admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the twenty admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -262,6 +262,12 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // The Activity section (the audit log, 0007 / 0029 §6). Eighteenth
         // surface, same two-place edit.
         "src/features/admin/components/AuditPanel.module.css",
+        // R-357 / 0066: the Absences section. Nineteenth surface, same two-place
+        // edit.
+        "src/features/admin/components/AbsencesPanel.module.css",
+        // R-356 / 0067: the Templates section. Twentieth surface, same two-place
+        // edit.
+        "src/features/admin/components/TemplatesPanel.module.css",
       ].sort(),
     );
   });
@@ -468,7 +474,7 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
     expect(auditAdminSections(repoRoot)).toEqual([]);
   });
 
-  it("H2: the ten ids are exactly these, in rail order", () => {
+  it("H2: the twelve ids are exactly these, in rail order", () => {
     // The list that drives H1 is itself untested unless something asserts it —
     // deleting an entry from SECTIONS makes H1 *greener*, which is the shape
     // R10 and G12 both exist to close.
@@ -483,6 +489,9 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       "access",
       "shifts",
       "operators",
+      // R-357 / 0066: Absences, beside Operators — a person, a date range and a
+      // reason, offered to the same supervisors Operators is.
+      "absences",
       "trainings",
       // The Operator Training Matrix — a third view of the same operators-and-
       // trainings data, so it sits beside the two screens it draws from.
@@ -492,6 +501,9 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       // because a cycle time is a fact about a part at a place.
       "cycletimes",
       "import",
+      // R-356 / 0067: named week templates for the chosen plant, admins only.
+      // The id is in SECTIONS and has a render branch, which is what H2 guards.
+      "templates",
       // Settings. 0037 shipped it org-wide (the date format) and it was
       // system-admin only; 0050 and 0052 made every setting on it PER-PLANT, so
       // DEF-0007 took `companyAdminOnly` off it and a plant admin is offered it

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { describeSchedulerError, type SchedulerError } from "@/lib/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { describeSchedulerError, invite, type InviteResult, type SchedulerError } from "@/lib/api";
 import {
   accessPanelState,
   allowedRoles,
@@ -17,7 +18,21 @@ import {
   type AccessRow,
   type GrantRole,
 } from "../lib/siteAccess";
-import { useRemoveSiteMember, useSetSiteMember, useSitePeople } from "../hooks/useSiteAccess";
+import {
+  buildInviteBody,
+  canOfferInvite,
+  describeInviteRefusal,
+  inviteRoles,
+  inviteSuccessMessage,
+  normaliseEmail,
+  readInvitedPending,
+} from "../lib/invite";
+import {
+  siteAccessKeys,
+  useRemoveSiteMember,
+  useSetSiteMember,
+  useSitePeople,
+} from "../hooks/useSiteAccess";
 import styles from "./SiteAccessPanel.module.css";
 
 /**
@@ -112,6 +127,40 @@ export function SiteAccessPanel({
   const [rowError, setRowError] = useState<{ profileId: string; message: string } | null>(null);
   const [addRoles, setAddRoles] = useState<Readonly<Record<string, GrantRole>>>({});
 
+  // ⭐ INVITE (P1-6c). Offered only when a search by email matches NOBODY in the
+  // company (see `canOfferInvite`); the role menu is the SAME one the Add
+  // control uses, so the two never disagree about admin-only-at-a-root. The
+  // mutation reaches the `invite` Edge Function, which authorises the grant AS
+  // THE CALLER through `set_site_member` — the panel offers, the database
+  // decides. Fired from a click handler, never a state updater (StrictMode §6).
+  const queryClient = useQueryClient();
+  const [inviteRole, setInviteRole] = useState<GrantRole>("supervisor");
+  const [inviteNotice, setInviteNotice] = useState<{ tone: "ok" | "err"; message: string } | null>(
+    null,
+  );
+  const inviteMutation = useMutation<
+    InviteResult,
+    SchedulerError,
+    { email: string; nodeId: string; role: GrantRole }
+  >({
+    mutationFn: (vars) => invite(buildInviteBody(vars.email, vars.nodeId, vars.role)),
+    onSuccess: (result, vars) => {
+      if (result.ok) {
+        setInviteNotice({ tone: "ok", message: inviteSuccessMessage(vars.email, result.invited) });
+        // The new (or newly granted) member shows on the next read.
+        void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
+      } else {
+        setInviteNotice({
+          tone: "err",
+          message: describeInviteRefusal(result.reason) ?? describeSchedulerError(result.error),
+        });
+      }
+    },
+    // invite() returns a handled outcome and does not throw; this is the crash
+    // path only.
+    onError: (err) => setInviteNotice({ tone: "err", message: describeSchedulerError(err) }),
+  });
+
   const state = accessPanelState(
     treeLoading,
     activeNodeId,
@@ -177,6 +226,22 @@ export function SiteAccessPanel({
 
   const view = buildAccessRows(peopleQuery.data, viewerProfileId);
   const { members, candidates } = partitionAccess(view.rows, query);
+
+  // "Invited, not yet signed in" (0064). Read from the raw payload as an overlay
+  // rather than folded into every AccessRow — see `invite.ts::readInvitedPending`.
+  const invitedPending = readInvitedPending(peopleQuery.data);
+
+  // Offer an invite only when a search by email matches nobody already in the
+  // company. `activeNodeId` is non-null in the `ready` branch (the panel is
+  // scoped to a place the viewer administers), which is exactly `canGrantHere`.
+  const offerInvite =
+    activeNodeId !== null &&
+    canOfferInvite({
+      query,
+      memberMatches: members.length,
+      candidateMatches: candidates.length,
+      canGrantHere: true,
+    });
 
   // ⭐ FOUND BY LOOKING AT THE RENDER, NOT BY A TEST. `matchesQuery` drops a
   // person with no address on file from every non-empty search — correct, and
@@ -275,7 +340,14 @@ export function SiteAccessPanel({
 
           return (
             <li key={row.profileId} className={styles.row}>
-              <span className={styles.email}>{row.email ?? "(no address on file)"}</span>
+              <span className={styles.email}>
+                {row.email ?? "(no address on file)"}
+                {invitedPending.has(row.profileId) && (
+                  <span className={styles.invitedTag} title="Invited — hasn't signed in yet">
+                    invited
+                  </span>
+                )}
+              </span>
               <span className={styles.desc}>{describeAccess(row, view.nodeName)}</span>
 
               {isConfirming ? (
@@ -383,7 +455,7 @@ export function SiteAccessPanel({
         <p className={styles.skippedLine}>
           Search above by email address to give someone access to {view.nodeName}.
         </p>
-      ) : candidates.length === 0 ? (
+      ) : candidates.length === 0 && !offerInvite ? (
         <p className={styles.skippedLine}>Nobody else in the company matches “{query.trim()}”.</p>
       ) : null}
       <div className={styles.head} aria-hidden="true" hidden={candidates.length === 0}>
@@ -447,6 +519,58 @@ export function SiteAccessPanel({
           );
         })}
       </ul>
+
+      {/* ⭐ INVITE — offered only when the email search matched nobody already
+          in the company. The role menu is `inviteRoles(atPlantRoot)`, the same
+          list the Add control uses, so a person invited below a plant root can
+          only be a supervisor or viewer, exactly as the server will allow. */}
+      {offerInvite && activeNodeId !== null && (
+        <div className={styles.inviteBox}>
+          <p className={styles.inviteLead}>
+            Nobody in the company matches “{query.trim()}”. Invite them to{" "}
+            {view.nodeName ?? "this place"}?
+          </p>
+          <div className={styles.inviteRow}>
+            <span className={styles.inviteEmail}>{normaliseEmail(query)}</span>
+            <select
+              aria-label="Role to invite as"
+              className={styles.select}
+              value={inviteRole}
+              disabled={inviteMutation.isPending}
+              onChange={(e) => setInviteRole(e.target.value as GrantRole)}
+            >
+              {inviteRoles(atPlantRoot).map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={styles.inviteBtn}
+              disabled={inviteMutation.isPending}
+              onClick={() => {
+                setInviteNotice(null);
+                inviteMutation.mutate({
+                  email: normaliseEmail(query),
+                  nodeId: activeNodeId,
+                  role: inviteRole,
+                });
+              }}
+            >
+              {inviteMutation.isPending ? "Inviting…" : `Invite as ${inviteRole}`}
+            </button>
+          </div>
+          {inviteNotice && (
+            <p
+              className={inviteNotice.tone === "ok" ? styles.inviteOk : styles.errorLine}
+              role={inviteNotice.tone === "ok" ? "status" : "alert"}
+            >
+              {inviteNotice.message}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

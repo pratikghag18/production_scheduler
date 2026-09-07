@@ -118,9 +118,24 @@ The numbers band on the page is computed from the newest session with `confirmed
 ## `next[]`
 
 ```yaml
-- stage: S23             # or a requirement id, or free text under `text:`
+- kind: task             # task | parked | note — REQUIRED, VALIDATED
+  stage: S23             # or a requirement id, or free text under `text:`
   why: "..."
 ```
+
+`kind` says what the entry is, so the page can stop counting parked items and notes
+as open work:
+
+- `task` — live work, next in line. These are the only entries numbered on the page,
+  and their count is the number in the section heading ("What comes next: 1 task").
+- `parked` — tabled or decided by the maintainer, not next. Rendered unnumbered under
+  "Parked, by decision"; an entry that also carries `decided: true` keeps its chip.
+- `note` — a standing note that is never a task (its `text` begins "STANDING NOTE").
+  Rendered unnumbered under "Standing notes".
+
+A missing or unknown `kind` is a validator failure that names the entry's text. The
+`# ---- PARKED ----` comment in the YAML is kept as a reading aid only; the renderer
+groups by `kind`, not by where an entry sits relative to the comment.
 
 ## Defect files — `docs/defects/DEF-0001.md`
 

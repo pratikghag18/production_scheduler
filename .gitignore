@@ -8,6 +8,11 @@ test-results
 .env
 .env.local
 .env.*.local
+# The invite Edge Function's local secrets (service-role key etc.). The bare
+# `.env` above already matches it in any directory; named here so nobody has to
+# reason about that, and so it is obvious the file is meant to exist untracked.
+# supabase/functions/README.md says what goes in it.
+supabase/functions/.env
 
 # supabase local state
 .supabase/

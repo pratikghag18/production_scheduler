@@ -37,7 +37,10 @@ import {
 } from "@/lib/api";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geometry";
+import type { DayAxis } from "../lib/time";
 import { formatClock, addMinutes } from "../lib/time";
+import { leaveLine } from "../lib/leave";
+import type { DateFormat } from "@/lib/format/dates";
 import {
   MIN_DURATION_MINUTES,
   DRAG_THRESHOLD_PX,
@@ -182,11 +185,11 @@ interface SnapConfig {
 function snapConfigFor(
   zoomIndex: ZoomIndex,
   template: ShiftTemplate | null,
-  dayCount: number,
+  axis: DayAxis,
 ): SnapConfig {
   const zoom = ZOOMS[zoomIndex];
   const useShiftSnap = zoom.name === "Compact";
-  const shiftPoints = template ? shiftSnapPoints(template, dayCount) : [];
+  const shiftPoints = template ? shiftSnapPoints(template, axis) : [];
   return { useShiftSnap, snapMinutes: zoom.snapMinutes, shiftPoints };
 }
 
@@ -255,6 +258,13 @@ export interface UseDragGestureArgs {
    * in `BoardPage` — because seeing a chip is not placing anyone.
    */
   canPlace: boolean;
+  /**
+   * R-357: the plant's resolved date format, used to phrase the leave a
+   * warn-move went ahead over in the drag success toast (`leaveLine`) — the same
+   * seam the create/reassign pop-ups read absences through, so the drag path
+   * names the dates the way they do rather than staying silent.
+   */
+  dateFormat: DateFormat;
 }
 
 export interface BlockDragDescriptor {
@@ -265,6 +275,7 @@ export interface BlockDragDescriptor {
   windowMinutes: number;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: ZoomIndex;
   handlePx: number;
   blockWidthPx: number;
@@ -279,6 +290,7 @@ export interface TrackCreateDescriptor {
   windowMinutes: number;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: ZoomIndex;
   trackLeftPx: number;
   offsetXPx: number;
@@ -293,12 +305,12 @@ function toastCtx(index: BoardIndex): ToastResolveCtx {
     productById: index.productById,
     runById: index.runById,
     formatRange: (s, e) =>
-      `${formatClock(addMinutes(index.windowStart, s))}–${formatClock(addMinutes(index.windowStart, e))}`,
+      `${formatClock(addMinutes(index.windowStart, s), index.zone)}–${formatClock(addMinutes(index.windowStart, e), index.zone)}`,
   };
 }
 
 export function useDragGesture(args: UseDragGestureArgs) {
-  const { rootPath, from, to, index, zoomIndex } = args;
+  const { rootPath, from, to, index, zoomIndex, dateFormat } = args;
 
   const createRun = useCreateRun(rootPath, from, to);
   const updateRunFields = useUpdateRunFields(rootPath, from, to);
@@ -447,7 +459,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       pointerId: e.pointerId,
       pxPerHour: d.pxPerHour,
       windowMinutes: d.windowMinutes,
-      snap: snapConfigFor(d.zoomIndex, d.template, d.dayCount),
+      snap: snapConfigFor(d.zoomIndex, d.template, d.dayAxis),
       originClientX: e.clientX,
       originClientY: e.clientY,
       altKey: e.altKey,
@@ -662,6 +674,36 @@ export function useDragGesture(args: UseDragGestureArgs) {
                       `${result.eligibilityWarnings.length} of the crew (${names}) not certified for ${destName} — override recorded.`,
                     );
                   }
+                  // R-357: the TWIN of the eligibility warning above, and the one
+                  // place the drag path used to swallow it. A warn-move carries
+                  // `absence_warnings` for every crew member moved onto a window
+                  // they are away for (D60: informational — the move already
+                  // succeeded). Named the way the create/reassign pop-ups name it:
+                  // the person, then `leaveLine`'s "On leave <dates>: reason" in
+                  // the plant's own date format. An entry in `absence_warnings` is
+                  // `absent:true` by construction (the server only emits away
+                  // crew), so `from`/`to` are non-null — guarded anyway, a mirror
+                  // never throws.
+                  if (result.absenceWarnings.length > 0) {
+                    const lines = result.absenceWarnings
+                      .map((w) => {
+                        const name =
+                          index.operatorById.get(w.operatorId)?.displayName ?? w.operatorId;
+                        const a = w.absence;
+                        const when =
+                          a.from !== null && a.to !== null
+                            ? leaveLine(
+                                { from: a.from, to: a.to, reason: a.reason ?? "" },
+                                dateFormat,
+                              )
+                            : "on leave";
+                        return `${name}: ${when}`;
+                      })
+                      .join("; ");
+                    toast.info(
+                      `${result.absenceWarnings.length} of the crew moved over leave — ${lines}. Override recorded.`,
+                    );
+                  }
                 },
                 onError: (err) => failWith(err, revertLabel(d.subject)),
               },
@@ -798,6 +840,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       failWith,
       revertLabel,
       askConfirm,
+      dateFormat,
     ],
   );
 
@@ -853,7 +896,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       if (!canPlaceRef.current) return;
       setPopover(null);
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
-      const snap = snapConfigFor(d.zoomIndex, d.template, d.dayCount);
+      const snap = snapConfigFor(d.zoomIndex, d.template, d.dayAxis);
       const rawAnchor = pxToMinutes(e.clientX - d.trackLeftPx, d.pxPerHour);
       const anchorMin = Math.max(
         0,
@@ -989,7 +1032,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const snap = snapConfigFor(
         ctxDescriptor.zoomIndex,
         ctxDescriptor.template,
-        ctxDescriptor.dayCount,
+        ctxDescriptor.dayAxis,
       );
       const step = snap.snapMinutes * (e.key === "ArrowLeft" ? -1 : 1);
       const existing = dragRef.current;
@@ -1164,7 +1207,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
       const template = index.templateForNode.get(hit.nodeId) ?? null;
       const windowMinutes = index.windowMinutes;
-      const snap = snapConfigFor(zoomIndex, template, index.dayCount);
+      const snap = snapConfigFor(zoomIndex, template, index.dayAxis);
       const rawStart = Math.max(0, Math.min(windowMinutes, hit.minute));
       const startMin = Math.max(
         0,
