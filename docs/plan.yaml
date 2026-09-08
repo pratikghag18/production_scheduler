@@ -4,13 +4,13 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-08'
-  tip: 01f4898
+  tip: 6b0f750
   baseline:
-    app_tests: 2495
-    app_test_files: 110
+    app_tests: 2497
+    app_test_files: 111
     tsc: 0
     eslint: 0
-    db_checks: 760
+    db_checks: 763
     migrations: 68
     mutations: 509 of 536
 tracks:
@@ -7853,13 +7853,19 @@ requirements:
       succeed and two overlapping ones are refused by absences_part_day_excl; two whole-day rows
       overlapping are still refused by absences_whole_day_excl; a part-day row inside a whole-day
       absence is accepted deliberately; set_absence with only one of the two times refuses
-      invalid_argument; a part-day row whose from and to are different days refuses
+      invalid_argument; a part-day row whose from and to are different days refuses; and AB23-AB25,
+      the boundary itself (DEF-0022) --- a shift starting exactly when a part-day absence ends and
+      one ending exactly when it starts both miss, and two part-day absences that merely TOUCH are
+      both accepted, each proved by a mutation that turns it red by name
   - kind: vitest
     file: src/test/absence.test.ts
     cases: >-
-      AB15 and AB16 by the same names the SQL cases carry: the overlapping and non-overlapping
-      shift, a shift ending exactly when the absence ends and one starting exactly when it starts,
-      an open-ended window on both sides of a part-day absence, and the whole-day-first tie-break
+      the overlapping and the clearly-outside shift; the three BOUNDARY cases, each mirrored in
+      88_absences_test.sql by the name it carries there (AB23 a shift starting exactly when the
+      absence ends, AB24 a shift ending exactly when it starts, and the existing case for a shift
+      starting exactly when the absence starts, which does clash); an open-ended window on both
+      sides of a part-day absence; and the whole-day-first tie-break. DEF-0022 corrected this
+      entry: it previously claimed the SQL suite carried the same names when only the client did.
   - kind: vitest
     file: src/test/absencesPanel.test.tsx
     cases: >-
@@ -10822,6 +10828,63 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 92
+  date: 2026-09-08
+  title: 'DEF-0022: the part-day boundary gets cases that can fail, and the database is reset clean'
+  commits:
+  - 6b0f750
+  numbers:
+    app_tests: 2497
+    app_test_files: 111
+    tsc: 0
+    eslint: 0
+    db_checks: 763
+    migrations: 68
+  confirmed: true
+  summary: >-
+    The tester filed one defect and it is the best kind: DEF-0022 says the code is RIGHT and the
+    suite cannot tell you when it stops being. `88_absences_test.sql` had no case anywhere near the
+    part-day boundary --- AB15's "miss" is a shift a full hour clear of the absence --- so closing
+    the stored range's upper bound, and wrongly blocking a shift that starts the instant an absence
+    ends, left all 27 cases green. Agreed on sight, and widened on reading: AB16 had the SAME hole,
+    its two "non-overlapping" part-day absences being eight hours apart, so the exclusion
+    constraint's touching boundary was untested by the identical mistake. The tester found one
+    instance of the pattern; there were two.
+    ⭐ THE FIX IS THREE CASES AND, MUCH MORE, FOUR MUTATIONS. AB23 (a shift starting exactly when a
+    part-day absence ends does not clash), AB24 (one ending exactly when it starts does not clash)
+    and AB25 (two part-day absences that merely TOUCH are both accepted), each named to mirror
+    `absence.test.ts`. On a defect whose whole nature is "green proves nothing", the deliverable is
+    the red: closing the range's upper bound turns AB23 red (and AB25, for a reason the lane worked
+    out and checked against the database rather than assumed --- both of AB25's rows go through the
+    same mutated constructor, so they genuinely overlap); widening the exclusion's own comparison
+    turns AB25 red alone; stripping the part-day branch out of `absence_overlap` turns AB15, AB23
+    AND AB24 red together. `0069` was restored from a copy and confirmed byte-identical after every
+    one.
+    ⚠️ ONE PREDICTION IN THE BRIEF WAS WRONG AND THE LANE SAID SO RATHER THAN FORCING IT. Flipping
+    the absence's LOWER bound flag does not move AB24, and cannot: AB24's window is built with the
+    constructor's default `[)` bounds, so its own upper bound already excludes the shared instant
+    and the two ranges can never meet there. The flag is only observable through a window whose
+    upper bound is inclusive, which nothing in this codebase builds. AB24 is still falsifiable ---
+    the fourth mutation proves it --- just not by that one. Checked here directly, not taken on
+    trust, because the whole defect is about cases that cannot fail.
+    ⭐ AND ONE CORRECTION THAT IS THIS SESSION'S OWN. R-359's `verified_by` claimed the client's
+    boundary cases were proved "by the same names the SQL cases carry". They were not; only the
+    client had them. That sentence is rewritten to say what is true now, and the SQL entry names
+    AB23-AB25. A requirement's record claiming a test that does not exist is the same defect class
+    as the one being closed, one level up.
+    ⭐ THE DEV DATABASE. The tester found the local demo data stale (dated 2028) and a hand-run seed
+    left a stray fourth plant; its own sandbox refused `supabase db reset` outright rather than
+    prompting, so it stopped rather than working around it --- the right call. Run here on the
+    maintainer's instruction: all 68 migrations applied clean, the four plant roots are the designed
+    fixture again (Northwind A/B/C and Contoso's Plant 1), runs are dated 7-9 Sept, and the
+    migration table now tracks 0068 and 0069 --- which also closes the hand-applied gap session 90
+    recorded, since neither had ever been registered there.
+    ⭐ THE NUMBERS, RUN HERE. `Test Files 111 passed (111)` / `Tests 2497 passed (2497)`; the SQL
+    suite summed per file over the 51 numbered suites, 763 passed 0 failed; tsc 0; eslint 0. The
+    client gained one case the lane found missing on its own read --- the true mirror of AB24, a
+    shift ending exactly when the absence starts --- proved by mutating `absenceGaps`' comparison
+    operator and putting it back.
+  shipped: []
 - id: 91
   date: 2026-09-08
   title: Tester run
