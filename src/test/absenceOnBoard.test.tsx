@@ -513,7 +513,13 @@ describe("shapes.ts: the warn-path payload keys are parsed, never raw", () => {
     expect(a?.startsAt).toBe("2026-09-28T09:00:00.000Z");
     expect(a?.endsAt).toBe("2026-09-28T13:00:00.000Z");
     const sentence = leaveLine(
-      { from: a!.from!, to: a!.to!, reason: a!.reason ?? "", startsAt: a?.startsAt, endsAt: a?.endsAt },
+      {
+        from: a!.from!,
+        to: a!.to!,
+        reason: a!.reason ?? "",
+        startsAt: a?.startsAt,
+        endsAt: a?.endsAt,
+      },
       "d_mon_yyyy",
     );
     expect(sentence).toBe("On leave 28 Sep 2026, 09:00–13:00: sick");
@@ -558,7 +564,13 @@ describe("shapes.ts: the warn-path payload keys are parsed, never raw", () => {
     expect(a?.endsAt).toBe("2026-09-28T13:00:00.000Z");
     // America/Chicago is UTC-5 in September (CDT): 09:00Z/13:00Z -> 04:00/08:00.
     const sentence = leaveLine(
-      { from: a!.from!, to: a!.to!, reason: a!.reason ?? "", startsAt: a?.startsAt, endsAt: a?.endsAt },
+      {
+        from: a!.from!,
+        to: a!.to!,
+        reason: a!.reason ?? "",
+        startsAt: a?.startsAt,
+        endsAt: a?.endsAt,
+      },
       "d_mon_yyyy",
       "America/Chicago",
     );
@@ -581,7 +593,9 @@ describe("leaveLine: R-359, a part-day hit reads as the day plus the hours", () 
   };
 
   it("reads the hours in the given zone, in the plant's date format", () => {
-    expect(leaveLine(partDayHit, "d_mon_yyyy", "UTC")).toBe("On leave 14 Sep 2026, 09:00–13:00: sick");
+    expect(leaveLine(partDayHit, "d_mon_yyyy", "UTC")).toBe(
+      "On leave 14 Sep 2026, 09:00–13:00: sick",
+    );
   });
 
   it("the same instants read differently in a different zone", () => {

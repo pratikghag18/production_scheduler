@@ -26,7 +26,11 @@ import { BOARD_ZONE, formatClock } from "./time";
  * in `zone`. The reason is the person's own free text; a blank one (the server
  * forbids it, but a mirror should never throw) drops the colon.
  */
-export function leaveLine(hit: AbsenceHit, dateFormat: DateFormat, zone: string = BOARD_ZONE): string {
+export function leaveLine(
+  hit: AbsenceHit,
+  dateFormat: DateFormat,
+  zone: string = BOARD_ZONE,
+): string {
   const from = formatCalendarDay(hit.from, dateFormat);
   const reason = hit.reason.trim() === "" ? "" : `: ${hit.reason}`;
   if (hit.startsAt !== undefined && hit.endsAt !== undefined) {

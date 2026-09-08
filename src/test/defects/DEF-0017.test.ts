@@ -51,7 +51,9 @@ function apiSource(): string {
 function lastBoardWindow(): string | null {
   let body: string | null = null;
   const re = /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?board_window\s*\(/gi;
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
+  for (const file of readdirSync(MIGRATIONS)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()) {
     const sql = readFileSync(path.join(MIGRATIONS, file), "utf8").replace(/--[^\n]*/g, "");
     let m: RegExpExecArray | null;
     while ((m = re.exec(sql)) !== null) {
@@ -87,8 +89,11 @@ describe("DEF-0017: the board's date format is the plant's resolved value, not t
     expect(useDateFormatBody()).not.toBeNull();
     expect(lastBoardWindow()).not.toBeNull();
     let header: string | null = null;
-    const re = /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?app_resolve_node_setting\s*\(/gi;
-    for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
+    const re =
+      /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?app_resolve_node_setting\s*\(/gi;
+    for (const file of readdirSync(MIGRATIONS)
+      .filter((f) => f.endsWith(".sql"))
+      .sort()) {
       const sql = readFileSync(path.join(MIGRATIONS, file), "utf8").replace(/--[^\n]*/g, "");
       let m: RegExpExecArray | null;
       while ((m = re.exec(sql)) !== null) {

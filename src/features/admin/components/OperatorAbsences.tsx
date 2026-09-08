@@ -239,7 +239,8 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
                     {a.startsAt !== undefined && a.endsAt !== undefined && (
                       <>
                         {" "}
-                        {formatClock(new Date(a.startsAt), zone)}–{formatClock(new Date(a.endsAt), zone)}
+                        {formatClock(new Date(a.startsAt), zone)}–
+                        {formatClock(new Date(a.endsAt), zone)}
                       </>
                     )}
                   </span>
@@ -273,13 +274,21 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
         </>
       )}
 
-      <form className={styles.addRow} onSubmit={submit} aria-label={`Record an absence for ${displayName}`}>
+      <form
+        className={styles.addRow}
+        onSubmit={submit}
+        aria-label={`Record an absence for ${displayName}`}
+      >
         <label className={styles.partOfDayCheck}>
           <input
             type="checkbox"
             checked={draft.partOfDay}
             onChange={(e) =>
-              setDraft((d) => ({ ...d, partOfDay: e.target.checked, to: e.target.checked ? d.from : d.to }))
+              setDraft((d) => ({
+                ...d,
+                partOfDay: e.target.checked,
+                to: e.target.checked ? d.from : d.to,
+              }))
             }
           />
           Part of a day
@@ -291,7 +300,9 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
               type="date"
               aria-label="Date"
               value={draft.from}
-              onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value, to: e.target.value }))}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, from: e.target.value, to: e.target.value }))
+              }
             />
             <input
               className={fieldStyles.field}

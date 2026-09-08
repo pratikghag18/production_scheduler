@@ -95,7 +95,9 @@ describe("DEF-0020: an email that belongs to another org, but whose auth row GoT
       return;
     }
     if (!(await functionServed())) {
-      console.warn(`DEF-0020 pin skipped: the invite function is not being served at ${FUNCTIONS_BASE}`);
+      console.warn(
+        `DEF-0020 pin skipped: the invite function is not being served at ${FUNCTIONS_BASE}`,
+      );
       return;
     }
     const dana = await tokenFor("dana@example.test", "devpassword");

@@ -138,7 +138,8 @@ export function AbsencesPanel() {
   );
   const draftZoneQuery = useQuery({
     queryKey: ["node-setting", draftOperator?.siteNodeId ?? null, "timezone"],
-    queryFn: () => fetchNodeSetting((draftOperator as { siteNodeId: string }).siteNodeId, "timezone"),
+    queryFn: () =>
+      fetchNodeSetting((draftOperator as { siteNodeId: string }).siteNodeId, "timezone"),
     enabled: canQuery && draft.partOfDay && draftOperator !== null,
   });
   const draftZone = coerceTimezone(draftZoneQuery.data ?? undefined);
@@ -216,7 +217,14 @@ export function AbsencesPanel() {
       if (ymd === null || st === null || et === null) {
         return setFormError("Give a valid date and times.");
       }
-      const startsAt = zonedTimeToInstant(draftZone, ymd.y, ymd.mo, ymd.d, st.h, st.mi).toISOString();
+      const startsAt = zonedTimeToInstant(
+        draftZone,
+        ymd.y,
+        ymd.mo,
+        ymd.d,
+        st.h,
+        st.mi,
+      ).toISOString();
       const endsAt = zonedTimeToInstant(draftZone, ymd.y, ymd.mo, ymd.d, et.h, et.mi).toISOString();
       addMutation.mutate({
         operatorId: draft.operatorId,
@@ -302,7 +310,9 @@ export function AbsencesPanel() {
               type="date"
               aria-label="Date"
               value={draft.from}
-              onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value, to: e.target.value }))}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, from: e.target.value, to: e.target.value }))
+              }
             />
             <input
               className={fieldStyles.field}

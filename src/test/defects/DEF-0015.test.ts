@@ -60,7 +60,8 @@ function isDecidedByTheServer(name: string): { ok: boolean; why: string } {
   const found = elementAndGuard(name);
   if (!found) return { ok: false, why: `<${name} is not rendered by BoardPage.tsx at all` };
   if (GATED_BY_CAN_PLACE.test(found.guard)) return { ok: true, why: "guarded by canPlace" };
-  if (HANDED_THE_ANSWER.test(found.element)) return { ok: true, why: "handed the answer as a prop" };
+  if (HANDED_THE_ANSWER.test(found.element))
+    return { ok: true, why: "handed the answer as a prop" };
   return {
     ok: false,
     why: `<${name} is rendered under "${found.guard.trim().split("\n")[0]}" with no canPlace guard and no canPlace/readOnly/canEdit prop, so a viewer is offered its write controls (DEF-0015)`,

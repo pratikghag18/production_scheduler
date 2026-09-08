@@ -110,12 +110,14 @@ describe("absenceGaps — the boundary, mirrored on 88_absences_test.sql", () =>
  * ======================================================================== */
 
 /** A part-day absence: one day, a start and an end instant (ISO). */
-const partDay = (
-  from: string,
-  startsAt: string,
-  endsAt: string,
-  operatorId = el,
-): AbsenceRow => ({ operatorId, from, to: from, reason: "leave", startsAt, endsAt });
+const partDay = (from: string, startsAt: string, endsAt: string, operatorId = el): AbsenceRow => ({
+  operatorId,
+  from,
+  to: from,
+  reason: "leave",
+  startsAt,
+  endsAt,
+});
 
 describe("absenceGaps — R-359, a part-day absence is judged by the HOURS", () => {
   it("AB15: a part-day 09:00-13:00 absence clashes with an overlapping shift", () => {
