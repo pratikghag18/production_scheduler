@@ -101,6 +101,9 @@ const h = vi.hoisted(() => {
     activeMutate: vi.fn(),
     attachMutate: vi.fn(),
     detachMutate: vi.fn(),
+    updateBreakMutate: vi.fn(),
+    createBreakMutate: vi.fn(),
+    deleteBreakMutate: vi.fn(),
     state: {
       profile: {
         id: "u1",
@@ -142,9 +145,9 @@ vi.mock("@/features/admin/hooks/useShifts", () => ({
   useCreateShift: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateShift: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteShift: () => ({ mutate: vi.fn(), isPending: false }),
-  useCreateBreak: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdateBreak: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteBreak: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateBreak: () => ({ mutate: h.createBreakMutate, isPending: false }),
+  useUpdateBreak: () => ({ mutate: h.updateBreakMutate, isPending: false }),
+  useDeleteBreak: () => ({ mutate: h.deleteBreakMutate, isPending: false }),
   useAttachPattern: () => ({ mutate: h.attachMutate, isPending: false }),
   useDetachPattern: () => ({ mutate: h.detachMutate, isPending: false }),
 }));
@@ -308,6 +311,18 @@ function withRetiredEvenings() {
   };
 }
 
+/**
+ * "Days" (Plant 1, shift "Morning" 06:00-14:00) gets one break: "Lunch",
+ * 10:00-10:30 (600-630 min). R-250's own claim is a table AND edit-in-place,
+ * so the fixture needs an EXISTING break to open, not just an empty shift.
+ */
+function withBreak() {
+  h.state.payload = {
+    ...h.basePayload(),
+    breaks: [{ id: "b-lunch", shiftId: "s-morning", name: "Lunch", startMin: 600, endMin: 630 }],
+  };
+}
+
 /** Choose a plant the way `AdminPage`'s one control does, and re-render on it. */
 function showPlant(choice: string | null) {
   act(() => useAdminViewStore.setState({ plantChoice: choice }));
@@ -319,6 +334,9 @@ beforeEach(() => {
   h.activeMutate.mockClear();
   h.attachMutate.mockClear();
   h.detachMutate.mockClear();
+  h.updateBreakMutate.mockClear();
+  h.createBreakMutate.mockClear();
+  h.deleteBreakMutate.mockClear();
   h.state.payload = h.basePayload();
   // ⚠️ THE STORE IS A MODULE SINGLETON AND OUTLIVES A RENDER. Left set, one
   // case's chosen plant filters the next case's screen — the cross-section leak
@@ -793,5 +811,59 @@ describe("ShiftsPanel — a pattern can be put away, not only destroyed (S21)", 
     expect(
       within(patternRow("Evenings")).getByText(/1 place still runs it|still runs it/),
     ).toBeTruthy();
+  });
+});
+
+describe("ShiftsPanel — breaks are a table, and an existing one is edited in place (R-250)", () => {
+  it("S23 ⭐ the breaks table draws a header once per shift, then Break/Clock/Length per break", () => {
+    withBreak();
+    render(<ShiftsPanel />);
+    fireEvent.click(within(patternRow("Days")).getByRole("button", { name: "Edit" }));
+    const list = screen.getByText("Lunch").closest("ul");
+    if (list === null) throw new Error("no break list found");
+    // The header row is drawn once, ahead of the break rows it labels.
+    expect(within(list).getByText("Break")).toBeTruthy();
+    expect(within(list).getByText("Clock")).toBeTruthy();
+    expect(within(list).getByText("Length")).toBeTruthy();
+    const breakRow = screen.getByText("Lunch").closest("li");
+    if (breakRow === null) throw new Error("no break row found");
+    expect(within(breakRow).getByText("10:00–10:30")).toBeTruthy();
+    expect(within(breakRow).getByText("30m")).toBeTruthy();
+  });
+
+  it("S24 ⭐ Edit opens the break PRE-FILLED with its own name and times — not a blank add form", () => {
+    withBreak();
+    render(<ShiftsPanel />);
+    fireEvent.click(within(patternRow("Days")).getByRole("button", { name: "Edit" }));
+    const breakRow = screen.getByText("Lunch").closest("li");
+    if (breakRow === null) throw new Error("no break row found");
+    fireEvent.click(within(breakRow).getByRole("button", { name: "Edit" }));
+    expect((screen.getByLabelText("Break name") as HTMLInputElement).value).toBe("Lunch");
+    expect((within(breakRow).getByLabelText("Starts") as HTMLInputElement).value).toBe("10:00");
+    expect((within(breakRow).getByLabelText("Ends") as HTMLInputElement).value).toBe("10:30");
+  });
+
+  it("S25 ⭐ Save writes the move through updateBreak alone — no delete, no re-create", () => {
+    // The claim this row makes: "an existing break can be edited without
+    // deleting and retyping it." Before this screen had an edit path the only
+    // way to move a break was delete-then-recreate, losing its name. Proving
+    // the in-place claim means proving the OTHER two writers stay silent.
+    withBreak();
+    render(<ShiftsPanel />);
+    fireEvent.click(within(patternRow("Days")).getByRole("button", { name: "Edit" }));
+    const breakRow = screen.getByText("Lunch").closest("li");
+    if (breakRow === null) throw new Error("no break row found");
+    fireEvent.click(within(breakRow).getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Break name"), { target: { value: "Lunch (long)" } });
+    fireEvent.click(within(breakRow).getByRole("button", { name: "Save" }));
+    expect(h.updateBreakMutate).toHaveBeenCalledTimes(1);
+    expect(h.updateBreakMutate.mock.calls[0][0]).toEqual({
+      breakId: "b-lunch",
+      name: "Lunch (long)",
+      startMin: 600,
+      endMin: 630,
+    });
+    expect(h.deleteBreakMutate).not.toHaveBeenCalled();
+    expect(h.createBreakMutate).not.toHaveBeenCalled();
   });
 });

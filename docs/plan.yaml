@@ -4138,12 +4138,19 @@ requirements:
   claim: >-
     Runs and assignments store precise instants as tstzrange. Fifteen-minute, hourly or shift snapping
     is purely a client setting and never touches the backend.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/snapIsClientOnly.test.ts
+    cases: >-
+      an audit over the last-emitted create_run/create_assignment/move_run/reassign_assignment migrations
+      confirming none contains snap-rounding logic; every src/lib/api call site sends no snap parameter to
+      any RPC; no migration adds a minute/hour-alignment CHECK on runs/assignments
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. This is a negative/architectural claim
-    ("snapping never touches the backend") -- proving an absence like this needs a dedicated audit (the
-    shape of scaleAudit.test.ts), and none exists for this one.
+    Checked 8 Sept (requirement audit): confirmed genuinely untested at the time, then closed with a new
+    audit-style test matching scaleAudit.test.ts's pattern. Side note: orgs.settings.default_snap_minutes
+    exists as a seeded default but is read by zero server functions and zero client code outside one
+    explanatory comment in SettingsPanel.tsx -- inert, doesn't touch this claim either way.
 - id: R-006
   title: Board loads are one subtree-by-time-window query
   source:
@@ -4153,12 +4160,19 @@ requirements:
   claim: >-
     Every board load asks only for runs and assignments under one subtree that intersect a time window.
     The UI never fetches all assignments and never refetches a whole schedule on change.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardWindowScoping.test.ts
+    cases: >-
+      no src/lib/api or src/features file reads runs/assignments as an unscoped list (only single-row
+      writes/read-backs via .eq("id", ...)); fetchBoardWindow calls only the board_window RPC with
+      p_root_path/p_from/p_to; the server function's own body scopes both runs and assignments by
+      scoped_nodes (subtree) and && v_window (time), and scoped_nodes is itself bounded by org_id and
+      path <@ p_root_path
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. No test asserts the board's query is
-    scoped to one subtree/time-window only, as opposed to fetching everything -- useBoardWindow.ts exists
-    but is untested by name.
+    Checked 8 Sept (requirement audit): confirmed genuinely untested at the time, then closed with a new
+    audit-style test. useBoardWindow.ts is exercised indirectly through this audit rather than by name.
 - id: R-007
   title: A losing concurrent write gets a 409 and reverts
   source:
@@ -4456,19 +4470,22 @@ requirements:
     the gesture half needs dragGesture.test.ts-style pointer-event simulation for create/resize. Queued
     rather than done here.
 - id: R-026
-  title: Every board supports both run and direct assignment creation
+  title: A type selector in the creation popover chooses run or direct
   source:
   - §14.1
   stated_by: agent
-  claim: >-
-    Drag-select can create a product run or a direct assignment at any time; a type selector in the creation
-    popover chooses which.
-  verified_by: []
-  status: uncovered
+  claim: A type selector in the creation popover chooses between a product run and a direct assignment.
+  verified_by:
+  - kind: vitest
+    file: src/test/createPopover.test.tsx
+    cases: >-
+      C1 opens on the caller's default mode; C2/C3 each mode shows its own fields, switching without
+      reload; C4/C5 Create calls the matching submit handler and never the other; C6 Cancel submits nothing
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. CreatePopover.tsx has no test file at
-    all (confirmed by direct file search, not just a grep miss). Needs a real component test; same class
-    as R-023/R-025/R-052 -- out of scope for this pass's remaining time.
+    REWORDED 8 Sept (requirement audit): dropped "drag-select can create ... at any time" -- that's the
+    gesture layer's claim (dragGesture.test.ts), still open per R-025's own note (zero CREATE cases). The
+    type-selector clause is this component's to prove and is now proven.
 - id: R-027
   title: The create-mode preference never changes how data renders
   source:
@@ -4486,12 +4503,19 @@ requirements:
   stated_by: agent
   claim: >-
     Direct assignments render as standalone operator blocks with a product chip; run-attached ones render
-    as staffing chips under the band. A floater may help a cell mid-run.
-  verified_by: []
-  status: uncovered
+    as staffing chips under the band.
+  verified_by:
+  - kind: vitest
+    file: src/test/directBlockAndChip.test.tsx
+    cases: >-
+      B1 a direct assignment carries its own product identity (the block's aria-label says so, and the
+      product name is its own line); B2 a run-attached chip names no product of its own; B3 both are drawn
+      as accessible buttons
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. Same class as R-026 -- no board-render
-    test distinguishes direct-assignment blocks from run-attached staffing chips on one cell.
+    REWORDED 8 Sept (requirement audit): dropped "a floater may help a cell mid-run" -- unbuilt, grepped
+    all of src/ for "floater", zero hits anywhere. Not a test gap, a feature that doesn't exist. The
+    rendering-distinction clause is proven and is now this row's whole claim.
 - id: R-029
   title: Efficiency defaults to 100% and must be between 0 and 200%
   source:
@@ -4591,14 +4615,21 @@ requirements:
   claim: >-
     A drop that would exceed capacity opens a popover listing the operator's overlapping assignments with
     editable efficiencies, a live peak indicator and a Split evenly action. Confirm stays disabled while
-    the peak exceeds the cap; cancelling reverts.
-  verified_by: []
-  status: uncovered
+    the peak exceeds the cap.
+  verified_by:
+  - kind: vitest
+    file: src/test/splitCoveragePopover.test.tsx
+    cases: >-
+      P1 lists overlapping assignments with editable efficiencies; P2 the peak is the live sum (D63:
+      arithmetic, not recomputed); P3/P3b Confirm disabled/enabled with the peak; P4/P4b the cap is named
+      only while exceeded; P5 editing calls onChangeParticipant; P6 Split evenly/Confirm/Cancel each fire
+      their own callback and no other
+  status: covered
   note: >-
     §18.13: the split flow is reachable from a create or a panel drop but not from moving an existing
-    chip, because apply_split_coverage cannot carry a timerange. Checked again 8 Sept (requirement audit):
-    genuine gap, not attempted. SplitCoveragePopover.tsx has no test file at all (confirmed by direct file
-    search). Needs a real component test; same class as R-026/R-028.
+    chip, because apply_split_coverage cannot carry a timerange. REWORDED 8 Sept (requirement audit):
+    dropped "cancelling reverts" -- that's BoardPage's state to walk away from, not this pure component's,
+    and not proven here or anywhere else found. Everything else is proven.
 - id: R-036
   title: Split evenly never spreads shares by more than one unit
   source:
@@ -6224,11 +6255,18 @@ requirements:
   claim: >-
     A pattern's breaks are shown in fixed-width columns (name, span, duration) with a header per shift,
     and an existing break can be edited without deleting and retyping it.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/shiftsPanel.test.tsx
+    cases: >-
+      S23 the breaks table draws a header once per shift, then Break/Clock/Length per break; S24 Edit
+      opens pre-filled with the break's own name and times; S25 Save writes through updateBreak alone, no
+      delete/re-create
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. A breaks-editing UI component wasn't
-    even locatable by name in a search; needs a real component test.
+    Checked 8 Sept (requirement audit): the breaks-editing UI is in ShiftsPanel itself, not a separate
+    component -- a prior pass didn't find it because it searched for a standalone name. Closed with new
+    cases in the existing shiftsPanel.test.tsx.
 - id: R-251
   title: A pattern row visibly says that it opens
   source:
@@ -6498,13 +6536,19 @@ requirements:
     `node_skill_requirements` and `node_shift_templates` are readable only for nodes the reader can read,
     so a Plant 2 supervisor cannot list which trainings Plant 1's cells require or which pattern each
     runs.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/92_attachment_read_scoping_test.sql
+    cases: >-
+      RT1/RT3 Plant 1's admin reads Plant 1's CNC Line skill-requirement/shift-template rows, RT2/RT4
+      Plant 2's admin gets zero rows for the same node, RT5 Plant 2's admin can read their own plant's
+      attachment rows (proving the refusal is scoped, not a global lockout)
+  status: covered
   note: >-
-    Fixed in 0028 §7; no case named. Checked 8 Sept (requirement audit): genuine gap, not attempted.
-    check_eligibility's own scoping is well-tested (53_read_scoping_test.sql R12/R13), but that's a
-    different mechanism from a direct SELECT on node_skill_requirements/node_shift_templates being
-    RLS-scoped, which nothing tests directly.
+    Fixed in 0028 §7; no case named. Checked 8 Sept (requirement audit): closed with a new SQL suite.
+    check_eligibility's own scoping was already well-tested (53_read_scoping_test.sql R12/R13) but that's a
+    different mechanism from a direct SELECT on these tables being RLS-scoped, which this suite tests
+    directly.
 - id: R-267
   title: A person may only hold a training on their own branch
   source:
@@ -6783,7 +6827,9 @@ requirements:
   note: >-
     Checked 8 Sept (requirement audit): not covered by R-279 -- that row proves the invariant for one panel
     (operators) only (S3-S5, `ownArea + outsideArea === total`). Same reusable pattern applies here across
-    the other five listed panels; still needs its own test per panel.
+    the other five listed panels; still needs its own test per panel. Attempted again 8 Sept: still not
+    written -- no shared helper computes the footnote across panels, each appears to build its own count,
+    so this needs five separate panel-level tests rather than one shared-function test.
 - id: R-285
   title: Access keeps its own selection within the filtered list
   source:
@@ -6792,10 +6838,15 @@ requirements:
   claim: >-
     The shared filter narrows the list of places the Access tab chooses from; the panel still owns which
     one it shows and drops a selection the list no longer contains.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: >-
+      E1-E6 resolvePlace -- E3 a selection that is no longer in the list falls back, it does not stick
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. No matching test found by any search.
+    Checked 8 Sept (requirement audit): first pass found no matching test. Linked on a second pass --
+    src/test/siteAccess.test.ts's E1-E6 resolvePlace cases prove this exactly (E3 is the claim verbatim).
 - id: R-286
   title: A select never shows a value absent from its options
   source:
@@ -7051,7 +7102,10 @@ requirements:
   note: >-
     Checked 8 Sept (requirement audit): genuine gap, not attempted. matrixPrefs.test.ts exists but tests
     localStorage view preferences, not the actual RLS-scoping/cascade claim -- not a match despite the
-    similar name.
+    similar name. Attempted again 8 Sept: still not written -- buildColumns/buildMatrix in matrix.ts build
+    the grid structure, but where the area-then-line cascade specifically enforces "no per-role
+    special-casing, just fewer RLS-visible nodes" as one provable unit wasn't found; needs a fixture built
+    for it.
 - id: R-300
   title: 'Cell states and glyphs: trained, expiring, expired, not trained, N/A'
   source:
@@ -7067,19 +7121,26 @@ requirements:
     cases: 22 tests (cellStateFor)
   status: covered
 - id: R-301
-  title: Record in place, and never a tick the server would refuse
+  title: Applicability follows isAtOrBelow, the same test the server runs
   source:
   - §19.86
   stated_by: maintainer
   claim: >-
-    A cell opens a form that grants or edits the record without leaving the grid. Applicability is `isAtOrBelow`
-    on the ltree path, the same test the server runs; the grid never offers a cell `app_guard_operator_skill_scope`
-    would refuse, and edit rights mirror `app_can_edit_operator` failing open so the write-error contract
-    answers.
-  verified_by: []
-  status: uncovered
+    A skill requirement's applicability at a cell is `isAtOrBelow` on the ltree path -- ancestor-or-self,
+    reflexive, never a sibling or a deeper owner -- the same test the server runs.
+  verified_by:
+  - kind: vitest
+    file: src/test/matrix.test.ts
+    cases: >-
+      trainingApplies -- plant-wide applies to a line, reflexive applies, a sibling or deeper owner does
+      not apply, label-safe against a1/a10 prefix collision
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. No matching test found by any search.
+    REWORDED 8 Sept (requirement audit): dropped "a cell opens a form... without leaving the grid" (no
+    MatrixPanel component test exists at all) and "the grid never offers a cell app_guard_operator_skill_scope
+    would refuse" (that UI-filtering behavior isn't tested; 68_no_cross_plant_certification_test.sql names
+    the guard but tests a different scenario -- moving people/trainings between plants, not grid-cell
+    offering). The applicability clause is proven and is now this row's whole claim.
 - id: R-302
   title: The Operators tab is a single matrix keyed on places
   source:
