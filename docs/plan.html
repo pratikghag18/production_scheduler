@@ -114,7 +114,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">773</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">70</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">245 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">248 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>5c9e6d4</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -2632,7 +2632,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 245 covered · 38 uncovered · 1 contradicted · 20 superseded</caption>
+<caption>304 requirements · 248 covered · 35 uncovered · 1 contradicted · 20 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -2846,7 +2846,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-D77">
   <td class="g-n">R-D77</td>
   <td class="reqmain"><b>Portaled floating panels are chrome; the drag ghost is not</b><br><span class="fine">Popovers and the toast stack scale with --chrome-scale in every dimension, not just font-size. The drag ghost stays on --ui-scale because it is a preview of a fitted block.</span>
-      <br><span class="fine">§19.10, D77 · agent · Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-057 -- these CSS custom properties need a real mounted component to observe, and this repo's convention avoids mounting BoardPage whole.</span></td>
+      <br><span class="fine">§19.10, D77 · agent · Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-057 -- these CSS custom properties need a real mounted component to observe, and this repo's convention avoids mounting BoardPage whole. Checked again after a BoardPage-harness investigation: this is a genuine wall, not a skipped effort -- it's a pure CSS calc() claim and jsdom has no CSS engine at all, so no getComputedStyle assertion in vitest can prove it regardless of harness. Needs an e2e/Playwright test.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -2934,12 +2934,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/75_node_mobility_test.sql</code> M1–M8</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D95">
+<tr class="r-covered" id="R-D95">
   <td class="g-n">R-D95</td>
-  <td class="reqmain"><b>Whole row drags with a mouse; handle alone on touch</b><br><span class="fine">For mouse and pen the whole tree row is the drag source with a ~4px movement threshold so clicks stay clicks; on touch only the ⠿ handle drags so the page stays scrollable. The handle remains visible as the affordance. The level list gets drag-to-reorder (moveTo) in the same build, sharing one pointer mechanism.</span>
-      <br><span class="fine">§19.35, D95 · maintainer · Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-078/R-230 -- mouse-vs-touch drag-source selection needs jsdom's PointerEvent capture API, which doesn't exist there.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>Whole row drags with a mouse; handle alone on touch</b><br><span class="fine">For mouse and pen the whole tree row is the drag source with a ~4px movement threshold so clicks stay clicks; on touch only the ⠿ handle drags so the page stays scrollable. Both <code>NodeTreeEditor</code> and the level list's drag-to-reorder share one pointer mechanism (<code>dragPointer.ts</code>).</span>
+      <br><span class="fine">§19.35, D95 · maintainer · Checked 8 Sept (requirement audit): confirmed genuinely untested at the time, closed by linking an existing, unlinked file after a jsdom PointerEvent polyfill was added (src/test/setup.ts). Confirmed both NodeTreeEditor.tsx and LevelEditor.tsx import the same dragPointer.ts module. &quot;The handle remains visible as the affordance&quot; is a rendering detail not tested here or elsewhere.</span></td>
+  <td class="fine">vitest · <code>src/test/dragPointer.test.ts</code> T1-T7 the 4px Euclidean movement threshold; T14-T17 rowIsDragSource -- mouse and pen drag from the row, touch does not</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-D97">
   <td class="g-n">R-D97</td>
@@ -3378,7 +3378,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-023">
   <td class="g-n">R-023</td>
   <td class="reqmain"><b>Board layout: roster panel, hierarchy rail, rows, time header</b><br><span class="fine">A collapsible operator panel sits at the far left, then the hierarchy rail, then one row per schedulable node under a time-axis header. Collapsing a group collapses its rows.</span>
-      <br><span class="fine">§10, §15.3 · agent · Checked 8 Sept (requirement audit): no test renders the board's actual layout or proves &quot;collapsing a group collapses its rows&quot; -- collapsedNodeIds lives in useBoardViewStore but the row-filtering by it happens deep in BoardPage's render tree, not a pure/testable function. Needs a BoardPage-level render test with real fixtures; bigger than a link-or-small-case fix, queued rather than done here.</span></td>
+      <br><span class="fine">§10, §15.3 · agent · Checked 8 Sept (requirement audit): no test renders the board's actual layout or proves &quot;collapsing a group collapses its rows&quot; -- collapsedNodeIds lives in useBoardViewStore but the row-filtering by it happens deep in BoardPage's render tree, not a pure/testable function. Needs a BoardPage-level render test with real fixtures; bigger than a link-or-small-case fix, queued rather than done here. A BoardPage test harness was investigated (8 Sept): BoardPage.tsx is 890 lines pulling in useSession, useBoardWindow, useAbsences, useRootPath, useDragGesture and the full board-index/mutation surface -- assembling and debugging a harness that mocks all of it to the right shape is a separate-sized piece of work from a normal batch item. Recommended as its own dedicated pass (a reusable boardPageHarness.tsx), not built this round.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3392,7 +3392,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-025">
   <td class="g-n">R-025</td>
   <td class="reqmain"><b>Board gestures: create, resize, move, click; all optimistic</b><br><span class="fine">Drag on empty row space creates; dragging block edges resizes; dragging a body moves it in time or across rows and re-checks eligibility live; click opens a details popover. Every mutation applies optimistically and rolls back on 409.</span>
-      <br><span class="fine">§10, §5, §18.13 · agent · Checked 8 Sept (requirement audit): dragGesture.test.ts covers MOVE extensively (staffed/unstaffed, T11/T13) but has zero cases for CREATE (drag on empty space) or RESIZE (dragging a block edge), and no case asserts optimistic-then-409-rollback generically across mutation types. useAssignmentMutations.ts does implement onMutate/onError rollback consistently for create/resize/move/delete (read, not assumed) -- untested is the gesture layer that calls it, not the mutation layer itself. A useAssignmentMutations.test.ts (hook-level, no drag DOM needed) would close the mutation half cheaply; the gesture half needs dragGesture.test.ts-style pointer-event simulation for create/resize. Queued rather than done here.</span></td>
+      <br><span class="fine">§10, §5, §18.13 · agent · Checked 8 Sept (requirement audit): dragGesture.test.ts covers MOVE extensively (staffed/unstaffed, T11/T13) but has zero cases for CREATE (drag on empty space) or RESIZE (dragging a block edge), and no case asserts optimistic-then-409-rollback generically across mutation types. useAssignmentMutations.ts does implement onMutate/onError rollback consistently for create/resize/move/delete (read, not assumed) -- untested is the gesture layer that calls it, not the mutation layer itself. A useAssignmentMutations.test.ts (hook-level, no drag DOM needed) would close the mutation half cheaply; the gesture half needs dragGesture.test.ts-style pointer-event simulation for create/resize. Queued rather than done here. A BoardPage test harness was investigated (8 Sept) and not built this round -- see R-023's note for why; recommended as its own dedicated pass.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3571,17 +3571,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-051">
+<tr class="r-covered" id="R-051">
   <td class="g-n">R-051</td>
   <td class="reqmain"><b>Zoom keeps the instant under the visible track's centre</b><br><span class="fine">Changing zoom preserves the instant at the horizontal centre of the track area, measured excluding the sticky rail width, so repeated zooming does not drift.</span>
-      <br><span class="fine">§18.2, §18.4 · agent · Checked 8 Sept (requirement audit): blocked, not written. No test file imports BoardGrid at all. The zoom-centering effect (BoardGrid.tsx:407-439) depends on useLayoutEffect plus real getBoundingClientRect/ResizeObserver measurements this repo's jsdom setup doesn't provide (ResizeObserver is stubbed as a no-op). Needs either heavy DOM mocking or extracting the centre-math into a pure function first -- same class of gap as R-057/R-078.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18.2, §18.4 · agent · Checked 8 Sept (requirement audit): a first pass found no test file imports BoardGrid at all, blocked on the zoom-centering effect (BoardGrid.tsx:407-439) needing real getBoundingClientRect/ResizeObserver measurements. Closed with a local fake ResizeObserver the test fires manually. One real ceiling: railWidth comes from getComputedStyle, which jsdom always resolves to 0 -- the centring MATH is proven (viewport.width - railWidth), not the real ~232px rail value. Same class of ceiling as R-D77.</span></td>
+  <td class="fine">vitest · <code>src/test/boardGridZoomCentre.test.tsx</code> D51a zooming Standard to Fine re-centres scrollLeft on the same instant rather than leaving it unchanged or resetting to 0; D51b zooming to the same zoomIndex is a no-op</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-052">
   <td class="g-n">R-052</td>
   <td class="reqmain"><b>A background refetch never blanks the board</b><br><span class="fine">The spinner shows only when there is no cached data, not on every fetch, so the board does not flash empty each time it refreshes.</span>
-      <br><span class="fine">§18.2 · agent · Checked 8 Sept (requirement audit): BoardPage.tsx:635 (`isFetching={boardQuery.isFetching &amp;&amp; hasData}`) implements exactly the claim but no test exercises it -- same blocker as R-023/R-025, needs a BoardPage-level render test with real fixtures rather than a small link-or-case fix. Queued.</span></td>
+      <br><span class="fine">§18.2 · agent · Checked 8 Sept (requirement audit): BoardPage.tsx:635 (`isFetching={boardQuery.isFetching &amp;&amp; hasData}`) implements exactly the claim but no test exercises it -- same blocker as R-023/R-025, needs a BoardPage-level render test with real fixtures rather than a small link-or-case fix. Queued. A BoardPage test harness was investigated (8 Sept) and not built this round -- see R-023's note.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3616,7 +3616,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-057">
   <td class="g-n">R-057</td>
   <td class="reqmain"><b>--ui-scale is published on the document root</b><br><span class="fine">Because popovers are portaled, any board custom property must be set on :root or the portal silently gets the fallback value.</span>
-      <br><span class="fine">§18.14 · agent · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. scaleAudit.test.ts is a file-reference lint only -- no test sets or reads --ui-scale on document.documentElement. Attempted 8 Sept: blocked, not written -- the publish is an inline useEffect in BoardPage.tsx:342-354, and this repo's own test convention explicitly avoids mounting BoardPage whole (viewerBoard.test.tsx's own comment: needs session/query-client/API/drag-layer all mocked at once). Same class of gap as R-051/R-078.</span></td>
+      <br><span class="fine">§18.14 · agent · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. scaleAudit.test.ts is a file-reference lint only -- no test sets or reads --ui-scale on document.documentElement. Attempted 8 Sept: blocked, not written -- the publish is an inline useEffect in BoardPage.tsx:342-354, and this repo's own test convention explicitly avoids mounting BoardPage whole (viewerBoard.test.tsx's own comment: needs session/query-client/API/drag-layer all mocked at once). R-051 and R-078 have since closed without a full mount, but this one genuinely needs BoardPage.tsx specifically (the effect lives there, not in a module either of those could import in isolation). A harness was investigated (8 Sept) and not built this round -- see R-023's note.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3760,12 +3760,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/75_node_mobility_test.sql</code> M22, M24<br>sql · <code>supabase/tests/70_hierarchy_test.sql</code> N14, N14b</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-078">
+<tr class="r-covered" id="R-078">
   <td class="g-n">R-078</td>
   <td class="reqmain"><b>Tree drag releases pointer capture and keys Escape on drag presence</b><br><span class="fine">On pointer up or cancel the drag releases capture and clears state, and the Escape listener is installed once per drag rather than on every pointer move.</span>
-      <br><span class="fine">§19.36 · agent · Both found by review in §19.36 and folded into P1-5l rather than patched. Attempted 8 Sept (requirement audit): blocked, not written. jsdom has no native Pointer Events capture API (setPointerCapture is undefined on HTMLElement.prototype); even polyfilled, fireEvent.pointerUp/pointerCancel don't propagate pointerId the way pointerDown/pointerMove do. dragGesture.test.ts gets around exactly this by testing the hook's own methods with hand-built fake events, but NodeTreeEditor's drag logic is inline in the component, not exposed that way. Same class of gap as R-051/R-057.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.36 · agent · Both found by review in §19.36 and folded into P1-5l rather than patched. A first attempt 8 Sept (requirement audit) was blocked on jsdom's missing PointerEvent capture API; closed on a second pass after adding a polyfill (src/test/setup.ts) and a PointerEvent class jsdom also lacks entirely. One wrong assumption caught by the test itself: Escape does NOT release pointer capture the way pointerup/cancel does (it only clears the drag ref/state) -- D78e was corrected to match, not the other way around.</span></td>
+  <td class="fine">vitest · <code>src/test/treeDragCapture.test.tsx</code> D78a pointerup before the drag threshold releases capture and commits nothing; D78b pointercancel releases capture the same way; D78c a pointerup for a different pointerId is ignored; D78d no Escape listener effect before any drag starts; D78e Escape clears drag state but does NOT itself release pointer capture -- a distinct claim from pointerup/cancel's</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-079">
   <td class="g-n">R-079</td>
@@ -4001,7 +4001,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-230">
   <td class="g-n">R-230</td>
   <td class="reqmain"><b>The level list has a drag grip that works by touch</b><br><span class="fine">Each level row carries a <code>⠿</code> grip (with <code>touch-action: none</code> and its own pointer handler) so a finger can start a drag; the whole row shows <code>cursor: grab</code> and a visible hover tint that stands down while a drag is live so the caret owns the seam. The grip sits last but one, immediately before the row's <code>×</code>, matching where the tree puts its grip.</span>
-      <br><span class="fine">§19.56, §19.58 · maintainer · The rendered states are in docs/mockups/p1-6e-level-grip.png and d100-drag-surface.png; the behaviour rule (P group) is covered by R-228, the affordance itself by no committed case. Checked again 8 Sept (requirement audit): confirmed R-228 is unrelated in mechanism (no-op-drop caret suppression, not touch) and there is no path to merging this row into it. A direct touch-interaction test is what closes this one.</span></td>
+      <br><span class="fine">§19.56, §19.58 · maintainer · The rendered states are in docs/mockups/p1-6e-level-grip.png and d100-drag-surface.png; the behaviour rule (P group) is covered by R-228, the affordance itself by no committed case. Checked again 8 Sept (requirement audit): confirmed R-228 is unrelated in mechanism (no-op-drop caret suppression, not touch) and there is no path to merging this row into it. A direct touch-interaction test is what closes this one. Checked again after R-D95 closed: the underlying mouse-vs-touch mechanism is proven generically there (dragPointer.test.ts T14-T17, the same module LevelEditor imports), but this row's own claim is about LevelEditor-specific rendering (grip position &quot;last but one&quot;, cursor/hover-tint states during drag) that no test exercises. Still open.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>

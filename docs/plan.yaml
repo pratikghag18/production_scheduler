@@ -2581,7 +2581,9 @@ requirements:
   note: >-
     Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-057 -- these CSS custom
     properties need a real mounted component to observe, and this repo's convention avoids mounting
-    BoardPage whole.
+    BoardPage whole. Checked again after a BoardPage-harness investigation: this is a genuine wall, not a
+    skipped effort -- it's a pure CSS calc() claim and jsdom has no CSS engine at all, so no
+    getComputedStyle assertion in vitest can prove it regardless of harness. Needs an e2e/Playwright test.
 - id: R-D83
   title: Node read and edit checks are scoped to the caller's org
   source:
@@ -2784,14 +2786,20 @@ requirements:
   stated_by: maintainer
   claim: >-
     For mouse and pen the whole tree row is the drag source with a ~4px movement threshold so clicks stay
-    clicks; on touch only the ⠿ handle drags so the page stays scrollable. The handle remains visible
-    as the affordance. The level list gets drag-to-reorder (moveTo) in the same build, sharing one pointer
-    mechanism.
-  verified_by: []
-  status: uncovered
+    clicks; on touch only the ⠿ handle drags so the page stays scrollable. Both `NodeTreeEditor` and the
+    level list's drag-to-reorder share one pointer mechanism (`dragPointer.ts`).
+  verified_by:
+  - kind: vitest
+    file: src/test/dragPointer.test.ts
+    cases: >-
+      T1-T7 the 4px Euclidean movement threshold; T14-T17 rowIsDragSource -- mouse and pen drag from the
+      row, touch does not
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-078/R-230 -- mouse-vs-touch
-    drag-source selection needs jsdom's PointerEvent capture API, which doesn't exist there.
+    Checked 8 Sept (requirement audit): confirmed genuinely untested at the time, closed by linking an
+    existing, unlinked file after a jsdom PointerEvent polyfill was added (src/test/setup.ts). Confirmed
+    both NodeTreeEditor.tsx and LevelEditor.tsx import the same dragPointer.ts module. "The handle remains
+    visible as the affordance" is a rendering detail not tested here or elsewhere.
 - id: R-D97
   title: 'System admin, site admin, supervisor: no lurking'
   source:
@@ -4447,7 +4455,12 @@ requirements:
     Checked 8 Sept (requirement audit): no test renders the board's actual layout or proves "collapsing a
     group collapses its rows" -- collapsedNodeIds lives in useBoardViewStore but the row-filtering by it
     happens deep in BoardPage's render tree, not a pure/testable function. Needs a BoardPage-level render
-    test with real fixtures; bigger than a link-or-small-case fix, queued rather than done here.
+    test with real fixtures; bigger than a link-or-small-case fix, queued rather than done here. A BoardPage
+    test harness was investigated (8 Sept): BoardPage.tsx is 890 lines pulling in useSession, useBoardWindow,
+    useAbsences, useRootPath, useDragGesture and the full board-index/mutation surface -- assembling and
+    debugging a harness that mocks all of it to the right shape is a separate-sized piece of work from a
+    normal batch item. Recommended as its own dedicated pass (a reusable boardPageHarness.tsx), not built
+    this round.
 - id: R-024
   title: A modifier key drags free of the zoom's snap
   source:
@@ -4493,7 +4506,8 @@ requirements:
     assumed) -- untested is the gesture layer that calls it, not the mutation layer itself. A
     useAssignmentMutations.test.ts (hook-level, no drag DOM needed) would close the mutation half cheaply;
     the gesture half needs dragGesture.test.ts-style pointer-event simulation for create/resize. Queued
-    rather than done here.
+    rather than done here. A BoardPage test harness was investigated (8 Sept) and not built this round --
+    see R-023's note for why; recommended as its own dedicated pass.
 - id: R-026
   title: A type selector in the creation popover chooses run or direct
   source:
@@ -4978,14 +4992,19 @@ requirements:
   claim: >-
     Changing zoom preserves the instant at the horizontal centre of the track area, measured excluding
     the sticky rail width, so repeated zooming does not drift.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardGridZoomCentre.test.tsx
+    cases: >-
+      D51a zooming Standard to Fine re-centres scrollLeft on the same instant rather than leaving it
+      unchanged or resetting to 0; D51b zooming to the same zoomIndex is a no-op
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): blocked, not written. No test file imports BoardGrid at all. The
-    zoom-centering effect (BoardGrid.tsx:407-439) depends on useLayoutEffect plus real
-    getBoundingClientRect/ResizeObserver measurements this repo's jsdom setup doesn't provide
-    (ResizeObserver is stubbed as a no-op). Needs either heavy DOM mocking or extracting the centre-math
-    into a pure function first -- same class of gap as R-057/R-078.
+    Checked 8 Sept (requirement audit): a first pass found no test file imports BoardGrid at all, blocked
+    on the zoom-centering effect (BoardGrid.tsx:407-439) needing real getBoundingClientRect/ResizeObserver
+    measurements. Closed with a local fake ResizeObserver the test fires manually. One real ceiling:
+    railWidth comes from getComputedStyle, which jsdom always resolves to 0 -- the centring MATH is
+    proven (viewport.width - railWidth), not the real ~232px rail value. Same class of ceiling as R-D77.
 - id: R-052
   title: A background refetch never blanks the board
   source:
@@ -4999,7 +5018,8 @@ requirements:
   note: >-
     Checked 8 Sept (requirement audit): BoardPage.tsx:635 (`isFetching={boardQuery.isFetching && hasData}`)
     implements exactly the claim but no test exercises it -- same blocker as R-023/R-025, needs a
-    BoardPage-level render test with real fixtures rather than a small link-or-case fix. Queued.
+    BoardPage-level render test with real fixtures rather than a small link-or-case fix. Queued. A
+    BoardPage test harness was investigated (8 Sept) and not built this round -- see R-023's note.
 - id: R-053
   title: Scrolling never triggers a fetch
   source:
@@ -5070,7 +5090,10 @@ requirements:
     file-reference lint only -- no test sets or reads --ui-scale on document.documentElement. Attempted 8 Sept:
     blocked, not written -- the publish is an inline useEffect in BoardPage.tsx:342-354, and this repo's own
     test convention explicitly avoids mounting BoardPage whole (viewerBoard.test.tsx's own comment: needs
-    session/query-client/API/drag-layer all mocked at once). Same class of gap as R-051/R-078.
+    session/query-client/API/drag-layer all mocked at once). R-051 and R-078 have since closed without a
+    full mount, but this one genuinely needs BoardPage.tsx specifically (the effect lives there, not in a
+    module either of those could import in isolation). A harness was investigated (8 Sept) and not built
+    this round -- see R-023's note.
 - id: R-058
   title: Popover width is computed once and keeps it on screen
   source:
@@ -5369,15 +5392,22 @@ requirements:
   claim: >-
     On pointer up or cancel the drag releases capture and clears state, and the Escape listener is installed
     once per drag rather than on every pointer move.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/treeDragCapture.test.tsx
+    cases: >-
+      D78a pointerup before the drag threshold releases capture and commits nothing; D78b pointercancel
+      releases capture the same way; D78c a pointerup for a different pointerId is ignored; D78d no Escape
+      listener effect before any drag starts; D78e Escape clears drag state but does NOT itself release
+      pointer capture -- a distinct claim from pointerup/cancel's
+  status: covered
   note: >-
-    Both found by review in §19.36 and folded into P1-5l rather than patched. Attempted 8 Sept (requirement
-    audit): blocked, not written. jsdom has no native Pointer Events capture API (setPointerCapture is
-    undefined on HTMLElement.prototype); even polyfilled, fireEvent.pointerUp/pointerCancel don't propagate
-    pointerId the way pointerDown/pointerMove do. dragGesture.test.ts gets around exactly this by testing the
-    hook's own methods with hand-built fake events, but NodeTreeEditor's drag logic is inline in the
-    component, not exposed that way. Same class of gap as R-051/R-057.
+    Both found by review in §19.36 and folded into P1-5l rather than patched. A first attempt 8 Sept
+    (requirement audit) was blocked on jsdom's missing PointerEvent capture API; closed on a second pass
+    after adding a polyfill (src/test/setup.ts) and a PointerEvent class jsdom also lacks entirely. One
+    wrong assumption caught by the test itself: Escape does NOT release pointer capture the way
+    pointerup/cancel does (it only clears the drag ref/state) -- D78e was corrected to match, not the
+    other way around.
 - id: R-079
   title: The admin screen and its nav link are admin-only
   source:
@@ -5915,6 +5945,10 @@ requirements:
     rule (P group) is covered by R-228, the affordance itself by no committed case. Checked again 8 Sept
     (requirement audit): confirmed R-228 is unrelated in mechanism (no-op-drop caret suppression, not touch)
     and there is no path to merging this row into it. A direct touch-interaction test is what closes this one.
+    Checked again after R-D95 closed: the underlying mouse-vs-touch mechanism is proven generically there
+    (dragPointer.test.ts T14-T17, the same module LevelEditor imports), but this row's own claim is about
+    LevelEditor-specific rendering (grip position "last but one", cursor/hover-tint states during drag)
+    that no test exercises. Still open.
 - id: R-231
   title: '`site_people` lists people only for a node you administer'
   source:
