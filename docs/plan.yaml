@@ -4186,8 +4186,7 @@ requirements:
   note: >-
     PREMATURE (requirement audit, 8 Sept): source/external_id columns exist and CSV import writes them
     (operators.ts, products.ts), but no UI logic anywhere gates a field's editability on source -- readonly-if-
-    synced is not built. Flagged for the maintainer: park this until that UI exists, or decide it's in scope
-    now that CSV import writes the columns it depends on.
+    synced is not built. Maintainer decided 8 Sept: parked until the read-only UI exists. See `next`.
 - id: R-017
   title: Deactivation is active=false, never a delete
   source:
@@ -5669,9 +5668,8 @@ requirements:
   note: >-
     Labelled "D102" in §19.53; that number is reused in §19.59 for product colour (R-D102). Layout only;
     no test. Checked again 8 Sept (requirement audit): not proven by R-332/settingRowStandard.test.ts, which
-    is scoped to the Settings tab only and never mentions Access. This was a deliberate layout-only/no-test
-    call when written, not an oversight -- accept-risk may be the more honest status than uncovered, but that
-    call is the maintainer's.
+    is scoped to the Settings tab only and never mentions Access. ACCEPT-RISK, maintainer's call 8 Sept:
+    cosmetic/layout-only, no test planned. Not open work -- do not re-flag this as a gap in a future audit.
 - id: R-237
   title: 'Adding a person is an action: candidates appear only when searched'
   source:
@@ -11023,6 +11021,44 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 95
+  date: 2026-09-08
+  title: 'A requirement-coverage audit closes 21 rows without writing a line of test code'
+  commits: []
+  numbers:
+    app_tests: 2502
+    app_test_files: 111
+    tsc: 0
+    eslint: 0
+    db_checks: 773
+    migrations: 70
+  confirmed: true
+  summary: >-
+    The maintainer asked how nervous 183/300 (61%) covered should make them, and the answer turned into
+    a full audit: a generated CSV (id, claim, evidence, an opinion on both), then a browsable requirement-
+    review Artifact (one card at a time, decision + notes, backed by the artifact's own db) so the
+    maintainer could work through all 103 `uncovered` rows without touching the terminal. They did.
+    ⭐ THE SHAPE OF THE RESULT MATTERS MORE THAN THE NUMBER. 61 of the 103 are real gaps -- the 61%
+    figure was not padding. But 21 were never a testing question: R-013, R-018, R-019, R-288 and R-289
+    were duplicates of requirements already covered elsewhere (R-338, R-339, R-356, R-308, R-D102) and are
+    now `superseded`, checked against the actual target's test files rather than trusted on the plan's own
+    prose -- R-288 in particular turned out not to be a merge but a correction, R-308 having explicitly
+    reopened the rule R-288 stated. R-014 and R-252 were already proven by tests nobody had linked
+    (plantEligibilityPolicy.test.tsx, productsPanel.test.tsx) and are now `covered`. R-042 was reworded,
+    not removed, after its own note showed R-316 only settles half its claim -- the maintainer's
+    "R-316 is the correct expectation" call was right about the target-display half and did not reach the
+    capacity/blocking half, which stays open. R-016 (synced fields read-only) turned out to describe UI
+    that was never built at all and is now `parked` in `next`. R-236 is `accept-risk` by the maintainer's
+    own call, cosmetic and never going to get a test.
+    ⚠️ NOT EVERY GUESS SURVIVED CONTACT WITH THE TEST FILES. R-024 and R-D16 give CONFLICTING snap values
+    and neither is a duplicate of the other. R-056/R-057 were guessed as covered by scaleAudit.test.ts and
+    are not -- that file only lints which CSS references the token, it asserts nothing about the actual
+    clamp or publication point. R-048 is half-proven (shift-template side, not the skill-requirement side)
+    and was left uncovered as a whole rather than split. R-230 is not a duplicate of R-228 (different
+    mechanism) and stays queued for its own test. Twelve rows carry a note now that did not before, so the
+    next pass does not re-guess what this one already checked.
+    This entry is plan-only; no code changed, so the numbers above are unchanged from session 94's own
+    confirmed run, re-run rather than copied.
 - id: 94
   date: 2026-09-08
   title: 'The fifth writer starts asking, and the gate nobody ran moves to pre-commit'
@@ -15096,6 +15132,14 @@ next:
     code: the emailed reset link lands on 127.0.0.1, where the dev server does not answer, until the
     local stack restarts with the redirect allow-list F-106 added. Restart the stack and walk it once.
 # ------------------------------- PARKED ------------------------------------
+- kind: parked
+  requirement: R-016
+  decided: true
+  why: >-
+    PARKED BY THE MAINTAINER, 8 Sept (requirement audit): the read-only-if-synced UI this row describes
+    is not built -- source/external_id columns exist and CSV import writes them, but no UI logic anywhere
+    gates a field's editability on source. Parked until that UI actually exists rather than tested now.
+
 - kind: parked
   text: >-
     Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
