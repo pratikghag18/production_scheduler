@@ -2632,7 +2632,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 252 covered · 29 uncovered · 1 contradicted · 22 superseded</caption>
+<caption>304 requirements · 252 covered · 27 uncovered · 1 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -3266,7 +3266,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-007">
   <td class="g-n">R-007</td>
   <td class="reqmain"><b>A losing concurrent write gets a 409 and reverts</b><br><span class="fine">When two supervisors race for the same operator exactly one write wins. The loser receives a 409 with the conflict attached and the client reverts its optimistic block with a message naming the conflicting assignment.</span>
-      <br><span class="fine">§3, §5, §18.8 · agent</span></td>
+      <br><span class="fine">§3, §5, §18.8 · agent · ACCEPT-RISK, maintainer's call 8 Sept (discuss-item review): rare in practice, and to an extent impossible unless two supervisors for the same line, or a supervisor and a site admin, are both assigning at once -- which should not happen in theory. Manual verification stands; no automated test planned. Not open work -- do not re-flag this as a gap in a future audit.</span></td>
   <td class="fine">manual: Force a second 100% assignment for a fully loaded operator; DevTools shows HTTP 409 with error=PT409 (§18.8)</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3287,7 +3287,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-010">
   <td class="g-n">R-010</td>
   <td class="reqmain"><b>Supabase is the v1 substrate with a designed escape hatch</b><br><span class="fine">v1 runs on Supabase (Postgres, RLS, Auth, Realtime). The design depends only on Postgres plus row-event broadcast so the realtime tier can be swapped later without redesign.</span>
-      <br><span class="fine">§5 · agent</span></td>
+      <br><span class="fine">§5 · agent · ACCEPT-RISK, maintainer's call 8 Sept (discuss-item review): this is architectural intent, not a testable behavior -- descriptive prose kept for the record, not a requirement to prove. No test planned. Not open work -- do not re-flag this as a gap in a future audit.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3319,12 +3319,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/plantEligibilityPolicy.test.tsx</code> ⭐ THE HEADLINE: the same untrained person, on ONE board, is refused at one cell and offered an override at the other</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-015">
+<tr class="r-superseded" id="R-015">
   <td class="g-n">R-015</td>
   <td class="reqmain"><b>Syncable tables carry source and external_id; CSV import upserts</b><br><span class="fine">Operators and products carry source and external_id. CSV import is an upsert keyed on (org_id, external_id) so re-importing an updated export just works, and it is the same pipeline a future connector uses.</span>
-      <br><span class="fine">§7, §19.36 · agent · §19.36 measured that nodes has no external_id column and products.external_id has no uniqueness constraint; the node import (P1-5h) needs its own migration first.</span></td>
+      <br><span class="fine">§7, §19.36 · agent · superseded by <a href="#R-291">R-291</a> · §19.36 measured that nodes has no external_id column and products.external_id has no uniqueness constraint; the node import (P1-5h) needs its own migration first. SUPERSEDED 8 Sept (discuss-item review, maintainer's call): this row's own wording is wrong now, not just unlinked -- it describes a pure (org_id, external_id) match, but the shipped product import (R-291, covered) matches on external_id THEN falls back to sku; the shipped operator import (R-294, covered) does match on external_id alone, matching this row's framing for operators only. Retired in favour of R-291 rather than corrected, on the maintainer's call.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
 <tr class="r-uncovered" id="R-016">
   <td class="g-n">R-016</td>
@@ -3417,12 +3417,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/directBlockAndChip.test.tsx</code> B1 a direct assignment carries its own product identity (the block's aria-label says so, and the product name is its own line); B2 a run-attached chip names no product of its own; B3 both are drawn as accessible buttons</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-029">
+<tr class="r-superseded" id="R-029">
   <td class="g-n">R-029</td>
   <td class="reqmain"><b>Efficiency defaults to 100% and must be between 0 and 200%</b><br><span class="fine">assignments.efficiency defaults to 1.000 and is constrained to more than 0 and at most 2. The UI shows a badge on any block that is not 100%.</span>
-      <br><span class="fine">§14.2 · agent</span></td>
+      <br><span class="fine">§14.2 · agent · superseded by <a href="#R-D2">R-D2</a> · SUPERSEDED 8 Sept (discuss-item review, maintainer's call): the maintainer's actual concern was &quot;if a person is assigned in 2 cells, the total efficiency should be 100%&quot; -- already enforced and already tested, by a different mechanism than this row's per-row 200% ceiling. R-D2 (covered) is check_operator_capacity: it sums a person's efficiency across every overlapping assignment and refuses the write once the total exceeds the org's capacity_cap, which defaults to exactly 1.0. This row's &quot;at most 2&quot; is only how high a SINGLE row's efficiency field can go, unrelated to the total; retired rather than tested separately, since R-D2 is the row that actually proves the maintainer's rule.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
 <tr class="r-covered" id="R-030">
   <td class="g-n">R-030</td>

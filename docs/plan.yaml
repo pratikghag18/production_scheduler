@@ -4217,6 +4217,11 @@ requirements:
       Force a second 100% assignment for a fully loaded operator; DevTools shows HTTP 409 with error=PT409
       (§18.8)
   status: uncovered
+  note: >-
+    ACCEPT-RISK, maintainer's call 8 Sept (discuss-item review): rare in practice, and to an extent
+    impossible unless two supervisors for the same line, or a supervisor and a site admin, are both
+    assigning at once -- which should not happen in theory. Manual verification stands; no automated test
+    planned. Not open work -- do not re-flag this as a gap in a future audit.
 - id: R-008
   title: No archive, partition or connector tables exist
   source:
@@ -4261,6 +4266,10 @@ requirements:
     broadcast so the realtime tier can be swapped later without redesign.
   verified_by: []
   status: uncovered
+  note: >-
+    ACCEPT-RISK, maintainer's call 8 Sept (discuss-item review): this is architectural intent, not a
+    testable behavior -- descriptive prose kept for the record, not a requirement to prove. No test
+    planned. Not open work -- do not re-flag this as a gap in a future audit.
 - id: R-011
   title: Skill requirements attach to any node and inherit downward
   source:
@@ -4349,10 +4358,15 @@ requirements:
     Operators and products carry source and external_id. CSV import is an upsert keyed on (org_id, external_id)
     so re-importing an updated export just works, and it is the same pipeline a future connector uses.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-291
   note: >-
     §19.36 measured that nodes has no external_id column and products.external_id has no uniqueness constraint;
-    the node import (P1-5h) needs its own migration first.
+    the node import (P1-5h) needs its own migration first. SUPERSEDED 8 Sept (discuss-item review, maintainer's
+    call): this row's own wording is wrong now, not just unlinked -- it describes a pure (org_id, external_id)
+    match, but the shipped product import (R-291, covered) matches on external_id THEN falls back to sku;
+    the shipped operator import (R-294, covered) does match on external_id alone, matching this row's
+    framing for operators only. Retired in favour of R-291 rather than corrected, on the maintainer's call.
 - id: R-016
   title: Synced fields are read-only in-app; app-owned fields stay editable
   source:
@@ -4588,7 +4602,16 @@ requirements:
     assignments.efficiency defaults to 1.000 and is constrained to more than 0 and at most 2. The UI shows
     a badge on any block that is not 100%.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-D2
+  note: >-
+    SUPERSEDED 8 Sept (discuss-item review, maintainer's call): the maintainer's actual concern was
+    "if a person is assigned in 2 cells, the total efficiency should be 100%" -- already enforced and
+    already tested, by a different mechanism than this row's per-row 200% ceiling. R-D2 (covered) is
+    check_operator_capacity: it sums a person's efficiency across every overlapping assignment and refuses
+    the write once the total exceeds the org's capacity_cap, which defaults to exactly 1.0. This row's
+    "at most 2" is only how high a SINGLE row's efficiency field can go, unrelated to the total; retired
+    rather than tested separately, since R-D2 is the row that actually proves the maintainer's rule.
 - id: R-030
   title: Effective headcount is the sum of efficiencies
   source:
