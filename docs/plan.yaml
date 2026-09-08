@@ -2236,8 +2236,12 @@ requirements:
   claim: >-
     The date control picks dates and board_window is called with midnight-to-midnight instants, so day
     boundaries fall at exact multiples of 1440 minutes from the window origin.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardViewStore.test.ts
+    cases: D14a/b shiftWindowByDays stays on UTC-day boundaries
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- new test file.
 - id: R-D15
   title: x is minutes since windowStart; previous day's shift tail drawn
   source:
@@ -2247,8 +2251,12 @@ requirements:
   claim: >-
     Horizontal position is minutes since the window start over a computed windowMinutes. Shift geometry
     loops from day −1 so an overnight shift from the day before the window appears on the first morning.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardGeometry.test.ts
+    cases: minutesToPx/pxToMinutes round-trip at all 3 zooms (case 4), shiftInstances day -1 tail (case 7)
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D16
   title: Three zoom levels with fixed pixel and snap values
   source:
@@ -2257,8 +2265,16 @@ requirements:
   stated_by: agent
   claim: >-
     Compact 64 px/h, Standard 104, Fine 168 with snaps 60, 30 and 15 minutes; Standard is the default.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/snapConfig.test.ts
+    cases: F1-F3 the wiring proves each zoom's snapMinutes, F8 the literal table pinned (64/60, 104/30,
+      168/15) so an accidental edit fails loudly, F9 the store opens at zoomIndex 1 (Standard)
+  status: covered
+  note: >-
+    Checked 8 Sept (requirement audit) against R-024, which turned out to claim different, wrong snap
+    values for the same table -- R-D16 is the row that's actually right (geometry.ts's ZOOMS: "D16 — zoom
+    table, ported verbatim"). See R-024's note.
 - id: R-D17
   title: The board opens on today with a 3-day window
   source:
@@ -2269,8 +2285,13 @@ requirements:
   claim: >-
     The default window starts at the start of today's UTC day and spans 3 days. The original Monday-of-the-week
     anchor was a seed concern that leaked into the product and was reversed.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardViewStore.test.ts
+    cases: D17a window starts at UTC midnight, D17b default 3-day span, D17c goToToday resets and bumps
+      scrollToNowNonce, D17d setWindowDayCount overrides the default
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- new test file.
 - id: R-D18
   title: A node is a track row iff its level is schedulable
   source:
@@ -2280,8 +2301,15 @@ requirements:
   claim: >-
     Track rows are exactly the nodes on the schedulable level; indentation comes from path depth. Nothing
     hardcodes department, line or cell.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardIndex.test.ts
+    cases: >-
+      R-D18a a node whose level IS schedulable is a track row, one whose level is not is a group row --
+      nothing hardcodes department/line/cell; R-D18b indentation (depth) comes from path segment count
+      relative to the root, not from the level's own position; T8 a missing level is a group row
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- new cases in an existing file.
 - id: R-D19
   title: Row windowing is hand-rolled from prefix sums, no virtualization library
   source:
@@ -2291,8 +2319,12 @@ requirements:
   claim: >-
     Row heights are computed from lane packing, not measured, so visible rows are found by prefix-sum
     offsets and a binary search in a pure, testable module.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardGeometry.test.ts
+    cases: visibleRowRange (buildRowOffsets prefix sums), viewport + overscan (case 11, 11f)
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D37
   title: A reverted edit's toast names the block
   source:
@@ -4282,22 +4314,35 @@ requirements:
     node under a time-axis header. Collapsing a group collapses its rows.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): no test renders the board's actual layout or proves "collapsing a
+    group collapses its rows" -- collapsedNodeIds lives in useBoardViewStore but the row-filtering by it
+    happens deep in BoardPage's render tree, not a pure/testable function. Needs a BoardPage-level render
+    test with real fixtures; bigger than a link-or-small-case fix, queued rather than done here.
 - id: R-024
-  title: Snapping adapts to zoom; a modifier key drags free
+  title: A modifier key drags free of the zoom's snap
   source:
   - §10
   - §16.2
   - D16
   stated_by: agent
   claim: >-
-    Each zoom level has a default snap (shift at the coarsest, then 1 h, 15 min, 5 min). Holding a modifier
-    key drags to the minute.
-  verified_by: []
-  status: uncovered
+    Each zoom level has a default snap (Compact snaps to shift boundaries, Standard and Fine snap to
+    minutes per R-D16's table). Holding a modifier key drags to the minute regardless of the zoom's snap.
+  verified_by:
+  - kind: vitest
+    file: src/test/snapConfig.test.ts
+    cases: F4-F5 useShiftSnap is true only at Compact, a null template yields no shift points
+  - kind: vitest
+    file: src/test/interaction.test.ts
+    cases: case2a/case2b the modifier key overrides the zoom's snap and drags to the minute
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): NOT a duplicate of R-D16 as first guessed -- R-D16 is itself uncovered,
-    and the two rows actively disagree on the snap values (R-D16 says 60/30/15 min; this row says
-    shift/1h/15min/5min). Resolve which is right before writing a test for either.
+    REWORDED 8 Sept (requirement audit): this row's own numbers were wrong. It claimed "1 h, 15 min, 5 min"
+    as the per-zoom snaps; the real, ported-verbatim table (geometry.ts ZOOMS) is 60/30/15, matching R-D16
+    exactly, not this row's original text. Corrected to point at R-D16 for the numbers rather than restate
+    them a second time, wrongly. The modifier-key clause, this row's actual distinct claim, was true and is
+    now proven.
 - id: R-025
   title: 'Board gestures: create, resize, move, click; all optimistic'
   source:
@@ -4311,6 +4356,15 @@ requirements:
     optimistically and rolls back on 409.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): dragGesture.test.ts covers MOVE extensively (staffed/unstaffed,
+    T11/T13) but has zero cases for CREATE (drag on empty space) or RESIZE (dragging a block edge), and no
+    case asserts optimistic-then-409-rollback generically across mutation types. useAssignmentMutations.ts
+    does implement onMutate/onError rollback consistently for create/resize/move/delete (read, not
+    assumed) -- untested is the gesture layer that calls it, not the mutation layer itself. A
+    useAssignmentMutations.test.ts (hook-level, no drag DOM needed) would close the mutation half cheaply;
+    the gesture half needs dragGesture.test.ts-style pointer-event simulation for create/resize. Queued
+    rather than done here.
 - id: R-026
   title: Every board supports both run and direct assignment creation
   source:
@@ -4376,7 +4430,9 @@ requirements:
     implies, and NA only when there is no cycle time". target_qty itself is unchanged — still a window total,
     still the human's explicit override, still null when nothing was typed. The keep-total-or-scale prompt on
     resize is still unbuilt and still queued; note that it only ever applied to a TYPED target, and a derived
-    one already follows a resize by being recomputed.
+    one already follows a resize by being recomputed. Re-checked 8 Sept (requirement audit): confirmed still
+    unbuilt against mutations.ts -- a resize on a targeted assignment silently leaves target_qty unchanged,
+    never prompting. Not a test gap; the feature the claim describes does not exist yet.
 - id: R-032
   title: The timeline is continuous and past edits are allowed and audited
   source:
@@ -4489,8 +4545,13 @@ requirements:
   claim: >-
     Each roster entry shows avatar, name, skill badges and a count pill with a tooltip listing the operator's
     assignments in the loaded window. Operators at full allocation render dimmed.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/absenceOnBoard.test.tsx
+    cases: R-038a avatar/name/skill badges, R-038b count pill shows N and is absent with none, R-038c
+      title attribute lists node/times/efficiency, R-038d dimmed ("full" class) only when fully allocated
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- new cases in an existing file.
 - id: R-039
   title: Shift templates attach to any node and resolve nearest-ancestor
   source:
@@ -4542,9 +4603,21 @@ requirements:
   stated_by: maintainer
   claim: >-
     start_min is 0–1439 and end_min may exceed 1440 to express an overnight shift, which belongs to the
-    day it starts. Breaks use the same coordinates and must lie inside their shift.
-  verified_by: []
-  status: uncovered
+    day it starts.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/30_shifts_test.sql
+    cases: 16a overnight (1320->1800) accepted, 16b inverted shift rejected, 16c 25h shift rejected
+  - kind: vitest
+    file: src/test/boardGeometry.test.ts
+    cases: shiftInstances produces a day -1 tail (case 7) -- an overnight shift from the day before renders
+      on the first morning
+  status: covered
+  note: >-
+    REWORDED 8 Sept (requirement audit): dropped "Breaks use the same coordinates and must lie inside their
+    shift" -- the CHECK exists in migration 20260821000005 but nothing exercises it, so that clause is a
+    real, separate gap, not proven by anything linked here. The start_min/end_min/overnight clause is
+    proven and is now this row's whole claim.
 - id: R-041
   title: Breaks render as a neutral hatched band; shifts as dashed boundaries
   source:
@@ -4576,15 +4649,25 @@ requirements:
     R-316 and still have no test. Flagged to the maintainer as still-open rather than removed on the "R-316 is
     the correct expectation" call, since R-316 only settles the target-display half of this row.
 - id: R-043
-  title: Compact zoom snaps to shift boundaries and offers full-shift quick actions
+  title: Compact zoom snaps to shift boundaries
   source:
   - §16.2
   stated_by: agent
-  claim: >-
-    At Compact zoom drag-select snaps to shift boundaries and the creation popover offers one-click whole-shift
-    creation for that row's pattern.
-  verified_by: []
-  status: uncovered
+  claim: At Compact zoom, drag-select snaps to shift boundaries.
+  verified_by:
+  - kind: vitest
+    file: src/test/snapConfig.test.ts
+    cases: F6-F7 Compact's snap pairing matches useShiftSnap's own condition; the two non-Compact zooms
+      never use shift-boundary snap
+  - kind: vitest
+    file: src/test/interaction.test.ts
+    cases: case3a/case3b useShiftSnap snaps to the nearest shift point
+  status: covered
+  note: >-
+    REWORDED 8 Sept (requirement audit): dropped the second clause, "the creation popover offers one-click
+    whole-shift creation for that row's pattern" -- grepped the whole board tree for any such control and
+    found none; CreatePopover.tsx has no one-click whole-shift action. Not a test gap, a feature that was
+    never built. The shift-boundary-snap clause was true and is now proven.
 - id: R-044
   title: Redefining shifts never touches existing assignments
   source:
@@ -4643,9 +4726,15 @@ requirements:
     Every cached query was fetched as one user under RLS, so on an identity change the cache is reset
     and active queries refetch. A routine token refresh, where the identity does not change, must not
     reset the cache or blank the board.
-  verified_by: []
-  status: uncovered
-  note: §19.14 says P1-5c committed a regression test for §19.8 but does not name the file.
+  verified_by:
+  - kind: vitest
+    file: src/test/sessionProvider.test.tsx
+    cases: S4 a token refresh resets nothing/refetches nothing, S5 a genuine identity change resets the
+      query cache exactly once
+  status: covered
+  note: >-
+    §19.14 says P1-5c committed a regression test for §19.8 but does not name the file -- linked 8 Sept
+    (requirement audit).
 - id: R-048
   title: Nearest-ancestor lookups walk ltree paths, never parent_id
   source:
@@ -4663,7 +4752,10 @@ requirements:
     pattern `resolve_shift_template` uses. The skill-requirement half is not: `check_eligibility`'s `required`
     CTE uses the identical ltree-ancestor join, but no test places a skill requirement on an ancestor node and
     checks eligibility at a descendant. Left uncovered as a whole rather than split into two rows; a test for
-    the skill-requirement half is what would close this one.
+    the skill-requirement half is what would close this one. Checked again 8 Sept: the exact gap is
+    `supabase/migrations/20260904000050_plant_settings.sql` lines 507-513 (the `required` CTE); a second
+    attempt ran out of time building a confident seed fixture for it, so the fix is precisely located but
+    still not written.
 - id: R-049
   title: A malformed timerange drops one block, never the board
   source:
@@ -4672,8 +4764,12 @@ requirements:
   claim: >-
     The index builder catches a parse failure per row, drops that row and counts it. The board never renders
     blank because of one bad range.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardIndex.test.ts
+    cases: a malformed timerange drops that row, counts it, and does not throw (case 18)
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-050
   title: Scroll position is anchored by node id, not pixel
   source:
@@ -4695,6 +4791,12 @@ requirements:
     the sticky rail width, so repeated zooming does not drift.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): blocked, not written. No test file imports BoardGrid at all. The
+    zoom-centering effect (BoardGrid.tsx:407-439) depends on useLayoutEffect plus real
+    getBoundingClientRect/ResizeObserver measurements this repo's jsdom setup doesn't provide
+    (ResizeObserver is stubbed as a no-op). Needs either heavy DOM mocking or extracting the centre-math
+    into a pure function first -- same class of gap as R-057/R-078.
 - id: R-052
   title: A background refetch never blanks the board
   source:
@@ -4705,6 +4807,10 @@ requirements:
     empty each time it refreshes.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): BoardPage.tsx:635 (`isFetching={boardQuery.isFetching && hasData}`)
+    implements exactly the claim but no test exercises it -- same blocker as R-023/R-025, needs a
+    BoardPage-level render test with real fixtures rather than a small link-or-case fix. Queued.
 - id: R-053
   title: Scrolling never triggers a fetch
   source:
@@ -4748,12 +4854,18 @@ requirements:
     fitScale is the available height divided by the natural Standard height, clamped to 0.75–2.5, computed
     in one pass from unscaled heights. Every density field is rounded to an integer, NaN and Infinity
     are guarded, a chip always fits its lane and an avatar its chip.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/fitScale.test.ts
+    cases: >-
+      F1-F3 raw ratio and both clamp directions, F4-F5 empty/unmeasured inputs return 1, F6-F8 NaN/Infinity
+      guards, F9 exact clamp boundaries, F10-F12 scaleDensity identity/rounding/no-mutation, F13 a chip
+      fits its lane and an avatar its chip at every clamp boundary and every named density
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. src/test/scaleAudit.test.ts
+    Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate -- src/test/scaleAudit.test.ts
     only lints which CSS files reference the --ui-scale token; it never imports or calls computeFitScale /
-    FIT_MIN / FIT_MAX (geometry.ts). The NaN/Infinity guard is a real crash risk if actually untested.
+    FIT_MIN / FIT_MAX (geometry.ts). New test file closes it.
 - id: R-057
   title: --ui-scale is published on the document root
   source:
@@ -4766,7 +4878,10 @@ requirements:
   status: uncovered
   note: >-
     Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. scaleAudit.test.ts is a
-    file-reference lint only -- no test sets or reads --ui-scale on document.documentElement.
+    file-reference lint only -- no test sets or reads --ui-scale on document.documentElement. Attempted 8 Sept:
+    blocked, not written -- the publish is an inline useEffect in BoardPage.tsx:342-354, and this repo's own
+    test convention explicitly avoids mounting BoardPage whole (viewerBoard.test.tsx's own comment: needs
+    session/query-client/API/drag-layer all mocked at once). Same class of gap as R-051/R-078.
 - id: R-058
   title: Popover width is computed once and keeps it on screen
   source:
@@ -4777,9 +4892,15 @@ requirements:
     One source of truth for the scaled width feeds both the inline style and the edge clamp, the viewport
     is tracked by a resize listener, and a malformed anchor never yields NaN. The popover stays inside
     the viewport near the right edge at maximum scale.
-  verified_by: []
-  status: uncovered
-  note: §19.14 names cases P17–P24 but not the test file.
+  verified_by:
+  - kind: vitest
+    file: src/test/placement.test.ts
+    cases: >-
+      P5-P6 measured height not hardcoded, P11 scaled width changes the right-edge answer, P15-P16
+      defaults and no-mutation, P17-P24 NaN/Infinity anchor and margin/gap edge cases
+  status: covered
+  note: >-
+    §19.14 names cases P17–P24 but not the test file -- linked 8 Sept (requirement audit).
 - id: R-059
   title: A hierarchy level with nodes cannot be removed
   source:
@@ -5051,7 +5172,13 @@ requirements:
     once per drag rather than on every pointer move.
   verified_by: []
   status: uncovered
-  note: Both found by review in §19.36 and folded into P1-5l rather than patched.
+  note: >-
+    Both found by review in §19.36 and folded into P1-5l rather than patched. Attempted 8 Sept (requirement
+    audit): blocked, not written. jsdom has no native Pointer Events capture API (setPointerCapture is
+    undefined on HTMLElement.prototype); even polyfilled, fireEvent.pointerUp/pointerCancel don't propagate
+    pointerId the way pointerDown/pointerMove do. dragGesture.test.ts gets around exactly this by testing the
+    hook's own methods with hand-built fake events, but NodeTreeEditor's drag logic is inline in the
+    component, not exposed that way. Same class of gap as R-051/R-057.
 - id: R-079
   title: The admin screen and its nav link are admin-only
   source:
@@ -6152,11 +6279,16 @@ requirements:
     for a company or site admin, the department for a supervisor — never a node they could not SELECT.
     It runs as the caller and still scopes to one org for a session that bypasses RLS. Inactive tops are
     ordered last, not excluded.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/54_board_roots_test.sql
+    cases: >-
+      V0-V9 -- V2 a site admin gets their own plant and only their own, V3 a mid-tree supervisor, V5
+      SECURITY INVOKER (not DEFINER, which would leak V2/V3), V9 the org-term guard holds under BYPASSRLS
+  status: covered
   note: >-
     §19.70 names ten SQL cases (V2–V9; V4 joins output back through `nodes`, V9 runs under BYPASSRLS)
-    but not the file they live in.
+    but not the file they live in -- linked 8 Sept (requirement audit).
 - id: R-263
   title: The board header names the place; picker only with a choice
   source:
@@ -6166,9 +6298,17 @@ requirements:
     The board reads "Board · <place> · <dates>"; a picker appears only when more than one root is offered.
     A remembered choice the server no longer offers is dropped, matching is exact (not ltree-prefix),
     and a person with no grant on any node sees a sentence about themselves rather than an error.
-  verified_by: []
-  status: uncovered
-  note: Seven `rootSelection.ts` cases (W5, W6) and SQL V8 are named; their files are not.
+  verified_by:
+  - kind: vitest
+    file: src/test/rootSelection.test.ts
+    cases: W1-W7
+  - kind: sql
+    file: supabase/tests/54_board_roots_test.sql
+    cases: V8 a caller with no grants at all gets an empty list
+  status: covered
+  note: >-
+    Seven `rootSelection.ts` cases (W5, W6) and SQL V8 are named; their files are not -- linked 8 Sept
+    (requirement audit).
 - id: R-264
   title: The product catalogue lists only what this site administers
   source:
@@ -6316,9 +6456,14 @@ requirements:
     `Run.productId` and `assignment.operatorId` are nullable in the client shapes and carry the snapshot
     fields; `history.ts` resolves the live row while it exists and synthesises a view from the snapshot
     afterwards. A synthesised row has an empty id and owner so `offeredAt` can never be asked about it.
-  verified_by: []
-  status: uncovered
-  note: Case H19 and 24 in-place probe assertions are named; the test file is not.
+  verified_by:
+  - kind: vitest
+    file: src/test/history.test.ts
+    cases: "H1-H19, esp. H18 a synthesised row has an empty id, H19 a deleted product's places list is empty"
+  status: covered
+  note: >-
+    Case H19 and 24 in-place probe assertions are named; the test file is not -- linked 8 Sept (requirement
+    audit).
 - id: R-274
   title: A plant cannot leave a part still scheduled under it
   source:

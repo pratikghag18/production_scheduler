@@ -279,7 +279,17 @@ describe("reassign pop-up: the leave line for the chosen person", () => {
  * 3. The operator panel mark.
  * ======================================================================== */
 
-function renderPanel(absences: AbsenceRow[]) {
+function renderPanel(
+  absences: AbsenceRow[],
+  opts: {
+    skillById?: Map<string, Skill>;
+    assignmentsByOperator?: Map<string, IndexedAssignment[]>;
+    nodeById?: Map<string, unknown>;
+    capacityCap?: number;
+    operators?: BoardOperator[];
+  } = {},
+) {
+  const ops = opts.operators ?? [ELENA, RAY];
   const dragApi = {
     beginPanelDrag: vi.fn(),
     updatePanelDrag: vi.fn(),
@@ -288,21 +298,35 @@ function renderPanel(absences: AbsenceRow[]) {
   };
   render(
     <OperatorPanel
-      operators={[ELENA, RAY]}
-      hereOperatorIds={new Set([ELENA.id, RAY.id])}
+      operators={ops}
+      hereOperatorIds={new Set(ops.map((o) => o.id))}
       absences={absences}
-      skillById={new Map<string, Skill>()}
-      nodeById={new Map()}
-      assignmentsByOperator={new Map()}
+      skillById={opts.skillById ?? new Map<string, Skill>()}
+      nodeById={(opts.nodeById as never) ?? new Map()}
+      assignmentsByOperator={opts.assignmentsByOperator ?? new Map()}
       windowStart={new Date("2026-09-07T00:00:00.000Z")}
       windowMinutes={1440}
-      capacityCap={1}
+      capacityCap={opts.capacityCap ?? 1}
       open={true}
       onToggleOpen={vi.fn()}
       draggingOperatorId={null}
       dragApi={dragApi}
     />,
   );
+}
+
+/** A minimal IndexedAssignment carrying only the fields OperatorPanel's
+ *  chip() and isFullyAllocated actually read: nodeId/startMin/endMin/
+ *  efficiencyPercent (the tooltip), and efficiency (the fraction
+ *  isFullyAllocated sums against capacityCap). */
+function assignmentFor(nodeId: string, startMin: number, endMin: number, efficiencyPercent = 100) {
+  return {
+    nodeId,
+    startMin,
+    endMin,
+    efficiencyPercent,
+    efficiency: efficiencyPercent / 100,
+  } as unknown as IndexedAssignment;
 }
 
 describe("operator panel: the on-leave mark", () => {
@@ -318,6 +342,53 @@ describe("operator panel: the on-leave mark", () => {
   it("does not mark anyone when nobody is away", () => {
     renderPanel([]);
     expect(screen.queryByText("on leave")).toBeNull();
+  });
+});
+
+describe("operator panel (R-038): avatar, name, skill badges, count pill, dimmed when full", () => {
+  it("R-038a: each chip shows an avatar (initials), the name, and one badge per skill", () => {
+    const welding: Skill = { id: "sk-1", name: "Welding" } as never;
+    const skilled: BoardOperator = { ...operator("op-nia", "Nia"), skillIds: ["sk-1"] };
+    renderPanel([], { operators: [skilled], skillById: new Map([["sk-1", welding]]) });
+    const chip = screen.getByText("Nia").closest("div") as HTMLElement;
+    // initials("Nia") -> "Nia".slice(0, 2).toUpperCase() -> "NI"
+    expect(within(chip).getByText("NI")).not.toBeNull();
+    expect(within(chip).getByText("Nia")).not.toBeNull();
+    expect(within(chip).getByText("Welding")).not.toBeNull();
+  });
+
+  it("R-038b: the count pill shows the number of assignments in the loaded window, and is absent with none", () => {
+    const assignments = new Map<string, IndexedAssignment[]>([
+      [ELENA.id, [assignmentFor(NODE, 0, 480), assignmentFor(NODE, 600, 900)]],
+    ]);
+    renderPanel([], { assignmentsByOperator: assignments });
+    const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
+    expect(within(elenaChip).getByText("2")).not.toBeNull();
+    const rayChip = screen.getByText("Ray").closest("div") as HTMLElement;
+    expect(within(rayChip).queryByText("0")).toBeNull(); // no pill at all, not a "0" pill
+  });
+
+  it("R-038c: the chip's title attribute lists the operator's assignments in the window (node, times, efficiency)", () => {
+    const assignments = new Map<string, IndexedAssignment[]>([
+      [ELENA.id, [assignmentFor(NODE, 360, 480, 50)]], // 06:00-08:00, 50%
+    ]);
+    renderPanel([], { assignmentsByOperator: assignments });
+    const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
+    expect(elenaChip.title).toMatch(NODE);
+    expect(elenaChip.title).toMatch("50%");
+  });
+
+  it("R-038d: a chip renders dimmed (the `full` class) when its operator is fully allocated over the window, and not otherwise", () => {
+    // windowMinutes=1440, capacityCap=1 (default): one assignment covering the
+    // whole day at 100% efficiency is exactly full.
+    const full = new Map<string, IndexedAssignment[]>([
+      [ELENA.id, [assignmentFor(NODE, 0, 1440, 100)]],
+    ]);
+    renderPanel([], { assignmentsByOperator: full });
+    const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
+    const rayChip = screen.getByText("Ray").closest("div") as HTMLElement;
+    expect(elenaChip.className).toMatch(/full/);
+    expect(rayChip.className).not.toMatch(/full/);
   });
 });
 

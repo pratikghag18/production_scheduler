@@ -179,13 +179,16 @@ export type PopoverState =
       onConfirm: () => void;
     };
 
-interface SnapConfig {
+export interface SnapConfig {
   useShiftSnap: boolean;
   snapMinutes: number;
   shiftPoints: number[];
 }
 
-function snapConfigFor(
+/** Exported for R-024/R-D16: proves which snap values each zoom level
+ * actually wires up (interaction.test.ts proves snapMinute's own logic
+ * with hand-supplied params; this is the zoomIndex -> params half). */
+export function snapConfigFor(
   zoomIndex: ZoomIndex,
   template: ShiftTemplate | null,
   axis: DayAxis,

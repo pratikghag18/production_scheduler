@@ -114,7 +114,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">773</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">70</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">195 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">212 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>5c9e6d4</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -2626,7 +2626,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 195 covered · 89 uncovered · 1 contradicted · 19 superseded</caption>
+<caption>304 requirements · 212 covered · 72 uncovered · 1 contradicted · 19 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -2704,47 +2704,47 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D14">
+<tr class="r-covered" id="R-D14">
   <td class="g-n">R-D14</td>
   <td class="reqmain"><b>The board window is always whole days</b><br><span class="fine">The date control picks dates and board_window is called with midnight-to-midnight instants, so day boundaries fall at exact multiples of 1440 minutes from the window origin.</span>
-      <br><span class="fine">§18, D14 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18, D14 · agent · Linked 8 Sept (requirement audit) -- new test file.</span></td>
+  <td class="fine">vitest · <code>src/test/boardViewStore.test.ts</code> D14a/b shiftWindowByDays stays on UTC-day boundaries</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D15">
+<tr class="r-covered" id="R-D15">
   <td class="g-n">R-D15</td>
   <td class="reqmain"><b>x is minutes since windowStart; previous day's shift tail drawn</b><br><span class="fine">Horizontal position is minutes since the window start over a computed windowMinutes. Shift geometry loops from day −1 so an overnight shift from the day before the window appears on the first morning.</span>
-      <br><span class="fine">§18, D15 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18, D15 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">vitest · <code>src/test/boardGeometry.test.ts</code> minutesToPx/pxToMinutes round-trip at all 3 zooms (case 4), shiftInstances day -1 tail (case 7)</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D16">
+<tr class="r-covered" id="R-D16">
   <td class="g-n">R-D16</td>
   <td class="reqmain"><b>Three zoom levels with fixed pixel and snap values</b><br><span class="fine">Compact 64 px/h, Standard 104, Fine 168 with snaps 60, 30 and 15 minutes; Standard is the default.</span>
-      <br><span class="fine">§18, D16 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18, D16 · agent · Checked 8 Sept (requirement audit) against R-024, which turned out to claim different, wrong snap values for the same table -- R-D16 is the row that's actually right (geometry.ts's ZOOMS: &quot;D16 — zoom table, ported verbatim&quot;). See R-024's note.</span></td>
+  <td class="fine">vitest · <code>src/test/snapConfig.test.ts</code> F1-F3 the wiring proves each zoom's snapMinutes, F8 the literal table pinned (64/60, 104/30, 168/15) so an accidental edit fails loudly, F9 the store opens at zoomIndex 1 (Standard)</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D17">
+<tr class="r-covered" id="R-D17">
   <td class="g-n">R-D17</td>
   <td class="reqmain"><b>The board opens on today with a 3-day window</b><br><span class="fine">The default window starts at the start of today's UTC day and spans 3 days. The original Monday-of-the-week anchor was a seed concern that leaked into the product and was reversed.</span>
-      <br><span class="fine">§18, D17, §18.4 · maintainer</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18, D17, §18.4 · maintainer · Linked 8 Sept (requirement audit) -- new test file.</span></td>
+  <td class="fine">vitest · <code>src/test/boardViewStore.test.ts</code> D17a window starts at UTC midnight, D17b default 3-day span, D17c goToToday resets and bumps scrollToNowNonce, D17d setWindowDayCount overrides the default</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D18">
+<tr class="r-covered" id="R-D18">
   <td class="g-n">R-D18</td>
   <td class="reqmain"><b>A node is a track row iff its level is schedulable</b><br><span class="fine">Track rows are exactly the nodes on the schedulable level; indentation comes from path depth. Nothing hardcodes department, line or cell.</span>
-      <br><span class="fine">§18, D18 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18, D18 · agent · Linked 8 Sept (requirement audit) -- new cases in an existing file.</span></td>
+  <td class="fine">vitest · <code>src/test/boardIndex.test.ts</code> R-D18a a node whose level IS schedulable is a track row, one whose level is not is a group row -- nothing hardcodes department/line/cell; R-D18b indentation (depth) comes from path segment count relative to the root, not from the level's own position; T8 a missing level is a group row</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D19">
+<tr class="r-covered" id="R-D19">
   <td class="g-n">R-D19</td>
   <td class="reqmain"><b>Row windowing is hand-rolled from prefix sums, no virtualization library</b><br><span class="fine">Row heights are computed from lane packing, not measured, so visible rows are found by prefix-sum offsets and a binary search in a pure, testable module.</span>
-      <br><span class="fine">§18, D19 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18, D19 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">vitest · <code>src/test/boardGeometry.test.ts</code> visibleRowRange (buildRowOffsets prefix sums), viewport + overscan (case 11, 11f)</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-D37">
   <td class="g-n">R-D37</td>
@@ -3372,21 +3372,21 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-023">
   <td class="g-n">R-023</td>
   <td class="reqmain"><b>Board layout: roster panel, hierarchy rail, rows, time header</b><br><span class="fine">A collapsible operator panel sits at the far left, then the hierarchy rail, then one row per schedulable node under a time-axis header. Collapsing a group collapses its rows.</span>
-      <br><span class="fine">§10, §15.3 · agent</span></td>
+      <br><span class="fine">§10, §15.3 · agent · Checked 8 Sept (requirement audit): no test renders the board's actual layout or proves &quot;collapsing a group collapses its rows&quot; -- collapsedNodeIds lives in useBoardViewStore but the row-filtering by it happens deep in BoardPage's render tree, not a pure/testable function. Needs a BoardPage-level render test with real fixtures; bigger than a link-or-small-case fix, queued rather than done here.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-024">
+<tr class="r-covered" id="R-024">
   <td class="g-n">R-024</td>
-  <td class="reqmain"><b>Snapping adapts to zoom; a modifier key drags free</b><br><span class="fine">Each zoom level has a default snap (shift at the coarsest, then 1 h, 15 min, 5 min). Holding a modifier key drags to the minute.</span>
-      <br><span class="fine">§10, §16.2, D16 · agent · Checked 8 Sept (requirement audit): NOT a duplicate of R-D16 as first guessed -- R-D16 is itself uncovered, and the two rows actively disagree on the snap values (R-D16 says 60/30/15 min; this row says shift/1h/15min/5min). Resolve which is right before writing a test for either.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>A modifier key drags free of the zoom's snap</b><br><span class="fine">Each zoom level has a default snap (Compact snaps to shift boundaries, Standard and Fine snap to minutes per R-D16's table). Holding a modifier key drags to the minute regardless of the zoom's snap.</span>
+      <br><span class="fine">§10, §16.2, D16 · agent · REWORDED 8 Sept (requirement audit): this row's own numbers were wrong. It claimed &quot;1 h, 15 min, 5 min&quot; as the per-zoom snaps; the real, ported-verbatim table (geometry.ts ZOOMS) is 60/30/15, matching R-D16 exactly, not this row's original text. Corrected to point at R-D16 for the numbers rather than restate them a second time, wrongly. The modifier-key clause, this row's actual distinct claim, was true and is now proven.</span></td>
+  <td class="fine">vitest · <code>src/test/snapConfig.test.ts</code> F4-F5 useShiftSnap is true only at Compact, a null template yields no shift points<br>vitest · <code>src/test/interaction.test.ts</code> case2a/case2b the modifier key overrides the zoom's snap and drags to the minute</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-025">
   <td class="g-n">R-025</td>
   <td class="reqmain"><b>Board gestures: create, resize, move, click; all optimistic</b><br><span class="fine">Drag on empty row space creates; dragging block edges resizes; dragging a body moves it in time or across rows and re-checks eligibility live; click opens a details popover. Every mutation applies optimistically and rolls back on 409.</span>
-      <br><span class="fine">§10, §5, §18.13 · agent</span></td>
+      <br><span class="fine">§10, §5, §18.13 · agent · Checked 8 Sept (requirement audit): dragGesture.test.ts covers MOVE extensively (staffed/unstaffed, T11/T13) but has zero cases for CREATE (drag on empty space) or RESIZE (dragging a block edge), and no case asserts optimistic-then-409-rollback generically across mutation types. useAssignmentMutations.ts does implement onMutate/onError rollback consistently for create/resize/move/delete (read, not assumed) -- untested is the gesture layer that calls it, not the mutation layer itself. A useAssignmentMutations.test.ts (hook-level, no drag DOM needed) would close the mutation half cheaply; the gesture half needs dragGesture.test.ts-style pointer-event simulation for create/resize. Queued rather than done here.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3428,7 +3428,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-031">
   <td class="g-n">R-031</td>
   <td class="reqmain"><b>A target is a window total; unset renders NA</b><br><span class="fine">target_qty is a total for the assignment window, not a rate, with free-text units. Resizing an assignment that carries a target prompts keep-total or scale-proportionally.</span>
-      <br><span class="fine">§14.2 · maintainer · QUALIFIED BY R-316 (0040). &quot;Unset renders NA&quot; now reads &quot;unset renders the standard the cell's cycle time implies, and NA only when there is no cycle time&quot;. target_qty itself is unchanged — still a window total, still the human's explicit override, still null when nothing was typed. The keep-total-or-scale prompt on resize is still unbuilt and still queued; note that it only ever applied to a TYPED target, and a derived one already follows a resize by being recomputed.</span></td>
+      <br><span class="fine">§14.2 · maintainer · QUALIFIED BY R-316 (0040). &quot;Unset renders NA&quot; now reads &quot;unset renders the standard the cell's cycle time implies, and NA only when there is no cycle time&quot;. target_qty itself is unchanged — still a window total, still the human's explicit override, still null when nothing was typed. The keep-total-or-scale prompt on resize is still unbuilt and still queued; note that it only ever applied to a TYPED target, and a derived one already follows a resize by being recomputed. Re-checked 8 Sept (requirement audit): confirmed still unbuilt against mutations.ts -- a resize on a targeted assignment silently leaves target_qty unchanged, never prompting. Not a test gap; the feature the claim describes does not exist yet.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3474,12 +3474,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/82_run_keeps_its_crew_test.sql</code> RK1 a raw UPDATE of a run's cell with crew attached is refused at commit with run_moved_without_crew and the run stays; RK2 a crewless run still moves; RK3 move_run carries the crew and passes the deferred check; RK4 move_run refused under block leaves run and crew in place<br>vitest · <code>src/test/defects/DEF-0014.test.ts</code> the last trigger set on runs includes one firing on UPDATE OF node_id whose function reads assignments (the migration-text half; RK1 is the behaviour)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-038">
+<tr class="r-covered" id="R-038">
   <td class="g-n">R-038</td>
   <td class="reqmain"><b>Roster entries show assignment count and dim when fully allocated</b><br><span class="fine">Each roster entry shows avatar, name, skill badges and a count pill with a tooltip listing the operator's assignments in the loaded window. Operators at full allocation render dimmed.</span>
-      <br><span class="fine">§15.3 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§15.3 · agent · Linked 8 Sept (requirement audit) -- new cases in an existing file.</span></td>
+  <td class="fine">vitest · <code>src/test/absenceOnBoard.test.tsx</code> R-038a avatar/name/skill badges, R-038b count pill shows N and is absent with none, R-038c title attribute lists node/times/efficiency, R-038d dimmed (&quot;full&quot; class) only when fully allocated</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-039">
   <td class="g-n">R-039</td>
@@ -3488,12 +3488,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/84_shift_pattern_resolves_upward_test.sql</code> ST0-ST7 -- ST1 and ST6 as a supervisor granted only her line resolve the plant's pattern past her grant and carry it in board_window; ST3 nearest ancestor; ST4/ST5 the other company and a bogus uuid<br>e2e · <code>e2e/roleWalk.spec.ts</code> Ana's create form offers exactly Dana's shift chips; Marco's exactly Quinn's<br>vitest · <code>src/test/defects/DEF-0016.test.ts</code> the last definition of resolve_shift_template is SECURITY DEFINER (the text half; retire or promote)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-040">
+<tr class="r-covered" id="R-040">
   <td class="g-n">R-040</td>
-  <td class="reqmain"><b>Shift times are minutes from midnight; overnight starts the day</b><br><span class="fine">start_min is 0–1439 and end_min may exceed 1440 to express an overnight shift, which belongs to the day it starts. Breaks use the same coordinates and must lie inside their shift.</span>
-      <br><span class="fine">§16.1 · maintainer</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>Shift times are minutes from midnight; overnight starts the day</b><br><span class="fine">start_min is 0–1439 and end_min may exceed 1440 to express an overnight shift, which belongs to the day it starts.</span>
+      <br><span class="fine">§16.1 · maintainer · REWORDED 8 Sept (requirement audit): dropped &quot;Breaks use the same coordinates and must lie inside their shift&quot; -- the CHECK exists in migration 20260821000005 but nothing exercises it, so that clause is a real, separate gap, not proven by anything linked here. The start_min/end_min/overnight clause is proven and is now this row's whole claim.</span></td>
+  <td class="fine">sql · <code>supabase/tests/30_shifts_test.sql</code> 16a overnight (1320-&gt;1800) accepted, 16b inverted shift rejected, 16c 25h shift rejected<br>vitest · <code>src/test/boardGeometry.test.ts</code> shiftInstances produces a day -1 tail (case 7) -- an overnight shift from the day before renders on the first morning</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-041">
   <td class="g-n">R-041</td>
@@ -3509,12 +3509,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-043">
+<tr class="r-covered" id="R-043">
   <td class="g-n">R-043</td>
-  <td class="reqmain"><b>Compact zoom snaps to shift boundaries and offers full-shift quick actions</b><br><span class="fine">At Compact zoom drag-select snaps to shift boundaries and the creation popover offers one-click whole-shift creation for that row's pattern.</span>
-      <br><span class="fine">§16.2 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>Compact zoom snaps to shift boundaries</b><br><span class="fine">At Compact zoom, drag-select snaps to shift boundaries.</span>
+      <br><span class="fine">§16.2 · agent · REWORDED 8 Sept (requirement audit): dropped the second clause, &quot;the creation popover offers one-click whole-shift creation for that row's pattern&quot; -- grepped the whole board tree for any such control and found none; CreatePopover.tsx has no one-click whole-shift action. Not a test gap, a feature that was never built. The shift-boundary-snap clause was true and is now proven.</span></td>
+  <td class="fine">vitest · <code>src/test/snapConfig.test.ts</code> F6-F7 Compact's snap pairing matches useShiftSnap's own condition; the two non-Compact zooms never use shift-boundary snap<br>vitest · <code>src/test/interaction.test.ts</code> case3a/case3b useShiftSnap snaps to the nearest shift point</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-044">
   <td class="g-n">R-044</td>
@@ -3537,26 +3537,26 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">manual: Force a capacity rejection in the browser; PostgREST returns HTTP 409 with Proxy-Status error=PT409 (§18.8)<br>vitest · <code>src/test/errors.test.ts</code> Group N (added for DEF-0003): the product refusal, which sends no owner node, classifies as NotOfferedHere and produces the real sentence; the operator refusal still classifies with all four fields and its sentence is unchanged; the two sentences differ, which is why kind stays required; a detail missing kind, id or node_id is still Unknown; a non-string owner is dropped rather than carried</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-047">
+<tr class="r-covered" id="R-047">
   <td class="g-n">R-047</td>
   <td class="reqmain"><b>The client cache is dropped when the signed-in identity changes</b><br><span class="fine">Every cached query was fetched as one user under RLS, so on an identity change the cache is reset and active queries refetch. A routine token refresh, where the identity does not change, must not reset the cache or blank the board.</span>
-      <br><span class="fine">§17.4, §19.8 · agent · §19.14 says P1-5c committed a regression test for §19.8 but does not name the file.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17.4, §19.8 · agent · §19.14 says P1-5c committed a regression test for §19.8 but does not name the file -- linked 8 Sept (requirement audit).</span></td>
+  <td class="fine">vitest · <code>src/test/sessionProvider.test.tsx</code> S4 a token refresh resets nothing/refetches nothing, S5 a genuine identity change resets the query cache exactly once</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-048">
   <td class="g-n">R-048</td>
   <td class="reqmain"><b>Nearest-ancestor lookups walk ltree paths, never parent_id</b><br><span class="fine">Shift template and skill requirement resolution walk the node's path, because a parent may sit outside the loaded window and a parent_id chain can cycle.</span>
-      <br><span class="fine">§18, §19.1 · agent · Checked 8 Sept (requirement audit): the shift-template half is proven -- R-039's supabase/tests/84_shift_pattern_resolves_upward_test.sql (case ST3) exercises the same `path &lt;@ anc.path` pattern `resolve_shift_template` uses. The skill-requirement half is not: `check_eligibility`'s `required` CTE uses the identical ltree-ancestor join, but no test places a skill requirement on an ancestor node and checks eligibility at a descendant. Left uncovered as a whole rather than split into two rows; a test for the skill-requirement half is what would close this one.</span></td>
+      <br><span class="fine">§18, §19.1 · agent · Checked 8 Sept (requirement audit): the shift-template half is proven -- R-039's supabase/tests/84_shift_pattern_resolves_upward_test.sql (case ST3) exercises the same `path &lt;@ anc.path` pattern `resolve_shift_template` uses. The skill-requirement half is not: `check_eligibility`'s `required` CTE uses the identical ltree-ancestor join, but no test places a skill requirement on an ancestor node and checks eligibility at a descendant. Left uncovered as a whole rather than split into two rows; a test for the skill-requirement half is what would close this one. Checked again 8 Sept: the exact gap is `supabase/migrations/20260904000050_plant_settings.sql` lines 507-513 (the `required` CTE); a second attempt ran out of time building a confident seed fixture for it, so the fix is precisely located but still not written.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-049">
+<tr class="r-covered" id="R-049">
   <td class="g-n">R-049</td>
   <td class="reqmain"><b>A malformed timerange drops one block, never the board</b><br><span class="fine">The index builder catches a parse failure per row, drops that row and counts it. The board never renders blank because of one bad range.</span>
-      <br><span class="fine">§18 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">vitest · <code>src/test/boardIndex.test.ts</code> a malformed timerange drops that row, counts it, and does not throw (case 18)</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-050">
   <td class="g-n">R-050</td>
@@ -3568,14 +3568,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-051">
   <td class="g-n">R-051</td>
   <td class="reqmain"><b>Zoom keeps the instant under the visible track's centre</b><br><span class="fine">Changing zoom preserves the instant at the horizontal centre of the track area, measured excluding the sticky rail width, so repeated zooming does not drift.</span>
-      <br><span class="fine">§18.2, §18.4 · agent</span></td>
+      <br><span class="fine">§18.2, §18.4 · agent · Checked 8 Sept (requirement audit): blocked, not written. No test file imports BoardGrid at all. The zoom-centering effect (BoardGrid.tsx:407-439) depends on useLayoutEffect plus real getBoundingClientRect/ResizeObserver measurements this repo's jsdom setup doesn't provide (ResizeObserver is stubbed as a no-op). Needs either heavy DOM mocking or extracting the centre-math into a pure function first -- same class of gap as R-057/R-078.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-052">
   <td class="g-n">R-052</td>
   <td class="reqmain"><b>A background refetch never blanks the board</b><br><span class="fine">The spinner shows only when there is no cached data, not on every fetch, so the board does not flash empty each time it refreshes.</span>
-      <br><span class="fine">§18.2 · agent</span></td>
+      <br><span class="fine">§18.2 · agent · Checked 8 Sept (requirement audit): BoardPage.tsx:635 (`isFetching={boardQuery.isFetching &amp;&amp; hasData}`) implements exactly the claim but no test exercises it -- same blocker as R-023/R-025, needs a BoardPage-level render test with real fixtures rather than a small link-or-case fix. Queued.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3600,26 +3600,26 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-056">
+<tr class="r-covered" id="R-056">
   <td class="g-n">R-056</td>
   <td class="reqmain"><b>Fit scales rows to fill the available height within 0.75×–2.5×</b><br><span class="fine">fitScale is the available height divided by the natural Standard height, clamped to 0.75–2.5, computed in one pass from unscaled heights. Every density field is rounded to an integer, NaN and Infinity are guarded, a chip always fits its lane and an avatar its chip.</span>
-      <br><span class="fine">§18.10, §18.11, §18.12 · maintainer · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. src/test/scaleAudit.test.ts only lints which CSS files reference the --ui-scale token; it never imports or calls computeFitScale / FIT_MIN / FIT_MAX (geometry.ts). The NaN/Infinity guard is a real crash risk if actually untested.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18.10, §18.11, §18.12 · maintainer · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate -- src/test/scaleAudit.test.ts only lints which CSS files reference the --ui-scale token; it never imports or calls computeFitScale / FIT_MIN / FIT_MAX (geometry.ts). New test file closes it.</span></td>
+  <td class="fine">vitest · <code>src/test/fitScale.test.ts</code> F1-F3 raw ratio and both clamp directions, F4-F5 empty/unmeasured inputs return 1, F6-F8 NaN/Infinity guards, F9 exact clamp boundaries, F10-F12 scaleDensity identity/rounding/no-mutation, F13 a chip fits its lane and an avatar its chip at every clamp boundary and every named density</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-057">
   <td class="g-n">R-057</td>
   <td class="reqmain"><b>--ui-scale is published on the document root</b><br><span class="fine">Because popovers are portaled, any board custom property must be set on :root or the portal silently gets the fallback value.</span>
-      <br><span class="fine">§18.14 · agent · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. scaleAudit.test.ts is a file-reference lint only -- no test sets or reads --ui-scale on document.documentElement.</span></td>
+      <br><span class="fine">§18.14 · agent · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. scaleAudit.test.ts is a file-reference lint only -- no test sets or reads --ui-scale on document.documentElement. Attempted 8 Sept: blocked, not written -- the publish is an inline useEffect in BoardPage.tsx:342-354, and this repo's own test convention explicitly avoids mounting BoardPage whole (viewerBoard.test.tsx's own comment: needs session/query-client/API/drag-layer all mocked at once). Same class of gap as R-051/R-078.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-058">
+<tr class="r-covered" id="R-058">
   <td class="g-n">R-058</td>
   <td class="reqmain"><b>Popover width is computed once and keeps it on screen</b><br><span class="fine">One source of truth for the scaled width feeds both the inline style and the edge clamp, the viewport is tracked by a resize listener, and a malformed anchor never yields NaN. The popover stays inside the viewport near the right edge at maximum scale.</span>
-      <br><span class="fine">§19.11, §19.14 · agent · §19.14 names cases P17–P24 but not the test file.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.11, §19.14 · agent · §19.14 names cases P17–P24 but not the test file -- linked 8 Sept (requirement audit).</span></td>
+  <td class="fine">vitest · <code>src/test/placement.test.ts</code> P5-P6 measured height not hardcoded, P11 scaled width changes the right-edge answer, P15-P16 defaults and no-mutation, P17-P24 NaN/Infinity anchor and margin/gap edge cases</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-059">
   <td class="g-n">R-059</td>
@@ -3757,7 +3757,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-078">
   <td class="g-n">R-078</td>
   <td class="reqmain"><b>Tree drag releases pointer capture and keys Escape on drag presence</b><br><span class="fine">On pointer up or cancel the drag releases capture and clears state, and the Escape listener is installed once per drag rather than on every pointer move.</span>
-      <br><span class="fine">§19.36 · agent · Both found by review in §19.36 and folded into P1-5l rather than patched.</span></td>
+      <br><span class="fine">§19.36 · agent · Both found by review in §19.36 and folded into P1-5l rather than patched. Attempted 8 Sept (requirement audit): blocked, not written. jsdom has no native Pointer Events capture API (setPointerCapture is undefined on HTMLElement.prototype); even polyfilled, fireEvent.pointerUp/pointerCancel don't propagate pointerId the way pointerDown/pointerMove do. dragGesture.test.ts gets around exactly this by testing the hook's own methods with hand-built fake events, but NodeTreeEditor's drag logic is inline in the component, not exposed that way. Same class of gap as R-051/R-057.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4216,19 +4216,19 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/53_read_scoping_test.sql</code> R9, R10, R11</td>
   <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
-<tr class="r-uncovered" id="R-262">
+<tr class="r-covered" id="R-262">
   <td class="g-n">R-262</td>
   <td class="reqmain"><b>The board opens on the top of what you can see</b><br><span class="fine"><code>visible_board_roots()</code> returns the nodes the caller can see whose parent they cannot — the real roots for a company or site admin, the department for a supervisor — never a node they could not SELECT. It runs as the caller and still scopes to one org for a session that bypasses RLS. Inactive tops are ordered last, not excluded.</span>
-      <br><span class="fine">§19.70 · agent · §19.70 names ten SQL cases (V2–V9; V4 joins output back through `nodes`, V9 runs under BYPASSRLS) but not the file they live in.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.70 · agent · §19.70 names ten SQL cases (V2–V9; V4 joins output back through `nodes`, V9 runs under BYPASSRLS) but not the file they live in -- linked 8 Sept (requirement audit).</span></td>
+  <td class="fine">sql · <code>supabase/tests/54_board_roots_test.sql</code> V0-V9 -- V2 a site admin gets their own plant and only their own, V3 a mid-tree supervisor, V5 SECURITY INVOKER (not DEFINER, which would leak V2/V3), V9 the org-term guard holds under BYPASSRLS</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-263">
+<tr class="r-covered" id="R-263">
   <td class="g-n">R-263</td>
   <td class="reqmain"><b>The board header names the place; picker only with a choice</b><br><span class="fine">The board reads &quot;Board · &lt;place&gt; · &lt;dates&gt;&quot;; a picker appears only when more than one root is offered. A remembered choice the server no longer offers is dropped, matching is exact (not ltree-prefix), and a person with no grant on any node sees a sentence about themselves rather than an error.</span>
-      <br><span class="fine">§19.70 · agent · Seven `rootSelection.ts` cases (W5, W6) and SQL V8 are named; their files are not.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.70 · agent · Seven `rootSelection.ts` cases (W5, W6) and SQL V8 are named; their files are not -- linked 8 Sept (requirement audit).</span></td>
+  <td class="fine">vitest · <code>src/test/rootSelection.test.ts</code> W1-W7<br>sql · <code>supabase/tests/54_board_roots_test.sql</code> V8 a caller with no grants at all gets an empty list</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-264">
   <td class="g-n">R-264</td>
@@ -4293,12 +4293,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/scope.test.ts</code> XP4 (inverted for DEF-0002) a place not in the board's map is not offered, XP6 a part made only at another plant is absent from the dropdown, XP7 parts made at this plant are still offered — the fix cuts and does not empty, XP8 a part at this plant but on another line is still absent, XP9 a board rooted below a plant still offers its own parts<br>vitest · <code>src/test/dragGesture.test.ts</code> DEF-0002's second door: changing the selected place closes the popover it was opened over, so a stale cell cannot fall back to the whole catalogue</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-273">
+<tr class="r-covered" id="R-273">
   <td class="g-n">R-273</td>
   <td class="reqmain"><b>The board still loads after a deletion with history</b><br><span class="fine"><code>Run.productId</code> and <code>assignment.operatorId</code> are nullable in the client shapes and carry the snapshot fields; <code>history.ts</code> resolves the live row while it exists and synthesises a view from the snapshot afterwards. A synthesised row has an empty id and owner so <code>offeredAt</code> can never be asked about it.</span>
-      <br><span class="fine">§19.76 · agent · Case H19 and 24 in-place probe assertions are named; the test file is not.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.76 · agent · Case H19 and 24 in-place probe assertions are named; the test file is not -- linked 8 Sept (requirement audit).</span></td>
+  <td class="fine">vitest · <code>src/test/history.test.ts</code> H1-H19, esp. H18 a synthesised row has an empty id, H19 a deleted product's places list is empty</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-274">
   <td class="g-n">R-274</td>

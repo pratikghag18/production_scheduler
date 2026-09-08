@@ -455,6 +455,30 @@ describe("boardIndex.ts", () => {
     expect(row?.isTrack).toBe(false);
   });
 
+  it("R-D18a: a node whose level IS schedulable is a track row; one whose level is not is a group row — nothing hardcodes department/line/cell", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    // n-cell1 sits on lvl-cell (isSchedulable: true)
+    expect(idx.rows.find((r) => r.node.id === "n-cell1")?.isTrack).toBe(true);
+    // n-plant/n-assembly/n-line1 sit on non-schedulable levels
+    expect(idx.rows.find((r) => r.node.id === "n-plant")?.isTrack).toBe(false);
+    expect(idx.rows.find((r) => r.node.id === "n-assembly")?.isTrack).toBe(false);
+    expect(idx.rows.find((r) => r.node.id === "n-line1")?.isTrack).toBe(false);
+  });
+
+  it("R-D18b: indentation (depth) comes from path segment count relative to the root, not from the level's own position", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    expect(idx.rows.find((r) => r.node.id === "n-plant")?.depth).toBe(0);
+    expect(idx.rows.find((r) => r.node.id === "n-assembly")?.depth).toBe(1);
+    expect(idx.rows.find((r) => r.node.id === "n-line1")?.depth).toBe(2);
+    expect(idx.rows.find((r) => r.node.id === "n-cell1")?.depth).toBe(3);
+    // A sibling branch at the same level depth (machining/cncline/cell6) lands
+    // at the same depths as assembly/line1/cell1 — depth tracks the path, not
+    // a hardcoded department/line/cell scheme.
+    expect(idx.rows.find((r) => r.node.id === "n-machining")?.depth).toBe(1);
+    expect(idx.rows.find((r) => r.node.id === "n-cncline")?.depth).toBe(2);
+    expect(idx.rows.find((r) => r.node.id === "n-cell6")?.depth).toBe(3);
+  });
+
   it("P1-4c: BoardIndex.density round-trips the density it was given", () => {
     for (const d of DENSITIES) {
       const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, d);
