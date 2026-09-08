@@ -156,6 +156,15 @@ describe("absenceGaps — R-359, a part-day absence is judged by the HOURS", () 
     expect(hit).not.toBeNull();
   });
 
+  it("AB24: a shift ending exactly when the absence starts does not clash (half-open, touching is not overlapping)", () => {
+    const hit = absenceGaps(
+      [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],
+      el,
+      shift("2027-06-10T07:00:00Z", "2027-06-10T09:00:00Z"),
+    );
+    expect(hit).toBeNull();
+  });
+
   it("AB16: an open-ended window overlaps a part-day absence that ends after the window's start", () => {
     const hit = absenceGaps(
       [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],

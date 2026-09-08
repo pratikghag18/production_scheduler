@@ -63,6 +63,12 @@
 --        byte 0066's answer
 --   AB22 a part-day row INSIDE a whole-day absence for the same person is
 --        allowed, and absence_overlap still answers absent for either
+--   AB23 a shift starting exactly when a part-day absence ENDS does not clash
+--        (half-open, touching is not overlapping)
+--   AB24 a shift ending exactly when a part-day absence STARTS does not clash
+--        (half-open, touching is not overlapping)
+--   AB25 the same person may hold two part-day absences that TOUCH (08:00-09:00
+--        and 09:00-10:00), both accepted by absences_part_day_excl
 -- ============================================================================
 
 BEGIN;
@@ -732,6 +738,66 @@ EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB22: unexpected % (sq
 END $$;
 ROLLBACK TO SAVEPOINT sp_AB22;
 
+\echo 'AB23: a shift starting exactly when a part-day absence ENDS does not clash (half-open, touching is not overlapping)'
+SAVEPOINT sp_AB23;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_res jsonb; v_a jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_res := set_absence(v_el, '2027-06-18', '2027-06-18', 'dentist', NULL,
+                        '2027-06-18 09:00+00'::timestamptz, '2027-06-18 13:00+00'::timestamptz);
+  -- A shift starting exactly at 13:00, the absence's own ends_at.
+  v_a := absence_overlap(v_el, tstzrange('2027-06-18 13:00+00','2027-06-18 15:00+00'));
+  RESET ROLE;
+  IF (v_res->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' the part-day absence was not written'; END IF;
+  IF (v_a->>'absent')::boolean THEN v_ok := false; v_why := v_why || ' a shift starting exactly when the absence ends was wrongly flagged'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB23'; ELSE RAISE NOTICE 'FAIL AB23:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB23: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB23;
+
+\echo 'AB24: a shift ending exactly when a part-day absence STARTS does not clash (half-open, touching is not overlapping)'
+SAVEPOINT sp_AB24;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_res jsonb; v_a jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_res := set_absence(v_el, '2027-06-19', '2027-06-19', 'dentist', NULL,
+                        '2027-06-19 09:00+00'::timestamptz, '2027-06-19 13:00+00'::timestamptz);
+  -- A shift ending exactly at 09:00, the absence's own starts_at.
+  v_a := absence_overlap(v_el, tstzrange('2027-06-19 07:00+00','2027-06-19 09:00+00'));
+  RESET ROLE;
+  IF (v_res->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' the part-day absence was not written'; END IF;
+  IF (v_a->>'absent')::boolean THEN v_ok := false; v_why := v_why || ' a shift ending exactly when the absence starts was wrongly flagged'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB24'; ELSE RAISE NOTICE 'FAIL AB24:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB24: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB24;
+
+\echo 'AB25: the same person may hold two part-day absences that TOUCH (08:00-09:00 and 09:00-10:00)'
+SAVEPOINT sp_AB25;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_r1 jsonb; v_r2 jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_r1 := set_absence(v_el, '2027-06-21', '2027-06-21', 'first', NULL,
+                       '2027-06-21 08:00+00'::timestamptz, '2027-06-21 09:00+00'::timestamptz);
+  v_r2 := set_absence(v_el, '2027-06-21', '2027-06-21', 'second', NULL,
+                       '2027-06-21 09:00+00'::timestamptz, '2027-06-21 10:00+00'::timestamptz);
+  RESET ROLE;
+  IF (v_r1->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' first (touching) absence not written'; END IF;
+  IF (v_r2->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' second (touching) absence not written'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB25'; ELSE RAISE NOTICE 'FAIL AB25:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB25: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB25;
+
 ROLLBACK;
 
-\echo '88_absences_test.sql complete (AB0-AB22 with AB8b, AB9b, AB10b, AB11b)'
+\echo '88_absences_test.sql complete (AB0-AB25 with AB8b, AB9b, AB10b, AB11b)'
