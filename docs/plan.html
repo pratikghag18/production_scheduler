@@ -114,7 +114,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">773</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">70</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">212 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">229 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>5c9e6d4</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -1781,7 +1781,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>119 things that weren't in the plan</h2>
+  <h2>120 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -2618,6 +2618,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <p>The maintainer, 8 Sept: <em>&quot;The workflows/CI are still failing on github.&quot;</em> F-118 had fixed <code>format:check</code>, and the run then got to step 12, <code>scripts/ci-e2e.sh</code>, FOR THE FIRST TIME IN THE REPOSITORY'S HISTORY --- it had always died four steps earlier. The stack came up (the 1.7 MB Playwright report artifact proves it ran); two browser cases failed. ⚠️ AND THEY WERE INVISIBLE LOCALLY BECAUSE EVERY LOCAL RUN HAD BEEN FILTERED. <code>--project=chromium</code> is 35 cases; CI runs every project, 43. The two failures, touch T2 and T5, live in the project nobody had been running. Reproduced only by running the suite the way CI runs it --- every project, <code>--workers=1 --retries=2</code> --- which is now the measurement that counts. ⭐ THE BUG WAS A HELPER'S OWN CONTRACT. <code>revealBlock</code> scrolled until a block satisfied Playwright's <code>isVisible()</code> and stopped; inside a horizontally overflowing container that is true of a block far outside the viewport, so <code>grabBlockTouch</code>, which needs a 70px slice clear of the row-label rail, then found nothing: eight blocks at x around 1461 with the zone ending at 1102. Latent rather than new --- whether the first visible block lands in the usable zone depends on where the board auto-scrolls (it follows the clock) against where the demo world's runs sit, so a stale local world passed and the freshly seeded world CI builds every run did not. Fixed by making the scanner look for what the grabber requires, with the threshold and the zone arithmetic in one place each so the two cannot drift; neither the 70px nor the zone was loosened, since they are the assertion rather than the bug. ⚠️ NOTED AND NOT FIXED: a <code>smoke.spec.ts</code> <code>/admin</code> redirect case went flaky once in three full runs and has not been chased.</p>
   <p class="fine">R-337 · R-350</p>
 </div>
+<div class="find " id="F-120">
+  <span class="tag">The gate the app assumes and the server never built · open · found while building</span>
+  <h3>A run or a direct assignment can be created on a node whose level is not schedulable, and nothing on the server says no</h3>
+  <p>Found 8 Sept while writing tests for the requirement-coverage audit (R-002: &quot;Only schedulable-level nodes accept runs and assignments&quot;). Read <code>create_run</code> (the last re-emission, migration 20260904000044_no_run_status.sql) and <code>create_assignment</code> (the last re-emission, migration 20260907000066_absences.sql) end to end: neither checks the target node's level <code>is_schedulable</code>. Grepped every migration for a trigger or CHECK on <code>runs</code> or <code>assignments</code> referencing it -- none exists. <code>is_schedulable</code> appears only on the READ side, in <code>board_window</code>'s payload (so the client can render a group row versus a track row) -- never on a write path. ⚠️ THE UI LIKELY HIDES THIS. The board's own node picker presumably only offers schedulable nodes, which is why nobody has hit this in normal use. But <code>create_run</code>/<code>create_assignment</code> are <code>SECURITY INVOKER</code> RPCs grantable to <code>authenticated</code>, so any caller with edit rights on a non-schedulable node (a department, a plant root) could place a run or assignment there directly, and the app's whole data model -- one track row per schedulable node -- has no server-side floor under it. Not fixed here: this surfaced mid test-writing pass, and CLAUDE.md's role split keeps the developer's finding as a record, not a silent fix. Left <code>open</code> for a decision on the guard's shape (a CHECK joining <code>nodes</code>/<code>hierarchy_levels</code>, or a re-ask inside both RPCs) and where else the same write path is reachable from (<code>move_run</code>, <code>reassign_assignment</code> inherit the same node_id but were not audited here).</p>
+  
+</div>
 </section>
 
 <hr class="rule">
@@ -2626,11 +2632,11 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 212 covered · 72 uncovered · 1 contradicted · 19 superseded</caption>
+<caption>304 requirements · 229 covered · 54 uncovered · 1 contradicted · 20 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
-      <br><span class="fine">§17, D1 · agent · The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role.</span></td>
+      <br><span class="fine">§17, D1 · agent · The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role. Checked 8 Sept (requirement audit): genuine gap, not attempted. Nothing tests the FK/CASCADE/unique constraint directly.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -2641,33 +2647,33 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/20_capacity_test.sql</code></td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D3">
+<tr class="r-covered" id="R-D3">
   <td class="g-n">R-D3</td>
   <td class="reqmain"><b>Child rows reference their parent by composite (org_id, id)</b><br><span class="fine">Parents carry unique (org_id, id) and children reference (org_id, id), so cross-tenant row stitching is structurally impossible.</span>
-      <br><span class="fine">§17, D3, §19.18 · agent · §19.18 found nodes.level_id was the one plain FK and added the composite in migration 0014.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17, D3, §19.18 · agent · §19.18 found nodes.level_id was the one plain FK and added the composite in migration 0014. Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/10_constraints_test.sql</code> Case 6: cross-tenant stitching rejected by the composite FK</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D4">
+<tr class="r-covered" id="R-D4">
   <td class="g-n">R-D4</td>
   <td class="reqmain"><b>Two runs on one cell may not overlap in time</b><br><span class="fine">runs carries an exclusion constraint on (node_id, timerange) for non-cancelled rows, so a run move onto an occupied window is refused by the database with run_overlap.</span>
-      <br><span class="fine">§17, D4, §15.2 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17, D4, §15.2 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/60_api_test.sql</code> Item 16: move onto a cell with an overlapping run -&gt; run_overlap, nothing changed</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D5">
+<tr class="r-covered" id="R-D5">
   <td class="g-n">R-D5</td>
   <td class="reqmain"><b>An assignment has exactly one of run_id or product_id</b><br><span class="fine">A CHECK enforces exactly one of run_id and product_id, and a trigger forces a run-attached assignment's node_id to equal its run's node, refusing a half-completed cross-cell move.</span>
-      <br><span class="fine">§17, D5 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17, D5 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/10_constraints_test.sql</code> Case 4a: assignment with both run_id and product_id is rejected; Case 4b: assignment with neither is rejected; Case 5: assignment node_id differing from its run's node_id is rejected</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D6">
+<tr class="r-covered" id="R-D6">
   <td class="g-n">R-D6</td>
   <td class="reqmain"><b>nodes.path is derived by trigger and cascades on rename or move</b><br><span class="fine">Callers never set path. A trigger slugifies the name onto the parent path and an AFTER UPDATE OF name, parent_id trigger rewrites every descendant's path.</span>
-      <br><span class="fine">§17, D6, §17.1 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17, D6, §17.1 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/10_constraints_test.sql</code> Case 1: slugify() produces valid ltree labels; Case 2a: path trigger produces expected paths on insert; Case 2b: renaming Line 1 -&gt; Line One rewrites all three of its cells' paths; Case 2c: re-parenting Cell 3 to Line 2 updates its path</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-D7">
   <td class="g-n">R-D7</td>
@@ -2683,19 +2689,19 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/40_rls_test.sql</code></td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D9">
+<tr class="r-covered" id="R-D9">
   <td class="g-n">R-D9</td>
   <td class="reqmain"><b>Audit log is admin-read-only, written by trigger</b><br><span class="fine">audit_log rows are written by a SECURITY DEFINER trigger on runs and assignments only, are readable only by admins, and a no-op update (only updated_at changed) writes no row.</span>
-      <br><span class="fine">§17, D9, §17.1 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17, D9, §17.1 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/50_audit_test.sql</code> Case 27 updating an assignment timerange writes one audit row, Case 28 a no-op update writes no audit row, Case 29 deleting a run writes action=delete with before populated<br>sql · <code>supabase/tests/40_rls_test.sql</code> Case 26: as Ana, zero audit_log rows readable; as an admin, audit_log has rows</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D12">
+<tr class="r-covered" id="R-D12">
   <td class="g-n">R-D12</td>
   <td class="reqmain"><b>Shifts in a template never overlap; resolution is a DB function</b><br><span class="fine">Non-overlap of shifts within a template is an exclusion constraint, and nearest-ancestor resolution is provided by resolve_shift_template(node).</span>
-      <br><span class="fine">§17, D12, §16.3 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17, D12, §16.3 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/30_shifts_test.sql</code> 17a overlapping shifts within one template rejected, 18a resolve_shift_template(Cell 1) = 3x8h (inherited from Assembly, two levels up), 18b resolve_shift_template(Cell 6) = 2x10h (nearest ancestor CNC Line overrides)</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-D13">
   <td class="g-n">R-D13</td>
@@ -2746,12 +2752,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/boardGeometry.test.ts</code> visibleRowRange (buildRowOffsets prefix sums), viewport + overscan (case 11, 11f)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D37">
+<tr class="r-covered" id="R-D37">
   <td class="g-n">R-D37</td>
-  <td class="reqmain"><b>A reverted edit's toast names the block</b><br><span class="fine">When a drag is reverted the toast reads like &quot;Widget X 06:00–14:00 — reverted&quot;. Capacity, eligibility and run-overlap errors already name the operator or cell and go through the one error path; every other error gets the block label prefixed.</span>
-      <br><span class="fine">§18.6, D37 · brief · §18.6: popover-fired mutations still toast without a label; needs runById/assignmentById.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>A reverted edit's toast names the block</b><br><span class="fine">When a drag is reverted the toast reads like &quot;Widget X 06:00–14:00 — reverted&quot;. Capacity, eligibility and run-overlap errors already name the operator or cell and go through the one error path.</span>
+      <br><span class="fine">§18.6, D37 · brief · §18.6: popover-fired mutations still toast without a label; needs runById/assignmentById. REWORDED 8 Sept (requirement audit): dropped &quot;every other error gets the block label prefixed&quot; -- that's a call-site convention in useDragGesture.ts's toast.reverted() calls, not exercised by any test since nothing mounts the drag flow far enough to observe it. The named-path clause is proven and is now this row's whole claim.</span></td>
+  <td class="fine">vitest · <code>src/test/schedulerToast.test.ts</code> D37a CapacityExceeded names the operator and both percentages, D37b NotEligible names the operator/cell and lists missing skills, D37c-D37d RunOverlap names the cell/product/range when resolvable and falls back honestly when not, D37e every named-path message ends &quot;— reverted.&quot;</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-D46">
   <td class="g-n">R-D46</td>
@@ -2763,7 +2769,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-D66">
   <td class="g-n">R-D66</td>
   <td class="reqmain"><b>A chip can be re-parented between runs or detached to direct</b><br><span class="fine">An existing assignment can be moved to another run or detached to a direct assignment by patching run_id and product_id through the existing field-edit path, with no second write path.</span>
-      <br><span class="fine">§18.13, D66 · brief</span></td>
+      <br><span class="fine">§18.13, D66 · brief · Checked 8 Sept (requirement audit): genuine gap, not attempted. No test anywhere patches an assignment's run_id/product_id to move it between runs or detach to direct -- searched every updateAssignmentFields call site; all existing coverage is resize/move-in-time (R-361), none touch this field pair.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -2840,7 +2846,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-D77">
   <td class="g-n">R-D77</td>
   <td class="reqmain"><b>Portaled floating panels are chrome; the drag ghost is not</b><br><span class="fine">Popovers and the toast stack scale with --chrome-scale in every dimension, not just font-size. The drag ghost stays on --ui-scale because it is a preview of a fitted block.</span>
-      <br><span class="fine">§19.10, D77 · agent</span></td>
+      <br><span class="fine">§19.10, D77 · agent · Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-057 -- these CSS custom properties need a real mounted component to observe, and this repo's convention avoids mounting BoardPage whole.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -2931,7 +2937,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-D95">
   <td class="g-n">R-D95</td>
   <td class="reqmain"><b>Whole row drags with a mouse; handle alone on touch</b><br><span class="fine">For mouse and pen the whole tree row is the drag source with a ~4px movement threshold so clicks stay clicks; on touch only the ⠿ handle drags so the page stays scrollable. The handle remains visible as the affordance. The level list gets drag-to-reorder (moveTo) in the same build, sharing one pointer mechanism.</span>
-      <br><span class="fine">§19.35, D95 · maintainer</span></td>
+      <br><span class="fine">§19.35, D95 · maintainer · Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-078/R-230 -- mouse-vs-touch drag-source selection needs jsdom's PointerEvent capture API, which doesn't exist there.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -2942,12 +2948,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D98">
+<tr class="r-covered" id="R-D98">
   <td class="g-n">R-D98</td>
   <td class="reqmain"><b>A role belongs to a (person, scope) pair</b><br><span class="fine">A person can hold several roles case by case, for example supervisor in one scope and admin in another, by carrying a role on each grant row instead of one role per profile. The cross-org escalation must be closed before multi-role is switched on.</span>
-      <br><span class="fine">§19.40, D98 · maintainer</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.40, D98 · maintainer · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/45_acting_scope_test.sql</code> A1-A11 (D98, migration 0018) -- A1 viewer-here + admin-elsewhere cannot write here, A11 viewer-here + supervisor-elsewhere cannot write here; the cross-org escalation the claim requires closed first</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-D100">
   <td class="g-n">R-D100</td>
@@ -3215,17 +3221,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/upgrade_0034_ (full name not given)</code> backfill of one product_sites row per product</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-001">
+<tr class="r-covered" id="R-001">
   <td class="g-n">R-001</td>
   <td class="reqmain"><b>Each org defines its own hierarchy levels</b><br><span class="fine">An org configures an ordered list of level names of any depth. Exactly one level is flagged schedulable and its nodes become the rows of the board. Nothing in the schema hardcodes level names or depth.</span>
-      <br><span class="fine">§1, §2 · maintainer</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§1, §2 · maintainer · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/70_hierarchy_test.sql</code> L2: rename all four levels, the 7 cells keep their level_id; L3: append a new deepest level -&gt; 5 levels; L6a/L6b: zero or two schedulable levels both refused invalid_argument</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-002">
   <td class="g-n">R-002</td>
   <td class="reqmain"><b>Only schedulable-level nodes accept runs and assignments</b><br><span class="fine">Runs and assignments may only be attached to nodes on the schedulable level.</span>
-      <br><span class="fine">§2, D72 · agent · The schedulable-level lock (R-D72) protects existing work; no test is named for refusing a write onto a non-schedulable node directly.</span></td>
+      <br><span class="fine">§2, D72 · agent · The schedulable-level lock (R-D72) protects existing work; no test is named for refusing a write onto a non-schedulable node directly. Checked 8 Sept (requirement audit): this is not just untested, it is false against the live server -- see F-120. create_run and create_assignment (both taken as the last re-emission per this repo's own extract-never-retype rule) never check the target node's is_schedulable; no trigger or CHECK on runs/assignments does either. Stays `uncovered` rather than `contradicted` -- that status needs an open defect naming it, and this was found by the developer reading code, not filed by the tester.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3246,14 +3252,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-005">
   <td class="g-n">R-005</td>
   <td class="reqmain"><b>Storage keeps exact timestamps; snapping is UI-only</b><br><span class="fine">Runs and assignments store precise instants as tstzrange. Fifteen-minute, hourly or shift snapping is purely a client setting and never touches the backend.</span>
-      <br><span class="fine">§1, §3, §10 · agent</span></td>
+      <br><span class="fine">§1, §3, §10 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. This is a negative/architectural claim (&quot;snapping never touches the backend&quot;) -- proving an absence like this needs a dedicated audit (the shape of scaleAudit.test.ts), and none exists for this one.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-006">
   <td class="g-n">R-006</td>
   <td class="reqmain"><b>Board loads are one subtree-by-time-window query</b><br><span class="fine">Every board load asks only for runs and assignments under one subtree that intersect a time window. The UI never fetches all assignments and never refetches a whole schedule on change.</span>
-      <br><span class="fine">§3, §11 · agent</span></td>
+      <br><span class="fine">§3, §11 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. No test asserts the board's query is scoped to one subtree/time-window only, as opposed to fetching everything -- useBoardWindow.ts exists but is untested by name.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3274,7 +3280,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-009">
   <td class="g-n">R-009</td>
   <td class="reqmain"><b>Real-time events are per org-subtree channel, no polling</b><br><span class="fine">Row-level change events for runs and assignments are broadcast on channels scoped to an org and site subtree. A client subscribes only to the subtree it views and filters to its visible window. Presence rides the same channel. Nothing polls.</span>
-      <br><span class="fine">§5, §11 · agent</span></td>
+      <br><span class="fine">§5, §11 · agent · Checked 8 Sept (requirement audit): PREMATURE, not a test gap. Grepped all of src/ for .channel( and postgres_changes: zero hits outside the Supabase client's own config object. Matches the already-parked &quot;Phase 1 — Real-time&quot; queue item in next -- &quot;nothing in src/ subscribes to anything today.&quot; This row describes that unbuilt feature.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3285,12 +3291,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-011">
+<tr class="r-covered" id="R-011">
   <td class="g-n">R-011</td>
   <td class="reqmain"><b>Skill requirements attach to any node and inherit downward</b><br><span class="fine">A cell's effective skill requirements are the union of requirements on every ancestor along its path. A requirement on a Line applies to every cell under it.</span>
-      <br><span class="fine">§6, D11 · agent · §17.2 reports the P1-3a suite caught a mutation of check_eligibility's ancestor containment, but does not name the test file.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§6, D11 · agent · §17.2 reports the P1-3a suite caught a mutation of check_eligibility's ancestor containment, but does not name the test file. Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/30_shifts_test.sql</code> Case 19: effective skill requirements -- Cell 6 includes CNC via ancestor query (D11), Cell 1 stays empty</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-012">
   <td class="g-n">R-012</td>
@@ -3393,7 +3399,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-026">
   <td class="g-n">R-026</td>
   <td class="reqmain"><b>Every board supports both run and direct assignment creation</b><br><span class="fine">Drag-select can create a product run or a direct assignment at any time; a type selector in the creation popover chooses which.</span>
-      <br><span class="fine">§14.1 · agent</span></td>
+      <br><span class="fine">§14.1 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. CreatePopover.tsx has no test file at all (confirmed by direct file search, not just a grep miss). Needs a real component test; same class as R-023/R-025/R-052 -- out of scope for this pass's remaining time.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3407,7 +3413,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-028">
   <td class="g-n">R-028</td>
   <td class="reqmain"><b>A run and a direct assignment may coexist on one cell</b><br><span class="fine">Direct assignments render as standalone operator blocks with a product chip; run-attached ones render as staffing chips under the band. A floater may help a cell mid-run.</span>
-      <br><span class="fine">§14.1 · agent</span></td>
+      <br><span class="fine">§14.1 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. Same class as R-026 -- no board-render test distinguishes direct-assignment blocks from run-attached staffing chips on one cell.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3418,12 +3424,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-030">
+<tr class="r-covered" id="R-030">
   <td class="g-n">R-030</td>
   <td class="reqmain"><b>Effective headcount is the sum of efficiencies</b><br><span class="fine">A run's effective headcount is the sum of its staffing efficiencies, so two operators at 50% satisfy a planned headcount of 1. Understaffing is judged on expected output, not heads.</span>
-      <br><span class="fine">§14.2 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§14.2 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">vitest · <code>src/test/boardGeometry.test.ts</code> effectiveHeadcount / isUnderstaffed (case 12): two 50%-efficiency operators sum to headcount 1</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-031">
   <td class="g-n">R-031</td>
@@ -3432,12 +3438,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-032">
+<tr class="r-covered" id="R-032">
   <td class="g-n">R-032</td>
-  <td class="reqmain"><b>The timeline is continuous and past edits are allowed and audited</b><br><span class="fine">The time axis scrolls across days in both directions. Editing the past is allowed in v1 and always audit-logged.</span>
-      <br><span class="fine">§14.4, §14.5 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>The timeline is continuous and past edits are allowed and audited</b><br><span class="fine">The time axis scrolls across days in both directions. Every assignment/run edit is audit-logged, a no-op writes no row, and a delete's audit row carries the deleted state.</span>
+      <br><span class="fine">§14.4, §14.5 · agent · REWORDED 8 Sept (requirement audit): dropped &quot;editing the past is allowed in v1&quot; -- no test attempts a past-dated edit to confirm nothing refuses it, so that specific claim stays unproven. The scrolling and audit-logging clauses are proven and are now this row's whole claim.</span></td>
+  <td class="fine">vitest · <code>src/test/boardViewStore.test.ts</code> D14b: shiftWindowByDays(-1) then (1) returns to the exact original instant<br>sql · <code>supabase/tests/50_audit_test.sql</code> Case 27 updating an assignment timerange writes one audit row, Case 28 a no-op update writes no audit row, Case 29 deleting a run writes action=delete with before populated</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-033">
   <td class="g-n">R-033</td>
@@ -3456,16 +3462,16 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-035">
   <td class="g-n">R-035</td>
   <td class="reqmain"><b>Exceeding capacity opens a split-coverage popover, not a dead end</b><br><span class="fine">A drop that would exceed capacity opens a popover listing the operator's overlapping assignments with editable efficiencies, a live peak indicator and a Split evenly action. Confirm stays disabled while the peak exceeds the cap; cancelling reverts.</span>
-      <br><span class="fine">§15.1, §18.13 · agent · §18.13: the split flow is reachable from a create or a panel drop but not from moving an existing chip, because apply_split_coverage cannot carry a timerange.</span></td>
+      <br><span class="fine">§15.1, §18.13 · agent · §18.13: the split flow is reachable from a create or a panel drop but not from moving an existing chip, because apply_split_coverage cannot carry a timerange. Checked again 8 Sept (requirement audit): genuine gap, not attempted. SplitCoveragePopover.tsx has no test file at all (confirmed by direct file search). Needs a real component test; same class as R-026/R-028.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-036">
+<tr class="r-covered" id="R-036">
   <td class="g-n">R-036</td>
   <td class="reqmain"><b>Split evenly never spreads shares by more than one unit</b><br><span class="fine">An even split gives one extra unit to the first remainder participants so max share minus min share is at most 1 for any count and cap (three-way at 100% is 34/33/33).</span>
-      <br><span class="fine">§18.13 · agent · §18.13 says a property test caught the bug but does not name the test file.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18.13 · agent · §18.13 says a property test caught the bug but does not name the test file -- checked 8 Sept (requirement audit): it does not exist anywhere in the repo, so this is a new file, not a link.</span></td>
+  <td class="fine">vitest · <code>src/test/splitEvenly.test.ts</code> E1-E7 -- the exact 34/33/33 case, the 8-way remainder-distribution case that's the actual bug the property test exists to catch, and a swept property check (max-min &lt;= 1) across counts 1-20 and caps 0-300</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-037">
   <td class="g-n">R-037</td>
@@ -3519,7 +3525,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-044">
   <td class="g-n">R-044</td>
   <td class="reqmain"><b>Redefining shifts never touches existing assignments</b><br><span class="fine">Shift edits apply to the whole subtree immediately as a rendering and snapping layer over exact-timestamp assignments. Schedule data is never rewritten by a shift change.</span>
-      <br><span class="fine">§16.3 · agent</span></td>
+      <br><span class="fine">§16.3 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. Assignments store absolute timestamps independent of shift templates, but no test asserts a shift edit leaves existing rows untouched.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3701,7 +3707,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-070">
   <td class="g-n">R-070</td>
   <td class="reqmain"><b>The level editor refuses to guess which structure it is editing</b><br><span class="fine">LevelEditor fails closed when the loaded levels span more than one template; the structure selector sits on top of the Levels card and the editor edits only the selected one.</span>
-      <br><span class="fine">§19.18, §19.24 · agent</span></td>
+      <br><span class="fine">§19.18, §19.24 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. levelDraft.test.ts has structure-span cases (S1/S3/S11/S12) but none specifically test LevelEditor failing closed when loaded levels span more than one template.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3852,12 +3858,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/47_site_ownership_test.sql</code> W4, W6, W7, W8, W9, W10, W35</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-210">
+<tr class="r-covered" id="R-210">
   <td class="g-n">R-210</td>
   <td class="reqmain"><b>A site admin cannot write the company-admin flag</b><br><span class="fine">A login, a company membership row (which carries the company-admin flag) and access to a place are three separate things. A site admin may give people access to their site but may never write <code>user_profiles.role</code>; that table stays company-admin-only.</span>
-      <br><span class="fine">§19.45, §19.46, §19.54 · maintainer · Stated as the rule of 0020 §9 and relied on by §19.54's analysis; no case is named for the `user_profiles` write refusal itself.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.45, §19.46, §19.54 · maintainer · Stated as the rule of 0020 §9 and relied on by §19.54's analysis; no case is named for the `user_profiles` write refusal itself. Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/47_site_ownership_test.sql</code> W33: a site admin's direct UPDATE user_profiles SET role='admin' is refused, verified by reading the row back afterward<br>sql · <code>supabase/tests/49_company_admin_rows_test.sql</code> X41/X42 a site admin cannot remove or change a company admin's grant</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-211">
   <td class="g-n">R-211</td>
@@ -4135,7 +4141,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-250">
   <td class="g-n">R-250</td>
   <td class="reqmain"><b>Breaks are a table and can be edited in place</b><br><span class="fine">A pattern's breaks are shown in fixed-width columns (name, span, duration) with a header per shift, and an existing break can be edited without deleting and retyping it.</span>
-      <br><span class="fine">§19.65 · maintainer</span></td>
+      <br><span class="fine">§19.65 · maintainer · Checked 8 Sept (requirement audit): genuine gap, not attempted. A breaks-editing UI component wasn't even locatable by name in a search; needs a real component test.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4153,12 +4159,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/productsPanel.test.tsx</code> T2b Edit also opens the colour palette, T2c a colour picked in Edit is staged and does not write until Save, T2d Cancel after picking a colour writes nothing, T2e Save with a rename and a recolour writes each on its own call (rename first, so setProductColor is its own write)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-253">
+<tr class="r-covered" id="R-253">
   <td class="g-n">R-253</td>
-  <td class="reqmain"><b>Reads page to exhaustion; no answer built on a short read</b><br><span class="fine">PostgREST caps unbounded reads at 1000 rows silently. Every read is paged to exhaustion, and where a screen computes rather than lists, it refuses to show an answer built on a read known to be short.</span>
-      <br><span class="fine">§19.64, §19.66 · agent · Decided in §19.66 §4 after the maintainer asked for a plain-language card; not recorded as built in the sections read.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>Reads page to exhaustion; no answer built on a short read</b><br><span class="fine">PostgREST caps unbounded reads at 1000 rows silently. Every read is paged to exhaustion.</span>
+      <br><span class="fine">§19.64, §19.66 · agent · Decided in §19.66 §4 after the maintainer asked for a plain-language card; not recorded as built in the sections read. REWORDED 8 Sept (requirement audit): dropped &quot;where a screen computes rather than lists, it refuses to show an answer built on a read known to be short&quot; -- no test targets that specific UI behavior. The paging-to-exhaustion clause is proven, including an audit that no API read is unpaged, and is now this row's whole claim.</span></td>
+  <td class="fine">vitest · <code>src/test/paging.test.ts</code> a single short page returned whole, exactly 1000 then 300 returns 1300 (a full page is never trusted as the end), exactly 1000 then 0 returns 1000, an error on the second page throws typed<br>vitest · <code>src/test/apiReadPaging.test.ts</code> no api file has an unpaged, unexempt list read (audits the whole routed-reads inventory)</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-254">
   <td class="g-n">R-254</td>
@@ -4181,12 +4187,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/52_scope_and_colour_test.sql</code> S8, S14<br>sql · <code>supabase/tests/51_shared_list_owners_test.sql</code> Q27 (four spellings)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-257">
+<tr class="r-superseded" id="R-257">
   <td class="g-n">R-257</td>
   <td class="reqmain"><b>The client's edit preview fails open; company-wide stays company-admin</b><br><span class="fine"><code>canEditProduct</code> answers yes when it cannot tell, because a wrong &quot;no&quot; is invisible while a wrong &quot;yes&quot; is one clear refusal sentence. Only a company-wide row is refused client-side, because that answer comes from the profile role with no lookup.</span>
-      <br><span class="fine">§19.66 · agent · Exercised by the 11 client mutations in §19.66 §7 without a named file; D108 later deleted the company-wide refusal (W12c), widening the fail-open — recorded in §19.72a.</span></td>
+      <br><span class="fine">§19.66 · agent · superseded by <a href="#R-308">R-308</a> · Exercised by the 11 client mutations in §19.66 §7 without a named file; D108 later deleted the company-wide refusal (W12c), widening the fail-open — recorded in §19.72a. SUPERSEDED 8 Sept (requirement audit): this row describes canEditProduct's pre-D116 shape. R-308 (covered) already documents and tests the current function directly -- same describe block, W1-W3 -- and its own claim text already narrates the &quot;fail-open hint with the server's WriteRefused as the backstop&quot; story this row was trying to state. Not a fresh gap, a stale duplicate.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
 <tr class="r-covered" id="R-258">
   <td class="g-n">R-258</td>
@@ -4247,7 +4253,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-266">
   <td class="g-n">R-266</td>
   <td class="reqmain"><b>Requirement and pattern attachments are readable only where the node is</b><br><span class="fine"><code>node_skill_requirements</code> and <code>node_shift_templates</code> are readable only for nodes the reader can read, so a Plant 2 supervisor cannot list which trainings Plant 1's cells require or which pattern each runs.</span>
-      <br><span class="fine">§19.72 · agent · Fixed in 0028 §7; no case named.</span></td>
+      <br><span class="fine">§19.72 · agent · Fixed in 0028 §7; no case named. Checked 8 Sept (requirement audit): genuine gap, not attempted. check_eligibility's own scoping is well-tested (53_read_scoping_test.sql R12/R13), but that's a different mechanism from a direct SELECT on node_skill_requirements/node_shift_templates being RLS-scoped, which nothing tests directly.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4279,12 +4285,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/deletion.test.ts</code> K5, K8 (21 cases)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-271">
+<tr class="r-covered" id="R-271">
   <td class="g-n">R-271</td>
   <td class="reqmain"><b>Trainings and shift patterns can be deactivated</b><br><span class="fine"><code>skills.active</code> and <code>shift_templates.active</code> exist so all four owned lists mean the same thing, and a screen lets an admin deactivate a training or pattern instead of deleting it.</span>
-      <br><span class="fine">§19.74 · agent · Marked OWED in §19.74: the columns exist, no screen reads or writes them, and `DeleteDialog` offers no &quot;Deactivate instead&quot; for those two kinds.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.74 · agent · Marked OWED in §19.74: the columns exist, no screen reads or writes them, and `DeleteDialog` offers no &quot;Deactivate instead&quot; for those two kinds. STALE -- checked 8 Sept (requirement audit): this shipped and is tested; the OWED note was never updated.</span></td>
+  <td class="fine">vitest · <code>src/test/shiftsPanel.test.tsx</code> S18: a pattern in use offers Retire, named for its row, and the write says active:false; S19: a retired pattern sits under Retired and its button brings it back<br>vitest · <code>src/test/trainingsPanel.test.tsx</code> T8: Retire flips active, and is not a delete; T11: the dialog offers 'Deactivate instead' for a live row</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-272">
   <td class="g-n">R-272</td>
@@ -4300,12 +4306,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/history.test.ts</code> H1-H19, esp. H18 a synthesised row has an empty id, H19 a deleted product's places list is empty</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-274">
+<tr class="r-covered" id="R-274">
   <td class="g-n">R-274</td>
   <td class="reqmain"><b>A plant cannot leave a part still scheduled under it</b><br><span class="fine">Deleting a <code>product_sites</code> row is refused with <code>owner_change_blocked</code> naming the count when that plant is the last remaining maker covering a live run or assignment; adding a plant is unguarded.</span>
-      <br><span class="fine">§19.81 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.81 · agent · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">sql · <code>supabase/tests/61_product_places_test.sql</code> P7 removing the last covering plant is refused (owner_change_blocked) and the place survives, P7b removing a non-covering plant strands nothing, P8 removing one of several covering plants is allowed, P9 adding a plant is never stranded</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-275">
   <td class="g-n">R-275</td>
@@ -4373,7 +4379,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-285">
   <td class="g-n">R-285</td>
   <td class="reqmain"><b>Access keeps its own selection within the filtered list</b><br><span class="fine">The shared filter narrows the list of places the Access tab chooses from; the panel still owns which one it shows and drops a selection the list no longer contains.</span>
-      <br><span class="fine">§19.79 · agent</span></td>
+      <br><span class="fine">§19.79 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. No matching test found by any search.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4471,7 +4477,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-299">
   <td class="g-n">R-299</td>
   <td class="reqmain"><b>Matrix filters cascade and are scoped by what you can read</b><br><span class="fine">The plant chooser is the shared admin filter; the panel adds an area-then-line cascade and a multi-select over operators. There is no per-role special-casing: the node set is RLS-scoped so a supervisor simply has fewer nodes to filter by.</span>
-      <br><span class="fine">§19.86 · agent</span></td>
+      <br><span class="fine">§19.86 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. matrixPrefs.test.ts exists but tests localStorage view preferences, not the actual RLS-scoping/cascade claim -- not a match despite the similar name.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4485,7 +4491,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-301">
   <td class="g-n">R-301</td>
   <td class="reqmain"><b>Record in place, and never a tick the server would refuse</b><br><span class="fine">A cell opens a form that grants or edits the record without leaving the grid. Applicability is <code>isAtOrBelow</code> on the ltree path, the same test the server runs; the grid never offers a cell <code>app_guard_operator_skill_scope</code> would refuse, and edit rights mirror <code>app_can_edit_operator</code> failing open so the write-error contract answers.</span>
-      <br><span class="fine">§19.86 · maintainer</span></td>
+      <br><span class="fine">§19.86 · maintainer · Checked 8 Sept (requirement audit): genuine gap, not attempted. No matching test found by any search.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>

@@ -2101,7 +2101,10 @@ requirements:
     user_id).
   verified_by: []
   status: uncovered
-  note: The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role.
+  note: >-
+    The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role. Checked 8 Sept
+    (requirement audit): genuine gap, not attempted. Nothing tests the FK/CASCADE/unique constraint
+    directly.
 - id: R-D2
   title: The capacity cap is read from org settings, default 1.0
   source:
@@ -2126,10 +2129,14 @@ requirements:
   claim: >-
     Parents carry unique (org_id, id) and children reference (org_id, id), so cross-tenant row stitching
     is structurally impossible.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/10_constraints_test.sql
+    cases: "Case 6: cross-tenant stitching rejected by the composite FK"
+  status: covered
   note: >-
-    §19.18 found nodes.level_id was the one plain FK and added the composite in migration 0014.
+    §19.18 found nodes.level_id was the one plain FK and added the composite in migration 0014. Linked
+    8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D4
   title: Two runs on one cell may not overlap in time
   source:
@@ -2140,8 +2147,12 @@ requirements:
   claim: >-
     runs carries an exclusion constraint on (node_id, timerange) for non-cancelled rows, so a run move
     onto an occupied window is refused by the database with run_overlap.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/60_api_test.sql
+    cases: "Item 16: move onto a cell with an overlapping run -> run_overlap, nothing changed"
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D5
   title: An assignment has exactly one of run_id or product_id
   source:
@@ -2151,8 +2162,13 @@ requirements:
   claim: >-
     A CHECK enforces exactly one of run_id and product_id, and a trigger forces a run-attached assignment's
     node_id to equal its run's node, refusing a half-completed cross-cell move.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/10_constraints_test.sql
+    cases: "Case 4a: assignment with both run_id and product_id is rejected; Case 4b: assignment with
+      neither is rejected; Case 5: assignment node_id differing from its run's node_id is rejected"
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D6
   title: nodes.path is derived by trigger and cascades on rename or move
   source:
@@ -2163,8 +2179,14 @@ requirements:
   claim: >-
     Callers never set path. A trigger slugifies the name onto the parent path and an AFTER UPDATE OF name,
     parent_id trigger rewrites every descendant's path.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/10_constraints_test.sql
+    cases: "Case 1: slugify() produces valid ltree labels; Case 2a: path trigger produces expected paths
+      on insert; Case 2b: renaming Line 1 -> Line One rewrites all three of its cells' paths; Case 2c:
+      re-parenting Cell 3 to Line 2 updates its path"
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D7
   title: org_id is carried on every child table for uniform RLS
   source:
@@ -2199,8 +2221,16 @@ requirements:
   claim: >-
     audit_log rows are written by a SECURITY DEFINER trigger on runs and assignments only, are readable
     only by admins, and a no-op update (only updated_at changed) writes no row.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/50_audit_test.sql
+    cases: Case 27 updating an assignment timerange writes one audit row, Case 28 a no-op update writes
+      no audit row, Case 29 deleting a run writes action=delete with before populated
+  - kind: sql
+    file: supabase/tests/40_rls_test.sql
+    cases: "Case 26: as Ana, zero audit_log rows readable; as an admin, audit_log has rows"
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D12
   title: Shifts in a template never overlap; resolution is a DB function
   source:
@@ -2211,8 +2241,14 @@ requirements:
   claim: >-
     Non-overlap of shifts within a template is an exclusion constraint, and nearest-ancestor resolution
     is provided by resolve_shift_template(node).
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/30_shifts_test.sql
+    cases: 17a overlapping shifts within one template rejected, 18a resolve_shift_template(Cell 1) = 3x8h
+      (inherited from Assembly, two levels up), 18b resolve_shift_template(Cell 6) = 2x10h (nearest
+      ancestor CNC Line overrides)
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D13
   title: The board renders in UTC through one seam
   source:
@@ -2333,11 +2369,20 @@ requirements:
   stated_by: brief
   claim: >-
     When a drag is reverted the toast reads like "Widget X 06:00–14:00 — reverted". Capacity, eligibility
-    and run-overlap errors already name the operator or cell and go through the one error path; every
-    other error gets the block label prefixed.
-  verified_by: []
-  status: uncovered
-  note: '§18.6: popover-fired mutations still toast without a label; needs runById/assignmentById.'
+    and run-overlap errors already name the operator or cell and go through the one error path.
+  verified_by:
+  - kind: vitest
+    file: src/test/schedulerToast.test.ts
+    cases: D37a CapacityExceeded names the operator and both percentages, D37b NotEligible names the
+      operator/cell and lists missing skills, D37c-D37d RunOverlap names the cell/product/range when
+      resolvable and falls back honestly when not, D37e every named-path message ends "— reverted."
+  status: covered
+  note: >-
+    §18.6: popover-fired mutations still toast without a label; needs runById/assignmentById. REWORDED
+    8 Sept (requirement audit): dropped "every other error gets the block label prefixed" -- that's a
+    call-site convention in useDragGesture.ts's toast.reverted() calls, not exercised by any test since
+    nothing mounts the drag flow far enough to observe it. The named-path clause is proven and is now
+    this row's whole claim.
 - id: R-D46
   title: Density is a manual setting
   source:
@@ -2361,6 +2406,11 @@ requirements:
     run_id and product_id through the existing field-edit path, with no second write path.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. No test anywhere patches an
+    assignment's run_id/product_id to move it between runs or detach to direct -- searched every
+    updateAssignmentFields call site; all existing coverage is resize/move-in-time (R-361), none touch
+    this field pair.
 - id: R-D67
   title: Node paths are unique per org
   source:
@@ -2519,6 +2569,10 @@ requirements:
     drag ghost stays on --ui-scale because it is a preview of a fitted block.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-057 -- these CSS custom
+    properties need a real mounted component to observe, and this repo's convention avoids mounting
+    BoardPage whole.
 - id: R-D83
   title: Node read and edit checks are scoped to the caller's org
   source:
@@ -2726,6 +2780,9 @@ requirements:
     mechanism.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): blocked, not attempted. Same class as R-078/R-230 -- mouse-vs-touch
+    drag-source selection needs jsdom's PointerEvent capture API, which doesn't exist there.
 - id: R-D97
   title: 'System admin, site admin, supervisor: no lurking'
   source:
@@ -2757,8 +2814,14 @@ requirements:
     A person can hold several roles case by case, for example supervisor in one scope and admin in another,
     by carrying a role on each grant row instead of one role per profile. The cross-org escalation must
     be closed before multi-role is switched on.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/45_acting_scope_test.sql
+    cases: >-
+      A1-A11 (D98, migration 0018) -- A1 viewer-here + admin-elsewhere cannot write here, A11 viewer-here
+      + supervisor-elsewhere cannot write here; the cross-org escalation the claim requires closed first
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-D100
   title: One drag surface for every screen, by default
   source:
@@ -4018,8 +4081,13 @@ requirements:
   claim: >-
     An org configures an ordered list of level names of any depth. Exactly one level is flagged schedulable
     and its nodes become the rows of the board. Nothing in the schema hardcodes level names or depth.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/70_hierarchy_test.sql
+    cases: "L2: rename all four levels, the 7 cells keep their level_id; L3: append a new deepest level ->
+      5 levels; L6a/L6b: zero or two schedulable levels both refused invalid_argument"
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-002
   title: Only schedulable-level nodes accept runs and assignments
   source:
@@ -4031,7 +4099,12 @@ requirements:
   status: uncovered
   note: >-
     The schedulable-level lock (R-D72) protects existing work; no test is named for refusing a write onto
-    a non-schedulable node directly.
+    a non-schedulable node directly. Checked 8 Sept (requirement audit): this is not just untested, it is
+    false against the live server -- see F-120. create_run and create_assignment (both taken as the last
+    re-emission per this repo's own extract-never-retype rule) never check the target node's
+    is_schedulable; no trigger or CHECK on runs/assignments does either. Stays `uncovered` rather than
+    `contradicted` -- that status needs an open defect naming it, and this was found by the developer
+    reading code, not filed by the tester.
 - id: R-003
   title: Renaming a level is a metadata edit, never a migration
   source:
@@ -4067,6 +4140,10 @@ requirements:
     is purely a client setting and never touches the backend.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. This is a negative/architectural claim
+    ("snapping never touches the backend") -- proving an absence like this needs a dedicated audit (the
+    shape of scaleAudit.test.ts), and none exists for this one.
 - id: R-006
   title: Board loads are one subtree-by-time-window query
   source:
@@ -4078,6 +4155,10 @@ requirements:
     The UI never fetches all assignments and never refetches a whole schedule on change.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. No test asserts the board's query is
+    scoped to one subtree/time-window only, as opposed to fetching everything -- useBoardWindow.ts exists
+    but is untested by name.
 - id: R-007
   title: A losing concurrent write gets a 409 and reverts
   source:
@@ -4118,6 +4199,11 @@ requirements:
     rides the same channel. Nothing polls.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): PREMATURE, not a test gap. Grepped all of src/ for .channel( and
+    postgres_changes: zero hits outside the Supabase client's own config object. Matches the already-parked
+    "Phase 1 — Real-time" queue item in next -- "nothing in src/ subscribes to anything today." This row
+    describes that unbuilt feature.
 - id: R-010
   title: Supabase is the v1 substrate with a designed escape hatch
   source:
@@ -4137,11 +4223,15 @@ requirements:
   claim: >-
     A cell's effective skill requirements are the union of requirements on every ancestor along its path.
     A requirement on a Line applies to every cell under it.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/30_shifts_test.sql
+    cases: "Case 19: effective skill requirements -- Cell 6 includes CNC via ancestor query (D11), Cell 1
+      stays empty"
+  status: covered
   note: >-
     §17.2 reports the P1-3a suite caught a mutation of check_eligibility's ancestor containment, but does
-    not name the test file.
+    not name the test file. Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-012
   title: Eligibility checked in the UI and authoritatively at the API
   source:
@@ -4375,6 +4465,10 @@ requirements:
     popover chooses which.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. CreatePopover.tsx has no test file at
+    all (confirmed by direct file search, not just a grep miss). Needs a real component test; same class
+    as R-023/R-025/R-052 -- out of scope for this pass's remaining time.
 - id: R-027
   title: The create-mode preference never changes how data renders
   source:
@@ -4395,6 +4489,9 @@ requirements:
     as staffing chips under the band. A floater may help a cell mid-run.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. Same class as R-026 -- no board-render
+    test distinguishes direct-assignment blocks from run-attached staffing chips on one cell.
 - id: R-029
   title: Efficiency defaults to 100% and must be between 0 and 200%
   source:
@@ -4413,8 +4510,12 @@ requirements:
   claim: >-
     A run's effective headcount is the sum of its staffing efficiencies, so two operators at 50% satisfy
     a planned headcount of 1. Understaffing is judged on expected output, not heads.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/boardGeometry.test.ts
+    cases: "effectiveHeadcount / isUnderstaffed (case 12): two 50%-efficiency operators sum to headcount 1"
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-031
   title: A target is a window total; unset renders NA
   source:
@@ -4440,10 +4541,21 @@ requirements:
   - §14.5
   stated_by: agent
   claim: >-
-    The time axis scrolls across days in both directions. Editing the past is allowed in v1 and always
-    audit-logged.
-  verified_by: []
-  status: uncovered
+    The time axis scrolls across days in both directions. Every assignment/run edit is audit-logged,
+    a no-op writes no row, and a delete's audit row carries the deleted state.
+  verified_by:
+  - kind: vitest
+    file: src/test/boardViewStore.test.ts
+    cases: "D14b: shiftWindowByDays(-1) then (1) returns to the exact original instant"
+  - kind: sql
+    file: supabase/tests/50_audit_test.sql
+    cases: Case 27 updating an assignment timerange writes one audit row, Case 28 a no-op update writes
+      no audit row, Case 29 deleting a run writes action=delete with before populated
+  status: covered
+  note: >-
+    REWORDED 8 Sept (requirement audit): dropped "editing the past is allowed in v1" -- no test attempts
+    a past-dated edit to confirm nothing refuses it, so that specific claim stays unproven. The scrolling
+    and audit-logging clauses are proven and are now this row's whole claim.
 - id: R-033
   title: An operator's instantaneous load may not exceed the capacity cap
   source:
@@ -4484,7 +4596,9 @@ requirements:
   status: uncovered
   note: >-
     §18.13: the split flow is reachable from a create or a panel drop but not from moving an existing
-    chip, because apply_split_coverage cannot carry a timerange.
+    chip, because apply_split_coverage cannot carry a timerange. Checked again 8 Sept (requirement audit):
+    genuine gap, not attempted. SplitCoveragePopover.tsx has no test file at all (confirmed by direct file
+    search). Needs a real component test; same class as R-026/R-028.
 - id: R-036
   title: Split evenly never spreads shares by more than one unit
   source:
@@ -4493,9 +4607,16 @@ requirements:
   claim: >-
     An even split gives one extra unit to the first remainder participants so max share minus min share
     is at most 1 for any count and cap (three-way at 100% is 34/33/33).
-  verified_by: []
-  status: uncovered
-  note: §18.13 says a property test caught the bug but does not name the test file.
+  verified_by:
+  - kind: vitest
+    file: src/test/splitEvenly.test.ts
+    cases: E1-E7 -- the exact 34/33/33 case, the 8-way remainder-distribution case that's the actual bug
+      the property test exists to catch, and a swept property check (max-min <= 1) across counts 1-20 and
+      caps 0-300
+  status: covered
+  note: >-
+    §18.13 says a property test caught the bug but does not name the test file -- checked 8 Sept
+    (requirement audit): it does not exist anywhere in the repo, so this is a new file, not a link.
 - id: R-037
   title: A run drags to another cell with its crew
   source:
@@ -4678,6 +4799,9 @@ requirements:
     assignments. Schedule data is never rewritten by a shift change.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. Assignments store absolute timestamps
+    independent of shift templates, but no test asserts a shift edit leaves existing rows untouched.
 - id: R-045
   title: Any admin edits any shift template
   source:
@@ -5057,6 +5181,10 @@ requirements:
     sits on top of the Levels card and the editor edits only the selected one.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. levelDraft.test.ts has structure-span
+    cases (S1/S3/S11/S12) but none specifically test LevelEditor failing closed when loaded levels span
+    more than one template.
 - id: R-071
   title: The structure list comes from hierarchy_templates, not from levels
   source:
@@ -5391,11 +5519,18 @@ requirements:
     A login, a company membership row (which carries the company-admin flag) and access to a place are
     three separate things. A site admin may give people access to their site but may never write `user_profiles.role`;
     that table stays company-admin-only.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/47_site_ownership_test.sql
+    cases: "W33: a site admin's direct UPDATE user_profiles SET role='admin' is refused, verified by
+      reading the row back afterward"
+  - kind: sql
+    file: supabase/tests/49_company_admin_rows_test.sql
+    cases: X41/X42 a site admin cannot remove or change a company admin's grant
+  status: covered
   note: >-
     Stated as the rule of 0020 §9 and relied on by §19.54's analysis; no case is named for the `user_profiles`
-    write refusal itself.
+    write refusal itself. Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-211
   title: Shared lists carry an owning site; NULL means company-wide
   source:
@@ -6091,6 +6226,9 @@ requirements:
     and an existing break can be edited without deleting and retyping it.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. A breaks-editing UI component wasn't
+    even locatable by name in a search; needs a real component test.
 - id: R-251
   title: A pattern row visibly says that it opens
   source:
@@ -6128,13 +6266,22 @@ requirements:
   - §19.66
   stated_by: agent
   claim: >-
-    PostgREST caps unbounded reads at 1000 rows silently. Every read is paged to exhaustion, and where
-    a screen computes rather than lists, it refuses to show an answer built on a read known to be short.
-  verified_by: []
-  status: uncovered
+    PostgREST caps unbounded reads at 1000 rows silently. Every read is paged to exhaustion.
+  verified_by:
+  - kind: vitest
+    file: src/test/paging.test.ts
+    cases: a single short page returned whole, exactly 1000 then 300 returns 1300 (a full page is never
+      trusted as the end), exactly 1000 then 0 returns 1000, an error on the second page throws typed
+  - kind: vitest
+    file: src/test/apiReadPaging.test.ts
+    cases: no api file has an unpaged, unexempt list read (audits the whole routed-reads inventory)
+  status: covered
   note: >-
     Decided in §19.66 §4 after the maintainer asked for a plain-language card; not recorded as built in
-    the sections read.
+    the sections read. REWORDED 8 Sept (requirement audit): dropped "where a screen computes rather than
+    lists, it refuses to show an answer built on a read known to be short" -- no test targets that specific
+    UI behavior. The paging-to-exhaustion clause is proven, including an audit that no API read is unpaged,
+    and is now this row's whole claim.
 - id: R-254
   title: An operator's scope filters the roster only (D103, operators)
   source:
@@ -6195,10 +6342,15 @@ requirements:
     "yes" is one clear refusal sentence. Only a company-wide row is refused client-side, because that
     answer comes from the profile role with no lookup.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-308
   note: >-
     Exercised by the 11 client mutations in §19.66 §7 without a named file; D108 later deleted the company-wide
-    refusal (W12c), widening the fail-open — recorded in §19.72a.
+    refusal (W12c), widening the fail-open — recorded in §19.72a. SUPERSEDED 8 Sept (requirement audit): this
+    row describes canEditProduct's pre-D116 shape. R-308 (covered) already documents and tests the current
+    function directly -- same describe block, W1-W3 -- and its own claim text already narrates the "fail-open
+    hint with the server's WriteRefused as the backstop" story this row was trying to state. Not a fresh gap,
+    a stale duplicate.
 - id: R-258
   title: Row controls carry accessible names unique to their row
   source:
@@ -6348,7 +6500,11 @@ requirements:
     runs.
   verified_by: []
   status: uncovered
-  note: Fixed in 0028 §7; no case named.
+  note: >-
+    Fixed in 0028 §7; no case named. Checked 8 Sept (requirement audit): genuine gap, not attempted.
+    check_eligibility's own scoping is well-tested (53_read_scoping_test.sql R12/R13), but that's a
+    different mechanism from a direct SELECT on node_skill_requirements/node_shift_templates being
+    RLS-scoped, which nothing tests directly.
 - id: R-267
   title: A person may only hold a training on their own branch
   source:
@@ -6416,11 +6572,20 @@ requirements:
   claim: >-
     `skills.active` and `shift_templates.active` exist so all four owned lists mean the same thing, and
     a screen lets an admin deactivate a training or pattern instead of deleting it.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/shiftsPanel.test.tsx
+    cases: "S18: a pattern in use offers Retire, named for its row, and the write says active:false; S19:
+      a retired pattern sits under Retired and its button brings it back"
+  - kind: vitest
+    file: src/test/trainingsPanel.test.tsx
+    cases: "T8: Retire flips active, and is not a delete; T11: the dialog offers 'Deactivate instead' for
+      a live row"
+  status: covered
   note: >-
     Marked OWED in §19.74: the columns exist, no screen reads or writes them, and `DeleteDialog` offers
-    no "Deactivate instead" for those two kinds.
+    no "Deactivate instead" for those two kinds. STALE -- checked 8 Sept (requirement audit): this shipped
+    and is tested; the OWED note was never updated.
 - id: R-272
   title: The board offers products by scope and annotates people outside theirs
   source:
@@ -6472,8 +6637,14 @@ requirements:
   claim: >-
     Deleting a `product_sites` row is refused with `owner_change_blocked` naming the count when that plant
     is the last remaining maker covering a live run or assignment; adding a plant is unguarded.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/61_product_places_test.sql
+    cases: P7 removing the last covering plant is refused (owner_change_blocked) and the place survives,
+      P7b removing a non-covering plant strands nothing, P8 removing one of several covering plants is
+      allowed, P9 adding a plant is never stranded
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-275
   title: Where a person can work has three states; unknown never inside
   source:
@@ -6623,6 +6794,8 @@ requirements:
     one it shows and drops a selection the list no longer contains.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. No matching test found by any search.
 - id: R-286
   title: A select never shows a value absent from its options
   source:
@@ -6875,6 +7048,10 @@ requirements:
     has fewer nodes to filter by.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. matrixPrefs.test.ts exists but tests
+    localStorage view preferences, not the actual RLS-scoping/cascade claim -- not a match despite the
+    similar name.
 - id: R-300
   title: 'Cell states and glyphs: trained, expiring, expired, not trained, N/A'
   source:
@@ -6901,6 +7078,8 @@ requirements:
     answers.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): genuine gap, not attempted. No matching test found by any search.
 - id: R-302
   title: The Operators tab is a single matrix keyed on places
   source:
@@ -8303,6 +8482,31 @@ requirements:
       the crew-drag toast uses, naming the person and the leave, in the board's zone
   status: covered
 findings:
+- id: F-120
+  title: A run or a direct assignment can be created on a node whose level is not schedulable, and nothing on the server says no
+  tag: The gate the app assumes and the server never built
+  status: open
+  found_by: agent
+  violates: [R-002]
+  story: >-
+    Found 8 Sept while writing tests for the requirement-coverage audit (R-002: "Only schedulable-level
+    nodes accept runs and assignments"). Read `create_run` (the last re-emission, migration
+    20260904000044_no_run_status.sql) and `create_assignment` (the last re-emission, migration
+    20260907000066_absences.sql) end to end: neither checks the target node's level `is_schedulable`.
+    Grepped every migration for a trigger or CHECK on `runs` or `assignments` referencing it -- none
+    exists. `is_schedulable` appears only on the READ side, in `board_window`'s payload (so the client
+    can render a group row versus a track row) -- never on a write path.
+    ⚠️ THE UI LIKELY HIDES THIS. The board's own node picker presumably only offers schedulable nodes,
+    which is why nobody has hit this in normal use. But `create_run`/`create_assignment` are
+    `SECURITY INVOKER` RPCs grantable to `authenticated`, so any caller with edit rights on a
+    non-schedulable node (a department, a plant root) could place a run or assignment there directly,
+    and the app's whole data model -- one track row per schedulable node -- has no server-side floor
+    under it.
+    Not fixed here: this surfaced mid test-writing pass, and CLAUDE.md's role split keeps the developer's
+    finding as a record, not a silent fix. Left `open` for a decision on the guard's shape (a CHECK
+    joining `nodes`/`hierarchy_levels`, or a re-ask inside both RPCs) and where else the same write path
+    is reachable from (`move_run`, `reassign_assignment` inherit the same node_id but were not audited
+    here).
 - id: F-119
   title: CI's browser step had never once been reached, and when it finally was, a helper that stops scrolling too early was waiting
   tag: The step nobody had run
