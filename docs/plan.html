@@ -114,7 +114,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">773</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">70</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">238 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">245 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>5c9e6d4</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -2632,13 +2632,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 238 covered · 45 uncovered · 1 contradicted · 20 superseded</caption>
-<tbody><tr class="r-uncovered" id="R-D1">
+<caption>304 requirements · 245 covered · 38 uncovered · 1 contradicted · 20 superseded</caption>
+<tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
-      <br><span class="fine">§17, D1 · agent · The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role. Checked 8 Sept (requirement audit): genuine gap, not attempted. Nothing tests the FK/CASCADE/unique constraint directly.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§17, D1 · agent · The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role. Closed 8 Sept (requirement audit) with new cases in the existing suite.</span></td>
+  <td class="fine">sql · <code>supabase/tests/10_constraints_test.sql</code> Case 8a user_id rejects a uuid absent from auth.users; Case 8b (org_id, user_id) unique violation on a second profile; Case 8c deleting the auth.users row cascades to user_profiles</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-D2">
   <td class="g-n">R-D2</td>
@@ -2766,12 +2766,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D66">
+<tr class="r-covered" id="R-D66">
   <td class="g-n">R-D66</td>
   <td class="reqmain"><b>A chip can be re-parented between runs or detached to direct</b><br><span class="fine">An existing assignment can be moved to another run or detached to a direct assignment by patching run_id and product_id through the existing field-edit path, with no second write path.</span>
-      <br><span class="fine">§18.13, D66 · brief · Checked 8 Sept (requirement audit): genuine gap, not attempted. No test anywhere patches an assignment's run_id/product_id to move it between runs or detach to direct -- searched every updateAssignmentFields call site; all existing coverage is resize/move-in-time (R-361), none touch this field pair.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18.13, D66 · brief · Checked 8 Sept (requirement audit): confirmed genuinely untested at the time -- searched every updateAssignmentFields call site, all existing coverage was resize/move-in-time (R-361), none touched this field pair. Closed with a new test file.</span></td>
+  <td class="fine">vitest · <code>src/test/assignmentFieldEdit.test.ts</code> F1 re-parenting to another run patches run_id and clears product_id; F2 detaching to direct clears run_id and sets product_id; F3 no second write path -- only assignments is ever touched; F4 an omitted field stays out of the patch</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-D67">
   <td class="g-n">R-D67</td>
@@ -3298,12 +3298,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/30_shifts_test.sql</code> Case 19: effective skill requirements -- Cell 6 includes CNC via ancestor query (D11), Cell 1 stays empty</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-012">
+<tr class="r-covered" id="R-012">
   <td class="g-n">R-012</td>
   <td class="reqmain"><b>Eligibility checked in the UI and authoritatively at the API</b><br><span class="fine">When an operator is picked up, ineligible rows dim and expiring certifications warn, computed client-side. The API check on write is authoritative so no client bug can staff an uncertified operator.</span>
-      <br><span class="fine">§6, §10 · agent · Checked 8 Sept (requirement audit): R-338's certificateExpiry.test.tsx proves this client/server pairing for the certificate-expiry case specifically (the client mirrors the server's exact comparison). No test found covering the general/skill-mismatch eligibility case this claim also implies -- still a real gap.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§6, §10 · agent · Checked 8 Sept (requirement audit): R-338's certificateExpiry.test.tsx proves this client/server pairing for the certificate-expiry case specifically (the client mirrors the server's exact comparison). Closed on a second pass by linking the general/skill-mismatch case to certificateExpiry.test.tsx's own override-flow cases plus 60_api_test.sql's Item 12, which is a skill-mismatch case, not certificate.</span></td>
+  <td class="fine">vitest · <code>src/test/certificateExpiry.test.tsx</code> a training never held is MISSING (never-trained and lapsed are disjoint, and both are reported); Create is refused until the override is ticked and reasoned, and the override reaches the server call<br>sql · <code>supabase/tests/60_api_test.sql</code> &quot;Item 12: warn policy, no override -&gt; not_eligible (a skill-mismatch case, not a certificate one); with override -&gt; succeeds, flag + reason stored&quot;</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-013">
   <td class="g-n">R-013</td>
@@ -3333,12 +3333,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-017">
+<tr class="r-covered" id="R-017">
   <td class="g-n">R-017</td>
   <td class="reqmain"><b>Deactivation is active=false, never a delete</b><br><span class="fine">Operators and products are deactivated, not deleted, so schedule history survives.</span>
-      <br><span class="fine">§7 · agent · Checked 8 Sept (requirement audit): not a duplicate of R-D110 as first guessed. R-D110's evidence (56_*.sql, upgrade_0029) tests the DELETE flow's cascade/history rules, not the Deactivate mechanism's active=false write -- no test found for that specifically. Still a real gap.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§7 · agent · Checked 8 Sept (requirement audit): not a duplicate of R-D110 as first guessed. R-D110's evidence (56_*.sql, upgrade_0029) tests the DELETE flow's cascade/history rules, not the Deactivate mechanism's active=false write. Closed with a new test file.</span></td>
+  <td class="fine">vitest · <code>src/test/operatorActive.test.ts</code> A1-A2 deactivate/reactivate write active:false/true via update, filtered to the one id; A3 never a delete; A4 a filtered-away row is refused, not silently accepted; B1-B3 the same three for products</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-018">
   <td class="g-n">R-018</td>
@@ -3522,12 +3522,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/snapConfig.test.ts</code> F6-F7 Compact's snap pairing matches useShiftSnap's own condition; the two non-Compact zooms never use shift-boundary snap<br>vitest · <code>src/test/interaction.test.ts</code> case3a/case3b useShiftSnap snaps to the nearest shift point</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-044">
+<tr class="r-covered" id="R-044">
   <td class="g-n">R-044</td>
   <td class="reqmain"><b>Redefining shifts never touches existing assignments</b><br><span class="fine">Shift edits apply to the whole subtree immediately as a rendering and snapping layer over exact-timestamp assignments. Schedule data is never rewritten by a shift change.</span>
-      <br><span class="fine">§16.3 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. Assignments store absolute timestamps independent of shift templates, but no test asserts a shift edit leaves existing rows untouched.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§16.3 · agent · Checked 8 Sept (requirement audit): confirmed genuinely untested at the time. Closed with a new test file; also confirmed no DB trigger on shifts/shift_templates cascades into runs/assignments.</span></td>
+  <td class="fine">vitest · <code>src/test/shiftEdit.test.ts</code> D1-D2 updateShift's exact patch shape (full and partial); D3 the claim itself -- no table but shifts is ever touched by a shift edit, assignments and runs included; D4 a filtered-away shift is refused</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-045">
   <td class="g-n">R-045</td>
@@ -3550,12 +3550,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/sessionProvider.test.tsx</code> S4 a token refresh resets nothing/refetches nothing, S5 a genuine identity change resets the query cache exactly once</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-048">
+<tr class="r-covered" id="R-048">
   <td class="g-n">R-048</td>
   <td class="reqmain"><b>Nearest-ancestor lookups walk ltree paths, never parent_id</b><br><span class="fine">Shift template and skill requirement resolution walk the node's path, because a parent may sit outside the loaded window and a parent_id chain can cycle.</span>
-      <br><span class="fine">§18, §19.1 · agent · Checked 8 Sept (requirement audit): the shift-template half is proven -- R-039's supabase/tests/84_shift_pattern_resolves_upward_test.sql (case ST3) exercises the same `path &lt;@ anc.path` pattern `resolve_shift_template` uses. The skill-requirement half is not: `check_eligibility`'s `required` CTE uses the identical ltree-ancestor join, but no test places a skill requirement on an ancestor node and checks eligibility at a descendant. Left uncovered as a whole rather than split into two rows; a test for the skill-requirement half is what would close this one. Checked again 8 Sept: the exact gap is `supabase/migrations/20260904000050_plant_settings.sql` lines 507-513 (the `required` CTE); a second attempt ran out of time building a confident seed fixture for it, so the fix is precisely located but still not written.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§18, §19.1 · agent · Checked 8 Sept (requirement audit): the shift-template half was already proven -- R-039's ST3. The skill-requirement half took two more attempts to close: the exact gap was `supabase/migrations/20260904000050_plant_settings.sql` lines 507-513 (the `required` CTE), and a third pass built the seed fixture the first two ran out of time for -- Case 19b now proves it directly.</span></td>
+  <td class="fine">sql · <code>supabase/tests/84_shift_pattern_resolves_upward_test.sql</code> ST3: nearest ancestor for shift templates<br>sql · <code>supabase/tests/30_shifts_test.sql</code> &quot;Case 19b: check_eligibility itself walks multiple levels of ancestry -- a requirement on Plant 1 (root) reaches Cell 1 three hops down (root -&gt; Assembly -&gt; Line 1 -&gt; Cell 1), correct for both an operator without it and one with it&quot;</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-049">
   <td class="g-n">R-049</td>
@@ -3704,12 +3704,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/hierarchy.test.ts</code></td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-070">
+<tr class="r-covered" id="R-070">
   <td class="g-n">R-070</td>
   <td class="reqmain"><b>The level editor refuses to guess which structure it is editing</b><br><span class="fine">LevelEditor fails closed when the loaded levels span more than one template; the structure selector sits on top of the Levels card and the editor edits only the selected one.</span>
-      <br><span class="fine">§19.18, §19.24 · agent · Checked 8 Sept (requirement audit): genuine gap, not attempted. levelDraft.test.ts has structure-span cases (S1/S3/S11/S12) but none specifically test LevelEditor failing closed when loaded levels span more than one template.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.18, §19.24 · agent · Checked 8 Sept (requirement audit): confirmed genuinely untested at the time -- levelDraft.test.ts had structure-span cases (S1/S3/S11/S12) but none testing LevelEditor's own fail-closed behavior. Closed with a new test file, rendering the real component against levels spanning two templates.</span></td>
+  <td class="fine">vitest · <code>src/test/levelEditor.test.tsx</code> E1 templateId=null disables Save even though levels for two templates are loaded; E2 renders no rows from either template rather than falling back to the first one; E3 a real templateId edits only that template's levels, in position order; E4 with a real templateId and a sound draft, Save is enabled</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-071">
   <td class="g-n">R-071</td>

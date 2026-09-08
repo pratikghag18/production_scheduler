@@ -2099,12 +2099,16 @@ requirements:
   claim: >-
     user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id,
     user_id).
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/10_constraints_test.sql
+    cases: >-
+      Case 8a user_id rejects a uuid absent from auth.users; Case 8b (org_id, user_id) unique violation on
+      a second profile; Case 8c deleting the auth.users row cascades to user_profiles
+  status: covered
   note: >-
-    The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role. Checked 8 Sept
-    (requirement audit): genuine gap, not attempted. Nothing tests the FK/CASCADE/unique constraint
-    directly.
+    The unique (org_id, user_id) is what D98 (§19.40) will relax for multi-role. Closed 8 Sept
+    (requirement audit) with new cases in the existing suite.
 - id: R-D2
   title: The capacity cap is read from org settings, default 1.0
   source:
@@ -2404,13 +2408,18 @@ requirements:
   claim: >-
     An existing assignment can be moved to another run or detached to a direct assignment by patching
     run_id and product_id through the existing field-edit path, with no second write path.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/assignmentFieldEdit.test.ts
+    cases: >-
+      F1 re-parenting to another run patches run_id and clears product_id; F2 detaching to direct clears
+      run_id and sets product_id; F3 no second write path -- only assignments is ever touched; F4 an
+      omitted field stays out of the patch
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. No test anywhere patches an
-    assignment's run_id/product_id to move it between runs or detach to direct -- searched every
-    updateAssignmentFields call site; all existing coverage is resize/move-in-time (R-361), none touch
-    this field pair.
+    Checked 8 Sept (requirement audit): confirmed genuinely untested at the time -- searched every
+    updateAssignmentFields call site, all existing coverage was resize/move-in-time (R-361), none touched
+    this field pair. Closed with a new test file.
 - id: R-D67
   title: Node paths are unique per org
   source:
@@ -4255,12 +4264,23 @@ requirements:
   claim: >-
     When an operator is picked up, ineligible rows dim and expiring certifications warn, computed client-side.
     The API check on write is authoritative so no client bug can staff an uncertified operator.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/certificateExpiry.test.tsx
+    cases: >-
+      a training never held is MISSING (never-trained and lapsed are disjoint, and both are reported);
+      Create is refused until the override is ticked and reasoned, and the override reaches the server call
+  - kind: sql
+    file: supabase/tests/60_api_test.sql
+    cases: >-
+      "Item 12: warn policy, no override -> not_eligible (a skill-mismatch case, not a certificate one);
+      with override -> succeeds, flag + reason stored"
+  status: covered
   note: >-
     Checked 8 Sept (requirement audit): R-338's certificateExpiry.test.tsx proves this client/server pairing
-    for the certificate-expiry case specifically (the client mirrors the server's exact comparison). No test
-    found covering the general/skill-mismatch eligibility case this claim also implies -- still a real gap.
+    for the certificate-expiry case specifically (the client mirrors the server's exact comparison). Closed
+    on a second pass by linking the general/skill-mismatch case to certificateExpiry.test.tsx's own
+    override-flow cases plus 60_api_test.sql's Item 12, which is a skill-mismatch case, not certificate.
 - id: R-013
   title: Certification expiry is checked against the assignment window
   source:
@@ -4329,12 +4349,17 @@ requirements:
   - §7
   stated_by: agent
   claim: Operators and products are deactivated, not deleted, so schedule history survives.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/operatorActive.test.ts
+    cases: >-
+      A1-A2 deactivate/reactivate write active:false/true via update, filtered to the one id; A3 never a
+      delete; A4 a filtered-away row is refused, not silently accepted; B1-B3 the same three for products
+  status: covered
   note: >-
     Checked 8 Sept (requirement audit): not a duplicate of R-D110 as first guessed. R-D110's evidence
     (56_*.sql, upgrade_0029) tests the DELETE flow's cascade/history rules, not the Deactivate mechanism's
-    active=false write -- no test found for that specifically. Still a real gap.
+    active=false write. Closed with a new test file.
 - id: R-018
   title: Copy Week always previews conflicts before committing
   source:
@@ -4828,11 +4853,16 @@ requirements:
   claim: >-
     Shift edits apply to the whole subtree immediately as a rendering and snapping layer over exact-timestamp
     assignments. Schedule data is never rewritten by a shift change.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/shiftEdit.test.ts
+    cases: >-
+      D1-D2 updateShift's exact patch shape (full and partial); D3 the claim itself -- no table but shifts
+      is ever touched by a shift edit, assignments and runs included; D4 a filtered-away shift is refused
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. Assignments store absolute timestamps
-    independent of shift templates, but no test asserts a shift edit leaves existing rows untouched.
+    Checked 8 Sept (requirement audit): confirmed genuinely untested at the time. Closed with a new test
+    file; also confirmed no DB trigger on shifts/shift_templates cascades into runs/assignments.
 - id: R-045
   title: Any admin edits any shift template
   source:
@@ -4899,18 +4929,22 @@ requirements:
   claim: >-
     Shift template and skill requirement resolution walk the node's path, because a parent may sit outside
     the loaded window and a parent_id chain can cycle.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/84_shift_pattern_resolves_upward_test.sql
+    cases: "ST3: nearest ancestor for shift templates"
+  - kind: sql
+    file: supabase/tests/30_shifts_test.sql
+    cases: >-
+      "Case 19b: check_eligibility itself walks multiple levels of ancestry -- a requirement on Plant 1
+      (root) reaches Cell 1 three hops down (root -> Assembly -> Line 1 -> Cell 1), correct for both an
+      operator without it and one with it"
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): the shift-template half is proven -- R-039's
-    supabase/tests/84_shift_pattern_resolves_upward_test.sql (case ST3) exercises the same `path <@ anc.path`
-    pattern `resolve_shift_template` uses. The skill-requirement half is not: `check_eligibility`'s `required`
-    CTE uses the identical ltree-ancestor join, but no test places a skill requirement on an ancestor node and
-    checks eligibility at a descendant. Left uncovered as a whole rather than split into two rows; a test for
-    the skill-requirement half is what would close this one. Checked again 8 Sept: the exact gap is
-    `supabase/migrations/20260904000050_plant_settings.sql` lines 507-513 (the `required` CTE); a second
-    attempt ran out of time building a confident seed fixture for it, so the fix is precisely located but
-    still not written.
+    Checked 8 Sept (requirement audit): the shift-template half was already proven -- R-039's ST3. The
+    skill-requirement half took two more attempts to close: the exact gap was
+    `supabase/migrations/20260904000050_plant_settings.sql` lines 507-513 (the `required` CTE), and a third
+    pass built the seed fixture the first two ran out of time for -- Case 19b now proves it directly.
 - id: R-049
   title: A malformed timerange drops one block, never the board
   source:
@@ -5210,12 +5244,18 @@ requirements:
   claim: >-
     LevelEditor fails closed when the loaded levels span more than one template; the structure selector
     sits on top of the Levels card and the editor edits only the selected one.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/levelEditor.test.tsx
+    cases: >-
+      E1 templateId=null disables Save even though levels for two templates are loaded; E2 renders no rows
+      from either template rather than falling back to the first one; E3 a real templateId edits only that
+      template's levels, in position order; E4 with a real templateId and a sound draft, Save is enabled
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): genuine gap, not attempted. levelDraft.test.ts has structure-span
-    cases (S1/S3/S11/S12) but none specifically test LevelEditor failing closed when loaded levels span
-    more than one template.
+    Checked 8 Sept (requirement audit): confirmed genuinely untested at the time -- levelDraft.test.ts had
+    structure-span cases (S1/S3/S11/S12) but none testing LevelEditor's own fail-closed behavior. Closed
+    with a new test file, rendering the real component against levels spanning two templates.
 - id: R-071
   title: The structure list comes from hierarchy_templates, not from levels
   source:

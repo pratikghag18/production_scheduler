@@ -271,5 +271,54 @@ BEGIN
   END IF;
 END $$;
 
+\echo 'Case 8a: user_profiles.user_id is an FK to auth.users (R-D1)'
+DO $$
+DECLARE v_caught boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO user_profiles (org_id, user_id, role)
+    VALUES ('10000000-0000-0000-0000-000000000001', gen_random_uuid(), 'viewer');
+  EXCEPTION WHEN foreign_key_violation THEN
+    v_caught := true;
+  END;
+  IF NOT v_caught THEN
+    RAISE EXCEPTION 'FAIL: user_profiles.user_id accepted a uuid absent from auth.users';
+  END IF;
+END $$;
+
+\echo 'Case 8b: (org_id, user_id) is unique -- the same person cannot hold two profiles in one org (R-D1)'
+DO $$
+DECLARE v_uid uuid := gen_random_uuid(); v_caught boolean := false;
+BEGIN
+  INSERT INTO auth.users (id) VALUES (v_uid);
+  INSERT INTO user_profiles (org_id, user_id, role)
+  VALUES ('10000000-0000-0000-0000-000000000001', v_uid, 'viewer');
+  BEGIN
+    INSERT INTO user_profiles (org_id, user_id, role)
+    VALUES ('10000000-0000-0000-0000-000000000001', v_uid, 'supervisor');
+  EXCEPTION WHEN unique_violation THEN
+    v_caught := true;
+  END;
+  IF NOT v_caught THEN
+    RAISE EXCEPTION 'FAIL: a second user_profiles row for the same (org_id, user_id) was accepted';
+  END IF;
+END $$;
+
+\echo 'Case 8c: deleting the auth.users row cascades to user_profiles (R-D1)'
+DO $$
+DECLARE v_uid uuid := gen_random_uuid(); v_profile_id uuid;
+BEGIN
+  INSERT INTO auth.users (id) VALUES (v_uid);
+  INSERT INTO user_profiles (org_id, user_id, role)
+  VALUES ('10000000-0000-0000-0000-000000000001', v_uid, 'viewer')
+  RETURNING id INTO v_profile_id;
+
+  DELETE FROM auth.users WHERE id = v_uid;
+
+  IF EXISTS (SELECT 1 FROM user_profiles WHERE id = v_profile_id) THEN
+    RAISE EXCEPTION 'FAIL: user_profiles row survived its auth.users row being deleted (ON DELETE CASCADE)';
+  END IF;
+END $$;
+
 \echo '10_constraints_test.sql: all cases passed'
 ROLLBACK;
