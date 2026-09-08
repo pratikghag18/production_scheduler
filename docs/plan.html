@@ -113,8 +113,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">760</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">68</span><span class="l">database changes (migrations)</span></div>
-  <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
-  <div class="stat "><span class="n">186 / 303</span><span class="l">requirements covered by a test</span></div>
+  <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
+  <div class="stat act"><span class="n">185 / 303</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>01f4898</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -628,9 +628,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <hr class="rule">
 <section id="defects">
   <span class="eyebrow">Defects</span>
-  <h2>No open defects</h2>
+  <h2>1 open defect</h2>
   <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
-  <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="closed">
+  <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="open">
+    <td><a href="#DEF-0022"><code>DEF-0022</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>minor</td>
+    <td>88_absences_test.sql's boundary case for a part-day absence never touches the boundary -- a shift starting the instant the absence ends could be wrongly blocked with every SQL case still green</td>
+    <td><a href="#R-359">R-359</a></td>
+    <td class="fine">2026-09-08 · <a href="defects/DEF-0022.md">file</a></td>
+  </tr>
+<tr class="closed">
     <td><a href="#DEF-0001"><code>DEF-0001</code></a></td>
     <td><span class="chip done">verified</span></td>
     <td>major</td>
@@ -1714,6 +1722,28 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <p>Same shape a bogus id gives, on both functions, and the row is provably untouched (read back by id, name identical, still exists) rather than merely &quot;no error was raised&quot; — the write-that-changes-nothing case this project has been burned by before. The probe row was deleted afterward (<code>DELETE FROM week_templates WHERE id = ...</code>).</p>
 <p>This fix is independent code from DEF-0018/0019's node resolvers (a different existence-lookup edit, <code>AND org_id = app_current_org()</code>, added to two PL/pgSQL functions, no owner exemption since these are writer paths only reached by a signed-in admin) — see DEF-0018's re-verification for why migration 0068 as a whole is four hand-written copies of a boundary, not one shared mechanism. The pin has not been promoted out of <code>src/test/defects/</code>.</p>
 </details>
+<div class="find" id="DEF-0022">
+  <span class="tag">DEF-0022 · minor · test-cannot-fail · open</span>
+  <h3>88_absences_test.sql's boundary case for a part-day absence never touches the boundary -- a shift starting the instant the absence ends could be wrongly blocked with every SQL case still green</h3>
+  <p class="fine">Violates <a href="#R-359">R-359</a> · filed 2026-09-08 by tester · pinned by <code>src/test/defects/DEF-0022.test.ts</code> · <a href="defects/DEF-0022.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>At tip <code>0a8da7a</code>. The code is correct today; this is about what the suite can and cannot tell you when it stops being correct.</p>
+<p>Mutate the one line that sets a part-day absence's stored range:</p>
+<p>``<code> sed -i &quot;s/tstzrange(p_starts_at, p_ends_at, '\[)')/tstzrange(p_starts_at, p_ends_at, '[]')/&quot; \   supabase/migrations/20260907000069_absence_by_the_hour.sql </code>``</p>
+<p>Rebuild the scratch database and run the absences suite:</p>
+<p>``<code> bash scripts/run-sql-test.sh --rebuild bash scripts/run-sql-test.sh 88_absences_test.sql </code>``</p>
+<p><b>Expected</b></p>
+<p>R-359 (<code>stated_by: maintainer</code>): <em>&quot;a person out 09:00-13:00 is a clash for the morning shift and not the night one&quot;</em> -- the boundary is the whole point of the requirement, and it is a half-open range (<code>'[)'</code>) on purpose (0069's own header: &quot;mirrors Postgres's <code>&amp;&amp;</code> on two <code>[)</code> ranges exactly&quot;). A mutation that closes the upper bound, so a shift starting the instant the absence ends is wrongly caught, should turn at least one named SQL case red.</p>
+<p><b>Actual</b></p>
+<p>``<code> ---- 88_absences_test.sql : 27 passed, 0 failed, 0 hard-errors ---- </code>``</p>
+<p>Every case, including AB15 (&quot;absence_overlap by the HOURS --- part-day 09:00-13:00 clashes with an overlapping shift and not with one outside those hours&quot;), stays green. Reading AB15 itself (<code>supabase/tests/88_absences_test.sql</code>): its &quot;miss&quot; case is a shift at 14:00-16:00, a full hour clear of the absence's 13:00 end -- nowhere near the boundary the mutation moves. No other case in the file asks about a shift touching the exact instant a part-day absence starts or ends.</p>
+<p>Confirmed the mutation is a real, live behaviour change and not a no-op: direct calls against the mutated database --</p>
+<p>``<code> set_absence(operator, '2027-06-11','2027-06-11','dentist',NULL,'09:00Z','13:00Z') absence_overlap(operator, tstzrange('13:00Z','15:00Z'))  -- shift starting exactly when the absence ends -&gt; {&quot;absent&quot;: true}     (mutated: wrong) -&gt; {&quot;absent&quot;: false}    (unmutated, reverted: right) </code>``</p>
+<p>The client's own mirror (<code>src/lib/absence.ts</code>'s <code>absenceGaps</code>) IS pinned on this exact case -- <code>src/test/absence.test.ts</code>, <em>&quot;a shift ending exactly when the absence ends does not clash (half-open, touching is not overlapping)&quot;</em> -- and R-359's own <code>verified_by</code> entry for that file claims the SQL suite proves the same thing &quot;by the same names the SQL cases carry.&quot; It does not; only the client side does.</p>
+<p>The developer's own pin, <code>src/test/defects/DEF-0022.test.ts</code>, proves the LIVE server function gets the boundary right today (a real call over PostgREST as Dana, not a read of migration text) -- this defect is that the SQL suite cannot tell you if that ever changes, not that it is currently wrong.</p>
+<p><b>Lead</b></p>
+<p>A suspicion, not a fact. <code>88_absences_test.sql</code>'s AB15 was written to prove &quot;hours, not days&quot; against a coarse counter-example (a shift on the same day but hours away), which is the right case for proving the branch exists at all, but is a different case from proving WHERE the boundary sits. The smallest fix is one more named case beside AB15 -- a shift starting exactly at the absence's <code>ends_at</code> (must not clash) and one ending exactly at its <code>starts_at</code> (must not clash), mirroring <code>absence.test.ts</code>'s two boundary <code>it</code>s by name -- rather than widening AB15 itself, since AB15's own miss case is still worth keeping as the &quot;clearly outside&quot; sanity check.</p>
+</div>
 </section>
 
 <hr class="rule">
@@ -2546,7 +2576,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>303 requirements · 186 covered · 103 uncovered · 0 contradicted · 14 superseded</caption>
+<caption>303 requirements · 185 covered · 103 uncovered · 1 contradicted · 14 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -4654,12 +4684,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/copyWeekDialogTemplate.test.tsx</code> an admin is offered all three buttons; an admin's &quot;Apply a template&quot; opens the dialog already on the template source while &quot;Copy week&quot; opens it on the week source; a placing supervisor is unchanged, Apply and Save and never Copy week; a viewer is offered none<br>e2e · <code>e2e/weekTemplates.spec.ts</code> an admin reaches a saved template through the new &quot;Apply a template&quot; button rather than through the source select inside Copy week</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-covered" id="R-359">
+<tr class="r-contradicted" id="R-359">
   <td class="g-n">R-359</td>
   <td class="reqmain"><b>An absence may be part of a day --- a date, a start time and an end time --- and a clash is judged by the hours</b><br><span class="fine">The maintainer, 7 Sept: <em>&quot;sometimes operators could be out only for a few hours, we need a way to record that as well.&quot;</em> A whole-day absence stays exactly what it is today: a <code>daterange</code>, both ends inclusive, judged by the calendar DAYS a shift touches (R-357, and every boundary <code>absence.test.ts</code> and 88 pin stays true). A PART-DAY absence is ONE calendar day plus a start and an end clock time, and it clashes with a placement only where the HOURS actually overlap --- so a person out 09:00-13:00 is a clash for the morning shift and not for the night one. ⭐ STORED AS AN ABSOLUTE INSTANT RANGE, converted from wall-clock ON THE CLIENT through <code>zonedTimeToInstant</code> in the person's plant zone, because R-353's rule is that only the client computes wall-clock geometry and there is to be no second implementation to drift from the first. The server then compares two <code>tstzrange</code>s and resolves no zone at all. ⚠️ The CSV import stays WHOLE-DAY in this piece and the wizard says so; widening it needs the planner to learn a zone, which is a separate piece of work.</span>
-      <br><span class="fine">session 88 conversation · maintainer</span></td>
+      <br><span class="fine">session 88 conversation · maintainer · ⛔ CONTRADICTED 8 Sept by DEF-0022 (tester, minor, test-cannot-fail), against the SQL proof only, not the product: 88_absences_test.sql's AB15 tests a part-day absence's hour boundary with a MISS case a full hour clear of it (14:00-16:00 against a 09:00-13:00 absence), never the touching instant. A one-line mutation closing set_absence's upper bound ('[)' to '[]') is a live, wrong change -- a shift starting exactly when a part-day absence ends would be wrongly blocked -- and every one of the suite's 27 cases stays green. The client's own mirror (absenceGaps, src/test/absence.test.ts) IS pinned on this exact instant, and this row's own claim above says the SQL suite proves it &quot;by the same names the SQL cases carry&quot; -- it does not. The tester's own pin (src/test/defects/DEF-0022.test.ts) calls the live server (not migration text) and confirms today's code answers the boundary correctly; the gap is in what 88 can catch, not in what the server does.</span></td>
   <td class="fine">sql · <code>supabase/tests/88_absences_test.sql</code> AB15-AB22: a part-day 09:00-13:00 absence clashes with a shift overlapping those hours and does not clash with one outside them; two non-overlapping part-day rows on one day both succeed and two overlapping ones are refused by absences_part_day_excl; two whole-day rows overlapping are still refused by absences_whole_day_excl; a part-day row inside a whole-day absence is accepted deliberately; set_absence with only one of the two times refuses invalid_argument; a part-day row whose from and to are different days refuses<br>vitest · <code>src/test/absence.test.ts</code> AB15 and AB16 by the same names the SQL cases carry: the overlapping and non-overlapping shift, a shift ending exactly when the absence ends and one starting exactly when it starts, an open-ended window on both sides of a part-day absence, and the whole-day-first tie-break<br>vitest · <code>src/test/absencesPanel.test.tsx</code> the &quot;Part of a day&quot; checkbox swaps the two date fields for a date plus a start and an end; whole-day stays the default and the untouched path; the hours are shown on a part-day row<br>vitest · <code>src/test/shapes.test.ts</code> parseAbsenceInfo carries starts_at/ends_at through additively; a payload with no part-day keys parses byte-for-byte as before; a malformed part-day key never turns a valid whole-day hit into none<br>vitest · <code>src/test/dragGesture.test.ts</code> a crew-drag toast built from a part-day absence_warnings entry names the hours, in the board's own zone rather than UTC<br>vitest · <code>src/test/absenceOnBoard.test.tsx</code> leaveLine renders a part-day hit as the day plus the hours in the given zone, and a whole-day hit's sentence is unchanged; a raw part-day payload round-trips through the parser into the sentence</td>
-  <td class="chipcol"><span class="chip done">covered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-covered" id="R-360">
   <td class="g-n">R-360</td>

@@ -7871,7 +7871,19 @@ requirements:
       leaveLine renders a part-day hit as the day plus the hours in the given zone, and a whole-day
       hit's sentence is unchanged; a raw part-day payload round-trips through the parser into the
       sentence
-  status: covered
+  status: contradicted
+  note: >-
+    ⛔ CONTRADICTED 8 Sept by DEF-0022 (tester, minor, test-cannot-fail), against the SQL proof only,
+    not the product: 88_absences_test.sql's AB15 tests a part-day absence's hour boundary with a MISS
+    case a full hour clear of it (14:00-16:00 against a 09:00-13:00 absence), never the touching
+    instant. A one-line mutation closing set_absence's upper bound ('[)' to '[]') is a live, wrong
+    change -- a shift starting exactly when a part-day absence ends would be wrongly blocked -- and
+    every one of the suite's 27 cases stays green. The client's own mirror (absenceGaps,
+    src/test/absence.test.ts) IS pinned on this exact instant, and this row's own claim above says
+    the SQL suite proves it "by the same names the SQL cases carry" -- it does not. The tester's own
+    pin (src/test/defects/DEF-0022.test.ts) calls the live server (not migration text) and confirms
+    today's code answers the boundary correctly; the gap is in what 88 can catch, not in what the
+    server does.
 - id: R-360
   title: A person's own absences are read, recorded and removed on their record in the Operators tab
   source:
