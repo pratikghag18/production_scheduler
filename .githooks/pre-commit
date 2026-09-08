@@ -1,0 +1,70 @@
+#!/bin/sh
+#
+# pre-commit — the Prettier gate, moved to where the mistake is actually made.
+#
+# WHY THIS EXISTS. `npm run format:check` is the fifth step of eight in CI and it
+# exits non-zero two steps before `npm run test`, so a single unformatted file
+# kills the whole run and nothing after it — the test suite, the build, the
+# browser cases — ever executes. That has now happened twice: the tester recorded
+# it on 4 Sept, and it recurred on 8 Sept with eight files, five written by build
+# lanes and three of them defect pins written in the tester's own worktree. Both
+# times every OTHER instrument was green, which is exactly why nobody caught it:
+# typecheck, eslint, vitest and the SQL suite all pass while the one gate nobody
+# runs locally is red. A rule that lives only in a document is a rule the next
+# lane forgets.
+#
+# ⚠️ IT CHECKS THE STAGED BLOB, NOT THE FILE ON DISK, AND THE REASON IS LINE
+# ENDINGS. This repo runs core.autocrlf=true, so the index holds LF and a file
+# git checked out holds CRLF, while Prettier's endOfLine defaults to "lf". A
+# plain `prettier --check .` here therefore reports files CI is perfectly happy
+# with — on 8 Sept it named twenty when CI's own answer was eight — and noise
+# like that trains people to ignore the gate. The index blob is what CI checks
+# out, so the index blob is what this reads. It also means a file you edited but
+# did not stage cannot fail your commit, and one you staged and then dirtied
+# cannot sneak past it.
+#
+# To bypass in a genuine emergency: `git commit --no-verify`. CLAUDE.md asks you
+# not to; if a hook fails, fix the cause.
+
+set -e
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+prettier="node_modules/prettier/bin/prettier.cjs"
+if [ ! -f "$prettier" ]; then
+  echo "pre-commit: node_modules/prettier not found; run npm ci. Format gate skipped." >&2
+  exit 0
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+bad=""
+
+for f in $staged; do
+  git cat-file -e ":$f" 2>/dev/null || continue
+  git show ":$f" > "$tmp/blob" 2>/dev/null || continue
+
+  # Prettier resolves .prettierrc AND .prettierignore from --stdin-filepath, so
+  # an ignored path or an unknown extension exits non-zero and is skipped here.
+  if ! node "$prettier" --stdin-filepath "$f" < "$tmp/blob" > "$tmp/fmt" 2>/dev/null; then
+    continue
+  fi
+
+  cmp -s "$tmp/blob" "$tmp/fmt" || bad="$bad $f"
+done
+
+if [ -n "$bad" ]; then
+  echo "" >&2
+  echo "pre-commit: these staged files are not Prettier-formatted, and CI dies on" >&2
+  echo "format:check two steps before it ever reaches the tests:" >&2
+  for f in $bad; do echo "    $f" >&2; done
+  echo "" >&2
+  echo "Fix and re-stage:" >&2
+  echo "    npx prettier --write$bad" >&2
+  echo "    git add$bad" >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0

@@ -14,6 +14,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "verify": "npm run plan -- --check && npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "prepare": "git config core.hooksPath .githooks",
     "test": "vitest run",
     "test:watch": "vitest",
     "plan": "node scripts/render-plan.mjs",
