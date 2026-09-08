@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-07'
-  tip: 935ba6b
+  tip: 413f436
   baseline:
-    app_tests: 2446
-    app_test_files: 105
+    app_tests: 2455
+    app_test_files: 109
     tsc: 0
     eslint: 0
-    db_checks: 747
-    migrations: 66
+    db_checks: 752
+    migrations: 67
     mutations: 509 of 536
 tracks:
 - id: core
@@ -3654,8 +3654,30 @@ requirements:
       true (so the case cannot pass by the helper saying false to everything); then a site admin's
       direct INSERT of admin on the foreign root and on the bogus uuid must come back with the SAME
       sqlstate and store nothing. Against 0054's helper it reads foreign_root=t, 42501 versus PT400.
+  - kind: sql
+    file: supabase/tests/73_plant_settings_test.sql
+    cases: >-
+      P23-P25 (0068): as Ana the other company's root answers NULL for date_format, eligibility_policy
+      and timezone set there by the owner, and the same NULL for a bogus uuid, on the node_settings
+      branch (P23) and on the company branch with no node override (P25); a signed-in session with no
+      profile row answers NULL (P24); in owner context, the claim cleared, the same calls answer the value
+  - kind: sql
+    file: supabase/tests/84_shift_pattern_resolves_upward_test.sql
+    cases: >-
+      ST8 (0068): an authenticated session whose auth.users row has no profile resolves NULL for the
+      other company's root AND for its own company's Plant A; ST4 and ST5 unchanged
+  - kind: vitest
+    file: src/test/defects/DEF-0018.test.ts
+    cases: the last definition of app_resolve_node_setting carries an app_current_org() term; the reader proves itself on app_node_exists_in_org
+  - kind: vitest
+    file: src/test/defects/DEF-0019.test.ts
+    cases: the last definition of resolve_shift_template no longer exempts a null app_current_org(); the reader sees the org term 0061 put on the target scan
   status: contradicted
   note: >-
+    ⭐ FIX CLAIMED 7 Sept at 413f436 (session 89), not verified: migration 0068 re-emits app_resolve_node_setting
+    with the caller's-company term on both branches and resolve_shift_template with its owner exemption keyed on
+    auth.uid() IS NULL (no caller identity at all) instead of app_current_org() IS NULL; the two are written the
+    same way so they cannot drift. DEF-0018 and DEF-0019 are fix-claimed; the tester re-runs its own reproductions.
     ⛔ CONTRADICTED 7 Sept by DEF-0018 and DEF-0019 (tester, both minor, both cross-tenant).
     `app_resolve_node_setting` (0050, SECURITY DEFINER, granted to authenticated) names the caller's company
     nowhere: as Ana it answers the other company's `date_format` (iso) and `eligibility_policy` (block) by
@@ -7470,7 +7492,22 @@ requirements:
       an admin saves this week and applies it through Copy Week onto a scratch week, then deletes
       it in the admin Templates tab; a supervisor is offered Save and Apply a template, template
       source only, and never Copy week; a viewer is offered none
+  - kind: sql
+    file: supabase/tests/89_week_templates_test.sql
+    cases: >-
+      TP-XT (0068): as an org-1 plant admin, rename and delete of a fabricated org-2 template id raise the
+      same invalid_argument / no_such_template a bogus id raises, and the foreign row survives both calls
+  - kind: vitest
+    file: src/test/defects/DEF-0021.test.ts
+    cases: rename_week_template's and delete_week_template's existence lookups are org-scoped; the reader sees the shape list_week_templates already uses
   status: contradicted
+  note: >-
+    ⭐ FIX CLAIMED 7 Sept at 413f436 (session 89), not verified: 0068 re-emits rename_week_template and
+    delete_week_template with org_id = app_current_org() on the existence lookup, so a foreign id and a bogus
+    id both say no_such_template, matching list_week_templates. DEF-0021 is fix-claimed; the tester re-runs
+    its own reproduction.
+    ⛔ CONTRADICTED 7 Sept by DEF-0021 (tester, minor, cross-tenant): a real template id in another company
+    answered not_permitted/not_admin where a bogus one answered no_such_template, two distinguishable refusals.
 - id: R-357
   title: An absence is recorded in the app or imported by file, and the board and Copy Week treat it as a clash
   source:
@@ -7582,7 +7619,21 @@ requirements:
   - kind: sql
     file: supabase/tests/86_invite_test.sql
     cases: G4 the site_people refusal guards still fire (non-admin not_permitted, bad node invalid_argument)
+  - kind: vitest
+    file: src/test/defects/DEF-0020.test.ts
+    cases: >-
+      live against the served function: Dana inviting sofia@contoso.example (org 2, an auth row GoTrue's
+      admin listing cannot see) answers ok false, reason other_org, and nothing else; skips honestly with
+      no backend
   status: contradicted
+  note: >-
+    ⭐ FIX CLAIMED 7 Sept at 413f436 (session 89), not verified: the invite call's own already-taken failure
+    is classified in one named function quoting the two shapes measured live and answered as the silent
+    other_org refusal; every other invite failure is logged server-side and answered with a fixed message.
+    DEF-0020 is fix-claimed; the tester re-runs its own reproduction.
+    ⛔ CONTRADICTED 7 Sept by DEF-0020 (tester, minor, cross-tenant): inviting an address whose auth row has a
+    NULL instance_id answered a raw "Database error saving new user" instead of other_org, a side channel for
+    "this email exists somewhere in the project".
 - id: R-352
   title: An invited person sets a password from the link and shows as invited until first sign-in
   source:
@@ -7712,6 +7763,29 @@ requirements:
     cases: NODE_SETTING_KEYS is exactly eligibility_policy, date_format, timezone
   status: covered
 findings:
+- id: F-114
+  title: Four definer helpers and one function, each answering one bit about another company, and the review checklist that never named the question
+  tag: The same door, a fourth time
+  status: fixed
+  found_by: tester
+  refs:
+  - R-341
+  - R-351
+  - R-356
+  story: >-
+    The tester's session 87 filed four defects in one run, every one minor, every one the same
+    shape: a helper that runs as its definer so RLS cannot get in the way, and therefore answers
+    about any company's row unless it names the caller's company itself. The settings resolver
+    never had the term; the shift resolver had it behind an exemption keyed on the wrong fact (no
+    company, which a fresh sign-up also has, rather than no caller); the two template writers
+    looked a row up by id before asking whose it was; and the invite function let the database's
+    own uniqueness error say what the code had been written not to say. None writes, none grants.
+    What they share is where they were missed: wave three's reviewer brief listed cross-plant apply,
+    cross-plant delete and an email already in the demo org, and never a cross-COMPANY rename or a
+    cross-COMPANY invite of an address the admin listing cannot see. The fix is one migration and
+    one classifier, and the lesson is in the brief that fixed them: decide the boundary's shape
+    before the lanes run, write it once, and give the reviewer the other tenant as a named thing to
+    try.
 - id: F-111
   title: Four things the lanes could see and could not reach, closed by the reviewer's walk and one fix lane
   tag: What a fence costs
@@ -10467,6 +10541,75 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 89
+  date: 2026-09-07
+  title: The four cross-tenant defects claimed, one migration and one function
+  commits:
+  - 413f436
+  numbers:
+    app_tests: 2455
+    app_test_files: 109
+    tsc: 0
+    eslint: 0
+    db_checks: 752
+    migrations: 67
+  confirmed: true
+  summary: >-
+    Opened by merging the tester's session 87 by hand (the inbox skipped it for a dirty tree: the
+    maintainer's plugin toggle and a brief edit, stashed and restored). Four open defects came in,
+    all minor, all cross-tenant, all the same family: a SECURITY DEFINER helper answering about a
+    row the caller's company does not hold. Baseline confirmed first: 2454 tests in 109 files with
+    exactly the four pins red. Then, per the maintainer's standing rule, two Opus 4.8 lanes with
+    exclusive files and a third to break them.
+    ⭐ THE SHAPE, DECIDED BEFORE THE LANES RAN. The tester's lead for DEF-0019 was to key the owner
+    exemption on `session_user`; migration 0020's own note had already ruled that out (it is
+    `authenticator` under PostgREST and the superuser in this harness, so a test keyed on it would
+    hide the hole). What owner context actually IS is "no caller identity at all", which is how 84's
+    ST4 already reaches it: it clears the jwt claim. So the exemption is `auth.uid() IS NULL`, written
+    the same way in both node resolvers so they cannot drift, and the two template writers take no
+    exemption at all because no owner-context caller exists for them. The brief said this in so many
+    words and forbade a third shape; the reviewer then tried the exemption under the production
+    claim shape (sub inside `request.jwt.claims`, not the harness's `request.jwt.claim.sub`) and it
+    held.
+    ⭐ MIGRATION 0068 re-emits four functions by extraction: app_resolve_node_setting (0050) gains
+    the caller's-company term on BOTH branches, so a foreign date format, policy or zone by literal
+    uuid answers NULL for every key; resolve_shift_template (0061) keeps its boundary re-keyed;
+    rename_week_template and delete_week_template (0067) scope their existence lookup so a foreign
+    id and a bogus id both say no_such_template, matching list_week_templates. Three psql
+    reproductions re-run live after applying 0068: every other-org column NULL, the profile-less
+    session resolves neither company, the two NOTICEs are the same sentence.
+    ⭐ THE INVITE FUNCTION classifies GoTrue's own already-taken failure in one named function that
+    quotes the two shapes measured live (a listable duplicate answers code email_exists; a row the
+    admin listing cannot see answers "Database error saving new user" with no code) and answers the
+    silent other_org shape; every other invite failure is logged server-side and answered with a
+    fixed message, a small deliberate widening, since the raw message was the side channel. Four live
+    calls as Dana and Ana came back in the intended shapes. The fuller fix the tester named, a
+    definer lookup over auth.users so findAuthUser is not blind to a NULL instance_id row, is
+    recorded and not built: it needs a migration and no product path creates such a row today.
+    ⭐ PROOF. Four pins green by name, DEF-0020's against the served function. New SQL cases: P23,
+    P24, P25 in 73 (both branches of the settings resolver as Ana, as a profile-less session, and in
+    owner context; P25 added after the reviewer noticed the company branch had the term and no
+    case), ST8 in 84, TP-XT in 89. Whole SQL suite after a rebuild: 752 by the developer's runner
+    (`run-sql-test.sh` looped over every file, the same count session 85 read as 747, plus five; the
+    tester's 758 in session 87 sums a different runner's lines and the two are not comparable).
+    roleWalk 5 passed, Ana's board still carrying the plant's date format, zone and pattern. tsc 0.
+    ⚠️ THE COUNT ABOVE INCLUDES A NEIGHBOUR. Another session was building wave four in this same
+    working tree while this ran (its briefs are wave4-a and wave4-b, its rows R-358 to R-360, its
+    card F-113, its migration 0069, none of them committed here). `npm run test` was run on that
+    tree: 2455 in 109 files, all green, where this session's own commit adds no vitest case, so
+    the one case above session 87's 2454 is that session's uncommitted test file. If the next
+    baseline reads 2454, that is why. The reviewer's two other notes, for the record and not
+    changed: TP-XT proves the leak only because 89's setup gives its actor a real org-1 profile,
+    and the "database error saving new user" match is a broad substring that a future trigger on
+    auth.users could make true for a free address.
+    ⭐ BOOKKEEPING. DEF-0018, DEF-0019, DEF-0020 and DEF-0021 are fix-claimed at 413f436, never
+    verified; R-341, R-351 and R-356 stay contradicted until the tester re-runs its own
+    reproductions, each with the new cases added to verified_by. The SQL lane found the CLI's
+    migration ledger on the live database out of step (migration up fails on 0039 as already
+    applied), so 0068 was applied by psql without a ledger row; harmless for the next reset, worth
+    reconciling. The stale "Wave three's loose ends" queue entry the tester flagged was rewritten by
+    the neighbouring session on disk and is left to its commit.
+  shipped: []
 - id: 87
   date: 2026-09-07
   title: Tester run
