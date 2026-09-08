@@ -70,13 +70,20 @@ $fn$;
 
 -- ---- fixture: the plant, its people, and the source week -------------------
 DO $$
-DECLARE v_pt uuid; v_l1 uuid; v_l2 uuid;
+DECLARE v_pt uuid; v_dt uuid; v_st uuid; v_l1 uuid; v_l2 uuid;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   v_pt := (create_node(NULL,  'Plant T', 0, '21000000-0000-0000-0000-000000000001')->>'id')::uuid;
-  v_l1 := (create_node(v_pt,  'Line T1', 0)->>'id')::uuid;
-  v_l2 := (create_node(v_pt,  'Line T2', 1)->>'id')::uuid;
+  -- F-120/R-002: 'Standard Plant' is 4 levels (Site/Department/Line/Work
+  -- Cell, only the last schedulable). Two ancestor levels added above Line
+  -- T1/T2 so they land on the actual schedulable level -- every other name
+  -- and id in this file (Line T1, Line T2, and everything that reads runs/
+  -- assignments off them) is unchanged.
+  v_dt := (create_node(v_pt,  'Dept T',   0)->>'id')::uuid;
+  v_st := (create_node(v_dt,  'Sub T',    0)->>'id')::uuid;
+  v_l1 := (create_node(v_st,  'Line T1', 0)->>'id')::uuid;
+  v_l2 := (create_node(v_st,  'Line T2', 1)->>'id')::uuid;
   RESET ROLE;
   INSERT INTO t_fix (k, v) VALUES ('pt', v_pt), ('l1', v_l1), ('l2', v_l2);
 EXCEPTION WHEN OTHERS THEN

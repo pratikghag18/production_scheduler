@@ -98,9 +98,11 @@ DO $$
 DECLARE v_run runs; v_other uuid; v_id uuid;
 BEGIN
   SELECT * INTO v_run FROM runs LIMIT 1;
-  SELECT n.id INTO v_other FROM nodes n
+  -- F-120/R-002: must be a schedulable-level node, or the guard refuses it
+  -- for that reason rather than proving what X4 is actually about.
+  SELECT n.id INTO v_other FROM nodes n JOIN hierarchy_levels hl ON hl.id = n.level_id
    WHERE n.org_id = v_run.org_id AND n.id <> v_run.node_id
-     AND n.path <@ 'plant_1'::ltree
+     AND n.path <@ 'plant_1'::ltree AND hl.is_schedulable
      AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.node_id = n.id)
    LIMIT 1;
   INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
@@ -155,8 +157,11 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   SELECT * INTO v_run FROM runs LIMIT 1;
-  SELECT n.id INTO v_node FROM nodes n
+  -- F-120/R-002: must be a schedulable-level node, or the guard refuses it
+  -- for that reason rather than proving what X6 is actually about.
+  SELECT n.id INTO v_node FROM nodes n JOIN hierarchy_levels hl ON hl.id = n.level_id
    WHERE n.org_id = v_run.org_id AND n.path <@ 'plant_1'::ltree AND n.id <> v_run.node_id
+     AND hl.is_schedulable
      AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.node_id = n.id)
    LIMIT 1;
   v_res := create_run(v_node, v_run.product_id,

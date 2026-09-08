@@ -1049,12 +1049,15 @@ ROLLBACK TO SAVEPOINT sp_AB31;
 SAVEPOINT sp_AB32;
 DO $$
 DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
-        -- Cell 6 (machining.cnc_line.cell_6) is the seed's only node carrying
-        -- a skill requirement (CNC); Elena never held it (only operators
-        -- 1-3 do, per seed.sql), so check_eligibility(cell, NULL, window)
-        -- would answer eligible=false for her history row if this trigger
-        -- asked about a cleared operator.
-        v_cell uuid := '30000000-0000-0000-0000-000000000006';
+        -- Cell 6 (machining.cnc_line.cell_6) is under the seed's only node
+        -- carrying a skill requirement (CNC, on CNC Line, inherited downward
+        -- per D11); Elena never held it (only operators 1-3 do, per
+        -- seed.sql), so check_eligibility(cell, NULL, window) would answer
+        -- eligible=false for her history row if this trigger asked about a
+        -- cleared operator. F-120/R-002: must be the actual schedulable
+        -- cell, not its parent CNC Line (the CNC Line's own id was used here
+        -- before the schedulable-node guard existed to catch it).
+        v_cell uuid := '3000000a-0000-0000-0000-00000000000c';
         v_el uuid := '50000000-0000-0000-0000-000000000004';
         v_wx uuid := '60000000-0000-0000-0000-000000000001';
         v_asg_id uuid; v_res jsonb; v_ok boolean := true; v_why text := '';

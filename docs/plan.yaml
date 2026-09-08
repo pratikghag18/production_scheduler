@@ -4122,16 +4122,24 @@ requirements:
   - D72
   stated_by: agent
   claim: Runs and assignments may only be attached to nodes on the schedulable level.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/93_schedulable_node_guard_test.sql
+    cases: >-
+      CS1/CS2 create_run refuses a Line and accepts a Work Cell; CS3/CS4 create_assignment the same;
+      CS5 move_run refuses a Line and the run does not move; CS6/CS7 a raw INSERT and a raw UPDATE of
+      node_id are refused the same way, with no RPC and no client in the way
+  status: covered
   note: >-
-    The schedulable-level lock (R-D72) protects existing work; no test is named for refusing a write onto
-    a non-schedulable node directly. Checked 8 Sept (requirement audit): this is not just untested, it is
-    false against the live server -- see F-120. create_run and create_assignment (both taken as the last
-    re-emission per this repo's own extract-never-retype rule) never check the target node's
-    is_schedulable; no trigger or CHECK on runs/assignments does either. Stays `uncovered` rather than
-    `contradicted` -- that status needs an open defect naming it, and this was found by the developer
-    reading code, not filed by the tester.
+    The schedulable-level lock (R-D72) protects existing work; this row is the write-time floor under
+    it. FIXED 8 Sept (F-120, migration 20260908000072): create_run, create_assignment and move_run never
+    checked is_schedulable; neither did any trigger or CHECK. Closed by adding the check to
+    app_guard_run_scope and app_guard_assignment_scope -- the BEFORE INSERT OR UPDATE OF node_id triggers
+    both tables already carried, which fire on every write to node_id including a raw PATCH through no
+    RPC at all -- rather than a third copy of the rule inside three separate functions. Fixing it exposed
+    five pre-existing fixture bugs (53/67/78/88/89_*.sql all built shallow trees or used a mislabeled
+    node id, placing rows one or two levels above the actual schedulable node); all five fixed and
+    re-verified against the file's own prior pass count before this row was marked covered.
 - id: R-003
   title: Renaming a level is a metadata edit, never a migration
   source:
@@ -8706,7 +8714,7 @@ findings:
 - id: F-120
   title: A run or a direct assignment can be created on a node whose level is not schedulable, and nothing on the server says no
   tag: The gate the app assumes and the server never built
-  status: open
+  status: fixed
   found_by: agent
   violates: [R-002]
   story: >-
@@ -8723,11 +8731,27 @@ findings:
     non-schedulable node (a department, a plant root) could place a run or assignment there directly,
     and the app's whole data model -- one track row per schedulable node -- has no server-side floor
     under it.
-    Not fixed here: this surfaced mid test-writing pass, and CLAUDE.md's role split keeps the developer's
-    finding as a record, not a silent fix. Left `open` for a decision on the guard's shape (a CHECK
-    joining `nodes`/`hierarchy_levels`, or a re-ask inside both RPCs) and where else the same write path
-    is reachable from (`move_run`, `reassign_assignment` inherit the same node_id but were not audited
-    here).
+    ⭐ FIXED 8 Sept, migration 20260908000072. `move_run` checked out to have the identical gap
+    (re-emission 20260907000066_absences.sql); `reassign_assignment` is not exposed to it -- its own
+    doc comment confirms it never changes `node_id`, only who holds the row. Closed at the table, not
+    inside three separate RPCs: `runs` and `assignments` each already carried a `BEFORE INSERT OR UPDATE
+    OF node_id` trigger (`app_guard_run_scope`, `app_guard_assignment_scope`, both from 0028) that fires
+    on every write to `node_id` -- every RPC and a raw PostgREST PATCH that goes through none of them,
+    the same "a door built on one screen is a door that refuses from the other screen" reasoning 0030
+    used for the D113 area-override door. One `is_schedulable` check added to each, first.
+    ⚠️ FIXING IT EXPOSED FIVE PRE-EXISTING FIXTURE BUGS, ALL FOUND BY RUNNING THE WHOLE SQL SUITE BEFORE
+    CLAIMING DONE. 53/78/89_*.sql built shallow ad-hoc trees that stopped one or two levels short of the
+    template's actual schedulable level and placed rows there anyway; 67_*.sql's node-picker queries had
+    no schedulable filter and could pick an ancestor node with no runs on it (true of every ancestor,
+    trivially); 88_*.sql's AB32 case used a hardcoded id that was the CNC Line, not Cell 6 as its own
+    comment claimed. All five fixed (new cells added where the fixture needed real depth, filters added
+    to the two dynamic queries, the one wrong id corrected) and every numbered SQL test file re-run
+    individually against a baseline captured before the migration, matching pass-for-pass. New proof:
+    supabase/tests/93_schedulable_node_guard_test.sql (CS1-CS7): create_run, create_assignment and
+    move_run each refuse a Line and accept a Work Cell; a raw INSERT and a raw UPDATE of `node_id` are
+    refused the same way, with no RPC and no client involved. `npm run db:types` confirms no schema/RPC
+    signature changed (trigger bodies only), and the migration was applied to the local dev stack via
+    `supabase migration up`, not `db:reset`.
 - id: F-119
   title: CI's browser step had never once been reached, and when it finally was, a helper that stops scrolling too early was waiting
   tag: The step nobody had run
@@ -11672,6 +11696,40 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 97
+  date: 2026-09-08
+  title: 'F-120 closes: the schedulable-node floor the app assumed and the server never built'
+  commits: []
+  numbers:
+    app_tests: 2609
+    app_test_files: 128
+    tsc: 0
+    eslint: 0
+    migrations: 71
+  confirmed: true
+  summary: >-
+    F-120, found mid the requirement-coverage audit's add-test pass: create_run and create_assignment
+    never checked whether their target node was on the schedulable level, and neither did any trigger or
+    CHECK. Checked again on the maintainer's word before proposing a fix: move_run has the identical gap;
+    reassign_assignment does not, since it never touches node_id at all.
+    ⭐ CLOSED AT THE TABLE, NOT INSIDE THREE RPCS. `runs` and `assignments` each already carry a
+    `BEFORE INSERT OR UPDATE OF node_id` trigger (0028) that fires on every write to node_id --- every
+    RPC, and a raw PostgREST PATCH that goes through none of them --- the same reasoning 0030 used for
+    the D113 area-override door. Migration 0072 adds one `is_schedulable` check to each trigger, first.
+    ⚠️ THE FIX EXPOSED FIVE PRE-EXISTING FIXTURE BUGS, FOUND BY RUNNING THE WHOLE SQL SUITE RATHER THAN
+    TRUSTING THE NEW FILE ALONE. 53/78/89_*.sql built ad-hoc trees that stopped one or two levels short
+    of the template's real schedulable level and placed runs or assignments there anyway; 67_*.sql's
+    node-picker queries had no schedulable filter, so they could and did pick an ancestor node with no
+    runs on it (true of every ancestor, trivially, since nothing had ever placed one there); 88_*.sql's
+    AB32 case used a hardcoded id that was the CNC Line, not Cell 6 as its own comment already claimed.
+    All five fixed and every numbered SQL file re-run individually against a baseline captured before
+    the migration, matching pass-for-pass; the dev_demo/upgrade_* failures already present in that
+    baseline are unrelated and untouched.
+    New proof: supabase/tests/93_schedulable_node_guard_test.sql (CS1-CS7) --- create_run,
+    create_assignment and move_run each refuse a Line and accept a Work Cell; a raw INSERT and a raw
+    UPDATE of node_id are refused the same way. R-002 flips to covered; F-120 to fixed. `npm run
+    db:types` confirmed no schema/RPC signature changed (trigger bodies only); the migration reached the
+    local dev stack through `supabase migration up`, never `db:reset`.
 - id: 96
   date: 2026-09-08
   title: 'CI reaches its browser step for the first time, and the two cases waiting there are fixed'

@@ -49,15 +49,19 @@ BEGIN;
 CREATE TEMP TABLE r_fix (k text primary key, v uuid);
 
 DO $$
-DECLARE v_p2 uuid; v_dept uuid; v_line uuid;
+DECLARE v_p2 uuid; v_dept uuid; v_line uuid; v_cell uuid;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   v_p2   := (create_node(NULL, 'Plant 2 (R)', 0, '21000000-0000-0000-0000-000000000001')->>'id')::uuid;
   v_dept := (create_node(v_p2,  'Fabrication R', 0)->>'id')::uuid;
   v_line := (create_node(v_dept,'Weld Line R',   0)->>'id')::uuid;
+  -- F-120/R-002: 'Standard Plant' is 4 levels (Site/Department/Line/Work
+  -- Cell, only the last schedulable) -- runs and assignments need an actual
+  -- cell, not the Line itself.
+  v_cell := (create_node(v_line,'Weld Cell R',   0)->>'id')::uuid;
   RESET ROLE;
-  INSERT INTO r_fix (k, v) VALUES ('p2', v_p2), ('p2_dept', v_dept), ('p2_line', v_line);
+  INSERT INTO r_fix (k, v) VALUES ('p2', v_p2), ('p2_dept', v_dept), ('p2_line', v_line), ('p2_cell', v_cell);
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
   RAISE EXCEPTION 'FIXTURE FAILED (nodes): % (sqlstate %)', SQLERRM, SQLSTATE;
@@ -368,7 +372,8 @@ SAVEPOINT sp_R9;
 DO $$
 DECLARE v_line uuid; v_err text := 'no error'; v_detail text := '-'; v_runs int;
 BEGIN
-  SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
+  -- F-120/R-002: must be the actual schedulable cell, not the Line above it.
+  SELECT v INTO v_line FROM r_fix WHERE k='p2_cell';
   BEGIN
     INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001', v_line,
@@ -398,7 +403,8 @@ SAVEPOINT sp_R10;
 DO $$
 DECLARE v_line uuid; v_err text := 'no error'; v_runs int;
 BEGIN
-  SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
+  -- F-120/R-002: must be the actual schedulable cell, not the Line above it.
+  SELECT v INTO v_line FROM r_fix WHERE k='p2_cell';
   BEGIN
     INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
     VALUES ('10000000-0000-0000-0000-000000000001', v_line,
@@ -417,7 +423,8 @@ SAVEPOINT sp_R11;
 DO $$
 DECLARE v_line uuid; v_unnameable int;
 BEGIN
-  SELECT v INTO v_line FROM r_fix WHERE k='p2_line';
+  -- F-120/R-002: must be the actual schedulable cell, not the Line above it.
+  SELECT v INTO v_line FROM r_fix WHERE k='p2_cell';
   -- Their own board, populated legally.
   INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
   VALUES ('10000000-0000-0000-0000-000000000001', v_line,

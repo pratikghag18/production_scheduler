@@ -255,15 +255,17 @@ RESET ROLE;
 -- with a line under it, and Vera owned by the department. See this file's
 -- header for what F-099 lost.
 DO $$
-DECLARE v_av uuid; v_lv uuid; v_pw uuid; v_org uuid := '10000000-0000-0000-0000-000000000001';
+DECLARE v_av uuid; v_lv uuid; v_cv uuid; v_pw uuid; v_org uuid := '10000000-0000-0000-0000-000000000001';
 BEGIN
   SELECT v INTO v_pw FROM cw_fix WHERE k = 'pw';
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
   SET LOCAL ROLE authenticated;
   v_av := (create_node(v_pw, 'Assembly V', 1)->>'id')::uuid;
   v_lv := (create_node(v_av, 'Line V',     0)->>'id')::uuid;
+  -- F-120/R-002: a schedulable cell under Line V, for rows to actually sit on.
+  v_cv := (create_node(v_lv, 'Cell V1',    0)->>'id')::uuid;
   RESET ROLE;
-  INSERT INTO cw_fix (k, v) VALUES ('av', v_av), ('lv', v_lv);
+  INSERT INTO cw_fix (k, v) VALUES ('av', v_av), ('lv', v_lv), ('cv', v_cv);
   INSERT INTO operators (id, org_id, display_name, employee_ref, site_node_id) VALUES
     ('d5000000-0000-0000-0000-0000000000f1', v_org, 'Vera', 'EMP-V01', v_av);
   -- w3 runs ONE AREA of this plant and not the plant. She is the person CW26 is
@@ -1379,7 +1381,7 @@ ROLLBACK TO SAVEPOINT sp_CW25;
 \echo 'CW26 ⭐: the ["prior"]-only-because-uneditable branch has no live shape inside one plant any more, and this case is the argument for that in three measurements (R-239, R-345)'
 SAVEPOINT sp_CW26;
 DO $$
-DECLARE v_plan jsonb; v_item jsonb; v_res jsonb; v_c1 uuid; v_lv uuid;
+DECLARE v_plan jsonb; v_item jsonb; v_res jsonb; v_c1 uuid; v_lv uuid; v_cv uuid;
         v_org uuid := '10000000-0000-0000-0000-000000000001';
         v_raw text; v_detail jsonb; v_state text := 'allowed';
         v_gone int; v_copy int; v_edit boolean; v_ok boolean := true; v_why text := '';
@@ -1400,6 +1402,7 @@ BEGIN
   -- CW13.)
   SELECT v INTO v_c1 FROM cw_fix WHERE k = 'c1';
   SELECT v INTO v_lv FROM cw_fix WHERE k = 'lv';
+  SELECT v INTO v_cv FROM cw_fix WHERE k = 'cv';
 
   -- 1. THE FIRST PREMISE: a supervisor who runs ONE AREA of this plant is not
   --    the copier. w3 holds a supervisor grant on Assembly V and nothing above
@@ -1418,13 +1421,14 @@ BEGIN
                                      || ' detail=' || COALESCE(v_detail::text, '-'); END IF;
 
   -- Vera on the area override at Cell W1 in the source week; in the target week
-  -- she holds a row at Line V, in the OTHER area of the same plant --- the
-  -- furthest away a displaced row can now be from the cell being copied.
+  -- she holds a row at Cell V1 under Line V, in the OTHER area of the same
+  -- plant --- the furthest away a displaced row can now be from the cell
+  -- being copied.
   INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency, area_override, area_override_reason) VALUES
     ('d9000000-0000-0000-0000-0000000000f1', v_org, v_c1, 'd5000000-0000-0000-0000-0000000000f1',
      NULL, 'd6000000-0000-0000-0000-000000000001', tstzrange('2099-06-04 13:00+00', '2099-06-04 17:00+00', '[)'), 1.000, true, 'on loan');
   INSERT INTO assignments (id, org_id, node_id, operator_id, run_id, product_id, timerange, efficiency) VALUES
-    ('d9000000-0000-0000-0000-0000000000f2', v_org, v_lv, 'd5000000-0000-0000-0000-0000000000f1',
+    ('d9000000-0000-0000-0000-0000000000f2', v_org, v_cv, 'd5000000-0000-0000-0000-0000000000f1',
      NULL, 'd6000000-0000-0000-0000-000000000001', tstzrange('2099-06-11 14:00+00', '2099-06-11 18:00+00', '[)'), 1.000);
 
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', true);
