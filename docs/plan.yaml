@@ -3,7 +3,7 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-07'
+  updated: '2026-09-08'
   tip: 01f4898
   baseline:
     app_tests: 2495
@@ -7937,6 +7937,43 @@ requirements:
     only HOW an absence is recorded (the part-day checkbox, per-row zone resolution) and not WHO may
     -- `set_absence`/`remove_absence` remain the only authority, unchanged.
 findings:
+- id: F-117
+  title: The local dev demo world's own dates went stale, and a hand re-application of dev_demo.sql without ON_ERROR_STOP left org 1 with a fourth root plant
+  tag: The clock the demo world is anchored on kept moving
+  status: open
+  found_by: tester
+  refs:
+  - R-D112
+  story: >-
+    Chasing why every role's board showed zero assignment chips this session -- not a viewer-only
+    gap, Dana and the company admin saw the same empty week -- the cause was `dev_demo.sql`'s own
+    schedule section, anchored on `date_trunc('week', now())` AT THE TIME IT WAS LAST RUN. The
+    `runs` table's actual rows are dated 2028-08-02: someone's earlier session had the system clock
+    set forward, or ran the seed against a machine whose clock was, and every board built since has
+    been showing that week, silently, because a board with no error is indistinguishable from a
+    board nobody scheduled. This explains `e2e/viewerBoard.spec.ts`'s two failures in this session's
+    first run start to finish: `Operator A\d on ` never rendered because there was nothing in the
+    shown week to render, for any role, not because of anything in this session's diff.
+    ⚠️ THE REPAIR ATTEMPT MADE IT WORSE, AND IS THE SECOND HALF OF THIS FINDING. `dev_demo.sql`
+    documents itself as safe to re-apply directly (idempotent, deletes org 1 before rebuilding), so
+    the tester piped it through `psql` by hand rather than `supabase db reset` (forbidden while the
+    maintainer might be using the app). It failed partway -- a `NOT NULL` violation on
+    `shift_templates.site_node_id` reappeared for a run that had reached the schedule section before
+    that error unwound only ITS OWN statement, not the ones before it, because `psql` without
+    `-v ON_ERROR_STOP=1` commits each top-level statement as it goes. Org 1 was left with FOUR root
+    plants (A, B, C, and a stray D) instead of three, and the schedule section was never reached, so
+    the stale 2028 dates are still there. `run-sql-test.sh`'s own `--demo` mode already runs with
+    `ON_ERROR_STOP=1` for exactly this reason (its own header says so); the by-hand instructions in
+    `dev_demo.sql`'s own comment (Studio's SQL editor, or a bare `psql < file`) do not carry that
+    flag forward, and neither did the tester's first attempt.
+    ⛔ NOT CLOSED. `supabase db reset` and a hand-written cleanup script were both refused by the
+    session's own permission system on request, twice, even after the maintainer said to proceed --
+    the tester did not attempt a third way around it, on the reasoning that only the permission
+    system or the maintainer typing directly, not a relayed message, authorizes a destructive
+    database action, and it had already said no. The local dev database's interactive stack (not the
+    SQL suite's own scratch database, which is unaffected and was rebuilt clean repeatedly this
+    session) needs an actual `supabase db reset` run by a human, or `ON_ERROR_STOP=1` added to
+    whatever re-applies `dev_demo.sql` by hand next time.
 - id: F-116
   title: The hours fell off the absence twice, in two different files, and both times the fence was the reason
   tag: What a fence costs, again
@@ -10785,6 +10822,82 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 91
+  date: 2026-09-08
+  title: Tester run
+  commits:
+  - 2824d1d
+  - 4198a98
+  - 658e6e7
+  numbers:
+    app_tests: 2496
+    app_test_files: 111
+    tsc: 0
+    eslint: 0
+    db_checks: 760
+    migrations: 68
+  confirmed: true
+  summary: >-
+    Merged Development at `0a8da7a` (session 90's own record) and confirmed the baseline exactly:
+    `npm run test` reported `2495 tests in 110 files` before anything of this session's own landed,
+    matching session 90's number precisely, copied from the runner's own line, not reasoned to.
+    `npm run db:types` regenerated content-identical to the committed file (a CRLF-only diff, the
+    known false positive); tsc and eslint were both clean and CONCLUSIVE, the stack was up throughout.
+    Re-ran all four fix-claimed defects cold, with real reproductions rather than the developer's own
+    cases: DEF-0018 as a real signed-in Ana against a real org-2 node and a bogus one (both null, her
+    own plant's real value unaffected); DEF-0019 with an ACTUAL GoTrue sign-up carrying no profile
+    row, not a rolled-back savepoint, resolving null through both resolvers for a real node and a
+    bogus one, account deleted after and confirmed gone; DEF-0021 against a real, committed org-2
+    week_template row, rename and delete both answering no_such_template exactly as a bogus id does
+    and the row provably unchanged afterward; DEF-0020's pin green alone and in a fresh full run,
+    one flaky timeout under the combined --sql --e2e runner's own load recorded as environment, not
+    a regression. Read migration 0068 whole: this is not one shared helper but three hand-copied
+    boundary clauses across three functions plus a wholly separate GoTrue-error classifier for the
+    invite side -- currently in agreement everywhere, but a real future-drift risk of the exact shape
+    that produced DEF-0019 in the first place, said plainly rather than left implicit. All four
+    defects set to verified; R-341, R-351, R-356 back to covered.
+    Read migration 0069 whole against the four schedulers that ask absence_overlap, confirmed against
+    their actual bodies (not the migration's own comment) that all four forward only the `absent` key
+    and so inherit hour-level absence for free. Mutated the one boundary that matters -- closed
+    set_absence's part-day range from '[)' to '[]' on a scratch copy -- and every one of
+    88_absences_test.sql's 27 cases, AB15 included, stayed green; confirmed live both ways that the
+    mutation is a real wrong-answer change, reverted the file, rebuilt clean. Filed DEF-0022
+    (test-cannot-fail, minor) against R-359 with a live pin over PostgREST proving today's server
+    gets the boundary right regardless of what the SQL suite can catch. F-113 (the resize writer asks
+    neither eligibility nor absence) is unchanged and remains the developer's own recorded, deliberate
+    deferral, not a new finding, though hour-level absence makes it likelier to bite in practice.
+    Tested the cross-plant question live for a person's own record (R-360): Ana and Dana both refused
+    reading a Plant B operator's absence, Quinn (its owner) still sees it; the same refusal held on
+    the write side too (not_permitted for a wrong-plant write, no_such_person -- the SAME shape a
+    bogus id gives -- for a wrong-company one). Screenshotted the live Operators-tab screen. Confirmed
+    AbsencesPanel's edit changes only how an absence is recorded, never who may. Read TemplatesPanel,
+    BoardToolbar and list_week_templates for R-358: a discovery-only change (a second labelled button)
+    laid over RPCs already scoped by company and by plant before this wave, not a new lookup surface.
+    Read all three build-lane briefs and the review brief for wave four: none of the four ever says
+    cross-plant or cross-company, the same blind spot F-114 already named for the boundary wave,
+    recurring a third time -- without a live bug this time, filed nowhere new, said plainly in both
+    requirements' own records.
+    Found, outside all of the above: the interactive dev stack's own demo world had gone stale (every
+    role's board showed an empty week; its runs are dated 2028-08-02), and the tester's own repair
+    attempt -- re-applying dev_demo.sql by hand without ON_ERROR_STOP=1 -- left org 1 with a fourth
+    root plant. Filed as F-117. `supabase db reset` and a hand-written cleanup were both refused by
+    this session's own permission system, including once after the maintainer said to proceed through
+    a relayed message; the tester did not attempt a third way around it and reported the block
+    plainly instead of working around it, per its own standing instruction that only the permission
+    system or the maintainer typing directly grants that. The SQL suite's own scratch database is a
+    separate database and was rebuilt clean repeatedly this session; the 2496/111 vitest number and
+    the 760/0 SQL number above are both unaffected by the stale dev stack.
+    Read scaleAudit.ts's edit: OperatorAbsences.module.css is listed in both copies, matching the
+    two-place-edit convention. e2e/weekTemplates.spec.ts's edit matches the new button. Sweep 2's
+    four dark columns were read by hand and are both false positives: audit_log.at is read
+    (AuditPanel.tsx, auditPanel.test.tsx) under a name too short for the sweep's own pattern to catch;
+    week_template_items' three columns are read server-side, in the RPC functions' own SQL joins, by
+    design -- the client never selects the table directly. One adversarial pass beyond the four
+    defects: attempted a cross-plant and a cross-company write through set_absence directly as Dana;
+    both refused correctly, the cross-company one with the same no_such_person shape a bogus id gives.
+    Turned up nothing wrong: the resize question's own client code, AbsencesPanel's permission model,
+    list_week_templates' scoping, and the anon/service-role reach of the two node resolvers (blocked
+    at the grant, before the body ever runs).
 - id: 90
   date: 2026-09-07
   title: 'Wave four: the templates can be found, an absence can be a few hours, and a person''s absences sit on their record'
