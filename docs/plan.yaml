@@ -7890,17 +7890,22 @@ requirements:
       sentence
   status: contradicted
   note: >-
-    ⛔ CONTRADICTED 8 Sept by DEF-0022 (tester, minor, test-cannot-fail), against the SQL proof only,
-    not the product: 88_absences_test.sql's AB15 tests a part-day absence's hour boundary with a MISS
-    case a full hour clear of it (14:00-16:00 against a 09:00-13:00 absence), never the touching
-    instant. A one-line mutation closing set_absence's upper bound ('[)' to '[]') is a live, wrong
-    change -- a shift starting exactly when a part-day absence ends would be wrongly blocked -- and
-    every one of the suite's 27 cases stays green. The client's own mirror (absenceGaps,
-    src/test/absence.test.ts) IS pinned on this exact instant, and this row's own claim above says
-    the SQL suite proves it "by the same names the SQL cases carry" -- it does not. The tester's own
-    pin (src/test/defects/DEF-0022.test.ts) calls the live server (not migration text) and confirms
-    today's code answers the boundary correctly; the gap is in what 88 can catch, not in what the
-    server does.
+    ✅ DEF-0022 VERIFIED 8 Sept, cold, at 6b0f750: AB23 and AB24 are now real and independently
+    provable by mutation (the exact reported '[)' to '[]' mutation turns AB23 red by name, and also
+    AB25; an off-by-one VALUE mutation on p_ends_at turns AB23 red again; the mirror mutation, '[)'
+    to '(]', correctly leaves AB24 untouched because AB24's own window construction protects it by
+    convention regardless of the absence's stored boundary type, which is not a defect, just a
+    one-sided fragility this rule happens to have). AB25 (two part-day absences that merely touch)
+    is real too.
+    ⛔ STILL CONTRADICTED, now by DEF-0023 (tester, minor, doc-drift), filed 8 Sept against a smaller
+    claim in the SAME sentence DEF-0022 fixed: the corrected wording above says all three client
+    boundary cases are "each mirrored in 88_absences_test.sql by the name it carries there," but the
+    third one -- "a shift starting exactly when the absence starts, which does clash" -- has no
+    counterpart anywhere in 88_absences_test.sql, named or otherwise. A fully-open mutation ('[)' to
+    '()') confirmed this specific clause is not a live risk (any window with real duration overlaps
+    an absence's interior regardless of the absence's own start being inclusive or exclusive, so a
+    genuinely boundary-sensitive case here is not constructible), so this is a record-accuracy defect
+    in the plan's own claim, not a product or coverage gap the way DEF-0022 was.
 - id: R-360
   title: A person's own absences are read, recorded and removed on their record in the Operators tab
   source:
@@ -10894,6 +10899,67 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 93
+  date: 2026-09-08
+  title: Tester run
+  commits: []
+  numbers:
+    app_tests: 2497
+    app_test_files: 111
+    tsc: 0
+    eslint: 0
+    db_checks: 763
+    migrations: 68
+  confirmed: true
+  summary: >-
+    Merged Development at `8d5eb26` (session 92's own tip); worktree clean throughout, no package-lock
+    change so no `npm ci`. `npm run db:types` regenerated content-identical to the committed file (a
+    CRLF-only diff, the known false positive) -- confirms no migration in this diff and the type
+    surface is unchanged, so typecheck's `exit 0` is CONCLUSIVE, not merely clean-looking. Checked
+    F-117 before trusting anything board-level: the demo world is genuinely clean now -- exactly four
+    root plants (Northwind A/B/C, Contoso's Plant 1, no stray fifth), migrations table carries 0068
+    and 0069, and run dates read 2026-09-07 through 2026-09-09 in the live database, matching the
+    plan's own claim and today's date. `npm run test`: `Test Files 111 passed (111)` / `Tests 2497
+    passed (2497)`, matching the plan exactly. `88_absences_test.sql` alone: `30 passed, 0 failed, 0
+    hard-errors` (27 plus the three new AB23-AB25); the full 51-suite sweep summed the same as the
+    plan's own count, 763 passed 0 failed.
+    DEF-0022 re-verified cold, past the original reproduction: the exact reported mutation
+    ('[)' to '[]') now turns AB23 red by name (and AB25, a genuine side effect since both of AB25's
+    rows go through the same mutated constructor and now truly overlap). Went further, as the brief
+    for this run asked, with three more mutations, each rebuilt and reverted before the next
+    ('git diff --exit-code' clean between all of them): the mirror ('[)' to '(]') correctly does NOT
+    move AB24, and cannot -- AB24's window is built with the constructor's own default `[)` bounds,
+    so its upper bound already excludes the shared instant regardless of what the absence's stored
+    lower bound is, which the developer's own session-92 record already found and said plainly, and
+    I confirm independently; an off-by-one VALUE mutation (`p_ends_at + interval '1 hour'`, distinct
+    from a boundary-TYPE change) turns AB23 red again and AB25 red too; a fully-open mutation
+    ('[)' to '()') is caught by NOTHING in the file -- checked live before concluding anything, and it
+    is not a coverage gap the way the original filing was: a placement window with any real duration
+    overlaps an absence's interior regardless of whether the absence's own start is inclusive or
+    exclusive, so no boundary-sensitive case at that exact point is constructible with a non-empty
+    window. DEF-0022 set to verified.
+    That fourth mutation is what surfaced DEF-0023: R-359's own corrected claim (this session's
+    fix for the ORIGINAL overclaim) still says all three client boundary cases are "each mirrored in
+    88_absences_test.sql by the name it carries there" -- but the third one, "a shift starting exactly
+    when the absence starts, which does clash," has no SQL counterpart anywhere, named or otherwise.
+    AB15 tests a different, non-boundary shift (10:00-12:00 against a 09:00-13:00 absence). Filed
+    minor, class doc-drift, against R-359: the underlying behaviour is not at risk (confirmed above),
+    but the plan's own record overclaims a proof that does not exist, in the very sentence written to
+    correct the last overclaim of the same shape.
+    Playwright: 41 of 43 passed; two touch-project cases (T2, T5) failed reproducibly, twice, with
+    "no block with a touchable slice" -- board run bands rendered off-screen to the left. Neither
+    test file nor any board/touch code is in this session's diff, and re-running `e2e/touch.spec.ts`
+    alone reproduced the identical failure both times (not a one-off timeout the way past flakiness
+    under combined --sql --e2e load has read), so this is not something today's commits caused, but it
+    is also not explained away -- flagged for the maintainer's attention rather than chased down,
+    since it sits outside this session's one defect. Sweep 2's four dark columns (audit_log.at,
+    week_template_items' three) are the same long-standing false positives prior sessions already
+    read by hand; confirmed week_template_items' columns are still read server-side in the RPC
+    functions' own joins (25 hits across the migrations). Sweep 1: no migrations since the tip, so
+    nothing to check. Turned up nothing wrong: R-359's other verified_by files (absencesPanel,
+    shapes, dragGesture, absenceOnBoard) were not touched by this diff and their own cases still read
+    as boundary-genuine on inspection, not just green.
+  shipped: []
 - id: 92
   date: 2026-09-08
   title: 'DEF-0022: the part-day boundary gets cases that can fail, and the database is reset clean'
