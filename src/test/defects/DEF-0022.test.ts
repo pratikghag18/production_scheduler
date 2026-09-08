@@ -1,6 +1,7 @@
 import { describe, expect, it, afterAll } from "vitest";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from "../../../e2e/env";
+import type { Database } from "@/lib/database.types";
 
 /**
  * DEF-0022: the SQL suite's own boundary case for a part-day absence (R-359,
@@ -44,13 +45,13 @@ import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from 
 
 const ORG1_ADMIN = { email: "dana@example.test", password: "devpassword" };
 
-async function client() {
-  return createClient(supabaseUrl, supabaseAnonKey);
+function client(): SupabaseClient<Database> {
+  return createClient<Database>(supabaseUrl, supabaseAnonKey);
 }
 
 describe("DEF-0022: the part-day absence boundary is right live, though 88_absences_test.sql cannot tell", () => {
   let createdAbsenceId: string | null = null;
-  let sb: ReturnType<typeof createClient> | null = null;
+  let sb: SupabaseClient<Database> | null = null;
 
   afterAll(async () => {
     if (sb && createdAbsenceId) {
@@ -63,14 +64,15 @@ describe("DEF-0022: the part-day absence boundary is right live, though 88_absen
       console.warn(`DEF-0022 pin skipped: ${NO_BACKEND_REASON}`);
       return;
     }
-    sb = await client();
-    const { data: signIn, error: signInErr } = await sb.auth.signInWithPassword(ORG1_ADMIN);
+    const db = client();
+    sb = db;
+    const { data: signIn, error: signInErr } = await db.auth.signInWithPassword(ORG1_ADMIN);
     if (signInErr || !signIn.session) {
       console.warn(`DEF-0022 pin skipped: could not sign in as Dana: ${signInErr?.message}`);
       return;
     }
 
-    const { data: operators, error: opErr } = await sb
+    const { data: operators, error: opErr } = await db
       .from("operators")
       .select("id, display_name")
       .eq("display_name", "Operator A2")
@@ -79,16 +81,15 @@ describe("DEF-0022: the part-day absence boundary is right live, though 88_absen
       console.warn(`DEF-0022 pin skipped: Operator A2 not found (${opErr?.message ?? "no rows"})`);
       return;
     }
-    const operatorId = operators[0].id as string;
+    const operatorId = operators[0].id;
 
     // A far-future date so this never collides with a real fixture's own absence.
     const day = "2099-06-10";
-    const { data: setResult, error: setErr } = await sb.rpc("set_absence", {
+    const { data: setResult, error: setErr } = await db.rpc("set_absence", {
       p_operator_id: operatorId,
       p_from: day,
       p_to: day,
       p_reason: "DEF-0022 boundary probe",
-      p_external_id: null,
       p_starts_at: `${day}T09:00:00.000Z`,
       p_ends_at: `${day}T13:00:00.000Z`,
     });
@@ -96,7 +97,7 @@ describe("DEF-0022: the part-day absence boundary is right live, though 88_absen
     createdAbsenceId = (setResult as { id?: string } | null)?.id ?? null;
     expect(createdAbsenceId, "set_absence did not return an id").not.toBeNull();
 
-    const { data: touching, error: touchErr } = await sb.rpc("absence_overlap", {
+    const { data: touching, error: touchErr } = await db.rpc("absence_overlap", {
       p_operator_id: operatorId,
       p_timerange: `[${day}T13:00:00.000Z,${day}T15:00:00.000Z)`,
     });
@@ -106,7 +107,7 @@ describe("DEF-0022: the part-day absence boundary is right live, though 88_absen
       `a shift starting exactly when the part-day absence ends must not clash (half-open ranges) -- got ${JSON.stringify(touching)}`,
     ).toBe(false);
 
-    const { data: overlapping, error: overlapErr } = await sb.rpc("absence_overlap", {
+    const { data: overlapping, error: overlapErr } = await db.rpc("absence_overlap", {
       p_operator_id: operatorId,
       p_timerange: `[${day}T12:00:00.000Z,${day}T14:00:00.000Z)`,
     });

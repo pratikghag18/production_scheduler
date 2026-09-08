@@ -7815,6 +7815,17 @@ requirements:
       an admin reaches a saved template through the new "Apply a template" button rather than
       through the source select inside Copy week
   status: covered
+  note: >-
+    ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`: this is a discovery-only change layered on RPCs
+    already fixed or already correct, not a new lookup surface -- `BoardToolbar`'s new
+    `offerApplyTemplate` gate reads `canPlaceHere` (the same predicate the server runs), and
+    `list_week_templates` itself was already both org-scoped (`app_node_exists_in_org`) and
+    plant-scoped (`app_can_read_in_plant` on the resolved plant root) before this wave, unrelated to
+    DEF-0021's writers. Read wave4-a/-b/-c and the wave4-review-brief: none of the four documents
+    mentions cross-plant or cross-company once (grepped for both phrasings), the same blind spot
+    F-114 already named for the boundary wave, recurring a third time -- this time without a live
+    bug, since the templates lane built on top of already-scoped reads rather than adding a new one.
+    Checked by hand anyway since nobody else's brief asked for it.
 - id: R-359
   title: An absence may be part of a day --- a date, a start time and an end time --- and a clash is judged by the hours
   source:
@@ -7914,6 +7925,17 @@ requirements:
       the person's detail renders the absences block below "Where they can work" and every existing
       person-selecting case still holds
   status: covered
+  note: >-
+    ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`, the cross-plant question every screen here has had
+    to answer, live and not just by reading the RLS policy: recorded a real absence for a Plant B
+    operator as Quinn (Plant B's admin), then read the absences table as Ana (Plant A, Line 1 only)
+    and as Dana (Plant A's admin) -- both get nothing back, neither the row nor a count of it; Quinn
+    herself still sees it (the reader is not blind). `absences_select`'s
+    `app_can_read_operator(operator_id)` (0058, reused rather than reinvented) holds. Screenshotted
+    the live Operators-tab screen as Dana: the absences block renders below "Where Operator A1 can
+    work" exactly as the claim describes. Also confirmed AbsencesPanel's own wave-four edit changes
+    only HOW an absence is recorded (the part-day checkbox, per-row zone resolution) and not WHO may
+    -- `set_absence`/`remove_absence` remain the only authority, unchanged.
 findings:
 - id: F-116
   title: The hours fell off the absence twice, in two different files, and both times the fence was the reason
