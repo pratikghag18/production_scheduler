@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-08'
-  tip: 6b0f750
+  tip: f94796f
   baseline:
-    app_tests: 2497
+    app_tests: 2502
     app_test_files: 111
     tsc: 0
     eslint: 0
-    db_checks: 763
-    migrations: 68
+    db_checks: 773
+    migrations: 70
     mutations: 509 of 536
 tracks:
 - id: core
@@ -4121,6 +4121,10 @@ requirements:
     The API check on write is authoritative so no client bug can staff an uncertified operator.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): R-338's certificateExpiry.test.tsx proves this client/server pairing
+    for the certificate-expiry case specifically (the client mirrors the server's exact comparison). No test
+    found covering the general/skill-mismatch eligibility case this claim also implies -- still a real gap.
 - id: R-013
   title: Certification expiry is checked against the assignment window
   source:
@@ -4130,7 +4134,12 @@ requirements:
     Expiry is tested against the assignment's time range, not today. Scheduling someone three weeks out
     fails if their certification lapses in two.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-338
+  note: >-
+    src/test/certificateExpiry.test.tsx (R-338) already proves this exact claim -- "boundary both ways:
+    expiring ON the window's last day is valid... the day before is lapsed." Retired here (requirement audit,
+    8 Sept) as a duplicate rather than a second untested row for the same fact.
 - id: R-014
   title: 'Eligibility policy is per org: warn (default) or block'
   source:
@@ -4140,8 +4149,16 @@ requirements:
   claim: >-
     An org chooses whether an ineligible placement is refused outright or allowed with a recorded override.
     The default is warn.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/plantEligibilityPolicy.test.tsx
+    cases: "⭐ THE HEADLINE: the same untrained person, on ONE board, is refused at one cell and offered an override at the other"
+  status: covered
+  note: >-
+    Linked 8 Sept (requirement audit). R-331's own SQL evidence (73_plant_settings_test.sql) only proves the
+    policy VALUE resolves per-plant -- R-331's own note admits the board wasn't yet plant-aware for it.
+    plantEligibilityPolicy.test.tsx is the fix for that gap and is the actual proof of this row's claim, even
+    though its describe block is labeled R-331.
 - id: R-015
   title: Syncable tables carry source and external_id; CSV import upserts
   source:
@@ -4166,6 +4183,11 @@ requirements:
     everywhere.
   verified_by: []
   status: uncovered
+  note: >-
+    PREMATURE (requirement audit, 8 Sept): source/external_id columns exist and CSV import writes them
+    (operators.ts, products.ts), but no UI logic anywhere gates a field's editability on source -- readonly-if-
+    synced is not built. Flagged for the maintainer: park this until that UI exists, or decide it's in scope
+    now that CSV import writes the columns it depends on.
 - id: R-017
   title: Deactivation is active=false, never a delete
   source:
@@ -4174,6 +4196,10 @@ requirements:
   claim: Operators and products are deactivated, not deleted, so schedule history survives.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): not a duplicate of R-D110 as first guessed. R-D110's evidence
+    (56_*.sql, upgrade_0029) tests the DELETE flow's cascade/history rules, not the Deactivate mechanism's
+    active=false write -- no test found for that specifically. Still a real gap.
 - id: R-018
   title: Copy Week always previews conflicts before committing
   source:
@@ -4184,7 +4210,14 @@ requirements:
     and references to deactivated operators. The supervisor resolves or skips, then commits. Never a blind
     paste.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-339
+  note: >-
+    This early agent-drafted row asked only for a dry-run preview. The maintainer's later, more specific word
+    (session 71) is R-339 -- every clash listed with both candidates, resolved one by one, nothing written
+    until the person has answered all of them -- which is what was built and is covered by
+    supabase/tests/78_copy_week_test.sql, src/test/copyWeek.test.tsx and e2e/copyWeek.spec.ts. Retired here
+    (requirement audit, 8 Sept) rather than tracked as a second, weaker, untested claim about the same feature.
 - id: R-019
   title: Named templates store relative placements
   source:
@@ -4194,7 +4227,12 @@ requirements:
     A template stores day-of-week plus start and end offsets with operator, product and node references,
     and stamps onto any future week through the same preview-then-commit flow.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-356
+  note: >-
+    This early agent-drafted row anticipated the same feature R-356 shipped in session 85 (migration 0067,
+    supabase/tests/89_week_templates_test.sql, case TP-EQ: "a plan from a template equals a plan from the week
+    it was saved from, item for item"). Retired here (requirement audit, 8 Sept) as a duplicate.
 - id: R-020
   title: 'Three roles: admin, supervisor, viewer'
   source:
@@ -4257,6 +4295,10 @@ requirements:
     key drags to the minute.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): NOT a duplicate of R-D16 as first guessed -- R-D16 is itself uncovered,
+    and the two rows actively disagree on the snap values (R-D16 says 60/30/15 min; this row says
+    shift/1h/15min/5min). Resolve which is right before writing a test for either.
 - id: R-025
   title: 'Board gestures: create, resize, move, click; all optimistic'
   source:
@@ -4516,20 +4558,24 @@ requirements:
   verified_by: []
   status: uncovered
 - id: R-042
-  title: Breaks are display-only in v1
+  title: Breaks do not block assignments or count against capacity
   source:
   - §16.2
   - §16.4
   stated_by: agent
-  claim: Breaks do not block assignments and are not subtracted from targets or capacity.
+  claim: >-
+    Breaks do not block an assignment from being made and are not subtracted from operator capacity or from a
+    target a human typed. (The derived default target is the one place breaks ARE subtracted — that is R-316,
+    not this row.)
   verified_by: []
   status: uncovered
   note: >-
-    NARROWED BY R-316 (0040). Breaks ARE now subtracted from the DERIVED default target — that is the
-    maintainer's own formula, "(how much time a person is assigned - breaks) / standard cycle time". Everything
-    else in this row still holds: breaks do not block an assignment, are not subtracted from capacity, and are
-    not subtracted from a target a human typed. The subtraction is a display computation over the cell's
-    resolved shift pattern (standardTarget.ts), not a stored or enforced quantity.
+    NARROWED BY R-316 (0040): breaks ARE now subtracted from the DERIVED default target, the maintainer's own
+    formula "(how much time a person is assigned - breaks) / standard cycle time". Reworded 8 Sept (requirement
+    audit) to drop that now-false clause rather than retire the row outright — the remaining claims (breaks
+    don't block an assignment, don't count against capacity, don't touch a human-typed target) are untouched by
+    R-316 and still have no test. Flagged to the maintainer as still-open rather than removed on the "R-316 is
+    the correct expectation" call, since R-316 only settles the target-display half of this row.
 - id: R-043
   title: Compact zoom snaps to shift boundaries and offers full-shift quick actions
   source:
@@ -4612,6 +4658,13 @@ requirements:
     the loaded window and a parent_id chain can cycle.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): the shift-template half is proven -- R-039's
+    supabase/tests/84_shift_pattern_resolves_upward_test.sql (case ST3) exercises the same `path <@ anc.path`
+    pattern `resolve_shift_template` uses. The skill-requirement half is not: `check_eligibility`'s `required`
+    CTE uses the identical ltree-ancestor join, but no test places a skill requirement on an ancestor node and
+    checks eligibility at a descendant. Left uncovered as a whole rather than split into two rows; a test for
+    the skill-requirement half is what would close this one.
 - id: R-049
   title: A malformed timerange drops one block, never the board
   source:
@@ -4698,6 +4751,10 @@ requirements:
     are guarded, a chip always fits its lane and an avatar its chip.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. src/test/scaleAudit.test.ts
+    only lints which CSS files reference the --ui-scale token; it never imports or calls computeFitScale /
+    FIT_MIN / FIT_MAX (geometry.ts). The NaN/Infinity guard is a real crash risk if actually untested.
 - id: R-057
   title: --ui-scale is published on the document root
   source:
@@ -4708,6 +4765,9 @@ requirements:
     gets the fallback value.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. scaleAudit.test.ts is a
+    file-reference lint only -- no test sets or reads --ui-scale on document.documentElement.
 - id: R-058
   title: Popover width is computed once and keeps it on screen
   source:
@@ -5520,7 +5580,9 @@ requirements:
   status: uncovered
   note: >-
     The rendered states are in docs/mockups/p1-6e-level-grip.png and d100-drag-surface.png; the behaviour
-    rule (P group) is covered by R-228, the affordance itself by no committed case.
+    rule (P group) is covered by R-228, the affordance itself by no committed case. Checked again 8 Sept
+    (requirement audit): confirmed R-228 is unrelated in mechanism (no-op-drop caret suppression, not touch)
+    and there is no path to merging this row into it. A direct touch-interaction test is what closes this one.
 - id: R-231
   title: '`site_people` lists people only for a node you administer'
   source:
@@ -5606,7 +5668,10 @@ requirements:
   status: uncovered
   note: >-
     Labelled "D102" in §19.53; that number is reused in §19.59 for product colour (R-D102). Layout only;
-    no test.
+    no test. Checked again 8 Sept (requirement audit): not proven by R-332/settingRowStandard.test.ts, which
+    is scoped to the Settings tab only and never mentions Access. This was a deliberate layout-only/no-test
+    call when written, not an oversight -- accept-risk may be the more honest status than uncovered, but that
+    call is the maintainer's.
 - id: R-237
   title: 'Adding a person is an action: candidates appear only when searched'
   source:
@@ -5922,8 +5987,15 @@ requirements:
     is a button that opens the palette (and, since 0025, accepts a hex). `setProductColor` is its own
     write so a colour change cannot fail on a duplicate SKU. The hint no longer says the colour "never
     changes".
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/productsPanel.test.tsx
+    cases: >-
+      T2b Edit also opens the colour palette, T2c a colour picked in Edit is staged and does not write until
+      Save, T2d Cancel after picking a colour writes nothing, T2e Save with a rename and a recolour writes
+      each on its own call (rename first, so setProductColor is its own write)
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-253
   title: Reads page to exhaustion; no answer built on a short read
   source:
@@ -6394,6 +6466,10 @@ requirements:
     is user-defined.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): not covered by R-279 -- that row proves the invariant for one panel
+    (operators) only (S3-S5, `ownArea + outsideArea === total`). Same reusable pattern applies here across
+    the other five listed panels; still needs its own test per panel.
 - id: R-285
   title: Access keeps its own selection within the filtered list
   source:
@@ -6443,7 +6519,13 @@ requirements:
     plants is a legitimate state — the board simply does not offer it. The create form asks for sku and
     name and no owner.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-308
+  note: >-
+    Checked 8 Sept (requirement audit): not a merge, a correction. R-308 (2 Sept, covered by
+    supabase/tests/62_product_lifecycle_test.sql) explicitly reopens this row's company-admin-only rule --
+    R-308's own text: "This reopens the D115 Split, which had made the whole shared record company-only." This
+    row states the rule R-308 replaced.
 - id: R-289
   title: Automatic colour balances across the whole org and never re-picks
   source:
@@ -6453,7 +6535,15 @@ requirements:
     `app_pick_product_color(p_org_id)` chooses the least-used token across all the org's products; colour
     is set once at insert and only a deliberate hand-override changes it.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-D102
+  note: >-
+    Same §19.81 fact as the amendment recorded in R-D102's own note ("D115 balances the automatic pick across
+    the whole org rather than per owner"). Retired here (requirement audit, 8 Sept) as a duplicate rather than
+    a second untested row for the same change. CAUTION carried forward, not resolved: R-D102's own verified_by
+    (51_shared_list_owners_test.sql, upgrade_0023_product_colour.sql) predates the D115 amendment by its file
+    names -- nothing found in this pass confirms the whole-org balancing itself is under test anywhere. That is
+    a gap in R-D102, not reopened by retiring this row.
 - id: R-290
   title: The CSV parser is RFC 4180 and entity-agnostic
   source:
@@ -6477,7 +6567,12 @@ requirements:
     unresolvable plant name is an error and a blank one is fine.
   verified_by: []
   status: uncovered
-  note: '"Verified on the running database" — a manual check, no case named.'
+  note: >-
+    "Verified on the running database" — a manual check, no case named. Checked 8 Sept (requirement audit)
+    against R-294/R-295: match semantics genuinely differ per entity (this row falls back external_id-then-sku;
+    R-294 is external_id-only; R-295 matches on name+owner, no external_id at all) so these stay separate
+    requirements, not a merge — but they share one ImportWizard component, so one test file with a case per
+    entity is the natural shape for the tests that close all three.
 - id: R-292
   title: Import previews a plan, applies per row, company-admin only
   source:
@@ -6517,7 +6612,9 @@ requirements:
     and the file name as `source`.
   verified_by: []
   status: uncovered
-  note: Verified in the browser only.
+  note: >-
+    Verified in the browser only. Checked 8 Sept (requirement audit): not a duplicate of R-291 — its match key
+    is external_id only, no sku fallback. See R-291's note on sharing one test file across the import cluster.
 - id: R-295
   title: Trainings import bulk-adds training types per plant
   source:
@@ -6528,6 +6625,9 @@ requirements:
     pair is a no-op update, and a blank or unresolvable plant is a per-row error.
   verified_by: []
   status: uncovered
+  note: >-
+    Checked 8 Sept (requirement audit): not a duplicate of R-291 — this one matches on (name, owner) with no
+    external_id at all. See R-291's note on sharing one test file across the import cluster.
 - id: R-296
   title: Certifications import matches by employee ref and training name
   source:
@@ -7987,8 +8087,26 @@ requirements:
     and `assignments_run_consistency` both guard `node_id` alone, so changing a run's `timerange`
     does not move its crew in time and puts nobody anywhere new. The assignment's own `timerange` is
     the only write that does.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/88_absences_test.sql
+    cases: >-
+      AB26-AB34: a resize onto an absence is refused with `absent` under block and SUCCEEDS under
+      warn with the row read back to prove it actually moved; a resize clear of any absence succeeds
+      under both; an efficiency-only UPDATE is untouched, so a write that does not move the window
+      pays for nothing; move_run's and reassign_assignment's own warn-policy overrides still land
+      (AB30, AB31), the two writers that literally UPDATE assignments; delete_owned_row clearing a
+      departed person's operator_id to NULL is exempt (AB32); owner context with no jwt sub at all
+      is exempt and the row really moves (AB33); and a signed-in session with NO user_profiles row
+      --- DEF-0019's own shape, a caller identity and therefore NOT owner context --- is still
+      refused and the row does not move (AB34), which is the case that goes red if the exemption is
+      ever widened to `app_current_org() IS NULL`
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: >-
+      the resize path runs the client's own mirrors before the write and toasts the same sentence
+      the crew-drag toast uses, naming the person and the leave, in the board's zone
+  status: covered
 findings:
 - id: F-118
   title: CI died on the Prettier gate twice, two steps before the tests, and every other instrument was green both times
@@ -10905,6 +11023,80 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 94
+  date: 2026-09-08
+  title: 'The fifth writer starts asking, and the gate nobody ran moves to pre-commit'
+  commits:
+  - c02151c
+  - 2d9cf09
+  - 05d2127
+  - 2016c69
+  - 27c2a17
+  - f94796f
+  numbers:
+    app_tests: 2502
+    app_test_files: 111
+    tsc: 0
+    eslint: 0
+    db_checks: 773
+    migrations: 70
+  confirmed: true
+  summary: >-
+    Three things, and the first was not a defect in anything this project built.
+    ⛔ CI HAD BEEN RED ON `format:check`, THE FIFTH STEP OF EIGHT, WHICH EXITS TWO STEPS BEFORE THE
+    TESTS --- so one unformatted file took the suite, the build and the browser cases with it and
+    none of them ran. Eight tracked files: five from wave four's lanes, three defect pins written in
+    the tester's worktree, which does not run the check either. The tester recorded this same shape
+    on 4 Sept; it is a process hole, not an incident, and this session had run typecheck, eslint,
+    vitest and the SQL suite and never run the one gate that was red. Reproducing it took two goes
+    and the first was wrong in a way worth keeping: `prettier --check .` here names files CI is
+    happy with, because `core.autocrlf=true` means the index holds LF and the working tree holds
+    CRLF while Prettier defaults to LF --- twenty locally against CI's eight --- and `git archive`
+    applies the same conversion, which reported 371. Exporting with `core.autocrlf=false`, how a
+    Linux runner checks out, gives exactly eight, and the same export on the fix reads clean.
+    ⭐ FIXED WHERE THE MISTAKE IS MADE (F-118). `.githooks/pre-commit` refuses unformatted STAGED
+    BLOBS --- the bytes CI checks out, so it neither cries wolf over line endings nor lets a dirtied
+    file past --- and `package.json`'s `prepare` points `core.hooksPath` at it on every `npm ci`, so
+    a fresh clone and the tester's worktree get it with no step to forget. Proved both ways: a
+    mangled file was refused by name with no commit made, and a clean commit went through. Also
+    `npm run verify`, CI's sequence in CI's order.
+    ⭐ THE RESIZE, R-361, DECIDED BY THE MAINTAINER: *"The resize should get similar warnings as
+    other 4."* A plain PATCH moving an assignment's timerange now re-asks `check_eligibility` and
+    `absence_overlap` under the same resolved policy --- block refuses with the same two codes and
+    DETAIL shape the four raise, warn stays silent on the server and the client toasts the sentence
+    the crew-drag toast already uses. A trigger on the table, not a fifth copy of the rule, so the
+    raw PATCH and anything added later are covered by the four's own predicates. Written failing
+    first: before it existed the resize onto an absent day under block was simply not refused.
+    ⚠️ TWO THINGS THE BRIEF HAD WRONG, BOTH FOUND BY READING RATHER THAN ASSUMING. Only TWO of the
+    four writers UPDATE assignments (`create_assignment` inserts and Copy Week goes through it), so
+    the trigger never sees the other two; and `delete_owned_row` clears a departed person's
+    `operator_id` to NULL, which `check_eligibility` answers "not eligible" for, so that deletion
+    would have been refused under block for a reason that was never about it. The trigger's WHEN
+    clause requires a non-null operator_id; AB32 pins it.
+    ⛔ AND ONE REAL REGRESSION, CAUGHT BY THE SUITE AND FIXED IN THE RIGHT PLACE. The guard as first
+    written broke `50_audit_test.sql`, whose Case 27 resizes with no session because it is testing
+    the AUDIT TRAIL, not eligibility. The lane's instinct --- give that case a session --- was
+    wrong, and the fix belonged in the trigger: `check_eligibility`'s own read gate has no owner
+    exemption and nothing had ever called it from owner context before. 0071 adds the exemption on
+    `auth.uid() IS NULL`, the same key and reasoning 0068 settled for DEF-0019, with both
+    alternatives named as rejected in its header. A caller with no jwt sub already bypasses RLS on
+    this table, so the guard was only ever breaking the seed, a backfill and a psql session. AB33
+    and AB34 pin it from both sides, and AB34 --- a signed-in session with no profile row, refused,
+    row unchanged --- is named in the header as the case that goes red if anyone ever widens the
+    exemption to `app_current_org() IS NULL`.
+    ⭐ THE TESTER'S TWO. DEF-0022 verified. DEF-0023 filed against R-359 and it is this session's own
+    sentence twice over: the wording written to correct DEF-0022 repeated the same shape of
+    overclaim about a third case that has no SQL mirror. Verified here rather than accepted --- the
+    client case is at absence.test.ts line 152 and no SQL window starts at that instant --- and
+    corrected to say what is true AND why the gap must stay: no window with positive duration can
+    tell an inclusive absence start from an exclusive one, so an AB26 there would look like a fourth
+    boundary DEF-0022 secured while securing nothing. Both corrections were caught by someone
+    reading the record against the code, not by any runner.
+    ⭐ THE NUMBERS, RUN HERE. `Test Files 111 passed (111)` / `Tests 2502 passed (2502)`; the SQL
+    suite summed per file over the 51 numbered suites, 773 passed, 0 failed, 0 hard-errors, with
+    50_audit_test.sql back to clean and untouched; tsc 0; eslint 0; `format:check` clean on
+    everything CI can see.
+  shipped: []
 - id: 93
   date: 2026-09-08
   title: Tester run

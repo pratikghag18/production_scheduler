@@ -106,17 +106,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 93 · 2026-09-08 · Tester run</h2>
-  <div class="lead"><p>Merged Development at <code>8d5eb26</code> (session 92's own tip); worktree clean throughout, no package-lock change so no <code>npm ci</code>. <code>npm run db:types</code> regenerated content-identical to the committed file (a CRLF-only diff, the known false positive) -- confirms no migration in this diff and the type surface is unchanged, so typecheck's <code>exit 0</code> is CONCLUSIVE, not merely clean-looking. Checked F-117 before trusting anything board-level: the demo world is genuinely clean now -- exactly four root plants (Northwind A/B/C, Contoso's Plant 1, no stray fifth), migrations table carries 0068 and 0069, and run dates read 2026-09-07 through 2026-09-09 in the live database, matching the plan's own claim and today's date. <code>npm run test</code>: <code>Test Files 111 passed (111)</code> / <code>Tests 2497 passed (2497)</code>, matching the plan exactly. <code>88_absences_test.sql</code> alone: <code>30 passed, 0 failed, 0 hard-errors</code> (27 plus the three new AB23-AB25); the full 51-suite sweep summed the same as the plan's own count, 763 passed 0 failed. DEF-0022 re-verified cold, past the original reproduction: the exact reported mutation ('[)' to '[]') now turns AB23 red by name (and AB25, a genuine side effect since both of AB25's rows go through the same mutated constructor and now truly overlap). Went further, as the brief for this run asked, with three more mutations, each rebuilt and reverted before the next ('git diff --exit-code' clean between all of them): the mirror ('[)' to '(]') correctly does NOT move AB24, and cannot -- AB24's window is built with the constructor's own default <code>[)</code> bounds, so its upper bound already excludes the shared instant regardless of what the absence's stored lower bound is, which the developer's own session-92 record already found and said plainly, and I confirm independently; an off-by-one VALUE mutation (<code>p_ends_at + interval '1 hour'</code>, distinct from a boundary-TYPE change) turns AB23 red again and AB25 red too; a fully-open mutation ('[)' to '()') is caught by NOTHING in the file -- checked live before concluding anything, and it is not a coverage gap the way the original filing was: a placement window with any real duration overlaps an absence's interior regardless of whether the absence's own start is inclusive or exclusive, so no boundary-sensitive case at that exact point is constructible with a non-empty window. DEF-0022 set to verified. That fourth mutation is what surfaced DEF-0023: R-359's own corrected claim (this session's fix for the ORIGINAL overclaim) still says all three client boundary cases are &quot;each mirrored in 88_absences_test.sql by the name it carries there&quot; -- but the third one, &quot;a shift starting exactly when the absence starts, which does clash,&quot; has no SQL counterpart anywhere, named or otherwise. AB15 tests a different, non-boundary shift (10:00-12:00 against a 09:00-13:00 absence). Filed minor, class doc-drift, against R-359: the underlying behaviour is not at risk (confirmed above), but the plan's own record overclaims a proof that does not exist, in the very sentence written to correct the last overclaim of the same shape. Playwright: 41 of 43 passed; two touch-project cases (T2, T5) failed reproducibly, twice, with &quot;no block with a touchable slice&quot; -- board run bands rendered off-screen to the left. Neither test file nor any board/touch code is in this session's diff, and re-running <code>e2e/touch.spec.ts</code> alone reproduced the identical failure both times (not a one-off timeout the way past flakiness under combined --sql --e2e load has read), so this is not something today's commits caused, but it is also not explained away -- flagged for the maintainer's attention rather than chased down, since it sits outside this session's one defect. Sweep 2's four dark columns (audit_log.at, week_template_items' three) are the same long-standing false positives prior sessions already read by hand; confirmed week_template_items' columns are still read server-side in the RPC functions' own joins (25 hits across the migrations). Sweep 1: no migrations since the tip, so nothing to check. Turned up nothing wrong: R-359's other verified_by files (absencesPanel, shapes, dragGesture, absenceOnBoard) were not touched by this diff and their own cases still read as boundary-genuine on inspection, not just green.</p></div>
+  <h2>Session 94 · 2026-09-08 · The fifth writer starts asking, and the gate nobody ran moves to pre-commit</h2>
+  <div class="lead"><p>Three things, and the first was not a defect in anything this project built. ⛔ CI HAD BEEN RED ON <code>format:check</code>, THE FIFTH STEP OF EIGHT, WHICH EXITS TWO STEPS BEFORE THE TESTS --- so one unformatted file took the suite, the build and the browser cases with it and none of them ran. Eight tracked files: five from wave four's lanes, three defect pins written in the tester's worktree, which does not run the check either. The tester recorded this same shape on 4 Sept; it is a process hole, not an incident, and this session had run typecheck, eslint, vitest and the SQL suite and never run the one gate that was red. Reproducing it took two goes and the first was wrong in a way worth keeping: <code>prettier --check .</code> here names files CI is happy with, because <code>core.autocrlf=true</code> means the index holds LF and the working tree holds CRLF while Prettier defaults to LF --- twenty locally against CI's eight --- and <code>git archive</code> applies the same conversion, which reported 371. Exporting with <code>core.autocrlf=false</code>, how a Linux runner checks out, gives exactly eight, and the same export on the fix reads clean. ⭐ FIXED WHERE THE MISTAKE IS MADE (F-118). <code>.githooks/pre-commit</code> refuses unformatted STAGED BLOBS --- the bytes CI checks out, so it neither cries wolf over line endings nor lets a dirtied file past --- and <code>package.json</code>'s <code>prepare</code> points <code>core.hooksPath</code> at it on every <code>npm ci</code>, so a fresh clone and the tester's worktree get it with no step to forget. Proved both ways: a mangled file was refused by name with no commit made, and a clean commit went through. Also <code>npm run verify</code>, CI's sequence in CI's order. ⭐ THE RESIZE, R-361, DECIDED BY THE MAINTAINER: <em>&quot;The resize should get similar warnings as other 4.&quot;</em> A plain PATCH moving an assignment's timerange now re-asks <code>check_eligibility</code> and <code>absence_overlap</code> under the same resolved policy --- block refuses with the same two codes and DETAIL shape the four raise, warn stays silent on the server and the client toasts the sentence the crew-drag toast already uses. A trigger on the table, not a fifth copy of the rule, so the raw PATCH and anything added later are covered by the four's own predicates. Written failing first: before it existed the resize onto an absent day under block was simply not refused. ⚠️ TWO THINGS THE BRIEF HAD WRONG, BOTH FOUND BY READING RATHER THAN ASSUMING. Only TWO of the four writers UPDATE assignments (<code>create_assignment</code> inserts and Copy Week goes through it), so the trigger never sees the other two; and <code>delete_owned_row</code> clears a departed person's <code>operator_id</code> to NULL, which <code>check_eligibility</code> answers &quot;not eligible&quot; for, so that deletion would have been refused under block for a reason that was never about it. The trigger's WHEN clause requires a non-null operator_id; AB32 pins it. ⛔ AND ONE REAL REGRESSION, CAUGHT BY THE SUITE AND FIXED IN THE RIGHT PLACE. The guard as first written broke <code>50_audit_test.sql</code>, whose Case 27 resizes with no session because it is testing the AUDIT TRAIL, not eligibility. The lane's instinct --- give that case a session --- was wrong, and the fix belonged in the trigger: <code>check_eligibility</code>'s own read gate has no owner exemption and nothing had ever called it from owner context before. 0071 adds the exemption on <code>auth.uid() IS NULL</code>, the same key and reasoning 0068 settled for DEF-0019, with both alternatives named as rejected in its header. A caller with no jwt sub already bypasses RLS on this table, so the guard was only ever breaking the seed, a backfill and a psql session. AB33 and AB34 pin it from both sides, and AB34 --- a signed-in session with no profile row, refused, row unchanged --- is named in the header as the case that goes red if anyone ever widens the exemption to <code>app_current_org() IS NULL</code>. ⭐ THE TESTER'S TWO. DEF-0022 verified. DEF-0023 filed against R-359 and it is this session's own sentence twice over: the wording written to correct DEF-0022 repeated the same shape of overclaim about a third case that has no SQL mirror. Verified here rather than accepted --- the client case is at absence.test.ts line 152 and no SQL window starts at that instant --- and corrected to say what is true AND why the gap must stay: no window with positive duration can tell an inclusive absence start from an exclusive one, so an AB26 there would look like a fourth boundary DEF-0022 secured while securing nothing. Both corrections were caught by someone reading the record against the code, not by any runner. ⭐ THE NUMBERS, RUN HERE. <code>Test Files 111 passed (111)</code> / <code>Tests 2502 passed (2502)</code>; the SQL suite summed per file over the 51 numbered suites, 773 passed, 0 failed, 0 hard-errors, with 50_audit_test.sql back to clean and untouched; tsc 0; eslint 0; <code>format:check</code> clean on everything CI can see.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">2497</span><span class="l">app tests in 111 files — session 93, 2026-09-08</span></div>
+  <div class="stat ok"><span class="n">2502</span><span class="l">app tests in 111 files — session 94, 2026-09-08</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
-  <div class="stat ok"><span class="n">763</span><span class="l">database checks</span></div>
-  <div class="stat"><span class="n">68</span><span class="l">database changes (migrations)</span></div>
+  <div class="stat ok"><span class="n">773</span><span class="l">database checks</span></div>
+  <div class="stat"><span class="n">70</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">185 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">188 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
-  <p class="fine">Measured at commit <code>6b0f750</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>f94796f</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2620,7 +2620,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 185 covered · 104 uncovered · 1 contradicted · 14 superseded</caption>
+<caption>304 requirements · 188 covered · 96 uncovered · 1 contradicted · 19 superseded</caption>
 <tbody><tr class="r-uncovered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -3289,23 +3289,23 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-012">
   <td class="g-n">R-012</td>
   <td class="reqmain"><b>Eligibility checked in the UI and authoritatively at the API</b><br><span class="fine">When an operator is picked up, ineligible rows dim and expiring certifications warn, computed client-side. The API check on write is authoritative so no client bug can staff an uncertified operator.</span>
-      <br><span class="fine">§6, §10 · agent</span></td>
+      <br><span class="fine">§6, §10 · agent · Checked 8 Sept (requirement audit): R-338's certificateExpiry.test.tsx proves this client/server pairing for the certificate-expiry case specifically (the client mirrors the server's exact comparison). No test found covering the general/skill-mismatch eligibility case this claim also implies -- still a real gap.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-013">
+<tr class="r-superseded" id="R-013">
   <td class="g-n">R-013</td>
   <td class="reqmain"><b>Certification expiry is checked against the assignment window</b><br><span class="fine">Expiry is tested against the assignment's time range, not today. Scheduling someone three weeks out fails if their certification lapses in two.</span>
-      <br><span class="fine">§6 · agent</span></td>
+      <br><span class="fine">§6 · agent · superseded by <a href="#R-338">R-338</a> · src/test/certificateExpiry.test.tsx (R-338) already proves this exact claim -- &quot;boundary both ways: expiring ON the window's last day is valid... the day before is lapsed.&quot; Retired here (requirement audit, 8 Sept) as a duplicate rather than a second untested row for the same fact.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
-<tr class="r-uncovered" id="R-014">
+<tr class="r-covered" id="R-014">
   <td class="g-n">R-014</td>
   <td class="reqmain"><b>Eligibility policy is per org: warn (default) or block</b><br><span class="fine">An org chooses whether an ineligible placement is refused outright or allowed with a recorded override. The default is warn.</span>
-      <br><span class="fine">§6, §15.2 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§6, §15.2 · agent · Linked 8 Sept (requirement audit). R-331's own SQL evidence (73_plant_settings_test.sql) only proves the policy VALUE resolves per-plant -- R-331's own note admits the board wasn't yet plant-aware for it. plantEligibilityPolicy.test.tsx is the fix for that gap and is the actual proof of this row's claim, even though its describe block is labeled R-331.</span></td>
+  <td class="fine">vitest · <code>src/test/plantEligibilityPolicy.test.tsx</code> ⭐ THE HEADLINE: the same untrained person, on ONE board, is refused at one cell and offered an override at the other</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-015">
   <td class="g-n">R-015</td>
@@ -3317,30 +3317,30 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-016">
   <td class="g-n">R-016</td>
   <td class="reqmain"><b>Synced fields are read-only in-app; app-owned fields stay editable</b><br><span class="fine">Records that came from a sync lock their synced fields in the app. Skills and home node remain editable everywhere.</span>
-      <br><span class="fine">§7 · agent</span></td>
+      <br><span class="fine">§7 · agent · PREMATURE (requirement audit, 8 Sept): source/external_id columns exist and CSV import writes them (operators.ts, products.ts), but no UI logic anywhere gates a field's editability on source -- readonly-if- synced is not built. Flagged for the maintainer: park this until that UI exists, or decide it's in scope now that CSV import writes the columns it depends on.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-017">
   <td class="g-n">R-017</td>
   <td class="reqmain"><b>Deactivation is active=false, never a delete</b><br><span class="fine">Operators and products are deactivated, not deleted, so schedule history survives.</span>
-      <br><span class="fine">§7 · agent</span></td>
+      <br><span class="fine">§7 · agent · Checked 8 Sept (requirement audit): not a duplicate of R-D110 as first guessed. R-D110's evidence (56_*.sql, upgrade_0029) tests the DELETE flow's cascade/history rules, not the Deactivate mechanism's active=false write -- no test found for that specifically. Still a real gap.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-018">
+<tr class="r-superseded" id="R-018">
   <td class="g-n">R-018</td>
   <td class="reqmain"><b>Copy Week always previews conflicts before committing</b><br><span class="fine">Copying a week forward is a bulk insert preceded by a mandatory dry-run that lists clean copies, conflicts and references to deactivated operators. The supervisor resolves or skips, then commits. Never a blind paste.</span>
-      <br><span class="fine">§8 · agent</span></td>
+      <br><span class="fine">§8 · agent · superseded by <a href="#R-339">R-339</a> · This early agent-drafted row asked only for a dry-run preview. The maintainer's later, more specific word (session 71) is R-339 -- every clash listed with both candidates, resolved one by one, nothing written until the person has answered all of them -- which is what was built and is covered by supabase/tests/78_copy_week_test.sql, src/test/copyWeek.test.tsx and e2e/copyWeek.spec.ts. Retired here (requirement audit, 8 Sept) rather than tracked as a second, weaker, untested claim about the same feature.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
-<tr class="r-uncovered" id="R-019">
+<tr class="r-superseded" id="R-019">
   <td class="g-n">R-019</td>
   <td class="reqmain"><b>Named templates store relative placements</b><br><span class="fine">A template stores day-of-week plus start and end offsets with operator, product and node references, and stamps onto any future week through the same preview-then-commit flow.</span>
-      <br><span class="fine">§8 · agent</span></td>
+      <br><span class="fine">§8 · agent · superseded by <a href="#R-356">R-356</a> · This early agent-drafted row anticipated the same feature R-356 shipped in session 85 (migration 0067, supabase/tests/89_week_templates_test.sql, case TP-EQ: &quot;a plan from a template equals a plan from the week it was saved from, item for item&quot;). Retired here (requirement audit, 8 Sept) as a duplicate.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
 <tr class="r-superseded" id="R-020">
   <td class="g-n">R-020</td>
@@ -3373,7 +3373,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-024">
   <td class="g-n">R-024</td>
   <td class="reqmain"><b>Snapping adapts to zoom; a modifier key drags free</b><br><span class="fine">Each zoom level has a default snap (shift at the coarsest, then 1 h, 15 min, 5 min). Holding a modifier key drags to the minute.</span>
-      <br><span class="fine">§10, §16.2, D16 · agent</span></td>
+      <br><span class="fine">§10, §16.2, D16 · agent · Checked 8 Sept (requirement audit): NOT a duplicate of R-D16 as first guessed -- R-D16 is itself uncovered, and the two rows actively disagree on the snap values (R-D16 says 60/30/15 min; this row says shift/1h/15min/5min). Resolve which is right before writing a test for either.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3498,8 +3498,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 </tr>
 <tr class="r-uncovered" id="R-042">
   <td class="g-n">R-042</td>
-  <td class="reqmain"><b>Breaks are display-only in v1</b><br><span class="fine">Breaks do not block assignments and are not subtracted from targets or capacity.</span>
-      <br><span class="fine">§16.2, §16.4 · agent · NARROWED BY R-316 (0040). Breaks ARE now subtracted from the DERIVED default target — that is the maintainer's own formula, &quot;(how much time a person is assigned - breaks) / standard cycle time&quot;. Everything else in this row still holds: breaks do not block an assignment, are not subtracted from capacity, and are not subtracted from a target a human typed. The subtraction is a display computation over the cell's resolved shift pattern (standardTarget.ts), not a stored or enforced quantity.</span></td>
+  <td class="reqmain"><b>Breaks do not block assignments or count against capacity</b><br><span class="fine">Breaks do not block an assignment from being made and are not subtracted from operator capacity or from a target a human typed. (The derived default target is the one place breaks ARE subtracted — that is R-316, not this row.)</span>
+      <br><span class="fine">§16.2, §16.4 · agent · NARROWED BY R-316 (0040): breaks ARE now subtracted from the DERIVED default target, the maintainer's own formula &quot;(how much time a person is assigned - breaks) / standard cycle time&quot;. Reworded 8 Sept (requirement audit) to drop that now-false clause rather than retire the row outright — the remaining claims (breaks don't block an assignment, don't count against capacity, don't touch a human-typed target) are untouched by R-316 and still have no test. Flagged to the maintainer as still-open rather than removed on the &quot;R-316 is the correct expectation&quot; call, since R-316 only settles the target-display half of this row.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3541,7 +3541,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-048">
   <td class="g-n">R-048</td>
   <td class="reqmain"><b>Nearest-ancestor lookups walk ltree paths, never parent_id</b><br><span class="fine">Shift template and skill requirement resolution walk the node's path, because a parent may sit outside the loaded window and a parent_id chain can cycle.</span>
-      <br><span class="fine">§18, §19.1 · agent</span></td>
+      <br><span class="fine">§18, §19.1 · agent · Checked 8 Sept (requirement audit): the shift-template half is proven -- R-039's supabase/tests/84_shift_pattern_resolves_upward_test.sql (case ST3) exercises the same `path &lt;@ anc.path` pattern `resolve_shift_template` uses. The skill-requirement half is not: `check_eligibility`'s `required` CTE uses the identical ltree-ancestor join, but no test places a skill requirement on an ancestor node and checks eligibility at a descendant. Left uncovered as a whole rather than split into two rows; a test for the skill-requirement half is what would close this one.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3597,14 +3597,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-056">
   <td class="g-n">R-056</td>
   <td class="reqmain"><b>Fit scales rows to fill the available height within 0.75×–2.5×</b><br><span class="fine">fitScale is the available height divided by the natural Standard height, clamped to 0.75–2.5, computed in one pass from unscaled heights. Every density field is rounded to an integer, NaN and Infinity are guarded, a chip always fits its lane and an avatar its chip.</span>
-      <br><span class="fine">§18.10, §18.11, §18.12 · maintainer</span></td>
+      <br><span class="fine">§18.10, §18.11, §18.12 · maintainer · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. src/test/scaleAudit.test.ts only lints which CSS files reference the --ui-scale token; it never imports or calls computeFitScale / FIT_MIN / FIT_MAX (geometry.ts). The NaN/Infinity guard is a real crash risk if actually untested.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-057">
   <td class="g-n">R-057</td>
   <td class="reqmain"><b>--ui-scale is published on the document root</b><br><span class="fine">Because popovers are portaled, any board custom property must be set on :root or the portal silently gets the fallback value.</span>
-      <br><span class="fine">§18.14 · agent</span></td>
+      <br><span class="fine">§18.14 · agent · Checked 8 Sept (requirement audit): confirmed genuinely untested, not a duplicate. scaleAudit.test.ts is a file-reference lint only -- no test sets or reads --ui-scale on document.documentElement.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -3989,7 +3989,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-230">
   <td class="g-n">R-230</td>
   <td class="reqmain"><b>The level list has a drag grip that works by touch</b><br><span class="fine">Each level row carries a <code>⠿</code> grip (with <code>touch-action: none</code> and its own pointer handler) so a finger can start a drag; the whole row shows <code>cursor: grab</code> and a visible hover tint that stands down while a drag is live so the caret owns the seam. The grip sits last but one, immediately before the row's <code>×</code>, matching where the tree puts its grip.</span>
-      <br><span class="fine">§19.56, §19.58 · maintainer · The rendered states are in docs/mockups/p1-6e-level-grip.png and d100-drag-surface.png; the behaviour rule (P group) is covered by R-228, the affordance itself by no committed case.</span></td>
+      <br><span class="fine">§19.56, §19.58 · maintainer · The rendered states are in docs/mockups/p1-6e-level-grip.png and d100-drag-surface.png; the behaviour rule (P group) is covered by R-228, the affordance itself by no committed case. Checked again 8 Sept (requirement audit): confirmed R-228 is unrelated in mechanism (no-op-drop caret suppression, not touch) and there is no path to merging this row into it. A direct touch-interaction test is what closes this one.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4031,7 +4031,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-236">
   <td class="g-n">R-236</td>
   <td class="reqmain"><b>Access rows share one grid with fixed control columns</b><br><span class="fine">Data and columns are presented structurally: one grid template shared by header and rows, fixed tracks for the role control and the action, anything that cannot fit a column on its own full-width line, and every candidate row shows its access (&quot;No access&quot;).</span>
-      <br><span class="fine">§19.53 · maintainer · Labelled &quot;D102&quot; in §19.53; that number is reused in §19.59 for product colour (R-D102). Layout only; no test.</span></td>
+      <br><span class="fine">§19.53 · maintainer · Labelled &quot;D102&quot; in §19.53; that number is reused in §19.59 for product colour (R-D102). Layout only; no test. Checked again 8 Sept (requirement audit): not proven by R-332/settingRowStandard.test.ts, which is scoped to the Settings tab only and never mentions Access. This was a deliberate layout-only/no-test call when written, not an oversight -- accept-risk may be the more honest status than uncovered, but that call is the maintainer's.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4140,12 +4140,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-252">
+<tr class="r-covered" id="R-252">
   <td class="g-n">R-252</td>
   <td class="reqmain"><b>A product's colour can be set by the user</b><br><span class="fine">The automatic pick at creation stays and nothing re-picks on rename or re-assignment, but the swatch is a button that opens the palette (and, since 0025, accepts a hex). <code>setProductColor</code> is its own write so a colour change cannot fail on a duplicate SKU. The hint no longer says the colour &quot;never changes&quot;.</span>
-      <br><span class="fine">§19.65, §19.66 · maintainer</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.65, §19.66 · maintainer · Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.</span></td>
+  <td class="fine">vitest · <code>src/test/productsPanel.test.tsx</code> T2b Edit also opens the colour palette, T2c a colour picked in Edit is staged and does not write until Save, T2d Cancel after picking a colour writes nothing, T2e Save with a rename and a recolour writes each on its own call (rename first, so setProductColor is its own write)</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-253">
   <td class="g-n">R-253</td>
@@ -4360,7 +4360,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-284">
   <td class="g-n">R-284</td>
   <td class="reqmain"><b>Everything the filter trims is counted</b><br><span class="fine">Every trimmed list — people, trainings, products, patterns, places, tree rows — carries a footnote with the count, naming the filter's own label rather than the word &quot;plant&quot;, because the hierarchy is user-defined.</span>
-      <br><span class="fine">§19.79 · agent</span></td>
+      <br><span class="fine">§19.79 · agent · Checked 8 Sept (requirement audit): not covered by R-279 -- that row proves the invariant for one panel (operators) only (S3-S5, `ownArea + outsideArea === total`). Same reusable pattern applies here across the other five listed panels; still needs its own test per panel.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4385,19 +4385,19 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-288">
+<tr class="r-superseded" id="R-288">
   <td class="g-n">R-288</td>
   <td class="reqmain"><b>Split: the part record is company property, makers per plant</b><br><span class="fine">Creating, renaming, recolouring or deleting a part is company-admin only. A plant admin may add or remove their OWN plant from a part's makers; a company admin manages the whole list. A part with zero plants is a legitimate state — the board simply does not offer it. The create form asks for sku and name and no owner.</span>
-      <br><span class="fine">§19.81 · maintainer</span></td>
+      <br><span class="fine">§19.81 · maintainer · superseded by <a href="#R-308">R-308</a> · Checked 8 Sept (requirement audit): not a merge, a correction. R-308 (2 Sept, covered by supabase/tests/62_product_lifecycle_test.sql) explicitly reopens this row's company-admin-only rule -- R-308's own text: &quot;This reopens the D115 Split, which had made the whole shared record company-only.&quot; This row states the rule R-308 replaced.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
-<tr class="r-uncovered" id="R-289">
+<tr class="r-superseded" id="R-289">
   <td class="g-n">R-289</td>
   <td class="reqmain"><b>Automatic colour balances across the whole org and never re-picks</b><br><span class="fine"><code>app_pick_product_color(p_org_id)</code> chooses the least-used token across all the org's products; colour is set once at insert and only a deliberate hand-override changes it.</span>
-      <br><span class="fine">§19.81 · agent</span></td>
+      <br><span class="fine">§19.81 · agent · superseded by <a href="#R-D102">R-D102</a> · Same §19.81 fact as the amendment recorded in R-D102's own note (&quot;D115 balances the automatic pick across the whole org rather than per owner&quot;). Retired here (requirement audit, 8 Sept) as a duplicate rather than a second untested row for the same change. CAUTION carried forward, not resolved: R-D102's own verified_by (51_shared_list_owners_test.sql, upgrade_0023_product_colour.sql) predates the D115 amendment by its file names -- nothing found in this pass confirms the whole-org balancing itself is under test anywhere. That is a gap in R-D102, not reopened by retiring this row.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
 <tr class="r-uncovered" id="R-290">
   <td class="g-n">R-290</td>
@@ -4409,7 +4409,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-291">
   <td class="g-n">R-291</td>
   <td class="reqmain"><b>Product import matches on external_id, then sku</b><br><span class="fine">A row is judged in order: an <code>external_id</code> matching an existing part UPDATES sku and name unless the new sku already belongs to a different part; an unmatched <code>external_id</code> INSERTS; with no <code>external_id</code>, a matching sku UPDATES that part and a new sku INSERTS; two file rows sharing an external_id or a sku are both errors; an optional <code>plant</code> column assigns a <code>product_sites</code> row after the write, an unresolvable plant name is an error and a blank one is fine.</span>
-      <br><span class="fine">§19.82 · agent · &quot;Verified on the running database&quot; — a manual check, no case named.</span></td>
+      <br><span class="fine">§19.82 · agent · &quot;Verified on the running database&quot; — a manual check, no case named. Checked 8 Sept (requirement audit) against R-294/R-295: match semantics genuinely differ per entity (this row falls back external_id-then-sku; R-294 is external_id-only; R-295 matches on name+owner, no external_id at all) so these stay separate requirements, not a merge — but they share one ImportWizard component, so one test file with a case per entity is the natural shape for the tests that close all three.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4430,14 +4430,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <tr class="r-uncovered" id="R-294">
   <td class="g-n">R-294</td>
   <td class="reqmain"><b>People import matches on external_id; inserts need a site</b><br><span class="fine">One generic <code>ImportWizard</code> driven by a per-entity descriptor serves every import. Operators match on <code>external_id</code> only (a row without one can only INSERT); an insert must resolve a plant by name and a blank plant is a per-row error; an UPDATE leaves the site alone. Imported rows carry <code>external_id</code> and the file name as <code>source</code>.</span>
-      <br><span class="fine">§19.84 · agent · Verified in the browser only.</span></td>
+      <br><span class="fine">§19.84 · agent · Verified in the browser only. Checked 8 Sept (requirement audit): not a duplicate of R-291 — its match key is external_id only, no sku fallback. See R-291's note on sharing one test file across the import cluster.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-295">
   <td class="g-n">R-295</td>
   <td class="reqmain"><b>Trainings import bulk-adds training types per plant</b><br><span class="fine">A trainings CSV matches on (name, owner): the plant is resolved by name, a new pair inserts, an existing pair is a no-op update, and a blank or unresolvable plant is a per-row error.</span>
-      <br><span class="fine">§19.85 · maintainer</span></td>
+      <br><span class="fine">§19.85 · maintainer · Checked 8 Sept (requirement audit): not a duplicate of R-291 — this one matches on (name, owner) with no external_id at all. See R-291's note on sharing one test file across the import cluster.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
@@ -4742,12 +4742,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/operatorAbsences.test.tsx</code> an honest empty state names the person; the block shares the Absences tab's cache key and filters to this person only; whole-day and part-day listed soonest first with a part-day row's hours in the person's own resolved zone; past ones hidden behind a toggle naming the count; recording a whole-day and a part-day absence (the latter converted to instants in this person's own zone) and removing one; a server refusal shown in words, never pre-guessed<br>vitest · <code>src/test/operatorsPanel.test.tsx</code> the person's detail renders the absences block below &quot;Where they can work&quot; and every existing person-selecting case still holds</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-361">
+<tr class="r-covered" id="R-361">
   <td class="g-n">R-361</td>
   <td class="reqmain"><b>A resize asks the same two questions the other four writers ask, and answers them the same way</b><br><span class="fine">The maintainer, 8 Sept, asked directly: <em>&quot;The resize should get similar warnings as other 4.&quot;</em> So the fifth way an assignment's time changes stops being the exception. Four writers ask <code>check_eligibility</code> and <code>absence_overlap</code> before they write --- <code>create_assignment</code>, <code>move_run</code>, <code>reassign_assignment</code>, <code>copy_week_plan</code> --- and a plain <code>PATCH /assignments</code> that changes <code>timerange</code> (a drag on the block's EDGE, or a nudge to a new time in the same cell) asks neither, so a person can be moved onto a day they are on leave, or past the day their certificate expires, in silence. ⭐ THE ANSWER IS THE SAME ANSWER, UNDER THE SAME RESOLVED POLICY. Under <code>block</code> the write is refused with the same error codes the four raise (<code>absent</code>, <code>not_eligible</code>). Under <code>warn</code> it goes through and the person is named in a toast carrying the same sentence the crew-drag toast already shows, hours included for a part-day absence (R-359). ⭐ AND IT BELONGS IN A TRIGGER ON THE TABLE, NOT A FIFTH COPY OF THE RULE. A <code>BEFORE UPDATE</code> trigger on <code>assignments</code> that re-asks the two predicates whenever <code>timerange</code> (or <code>operator_id</code>) changes catches every path at once --- the client's PATCH, a raw PostgREST call, anything added later --- and cannot drift from the four, because it IS their predicates. Measured, not inferred: the guards that already fire on that PATCH (<code>assignments_capacity</code>, <code>assignments_run_consistency</code>, <code>assignments_scope_guard</code>) are about capacity, node and scope, and not one of them looks at the person. ⚠️ A TRIGGER CAN REFUSE AND CANNOT WARN, which is why the two halves are split. Under <code>warn</code> the trigger must stay silent and the CLIENT owns the sentence, through the mirrors it already has (<code>absenceGaps</code>, <code>certificateGaps</code>) --- the same predicate the server runs, which is the standing rule. A trigger that refused under <code>warn</code> would be worse than the gap it closes. ⚠️ A RUN RESIZE IS NOT IN SCOPE, AND THAT WAS CHECKED RATHER THAN ASSUMED. <code>runs_crew_follows</code> and <code>assignments_run_consistency</code> both guard <code>node_id</code> alone, so changing a run's <code>timerange</code> does not move its crew in time and puts nobody anywhere new. The assignment's own <code>timerange</code> is the only write that does.</span>
       <br><span class="fine">session 93 conversation, F-113, tester note, session 87 stage 7 · maintainer</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="fine">sql · <code>supabase/tests/88_absences_test.sql</code> AB26-AB34: a resize onto an absence is refused with `absent` under block and SUCCEEDS under warn with the row read back to prove it actually moved; a resize clear of any absence succeeds under both; an efficiency-only UPDATE is untouched, so a write that does not move the window pays for nothing; move_run's and reassign_assignment's own warn-policy overrides still land (AB30, AB31), the two writers that literally UPDATE assignments; delete_owned_row clearing a departed person's operator_id to NULL is exempt (AB32); owner context with no jwt sub at all is exempt and the row really moves (AB33); and a signed-in session with NO user_profiles row --- DEF-0019's own shape, a caller identity and therefore NOT owner context --- is still refused and the row does not move (AB34), which is the case that goes red if the exemption is ever widened to `app_current_org() IS NULL`<br>vitest · <code>src/test/dragGesture.test.ts</code> the resize path runs the client's own mirrors before the write and toasts the same sentence the crew-drag toast uses, naming the person and the leave, in the board's zone</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr></tbody></table></div>
 </section>
 
@@ -4756,6 +4756,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 94</b> · 2026-09-08 · The fifth writer starts asking, and the gate nobody ran moves to pre-commit <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>Three things, and the first was not a defect in anything this project built. ⛔ CI HAD BEEN RED ON <code>format:check</code>, THE FIFTH STEP OF EIGHT, WHICH EXITS TWO STEPS BEFORE THE TESTS --- so one unformatted file took the suite, the build and the browser cases with it and none of them ran. Eight tracked files: five from wave four's lanes, three defect pins written in the tester's worktree, which does not run the check either. The tester recorded this same shape on 4 Sept; it is a process hole, not an incident, and this session had run typecheck, eslint, vitest and the SQL suite and never run the one gate that was red. Reproducing it took two goes and the first was wrong in a way worth keeping: <code>prettier --check .</code> here names files CI is happy with, because <code>core.autocrlf=true</code> means the index holds LF and the working tree holds CRLF while Prettier defaults to LF --- twenty locally against CI's eight --- and <code>git archive</code> applies the same conversion, which reported 371. Exporting with <code>core.autocrlf=false</code>, how a Linux runner checks out, gives exactly eight, and the same export on the fix reads clean. ⭐ FIXED WHERE THE MISTAKE IS MADE (F-118). <code>.githooks/pre-commit</code> refuses unformatted STAGED BLOBS --- the bytes CI checks out, so it neither cries wolf over line endings nor lets a dirtied file past --- and <code>package.json</code>'s <code>prepare</code> points <code>core.hooksPath</code> at it on every <code>npm ci</code>, so a fresh clone and the tester's worktree get it with no step to forget. Proved both ways: a mangled file was refused by name with no commit made, and a clean commit went through. Also <code>npm run verify</code>, CI's sequence in CI's order. ⭐ THE RESIZE, R-361, DECIDED BY THE MAINTAINER: <em>&quot;The resize should get similar warnings as other 4.&quot;</em> A plain PATCH moving an assignment's timerange now re-asks <code>check_eligibility</code> and <code>absence_overlap</code> under the same resolved policy --- block refuses with the same two codes and DETAIL shape the four raise, warn stays silent on the server and the client toasts the sentence the crew-drag toast already uses. A trigger on the table, not a fifth copy of the rule, so the raw PATCH and anything added later are covered by the four's own predicates. Written failing first: before it existed the resize onto an absent day under block was simply not refused. ⚠️ TWO THINGS THE BRIEF HAD WRONG, BOTH FOUND BY READING RATHER THAN ASSUMING. Only TWO of the four writers UPDATE assignments (<code>create_assignment</code> inserts and Copy Week goes through it), so the trigger never sees the other two; and <code>delete_owned_row</code> clears a departed person's <code>operator_id</code> to NULL, which <code>check_eligibility</code> answers &quot;not eligible&quot; for, so that deletion would have been refused under block for a reason that was never about it. The trigger's WHEN clause requires a non-null operator_id; AB32 pins it. ⛔ AND ONE REAL REGRESSION, CAUGHT BY THE SUITE AND FIXED IN THE RIGHT PLACE. The guard as first written broke <code>50_audit_test.sql</code>, whose Case 27 resizes with no session because it is testing the AUDIT TRAIL, not eligibility. The lane's instinct --- give that case a session --- was wrong, and the fix belonged in the trigger: <code>check_eligibility</code>'s own read gate has no owner exemption and nothing had ever called it from owner context before. 0071 adds the exemption on <code>auth.uid() IS NULL</code>, the same key and reasoning 0068 settled for DEF-0019, with both alternatives named as rejected in its header. A caller with no jwt sub already bypasses RLS on this table, so the guard was only ever breaking the seed, a backfill and a psql session. AB33 and AB34 pin it from both sides, and AB34 --- a signed-in session with no profile row, refused, row unchanged --- is named in the header as the case that goes red if anyone ever widens the exemption to <code>app_current_org() IS NULL</code>. ⭐ THE TESTER'S TWO. DEF-0022 verified. DEF-0023 filed against R-359 and it is this session's own sentence twice over: the wording written to correct DEF-0022 repeated the same shape of overclaim about a third case that has no SQL mirror. Verified here rather than accepted --- the client case is at absence.test.ts line 152 and no SQL window starts at that instant --- and corrected to say what is true AND why the gap must stay: no window with positive duration can tell an inclusive absence start from an exclusive one, so an AB26 there would look like a fourth boundary DEF-0022 secured while securing nothing. Both corrections were caught by someone reading the record against the code, not by any runner. ⭐ THE NUMBERS, RUN HERE. <code>Test Files 111 passed (111)</code> / <code>Tests 2502 passed (2502)</code>; the SQL suite summed per file over the 51 numbered suites, 773 passed, 0 failed, 0 hard-errors, with 50_audit_test.sql back to clean and untouched; tsc 0; eslint 0; <code>format:check</code> clean on everything CI can see.</p>
+    <p class="fine">2502 app tests in 111 files · 773 database checks · 70 migrations · tsc 0 · eslint 0 · commits c02151c, 2d9cf09, 05d2127, 2016c69, 27c2a17, f94796f</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 93</b> · 2026-09-08 · Tester run <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>Merged Development at <code>8d5eb26</code> (session 92's own tip); worktree clean throughout, no package-lock change so no <code>npm ci</code>. <code>npm run db:types</code> regenerated content-identical to the committed file (a CRLF-only diff, the known false positive) -- confirms no migration in this diff and the type surface is unchanged, so typecheck's <code>exit 0</code> is CONCLUSIVE, not merely clean-looking. Checked F-117 before trusting anything board-level: the demo world is genuinely clean now -- exactly four root plants (Northwind A/B/C, Contoso's Plant 1, no stray fifth), migrations table carries 0068 and 0069, and run dates read 2026-09-07 through 2026-09-09 in the live database, matching the plan's own claim and today's date. <code>npm run test</code>: <code>Test Files 111 passed (111)</code> / <code>Tests 2497 passed (2497)</code>, matching the plan exactly. <code>88_absences_test.sql</code> alone: <code>30 passed, 0 failed, 0 hard-errors</code> (27 plus the three new AB23-AB25); the full 51-suite sweep summed the same as the plan's own count, 763 passed 0 failed. DEF-0022 re-verified cold, past the original reproduction: the exact reported mutation ('[)' to '[]') now turns AB23 red by name (and AB25, a genuine side effect since both of AB25's rows go through the same mutated constructor and now truly overlap). Went further, as the brief for this run asked, with three more mutations, each rebuilt and reverted before the next ('git diff --exit-code' clean between all of them): the mirror ('[)' to '(]') correctly does NOT move AB24, and cannot -- AB24's window is built with the constructor's own default <code>[)</code> bounds, so its upper bound already excludes the shared instant regardless of what the absence's stored lower bound is, which the developer's own session-92 record already found and said plainly, and I confirm independently; an off-by-one VALUE mutation (<code>p_ends_at + interval '1 hour'</code>, distinct from a boundary-TYPE change) turns AB23 red again and AB25 red too; a fully-open mutation ('[)' to '()') is caught by NOTHING in the file -- checked live before concluding anything, and it is not a coverage gap the way the original filing was: a placement window with any real duration overlaps an absence's interior regardless of whether the absence's own start is inclusive or exclusive, so no boundary-sensitive case at that exact point is constructible with a non-empty window. DEF-0022 set to verified. That fourth mutation is what surfaced DEF-0023: R-359's own corrected claim (this session's fix for the ORIGINAL overclaim) still says all three client boundary cases are &quot;each mirrored in 88_absences_test.sql by the name it carries there&quot; -- but the third one, &quot;a shift starting exactly when the absence starts, which does clash,&quot; has no SQL counterpart anywhere, named or otherwise. AB15 tests a different, non-boundary shift (10:00-12:00 against a 09:00-13:00 absence). Filed minor, class doc-drift, against R-359: the underlying behaviour is not at risk (confirmed above), but the plan's own record overclaims a proof that does not exist, in the very sentence written to correct the last overclaim of the same shape. Playwright: 41 of 43 passed; two touch-project cases (T2, T5) failed reproducibly, twice, with &quot;no block with a touchable slice&quot; -- board run bands rendered off-screen to the left. Neither test file nor any board/touch code is in this session's diff, and re-running <code>e2e/touch.spec.ts</code> alone reproduced the identical failure both times (not a one-off timeout the way past flakiness under combined --sql --e2e load has read), so this is not something today's commits caused, but it is also not explained away -- flagged for the maintainer's attention rather than chased down, since it sits outside this session's one defect. Sweep 2's four dark columns (audit_log.at, week_template_items' three) are the same long-standing false positives prior sessions already read by hand; confirmed week_template_items' columns are still read server-side in the RPC functions' own joins (25 hits across the migrations). Sweep 1: no migrations since the tip, so nothing to check. Turned up nothing wrong: R-359's other verified_by files (absencesPanel, shapes, dragGesture, absenceOnBoard) were not touched by this diff and their own cases still read as boundary-genuine on inspection, not just green.</p>
