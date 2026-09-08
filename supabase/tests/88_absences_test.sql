@@ -69,6 +69,36 @@
 --        (half-open, touching is not overlapping)
 --   AB25 the same person may hold two part-day absences that TOUCH (08:00-09:00
 --        and 09:00-10:00), both accepted by absences_part_day_excl
+--
+-- 0070 (R-361) --- a plain resize (PATCH timerange, no RPC) asks the same two
+-- questions the four scheduler writers ask:
+--   AB26 a resize onto an absence under BLOCK is refused `absent`
+--   AB27 the SAME resize under WARN succeeds and the row really moved (read
+--        back, not just "no error")
+--   AB28 a resize that does not overlap any absence succeeds under BLOCK
+--   AB28b the same clean resize succeeds under WARN too
+--   AB29 an efficiency-only UPDATE is untouched even when the row already
+--        overlaps an absence recorded after it was placed, under BLOCK ---
+--        the trigger's WHEN clause never asks
+--   AB30 move_run's own internal UPDATE over an absence under WARN still
+--        succeeds with the trigger installed (no double refusal) and the
+--        crew row actually moved
+--   AB31 reassign_assignment's own internal UPDATE over an absence under WARN
+--        still succeeds with the trigger installed and the operator actually
+--        changed
+--   AB32 delete_owned_row('operator', ...) clearing a departed person's
+--        operator_id to NULL on a history row, on a node that requires a
+--        skill they never held, under BLOCK --- the trigger's WHEN clause
+--        (NEW.operator_id IS NOT NULL) keeps it from refusing the deletion
+--
+-- 0071 (DEF-0019) --- the resize guard's own owner exemption, the same key
+-- 0068 already settled on for app_resolve_node_setting/resolve_shift_template:
+--   AB33 owner context (no jwt sub at all) is exempt: a resize onto an
+--        absence under BLOCK succeeds, read back to confirm it really moved
+--   AB34 a signed-in session with NO user_profiles row (DEF-0019's own
+--        repro, not owner context) is still bound: the identical resize is
+--        refused and the row does not move --- the case that would go red if
+--        the exemption were ever "corrected" to app_current_org() IS NULL
 -- ============================================================================
 
 BEGIN;
@@ -798,6 +828,359 @@ EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB25: unexpected % (sq
 END $$;
 ROLLBACK TO SAVEPOINT sp_AB25;
 
+\echo 'AB26: a plain resize (PATCH timerange, no RPC) onto an absence under BLOCK --- refuses `absent`'
+SAVEPOINT sp_AB26;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid;
+        v_code text; v_ok boolean := true;
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2027-11-03','2027-11-03','[]'), 'sick');
+  INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'eligibility_policy', v_org, 'block');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  -- Placed clear of the absence --- create_assignment's own pre-check would
+  -- otherwise refuse the SETUP, not the resize this case is about.
+  v_run := create_run(v_cell, v_wx, tstzrange('2027-11-01 06:00+00','2027-11-01 14:00+00'), NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, tstzrange('2027-11-01 06:00+00','2027-11-01 14:00+00'));
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  BEGIN
+    -- docs/api.md §4: a plain time resize is an ordinary PostgREST table
+    -- update, never an RPC. This is that write, verbatim.
+    UPDATE assignments SET timerange = tstzrange('2027-11-03 06:00+00','2027-11-03 14:00+00')
+      WHERE id = v_asg_id;
+    v_ok := false;
+  EXCEPTION WHEN OTHERS THEN v_code := SQLERRM;
+  END;
+  RESET ROLE;
+  IF NOT v_ok THEN RAISE NOTICE 'FAIL AB26: block resize onto absence was not refused';
+  ELSIF v_code NOT ILIKE '%absent%' THEN RAISE NOTICE 'FAIL AB26: refused but not `absent`: %', v_code;
+  ELSE RAISE NOTICE 'PASS AB26'; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB26: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB26;
+
+\echo 'AB27: the SAME resize onto an absence under WARN --- succeeds, and the row really moved'
+SAVEPOINT sp_AB27;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_new tstzrange := tstzrange('2027-11-13 06:00+00','2027-11-13 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid;
+        v_after tstzrange; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2027-11-13','2027-11-13','[]'), 'sick');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, tstzrange('2027-11-11 06:00+00','2027-11-11 14:00+00'), NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, tstzrange('2027-11-11 06:00+00','2027-11-11 14:00+00'));
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  UPDATE assignments SET timerange = v_new WHERE id = v_asg_id;
+  -- CLAUDE.md §4: a write that reports success can have changed nothing.
+  -- Read the row back rather than trusting the absence of an exception.
+  SELECT timerange INTO v_after FROM assignments WHERE id = v_asg_id;
+  RESET ROLE;
+  IF v_after IS DISTINCT FROM v_new THEN v_ok := false; v_why := v_why || ' the row did not actually move'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB27'; ELSE RAISE NOTICE 'FAIL AB27:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB27: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB27;
+
+\echo 'AB28: a resize NOT overlapping any absence succeeds under BLOCK'
+SAVEPOINT sp_AB28;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_new tstzrange := tstzrange('2027-12-02 06:00+00','2027-12-02 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid;
+        v_after tstzrange; v_ok boolean := true;
+BEGIN
+  INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'eligibility_policy', v_org, 'block');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, tstzrange('2027-12-01 06:00+00','2027-12-01 14:00+00'), NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, tstzrange('2027-12-01 06:00+00','2027-12-01 14:00+00'));
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  UPDATE assignments SET timerange = v_new WHERE id = v_asg_id;
+  SELECT timerange INTO v_after FROM assignments WHERE id = v_asg_id;
+  RESET ROLE;
+  IF v_after IS DISTINCT FROM v_new THEN v_ok := false; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB28'; ELSE RAISE NOTICE 'FAIL AB28: a clean resize under block was refused or did not move'; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB28: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB28;
+
+\echo 'AB28b: the same clean resize succeeds under WARN too'
+SAVEPOINT sp_AB28b;
+DO $$
+DECLARE v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_new tstzrange := tstzrange('2027-12-16 06:00+00','2027-12-16 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid;
+        v_after tstzrange; v_ok boolean := true;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, tstzrange('2027-12-15 06:00+00','2027-12-15 14:00+00'), NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, tstzrange('2027-12-15 06:00+00','2027-12-15 14:00+00'));
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  UPDATE assignments SET timerange = v_new WHERE id = v_asg_id;
+  SELECT timerange INTO v_after FROM assignments WHERE id = v_asg_id;
+  RESET ROLE;
+  IF v_after IS DISTINCT FROM v_new THEN v_ok := false; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB28b'; ELSE RAISE NOTICE 'FAIL AB28b: a clean resize under warn was refused or did not move'; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB28b: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB28b;
+
+\echo 'AB29: an efficiency-only UPDATE is untouched, even over an absence recorded after placement, under BLOCK'
+SAVEPOINT sp_AB29;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_win tstzrange := tstzrange('2027-12-20 06:00+00','2027-12-20 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid;
+        v_eff numeric; v_ok boolean := true;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, v_win, NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, v_win);
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  RESET ROLE;
+  -- Recorded AFTER placement, and the plant switched to `block` AFTER too ---
+  -- this existing row NOW overlaps an absence and a fresh placement here
+  -- would be refused, but nobody asked this row to move.
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2027-12-20','2027-12-20','[]'), 'sick');
+  INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'eligibility_policy', v_org, 'block');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  UPDATE assignments SET efficiency = 0.900 WHERE id = v_asg_id;
+  SELECT efficiency INTO v_eff FROM assignments WHERE id = v_asg_id;
+  RESET ROLE;
+  IF v_eff IS DISTINCT FROM 0.900 THEN v_ok := false; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB29'; ELSE RAISE NOTICE 'FAIL AB29: an efficiency-only edit was refused or did not write'; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB29: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB29;
+
+\echo 'AB30: move_run''s own internal UPDATE over an absence under WARN still succeeds with the resize trigger installed'
+SAVEPOINT sp_AB30;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_new tstzrange := tstzrange('2028-01-10 06:00+00','2028-01-10 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid; v_res jsonb;
+        v_after tstzrange; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2028-01-10','2028-01-10','[]'), 'sick');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, tstzrange('2028-01-01 06:00+00','2028-01-01 14:00+00'), NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, tstzrange('2028-01-01 06:00+00','2028-01-01 14:00+00'));
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  v_res := move_run(v_run_id, v_cell, v_new);
+  SELECT timerange INTO v_after FROM assignments WHERE id = v_asg_id;
+  RESET ROLE;
+  IF jsonb_array_length(coalesce(v_res->'absence_warnings','[]'::jsonb)) < 1
+    THEN v_ok := false; v_why := v_why || ' missing absence_warnings'; END IF;
+  IF v_after IS DISTINCT FROM v_new THEN v_ok := false; v_why := v_why || ' the crew row did not actually move'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB30'; ELSE RAISE NOTICE 'FAIL AB30:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB30: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB30;
+
+\echo 'AB31: reassign_assignment''s own internal UPDATE over an absence under WARN still succeeds with the resize trigger installed'
+SAVEPOINT sp_AB31;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_tom uuid := '50000000-0000-0000-0000-000000000005';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_win tstzrange := tstzrange('2028-02-05 06:00+00','2028-02-05 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid; v_res jsonb;
+        v_after uuid; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2028-02-05','2028-02-05','[]'), 'sick');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, v_win, NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_tom, v_run_id, NULL, v_win);
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  v_res := reassign_assignment(v_asg_id, v_el);
+  SELECT operator_id INTO v_after FROM assignments WHERE id = v_asg_id;
+  RESET ROLE;
+  IF NOT (v_res->'absence'->>'absent')::boolean THEN v_ok := false; v_why := v_why || ' payload missing absence'; END IF;
+  IF v_after IS DISTINCT FROM v_el THEN v_ok := false; v_why := v_why || ' the operator was not actually reassigned'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB31'; ELSE RAISE NOTICE 'FAIL AB31:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB31: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB31;
+
+\echo 'AB32: delete_owned_row(operator) clearing operator_id to NULL on a history row does not trip the resize trigger under BLOCK'
+SAVEPOINT sp_AB32;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        -- Cell 6 (machining.cnc_line.cell_6) is the seed's only node carrying
+        -- a skill requirement (CNC); Elena never held it (only operators
+        -- 1-3 do, per seed.sql), so check_eligibility(cell, NULL, window)
+        -- would answer eligible=false for her history row if this trigger
+        -- asked about a cleared operator.
+        v_cell uuid := '30000000-0000-0000-0000-000000000006';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_asg_id uuid; v_res jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  -- A PAST row (delete_owned_row's history-keeping UPDATE only touches rows
+  -- whose lower(timerange) <= now()) --- a direct INSERT, since create_run/
+  -- create_assignment both refuse a past window outright and this trigger
+  -- is BEFORE UPDATE only, never seeing an INSERT.
+  INSERT INTO assignments (org_id, node_id, operator_id, product_id, timerange)
+    VALUES (v_org, v_cell, v_el, v_wx, tstzrange('2020-01-01 06:00+00','2020-01-01 14:00+00'))
+    RETURNING id INTO v_asg_id;
+  INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'eligibility_policy', v_org, 'block');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+  v_res := delete_owned_row('operator', v_el);
+  RESET ROLE;
+  IF NOT (v_res->>'deleted')::boolean THEN v_ok := false; v_why := v_why || ' delete_owned_row did not report deleted'; END IF;
+  IF EXISTS (SELECT 1 FROM assignments WHERE id = v_asg_id AND operator_id IS NOT NULL) THEN
+    v_ok := false; v_why := v_why || ' the history row''s operator_id was not cleared';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM assignments WHERE id = v_asg_id AND operator_display_name = 'Elena') THEN
+    v_ok := false; v_why := v_why || ' the history row lost its operator_display_name';
+  END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB32'; ELSE RAISE NOTICE 'FAIL AB32:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB32: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB32;
+
+\echo 'AB33: owner context (no jwt sub at all) is exempt from the resize guard --- a resize onto an absence under BLOCK succeeds'
+SAVEPOINT sp_AB33;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_win tstzrange := tstzrange('2028-03-06 06:00+00','2028-03-06 14:00+00');
+        v_new tstzrange := tstzrange('2028-03-08 06:00+00','2028-03-08 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid;
+        v_after tstzrange; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2028-03-08','2028-03-08','[]'), 'sick');
+  INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'eligibility_policy', v_org, 'block');
+  -- Ordinary setup, as Ana, so only the RESIZE ITSELF is attempted in owner
+  -- context. Placed on a CLEAN day (Mar 6) --- Elena is not absent yet, so
+  -- the placement itself needs no exemption.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, v_win, NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, v_win);
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  RESET ROLE;
+
+  -- Owner context: no jwt sub at all (0068/0071's own key). Stays on the
+  -- superuser connection on purpose --- RLS would ALSO stop a claim-carrying
+  -- but profile-less caller from ever reaching this row
+  -- (assignments_update needs app_can_edit_node -> app_current_org()), so
+  -- staying superuser here is what isolates the TRIGGER's own exemption from
+  -- RLS's separate one. AB34 below is the caller RLS does not protect this
+  -- migration from on its own.
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  UPDATE assignments SET timerange = v_new WHERE id = v_asg_id;
+  SELECT timerange INTO v_after FROM assignments WHERE id = v_asg_id;
+  IF v_after IS DISTINCT FROM v_new THEN
+    v_ok := false; v_why := v_why || ' owner context was refused, or the row did not move';
+  END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB33'; ELSE RAISE NOTICE 'FAIL AB33:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB33: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB33;
+
+\echo 'AB34: an authenticated session with no profile (DEF-0019''s own shape, NOT owner context) is still refused by the resize guard'
+SAVEPOINT sp_AB34;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_cell uuid := '30000000-0000-0000-0000-000000000007';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_wx uuid := '60000000-0000-0000-0000-000000000001';
+        v_win tstzrange := tstzrange('2028-04-03 06:00+00','2028-04-03 14:00+00');
+        v_new tstzrange := tstzrange('2028-04-05 06:00+00','2028-04-05 14:00+00');
+        v_run jsonb; v_run_id uuid; v_asg jsonb; v_asg_id uuid;
+        v_before tstzrange; v_after tstzrange; v_code text; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2028-04-05','2028-04-05','[]'), 'sick');
+  INSERT INTO node_settings (node_id, key, org_id, value)
+    VALUES ('30000000-0000-0000-0000-000000000001', 'eligibility_policy', v_org, 'block');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_run := create_run(v_cell, v_wx, v_win, NULL, NULL);
+  v_run_id := (v_run->'run'->>'id')::uuid;
+  v_asg := create_assignment(v_cell, v_el, v_run_id, NULL, v_win);
+  v_asg_id := (v_asg->'assignment'->>'id')::uuid;
+  RESET ROLE;
+  SELECT timerange INTO v_before FROM assignments WHERE id = v_asg_id;
+
+  -- A real jwt sub with NO user_profiles row --- what a fresh sign-up is
+  -- before anyone gives it a company (DEF-0019's own repro, 84's ST5). This
+  -- carries a caller identity, so it is NOT owner context and must not be
+  -- exempted. Superuser connection on purpose: RLS would ALSO refuse this
+  -- caller independently (app_can_edit_node needs app_current_org(), NULL
+  -- with no profile), but that is a SEPARATE gate and would hide a mistake in
+  -- THIS one --- 0071's header names this the case that would go red if the
+  -- exemption were ever "corrected" to app_current_org() IS NULL, since a
+  -- profile-less session's app_current_org() is NULL too.
+  INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-00000000af01');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000af01', true);
+  BEGIN
+    UPDATE assignments SET timerange = v_new WHERE id = v_asg_id;
+    v_ok := false; v_why := v_why || ' the profile-less session was not refused';
+  EXCEPTION WHEN OTHERS THEN v_code := SQLERRM;
+  END;
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  SELECT timerange INTO v_after FROM assignments WHERE id = v_asg_id;
+  IF v_ok AND v_code NOT ILIKE '%cannot see%' THEN
+    v_ok := false; v_why := v_why || format(' refused, but for the wrong reason: %s', v_code);
+  END IF;
+  IF v_after IS DISTINCT FROM v_before THEN v_ok := false; v_why := v_why || ' the row moved anyway'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB34'; ELSE RAISE NOTICE 'FAIL AB34:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB34: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB34;
+
 ROLLBACK;
 
-\echo '88_absences_test.sql complete (AB0-AB25 with AB8b, AB9b, AB10b, AB11b)'
+\echo '88_absences_test.sql complete (AB0-AB34 with AB8b, AB9b, AB10b, AB11b, AB28b)'

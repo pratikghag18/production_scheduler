@@ -19,7 +19,7 @@
  * ORIGIN clientX, not from a re-measured rect.
  */ import { operatorViewFor, productViewFor } from "../lib/history";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ShiftTemplate,
   BoardOperator,
@@ -36,10 +36,13 @@ import {
   fromEfficiency,
 } from "@/lib/api";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
+import { certificateGaps, policyForNode } from "../lib/boardIndex";
 import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geometry";
 import type { DayAxis } from "../lib/time";
 import { formatClock, addMinutes } from "../lib/time";
 import { leaveLine } from "../lib/leave";
+import { absenceGaps } from "@/lib/absence";
+import { useAbsences } from "./useAbsences";
 import type { DateFormat } from "@/lib/format/dates";
 import {
   MIN_DURATION_MINUTES,
@@ -321,6 +324,20 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const reassign = useReassignAssignment(rootPath, from, to); // R-343, first caller
   const deleteAssignment = useDeleteAssignment(rootPath, from, to);
   const applySplitCoverage = useApplySplitCoverage(rootPath, from, to); // D61/D62 — first caller
+
+  // R-361: the same absences list `BoardPage` already reads beside the board
+  // (`useAbsences`, R-357) — a SECOND subscription to the identical query key
+  // (`absenceKeys.all()`), not a new prop threaded down from `BoardPage`
+  // (outside this lane's owned files). React Query dedupes by key: this
+  // shares BoardPage's own cache entry and fetch rather than doubling the
+  // network read. Gated the same shape `BoardPage` gates its own read with
+  // (a resolved identity and a real root), close enough that an unauthenticated
+  // or not-yet-placed board never fires it — the mirror is best-effort for the
+  // toast under `warn` only, never the authority (the server's silent trigger
+  // is), so a slightly different readiness window changes nothing about
+  // correctness.
+  const resizeAbsencesQuery = useAbsences(args.sessionUserId !== null && rootPath !== "");
+  const resizeAbsences = useMemo(() => resizeAbsencesQuery.data ?? [], [resizeAbsencesQuery.data]);
   const toast = useSchedulerToast();
 
   const [activeDrag, setActiveDrag] = useState<InternalDragState | null>(null);
@@ -839,6 +856,49 @@ export function useDragGesture(args: UseDragGestureArgs) {
         // `assignments_capacity` trigger still guards it exactly as
         // before P1-4e, and a rejection surfaces through the existing
         // `CapacityExceeded` toast path (`failWith`), unchanged.
+        //
+        // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge,
+        // or a same-cell nudge) — migration 0070's `assignments_resize_guard`
+        // now asks `check_eligibility`/`absence_overlap` on it exactly as the
+        // four scheduler RPCs do. Under `block` a refusal comes back as
+        // `NotEligible`/`Absent` and `failWith` below shows it, unchanged. A
+        // trigger cannot return a warning, so under `warn` the client runs
+        // the SAME two mirrors the create/reassign pop-ups already run
+        // (`certificateGaps`, `absenceGaps`) against the window it is about
+        // to write, and on a hit toasts the SAME wording the crew-drag
+        // success toast already uses above (`commitBlockDrag`'s `run`/`move`
+        // branch) — count 1, not invented copy. A departed person's row
+        // (`a.operatorId === null`, D110) has nobody to ask about and is
+        // skipped, matching the trigger's own guard.
+        if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
+          const operatorId = a.operatorId;
+          const windowEnd = minuteDate(index.windowStart, candidate.endMin);
+          const operatorRecord = index.operatorById.get(operatorId);
+          const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
+          const operatorName = operatorRecord?.displayName ?? operatorId;
+
+          if (operatorRecord) {
+            const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
+            const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
+            if (gaps.length > 0) {
+              toast.info(
+                `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
+              );
+            }
+          }
+
+          const absenceHit = absenceGaps(resizeAbsences, operatorId, {
+            start: minuteDate(index.windowStart, candidate.startMin),
+            end: windowEnd,
+          });
+          if (absenceHit !== null) {
+            const when = leaveLine(absenceHit, dateFormat, index.zone);
+            toast.info(
+              `1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`,
+            );
+          }
+        }
+
         updateAssignmentFields.mutate(
           { assignmentId: a.id, edit },
           { onError: (err) => failWith(err, revertLabel(d.subject)) },
@@ -856,6 +916,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       revertLabel,
       askConfirm,
       dateFormat,
+      resizeAbsences,
     ],
   );
 

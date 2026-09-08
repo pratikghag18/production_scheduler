@@ -7,9 +7,10 @@ import {
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Run } from "@/lib/api";
+import type { Run, AbsenceRecord, Skill, BoardOperator } from "@/lib/api";
 import { useDragGesture, type UseDragGestureArgs } from "@/features/board/hooks/useDragGesture";
 import { useToastStore } from "@/features/board/hooks/useSchedulerToast";
+import { absenceKeys } from "@/features/board/hooks/useAbsences";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
 import { buildDayAxis } from "@/features/board/lib/time";
@@ -46,6 +47,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
     moveRun: vi.fn(),
     probeCapacity: vi.fn(),
     applySplitCoverage: vi.fn(),
+    // R-361: `useDragGesture` now also reads `useAbsences` (the same query
+    // `BoardPage` already subscribes to, R-357) to mirror the resize's warn
+    // toast. Defaults to an empty list so every EXISTING case above, which
+    // never mocks this, still resolves the query instead of hanging on the
+    // real network call.
+    fetchAbsences: vi.fn(async () => ({ absences: [], skipped: 0 })),
   };
 });
 
@@ -608,6 +615,287 @@ describe("useDragGesture", () => {
       expect(result.current.popover?.kind).toBe("run");
       expect(api.updateRunFields).not.toHaveBeenCalled();
       expect(api.moveRun).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * R-361 — A RESIZE ASKS THE SAME TWO QUESTIONS THE OTHER FOUR WRITERS ASK.
+   * Migration 0070's `assignments_resize_guard` is silent under `warn` (a
+   * trigger cannot return a warning), so the toast the maintainer asked for
+   * ("similar warnings as other 4") has to come from the CLIENT running the
+   * same mirrors (`certificateGaps`, `absenceGaps`) the create/reassign
+   * pop-ups already run, then reusing the crew-drag success toast's own
+   * wording (`commitBlockDrag`'s `move_run` `onSuccess`, above) rather than
+   * inventing new copy. `updateAssignmentFields` (the plain PATCH, no RPC)
+   * is mocked to resolve, so these cases are about what the CLIENT decides
+   * to say before/around the write, not the server's own refusal — that half
+   * is `88_absences_test.sql`'s AB26-AB32.
+   *
+   * A same-cell NUDGE ("move" mode, body-zone `offsetXPx`) is used for every
+   * case rather than an edge resize — `commitBlockDrag`'s assignment branch
+   * runs the identical code for both (R-361's own two named cases, "a drag on
+   * the block's EDGE, or a nudge to a new time in the same cell"), and a body
+   * hit needs no `hitTestBlock` grip-zone arithmetic to set up. The fixture
+   * assignment is DIRECT (no run) and its window sits far from `runFixture`'s
+   * own (13:20-15:20 vs. 06:00-10:00) so a 30-minute nudge never enters
+   * `assignmentFitsRun` range for either run on the node — the edit sent is
+   * `timerange` alone, exactly the PATCH docs/api.md §4 describes.
+   */
+  describe("R-361: a resize runs the same mirrors the create/reassign pop-ups run", () => {
+    function directAssignmentFixture(
+      overrides: Partial<IndexedAssignment> = {},
+    ): IndexedAssignment {
+      return {
+        id: "asg-direct-1",
+        orgId: "org-1",
+        nodeId: "cell-1",
+        operatorId: "op-1",
+        operatorDisplayName: null,
+        runId: null,
+        productId: "prod-1",
+        productSku: null,
+        productName: null,
+        productColorToken: null,
+        timerange: "[2026-08-24 13:20:00+00,2026-08-24 15:20:00+00)",
+        efficiency: 1,
+        eligibilityOverride: false,
+        overrideReason: null,
+        areaOverride: false,
+        areaOverrideReason: null,
+        targetQty: null,
+        targetUnit: null,
+        createdBy: null,
+        createdAt: WINDOW_START.toISOString(),
+        updatedAt: WINDOW_START.toISOString(),
+        startMin: 800,
+        endMin: 920,
+        efficiencyPercent: 100,
+        lane: 0,
+        defaultTargetQty: null,
+        ...overrides,
+      };
+    }
+
+    function operatorFixture(overrides: Partial<BoardOperator> = {}): BoardOperator {
+      return {
+        id: "op-1",
+        homeNodeId: "cell-1",
+        displayName: "Elena",
+        employeeRef: "EMP-1",
+        active: true,
+        siteNodeId: "plant-1",
+        sitePath: "plant_1",
+        skillIds: [],
+        skillExpiries: [],
+        ...overrides,
+      };
+    }
+
+    function assignmentChipDescriptor(a: IndexedAssignment) {
+      return {
+        nodeId: "cell-1",
+        subject: { kind: "assignment" as const, assignment: a, homeRun: null },
+        original: { startMin: a.startMin, endMin: a.endMin },
+        pxPerHour: 100,
+        windowMinutes: WINDOW_MINUTES,
+        template: null,
+        dayCount: 1,
+        dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
+        zoomIndex: 1 as const,
+        handlePx: 8,
+        blockWidthPx: 200,
+        offsetXPx: 100, // body zone, same grip math runDescriptor's comment gives
+        runsOnNode: [runFixture],
+        crew: [] as IndexedAssignment[],
+      };
+    }
+
+    /** A private `QueryClient`, exposed so a case can wait for `useAbsences`'
+     *  own query (the same key `BoardPage` subscribes to, R-357) to settle
+     *  BEFORE driving the drag — the mirror reads whatever `resizeAbsences`
+     *  holds at the moment `endBlockDrag` commits, synchronously, so a case
+     *  that cares about the mirror's answer must not race the fetch. */
+    function absencesWrapper() {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      function w({ children }: { children: ReactNode }) {
+        return createElement(QueryClientProvider, { client }, children);
+      }
+      return { wrapper: w, client };
+    }
+
+    function toastMessages(): string[] {
+      return useToastStore.getState().toasts.map((t) => t.message);
+    }
+
+    it("under warn, a nudge onto a recorded absence toasts the SAME leave sentence the crew-drag toast uses, and still commits", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const absence: AbsenceRecord = {
+        id: "ab-1",
+        operatorId: "op-1",
+        from: "2026-08-24",
+        to: "2026-08-24",
+        reason: "sick",
+        source: "manual",
+        externalId: null,
+      };
+      vi.mocked(api.fetchAbsences).mockResolvedValue({ absences: [absence], skipped: 0 });
+
+      const a = directAssignmentFixture();
+      const index: BoardIndex = {
+        ...buildIndex([a]),
+        operatorById: new Map([["op-1", operatorFixture()]]),
+      };
+      const { wrapper: w, client } = absencesWrapper();
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper: w });
+      await waitFor(() => expect(client.getQueryState(absenceKeys.all())?.status).toBe("success"));
+
+      act(() => {
+        result.current.beginBlockDrag(assignmentChipDescriptor(a), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300)); // 60px -> +30min (Standard snap)
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const messages = toastMessages();
+      expect(messages.some((m) => m.includes("Elena") && /on leave/i.test(m))).toBe(true);
+      expect(messages.some((m) => m.includes("Override recorded"))).toBe(true);
+      // The write still went through — a warn placement is not a refusal.
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent?.timerange).toBeDefined();
+    });
+
+    it("under warn, a nudge past a required certificate the operator never held toasts the SAME wording the crew-drag toast uses", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      vi.mocked(api.fetchAbsences).mockResolvedValue({ absences: [], skipped: 0 });
+
+      const a = directAssignmentFixture();
+      const requiredSkill: Skill = { id: "skill-cnc", name: "CNC" };
+      const index: BoardIndex = {
+        ...buildIndex([a]),
+        operatorById: new Map([["op-1", operatorFixture({ skillIds: [] })]]), // never trained
+        skillsForNode: new Map([["cell-1", [requiredSkill]]]),
+      };
+      const { wrapper: w, client } = absencesWrapper();
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper: w });
+      await waitFor(() => expect(client.getQueryState(absenceKeys.all())?.status).toBe("success"));
+
+      act(() => {
+        result.current.beginBlockDrag(assignmentChipDescriptor(a), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const messages = toastMessages();
+      expect(messages.some((m) => m.includes("Elena") && /not certified for/i.test(m))).toBe(true);
+      expect(messages.some((m) => /override recorded/i.test(m))).toBe(true);
+    });
+
+    it("under warn, a nudge that clears neither the absence nor the certificate mirror toasts nothing, and still commits", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      vi.mocked(api.fetchAbsences).mockResolvedValue({ absences: [], skipped: 0 });
+
+      const a = directAssignmentFixture();
+      const index: BoardIndex = {
+        ...buildIndex([a]),
+        operatorById: new Map([["op-1", operatorFixture()]]),
+      };
+      const { wrapper: w, client } = absencesWrapper();
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper: w });
+      await waitFor(() => expect(client.getQueryState(absenceKeys.all())?.status).toBe("success"));
+
+      act(() => {
+        result.current.beginBlockDrag(assignmentChipDescriptor(a), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      expect(toastMessages()).toEqual([]);
+    });
+
+    it("under block, the client never runs the mirror toast — the server's own refusal (failWith) is the only voice", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const absence: AbsenceRecord = {
+        id: "ab-2",
+        operatorId: "op-1",
+        from: "2026-08-24",
+        to: "2026-08-24",
+        reason: "sick",
+        source: "manual",
+        externalId: null,
+      };
+      vi.mocked(api.fetchAbsences).mockResolvedValue({ absences: [absence], skipped: 0 });
+
+      const a = directAssignmentFixture();
+      const index: BoardIndex = {
+        ...buildIndex([a]),
+        operatorById: new Map([["op-1", operatorFixture()]]),
+        eligibilityPolicy: "block",
+      };
+      const { wrapper: w, client } = absencesWrapper();
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper: w });
+      await waitFor(() => expect(client.getQueryState(absenceKeys.all())?.status).toBe("success"));
+
+      act(() => {
+        result.current.beginBlockDrag(assignmentChipDescriptor(a), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      // No client-side "on leave" mirror toast under block — a real server,
+      // unmocked, would refuse this write outright (AB26); the mock here just
+      // resolves it, so the only thing this case pins is that a `block`
+      // policy never gets the `warn` mirror's toast.
+      expect(toastMessages().some((m) => /on leave/i.test(m))).toBe(false);
+    });
+
+    it("a departed person's row (operatorId null, D110) has nobody to mirror and toasts nothing, but still commits", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      vi.mocked(api.fetchAbsences).mockResolvedValue({ absences: [], skipped: 0 });
+
+      const a = directAssignmentFixture({ operatorId: null, operatorDisplayName: "Departed Dana" });
+      const index = buildIndex([a]);
+      const { wrapper: w, client } = absencesWrapper();
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper: w });
+      await waitFor(() => expect(client.getQueryState(absenceKeys.all())?.status).toBe("success"));
+
+      act(() => {
+        result.current.beginBlockDrag(assignmentChipDescriptor(a), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      expect(toastMessages()).toEqual([]);
     });
   });
 });
