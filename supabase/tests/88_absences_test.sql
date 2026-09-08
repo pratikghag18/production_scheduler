@@ -45,6 +45,24 @@
 --   AB13 the definer predicate answers for Ana about an overlapping absence, and
 --        is null-safe for an unknown person
 --   AB14 grants: set/remove/import_absence and absence_overlap authenticated-only
+--
+-- 0069 (R-359) --- a part-day absence, judged by the HOURS, not the day:
+--   AB15 absence_overlap by the hours: a part-day 09:00-13:00 absence clashes
+--        with an overlapping shift and not with one outside those hours
+--   AB16 the same person may hold two NON-overlapping part-day absences on one
+--        calendar day
+--   AB17 the same person cannot hold two OVERLAPPING part-day absences on one
+--        calendar day (the part-day partial exclusion)
+--   AB18 after the exclusion split, a whole-day absence still cannot overlap
+--        another whole-day absence (the whole-day partial exclusion)
+--   AB19 set_absence with only one of p_starts_at/p_ends_at refuses
+--        invalid_argument
+--   AB20 set_absence with a part-day window spanning two different days (p_from
+--        <> p_to) refuses invalid_argument
+--   AB21 a whole-day hit carries no starts_at/ends_at keys at all --- byte for
+--        byte 0066's answer
+--   AB22 a part-day row INSIDE a whole-day absence for the same person is
+--        allowed, and absence_overlap still answers absent for either
 -- ============================================================================
 
 BEGIN;
@@ -520,8 +538,11 @@ SAVEPOINT sp_AB14;
 DO $$
 DECLARE r record; v_ok boolean := true; v_why text := '';
 BEGIN
+  -- 0069: set_absence's signature grew two trailing optional instants; the old
+  -- five-argument function was DROPPED in the same migration (see 0069's
+  -- header), so this checks the grant on the ONE set_absence that exists now.
   FOR r IN SELECT unnest(ARRAY[
-      'set_absence(uuid, date, date, text, text)',
+      'set_absence(uuid, date, date, text, text, timestamptz, timestamptz)',
       'remove_absence(uuid)',
       'import_absences(jsonb)',
       'absence_overlap(uuid, tstzrange)']) AS sig
@@ -537,6 +558,180 @@ EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'FAIL AB14: unexpected % (sqlstate %)', 
 END $$;
 ROLLBACK TO SAVEPOINT sp_AB14;
 
+\echo 'AB15: absence_overlap by the HOURS --- part-day 09:00-13:00 clashes with an overlapping shift and not with one outside those hours'
+SAVEPOINT sp_AB15;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_res jsonb; v_hit jsonb; v_miss jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_res := set_absence(v_el, '2027-06-10', '2027-06-10', 'dentist', NULL,
+                        '2027-06-10 09:00+00'::timestamptz, '2027-06-10 13:00+00'::timestamptz);
+  -- A shift 10:00-12:00 overlaps the 09:00-13:00 absence.
+  v_hit := absence_overlap(v_el, tstzrange('2027-06-10 10:00+00','2027-06-10 12:00+00'));
+  -- A shift 14:00-16:00, same day, does NOT overlap those hours.
+  v_miss := absence_overlap(v_el, tstzrange('2027-06-10 14:00+00','2027-06-10 16:00+00'));
+  RESET ROLE;
+  IF (v_res->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' the part-day absence was not written'; END IF;
+  IF NOT (v_hit->>'absent')::boolean THEN v_ok := false; v_why := v_why || ' overlapping shift not flagged'; END IF;
+  IF (v_hit->>'starts_at') IS NULL OR (v_hit->>'ends_at') IS NULL THEN v_ok := false; v_why := v_why || ' missing starts_at/ends_at'; END IF;
+  IF (v_miss->>'absent')::boolean THEN v_ok := false; v_why := v_why || ' non-overlapping shift wrongly flagged'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB15'; ELSE RAISE NOTICE 'FAIL AB15:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB15: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB15;
+
+\echo 'AB16: the same person may hold two NON-overlapping part-day absences on one calendar day'
+SAVEPOINT sp_AB16;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_r1 jsonb; v_r2 jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_r1 := set_absence(v_el, '2027-06-11', '2027-06-11', 'morning appointment', NULL,
+                       '2027-06-11 08:00+00'::timestamptz, '2027-06-11 09:00+00'::timestamptz);
+  v_r2 := set_absence(v_el, '2027-06-11', '2027-06-11', 'evening appointment', NULL,
+                       '2027-06-11 17:00+00'::timestamptz, '2027-06-11 18:00+00'::timestamptz);
+  RESET ROLE;
+  IF (v_r1->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' first absence not written'; END IF;
+  IF (v_r2->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' second absence not written'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB16'; ELSE RAISE NOTICE 'FAIL AB16:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB16: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB16;
+
+\echo 'AB17: the same person cannot hold two OVERLAPPING part-day absences on one calendar day'
+SAVEPOINT sp_AB17;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_raised boolean := false; v_ok boolean := true;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  PERFORM set_absence(v_el, '2027-06-12', '2027-06-12', 'first', NULL,
+                       '2027-06-12 09:00+00'::timestamptz, '2027-06-12 13:00+00'::timestamptz);
+  BEGIN
+    PERFORM set_absence(v_el, '2027-06-12', '2027-06-12', 'second', NULL,
+                         '2027-06-12 12:00+00'::timestamptz, '2027-06-12 14:00+00'::timestamptz);
+  EXCEPTION WHEN OTHERS THEN v_raised := true;
+  END;
+  RESET ROLE;
+  IF NOT v_raised THEN v_ok := false; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB17'; ELSE RAISE NOTICE 'FAIL AB17: the overlapping second part-day absence was accepted'; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB17: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB17;
+
+\echo 'AB18: after the exclusion split, a whole-day absence still cannot overlap another whole-day absence'
+SAVEPOINT sp_AB18;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_raised boolean := false; v_ok boolean := true;
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2027-06-20','2027-06-25','[]'), 'holiday');
+  BEGIN
+    INSERT INTO absences (org_id, operator_id, daterange, reason)
+      VALUES (v_org, v_el, daterange('2027-06-23','2027-06-28','[]'), 'holiday again');
+  EXCEPTION WHEN exclusion_violation THEN v_raised := true;
+  END;
+  IF NOT v_raised THEN v_ok := false; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB18'; ELSE RAISE NOTICE 'FAIL AB18: the overlapping second whole-day absence was accepted'; END IF;
+EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'FAIL AB18: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB18;
+
+\echo 'AB19: set_absence with only one of p_starts_at/p_ends_at refuses invalid_argument'
+SAVEPOINT sp_AB19;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_code text; v_ok boolean := true;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM set_absence(v_el, '2027-06-13', '2027-06-13', 'partial', NULL,
+                         '2027-06-13 09:00+00'::timestamptz, NULL);
+    v_ok := false;
+  EXCEPTION WHEN OTHERS THEN v_code := SQLERRM;
+  END;
+  RESET ROLE;
+  IF NOT v_ok THEN RAISE NOTICE 'FAIL AB19: one-sided times were accepted';
+  ELSIF v_code NOT ILIKE '%invalid_argument%' AND v_code NOT ILIKE '%start and an end time%' THEN
+    RAISE NOTICE 'FAIL AB19: refused but not as invalid_argument: %', v_code;
+  ELSE RAISE NOTICE 'PASS AB19'; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB19: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB19;
+
+\echo 'AB20: a part-day window spanning two different days (p_from <> p_to) refuses invalid_argument'
+SAVEPOINT sp_AB20;
+DO $$
+DECLARE v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_code text; v_ok boolean := true;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM set_absence(v_el, '2027-06-14', '2027-06-15', 'two days', NULL,
+                         '2027-06-14 09:00+00'::timestamptz, '2027-06-15 13:00+00'::timestamptz);
+    v_ok := false;
+  EXCEPTION WHEN OTHERS THEN v_code := SQLERRM;
+  END;
+  RESET ROLE;
+  IF NOT v_ok THEN RAISE NOTICE 'FAIL AB20: a two-day part-day absence was accepted';
+  ELSIF v_code NOT ILIKE '%invalid_argument%' AND v_code NOT ILIKE '%single day%' THEN
+    RAISE NOTICE 'FAIL AB20: refused but not as invalid_argument: %', v_code;
+  ELSE RAISE NOTICE 'PASS AB20'; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB20: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB20;
+
+\echo 'AB21: a whole-day hit carries no starts_at/ends_at keys at all --- byte for byte 0066''s answer'
+SAVEPOINT sp_AB21;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_a jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2027-06-16','2027-06-16','[]'), 'whole day');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_a := absence_overlap(v_el, tstzrange('2027-06-16 06:00+00','2027-06-16 14:00+00'));
+  RESET ROLE;
+  IF NOT (v_a->>'absent')::boolean THEN v_ok := false; v_why := v_why || ' not flagged'; END IF;
+  IF v_a ? 'starts_at' OR v_a ? 'ends_at' THEN v_ok := false; v_why := v_why || ' whole-day hit carries starts_at/ends_at'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB21'; ELSE RAISE NOTICE 'FAIL AB21:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB21: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB21;
+
+\echo 'AB22: a part-day row INSIDE a whole-day absence for the same person is allowed, and absence_overlap still answers absent for either'
+SAVEPOINT sp_AB22;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';
+        v_res jsonb; v_a jsonb; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO absences (org_id, operator_id, daterange, reason)
+    VALUES (v_org, v_el, daterange('2027-06-17','2027-06-17','[]'), 'whole day');
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_res := set_absence(v_el, '2027-06-17', '2027-06-17', 'dentist inside', NULL,
+                        '2027-06-17 09:00+00'::timestamptz, '2027-06-17 10:00+00'::timestamptz);
+  v_a := absence_overlap(v_el, tstzrange('2027-06-17 09:30+00','2027-06-17 09:45+00'));
+  RESET ROLE;
+  IF (v_res->>'id') IS NULL THEN v_ok := false; v_why := v_why || ' the part-day row inside the whole-day absence was refused'; END IF;
+  IF NOT (v_a->>'absent')::boolean THEN v_ok := false; v_why := v_why || ' absence_overlap did not flag it'; END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB22'; ELSE RAISE NOTICE 'FAIL AB22:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB22: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB22;
+
 ROLLBACK;
 
-\echo '88_absences_test.sql complete (AB0-AB14 with AB8b, AB9b, AB10b, AB11b)'
+\echo '88_absences_test.sql complete (AB0-AB22 with AB8b, AB9b, AB10b, AB11b)'

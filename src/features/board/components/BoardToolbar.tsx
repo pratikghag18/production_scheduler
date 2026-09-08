@@ -103,7 +103,14 @@ export function BoardToolbar({
   // same test the server runs. Nothing is offered while the answer is loading
   // or after the ask failed -- "we could not ask" is not "yes".
   const queryClient = useQueryClient();
-  const [copyWeekAnchor, setCopyWeekAnchor] = useState<{ x: number; y: number } | null>(null);
+  // R-358: one anchor carries which button opened it, so the same dialog can
+  // start on the week source (Copy week) or the template source (Apply a
+  // template) without a second piece of state to keep in step.
+  const [copyWeekAnchor, setCopyWeekAnchor] = useState<{
+    x: number;
+    y: number;
+    source: "week" | "template";
+  } | null>(null);
   const [saveAnchor, setSaveAnchor] = useState<{ x: number; y: number } | null>(null);
   const plant = roots.find((r) => r.path === rootPath) ?? null;
   const adminFor = useQuery({
@@ -126,10 +133,12 @@ export function BoardToolbar({
   const isAdmin = adminFor.data === true;
   const canPlaceHere = canPlace.data === true;
   // "Copy week" stays ADMIN-ONLY (S35): only an admin copies from another week.
-  // A placing supervisor reaches the SAME dialog through "Apply a template",
-  // which opens it locked to the template source. Both open one anchor.
+  // "Apply a template" is offered to EVERYONE who may place, admins included
+  // (R-358: the maintainer's only route to a saved template was a <select>
+  // inside a dialog named after the other thing it does). Both open the same
+  // dialog at the same anchor, switched to the source their own button means.
   const offerCopyWeek = plant !== null && isAdmin;
-  const offerApplyTemplate = plant !== null && canPlaceHere && !isAdmin;
+  const offerApplyTemplate = plant !== null && canPlaceHere;
   const offerSaveTemplate = plant !== null && canPlaceHere;
 
   return (
@@ -189,10 +198,10 @@ export function BoardToolbar({
           {offerCopyWeek && (
             <button
               type="button"
-              title="Copy this week's plan, or a template, into another week, deciding every clash yourself"
+              title="Copy this week's plan into another week, deciding every clash yourself"
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
-                setCopyWeekAnchor({ x: r.left, y: r.bottom + 4 });
+                setCopyWeekAnchor({ x: r.left, y: r.bottom + 4, source: "week" });
               }}
             >
               Copy week
@@ -201,10 +210,10 @@ export function BoardToolbar({
           {offerApplyTemplate && (
             <button
               type="button"
-              title="Copy a saved template into a week, deciding every clash yourself"
+              title="Apply a saved template to a week, deciding every clash yourself"
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
-                setCopyWeekAnchor({ x: r.left, y: r.bottom + 4 });
+                setCopyWeekAnchor({ x: r.left, y: r.bottom + 4, source: "template" });
               }}
             >
               Apply a template
@@ -233,6 +242,7 @@ export function BoardToolbar({
           dateFormat={dateFormat}
           zone={zone}
           isAdmin={isAdmin}
+          initialSource={copyWeekAnchor.source}
           onClose={() => setCopyWeekAnchor(null)}
           onApplied={() => {
             // The same refresh every writer on the board triggers: invalidate

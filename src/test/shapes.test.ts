@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseAbsenceInfo,
   parseBoardWindow,
   parseCapacityProbe,
   parseCreateAssignmentResult,
@@ -376,6 +377,26 @@ describe("parseCreateAssignmentResult", () => {
   it("rejects null", () => {
     expect(parseCreateAssignmentResult(null)).toBeNull();
   });
+
+  // R-359 / migration 0069 — the hole this lane closes. A part-day absence
+  // rides back on `create_assignment`'s `absence` key with two additive
+  // instant keys; before the fix `parseAbsenceInfo` read only `from`/`to`/
+  // `reason` and dropped them on the floor.
+  it("R-359: a part-day `absence` key carries its hours through as startsAt/endsAt", () => {
+    const parsed = parseCreateAssignmentResult({
+      ...(valid as Record<string, Json>),
+      absence: {
+        absent: true,
+        from: "2026-09-28",
+        to: "2026-09-28",
+        reason: "sick",
+        starts_at: "2026-09-28T09:00:00.000Z",
+        ends_at: "2026-09-28T13:00:00.000Z",
+      },
+    } as Json);
+    expect(parsed?.absence.startsAt).toBe("2026-09-28T09:00:00.000Z");
+    expect(parsed?.absence.endsAt).toBe("2026-09-28T13:00:00.000Z");
+  });
 });
 
 describe("parseMoveRunResult", () => {
@@ -407,6 +428,107 @@ describe("parseMoveRunResult", () => {
 
   it("rejects null", () => {
     expect(parseMoveRunResult(null)).toBeNull();
+  });
+
+  // R-359 / migration 0069 — the twin of the create_assignment case above,
+  // inside each `absence_warnings` entry.
+  it("R-359: a part-day absence_warnings entry carries its hours through as startsAt/endsAt", () => {
+    const parsed = parseMoveRunResult({
+      ...(valid as Record<string, Json>),
+      absence_warnings: [
+        {
+          operator_id: "50000000-0000-0000-0000-000000000002",
+          absence: {
+            absent: true,
+            from: "2026-09-28",
+            to: "2026-09-28",
+            reason: "sick",
+            starts_at: "2026-09-28T09:00:00.000Z",
+            ends_at: "2026-09-28T13:00:00.000Z",
+          },
+        },
+      ],
+    } as Json);
+    expect(parsed?.absenceWarnings[0]?.absence.startsAt).toBe("2026-09-28T09:00:00.000Z");
+    expect(parsed?.absenceWarnings[0]?.absence.endsAt).toBe("2026-09-28T13:00:00.000Z");
+  });
+});
+
+// R-359 / migration 0069 — `parseAbsenceInfo` itself: the two part-day keys
+// are ADDITIVE, named to match `AbsenceHit` (src/lib/absence.ts) so the two
+// shapes cannot drift.
+describe("parseAbsenceInfo (R-359): the part-day keys are additive", () => {
+  it("passes starts_at/ends_at through as startsAt/endsAt on a part-day hit", () => {
+    const parsed = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-09-28",
+      reason: "sick",
+      starts_at: "2026-09-28T09:00:00.000Z",
+      ends_at: "2026-09-28T13:00:00.000Z",
+    } as Json);
+    expect(parsed).toEqual({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-09-28",
+      reason: "sick",
+      startsAt: "2026-09-28T09:00:00.000Z",
+      endsAt: "2026-09-28T13:00:00.000Z",
+    });
+  });
+
+  it("a payload with no part-day keys parses byte-for-byte as it did before this lane", () => {
+    const parsed = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+    } as Json);
+    expect(parsed).toEqual({ absent: true, from: "2026-09-28", to: "2026-10-01", reason: "sick" });
+    expect("startsAt" in parsed).toBe(false);
+    expect("endsAt" in parsed).toBe(false);
+  });
+
+  it("a malformed part-day key does not turn a valid whole-day hit into none", () => {
+    // Only one of the pair present.
+    const onlyStart = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+      starts_at: "2026-09-28T09:00:00.000Z",
+    } as Json);
+    expect(onlyStart).toEqual({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+    });
+
+    // A part-day key present but not a string.
+    const nonString = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+      starts_at: 12345,
+      ends_at: "2026-09-28T13:00:00.000Z",
+    } as unknown as Json);
+    expect(nonString).toEqual({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+    });
+  });
+
+  it("an absent:false / missing payload is still {absent:false}, part-day keys or not", () => {
+    expect(parseAbsenceInfo(undefined)).toEqual({
+      absent: false,
+      from: null,
+      to: null,
+      reason: null,
+    });
   });
 });
 

@@ -1038,6 +1038,15 @@ export interface AbsenceInfo {
   from: string | null;
   to: string | null;
   reason: string | null;
+  /**
+   * R-359 / migration 0069: present TOGETHER, ISO instants, exactly when the
+   * hit is a part-day absence — absent on a whole-day one and on any payload
+   * from a database that has not run 0069. Named `startsAt`/`endsAt` to match
+   * `AbsenceHit` (`src/lib/absence.ts`) exactly, so the two shapes cannot
+   * drift into two different names for the same server key.
+   */
+  startsAt?: string;
+  endsAt?: string;
 }
 
 /**
@@ -1047,14 +1056,25 @@ export interface AbsenceInfo {
  * that really happened. A malformed object (present but not the expected shape)
  * is the same "nobody is absent" answer rather than a throw. When it IS absent,
  * all three of `from`/`to`/`reason` are read; a partial one falls back to false.
+ *
+ * R-359 / migration 0069: `starts_at`/`ends_at` are read ADDITIVELY, after the
+ * four fields above already decided the row is a valid whole-day hit. A
+ * malformed or partial pair (only one present, or not a string) is read as
+ * "no part-day keys" and falls back to the whole-day shape rather than
+ * rejecting the hit outright — an additive key must stay additive, or a shape
+ * guard that got stricter here would be a regression, not a fix.
  */
 export function parseAbsenceInfo(v: Json | undefined): AbsenceInfo {
   const none: AbsenceInfo = { absent: false, from: null, to: null, reason: null };
   if (!isJsonObject(v)) return none;
   if (v.absent !== true) return none;
-  const { from, to, reason } = v;
+  const { from, to, reason, starts_at, ends_at } = v;
   if (!isStr(from) || !isStr(to) || !isStr(reason)) return none;
-  return { absent: true, from, to, reason };
+  const base: AbsenceInfo = { absent: true, from, to, reason };
+  if (isStr(starts_at) && isStr(ends_at)) {
+    return { ...base, startsAt: starts_at, endsAt: ends_at };
+  }
+  return base;
 }
 
 export interface CreateAssignmentResult {

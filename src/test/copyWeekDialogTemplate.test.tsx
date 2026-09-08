@@ -190,13 +190,35 @@ describe("the save control's rights (R-356)", () => {
     expect(screen.queryByRole("button", { name: "Copy week" })).toBeNull();
   });
 
-  it("an admin is offered Copy week and Save, but not the supervisor-only Apply a template", async () => {
+  it("an admin is offered all three buttons (R-358: Apply a template is no longer supervisor-only)", async () => {
     h.isAdminFor.mockResolvedValue(true);
     h.canPlace.mockResolvedValue(true);
     renderToolbar();
     expect(await screen.findByRole("button", { name: "Copy week" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save this week as a template" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Apply a template" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Apply a template" })).toBeTruthy();
+  });
+
+  it("an admin's Apply a template opens the dialog on the template source; Copy week opens it on the week source (R-358)", async () => {
+    h.isAdminFor.mockResolvedValue(true);
+    h.canPlace.mockResolvedValue(true);
+    renderToolbar();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Apply a template" }));
+    let d = await screen.findByRole("dialog", { name: "Copy week" });
+    expect(within(d).getByLabelText("Template")).toBeTruthy();
+    expect(within(d).queryByLabelText("Copy the week starting")).toBeNull();
+    // The picker is still offered to an admin, already switched to "a template".
+    expect((within(d).getByLabelText("Copy from") as HTMLSelectElement).value).toBe("template");
+
+    fireEvent.click(within(d).getByRole("button", { name: /^Cancel$/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Copy week" })).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy week" }));
+    d = await screen.findByRole("dialog", { name: "Copy week" });
+    expect(within(d).getByLabelText("Copy the week starting")).toBeTruthy();
+    expect(within(d).queryByLabelText("Template")).toBeNull();
+    expect((within(d).getByLabelText("Copy from") as HTMLSelectElement).value).toBe("week");
   });
 
   it("a viewer who cannot place is offered none of the controls", async () => {

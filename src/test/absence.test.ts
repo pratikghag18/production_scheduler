@@ -103,3 +103,93 @@ describe("absenceGaps — the boundary, mirrored on 88_absences_test.sql", () =>
     expect(absenceGaps([], el, shift("2027-01-05T06:00:00Z", "2027-01-05T14:00:00Z"))).toBeNull();
   });
 });
+
+/* ===========================================================================
+ * R-359 / 0069 — a part-day absence is judged by the HOURS, not the day.
+ * Named for their twins in 88_absences_test.sql (AB15/AB16/AB17).
+ * ======================================================================== */
+
+/** A part-day absence: one day, a start and an end instant (ISO). */
+const partDay = (
+  from: string,
+  startsAt: string,
+  endsAt: string,
+  operatorId = el,
+): AbsenceRow => ({ operatorId, from, to: from, reason: "leave", startsAt, endsAt });
+
+describe("absenceGaps — R-359, a part-day absence is judged by the HOURS", () => {
+  it("AB15: a part-day 09:00-13:00 absence clashes with an overlapping shift", () => {
+    const hit = absenceGaps(
+      [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],
+      el,
+      shift("2027-06-10T10:00:00Z", "2027-06-10T12:00:00Z"),
+    );
+    expect(hit).not.toBeNull();
+    expect(hit?.startsAt).toBe("2027-06-10T09:00:00.000Z");
+    expect(hit?.endsAt).toBe("2027-06-10T13:00:00.000Z");
+  });
+
+  it("AB15: the same part-day absence does NOT clash with a shift outside those hours", () => {
+    const hit = absenceGaps(
+      [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],
+      el,
+      shift("2027-06-10T14:00:00Z", "2027-06-10T16:00:00Z"),
+    );
+    expect(hit).toBeNull();
+  });
+
+  it("a shift ending exactly when the absence ends does not clash (half-open, touching is not overlapping)", () => {
+    const hit = absenceGaps(
+      [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],
+      el,
+      shift("2027-06-10T13:00:00Z", "2027-06-10T15:00:00Z"),
+    );
+    expect(hit).toBeNull();
+  });
+
+  it("a shift starting exactly when the absence starts DOES clash", () => {
+    const hit = absenceGaps(
+      [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],
+      el,
+      shift("2027-06-10T09:00:00Z", "2027-06-10T10:00:00Z"),
+    );
+    expect(hit).not.toBeNull();
+  });
+
+  it("AB16: an open-ended window overlaps a part-day absence that ends after the window's start", () => {
+    const hit = absenceGaps(
+      [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],
+      el,
+      shift("2027-06-10T08:00:00Z", null),
+    );
+    expect(hit).not.toBeNull();
+  });
+
+  it("an open-ended window does NOT overlap a part-day absence that already ended before it starts", () => {
+    const hit = absenceGaps(
+      [partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z")],
+      el,
+      shift("2027-06-10T13:00:00Z", null),
+    );
+    expect(hit).toBeNull();
+  });
+
+  it("a whole-day absence on the same operator and day still clashes independently of a part-day row", () => {
+    const hit = absenceGaps(
+      [leave("2027-06-10", "2027-06-10")],
+      el,
+      shift("2027-06-10T14:00:00Z", "2027-06-10T16:00:00Z"),
+    );
+    expect(hit).not.toBeNull();
+    expect(hit?.startsAt).toBeUndefined();
+  });
+
+  it("whole-day before part-day on a tied day: the whole-day row's reason is returned first (server's NULLS FIRST)", () => {
+    const rows = [
+      partDay("2027-06-10", "2027-06-10T09:00:00.000Z", "2027-06-10T13:00:00.000Z", el),
+      { operatorId: el, from: "2027-06-10", to: "2027-06-10", reason: "whole day" },
+    ];
+    const hit = absenceGaps(rows, el, shift("2027-06-10T09:30:00Z", "2027-06-10T09:45:00Z"));
+    expect(hit?.reason).toBe("whole day");
+  });
+});

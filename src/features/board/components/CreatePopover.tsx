@@ -642,7 +642,7 @@ export function CreatePopover({
                     is a warning the planner reads and Create stays enabled;
                     under `block` there is nothing to tick and Create is off. */}
                 <p>
-                  <strong>{leaveLine(selectedAbsence, dateFormat)}</strong>
+                  <strong>{leaveLine(selectedAbsence, dateFormat, zone)}</strong>
                 </p>
                 {absenceBlocked ? (
                   <p>This person is on leave for this window, so there is no override.</p>

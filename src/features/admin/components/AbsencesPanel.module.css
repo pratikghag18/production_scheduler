@@ -27,6 +27,23 @@
   min-width: 12rem;
 }
 
+/* R-359: "Part of a day" — a plain label + checkbox, no border or padding of
+   its own so it cannot become a second copy of the field skin. */
+.partOfDayCheck {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+/* R-359: names the zone a part-day form's hours are read in. */
+.zoneNote {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

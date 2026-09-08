@@ -55,6 +55,7 @@ export function CopyWeekDialog({
   dateFormat = DEFAULT_DATE_FORMAT,
   zone,
   isAdmin = true,
+  initialSource,
   onClose,
   onApplied,
 }: {
@@ -72,6 +73,13 @@ export function CopyWeekDialog({
    * offering it here would be a control the server refuses (CLAUDE.md section 4).
    */
   isAdmin?: boolean;
+  /**
+   * R-358: which source the button that opened this dialog means — "Copy week"
+   * passes "week", "Apply a template" passes "template". OPTIONAL, and its
+   * absence must leave today's default (`isAdmin ? "week" : "template"}`)
+   * exactly as it was: every existing caller and test still gets that answer.
+   */
+  initialSource?: "week" | "template";
   onClose: () => void;
   /** Called after a successful apply, before the dialog closes, so the board can refresh. */
   onApplied: (result: CopyWeekResult) => void;
@@ -79,7 +87,11 @@ export function CopyWeekDialog({
   const toast = useSchedulerToast();
   // R-356: the source is another WEEK (today's flow) or a TEMPLATE. A caller
   // who cannot copy a week (a placing supervisor) starts on the template source.
-  const [sourceMode, setSourceMode] = useState<"week" | "template">(isAdmin ? "week" : "template");
+  // R-358: `initialSource`, when the caller passes it, says which button opened
+  // this dialog and wins outright; absent, the rule is exactly what it was.
+  const [sourceMode, setSourceMode] = useState<"week" | "template">(
+    initialSource ?? (isAdmin ? "week" : "template"),
+  );
   const [templates, setTemplates] = useState<WeekTemplate[] | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [templatesError, setTemplatesError] = useState<string | null>(null);

@@ -1,6 +1,6 @@
 /* ---------------------------------------------------------------------------
-   AbsencesPanel — record and remove absences, for the people the reader can see
-   in the chosen plant (R-357).
+   AbsencesPanel — record and remove absences, whole-day or part-day, for the
+   people the reader can see in the chosen plant (R-357, R-359).
 
    TAKES NO PROPS and DECIDES NO PERMISSION. Like every admin panel it reads the
    plant filter off `usePlantFilter` and shows the people that filter admits; who
@@ -13,12 +13,23 @@
    `useDateFormat(plant.choice)` — a plant root resolves its own override, All
    plants shows the company default. Fields are the shared field skin
    (Field.module.css, R-318); this module's CSS is layout only.
+
+   ⭐ R-359 — A PART-DAY WINDOW IS CONVERTED IN THE PERSON'S OWN PLANT ZONE, NOT
+   THE READER'S PLANT FILTER (decision 4). Recording one resolves the CHOSEN
+   PERSON's zone (`fetchNodeSetting(operator.siteNodeId, "timezone")`) and
+   converts with `zonedTimeToInstant`; the table, which can show several
+   people's rows from different plants at once, resolves each PART-DAY row's
+   own person's zone the same way (`useQueries`, one query per distinct place
+   actually needed — a whole-day row needs no zone at all). Neither path infers
+   a zone from the plant filter, because two different people's hours would
+   silently read as the wrong plant's the day this screen shows more than one.
    --------------------------------------------------------------------------- */
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   describeSchedulerError,
   fetchAbsences,
+  fetchNodeSetting,
   removeAbsence,
   setAbsence,
   type AbsenceRecord,
@@ -26,6 +37,8 @@ import {
   type SetAbsenceInput,
 } from "@/lib/api";
 import { formatCalendarDay } from "@/lib/format/dates";
+import { coerceTimezone } from "@/lib/format/timezones";
+import { formatClock, zonedTimeToInstant } from "@/features/board/lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
@@ -45,9 +58,34 @@ interface DraftState {
   from: string;
   to: string;
   reason: string;
+  /** R-359: "Part of a day" — swaps the two date inputs for one date plus a
+   *  start and an end clock time. Whole-day (`false`) is the default. */
+  partOfDay: boolean;
+  startTime: string;
+  endTime: string;
 }
 
-const EMPTY_DRAFT: DraftState = { operatorId: "", from: "", to: "", reason: "" };
+const EMPTY_DRAFT: DraftState = {
+  operatorId: "",
+  from: "",
+  to: "",
+  reason: "",
+  partOfDay: false,
+  startTime: "",
+  endTime: "",
+};
+
+/** `"YYYY-MM-DD"` -> its three numbers, or `null` — never a naive `Date` parse. */
+function parseYmd(s: string): { y: number; mo: number; d: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m === null ? null : { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
+}
+
+/** `<input type="time">`'s `"HH:MM"` -> its two numbers, or `null`. */
+function parseHm(s: string): { h: number; mi: number } | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(s);
+  return m === null ? null : { h: Number(m[1]), mi: Number(m[2]) };
+}
 
 export function AbsencesPanel() {
   const { session, loading: sessionLoading } = useSession();
@@ -91,6 +129,51 @@ export function AbsencesPanel() {
   const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // R-359: the chosen person's OWN plant zone (decision 4, not the plant
+  // filter) — resolved only while the checkbox is on and somebody is chosen,
+  // so a whole-day entry never fires this query at all.
+  const draftOperator = useMemo(
+    () => operators.find((o) => o.id === draft.operatorId) ?? null,
+    [operators, draft.operatorId],
+  );
+  const draftZoneQuery = useQuery({
+    queryKey: ["node-setting", draftOperator?.siteNodeId ?? null, "timezone"],
+    queryFn: () => fetchNodeSetting((draftOperator as { siteNodeId: string }).siteNodeId, "timezone"),
+    enabled: canQuery && draft.partOfDay && draftOperator !== null,
+  });
+  const draftZone = coerceTimezone(draftZoneQuery.data ?? undefined);
+
+  // R-359: each PART-DAY row's own person's zone, resolved per distinct place
+  // actually needed (a whole-day row needs none) — never the plant filter,
+  // because two people's rows can belong to two different plants at once.
+  const siteNodeIdByOperator = useMemo(
+    () => new Map(operators.map((o) => [o.id, o.siteNodeId] as const)),
+    [operators],
+  );
+  const partDayNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of rows) {
+      if (a.startsAt === undefined) continue;
+      const nodeId = siteNodeIdByOperator.get(a.operatorId);
+      if (nodeId !== undefined) set.add(nodeId);
+    }
+    return [...set];
+  }, [rows, siteNodeIdByOperator]);
+  const rowZoneQueries = useQueries({
+    queries: partDayNodeIds.map((nodeId) => ({
+      queryKey: ["node-setting", nodeId, "timezone"],
+      queryFn: () => fetchNodeSetting(nodeId, "timezone"),
+      enabled: canQuery,
+    })),
+  });
+  const zoneByNodeId = useMemo(() => {
+    const m = new Map<string, string>();
+    partDayNodeIds.forEach((nodeId, i) => {
+      m.set(nodeId, coerceTimezone(rowZoneQueries[i]?.data ?? undefined));
+    });
+    return m;
+  }, [partDayNodeIds, rowZoneQueries]);
+
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: absenceKeys.all });
 
   const addMutation = useMutation<AbsenceRecord, SchedulerError, SetAbsenceInput>({
@@ -115,9 +198,39 @@ export function AbsencesPanel() {
     e.preventDefault();
     setFormError(null);
     if (draft.operatorId === "") return setFormError("Choose a person.");
+    if (draft.reason.trim() === "") return setFormError("Give a reason.");
+
+    if (draft.partOfDay) {
+      if (draft.from === "" || draft.startTime === "" || draft.endTime === "") {
+        return setFormError("Give a date and a start and end time.");
+      }
+      if (draft.endTime <= draft.startTime) {
+        return setFormError("The end time is not after the start time.");
+      }
+      if (draftZoneQuery.isLoading) {
+        return setFormError("Still finding this person's time zone — try again in a moment.");
+      }
+      const ymd = parseYmd(draft.from);
+      const st = parseHm(draft.startTime);
+      const et = parseHm(draft.endTime);
+      if (ymd === null || st === null || et === null) {
+        return setFormError("Give a valid date and times.");
+      }
+      const startsAt = zonedTimeToInstant(draftZone, ymd.y, ymd.mo, ymd.d, st.h, st.mi).toISOString();
+      const endsAt = zonedTimeToInstant(draftZone, ymd.y, ymd.mo, ymd.d, et.h, et.mi).toISOString();
+      addMutation.mutate({
+        operatorId: draft.operatorId,
+        from: draft.from,
+        to: draft.from,
+        reason: draft.reason.trim(),
+        startsAt,
+        endsAt,
+      });
+      return;
+    }
+
     if (draft.from === "" || draft.to === "") return setFormError("Give a start and an end date.");
     if (draft.to < draft.from) return setFormError("The end date is before the start date.");
-    if (draft.reason.trim() === "") return setFormError("Give a reason.");
     addMutation.mutate({
       operatorId: draft.operatorId,
       from: draft.from,
@@ -166,20 +279,64 @@ export function AbsencesPanel() {
             </option>
           ))}
         </select>
-        <input
-          className={fieldStyles.field}
-          type="date"
-          aria-label="From"
-          value={draft.from}
-          onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
-        />
-        <input
-          className={fieldStyles.field}
-          type="date"
-          aria-label="To"
-          value={draft.to}
-          onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))}
-        />
+        <label className={styles.partOfDayCheck}>
+          <input
+            type="checkbox"
+            checked={draft.partOfDay}
+            onChange={(e) =>
+              setDraft((d) => ({
+                ...d,
+                partOfDay: e.target.checked,
+                // Whole-day's `to` follows `from` when switching in, so a
+                // stray earlier "To" can never silently outlive the switch.
+                to: e.target.checked ? d.from : d.to,
+              }))
+            }
+          />
+          Part of a day
+        </label>
+        {draft.partOfDay ? (
+          <>
+            <input
+              className={fieldStyles.field}
+              type="date"
+              aria-label="Date"
+              value={draft.from}
+              onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value, to: e.target.value }))}
+            />
+            <input
+              className={fieldStyles.field}
+              type="time"
+              aria-label="Start time"
+              value={draft.startTime}
+              onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))}
+            />
+            <input
+              className={fieldStyles.field}
+              type="time"
+              aria-label="End time"
+              value={draft.endTime}
+              onChange={(e) => setDraft((d) => ({ ...d, endTime: e.target.value }))}
+            />
+          </>
+        ) : (
+          <>
+            <input
+              className={fieldStyles.field}
+              type="date"
+              aria-label="From"
+              value={draft.from}
+              onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
+            />
+            <input
+              className={fieldStyles.field}
+              type="date"
+              aria-label="To"
+              value={draft.to}
+              onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))}
+            />
+          </>
+        )}
         <input
           className={fieldStyles.field}
           type="text"
@@ -192,6 +349,13 @@ export function AbsencesPanel() {
           {addMutation.isPending ? "Recording…" : "Record absence"}
         </button>
       </form>
+      {/* ⚠️ 09:00 MEANS NOTHING WITHOUT THE ZONE (R-359): named here, once the
+          checkbox and a person make it resolvable, rather than left implicit. */}
+      {draft.partOfDay && draftOperator !== null && (
+        <p className={styles.zoneNote}>
+          {draftZoneQuery.isLoading ? "Finding their time zone…" : `Times are in ${draftZone}.`}
+        </p>
+      )}
       {formError !== null && (
         <p className={styles.error} role="alert">
           {formError}
@@ -207,34 +371,48 @@ export function AbsencesPanel() {
               <th>Person</th>
               <th>From</th>
               <th>To</th>
+              <th>Hours</th>
               <th>Reason</th>
               <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
-            {rows.map((a) => (
-              <tr key={a.id}>
-                <td>{nameById.get(a.operatorId) ?? "—"}</td>
-                <td>{formatCalendarDay(a.from, dateFormat)}</td>
-                <td>{formatCalendarDay(a.to, dateFormat)}</td>
-                <td>{a.reason}</td>
-                <td className={styles.actions}>
-                  <button
-                    className={fieldStyles.btn}
-                    type="button"
-                    onClick={() => remove(a.id)}
-                    disabled={removeMutation.isPending}
-                  >
-                    Remove
-                  </button>
-                  {rowError !== null && rowError.id === a.id && (
-                    <span className={styles.error} role="alert">
-                      {rowError.message}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {rows.map((a) => {
+              // R-359: a part-day row's own person's zone — never the plant
+              // filter (decision 4) — resolved above per distinct place needed.
+              const zone =
+                a.startsAt !== undefined
+                  ? (zoneByNodeId.get(siteNodeIdByOperator.get(a.operatorId) ?? "") ?? null)
+                  : null;
+              return (
+                <tr key={a.id}>
+                  <td>{nameById.get(a.operatorId) ?? "—"}</td>
+                  <td>{formatCalendarDay(a.from, dateFormat)}</td>
+                  <td>{formatCalendarDay(a.to, dateFormat)}</td>
+                  <td>
+                    {a.startsAt !== undefined && a.endsAt !== undefined && zone !== null
+                      ? `${formatClock(new Date(a.startsAt), zone)}–${formatClock(new Date(a.endsAt), zone)} (${zone})`
+                      : "—"}
+                  </td>
+                  <td>{a.reason}</td>
+                  <td className={styles.actions}>
+                    <button
+                      className={fieldStyles.btn}
+                      type="button"
+                      onClick={() => remove(a.id)}
+                      disabled={removeMutation.isPending}
+                    >
+                      Remove
+                    </button>
+                    {rowError !== null && rowError.id === a.id && (
+                      <span className={styles.error} role="alert">
+                        {rowError.message}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

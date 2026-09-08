@@ -1,7 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { act, render as rtlRender, screen, fireEvent, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OperatorsPanel } from "@/features/admin/components/OperatorsPanel";
 import { useAdminViewStore } from "@/features/admin/store/adminView";
+
+/**
+ * ⚠️ R-360 / 0069 ADDENDUM. `OperatorsPanel` now renders `OperatorAbsences`
+ * for the selected person (one insertion, wave4-b's brief), which reads and
+ * writes through REAL `@tanstack/react-query` hooks — every other query this
+ * screen makes is mocked at the hook level (see this file's own header), so
+ * this is the first real `useQuery`/`useMutation` this suite's render tree
+ * reaches. `render` is shadowed with a `QueryClientProvider` wrapper so every
+ * existing `render(<OperatorsPanel />)` call site keeps working unchanged;
+ * `@/lib/api`'s mock factory below gains the four functions `OperatorAbsences`
+ * calls, each answering an empty/neutral shape so it renders its "no absences"
+ * state and touches none of this file's own assertions.
+ */
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 /**
  * ⭐ THE SECOND SUITE IN THIS REPO THAT MOUNTS AN ADMIN PANEL, and it exists
@@ -226,6 +245,22 @@ vi.mock("@/features/auth/useSession", () => ({
 
 vi.mock("@/lib/api", () => ({
   describeSchedulerError: (e: unknown) => String(e),
+  // R-360 / 0069: OperatorAbsences' own reads/writes. This suite is not about
+  // the absences block — an empty list and a resolved-but-neutral setting are
+  // enough for it to render its "no absences" state and stay out of every
+  // O-numbered case's way.
+  fetchAbsences: () => Promise.resolve({ absences: [], skipped: 0 }),
+  fetchNodeSetting: () => Promise.resolve(null),
+  setAbsence: vi.fn(),
+  removeAbsence: vi.fn(),
+}));
+
+// R-360 / 0069: `OperatorAbsences` imports `absenceKeys` from this file, whose
+// own top-level imports (`ImportWizard`, `../lib/csv`, `../lib/absenceImport`)
+// this suite has no reason to load — `absencesPanel.test.tsx` mocks the same
+// module for the same reason. The key's own shape stands in for the real one.
+vi.mock("@/features/admin/components/AbsencesImport", () => ({
+  absenceKeys: { all: ["absences"] as const },
 }));
 
 // The date-display seam's client hook. The panel reads only `useDateFormat` (for

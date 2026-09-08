@@ -44,7 +44,9 @@ export function SaveTemplateDialog({
       toast.info(
         `Saved “${saved.name}” — ${saved.runs} ${saved.runs === 1 ? "run" : "runs"} and ${
           saved.assignments
-        } ${saved.assignments === 1 ? "assignment" : "assignments"}.`,
+        } ${
+          saved.assignments === 1 ? "assignment" : "assignments"
+        }. It is on this plant's template list now, applied from this toolbar with “Apply a template”.`,
       );
       onClose();
     } catch (err) {

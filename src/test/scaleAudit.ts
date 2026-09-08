@@ -136,6 +136,11 @@ export const REM_SURFACES: readonly string[] = [
   // here AND in R10's copy in `scaleAudit.test.ts` — the two-place edit
   // `missingRemSurfaces` exists to force (CLAUDE.md section 4).
   "src/features/admin/components/TemplatesPanel.module.css",
+  // R-360 / 0069, the Operators tab's own absences block. A new admin
+  // surface, so it is listed here AND in R10's copy in `scaleAudit.test.ts`
+  // — the two-place edit `missingRemSurfaces` exists to force (CLAUDE.md
+  // section 4).
+  "src/features/admin/components/OperatorAbsences.module.css",
 ];
 
 /**

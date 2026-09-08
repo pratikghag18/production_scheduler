@@ -350,6 +350,71 @@ describe("useDragGesture", () => {
     });
   });
 
+  /**
+   * R-359 / migration 0069 — THE PART-DAY HOLE. `move_run`'s `absence_warnings`
+   * entries now carry `startsAt`/`endsAt` for a part-day hit, and this toast
+   * must read those hours in the board's own zone (`index.zone`, the same value
+   * `toastCtx`'s `formatRange` uses at line ~308) rather than in UTC. Before the
+   * fix the toast built `leaveLine`'s argument from only `from`/`to`/`reason`
+   * and called it with no third argument, so a part-day hit rendered as a
+   * whole-day one (no hours at all) — always in UTC even once that was fixed.
+   */
+  it("R-359: a part-day absence_warnings entry reads its hours in the board's own zone, not UTC", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.moveRun).mockResolvedValue({
+      run: {} as Run,
+      assignments: [],
+      eligibilityWarnings: [],
+      absenceWarnings: [
+        {
+          operatorId: "op-1",
+          absence: {
+            absent: true,
+            from: "2026-08-24",
+            to: "2026-08-24",
+            reason: "sick",
+            // 09:00Z-13:00Z is 04:00-08:00 in America/Chicago (CDT, UTC-5 in August).
+            startsAt: "2026-08-24T09:00:00.000Z",
+            endsAt: "2026-08-24T13:00:00.000Z",
+          },
+        },
+      ],
+    } as never);
+    const crew = [crewFixture()];
+    const index = buildIndex(crew);
+    index.zone = "America/Chicago"; // not UTC — the case the bug shipped as
+    index.operatorById.set("op-1", {
+      id: "op-1",
+      homeNodeId: null,
+      displayName: "Ana Operator",
+      employeeRef: null,
+      active: true,
+      siteNodeId: "cell-1",
+      sitePath: "plant_1.cell_1",
+      skillIds: [],
+      skillExpiries: [],
+    });
+    const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+    act(() => {
+      result.current.beginBlockDrag(runDescriptor([runFixture], []), fakePointerEvent(500, 300));
+    });
+    act(() => {
+      result.current.updateBlockDrag(fakePointerEvent(560, 300));
+    });
+    act(() => {
+      result.current.endBlockDrag(fakePointerEvent(560, 300));
+    });
+
+    await waitFor(() => expect(api.moveRun).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      const messages = useToastStore.getState().toasts.map((t) => t.message);
+      // The hours must survive AND read in the plant's own zone, not UTC.
+      expect(messages.some((m) => m.includes("04:00–08:00"))).toBe(true);
+      expect(messages.some((m) => m.includes("09:00–13:00"))).toBe(false);
+    });
+  });
+
   it("T13: a session identity change cancels an in-flight drag with no mutation sent", async () => {
     const api = await import("@/lib/api");
     const index = buildIndex([]);

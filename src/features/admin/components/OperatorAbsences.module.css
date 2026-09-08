@@ -1,0 +1,90 @@
+/* OperatorAbsences — LAYOUT ONLY (R-360). Every editable box is the shared
+   field skin (Field.module.css, R-318); nothing here re-declares a border,
+   background, padding or font-size on an input, select or button. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--axis);
+}
+
+.heading {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.when {
+  font-weight: 600;
+  min-width: 11rem;
+}
+
+.reason {
+  flex: 1 1 auto;
+  color: var(--muted);
+}
+
+.showPastBtn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.75rem;
+  color: var(--accent, #2a6);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.addRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.partOfDayCheck {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.zoneNote {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.muted {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}

@@ -12,9 +12,10 @@ import {
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { useEditRights } from "../hooks/useEditRights";
-import { canAdministerPlant } from "../hooks/useOrgSettings";
+import { canAdministerPlant, useDateFormat } from "../hooks/useOrgSettings";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import { usePlantFilter } from "../hooks/usePlantFilter";
+import { formatCalendarDay, type DateFormat } from "@/lib/format/dates";
 import styles from "./TemplatesPanel.module.css";
 
 /** Ready flag, like every other admin section's. */
@@ -54,6 +55,9 @@ export function TemplatesPanel() {
         ? plantFilter.plants[0]
         : null;
   const mayAdminister = plant !== null && canAdministerPlant(plant.path, rights);
+  // Same seam every admin panel reads a calendar date through (dateSeam.test.ts):
+  // the plant's own override, or the company's, never a re-derived format.
+  const dateFormat = useDateFormat(canQuery, plant?.id ?? null);
 
   const templatesQuery = useQuery<WeekTemplate[], SchedulerError>({
     queryKey: templateKeys.forPlant(plant?.id ?? ""),
@@ -70,6 +74,13 @@ export function TemplatesPanel() {
   return (
     <div className={styles.body}>
       <p className={styles.plant}>{plant.name}</p>
+      {/* R-358: the panel lists, renames and deletes; it says nothing about
+          applying. Name the plant, what a template is, and the one route back
+          to the board. */}
+      <p className={styles.about}>
+        A template is a whole week's runs and their people, saved from {plant.name}. It is applied
+        from the board's toolbar, with “Apply a template”.
+      </p>
       {templatesQuery.isLoading && <p className={styles.empty}>Loading templates…</p>}
       {templatesQuery.isError && (
         <p role="alert" className={styles.error}>
@@ -85,7 +96,13 @@ export function TemplatesPanel() {
       {templatesQuery.data && templatesQuery.data.length > 0 && (
         <ul className={styles.list} aria-label="Templates">
           {templatesQuery.data.map((t) => (
-            <TemplateRow key={t.id} template={t} plantId={plant.id} mayAdminister={mayAdminister} />
+            <TemplateRow
+              key={t.id}
+              template={t}
+              plantId={plant.id}
+              mayAdminister={mayAdminister}
+              dateFormat={dateFormat}
+            />
           ))}
         </ul>
       )}
@@ -97,10 +114,12 @@ function TemplateRow({
   template,
   plantId,
   mayAdminister,
+  dateFormat,
 }: {
   template: WeekTemplate;
   plantId: string;
   mayAdminister: boolean;
+  dateFormat: DateFormat;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -152,8 +171,9 @@ function TemplateRow({
           <span className={styles.name}>{template.name}</span>
         )}
         <span className={styles.meta}>
-          saved {template.savedFrom} · {template.runs} {template.runs === 1 ? "run" : "runs"},{" "}
-          {template.assignments} {template.assignments === 1 ? "assignment" : "assignments"}
+          saved from {formatCalendarDay(template.savedFrom, dateFormat)} · {template.runs}{" "}
+          {template.runs === 1 ? "run" : "runs"}, {template.assignments}{" "}
+          {template.assignments === 1 ? "assignment" : "assignments"}
         </span>
       </div>
 

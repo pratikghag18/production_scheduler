@@ -81,11 +81,14 @@ test("an admin saves this week as a template and applies it through Copy Week", 
   await signIn(page, ADMIN, "/");
   await saveTemplate(page, DANA_TPL);
 
-  await page.getByRole("button", { name: "Copy week" }).click({ timeout: 15_000 });
+  // R-358: an admin reaches a template through its OWN button, not through the
+  // "Copy from" select inside "Copy week".
+  await page.getByRole("button", { name: "Apply a template" }).click({ timeout: 15_000 });
   const dialog = page.getByRole("dialog", { name: "Copy week" });
   await expect(dialog).toBeVisible();
-  // Switch the source to the template just saved.
-  await dialog.getByLabel("Copy from").selectOption({ label: "a template" });
+  // Already on the template source: the picker is still offered to an admin,
+  // but nothing needs switching to get here.
+  await expect(dialog.getByLabel("Template")).toBeVisible({ timeout: 15_000 });
   await dialog.getByLabel("Template").selectOption({ label: DANA_TPL });
   await dialog.getByLabel("Into the week starting").fill(mondayPlusWeeks(120));
   // The same preview path, now naming the template as the source.

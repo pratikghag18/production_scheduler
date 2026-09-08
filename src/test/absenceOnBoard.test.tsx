@@ -27,11 +27,12 @@ import {
   parseCreateAssignmentResult,
   parseMoveRunResult,
 } from "@/lib/api";
-import type { AbsenceRow } from "@/lib/absence";
+import type { AbsenceRow, AbsenceHit } from "@/lib/absence";
 import { CreatePopover } from "@/features/board/components/CreatePopover";
 import { AssignmentPopover, describeRefusal } from "@/features/board/components/AssignmentPopover";
 import { OperatorPanel } from "@/features/board/components/OperatorPanel";
 import type { IndexedAssignment } from "@/features/board/lib/boardIndex";
+import { leaveLine } from "@/features/board/lib/leave";
 
 const NODE = "n-cell";
 
@@ -482,5 +483,122 @@ describe("shapes.ts: the warn-path payload keys are parsed, never raw", () => {
       eligibility_warnings: [],
     } as never);
     expect(parsed?.absenceWarnings).toEqual([]);
+  });
+
+  /**
+   * R-359 / migration 0069 — THE HOLE THIS LANE CLOSES. `absence_overlap` grew
+   * two additive keys on a part-day hit (`starts_at`/`ends_at`), forwarded whole
+   * by both `create_assignment` (under `absence`) and `move_run` (inside each
+   * `absence_warnings` entry). `parseAbsenceInfo` read only `absent`/`from`/
+   * `to`/`reason` and dropped them, so a part-day absence surfaced through
+   * either path rendered as a whole-day one and the hours vanished silently —
+   * proved here end to end: parse the raw payload, then feed the parsed shape
+   * straight into `leaveLine`, the same seam the pop-ups and the drag toast
+   * read leave through.
+   */
+  it("R-359: create_assignment's part-day `absence` reaches leaveLine's sentence with its hours", () => {
+    const parsed = parseCreateAssignmentResult({
+      assignment: assignmentRow,
+      eligibility: { eligible: true, policy: "warn", missing_skills: [], expiring_skills: [] },
+      absence: {
+        absent: true,
+        from: "2026-09-28",
+        to: "2026-09-28",
+        reason: "sick",
+        starts_at: "2026-09-28T09:00:00.000Z",
+        ends_at: "2026-09-28T13:00:00.000Z",
+      },
+    } as never);
+    const a = parsed?.absence;
+    expect(a?.startsAt).toBe("2026-09-28T09:00:00.000Z");
+    expect(a?.endsAt).toBe("2026-09-28T13:00:00.000Z");
+    const sentence = leaveLine(
+      { from: a!.from!, to: a!.to!, reason: a!.reason ?? "", startsAt: a?.startsAt, endsAt: a?.endsAt },
+      "d_mon_yyyy",
+    );
+    expect(sentence).toBe("On leave 28 Sep 2026, 09:00–13:00: sick");
+  });
+
+  it("R-359: move_run's part-day absence_warnings entry reaches leaveLine's sentence with its hours, in a given zone", () => {
+    const parsed = parseMoveRunResult({
+      run: {
+        id: "r1",
+        org_id: "org-1",
+        node_id: NODE,
+        product_id: "pr-a",
+        product_sku: null,
+        product_name: null,
+        product_color_token: null,
+        timerange: "[2026-09-07 06:00+00,2026-09-07 14:00+00)",
+        planned_headcount: 1,
+        notes: null,
+        status: "planned",
+        created_by: null,
+        created_at: "2026-09-01T00:00:00.000Z",
+        updated_at: "2026-09-01T00:00:00.000Z",
+      },
+      assignments: [assignmentRow],
+      eligibility_warnings: [],
+      absence_warnings: [
+        {
+          operator_id: ELENA.id,
+          absence: {
+            absent: true,
+            from: "2026-09-28",
+            to: "2026-09-28",
+            reason: "sick",
+            starts_at: "2026-09-28T09:00:00.000Z",
+            ends_at: "2026-09-28T13:00:00.000Z",
+          },
+        },
+      ],
+    } as never);
+    const a = parsed?.absenceWarnings[0]?.absence;
+    expect(a?.startsAt).toBe("2026-09-28T09:00:00.000Z");
+    expect(a?.endsAt).toBe("2026-09-28T13:00:00.000Z");
+    // America/Chicago is UTC-5 in September (CDT): 09:00Z/13:00Z -> 04:00/08:00.
+    const sentence = leaveLine(
+      { from: a!.from!, to: a!.to!, reason: a!.reason ?? "", startsAt: a?.startsAt, endsAt: a?.endsAt },
+      "d_mon_yyyy",
+      "America/Chicago",
+    );
+    expect(sentence).toBe("On leave 28 Sep 2026, 04:00–08:00: sick");
+  });
+});
+
+/* ===========================================================================
+ * 5. R-359 / 0069 — `leaveLine` reads a part-day hit's hours in the given
+ *    zone; a whole-day hit's sentence is untouched (both sides of Part B).
+ * ======================================================================== */
+
+describe("leaveLine: R-359, a part-day hit reads as the day plus the hours", () => {
+  const partDayHit: AbsenceHit = {
+    from: "2026-09-14",
+    to: "2026-09-14",
+    reason: "sick",
+    startsAt: "2026-09-14T09:00:00.000Z",
+    endsAt: "2026-09-14T13:00:00.000Z",
+  };
+
+  it("reads the hours in the given zone, in the plant's date format", () => {
+    expect(leaveLine(partDayHit, "d_mon_yyyy", "UTC")).toBe("On leave 14 Sep 2026, 09:00–13:00: sick");
+  });
+
+  it("the same instants read differently in a different zone", () => {
+    // America/Chicago is UTC-5 in September (CDT): 09:00Z/13:00Z -> 04:00/08:00.
+    expect(leaveLine(partDayHit, "d_mon_yyyy", "America/Chicago")).toBe(
+      "On leave 14 Sep 2026, 04:00–08:00: sick",
+    );
+  });
+
+  it("`zone` defaults to UTC, so every existing board caller (two positional args) keeps compiling and reads UTC", () => {
+    expect(leaveLine(partDayHit, "d_mon_yyyy")).toBe("On leave 14 Sep 2026, 09:00–13:00: sick");
+  });
+
+  it("a whole-day hit's sentence does not change, whatever zone is passed", () => {
+    const wholeDayHit: AbsenceHit = { from: "2026-09-14", to: "2026-09-18", reason: "sick" };
+    expect(leaveLine(wholeDayHit, "d_mon_yyyy", "America/Chicago")).toBe(
+      "On leave 14 Sep 2026 – 18 Sep 2026: sick",
+    );
   });
 });

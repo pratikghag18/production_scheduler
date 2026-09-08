@@ -591,7 +591,7 @@ export function AssignmentPopover({
                 `warn` this is a warning and Save stays enabled; under `block`
                 there is nothing to tick and Save is off. */}
             <p>
-              <strong>{leaveLine(selectedAbsence, dateFormat)}</strong>
+              <strong>{leaveLine(selectedAbsence, dateFormat, zone)}</strong>
             </p>
             {absenceBlocked ? (
               <p>This person is on leave for this window, so there is no override.</p>

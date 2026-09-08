@@ -684,6 +684,14 @@ export function useDragGesture(args: UseDragGestureArgs) {
                   // `absent:true` by construction (the server only emits away
                   // crew), so `from`/`to` are non-null — guarded anyway, a mirror
                   // never throws.
+                  //
+                  // R-359: `a.startsAt`/`a.endsAt` (present together on a
+                  // part-day hit) must ride along into `leaveLine`'s argument —
+                  // dropping them here is what silently turned a part-day
+                  // absence into a whole-day one. `index.zone` is the same
+                  // board zone `formatRange` above (line ~308) already reads;
+                  // an absent hit's hours must never print in UTC just because
+                  // this call site forgot to pass the zone it already has.
                   if (result.absenceWarnings.length > 0) {
                     const lines = result.absenceWarnings
                       .map((w) => {
@@ -693,8 +701,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
                         const when =
                           a.from !== null && a.to !== null
                             ? leaveLine(
-                                { from: a.from, to: a.to, reason: a.reason ?? "" },
+                                {
+                                  from: a.from,
+                                  to: a.to,
+                                  reason: a.reason ?? "",
+                                  startsAt: a.startsAt,
+                                  endsAt: a.endsAt,
+                                },
                                 dateFormat,
+                                index.zone,
                               )
                             : "on leave";
                         return `${name}: ${when}`;

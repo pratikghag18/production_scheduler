@@ -45,6 +45,7 @@ export type Database = {
           org_id: string
           reason: string
           source: string
+          timerange: unknown
           updated_at: string
         }
         Insert: {
@@ -57,6 +58,7 @@ export type Database = {
           org_id: string
           reason: string
           source?: string
+          timerange?: unknown
           updated_at?: string
         }
         Update: {
@@ -69,6 +71,7 @@ export type Database = {
           org_id?: string
           reason?: string
           source?: string
+          timerange?: unknown
           updated_at?: string
         }
         Relationships: [
@@ -1595,10 +1598,12 @@ export type Database = {
       }
       set_absence: {
         Args: {
+          p_ends_at?: string
           p_external_id?: string
           p_from: string
           p_operator_id: string
           p_reason: string
+          p_starts_at?: string
           p_to: string
         }
         Returns: Json

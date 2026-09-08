@@ -37,6 +37,9 @@ import { buildColumns, trainingApplies, type CellState } from "../lib/matrix";
 import { MatrixChip, RecordPopover, type RecordFields } from "./matrixCells";
 import cellStyles from "./matrixCells.module.css";
 import { Popover } from "@/components/Popover";
+// R-360: this person's own absences, on their record — its own file, its own
+// query (see OperatorAbsences.tsx's header for why the query lives there).
+import { OperatorAbsences } from "./OperatorAbsences";
 import type { OperatorSkillRecord } from "@/lib/api";
 // The calendar-date display seam: the org-wide format token, and the one
 // function that renders a `YYYY-MM-DD` with it. `../lib/operators` cannot import
@@ -1128,6 +1131,13 @@ export function OperatorsPanel() {
                     : `${hiddenPlaces} deactivated places are not shown.`}
                 </p>
               )}
+
+              {/* R-360: this person's own absences, on their record. */}
+              <OperatorAbsences
+                operatorId={selected.id}
+                displayName={selected.displayName}
+                homeNodeId={selected.siteNodeId}
+              />
 
               {/* ⭐⭐ THE CHOOSER BEHIND A CELL. Clicking a place cell above opens
                   this: the trainings that gate that cell and are not yet

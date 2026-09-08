@@ -217,7 +217,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the twenty admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the twenty-one admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -268,6 +268,9 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // R-356 / 0067: the Templates section. Twentieth surface, same two-place
         // edit.
         "src/features/admin/components/TemplatesPanel.module.css",
+        // R-360 / 0069: the Operators tab's own absences block. Twenty-first
+        // surface, same two-place edit.
+        "src/features/admin/components/OperatorAbsences.module.css",
       ].sort(),
     );
   });
