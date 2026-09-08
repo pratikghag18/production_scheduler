@@ -7860,12 +7860,18 @@ requirements:
   - kind: vitest
     file: src/test/absence.test.ts
     cases: >-
-      the overlapping and the clearly-outside shift; the three BOUNDARY cases, each mirrored in
-      88_absences_test.sql by the name it carries there (AB23 a shift starting exactly when the
-      absence ends, AB24 a shift ending exactly when it starts, and the existing case for a shift
-      starting exactly when the absence starts, which does clash); an open-ended window on both
-      sides of a part-day absence; and the whole-day-first tie-break. DEF-0022 corrected this
-      entry: it previously claimed the SQL suite carried the same names when only the client did.
+      the overlapping and the clearly-outside shift; three BOUNDARY cases, of which TWO are
+      mirrored in 88_absences_test.sql by the name they carry there --- AB23, a shift starting
+      exactly when a part-day absence ends, and AB24, one ending exactly when it starts. The third,
+      a shift starting exactly when the absence starts, which DOES clash, is deliberately not
+      mirrored and must not be: no window with positive duration can tell an inclusive absence
+      start from an exclusive one, because it reaches into the absence either way, so an AB26 would
+      look like a fourth boundary DEF-0022 secured while securing nothing. The tester proved that
+      by opening the stored range at both ends and watching all thirty SQL cases stay green while
+      the live server still answered correctly. AB15 covers that case as an ordinary overlap. Also
+      pinned here: an open-ended window on both sides of a part-day absence, and the whole-day-first
+      tie-break. This entry has been corrected twice --- DEF-0022 for claiming SQL names that did
+      not exist yet, DEF-0023 for repeating the same claim about the one case that still has none.
   - kind: vitest
     file: src/test/absencesPanel.test.tsx
     cases: >-
