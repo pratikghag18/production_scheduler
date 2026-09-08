@@ -632,11 +632,11 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
   <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="open">
     <td><a href="#DEF-0023"><code>DEF-0023</code></a></td>
-    <td><span class="chip bad">open</span></td>
+    <td><span class="chip now">fix-claimed</span></td>
     <td>minor</td>
     <td>R-359's own correction of DEF-0022 still overclaims one of the three boundary cases as mirrored by name in 88_absences_test.sql, and none is</td>
     <td><a href="#R-359">R-359</a></td>
-    <td class="fine">2026-09-08 · <a href="defects/DEF-0023.md">file</a></td>
+    <td class="fine">2026-09-08 · fix 2016c69 · <a href="defects/DEF-0023.md">file</a></td>
   </tr>
 <tr class="closed">
     <td><a href="#DEF-0001"><code>DEF-0001</code></a></td>
@@ -1758,9 +1758,9 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <p><code>npx vitest run src/test/defects/DEF-0022.test.ts src/test/absence.test.ts</code> -- <code>Test Files 2 passed (2)</code>, <code>Tests 19 passed (19)</code>, against the live server, unaffected by any of the above (all scratch-database mutations). Migration 0069 confirmed byte-identical to HEAD after the last revert (<code>git diff --exit-code</code>). Verified: two of the three named boundary cases (AB23, AB24) are now real and independently provable by mutation; the third scenario named in R-359's own claim was never real and still is not, which is DEF-0023, not a reopening of this one. The pin has not been promoted out of <code>src/test/defects/</code>.</p>
 </details>
 <div class="find" id="DEF-0023">
-  <span class="tag">DEF-0023 · minor · doc-drift · open</span>
+  <span class="tag">DEF-0023 · minor · doc-drift · fix-claimed</span>
   <h3>R-359's own correction of DEF-0022 still overclaims one of the three boundary cases as mirrored by name in 88_absences_test.sql, and none is</h3>
-  <p class="fine">Violates <a href="#R-359">R-359</a> · filed 2026-09-08 by tester · <a href="defects/DEF-0023.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p class="fine">Violates <a href="#R-359">R-359</a> · filed 2026-09-08 by tester · fix 2016c69 · <a href="defects/DEF-0023.md">open the file</a> · <a href="#defects">back to the index</a></p>
   <p><b>Reproduction</b></p>
 <p>At tip <code>8d5eb26</code>. Read <code>docs/plan.yaml</code>'s R-359 row, <code>verified_by</code> entry for <code>src/test/absence.test.ts</code>:</p>
 <p>&gt; &quot;the three BOUNDARY cases, each mirrored in 88_absences_test.sql by the name &gt; it carries there (AB23 a shift starting exactly when the absence ends, AB24 &gt; a shift ending exactly when it starts, and the existing case for a shift &gt; starting exactly when the absence starts, which does clash)&quot;</p>
