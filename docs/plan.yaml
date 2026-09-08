@@ -7942,7 +7942,73 @@ requirements:
     work" exactly as the claim describes. Also confirmed AbsencesPanel's own wave-four edit changes
     only HOW an absence is recorded (the part-day checkbox, per-row zone resolution) and not WHO may
     -- `set_absence`/`remove_absence` remain the only authority, unchanged.
+- id: R-361
+  title: A resize asks the same two questions the other four writers ask, and answers them the same way
+  source:
+  - session 93 conversation
+  - F-113
+  - tester note, session 87 stage 7
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 8 Sept, asked directly: *"The resize should get similar warnings as other 4."*
+    So the fifth way an assignment's time changes stops being the exception. Four writers ask
+    `check_eligibility` and `absence_overlap` before they write --- `create_assignment`, `move_run`,
+    `reassign_assignment`, `copy_week_plan` --- and a plain `PATCH /assignments` that changes
+    `timerange` (a drag on the block's EDGE, or a nudge to a new time in the same cell) asks
+    neither, so a person can be moved onto a day they are on leave, or past the day their
+    certificate expires, in silence.
+    ⭐ THE ANSWER IS THE SAME ANSWER, UNDER THE SAME RESOLVED POLICY. Under `block` the write is
+    refused with the same error codes the four raise (`absent`, `not_eligible`). Under `warn` it
+    goes through and the person is named in a toast carrying the same sentence the crew-drag toast
+    already shows, hours included for a part-day absence (R-359).
+    ⭐ AND IT BELONGS IN A TRIGGER ON THE TABLE, NOT A FIFTH COPY OF THE RULE. A `BEFORE UPDATE`
+    trigger on `assignments` that re-asks the two predicates whenever `timerange` (or `operator_id`)
+    changes catches every path at once --- the client's PATCH, a raw PostgREST call, anything added
+    later --- and cannot drift from the four, because it IS their predicates. Measured, not
+    inferred: the guards that already fire on that PATCH (`assignments_capacity`,
+    `assignments_run_consistency`, `assignments_scope_guard`) are about capacity, node and scope,
+    and not one of them looks at the person.
+    ⚠️ A TRIGGER CAN REFUSE AND CANNOT WARN, which is why the two halves are split. Under `warn` the
+    trigger must stay silent and the CLIENT owns the sentence, through the mirrors it already has
+    (`absenceGaps`, `certificateGaps`) --- the same predicate the server runs, which is the standing
+    rule. A trigger that refused under `warn` would be worse than the gap it closes.
+    ⚠️ A RUN RESIZE IS NOT IN SCOPE, AND THAT WAS CHECKED RATHER THAN ASSUMED. `runs_crew_follows`
+    and `assignments_run_consistency` both guard `node_id` alone, so changing a run's `timerange`
+    does not move its crew in time and puts nobody anywhere new. The assignment's own `timerange` is
+    the only write that does.
+  verified_by: []
+  status: uncovered
 findings:
+- id: F-118
+  title: CI died on the Prettier gate twice, two steps before the tests, and every other instrument was green both times
+  tag: The gate nobody runs
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-337
+  story: >-
+    The maintainer, 8 Sept, after pushing: *"github has been failing on CI, please explain why."*
+    Nothing this wave built was wrong. `npm run format:check` is the fifth step of eight and exits
+    non-zero TWO STEPS BEFORE `npm run test`, so one unformatted file kills the run and the suite,
+    the build and the browser cases never execute at all. The tester recorded this exact shape on
+    4 Sept; it came back on 8 Sept with eight files --- five written by wave four's lanes, three of
+    them defect pins written in the tester's own worktree, which does not run the check either.
+    ⚠️ WHAT MADE IT INVISIBLE IS THAT EVERY OTHER INSTRUMENT WAS GREEN. typecheck, eslint, 2497
+    vitest cases and 763 SQL checks all passed, and this session ran every one of them and never ran
+    format:check. An instrument nobody runs is not a gate, it is a delayed failure.
+    ⚠️ AND THE LOCAL CHECK LIES, WHICH IS WHY NOBODY TRUSTS IT. `core.autocrlf=true` means the index
+    holds LF and a checked-out file holds CRLF, while Prettier defaults `endOfLine` to "lf" --- so
+    `prettier --check .` here named TWENTY files when CI's own answer was eight. The first attempt
+    to reproduce CI made the same mistake in the other direction: `git archive` applied the same
+    conversion and reported 371 files. Exporting with `core.autocrlf=false`, which is how a Linux
+    runner checks out, gave exactly the eight, and the same export on the fix reports clean.
+    ⭐ FIXED WHERE THE MISTAKE IS MADE, NOT WHERE IT IS DISCOVERED. `.githooks/pre-commit` checks
+    the STAGED BLOB --- the bytes CI will check out, not the file on disk, so it neither cries wolf
+    over line endings nor lets a dirtied file past --- and `package.json`'s `prepare` script points
+    `core.hooksPath` at it on every `npm ci`, so a fresh clone and the tester's worktree both get it
+    without a setup step. Proved in both directions: a deliberately mangled file was refused by
+    name with the fix command, and a clean commit went through. `npm run verify` now runs CI's own
+    sequence in CI's own order for anyone who wants the whole thing before pushing.
 - id: F-117
   title: The local dev demo world's own dates went stale, and a hand re-application of dev_demo.sql without ON_ERROR_STOP left org 1 with a fourth root plant
   tag: The clock the demo world is anchored on kept moving
