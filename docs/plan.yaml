@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-08'
-  tip: f94796f
+  tip: 5c9e6d4
   baseline:
     app_tests: 2502
     app_test_files: 111
@@ -8158,6 +8158,35 @@ requirements:
       the crew-drag toast uses, naming the person and the leave, in the board's zone
   status: covered
 findings:
+- id: F-119
+  title: CI's browser step had never once been reached, and when it finally was, a helper that stops scrolling too early was waiting
+  tag: The step nobody had run
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-337
+  - R-350
+  story: >-
+    The maintainer, 8 Sept: *"The workflows/CI are still failing on github."* F-118 had fixed
+    `format:check`, and the run then got to step 12, `scripts/ci-e2e.sh`, FOR THE FIRST TIME IN THE
+    REPOSITORY'S HISTORY --- it had always died four steps earlier. The stack came up (the 1.7 MB
+    Playwright report artifact proves it ran); two browser cases failed.
+    ⚠️ AND THEY WERE INVISIBLE LOCALLY BECAUSE EVERY LOCAL RUN HAD BEEN FILTERED. `--project=chromium`
+    is 35 cases; CI runs every project, 43. The two failures, touch T2 and T5, live in the project
+    nobody had been running. Reproduced only by running the suite the way CI runs it --- every
+    project, `--workers=1 --retries=2` --- which is now the measurement that counts.
+    ⭐ THE BUG WAS A HELPER'S OWN CONTRACT. `revealBlock` scrolled until a block satisfied
+    Playwright's `isVisible()` and stopped; inside a horizontally overflowing container that is true
+    of a block far outside the viewport, so `grabBlockTouch`, which needs a 70px slice clear of the
+    row-label rail, then found nothing: eight blocks at x around 1461 with the zone ending at 1102.
+    Latent rather than new --- whether the first visible block lands in the usable zone depends on
+    where the board auto-scrolls (it follows the clock) against where the demo world's runs sit, so a
+    stale local world passed and the freshly seeded world CI builds every run did not. Fixed by
+    making the scanner look for what the grabber requires, with the threshold and the zone arithmetic
+    in one place each so the two cannot drift; neither the 70px nor the zone was loosened, since they
+    are the assertion rather than the bug.
+    ⚠️ NOTED AND NOT FIXED: a `smoke.spec.ts` `/admin` redirect case went flaky once in three full
+    runs and has not been chased.
 - id: F-118
   title: CI died on the Prettier gate twice, two steps before the tests, and every other instrument was green both times
   tag: The gate nobody runs
@@ -11073,6 +11102,49 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 96
+  date: 2026-09-08
+  title: 'CI reaches its browser step for the first time, and the two cases waiting there are fixed'
+  commits:
+  - 5c9e6d4
+  numbers:
+    app_tests: 2502
+    app_test_files: 111
+    tsc: 0
+    eslint: 0
+    db_checks: 773
+    migrations: 70
+  confirmed: false
+  summary: >-
+    ⚠️ `confirmed: false` ON PURPOSE, AND THE REASON IS THE NUMBERS, NOT THE WORK. Another session
+    had uncommitted test files in the shared working tree while this piece was measured (three new
+    unit files and edits to two more), so a unit or SQL count taken here would describe that tree
+    rather than this commit. The numbers above are session 94's, carried forward unchanged and NOT
+    re-measured. What WAS measured here, independently of the lane that wrote the fix, is the
+    browser suite: `43 passed`, every project, `--workers=1 --retries=2`, the way CI runs it.
+    ⭐ WHAT THE RUN ACTUALLY SAID, read from the GitHub API rather than guessed (`gh` is not
+    installed; the repository is public so the runs endpoint answers unauthenticated, though logs and
+    artifacts both return 401/403). Steps 1-11 all green --- `format:check` among them, in 6s, so
+    F-118's fix holds --- and step 12, `bash scripts/ci-e2e.sh`, failed after 301s having uploaded a
+    1.7 MB Playwright report. That artifact is the evidence the Supabase stack came up and the
+    BROWSER CASES failed, rather than the stack setup: no report is produced if the stack never
+    starts.
+    ⛔ AND THE FAILING CASES WERE INVISIBLE TO EVERY LOCAL RUN THIS PROJECT HAS EVER DONE, because
+    every local run was filtered. `--project=chromium` is 35 cases; CI runs all 43. Both failures
+    live in the `touch` project. Running the suite CI's way reproduced them deterministically on the
+    first try --- 41 passed, 2 failed, three attempts each. The lesson is the measurement, not the
+    bug: an unfiltered run is now the only one that means anything.
+    ⭐ THE FIX (F-119). `revealBlock` stopped scrolling as soon as a block satisfied Playwright's
+    `isVisible()`, which inside a horizontally overflowing container is true of a block far outside
+    the viewport --- so `grabBlockTouch`, needing a 70px slice clear of the rail, found nothing:
+    eight blocks at x around 1461, zone ending at 1102. The scanner now looks for exactly what the
+    grabber requires, with the threshold and the zone arithmetic in one place each so they cannot
+    drift. Neither was loosened: they are the assertion, not the bug. Latent rather than new --- it
+    turns on where the board auto-scrolls (which follows the clock) against where the demo world's
+    runs sit, so a stale local world passed and CI's freshly seeded one never could.
+    ⚠️ NOT CHASED: a `smoke.spec.ts` `/admin` redirect case went flaky once in three consecutive full
+    runs, in a file the lane did not own. Recorded rather than fixed.
+  shipped: []
 - id: 95
   date: 2026-09-08
   title: 'A requirement-coverage audit closes 21 rows without writing a line of test code'
