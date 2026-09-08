@@ -17,7 +17,10 @@
 -- save from and apply to a week they can place on and may NOT delete; TP4 a
 -- viewer refused everywhere; TP-EQ a template plan equals a week plan item for
 -- item; TP-ON the overnight item crosses the day boundary; TP-APPLY apply from
--- a template writes exactly what Copy Week from the week writes (rows compared).
+-- a template writes exactly what Copy Week from the week writes (rows compared);
+-- TP-XT (DEF-0021) a fabricated template id in another company answers
+-- no_such_template for rename and delete just as a bogus id does, and the
+-- foreign row survives --- no cross-tenant existence leak.
 -- ============================================================================
 
 BEGIN;
@@ -397,5 +400,49 @@ EXCEPTION WHEN OTHERS THEN
   RESET ROLE; RAISE NOTICE 'FAIL TP6: unexpected exception % (%)', SQLERRM, SQLSTATE;
 END $$;
 ROLLBACK TO SAVEPOINT sp_TP6;
+
+\echo 'TP-XT ⚠ (DEF-0021): a fabricated template id in ANOTHER company answers no_such_template for rename AND delete, exactly as a bogus id does --- not the not_admin it used to leak --- and the foreign row survives'
+SAVEPOINT sp_TPXT;
+DO $$
+DECLARE v_org2 uuid := '10000000-0000-0000-0000-000000000002';
+        v_p2   uuid := '3000000b-0000-0000-0000-000000000001';   -- org 2's plant root
+        v_foreign uuid := '99999999-0000-0000-0000-000000000001';
+        v_bogus   uuid := '88888888-0000-0000-0000-000000000000';
+        v_rn_bogus text; v_rn_foreign text; v_del_bogus text; v_del_foreign text;
+        v_survived int; v_ok boolean := true; v_why text := '';
+BEGIN
+  -- The other company's template, written as owner (superuser bypasses RLS).
+  INSERT INTO week_templates (id, org_id, plant_id, name, saved_from, created_by)
+  VALUES (v_foreign, v_org2, v_p2, 'Contoso Template', '2099-07-06', NULL);
+
+  -- As e1 (tp_admin): a SITE admin of Plant T in org 1, not an admin of org 2's
+  -- plant. Before 0068 the foreign row reached app_is_admin_for and answered
+  -- not_admin, distinguishable from a bogus id's no_such_template.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM rename_week_template(v_bogus, 'x'); v_rn_bogus := 'no_raise';
+  EXCEPTION WHEN OTHERS THEN DECLARE d text; BEGIN GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL; v_rn_bogus := (d::jsonb)->>'reason'; EXCEPTION WHEN OTHERS THEN v_rn_bogus := 'no_detail'; END; END;
+  BEGIN PERFORM rename_week_template(v_foreign, 'x'); v_rn_foreign := 'no_raise';
+  EXCEPTION WHEN OTHERS THEN DECLARE d text; BEGIN GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL; v_rn_foreign := (d::jsonb)->>'reason'; EXCEPTION WHEN OTHERS THEN v_rn_foreign := 'no_detail'; END; END;
+  BEGIN PERFORM delete_week_template(v_bogus); v_del_bogus := 'no_raise';
+  EXCEPTION WHEN OTHERS THEN DECLARE d text; BEGIN GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL; v_del_bogus := (d::jsonb)->>'reason'; EXCEPTION WHEN OTHERS THEN v_del_bogus := 'no_detail'; END; END;
+  BEGIN PERFORM delete_week_template(v_foreign); v_del_foreign := 'no_raise';
+  EXCEPTION WHEN OTHERS THEN DECLARE d text; BEGIN GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL; v_del_foreign := (d::jsonb)->>'reason'; EXCEPTION WHEN OTHERS THEN v_del_foreign := 'no_detail'; END; END;
+  RESET ROLE;
+
+  -- The foreign row must still be there (pure information leak, not a write).
+  SELECT count(*) INTO v_survived FROM week_templates WHERE id = v_foreign;
+
+  IF v_rn_bogus <> 'no_such_template'   THEN v_ok := false; v_why := v_why || format(' rename bogus=%s', COALESCE(v_rn_bogus,'null')); END IF;
+  IF v_rn_foreign <> 'no_such_template' THEN v_ok := false; v_why := v_why || format(' rename foreign=%s (leak: expected no_such_template)', COALESCE(v_rn_foreign,'null')); END IF;
+  IF v_del_bogus <> 'no_such_template'   THEN v_ok := false; v_why := v_why || format(' delete bogus=%s', COALESCE(v_del_bogus,'null')); END IF;
+  IF v_del_foreign <> 'no_such_template' THEN v_ok := false; v_why := v_why || format(' delete foreign=%s (leak: expected no_such_template)', COALESCE(v_del_foreign,'null')); END IF;
+  IF v_survived <> 1 THEN v_ok := false; v_why := v_why || format(' foreign row survived=%s (expected 1)', v_survived); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS TP-XT';
+  ELSE RAISE NOTICE 'FAIL TP-XT:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL TP-XT: unexpected exception % (%)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_TPXT;
 
 ROLLBACK;

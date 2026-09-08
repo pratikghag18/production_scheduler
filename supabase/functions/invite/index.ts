@@ -97,6 +97,31 @@ function json(status: number, body: unknown, origin: string | null): Response {
   });
 }
 
+/**
+ * DEF-0020: does this `inviteUserByEmail` failure mean the address is already
+ * taken somewhere in this Supabase project? Measured live against the local
+ * stack on 2026-09-07:
+ *
+ *   - a listable, GoTrue-managed duplicate (ana@example.test) →
+ *       { code: "email_exists", status: 422,
+ *         message: "A user with this email address has already been registered" }
+ *   - a duplicate whose auth.users row GoTrue's admin listing cannot see
+ *     (sofia@contoso.example — seed.sql's org-2 fixture shim, NULL instance_id) →
+ *       { name: "AuthRetryableFetchError", status: 500,
+ *         message: "Database error saving new user" }   (no `code`)
+ *
+ * We match on the STABLE parts: GoTrue's `code` where it sets one, and the raw
+ * database message for the path that has none. Every other failure is treated
+ * as unmeasured and answered generically by the caller.
+ */
+function isAlreadyTaken(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  const code = err.code ?? "";
+  if (code === "email_exists" || code === "user_already_exists") return true;
+  const msg = (err.message ?? "").toLowerCase();
+  return msg.includes("database error saving new user");
+}
+
 /** Find an existing auth user by email, paging listUsers to the end. */
 async function findAuthUser(admin: SupabaseClient, email: string): Promise<{ id: string } | null> {
   const target = email.trim().toLowerCase();
@@ -268,13 +293,33 @@ Deno.serve(async (req) => {
       redirectTo: `${redirectOrigin}/reset-password`,
     });
     if (invErr || !inv?.user) {
+      // DEF-0020 (R-351). The invite call is itself the oracle for "this
+      // address is already taken somewhere in this Supabase project". We reach
+      // here only because `findAuthUser` answered null — GoTrue's admin listing
+      // could not see the row, so there is no auth id to look profiles up by —
+      // yet the auth.users insert was refused. For an address the listing could
+      // not see, the only thing that refuses the insert is a row with that
+      // email that already exists but is invisible to listUsers (a NULL
+      // instance_id). Every such row this project has is seed.sql's org-2
+      // fixture shim, which is in ANOTHER org; no product path creates an
+      // auth.users row this listing cannot see whose profile is nevertheless in
+      // the CALLER's org. So we answer exactly what the `elsewhere` branch
+      // answers — the response is now indistinguishable from any other-org
+      // refusal, which is the promise R-351 makes.
+      if (isAlreadyTaken(invErr)) {
+        return json(200, { ok: false, reason: "other_org", error: notPermitted(nodeId) }, origin);
+      }
+      // Any OTHER invite failure: the raw GoTrue message is itself a side
+      // channel for shapes nobody has measured yet, so it is logged server-side
+      // and never returned. The caller gets a fixed, uninformative refusal.
+      console.error("invite: inviteUserByEmail failed", {
+        code: invErr?.code,
+        status: invErr?.status,
+        message: invErr?.message,
+      });
       return json(
         200,
-        {
-          ok: false,
-          reason: "invalid",
-          error: invalidArgument("email", invErr?.message ?? "invite failed"),
-        },
+        { ok: false, reason: "invalid", error: invalidArgument("email", "invite failed") },
         origin,
       );
     }

@@ -943,6 +943,118 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_P22;
 
+\echo 'P23 ⚠ (DEF-0018): the OTHER company''s plant root, given all three keys by the owner, answers NULL to Ana (org 1, one line) for every one and for a bogus uuid --- while owner context reads the values, so the null is the tenant boundary, not an absent override'
+SAVEPOINT sp_P23;
+DO $$
+DECLARE v_other uuid := '3000000b-0000-0000-0000-000000000001';   -- org 2 (Contoso) plant root
+        v_org2  uuid := '10000000-0000-0000-0000-000000000002';
+        v_bogus uuid := 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+        v_own_fmt text; v_own_pol text; v_own_tz text;
+        v_ana_fmt text; v_ana_pol text; v_ana_tz text; v_ana_bogus text;
+        v_ok boolean := true; v_why text := '';
+BEGIN
+  -- The owner sets all three overrides on the other company's root.
+  INSERT INTO node_settings (org_id, node_id, key, value) VALUES
+    (v_org2, v_other, 'date_format',        'iso'),
+    (v_org2, v_other, 'eligibility_policy', 'block'),
+    (v_org2, v_other, 'timezone',           'America/Chicago');
+
+  -- Owner context (no jwt sub): the overrides genuinely resolve, so Ana's NULLs
+  -- below are the boundary holding and not simply an absent row.
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  v_own_fmt := app_resolve_node_setting(v_other, 'date_format');
+  v_own_pol := app_resolve_node_setting(v_other, 'eligibility_policy');
+  v_own_tz  := app_resolve_node_setting(v_other, 'timezone');
+
+  -- As Ana: org 1, a supervisor of one line, the least-privileged signed-in
+  -- person the demo has. She may not read another company's setting by uuid.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_ana_fmt   := app_resolve_node_setting(v_other, 'date_format');
+  v_ana_pol   := app_resolve_node_setting(v_other, 'eligibility_policy');
+  v_ana_tz    := app_resolve_node_setting(v_other, 'timezone');
+  v_ana_bogus := app_resolve_node_setting(v_bogus, 'date_format');
+  RESET ROLE;
+
+  IF v_own_fmt IS DISTINCT FROM 'iso'             THEN v_ok := false; v_why := v_why || format(' owner fmt=%s', COALESCE(v_own_fmt,'null')); END IF;
+  IF v_own_pol IS DISTINCT FROM 'block'           THEN v_ok := false; v_why := v_why || format(' owner pol=%s', COALESCE(v_own_pol,'null')); END IF;
+  IF v_own_tz  IS DISTINCT FROM 'America/Chicago' THEN v_ok := false; v_why := v_why || format(' owner tz=%s', COALESCE(v_own_tz,'null')); END IF;
+  IF v_ana_fmt   IS NOT NULL THEN v_ok := false; v_why := v_why || format(' Ana read fmt=%s', v_ana_fmt); END IF;
+  IF v_ana_pol   IS NOT NULL THEN v_ok := false; v_why := v_why || format(' Ana read pol=%s', v_ana_pol); END IF;
+  IF v_ana_tz    IS NOT NULL THEN v_ok := false; v_why := v_why || format(' Ana read tz=%s', v_ana_tz); END IF;
+  IF v_ana_bogus IS NOT NULL THEN v_ok := false; v_why := v_why || format(' Ana read bogus=%s', v_ana_bogus); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS P23';
+  ELSE RAISE NOTICE 'FAIL P23:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL P23: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P23;
+
+\echo 'P24 ⚠ (DEF-0018/0019): an authenticated session with NO user_profiles row (app_current_org() NULL, auth.uid() NOT null) reads NULL for the other company''s override too --- the exemption is auth.uid() IS NULL, so a profile-less tenant is bounded'
+SAVEPOINT sp_P24;
+DO $$
+DECLARE v_other uuid := '3000000b-0000-0000-0000-000000000001';
+        v_org2  uuid := '10000000-0000-0000-0000-000000000002';
+        v_np_org uuid; v_np_fmt text; v_ok boolean := true; v_why text := '';
+BEGIN
+  INSERT INTO node_settings (org_id, node_id, key, value) VALUES
+    (v_org2, v_other, 'date_format', 'iso');
+  INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-00000000beef');
+
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000beef', true);
+  SET LOCAL ROLE authenticated;
+  v_np_org := app_current_org();
+  v_np_fmt := app_resolve_node_setting(v_other, 'date_format');
+  RESET ROLE;
+
+  IF v_np_org IS NOT NULL THEN v_ok := false; v_why := v_why || format(' app_current_org()=%s (expected null)', v_np_org::text); END IF;
+  IF v_np_fmt IS NOT NULL THEN v_ok := false; v_why := v_why || format(' profile-less read fmt=%s', v_np_fmt); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS P24';
+  ELSE RAISE NOTICE 'FAIL P24:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL P24: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P24;
+
+\echo 'P25 ⚠ (DEF-0018, branch 2): a key answered ONLY by the other company''s orgs.settings bag (no node_settings override anywhere) answers NULL to Ana and the value in owner context --- so the boundary is on the company branch too, not only the ancestor scan'
+SAVEPOINT sp_P25;
+DO $$
+DECLARE v_other uuid := '3000000b-0000-0000-0000-000000000001';   -- org 2 (Contoso) plant root
+        v_org2  uuid := '10000000-0000-0000-0000-000000000002';
+        v_own_pol text; v_ana_pol text; v_leak int;
+        v_ok boolean := true; v_why text := '';
+BEGIN
+  -- The value lives ONLY in the company bag: set eligibility_policy in org 2's
+  -- orgs.settings, and make sure no node_settings override for it exists on the
+  -- root or any ancestor, so branch 1 (the ancestor scan) is empty and the
+  -- answer can only come from branch 2 (the orgs.settings company branch).
+  UPDATE orgs SET settings = settings || jsonb_build_object('eligibility_policy', 'block')
+   WHERE id = v_org2;
+  DELETE FROM node_settings ns USING nodes n
+   WHERE ns.node_id = n.id AND n.org_id = v_org2 AND ns.key = 'eligibility_policy';
+  SELECT count(*) INTO v_leak FROM node_settings ns JOIN nodes n ON n.id = ns.node_id
+   WHERE n.org_id = v_org2 AND ns.key = 'eligibility_policy';
+
+  -- Owner context (no jwt sub): branch 1 finds nothing, branch 2 returns 'block'.
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  v_own_pol := app_resolve_node_setting(v_other, 'eligibility_policy');
+
+  -- As Ana (org 1, one line): branch 2 is bounded on n.org_id, so NULL.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a2', true);
+  SET LOCAL ROLE authenticated;
+  v_ana_pol := app_resolve_node_setting(v_other, 'eligibility_policy');
+  RESET ROLE;
+
+  IF v_leak <> 0        THEN v_ok := false; v_why := v_why || format(' a node_settings override exists (%s), so this is not the pure company-branch case', v_leak); END IF;
+  IF v_own_pol IS DISTINCT FROM 'block' THEN v_ok := false; v_why := v_why || format(' owner pol=%s (expected block from orgs.settings)', COALESCE(v_own_pol,'null')); END IF;
+  IF v_ana_pol IS NOT NULL THEN v_ok := false; v_why := v_why || format(' Ana read company-branch pol=%s', v_ana_pol); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS P25';
+  ELSE RAISE NOTICE 'FAIL P25:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL P25: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_P25;
+
 ROLLBACK;
 
-\echo '73_plant_settings_test.sql complete (23 cases: P0-P22)'
+\echo '73_plant_settings_test.sql complete (26 cases: P0-P25)'

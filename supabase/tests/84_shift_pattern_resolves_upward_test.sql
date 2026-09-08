@@ -64,6 +64,11 @@
 --        shift_templates carrying T with its shift and break (RED before; GREEN
 --        after)
 -- ST7    grants on resolve_shift_template(uuid): authenticated only
+-- ST8 ⚠  (DEF-0019) an authenticated session with NO profile row (a fresh
+--        sign-up: app_current_org() NULL but auth.uid() NOT null) resolves NULL
+--        for org 2's node AND for org 1's Plant P, both of which resolve their
+--        pattern in owner context --- so 0068's exemption is auth.uid() IS NULL,
+--        not app_current_org() IS NULL, and a profile-less tenant is bounded
 -- ============================================================================
 
 BEGIN;
@@ -346,6 +351,52 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_ST7;
 
+\echo 'ST8 ⚠ (DEF-0019): an authenticated session with NO user_profiles row (a fresh sign-up, app_current_org() NULL but auth.uid() NOT null) resolves NULL for org 2''s node AND for org 1''s Plant P, both of which HAVE a pattern in owner context --- so the null is the boundary holding, not an absent row, and 0061''s app_current_org() IS NULL exemption is gone'
+SAVEPOINT sp_ST8;
+DO $$
+DECLARE v_p uuid; v_other uuid := '3000000b-0000-0000-0000-000000000007';
+        v_t uuid := 'a1000000-0000-0000-0000-000000000001';
+        v_to uuid := 'a2000000-0000-0000-0000-000000000001';
+        v_org uuid; v_owner_p uuid; v_owner_o uuid;
+        v_np_org uuid; v_np_p uuid; v_np_o uuid;
+        v_ok boolean := true; v_why text := '';
+BEGIN
+  SELECT v INTO v_p FROM st_fix WHERE k = 'p';
+  -- The profile-less user: an auth.users row with no user_profiles row, exactly
+  -- what a fresh sign-up is before anyone gives it a company (DEF-0019's repro).
+  INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-00000000beef');
+
+  -- Owner context first (no jwt sub): both nodes genuinely resolve their
+  -- pattern, so the NULLs below are the tenant boundary and not absent rows.
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  v_owner_p := resolve_shift_template(v_p);
+  v_owner_o := resolve_shift_template(v_other);
+
+  -- As the profile-less authenticated session.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000beef', true);
+  SET LOCAL ROLE authenticated;
+  v_np_org := app_current_org();
+  v_np_p   := resolve_shift_template(v_p);
+  v_np_o   := resolve_shift_template(v_other);
+  RESET ROLE;
+
+  IF v_owner_p IS DISTINCT FROM v_t
+  THEN v_ok := false; v_why := v_why || format(' owner Plant P=%s (expected T)', COALESCE(v_owner_p::text,'null')); END IF;
+  IF v_owner_o IS DISTINCT FROM v_to
+  THEN v_ok := false; v_why := v_why || format(' owner org2 node=%s (expected T_other)', COALESCE(v_owner_o::text,'null')); END IF;
+  IF v_np_org IS NOT NULL
+  THEN v_ok := false; v_why := v_why || format(' profile-less app_current_org()=%s (expected null)', v_np_org::text); END IF;
+  IF v_np_p IS NOT NULL
+  THEN v_ok := false; v_why := v_why || format(' profile-less crossed to Plant P=%s', v_np_p::text); END IF;
+  IF v_np_o IS NOT NULL
+  THEN v_ok := false; v_why := v_why || format(' profile-less crossed to org2 node=%s', v_np_o::text); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS ST8';
+  ELSE RAISE NOTICE 'FAIL ST8:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL ST8: unexpected exception % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_ST8;
+
 ROLLBACK;
 
-\echo '84_shift_pattern_resolves_upward_test.sql complete (8 cases: ST0-ST7)'
+\echo '84_shift_pattern_resolves_upward_test.sql complete (9 cases: ST0-ST8)'
