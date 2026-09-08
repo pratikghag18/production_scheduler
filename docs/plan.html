@@ -114,7 +114,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">773</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">70</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">252 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">253 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>5c9e6d4</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -2632,7 +2632,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 252 covered · 27 uncovered · 1 contradicted · 24 superseded</caption>
+<caption>304 requirements · 253 covered · 26 uncovered · 1 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -3648,12 +3648,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/hierarchy.test.ts</code></td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-062">
+<tr class="r-covered" id="R-062">
   <td class="g-n">R-062</td>
   <td class="reqmain"><b>The client is never stricter than the server</b><br><span class="fine">A client pre-check may only refuse what the server would refuse. Where they diverge the server is tightened, and the client always passes the complete level list so the mirror cannot drift on a partial array.</span>
-      <br><span class="fine">§19.12, §19.30 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.12, §19.30 · agent · Closed 8 Sept (requirement audit, the &quot;discuss&quot; pile) by linking existing, unlinked evidence. Part one (client never stricter) is `canEditNode`/`canWriteOrgWide` (editRights.ts), whose own doc comment states the principle verbatim: &quot;a mirror which cannot see is not allowed to say no.&quot; Not the only mirror in the app -- `canDropOn` has its own row (R-069), so does `canEditProduct` (R-308) -- but the general-purpose case this row is naming, not a full inventory of every client pre-check. Part two (the complete level list) is `findLevelOrderProblems` (levelDraft.ts, §19.30), proven by S1's fixture.</span></td>
+  <td class="fine">vitest · <code>src/test/editRights.test.ts</code> E1 a company admin edits everything, holding no grants at all; E11 an unlanded grant read offers everything rather than refusing everything; E12 &quot;no grants&quot; and &quot;we were not told&quot; are different answers; E13 an owner the client cannot resolve to a path is offered, not hidden; E15 a shape it cannot read degrades to fail-open, never to a locked screen<br>vitest · <code>src/test/levelDraft.test.ts</code> S1 the stored order over a sound structure has no problems, proven against a fixture holding a SECOND template stored scrambled -- the function is given the complete cross-template array and must scope itself, not be handed a pre-filtered one</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-063">
   <td class="g-n">R-063</td>

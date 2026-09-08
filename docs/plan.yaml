@@ -5210,8 +5210,28 @@ requirements:
     A client pre-check may only refuse what the server would refuse. Where they diverge the server is
     tightened, and the client always passes the complete level list so the mirror cannot drift on a partial
     array.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/editRights.test.ts
+    cases: >-
+      E1 a company admin edits everything, holding no grants at all; E11 an unlanded grant read offers
+      everything rather than refusing everything; E12 "no grants" and "we were not told" are different
+      answers; E13 an owner the client cannot resolve to a path is offered, not hidden; E15 a shape it
+      cannot read degrades to fail-open, never to a locked screen
+  - kind: vitest
+    file: src/test/levelDraft.test.ts
+    cases: >-
+      S1 the stored order over a sound structure has no problems, proven against a fixture holding a
+      SECOND template stored scrambled -- the function is given the complete cross-template array and
+      must scope itself, not be handed a pre-filtered one
+  status: covered
+  note: >-
+    Closed 8 Sept (requirement audit, the "discuss" pile) by linking existing, unlinked evidence. Part one
+    (client never stricter) is `canEditNode`/`canWriteOrgWide` (editRights.ts), whose own doc comment
+    states the principle verbatim: "a mirror which cannot see is not allowed to say no." Not the only
+    mirror in the app -- `canDropOn` has its own row (R-069), so does `canEditProduct` (R-308) -- but the
+    general-purpose case this row is naming, not a full inventory of every client pre-check. Part two (the
+    complete level list) is `findLevelOrderProblems` (levelDraft.ts, §19.30), proven by S1's fixture.
 - id: R-063
   title: Names are trimmed with the ECMAScript whitespace set on both sides
   source:
