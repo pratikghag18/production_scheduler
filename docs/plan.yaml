@@ -3672,8 +3672,18 @@ requirements:
   - kind: vitest
     file: src/test/defects/DEF-0019.test.ts
     cases: the last definition of resolve_shift_template no longer exempts a null app_current_org(); the reader sees the org term 0061 put on the target scan
-  status: contradicted
+  status: covered
   note: >-
+    ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`: live, not a rolled-back transaction. As Ana (a real
+    sign-in, real bearer token) app_resolve_node_setting answers null for org 2's Plant 1 date_format
+    and for a bogus node id alike, and still answers ymd_slash for her own Plant A. For DEF-0019, a REAL
+    GoTrue sign-up with no user_profiles row (not a savepoint) resolves null for app_resolve_node_setting
+    AND resolve_shift_template against org 1's own Plant A and a bogus id alike; the probe account was
+    deleted afterward and confirmed gone. Read migration 0068 whole: this is NOT one shared helper --
+    the boundary clause is hand-copied into three functions (app_resolve_node_setting,
+    resolve_shift_template, and the rename/delete_week_template pair each carry their own text), a real
+    risk of future drift on its own but not a defect today, since the three copies currently agree.
+    DEF-0018 and DEF-0019 set to verified. Fuller history below.
     ⭐ FIX CLAIMED 7 Sept at 413f436 (session 89), not verified: migration 0068 re-emits app_resolve_node_setting
     with the caller's-company term on both branches and resolve_shift_template with its owner exemption keyed on
     auth.uid() IS NULL (no caller identity at all) instead of app_current_org() IS NULL; the two are written the
@@ -7500,8 +7510,13 @@ requirements:
   - kind: vitest
     file: src/test/defects/DEF-0021.test.ts
     cases: rename_week_template's and delete_week_template's existence lookups are org-scoped; the reader sees the shape list_week_templates already uses
-  status: contradicted
+  status: covered
   note: >-
+    ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`: live, with a real committed org-2 row (not the
+    transaction-scoped fixture the filing used). As Dana, rename_week_template and delete_week_template
+    on the real foreign id both answer invalid_argument/no_such_template, the same shape a bogus id
+    gives; read back afterward, the row's name is unchanged and it still exists (not merely "no error").
+    Probe row deleted after. DEF-0021 set to verified. Fuller history below.
     ⭐ FIX CLAIMED 7 Sept at 413f436 (session 89), not verified: 0068 re-emits rename_week_template and
     delete_week_template with org_id = app_current_org() on the existence lookup, so a foreign id and a bogus
     id both say no_such_template, matching list_week_templates. DEF-0021 is fix-claimed; the tester re-runs
@@ -7625,8 +7640,16 @@ requirements:
       live against the served function: Dana inviting sofia@contoso.example (org 2, an auth row GoTrue's
       admin listing cannot see) answers ok false, reason other_org, and nothing else; skips honestly with
       no backend
-  status: contradicted
+  status: covered
   note: >-
+    ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`: the pin is green alone and inside a fresh full-suite run
+    (2495/2495). It timed out once inside the combined --sql --e2e runner script under heavy concurrent
+    load (a plain 5000ms test timeout, not a wrong answer) and passed again immediately after re-run alone
+    in 602ms; recorded as environment flakiness, not a regression. This fix is separate code from
+    DEF-0018/0019/0021 (a GoTrue error-message/code classifier in the invite Edge Function, not the SQL
+    boundary clause), and is narrower and more fragile by nature (depends on GoTrue's own wording), which
+    is the deliberate "second closure" the review brief asked for. DEF-0020 set to verified. Fuller
+    history below.
     ⭐ FIX CLAIMED 7 Sept at 413f436 (session 89), not verified: the invite call's own already-taken failure
     is classified in one named function quoting the two shapes measured live and answered as the silent
     other_org refusal; every other invite failure is logged server-side and answered with a fixed message.
