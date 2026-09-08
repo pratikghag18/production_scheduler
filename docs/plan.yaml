@@ -2675,7 +2675,13 @@ requirements:
     DST change, so it is 7 or 9 hours that day (D88b). The timezone hangs off a node, resolved nearest-ancestor
     with an org fallback. Scheduled for Phase 2 (D88c); nothing new may assume UTC.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-353
+  note: >-
+    SUPERSEDED 8 Sept (discuss-item review): the maintainer's own suspicion ("this has shipped") was
+    right. D88a shipped as R-353 (the board axis is the plant's local time, resolved upward and carried
+    on board_window -- covered). D88b shipped as R-354 (a shift keeps its wall-clock start across a DST
+    change -- covered). D88c was only ever a scheduling note, moot now that both landed.
 - id: R-D89
   title: Form controls inherit font and body is sized in rem
   source:
@@ -2801,26 +2807,30 @@ requirements:
     both NodeTreeEditor.tsx and LevelEditor.tsx import the same dragPointer.ts module. "The handle remains
     visible as the affordance" is a rendering detail not tested here or elsewhere.
 - id: R-D97
-  title: 'System admin, site admin, supervisor: no lurking'
+  title: Admin functions ask "admin for this node?", never "admin at all?"
   source:
   - §19.38
   - D97
   stated_by: maintainer
   claim: >-
-    A system admin has all powers on any site; a site admin changes only the site they belong to; a supervisor
-    edits assignments only and has no access to the admin page. Admin functions must ask "admin for this
-    node?" rather than "admin at all?".
-  verified_by: []
-  status: uncovered
+    A system admin is admitted to the admin page outright. Anyone who administers a node somewhere is
+    admitted too, whatever their profile's own role reads -- the gate asks "admin for this node?" not
+    "admin at all?". A supervisor with a training-scoped grant is deliberately admitted as well, sectioned
+    by `adminSectionsFor` to what they're actually allowed to touch.
+  verified_by:
+  - kind: vitest
+    file: src/test/requireAdmin.test.tsx
+    cases: "G1 a system admin is let through to the screen; G2 an admin somewhere is let through too,
+      whatever their role reads; G3b a supervisor is admitted on purpose, and this case exists to say so"
+  status: covered
   note: >-
     Step 2 (hiding the admin page) is built as R-079; the tier design is open pending §19.44+.
-    ⚠️ ONE CLAUSE HERE IS OUT OF DATE AND WAS FOUND BY WRITING A TEST AGAINST IT: "a supervisor ... has no
-    access to the admin page" stopped being true at D114. Migration 0032 made a supervisor's grant enough to
-    keep a training record — the maintainer's reason was the job, "the supervisor will be the one who enters
-    or uploads the training information" — so `adminAccess` admits them and `adminSectionsFor` decides which
-    rooms they get. The row is left as the maintainer stated it rather than quietly edited; the correction
-    lives here, and `requireAdmin.test.tsx` G3b pins the current behaviour so nobody restores a refusal the
-    server would contradict.
+    REWORDED 8 Sept (discuss-item review): dropped "a supervisor ... has no access to the admin page" --
+    that stopped being true at D114 (migration 0032: "the supervisor will be the one who enters or uploads
+    the training information", so `adminAccess` admits them). Also dropped "a site admin changes only the
+    site they belong to" as a separate, untested clause here -- that's the server's RLS-scoping territory
+    (R-D83, R-210), not this admin-page-gating file's. Linked to `requireAdmin.test.tsx`, which already
+    pinned the corrected behaviour (G3b) without being connected to this row.
 - id: R-D98
   title: A role belongs to a (person, scope) pair
   source:
@@ -4208,16 +4218,22 @@ requirements:
       (§18.8)
   status: uncovered
 - id: R-008
-  title: Phase 1 builds no archive, partitioning, connector or template tables
+  title: No archive, partition or connector tables exist
   source:
   - §3
   - §17
   stated_by: agent
-  claim: >-
-    The migrations must not create assignments_archive, partitions, integration_connections or Copy Week
-    / template tables in Phase 1.
-  verified_by: []
-  status: uncovered
+  claim: The migrations must not create assignments_archive, partition tables, or integration_connections.
+  verified_by:
+  - kind: vitest
+    file: src/test/noArchivePartitionTables.test.ts
+  status: covered
+  note: >-
+    REWORDED 8 Sept (discuss-item review): this row also forbade "Copy Week / template tables in Phase
+    1." That clause is now false, deliberately -- Copy Week (R-339) and week templates (R-356, migration
+    0067's template table) both shipped on the maintainer's own later, explicit word, well past this row's
+    original "Phase 1" scope. Dropped rather than tested as a passing negative; the rest is still true and
+    is now this row's whole claim, proven by a new audit test.
 - id: R-009
   title: Real-time events are per org-subtree channel, no polling
   source:
@@ -4430,16 +4446,24 @@ requirements:
     file: supabase/tests/40_rls_test.sql
   status: covered
 - id: R-022
-  title: The board is an owned virtualized grid, not a chart library
+  title: The board is an owned virtualized grid, rendering only visible rows and time
   source:
   - §10
   - D19
   stated_by: agent
-  claim: >-
-    The board is a React and TypeScript component that renders only visible rows and visible time, targeting
-    smooth pan and zoom with hundreds of rows.
-  verified_by: []
-  status: uncovered
+  claim: The board renders only visible rows and visible time, not the whole schedule at once.
+  verified_by:
+  - kind: vitest
+    file: src/test/boardGeometry.test.ts
+    cases: >-
+      visibleRowRange (buildRowOffsets prefix sums), viewport + overscan (case 11, 11f) -- rows; the
+      windowed-query cluster (boardWindowScoping.test.ts) -- time
+  status: covered
+  note: >-
+    REWORDED 8 Sept (discuss-item review): dropped "a React and TypeScript component" (true but not
+    testable, just tooling) and "targeting smooth pan and zoom with hundreds of rows" (unfalsifiable design
+    language, no number to test against). The two testable clauses -- only visible rows, only visible time
+    -- were already proven by R-D19 and R-006/R-D15's evidence; linked here rather than duplicated.
 - id: R-023
   title: 'Board layout: roster panel, hierarchy rail, rows, time header'
   source:
@@ -5457,7 +5481,13 @@ requirements:
     The import parser handles quoting, BOM and CRLF, maps headers, detects duplicates and orders tree
     rows parents-before-children. A re-import must update existing rows rather than fail with path_collision.
   verified_by: []
-  status: uncovered
+  status: superseded
+  superseded_by: R-293
+  note: >-
+    SUPERSEDED 8 Sept (discuss-item review): this row's parents-before-children/re-import-updates language
+    is specific to TREE CSV import, which the plan's own record says was dropped in favor of
+    copy_plant_structure (§19.85, see R-293's note: "Tree CSV import was dropped in its favour"). The
+    parser-mechanics clause (quoting, BOM, CRLF, header mapping) is separately covered by R-290.
 - id: R-200
   title: 'Three roles: system admin, site admin, supervisor/viewer'
   source:
@@ -6946,9 +6976,22 @@ requirements:
     Typing a training name: a match under this owner disables Create and offers the existing row; a match
     elsewhere in this plant names the other place ("Line B already has a First Aid") and leaves Create
     live; a match in another plant says nothing. Without a node map there is no plant pass.
-  verified_by: []
-  status: uncovered
-  note: Cases N12–N18 and O23 are named; their files are not.
+  verified_by:
+  - kind: vitest
+    file: src/test/operators.test.ts
+    cases: >-
+      N11 the refusal is matched on the owner exactly, never by ancestry; N12 another place in the same
+      plant is a warning, not a refusal; N13 a clash under this owner wins over one merely in the same
+      plant; N14 with no tree there is no plant pass, silence rather than a clean bill of health; N15 a
+      name in a different plant is nothing at all; N16 an unresolvable root says nothing; N17 a case-only
+      match elsewhere in the plant warns too; N18 the warning names the other place, not a refusal
+  - kind: vitest
+    file: src/test/operatorsPanel.test.tsx
+    cases: "O23: recording a missing training sends all three facts, with the org, in one gesture"
+  status: covered
+  note: >-
+    Cases N12–N18 and O23 were named but their files were not -- closed 8 Sept (discuss-item review) by
+    linking them.
 - id: R-288
   title: 'Split: the part record is company property, makers per plant'
   source:

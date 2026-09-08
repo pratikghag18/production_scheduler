@@ -114,7 +114,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">773</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">70</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">248 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <div class="stat act"><span class="n">252 / 304</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>5c9e6d4</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -2632,7 +2632,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>304 requirements · 248 covered · 35 uncovered · 1 contradicted · 20 superseded</caption>
+<caption>304 requirements · 252 covered · 29 uncovered · 1 contradicted · 22 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -2885,12 +2885,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/90_hierarchy_template_test.sql</code> T20–T28, T30–T32<br>vitest · <code>src/test/shapePicker.test.ts</code></td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D88">
+<tr class="r-superseded" id="R-D88">
   <td class="g-n">R-D88</td>
   <td class="reqmain"><b>Per-site timezone: site-local axis, wall-clock shifts, Phase 2</b><br><span class="fine">The board axis is the site's local time (D88a). A shift keeps its posted wall-clock start across a DST change, so it is 7 or 9 hours that day (D88b). The timezone hangs off a node, resolved nearest-ancestor with an org fallback. Scheduled for Phase 2 (D88c); nothing new may assume UTC.</span>
-      <br><span class="fine">§19.21, D88 · maintainer</span></td>
+      <br><span class="fine">§19.21, D88 · maintainer · superseded by <a href="#R-353">R-353</a> · SUPERSEDED 8 Sept (discuss-item review): the maintainer's own suspicion (&quot;this has shipped&quot;) was right. D88a shipped as R-353 (the board axis is the plant's local time, resolved upward and carried on board_window -- covered). D88b shipped as R-354 (a shift keeps its wall-clock start across a DST change -- covered). D88c was only ever a scheduling note, moot now that both landed.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
 <tr class="r-covered" id="R-D89">
   <td class="g-n">R-D89</td>
@@ -2941,12 +2941,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/dragPointer.test.ts</code> T1-T7 the 4px Euclidean movement threshold; T14-T17 rowIsDragSource -- mouse and pen drag from the row, touch does not</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-D97">
+<tr class="r-covered" id="R-D97">
   <td class="g-n">R-D97</td>
-  <td class="reqmain"><b>System admin, site admin, supervisor: no lurking</b><br><span class="fine">A system admin has all powers on any site; a site admin changes only the site they belong to; a supervisor edits assignments only and has no access to the admin page. Admin functions must ask &quot;admin for this node?&quot; rather than &quot;admin at all?&quot;.</span>
-      <br><span class="fine">§19.38, D97 · maintainer · Step 2 (hiding the admin page) is built as R-079; the tier design is open pending §19.44+. ⚠️ ONE CLAUSE HERE IS OUT OF DATE AND WAS FOUND BY WRITING A TEST AGAINST IT: &quot;a supervisor ... has no access to the admin page&quot; stopped being true at D114. Migration 0032 made a supervisor's grant enough to keep a training record — the maintainer's reason was the job, &quot;the supervisor will be the one who enters or uploads the training information&quot; — so `adminAccess` admits them and `adminSectionsFor` decides which rooms they get. The row is left as the maintainer stated it rather than quietly edited; the correction lives here, and `requireAdmin.test.tsx` G3b pins the current behaviour so nobody restores a refusal the server would contradict.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>Admin functions ask &quot;admin for this node?&quot;, never &quot;admin at all?&quot;</b><br><span class="fine">A system admin is admitted to the admin page outright. Anyone who administers a node somewhere is admitted too, whatever their profile's own role reads -- the gate asks &quot;admin for this node?&quot; not &quot;admin at all?&quot;. A supervisor with a training-scoped grant is deliberately admitted as well, sectioned by <code>adminSectionsFor</code> to what they're actually allowed to touch.</span>
+      <br><span class="fine">§19.38, D97 · maintainer · Step 2 (hiding the admin page) is built as R-079; the tier design is open pending §19.44+. REWORDED 8 Sept (discuss-item review): dropped &quot;a supervisor ... has no access to the admin page&quot; -- that stopped being true at D114 (migration 0032: &quot;the supervisor will be the one who enters or uploads the training information&quot;, so `adminAccess` admits them). Also dropped &quot;a site admin changes only the site they belong to&quot; as a separate, untested clause here -- that's the server's RLS-scoping territory (R-D83, R-210), not this admin-page-gating file's. Linked to `requireAdmin.test.tsx`, which already pinned the corrected behaviour (G3b) without being connected to this row.</span></td>
+  <td class="fine">vitest · <code>src/test/requireAdmin.test.tsx</code> G1 a system admin is let through to the screen; G2 an admin somewhere is let through too, whatever their role reads; G3b a supervisor is admitted on purpose, and this case exists to say so</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-covered" id="R-D98">
   <td class="g-n">R-D98</td>
@@ -3270,12 +3270,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">manual: Force a second 100% assignment for a fully loaded operator; DevTools shows HTTP 409 with error=PT409 (§18.8)</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-008">
+<tr class="r-covered" id="R-008">
   <td class="g-n">R-008</td>
-  <td class="reqmain"><b>Phase 1 builds no archive, partitioning, connector or template tables</b><br><span class="fine">The migrations must not create assignments_archive, partitions, integration_connections or Copy Week / template tables in Phase 1.</span>
-      <br><span class="fine">§3, §17 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>No archive, partition or connector tables exist</b><br><span class="fine">The migrations must not create assignments_archive, partition tables, or integration_connections.</span>
+      <br><span class="fine">§3, §17 · agent · REWORDED 8 Sept (discuss-item review): this row also forbade &quot;Copy Week / template tables in Phase 1.&quot; That clause is now false, deliberately -- Copy Week (R-339) and week templates (R-356, migration 0067's template table) both shipped on the maintainer's own later, explicit word, well past this row's original &quot;Phase 1&quot; scope. Dropped rather than tested as a passing negative; the rest is still true and is now this row's whole claim, proven by a new audit test.</span></td>
+  <td class="fine">vitest · <code>src/test/noArchivePartitionTables.test.ts</code></td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-009">
   <td class="g-n">R-009</td>
@@ -3368,12 +3368,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/40_rls_test.sql</code></td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-022">
+<tr class="r-covered" id="R-022">
   <td class="g-n">R-022</td>
-  <td class="reqmain"><b>The board is an owned virtualized grid, not a chart library</b><br><span class="fine">The board is a React and TypeScript component that renders only visible rows and visible time, targeting smooth pan and zoom with hundreds of rows.</span>
-      <br><span class="fine">§10, D19 · agent</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>The board is an owned virtualized grid, rendering only visible rows and time</b><br><span class="fine">The board renders only visible rows and visible time, not the whole schedule at once.</span>
+      <br><span class="fine">§10, D19 · agent · REWORDED 8 Sept (discuss-item review): dropped &quot;a React and TypeScript component&quot; (true but not testable, just tooling) and &quot;targeting smooth pan and zoom with hundreds of rows&quot; (unfalsifiable design language, no number to test against). The two testable clauses -- only visible rows, only visible time -- were already proven by R-D19 and R-006/R-D15's evidence; linked here rather than duplicated.</span></td>
+  <td class="fine">vitest · <code>src/test/boardGeometry.test.ts</code> visibleRowRange (buildRowOffsets prefix sums), viewport + overscan (case 11, 11f) -- rows; the windowed-query cluster (boardWindowScoping.test.ts) -- time</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-uncovered" id="R-023">
   <td class="g-n">R-023</td>
@@ -3781,12 +3781,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">sql · <code>supabase/tests/45_acting_scope_test.sql</code> A1–A11</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-081">
+<tr class="r-superseded" id="R-081">
   <td class="g-n">R-081</td>
   <td class="reqmain"><b>CSV import: RFC 4180, BOM stripped, parents before children</b><br><span class="fine">The import parser handles quoting, BOM and CRLF, maps headers, detects duplicates and orders tree rows parents-before-children. A re-import must update existing rows rather than fail with path_collision.</span>
-      <br><span class="fine">§19.4, §19.36 · agent</span></td>
+      <br><span class="fine">§19.4, §19.36 · agent · superseded by <a href="#R-293">R-293</a> · SUPERSEDED 8 Sept (discuss-item review): this row's parents-before-children/re-import-updates language is specific to TREE CSV import, which the plan's own record says was dropped in favor of copy_plant_structure (§19.85, see R-293's note: &quot;Tree CSV import was dropped in its favour&quot;). The parser-mechanics clause (quoting, BOM, CRLF, header mapping) is separately covered by R-290.</span></td>
   <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip mine">superseded</span></td>
 </tr>
 <tr class="r-covered" id="R-200">
   <td class="g-n">R-200</td>
@@ -4390,12 +4390,12 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <td class="fine">vitest · <code>src/test/productsPanel.test.tsx</code> T13 (9 cases)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-287">
+<tr class="r-covered" id="R-287">
   <td class="g-n">R-287</td>
   <td class="reqmain"><b>The training-name warning has three answers; warnings never block</b><br><span class="fine">Typing a training name: a match under this owner disables Create and offers the existing row; a match elsewhere in this plant names the other place (&quot;Line B already has a First Aid&quot;) and leaves Create live; a match in another plant says nothing. Without a node map there is no plant pass.</span>
-      <br><span class="fine">§19.80 · agent · Cases N12–N18 and O23 are named; their files are not.</span></td>
-  <td class="fine">—</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+      <br><span class="fine">§19.80 · agent · Cases N12–N18 and O23 were named but their files were not -- closed 8 Sept (discuss-item review) by linking them.</span></td>
+  <td class="fine">vitest · <code>src/test/operators.test.ts</code> N11 the refusal is matched on the owner exactly, never by ancestry; N12 another place in the same plant is a warning, not a refusal; N13 a clash under this owner wins over one merely in the same plant; N14 with no tree there is no plant pass, silence rather than a clean bill of health; N15 a name in a different plant is nothing at all; N16 an unresolvable root says nothing; N17 a case-only match elsewhere in the plant warns too; N18 the warning names the other place, not a refusal<br>vitest · <code>src/test/operatorsPanel.test.tsx</code> O23: recording a missing training sends all three facts, with the org, in one gesture</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
 <tr class="r-superseded" id="R-288">
   <td class="g-n">R-288</td>
