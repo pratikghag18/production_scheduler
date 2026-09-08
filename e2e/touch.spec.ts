@@ -190,31 +190,86 @@ async function boardScrollMeta(page: Page): Promise<{ scrollWidth: number; clien
  *  one's accessible name ends in "HH:MM to HH:MM". */
 const anyBlock = (page: Page) => page.getByRole("button", { name: /\d\d:\d\d to \d\d:\d\d/ });
 
-/** Scan the window left→right until a block renders. The board only mounts the
- *  blocks in the horizontal range currently in view (§6), and the demo's runs
- *  need not be under wherever the board auto-scrolled to "now" — so a case that
- *  must grab a block first drives the container until one is on screen. */
+/** A touch point needs at least this many px of a block clear of the sticky
+ *  rail to be reliably touchable — grabBlockTouch's own requirement. Shared
+ *  here so revealBlock scrolls for what the caller will actually accept,
+ *  rather than for mere `isVisible()` (which inside a horizontally
+ *  overflowing container is satisfied by a block sitting far outside the zone
+ *  this file can actually touch). */
+const TOUCHABLE_SLICE_MIN = 70;
+
+type BlockSlice = {
+  visLeft: number;
+  visRight: number;
+  cy: number;
+  box: { x: number; y: number; width: number; height: number };
+};
+
+/** The board's safe touch zone: clear of the sticky rail (the node-name
+ *  column, wide on the tablet's scaled UI) and inside the visible track. One
+ *  place for this arithmetic — grabBlockTouch and revealBlock both call it,
+ *  so neither can drift from the other. */
+async function boardSafeZone(page: Page): Promise<{
+  cont: { x: number; y: number; width: number; height: number };
+  railW: number;
+  safeLeft: number;
+  safeRight: number;
+}> {
+  const cont = await boardContainerRect(page);
+  const railBox = await page
+    .locator('[class*="cellLabel"]')
+    .first()
+    .boundingBox()
+    .catch(() => null);
+  const railW = railBox ? railBox.width : 200;
+  return { cont, railW, safeLeft: cont.x + railW + 12, safeRight: cont.x + cont.width - 12 };
+}
+
+/** Every currently-rendered block's slice inside the safe zone, and the
+ *  widest one — the same scan grabBlockTouch needs to grab a block, reused by
+ *  revealBlock so both agree, by construction, on what counts as touchable. */
+async function bestTouchableBlock(
+  page: Page,
+): Promise<{ best: BlockSlice | null; bestSlice: number; n: number; dump: string[] }> {
+  const { safeLeft, safeRight } = await boardSafeZone(page);
+  const blocks = anyBlock(page);
+  const n = await blocks.count();
+  let best: BlockSlice | null = null;
+  let bestSlice = 0;
+  const dump: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const bb = await blocks.nth(i).boundingBox();
+    dump.push(bb ? `${Math.round(bb.x)},${Math.round(bb.width)}` : "null");
+    if (!bb || bb.width < 10) continue;
+    const visLeft = Math.max(bb.x, safeLeft);
+    const visRight = Math.min(bb.x + bb.width, safeRight);
+    const slice = visRight - visLeft;
+    if (slice > bestSlice) {
+      bestSlice = slice;
+      best = { visLeft, visRight, cy: bb.y + bb.height / 2, box: bb };
+    }
+  }
+  return { best, bestSlice, n, dump };
+}
+
+/** Scan the window left→right until a block has a touchable slice — at least
+ *  TOUCHABLE_SLICE_MIN px clear of the rail and inside the track, the same
+ *  bar grabBlockTouch itself enforces. The board only mounts the blocks in
+ *  the horizontal range currently in view (§6), and the demo's runs need not
+ *  be under wherever the board auto-scrolled to "now" — so a case that must
+ *  grab a block first drives the container until one clears the bar. */
 async function revealBlock(page: Page): Promise<void> {
-  if (
-    await anyBlock(page)
-      .first()
-      .isVisible()
-      .catch(() => false)
-  )
-    return;
+  if ((await bestTouchableBlock(page)).bestSlice >= TOUCHABLE_SLICE_MIN) return;
   const { scrollWidth, clientWidth } = await boardScrollMeta(page);
   for (let x = 0; x <= scrollWidth; x += Math.max(200, Math.floor(clientWidth * 0.8))) {
     await setBoardScrollLeft(page, x);
     await page.waitForTimeout(120);
-    if (
-      await anyBlock(page)
-        .first()
-        .isVisible()
-        .catch(() => false)
-    )
-      return;
+    if ((await bestTouchableBlock(page)).bestSlice >= TOUCHABLE_SLICE_MIN) return;
   }
-  throw new Error("no block found anywhere in the board window");
+  const { n, dump } = await bestTouchableBlock(page);
+  throw new Error(
+    `no block with a touchable slice anywhere in the board window: n=${n} blocks(x,w)=[${dump.join(" | ")}]`,
+  );
 }
 
 async function boardContainerRect(
@@ -257,43 +312,9 @@ async function grabBlockTouch(page: Page): Promise<{
   box: { x: number; y: number; width: number; height: number };
 }> {
   await revealBlock(page);
-  const cont = await boardContainerRect(page);
-  const railBox = await page
-    .locator('[class*="cellLabel"]')
-    .first()
-    .boundingBox()
-    .catch(() => null);
-  const railW = railBox ? railBox.width : 200;
-  const safeLeft = cont.x + railW + 12;
-  const safeRight = cont.x + cont.width - 12;
-
-  const blocks = anyBlock(page);
-  const n = await blocks.count();
-  // The block with the widest slice inside the clear track zone.
-  let best: {
-    visLeft: number;
-    visRight: number;
-    cy: number;
-    box: { x: number; y: number; width: number; height: number };
-  } | null = null;
-  let bestSlice = 0;
-  for (let i = 0; i < n; i++) {
-    const bb = await blocks.nth(i).boundingBox();
-    if (!bb || bb.width < 10) continue;
-    const visLeft = Math.max(bb.x, safeLeft);
-    const visRight = Math.min(bb.x + bb.width, safeRight);
-    const slice = visRight - visLeft;
-    if (slice > bestSlice) {
-      bestSlice = slice;
-      best = { visLeft, visRight, cy: bb.y + bb.height / 2, box: bb };
-    }
-  }
-  if (!best || bestSlice < 70) {
-    const dump: string[] = [];
-    for (let i = 0; i < n; i++) {
-      const bb = await blocks.nth(i).boundingBox();
-      dump.push(bb ? `${Math.round(bb.x)},${Math.round(bb.width)}` : "null");
-    }
+  const { cont, railW, safeLeft, safeRight } = await boardSafeZone(page);
+  const { best, bestSlice, n, dump } = await bestTouchableBlock(page);
+  if (!best || bestSlice < TOUCHABLE_SLICE_MIN) {
     throw new Error(
       `no block with a touchable slice: cont.x=${Math.round(cont.x)} w=${Math.round(cont.width)} railW=${Math.round(railW)} safe=[${Math.round(safeLeft)},${Math.round(safeRight)}] n=${n} blocks(x,w)=[${dump.join(" | ")}]`,
     );
