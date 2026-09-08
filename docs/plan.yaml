@@ -6550,8 +6550,16 @@ requirements:
   claim: >-
     Quoted fields may contain commas, newlines and doubled quotes; LF, CRLF and bare CR are record breaks;
     a leading BOM is stripped so the first header maps. It produces a grid and knows nothing about products.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/csv.test.ts
+    cases: >-
+      F1-F6 quoted commas, doubled quotes, LF/CR/CRLF kept as content; R1-R6 LF/bare-CR/CRLF record breaks,
+      no phantom trailing record, empty file; B1-B2 BOM stripped, header text otherwise untouched; Q1-Q3 an
+      unterminated quote is a reported error, not a throw; T1-T9 parseCsvTable normalises header keys, keeps
+      row values verbatim, reports/keeps a mismatched row, skips blank lines; W1-W2 toCsv round-trips parseCsv
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-291
   title: Product import matches on external_id, then sku
   source:
@@ -6563,14 +6571,19 @@ requirements:
     a matching sku UPDATES that part and a new sku INSERTS; two file rows sharing an external_id or a
     sku are both errors; an optional `plant` column assigns a `product_sites` row after the write, an
     unresolvable plant name is an error and a blank one is fine.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/productImport.test.ts
+    cases: >-
+      I1-I4 external_id-then-sku match order; I5-I6 sku collision refused both directions; I7-I8 within-file
+      duplicate external_id/sku both errors; I9-I11 validateProductDraft reuse, mixed-file counts; I12-I14
+      the plant column: case-insensitive resolve, unresolvable refused, blank is fine
+  status: covered
   note: >-
-    "Verified on the running database" — a manual check, no case named. Checked 8 Sept (requirement audit)
-    against R-294/R-295: match semantics genuinely differ per entity (this row falls back external_id-then-sku;
-    R-294 is external_id-only; R-295 matches on name+owner, no external_id at all) so these stay separate
-    requirements, not a merge — but they share one ImportWizard component, so one test file with a case per
-    entity is the natural shape for the tests that close all three.
+    "Verified on the running database" — a manual check, no case named -- superseded 8 Sept (requirement
+    audit): linked to existing test-file evidence, previously not linked. Checked against R-294/R-295: match
+    semantics genuinely differ per entity (this row falls back external_id-then-sku; R-294 is external_id-only;
+    R-295 matches on name+owner, no external_id at all) so these stay separate requirements, not a merge.
 - id: R-292
   title: Import previews a plan, applies per row, company-admin only
   source:
@@ -6580,8 +6593,15 @@ requirements:
     The wizard previews INSERT / UPDATE / ERROR per row before applying, validates with the same `validateProductDraft`
     the manual form uses, applies one row at a time so each outcome is reported, sets `external_id` and
     a non-manual `source` on inserts, and shows a site admin the preview but not the Apply button.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/importPanel.test.tsx
+    cases: >-
+      T1 preview counts insert/update/error per row; T2 Apply sends the plan with ctx.source as the file
+      name; T3 a non-company-admin sees the preview but no Apply button; T4 a required column left unmapped
+      blocks Apply; T5 the result renders inserted/updated and lists each failure
+  status: covered
+  note: Linked 8 Sept (requirement audit) -- existing evidence, not previously linked.
 - id: R-293
   title: A new plant can copy an existing plant's structure
   source:
@@ -6593,11 +6613,18 @@ requirements:
     (so the template is copied and every step is permission-checked as the caller). Company-admin only.
     The add-root form offers "Empty (from a shape)" or "Copy an existing plant"; the library is just an
     existing plant, edited with the ordinary tree editor.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/91_copy_plant_structure_test.sql
+    cases: >-
+      CP1-CP3 a company admin's copy succeeds, reproduces the source's exact shape node-for-node, and is
+      empty of parts/people; CP4a-CP4b a non-company-admin is refused -- first because RLS hides the root
+      from her, then again by app_is_admin() once granted read access to it; CP5-CP6 a non-root source and
+      an unknown source are both refused invalid_argument; CP7 grants: authenticated only, revoked from anon
+  status: covered
   note: >-
-    Verified on the running database (13 nodes copied); no suite case named. Tree CSV import was dropped
-    in its favour (§19.85).
+    Verified on the running database (13 nodes copied); no suite case named -- superseded 8 Sept (requirement
+    audit): a committed SQL suite now exists. Tree CSV import was dropped in its favour (§19.85).
 - id: R-294
   title: People import matches on external_id; inserts need a site
   source:
@@ -6608,11 +6635,19 @@ requirements:
     on `external_id` only (a row without one can only INSERT); an insert must resolve a plant by name
     and a blank plant is a per-row error; an UPDATE leaves the site alone. Imported rows carry `external_id`
     and the file name as `source`.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/operatorImport.test.ts
+    cases: >-
+      I1-I1c external_id match updates, an update ignores any plant column entirely; I2 external_id
+      match-nothing inserts with the resolved plant; I3-I4 no external_id always inserts, name carries no
+      uniqueness; I5-I6 duplicate external_id within a file is both errors, duplicate name is fine; I7-I8
+      blank name refused, mixed-file counts; I9-I11 a plant is required and must resolve for an insert
+  status: covered
   note: >-
-    Verified in the browser only. Checked 8 Sept (requirement audit): not a duplicate of R-291 — its match key
-    is external_id only, no sku fallback. See R-291's note on sharing one test file across the import cluster.
+    Verified in the browser only -- superseded 8 Sept (requirement audit): linked to existing test-file
+    evidence, previously not linked. Not a duplicate of R-291 -- its match key is external_id only, no sku
+    fallback.
 - id: R-295
   title: Trainings import bulk-adds training types per plant
   source:
@@ -6621,11 +6656,19 @@ requirements:
   claim: >-
     A trainings CSV matches on (name, owner): the plant is resolved by name, a new pair inserts, an existing
     pair is a no-op update, and a blank or unresolvable plant is a per-row error.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/trainingImport.test.ts
+    cases: >-
+      I1-I2 a new (name, plant) inserts, same name at a different plant is a new training; I3-I4 an existing
+      (name, plant) is a no-op update, matched case-insensitively; I5-I6 a blank or unresolvable plant
+      refuses; I7-I8 name validation; I9-I10 within-file (name, plant) duplicates are errors, same name at
+      different plants is fine; D1-D8 the document number: recorded on insert, updated when it differs, a
+      no-op when unchanged, never itself a match key
+  status: covered
   note: >-
-    Checked 8 Sept (requirement audit): not a duplicate of R-291 — this one matches on (name, owner) with no
-    external_id at all. See R-291's note on sharing one test file across the import cluster.
+    Linked 8 Sept (requirement audit) -- existing evidence, not previously linked. Not a duplicate of R-291 —
+    this one matches on (name, owner) with no external_id at all.
 - id: R-296
   title: Certifications import matches by employee ref and training name
   source:
@@ -6637,9 +6680,18 @@ requirements:
     is updated, an unheld one granted; the CSV is authoritative for sign-off, certified and expiry dates
     and a malformed date is refused. Both trainings and certification imports gate on admin-anywhere,
     so a site admin imports their own plant.
-  verified_by: []
-  status: uncovered
-  note: Driven in the browser only.
+  verified_by:
+  - kind: vitest
+    file: src/test/certificationImport.test.ts
+    cases: >-
+      R1-R7 a held training updates, an unheld one inserts, the training is matched on the person's own
+      branch, an unknown or ambiguous employee ref is refused, an unknown training name is refused; N1-N5 a
+      document number resolves the training on the person's branch, a name/number disagreement is an error
+      not a silent pick; D1-D4 expiry and certified dates carried through, a malformed or impossible date is
+      refused; V1-V2 within-file duplicates are errors, counts tally
+  status: covered
+  note: >-
+    Driven in the browser only -- superseded 8 Sept (requirement audit): linked to existing test-file evidence.
 - id: R-297
   title: The matrix shows one column per training
   source:
@@ -15049,6 +15101,15 @@ next:
 # `src/test/certificateExpiry.test.tsx` pins both sides of the boundary. The
 # finding it came from (F-087) had never been flipped off `open` and the work had
 # no requirement; both are fixed, and the requirement is R-338.
+#
+# Removed on 8 Sept, same rule -- checked against the code, not assumed: "A resize
+# is the fifth writer, and it has never asked whether the person may be there."
+# Shipped in session 94 as R-361 (covered): a BEFORE UPDATE trigger on `assignments`
+# re-asks `check_eligibility` and `absence_overlap` on any timerange/operator_id
+# change, `dragGesture.test.ts` covers the client toast, and
+# `supabase/tests/88_absences_test.sql` cases AB26-AB34 cover the trigger. This
+# entry sat in the queue for a session after the work landed; caught by the
+# requirement audit re-reading `next` against `docs/plan.yaml`, not assumed current.
 # ---------------------------------------------------------------------------
 - kind: task
   text: Two small holes wave four left open on purpose --- the CSV import cannot record part of a day, and a block refusal names no hours
@@ -15065,25 +15126,6 @@ next:
     the server decided by the hours --- and then explained in a sentence that names no hours. Low
     harm, never wrong, but it is the third surface in this family after the two F-116 closed, and
     the shape of the fix is the same one: carry the two keys the payload already has.
-- kind: task
-  text: A resize is the fifth writer, and it has never asked whether the person may be there
-  why: >-
-    ⚠️ THE TESTER FOUND IT IN STAGE 7 AND LEFT THE CALL TO THE DEVELOPER; THE CALL IS YES. Four
-    writers ask `check_eligibility` and now `absence_overlap` --- create_assignment, move_run,
-    reassign_assignment, copy_week_plan. The fifth path does not: `updateRunFields` and
-    `updateAssignmentFields` (docs/api.md §4) are plain PostgREST PATCHes, guarded only by the
-    capacity trigger, so dragging an assignment's EDGE to a new time, or nudging a run an hour later,
-    moves a person onto a day they are on leave or past the day their certificate expires and nobody
-    is told. R-357's own words name the four and no more, so this is not a broken promise --- it is a
-    gap the promise was written around, and F-113 records it.
-    ⭐ THE CHEAPEST CORRECT PLACE IS THE TABLE, NOT A FIFTH COPY OF THE RULE. A `BEFORE UPDATE`
-    trigger on `assignments` (and on `runs` for the rows a run drags with it) that re-asks the two
-    predicates whenever the timerange changes catches every path at once --- the two PATCHes, a raw
-    PostgREST call, anything added later --- and cannot drift from the four, because it IS the four's
-    predicates. Under `warn` a trigger cannot return a warning, so the client must run its own mirror
-    (`certificateGaps`, `absenceGaps`) before the resize and show the same sentence the drag toast
-    shows; under `block` the trigger refuses and the client already knows how to read that refusal.
-    Decide `warn` first: a trigger that refuses under `warn` would be worse than the gap.
 - kind: task
   text: Phase 1 — E2E test pass (Playwright) + load sanity
   why: >-
