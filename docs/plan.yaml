@@ -9027,7 +9027,7 @@ requirements:
     cases: "TS1-TS8: the generator over the REAL config.toml -- project id changed, every port line shifted by 100, no developer port or 5173 survives, and an unfamiliar port key or an unchanged project id is refused"
   - kind: manual
     steps: "node scripts/tester-stack.mjs up (TESTER_STACK_DIR set to a scratch path): docker ps shows ten supabase_*_production_scheduler_tester containers beside the developer's ten; bash scripts/run-sql-test.sh --rebuild with SUPABASE_DB_CONTAINER set runs in the tester container (docker logs); npx playwright test e2e/smoke.spec.ts with E2E_PORT=5174 hits 5174 while 5173 keeps listening; down returns docker ps to the original ten"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 9 Sept (session 114, 99ef996). DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
     attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
@@ -9041,6 +9041,14 @@ requirements:
     `functions/` in step with the worktree's commit, because the committed `config.toml` cannot
     carry two port sets and `env()` substitution has no defaults; the tester runner exports what
     that script prints.
+    ⛔ CONTRADICTED 9 Sept (tester, session 115, DEF-0026): first live use of the tester's own
+    stack for the full e2e suite, and 5 of 44 browser cases failed, deterministically ---
+    `invite.spec.ts` and `passwordReset.spec.ts` still hard-code the DEVELOPER's mail-catcher port
+    (`54324`) to fetch the invite/reset email a live test just sent. The tester's own stack's
+    inbucket is a different port under the same +100 shift (`54424`), so the email the tester's own
+    Supabase sent lands in the tester's own mailbox and the spec polls the developer's, forever. The
+    isolation this requirement promises does not yet reach the one other per-stack service these two
+    specs depend on.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -9078,12 +9086,13 @@ findings:
 - id: F-127
   title: fd35a20's own fix does not reliably reproduce -- four independent live attempts at the same commit wrote nothing, and the off-screen-chip failure it was fixed for recurred once
   tag: A fix that cannot repeat its own measurement
-  status: open
+  status: fixed
   found_by: tester
   refs:
   - F-126
   - DEF-0025
   - R-364
+  - R-366
   story: >-
     Found 9 Sept re-verifying DEF-0025 (`fix-claimed` at `fd35a20`). The developer's own account
     says three live runs at that commit each committed a real move and measured **8.3-8.4 seconds**.
@@ -9133,6 +9142,18 @@ findings:
     here. Naming and grabbing a SPECIFIC, known chip (by its `external_id` or a stable test id,
     rather than DOM-order `.first()`) would remove the guesswork; that is a bigger change than this
     card should prescribe on its own.
+  fix: >-
+    SETTLED 9 Sept (tester, session 115), exactly the way the developer's own note said would settle
+    it: ran `e2e/loadSanity.spec.ts` against a dev server and Supabase stack of the tester's own
+    (R-366, `node scripts/tester-stack.mjs up`), with no developer session anywhere near the folder.
+    Applied the load fixture to the TESTER's own database this time, not the shared one. Three runs,
+    three real commits: `1 PATCH to assignments; 1 row(s) moved, put back and read back`, every time
+    -- "from Continue to settled" now (R-365's prompt), 26-2082ms depending on whether a
+    `board_window` refetch landed in the race window, nothing like the old "committed nothing" or
+    the off-screen-chip shape. Confirmed at the database after all three: `run_id IS NULL` count 0.
+    Teardown clean after. The developer's diagnosis was exactly right: the shared dev server was the
+    whole cause, not the fixed spec, not the fixture, not `.first()`'s own fragility (which is still
+    real as a LEAD -- see above -- but was not what produced the four original failures).
 - id: F-126
   title: The one number that said a big board was cheap to USE was measuring a mouse-up over empty space
   tag: A measurement that never happened
