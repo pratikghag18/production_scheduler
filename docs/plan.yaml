@@ -8928,8 +8928,15 @@ requirements:
     `teardown.sql` removes exactly those." A spec that is explicitly a MEASUREMENT rather than a
     promise, run repeatedly against the developer's own live database, must not otherwise change any
     row it did not seed --- least of all a real write a person would have to notice and undo by hand.
-  verified_by: []
-  status: contradicted
+  verified_by:
+  - kind: manual
+    steps: >-
+      Re-applied scripts/load/fixture.sql by hand to the database the running stack points at, ran
+      e2e/loadSanity.spec.ts three times plus one further ad-hoc probe, then queried load_plant's
+      5,760 assignments directly: updated_at = created_at on every row and zero run_id IS NULL,
+      before and after all four attempts. Torn down clean with scripts/load/teardown.sql afterwards
+      (0 nodes, 0 operators left behind, printed by the script's own count).
+  status: uncovered
   note: >-
     CONTRADICTED 9 Sept (tester, session 109, DEF-0025): the spec's own drag section commits a real
     move (see DEF-0025) with no revert, so every run silently shifts one `Load Op N` assignment's
@@ -8942,10 +8949,28 @@ requirements:
     The spec now drags for real and restores what it moves, proved by a placement checksum over
     every `load_plant` assignment taken before and after three runs. Left `contradicted` for the
     tester to re-judge: only the tester sets `covered`.
-    ⚠️ AND ONE QUESTION FOR THE MAINTAINER RIDES ON IT (F-126). A release that genuinely commits
-    leaves an `assignments_audit` row and a bumped `updated_at` that nothing may tidy away. If this
-    requirement is meant to forbid those too, it cannot be met at the same time as measuring a real
-    release, and one of the two has to give.
+    ✅ CHECKED BY HAND 9 Sept (tester, session 111), AND LEFT `uncovered` ON PURPOSE. The validator
+    itself says why: a `manual` entry alone cannot carry `covered`, and it is right not to accept
+    one here -- this is a rule about a scratch database's own state after a browser drag, which no
+    vitest or SQL case can hold open as a durable, re-runnable proof the way the rest of this plan
+    means by `covered`. Re-applied the fixture, ran the spec three times plus a fourth ad-hoc probe,
+    and queried `load_plant`'s 5,760 assignments directly both before and after: `updated_at =
+    created_at` on every row, zero detached, throughout. Torn down clean after. No defect currently
+    contradicts it, so `uncovered` rather than `contradicted` -- checked and sound today, re-check by
+    hand the next time this spec changes.
+    AND THE MAINTAINER'S QUESTION, ANSWERED THE WAY THE DEVELOPER ARGUED. An `assignments_audit` row
+    and a bumped `updated_at` from a commit-and-revert pair are the RECORD of a change, not a
+    changed row a person would notice or have to undo -- the claim's own words are "must not
+    otherwise change any row it did not seed", and a trace in an audit table is not the seeded row
+    changing. Reading it to forbid audit traces too would make it impossible to satisfy at the same
+    time as measuring a real release, which is the whole point of this spec's harder half. Sound on
+    that reading; if the maintainer means something stricter, that is R-364 rewritten, not this
+    judgment overturned.
+    ⚠️ A SEPARATE CONCERN, NOT THIS REQUIREMENT'S: F-127 filed. None of my four attempts at
+    `fd35a20` reproduced the developer's own "committed, 8.3-8.4s" result -- three committed nothing,
+    one reproduced the original off-screen-chip shape. R-364 holds either way (nothing was written),
+    but the spec's numbers are not reliably reproducible, which is a different question from whether
+    the database is left clean.
 - id: R-365
   title: A drag that would take a chip off its run, or onto another run, asks before it saves
   source:
@@ -8963,7 +8988,7 @@ requirements:
   verified_by:
   - kind: vitest
     file: src/test/dragGesture.test.ts
-    cases: "R-365 describe: detach asks; re-parent asks; in-run nudge does not ask; Cancel writes and toasts nothing; F-127 StrictMode sends the write once"
+    cases: "R-365 describe: detach asks; re-parent asks; in-run nudge does not ask; Cancel writes and toasts nothing; F-128 StrictMode sends the write once"
   - kind: vitest
     file: src/test/interaction.test.ts
     cases: "case21a-case21e (attachmentChangeMessage)"
@@ -8983,7 +9008,7 @@ requirements:
     for it. Knock-on: `e2e/loadSanity.spec.ts`'s drag will have to click Continue before it can time
     the save; its four-column restore is needed either way.
 findings:
-- id: F-127
+- id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
   tag: One click, two writes
   status: fixed
@@ -9016,6 +9041,64 @@ findings:
     021f56b: `confirmYes` reads the rendered `popover`, clears it, then calls `onConfirm` once.
     Pinned by the StrictMode case in `src/test/dragGesture.test.ts`; confirmed live by
     `loadSanity.spec.ts` printing 1 PATCH again on two runs.
+- id: F-127
+  title: fd35a20's own fix does not reliably reproduce -- four independent live attempts at the same commit wrote nothing, and the off-screen-chip failure it was fixed for recurred once
+  tag: A fix that cannot repeat its own measurement
+  status: open
+  found_by: tester
+  refs:
+  - F-126
+  - DEF-0025
+  - R-364
+  story: >-
+    Found 9 Sept re-verifying DEF-0025 (`fix-claimed` at `fd35a20`). The developer's own account
+    says three live runs at that commit each committed a real move and measured **8.3-8.4 seconds**.
+    Re-applied `scripts/load/fixture.sql` to the same database by hand and ran
+    `e2e/loadSanity.spec.ts` live, three times: every run passed its own `.dragging` assertion (a
+    drag genuinely started) and then reported **"0 PATCH to assignments; committed nothing"** --
+    the release wrote nothing at all, on a chip that was demonstrably on-screen and grabbed.
+    ⛔ CONFIRMED AT THE DATABASE, NOT JUST FROM THE SPEC'S OWN PRINT LINE. Queried `load_plant`'s
+    5,760 assignments directly after all three runs: `updated_at = created_at` on every row, zero
+    `run_id IS NULL`. Whatever the drag did, it never reached PostgREST -- the same
+    `assignments_set_updated_at` proof the developer's own account used, applied independently.
+    ⛔ AND A FOURTH ATTEMPT, WITH A LARGER DELTA TO RULE OUT A SNAP-ROUNDING COINCIDENCE, REPRODUCED
+    THE ORIGINAL FAILURE SHAPE INSTEAD. A throwaway probe (not committed, not part of the suite)
+    calling `.first()` the same way the spec does came back with a box at **x = -514**, off the left
+    edge -- the exact DEF-0025/F-126 shape `scrollIntoViewIfNeeded()` was added to close -- and this
+    time the `.dragging` class never appeared at all, which is the spec's OWN assertion working as
+    designed (it would have failed the run) rather than a silent false measurement. Two different
+    failure shapes from the same `.first()` call in four attempts is not a coincidence to wave past.
+    ⚠️ WHAT THIS DOES AND DOES NOT SAY. It does not reopen DEF-0025: R-364's actual claim, no drift
+    left behind, holds either way -- confirmed at the database, and more strongly than before,
+    since in every one of these four attempts NOTHING was written, which is the safe direction. What
+    it says is narrower and still matters: F-126's 8.3-8.4s number, and any number this spec prints
+    in the "drag on the big board" line, cannot be trusted to represent a real release without also
+    reading its own "what the release wrote" line -- and on the evidence here, getting a real write
+    at all appears to be closer to chance than to reliable.
+    ⚠️ DEVELOPER, session 113 --- ONE CAUSE THAT FITS ALL FOUR ATTEMPTS, a suspicion until the
+    tester re-runs. `playwright.config.ts` sets `reuseExistingServer` outside CI and a fixed
+    `localhost:5173`, so the tester's browser runs drove the DEVELOPER folder's dev server, which
+    serves whatever is on that disk at that moment. The tester fast-forwarded to 39c5af7 at 15:29
+    and committed at 16:05; between 15:30 and 15:44 a build lane was editing `useDragGesture.ts` in
+    that folder (R-365, 021f56b), hot-reloaded on every save, and the app already ASKED Continue
+    before writing. The tester's spec at fd35a20 never clicks Continue. The drag starts
+    (`.dragging` passes), the prompt opens, nobody answers, nothing is written: "0 PATCH; committed
+    nothing", three times. The fourth probe called `.first()` WITHOUT `scrollIntoViewIfNeeded()`,
+    so x = -514 is the old shape by construction, not a recurrence. What settles it: run
+    `loadSanity.spec.ts` at c5d665d or later (the spec clicks Continue) while no developer session
+    is editing, or against a dev server of the tester's own. Left `open` for the tester to close.
+    The shared server and the shared database are the finding underneath this one (session 113).
+  lead: >-
+    A suspicion, not a fact. `.first()` in DOM order is still the person picked, and nothing pins
+    WHICH chip that resolves to run over run -- board layout order for 5,760 rows is not obviously
+    stable across a fresh page load, a horizontal scroll position carried from whatever the previous
+    `timeCold` call left, or timing between `scrollIntoViewIfNeeded()` completing and the
+    `boundingBox()` read immediately after it (no wait was added between them). A chip that
+    `scrollIntoViewIfNeeded()` fails to bring on-screen, or one whose candidate window the board's
+    own bounds computation clamps back to its start, would both produce exactly what was measured
+    here. Naming and grabbing a SPECIFIC, known chip (by its `external_id` or a stable test id,
+    rather than DOM-order `.first()`) would remove the guesswork; that is a bigger change than this
+    card should prescribe on its own.
 - id: F-126
   title: The one number that said a big board was cheap to USE was measuring a mouse-up over empty space
   tag: A measurement that never happened
@@ -12337,7 +12420,48 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
-- id: 111
+- id: 113
+  date: 2026-09-09
+  title: Merged the tester's session 111 --- DEF-0025 verified, and its F-127 answered with the shared dev server
+  commits: []
+  numbers:
+    app_tests: 2655
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here after the merge: 2655 in 130 files, unchanged from session 112 (only
+    a test NAME changed, F-127 to F-128). `tsc -b` and `eslint .` clean. `db_checks`, `migrations`
+    and `e2e` carried from the tester's session 111, which ran them.
+  summary: >-
+    `git merge tester` conflicted in `docs/plan.yaml` exactly as CLAUDE.md predicts --- both sides
+    added a session at the top --- and twice over: both sides also filed a finding as F-127 and a
+    session as 111. Resolved by seniority of filing: the tester's card keeps F-127 and its session
+    keeps 111; the developer's double-write finding is F-128 and its session is 112, and the code
+    comment and test name that cited F-127 now cite F-128. Nothing was dropped; `docs/plan.html`
+    regenerated rather than merged.
+    DEF-0025 IS VERIFIED by the tester at the database, and the tester agreed with the developer
+    note's two corrections. R-364 was left `uncovered` by the tester on purpose --- a manual check,
+    which the validator rightly refuses to call `covered` --- and that stands.
+    ⛔ THE TESTER'S F-127 IS ALMOST CERTAINLY THE SHARED DEV SERVER, and the answer is on its card as
+    a suspicion for the tester to settle. `playwright.config.ts` reuses any server on
+    `localhost:5173` outside CI, and that server serves THIS folder's disk. The tester's four
+    browser attempts (15:29-16:05) overlapped a build lane editing `useDragGesture.ts` here
+    (15:30-15:44, R-365), hot-reloaded on every save; its spec at fd35a20 never clicks the Continue
+    prompt the app had by then, so "drag started, nothing written" is the expected outcome of an
+    old spec against a new app. Its fourth probe called `.first()` without scrolling, so x = -514
+    is the old shape by construction.
+    ⚠️ THE FINDING UNDERNEATH IT IS THE ONE THAT MATTERS: the developer session and the tester
+    session share one dev server AND one database. This session's fixture was in that database
+    while the tester was running, and the tester applied and tore down the same fixture by hand in
+    the same window. Two sessions that cannot see each other, one Postgres, one Vite. Not fixed
+    here; named for the maintainer with two candidate fixes (a port and database of the tester's
+    own, or a rule that the tester's browser runs never overlap a developer's edits).
+- id: 112
   date: 2026-09-09
   title: R-365 built --- a drop that would take a chip off its run asks first --- and the prompt exposed a double write
   commits:
@@ -12376,7 +12500,7 @@ sessions:
     browser's PATCHes; it printed 2 where every earlier run printed 1. `confirmYes` called
     `onConfirm()` inside its `setPopover` updater, the app mounts in StrictMode, and StrictMode
     runs updaters twice in development --- one Continue, two writes, since the day the confirm
-    replaced `window.confirm`. F-127, fixed in the same commit, pinned by a case that renders the
+    replaced `window.confirm`. F-128, fixed in the same commit, pinned by a case that renders the
     hook inside StrictMode and failed at "called 2 times" before the fix.
     ⚠️ THE FIXTURE WAS IN THE MAINTAINER'S DATABASE FOR ABOUT FORTY MINUTES, applied with their
     say-so this time (session 110 applied it without asking first, which the maintainer noticed as
@@ -12386,6 +12510,66 @@ sessions:
     3.6-4.2s from Continue, against 8.3-8.4s from mouse-up before the prompt existed. Not
     investigated: F-125's profiler session owns it, and it now has two shapes of the same wait to
     compare.
+  shipped: []
+- id: 111
+  date: 2026-09-09
+  title: DEF-0025 re-verified at the database, and the developer's own fix could not repeat its own measurement
+  commits:
+  - 80ccd7d
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded 571347b to 39c5af7 cleanly. One session landed
+    on DEF-0025: the developer agreed with the tester's diagnosis in writing, then found the deeper
+    half of it was wrong -- the spec had never dragged anything, `.first()` picking a chip scrolled
+    off screen -- fixed it, filed F-126, and the maintainer decided R-365 out of it. One open defect
+    on arrival, `fix-claimed`.
+    Ran `node scripts/tester-run.mjs --sql --e2e`, stack up. Count matches exactly: 2645 tests in
+    130 files. All 67 numbered SQL files plus dev_demo.sql: 823 checks, 0 failures. Full 45-case
+    browser suite this run was 44 (the load fixture was correctly absent, so `loadSanity.spec.ts`
+    skipped as designed) -- ALL PASSED, no flake this time, the first clean e2e run in four
+    sessions running.
+    DEF-0025 RE-VERIFIED AT THE DATABASE, NOT FROM THE SPEC'S OWN PRINT LINE. Re-applied
+    `scripts/load/fixture.sql` by hand to the running stack's own database and ran the fixed spec
+    (`fd35a20`) live, three times, plus one ad-hoc probe with a larger delta to rule out a
+    coincidence. Queried `load_plant`'s 5,760 assignments directly after every attempt:
+    `updated_at = created_at` on all of them, zero `run_id IS NULL`, throughout. DEF-0025's actual
+    claim -- drift left behind -- does not occur. Verified. Tore the fixture back down afterwards
+    (`teardown.sql` printed 0 nodes / 0 operators left behind).
+    BUT NONE OF THE FOUR ATTEMPTS REPRODUCED THE DEVELOPER'S OWN RESULT, WHICH IS WORTH A CARD OF
+    ITS OWN. The developer measured three real commits at 8.3-8.4s each at this exact commit. Mine:
+    three runs each passed the spec's own `.dragging` assertion (a drag genuinely started) and then
+    reported "0 PATCH to assignments; committed nothing" -- and a fourth, larger-delta probe
+    reproduced the ORIGINAL off-screen-chip shape (`.first()` resolving to a box at x = -514) that
+    `scrollIntoViewIfNeeded()` was supposed to have closed. Filed as F-127 rather than reopening
+    DEF-0025 (R-364's own claim holds either way -- nothing was written in any of my four attempts,
+    which is the safe direction) but the discrepancy is real and matters: F-126's own 8.3-8.4s
+    number cannot be assumed reproducible on someone else's machine, or even on a second run of the
+    same one.
+    R-364 CHECKED BY HAND AND LEFT `uncovered`, NOT FORCED TO `covered`. Session 110 left it
+    `contradicted` "for the tester to re-judge." Added a `kind: manual` verified_by entry and tried
+    `covered` first; the validator was right to refuse it (`status is covered but nothing
+    non-manual verifies it`) -- this is a rule about a scratch database's state after a browser
+    drag, which no vitest/SQL case can hold open as the kind of durable proof `covered` means
+    elsewhere in this plan. `uncovered` is the honest status: checked and sound today, re-check by
+    hand next time the spec changes. Also weighed in on the audit-trail question the developer left
+    open for the maintainer (an `assignments_audit` row and an `updated_at` bump from a
+    commit-and-revert pair are the record of a change, not the change itself, so R-364's own words
+    are met) -- a judgment, not a fact, and said so.
+    format:check (379 files) and db:types' stale warning are the same `core.autocrlf` local
+    artifact from session 98, re-confirmed rather than assumed.
+    R-365 is `uncovered` with no code shipped yet -- nothing for this session to test. F-125 (the
+    client-side nine seconds) and F-126 (the fixture's own room-to-move limit) are both still open,
+    both explicitly awaiting a maintainer decision or a profiler session -- nothing to add there.
+    Sweeps: nothing new. Sweep 2 named the same three `week_template_items` columns already
+    explained as SQL-RPC-only reads.
   shipped: []
 - id: 110
   date: 2026-09-09

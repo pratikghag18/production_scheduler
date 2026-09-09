@@ -1001,7 +1001,7 @@ describe("useDragGesture", () => {
       expect(sent?.productId).toBe(runFixture.productId);
     });
 
-    it("F-127: Continue sends the write exactly ONCE under StrictMode, which the app runs in", async () => {
+    it("F-128: Continue sends the write exactly ONCE under StrictMode, which the app runs in", async () => {
       // `src/main.tsx` mounts the app in <StrictMode>, and StrictMode invokes
       // state UPDATER functions twice in development to flush out side effects
       // hidden inside them. `confirmYes` used to call `onConfirm()` inside its

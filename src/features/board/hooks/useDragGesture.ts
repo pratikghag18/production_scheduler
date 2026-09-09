@@ -1629,7 +1629,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const cancelSplit = useCallback(() => setPopover(null), []); // D62: Cancel reverts, sends nothing.
 
-  /* ⛔ F-127: `onConfirm()` used to run INSIDE the `setPopover` updater, and
+  /* ⛔ F-128: `onConfirm()` used to run INSIDE the `setPopover` updater, and
    * `src/main.tsx` mounts the app in <StrictMode>, which invokes state
    * updaters TWICE in development to flush out exactly that -- so every
    * Continue sent its write twice. Seen as "2 PATCH to assignments" in
