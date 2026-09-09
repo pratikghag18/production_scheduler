@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: 99ef996
+  tip: eb68708
   baseline:
-    app_tests: 2663
+    app_tests: 2665
     app_test_files: 131
     tsc: 0
     eslint: 0
@@ -9027,7 +9027,13 @@ requirements:
     cases: "TS1-TS8: the generator over the REAL config.toml -- project id changed, every port line shifted by 100, no developer port or 5173 survives, and an unfamiliar port key or an unchanged project id is refused"
   - kind: manual
     steps: "node scripts/tester-stack.mjs up (TESTER_STACK_DIR set to a scratch path): docker ps shows ten supabase_*_production_scheduler_tester containers beside the developer's ten; bash scripts/run-sql-test.sh --rebuild with SUPABASE_DB_CONTAINER set runs in the tester container (docker logs); npx playwright test e2e/smoke.spec.ts with E2E_PORT=5174 hits 5174 while 5173 keeps listening; down returns docker ps to the original ten"
-  status: contradicted
+  - kind: vitest
+    file: src/test/testerStack.test.ts
+    cases: "TS9-TS10 (DEF-0026): no e2e spec names a stack port by literal in code; e2e/env.ts's mailUrl follows E2E_MAIL_URL and defaults to the developer's inbucket"
+  - kind: e2e
+    file: e2e/invite.spec.ts
+    cases: "with the tester stack's env exported (E2E_MAIL_URL from tester-stack.mjs env) and E2E_PORT=5174, invite.spec.ts and passwordReset.spec.ts pass -- the five email-following cases DEF-0026 named among them"
+  status: covered
   note: >-
     BUILT 9 Sept (session 114, 99ef996). DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
     attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
@@ -9049,6 +9055,12 @@ requirements:
     Supabase sent lands in the tester's own mailbox and the spec polls the developer's, forever. The
     isolation this requirement promises does not yet reach the one other per-stack service these two
     specs depend on.
+    ⚠️ FIX CLAIMED 9 Sept (developer, session 116, eb68708): `mailUrl` in `e2e/env.ts`, read from
+    `E2E_MAIL_URL` which `tester-stack.mjs` takes straight off `supabase status` (INBUCKET_URL /
+    MAILPIT_URL) and refuses a stack that prints neither; both specs read it; two pins (TS9, TS10)
+    keep a literal port out of spec code. Reproduced the defect's own run against a scratch tester
+    stack on 5174: 7 of 7 in the two files pass. Set back to `covered` on that proof; the tester
+    re-verifies DEF-0026 on its own stack.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12475,6 +12487,61 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 116
+  date: 2026-09-09
+  title: DEF-0026 fixed --- the tester's stack reads its own mail --- and the queue explained in plain terms
+  commits:
+  - eb68708
+  numbers:
+    app_tests: 2665
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here: 2665 in 131 files --- session 115's 2663 plus the two DEF-0026 pins.
+    `tsc -b`, `eslint .`, `prettier --write` clean. `db_checks`, `migrations` and `e2e` carried
+    from the tester's session 115, which ran them on its own stack; this session ran only the two
+    email specs (7 cases) against a scratch tester stack as the defect's reproduction.
+  summary: >-
+    `git merge tester` fast-forwarded clean. The tester's session 115 was the FIRST REAL USE of
+    R-366's own stack: F-127 settled `fixed` exactly as the developer note predicted (three real
+    commits, nothing detached, nobody editing), F-128 independently mutation-tested, and one defect
+    filed on R-366 itself --- DEF-0026, major, agreed with in writing before touching code.
+    ⛔ THE HOLE WAS THE ONE PER-STACK SERVICE NOBODY LISTED. `invite.spec.ts` and
+    `passwordReset.spec.ts` follow a real email their own run just sent, and both had
+    `http://127.0.0.1:54324` --- the DEVELOPER's inbucket --- written in. The tester's stack mails
+    to 54424, so five cases timed out against a mailbox on the wrong stack, deterministically. The
+    invite spec derived its FUNCTIONS url from `supabaseUrl` two lines above the literal; the
+    pattern existed and was not applied to one constant. Session 114's review grepped for
+    `localhost:5173` and `54322` and not for the mail port --- the list the reviewer carried was
+    itself short by one.
+    ⭐ FIXED WHERE THE TESTER'S LEAD POINTED, NOT BY ARITHMETIC. `mailUrl` in `e2e/env.ts`, from
+    `E2E_MAIL_URL`, then `.env.local`, then the developer's default; `tester-stack.mjs` records
+    what `supabase status -o env` prints under INBUCKET_URL / MAILPIT_URL and refuses a stack
+    that prints neither; `tester-run.mjs` exports it; the brief lists it. Not "API port + 3": that
+    holds on both stacks today and is a coincidence of the port scheme, not a contract.
+    ⭐ PINNED THE SHAPE, NOT JUST THE VALUE. TS9 reads the three URL-building specs and asserts no
+    `127.0.0.1:5xxxx` / `localhost:5xxxx` literal in CODE (comments may cite a port); TS10 stubs
+    `E2E_MAIL_URL` and asserts `mailUrl` follows it. `tsc` cannot see a string; these can.
+    ⭐ REPRODUCED THE DEFECT'S OWN RUN. Scratch tester stack (`TESTER_STACK_DIR` under the job's
+    tmp), `env` now printing `E2E_MAIL_URL = http://127.0.0.1:54424`, the two specs on 5174:
+    7 passed in 9.0s, the five that failed for the tester among them. `down`; the developer's ten
+    containers and 5173 untouched throughout. DEF-0026 `fix-claimed` at eb68708; R-366 back to
+    `covered` on the new pins and the live run, for the tester to re-judge.
+    ⚠️ TWO LEADS THE TESTER LEFT, NOT FILED, NOT TAKEN HERE: `assertGeneratedConfig`'s `/5432\d/`
+    is a literal range rather than "the ports the transform actually read", a blind spot only if
+    Supabase's default port scheme moves; and `attachmentChangeMessage`'s id-not-label hardening
+    has no case that exercises two run ids sharing one label, because the fixture cannot build
+    one. Both true, both harmless today, both left as leads.
+    THE MAINTAINER ASKED FOR THE QUEUE IN PLAIN TERMS and got a five-row table: this defect
+    (done), F-125's profiler session (recommended next --- the most user-visible cost, and R-365's
+    drag reproduces it in ~4s), F-126's fixture room (a one-line change that is the maintainer's
+    call), R-364's audit-trail question (a sentence from the maintainer), and the standing notes.
+  shipped: []
 - id: 115
   date: 2026-09-09
   title: First run on the tester's own stack -- F-127 settled clean, DEF-0026 filed on R-366's mail-catcher gap
