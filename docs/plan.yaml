@@ -8674,6 +8674,18 @@ requirements:
       absent:true, not merely that a column is NULL. Migration restored from a copy, byte-identical.
   status: covered
   note: >-
+    ✅ TESTER-CHECKED 9 Sept, session 103, the CSV-import half added at 4aeb4ca: read `import_absences`
+    end to end and confirmed the extraction against 0066's own last emission (the diff is exactly the
+    part-day rules, org scoping/edit-rights gate/exclusion handler/definer/search_path all untouched).
+    Independently reproduced the developer's own mutation cold, on a scratch copy, not by trusting the
+    write-up: dropping `timerange` from 0073's INSERT turns IH1, IH6 and IH7 red by name (IH7 on
+    BEHAVIOUR -- a shift touching an imported part-day absence wrongly answers `absent: true`), 8 of 11
+    still green; migration restored byte-identical, `sql_test_db` rebuilt clean, 11 of 11 passing
+    again. Read `absenceImport.ts` and `AbsencesImport.tsx`: a still-loading plant zone is absent from
+    `zoneByNodeId` rather than defaulting through `coerceTimezone(undefined)` to UTC, so a row whose
+    zone has not arrived errors in the preview instead of silently landing as a whole day -- the exact
+    failure mode this piece exists to close, checked in the code rather than assumed from the story.
+    Confirmed no DDL in 0073 (function replacement only), so Sweep 1 had nothing to find. No defect.
     ✅ DEF-0022 VERIFIED 8 Sept, cold, at 6b0f750: AB23 and AB24 are now real and independently
     provable by mutation (the exact reported '[)' to '[]' mutation turns AB23 red by name, and also
     AB25; an off-by-one VALUE mutation on p_ends_at turns AB23 red again; the mirror mutation, '[)'
