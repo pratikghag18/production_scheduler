@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from "../../../e2e/env";
+import {
+  hasRealBackend,
+  NO_BACKEND_REASON,
+  supabaseUrl,
+  supabaseAnonKey,
+  liveBackendGone,
+  LIVE_PIN_TIMEOUT_MS,
+} from "../../../e2e/env";
 
 /**
  * DEF-0020: the invite function's "say nothing about the other org" promise
@@ -23,6 +30,13 @@ import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from 
  * e2e/invite.spec.ts does, and skips honestly when there is no backend to
  * call — the same discipline `hasRealBackend` gives every signed-in spec.
  *
+ * ⚠️ THAT SKIP IS FOR ONE CASE ONLY: this run was never pointed at a stack.
+ * A stack that IS configured but whose invite function does not answer is a
+ * FAILURE (`liveBackendGone`), because the alternative is what actually
+ * happened on 9 Sept — the edge runtime exited overnight, this body ran in
+ * 19ms making zero calls, and the file still printed `1 passed`. See the
+ * measurement in e2e/env.ts beside `liveBackendGone`.
+ *
  * Reproduction, by hand, against the running local stack:
  *   1. `docker exec -i supabase_db_production_scheduler psql -U postgres -d postgres \
  *        -c "select instance_id, email from auth.users where email='sofia@contoso.example';"`
@@ -42,9 +56,29 @@ import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from 
 
 const FUNCTIONS_BASE = `${supabaseUrl.replace(/\/$/, "")}/functions/v1`;
 
+/**
+ * ⛔ THE ABORT SIGNAL IS THE POINT OF THIS FUNCTION, NOT A DETAIL. A stopped
+ * edge-runtime container does not answer "no" — kong holds the connection open
+ * and this `fetch` never settles. Without a deadline the probe eats the whole
+ * test budget and the run reports "Test timed out", which says nothing about
+ * WHICH of the four round trips died. Measured 9 Sept: `docker stop` the edge
+ * runtime and the OPTIONS call hangs; leave the container exited long enough
+ * for kong to notice and the same call returns 503 in 7ms. Same dead
+ * dependency, two completely different symptoms, and the slow one is what made
+ * F-122 look like a random flake that "only fails in company".
+ *
+ * A cold-but-alive runtime answered this preflight in 336ms, so ten seconds is
+ * ~30x the real cost and still decisive: past it, the thing is not there, and
+ * the caller says so in words instead of timing out.
+ */
+const SERVED_PROBE_MS = 10_000;
+
 async function functionServed(): Promise<boolean> {
   try {
-    const res = await fetch(`${FUNCTIONS_BASE}/invite`, { method: "OPTIONS" });
+    const res = await fetch(`${FUNCTIONS_BASE}/invite`, {
+      method: "OPTIONS",
+      signal: AbortSignal.timeout(SERVED_PROBE_MS),
+    });
     return res.status === 200 || res.status === 204;
   } catch {
     return false;
@@ -89,28 +123,32 @@ async function callInvite(
 }
 
 describe("DEF-0020: an email that belongs to another org, but whose auth row GoTrue cannot list, is not silently refused", () => {
-  it("Dana inviting sofia@contoso.example (org 2) answers other_org, not a raw database error", async () => {
-    if (!hasRealBackend) {
-      console.warn(`DEF-0020 pin skipped: ${NO_BACKEND_REASON}`);
-      return;
-    }
-    if (!(await functionServed())) {
-      console.warn(
-        `DEF-0020 pin skipped: the invite function is not being served at ${FUNCTIONS_BASE}`,
-      );
-      return;
-    }
-    const dana = await tokenFor("dana@example.test", "devpassword");
-    const plantA = await plantAId(dana);
-    const result = await callInvite(dana, {
-      email: "sofia@contoso.example",
-      nodeId: plantA,
-      role: "viewer",
-    });
-    expect(result.json.ok, JSON.stringify(result.json)).toBe(false);
-    expect(
-      result.json.reason,
-      `R-351: "one in another org is refused and nothing is said about the other org" -- got ${JSON.stringify(result.json)}`,
-    ).toBe("other_org");
-  });
+  it(
+    "Dana inviting sofia@contoso.example (org 2) answers other_org, not a raw database error",
+    async () => {
+      if (!hasRealBackend) {
+        console.warn(`DEF-0020 pin skipped: ${NO_BACKEND_REASON}`);
+        return;
+      }
+      if (!(await functionServed())) {
+        liveBackendGone(
+          `DEF-0020: the invite function did not answer an OPTIONS preflight at ${FUNCTIONS_BASE} ` +
+            `within ${SERVED_PROBE_MS}ms (it either refused or hung).`,
+        );
+      }
+      const dana = await tokenFor("dana@example.test", "devpassword");
+      const plantA = await plantAId(dana);
+      const result = await callInvite(dana, {
+        email: "sofia@contoso.example",
+        nodeId: plantA,
+        role: "viewer",
+      });
+      expect(result.json.ok, JSON.stringify(result.json)).toBe(false);
+      expect(
+        result.json.reason,
+        `R-351: "one in another org is refused and nothing is said about the other org" -- got ${JSON.stringify(result.json)}`,
+      ).toBe("other_org");
+    },
+    LIVE_PIN_TIMEOUT_MS,
+  );
 });

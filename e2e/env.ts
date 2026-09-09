@@ -82,3 +82,53 @@ export const NO_BACKEND_REASON =
   `No Supabase to sign in to: this run is pointed at ${DUMMY_URL}. ` +
   "Put VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local and start " +
   "the local stack (npm run db:start) to run the signed-in specs.";
+
+/**
+ * ⭐⭐ THE OTHER HALF OF `hasRealBackend`, AND THE ONE THAT WAS MISSING.
+ * `hasRealBackend` answers "was this run pointed at a real stack?" — a NO is an
+ * honest skip. It deliberately does NOT answer "is that stack actually
+ * answering?", and the comment above has always said what the answer means: a
+ * stopped Supabase is a FAILURE, not a skip. Nothing enforced it. The two live
+ * pins each open with `hasRealBackend` and then, further down, treat "the
+ * function is not being served", "could not sign in as Dana" and "Operator A2
+ * not found" the same way — `console.warn` and `return` — which vitest counts
+ * as PASSED, not skipped.
+ *
+ * ⛔ MEASURED, 9 Sept, not argued. `supabase_edge_runtime_production_scheduler`
+ * had exited (255) overnight while the other nine containers stayed up. The
+ * DEF-0020 pin then reported `1 passed` with a body that ran in 19ms and made
+ * zero network calls; with the container restarted the same body takes ~678ms
+ * and makes four. A run that could not ask the question reported the same word
+ * as a run that asked it and got the right answer. Under the full parallel
+ * suite the dead container instead showed up as the OPTIONS probe hanging past
+ * the 5s default — which is why F-122 read as a random flake that "only fails
+ * in company": one dead container wearing two faces, and neither of them the
+ * worker contention F-122 suspected.
+ *
+ * So: past the `hasRealBackend` gate, a dependency that does not answer calls
+ * this, and the run goes red with the reason and the way back.
+ */
+export function liveBackendGone(detail: string): never {
+  throw new Error(
+    `${detail}\n\n` +
+      `This run IS pointed at a real backend (${supabaseUrl}), so this is a FAILURE, not a skip: ` +
+      "a live pin that goes quiet when its dependency is down reports the same word whether the " +
+      "rule it guards holds or was never asked about. Check the stack is whole — " +
+      "`docker ps` should list ten supabase_* containers, and the edge runtime is the one that " +
+      "dies quietly (`docker start supabase_edge_runtime_production_scheduler`). " +
+      "If you meant to run without a backend, unset VITE_SUPABASE_URL so the skip is the honest one.",
+  );
+}
+
+/**
+ * ⚠️ WHY THESE PINS GET AN EXPLICIT TIMEOUT AND IT IS THIS GENEROUS. They are
+ * the only tests in the unit suite that make real network round trips — four of
+ * them, in sequence, one of which boots a Deno function that may be cold. Warm
+ * and alone that is ~678ms; a cold edge runtime spent 336ms on the preflight
+ * ALONE, and under a full parallel run the whole suite's workers are competing
+ * for the same stack. Vitest's 5s default was tight enough that a cold start
+ * read as a failure, which is the wrong lesson: slow is not broken. The fix
+ * pulls in both directions on purpose — stricter about pretending to pass
+ * (`liveBackendGone`), more patient about being slow (this).
+ */
+export const LIVE_PIN_TIMEOUT_MS = 30_000;

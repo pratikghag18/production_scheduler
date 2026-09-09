@@ -3,11 +3,11 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-08'
+  updated: '2026-09-09'
   tip: f5fc400
   baseline:
-    app_tests: 2612
-    app_test_files: 129
+    app_tests: 2617
+    app_test_files: 130
     tsc: 0
     eslint: 0
     db_checks: 804
@@ -8734,6 +8734,60 @@ requirements:
       the resize path runs the client's own mirrors before the write and toasts the same sentence
       the crew-drag toast uses, naming the person and the leave, in the board's zone
   status: covered
+- id: R-362
+  title: A live pin goes quiet for one reason only --- no backend configured; a backend that is there and broken turns it red
+  source:
+  - session 100 conversation
+  - F-122
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 9 Sept, shown the three states a live pin can be in and asked to choose between
+    F-122's two candidate fixes and a third: *"Make the skips loud."* So the two pins that drive the
+    running stack --- `src/test/defects/DEF-0020.test.ts` and `DEF-0022.test.ts` --- may exit quietly
+    for exactly ONE reason: `hasRealBackend` is false, meaning this run was never pointed at a stack
+    at all. That is CI's deliberate state (a dummy URL, no secrets) and stays an honest skip.
+    ⛔ EVERY OTHER UNREACHABLE DEPENDENCY IS A FAILURE, BECAUSE IT MEANS THE STACK IS CONFIGURED AND
+    BROKEN. "The invite function is not being served", "could not sign in as Dana" and "Operator A2
+    not found" were all `console.warn` + `return`, which vitest counts as PASSED --- so a pin could
+    report the same word whether the rule it guards held or was never asked about. They now throw
+    through `liveBackendGone` in `e2e/env.ts`, next to the comment that has always stated the rule
+    in prose (*"A stopped Supabase is a FAILURE, not a skip"*) and never enforced it.
+    ⭐ AND THE OTHER DIRECTION AT THE SAME TIME: SLOW IS NOT BROKEN. The pins carry an explicit
+    `LIVE_PIN_TIMEOUT_MS` (30s) instead of vitest's 5s default, because four real round trips against
+    a possibly-cold Deno function do not fit it; and the served-probe carries its own 10s
+    `AbortSignal`, because a STOPPED container does not answer "no" --- kong holds the connection and
+    the probe never settles, eating the whole budget and reporting "Test timed out" with no cause.
+  verified_by:
+  - kind: vitest
+    file: src/test/livePinDiscipline.test.ts
+    cases: >-
+      the audit is not vacuously green (it names the two live pins it expects to find, so a deleted
+      or moved pin turns it red rather than making it pass by finding nothing); each pin has exactly
+      one console.warn and that one is guarded by !hasRealBackend within the preceding 240 chars;
+      each pin CALLS liveBackendGone( and passes LIVE_PIN_TIMEOUT_MS to it(), both searched past the
+      import line so an imported-but-unused name cannot satisfy either
+  - kind: mutation
+    file: src/test/livePinDiscipline.test.ts
+    cases: >-
+      proved able to fail before it was believed. Reintroducing the silent-skip shape (a console.warn
+      + return ahead of DEF-0022's liveBackendGone) turns it red naming the count. Deleting the
+      timeout ARGUMENT initially did NOT --- the identifier survived in the import list and the file
+      still reported 5 passed, the audit's own DEF-0024 --- which is why the search now starts after
+      the import; re-run against the same mutation it goes red. Restored from a copy, byte-identical.
+  - kind: mutation
+    file: src/test/defects/DEF-0020.test.ts
+    cases: >-
+      the wiring, which the text audit cannot reach. `docker stop supabase_edge_runtime_production_scheduler`
+      turns DEF-0020 red in ~10s carrying the reason and the way back (before this change: a bare
+      30s "Test timed out", and before the timeout was raised at all, a green 19ms run that made
+      zero network calls). A wrong password and a non-existent operator name each turn DEF-0022 red
+      with their own sentence. All restored from copies, not from HEAD.
+  status: covered
+  note: >-
+    The audit reads text, and says so in its own header: it proves the only silent exit is the
+    no-backend one and that the loud exit is called somewhere, NOT that the loud exit hangs off the
+    right branch. That half is the mutation rows above, recorded rather than automated because
+    automating it means killing a container inside a unit run.
 findings:
 - id: F-120
   title: A run or a direct assignment can be created on a node whose level is not schedulable, and nothing on the server says no
@@ -8797,10 +8851,46 @@ findings:
     before this fix would keep it silently forever unless that exact row's `node_id` were written
     again. Not a live defect here (there is nothing to find), but worth the record: this is a guard,
     not a cleanup, and the next person who inherits a database that predates it should not assume one.
+- id: F-123
+  title: A finding's `lead` never reaches the page, and the validator calls the file ok while dropping it
+  tag: The record that renders as nothing
+  status: open
+  found_by: agent
+  story: >-
+    Found 9 Sept by walking into it. Writing F-122's correction I added a `resolution:` key to the
+    finding, ran `npm run plan`, and got *"plan.yaml ok"* --- then grepped `docs/plan.html` for a
+    sentence from it and found ZERO. `findingCard()` in `scripts/render-plan.mjs` emits exactly one
+    body field, `${f.story}`; there is no `resolution` in it, and there is no `lead` either. The
+    `.lead` at line 620 is a TRACK's lead, not a finding's.
+    ⛔ SO THIS IS NOT ONLY ABOUT A KEY I INVENTED. F-121 and F-122 both carry a `lead:` --- the
+    tester's suspicion about the cause, the most useful paragraph on a card for whoever picks the
+    work up --- written into `docs/plan.yaml` in sessions 98 and 99, and NEITHER has ever been
+    visible on the generated page. `docs/plan-format.md`'s finding spec does not list `lead` at all,
+    so it was adopted from the defect files' own `## Lead` section into a place nothing renders it.
+    Two cards' worth of reasoning is in the file and not on the page.
+    ⚠️ THE HAZARD IS THE WORD "OK". CLAUDE.md says the plan is part of the deliverable and a red
+    validator is a finished piece with a hole in its record. The converse is what bit here: a GREEN
+    validator on a file with a hole in it. The validator checks that required keys are PRESENT
+    (`need(w, f, "story")`); nothing checks that a key which is present will ever be READ. Every
+    unknown key is silently accepted and silently dropped, so the failure mode is invisible from
+    both ends --- the writer sees "ok", the reader sees a card that simply does not mention the
+    thing.
+    ⭐ THE FIX IS TWO SMALL ONES AND THEY ARE INDEPENDENT. Render `lead` on a finding card (it is
+    already written, twice, and wanted); and have the validator REJECT an unknown key on a finding,
+    requirement, stage or session instead of ignoring it, which would have turned my `resolution:`
+    red in the same second I wrote it rather than leaving me to grep the HTML on a hunch. The second
+    is the one that stops the next occurrence; the first only repairs this one.
+    ⚠️ NOT DONE HERE, DELIBERATELY. F-122's correction was moved into `story` so the record is
+    visible NOW, which is what mattered this session; changing what the page renders and tightening
+    the validator both alter output the maintainer reads, and the validator change may well turn
+    other existing keys red. That is a queue item with a decision in it, not a drive-by.
+  refs:
+  - F-121
+  - F-122
 - id: F-122
   title: 'DEF-0020''s pin talks to the running stack and fails only in company --- twice now, and never alone'
   tag: The pin that passes on its own
-  status: open
+  status: fixed
   found_by: agent
   refs:
   - R-D112
@@ -8816,6 +8906,31 @@ findings:
     session against an exact test count, and CLAUDE.md says a different number means a file did not
     load and to chase that first. A pin that fails one run in two teaches the opposite habit --- run
     it again --- which is the habit that hides a real regression.
+    ⛔ THE LEAD WAS WRONG, AND MEASURING IT IS WHAT FOUND THE REAL THING. There was no worker
+    collision. Run alone at the default 5s the file passed 4 times out of 4; the failures track a
+    DEAD CONTAINER, not company. `supabase_edge_runtime_production_scheduler` had exited (255)
+    overnight on 9 Sept while the other nine stayed up --- the same container the tester had noted
+    as "no longer served" and which the lead correctly spotted and then reasoned past.
+    ⛔ AND THE FLAKE WAS THE LESS SERIOUS HALF. One dead container produces TWO symptoms, because
+    kong answers differently depending on whether it has noticed yet. Freshly stopped, the OPTIONS
+    probe HANGS --- no deadline on that fetch --- and eats the 5s budget, which is the "timeout in
+    company" everyone saw. Once kong notices, the same probe returns 503 in 7ms, `functionServed()`
+    answers false, and the pin took the `console.warn` + `return` path --- which vitest counts as
+    PASSED. Measured both ways: 19ms and zero network calls reported `1 passed`; with the container
+    restarted the identical body takes ~678ms and makes four. So the pin had three states and two of
+    them said "passed". It only ever went red by ACCIDENT, when the failure happened to be slow
+    rather than fast.
+    ⚠️ AND DEF-0022 WAS WORSE THAN THE FILE THIS CARD IS ABOUT. Its two other quiet exits are "could
+    not sign in as Dana" and "Operator A2 not found" --- neither of which means the stack is off.
+    Both mean it is ON and broken or unseeded, the exact condition a pin exists to shout about,
+    recorded as green.
+    ⭐ SO NEITHER CANDIDATE FIX WAS TAKEN, AND THE MAINTAINER CHOSE A THIRD: make the skips loud
+    (R-362). Pinning to one worker would have fixed contention that was never there; promoting
+    DEF-0020 to a fixture would have deleted the live round trip, which is the only part of it worth
+    anything. Instead the one honest skip stays, every other unreachable dependency throws through
+    `liveBackendGone`, the probe got its own 10s deadline so a dead dependency is named rather than
+    timed out, and the pins got an explicit 30s budget so a cold start is slow rather than red.
+    `src/test/livePinDiscipline.test.ts` keeps the next live pin from repeating the shape.
   lead: >-
     A suspicion, not a fact. Vitest runs files across parallel workers against ONE local stack, so
     two files touching the same auth rows or the same edge function can collide; DEF-0020's own
@@ -11816,6 +11931,90 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 100
+  date: 2026-09-09
+  title: The pin that reported "passed" three ways, and the audit that repeated its mistake on the first try
+  commits: []
+  numbers:
+    app_tests: 2617
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 804
+    migrations: 71
+  confirmed: true
+  summary: >-
+    Nothing to merge from `tester` (`git log Development..tester` empty; the hook had skipped the
+    merge on a dirty tree, checked by hand). One defect outstanding and it is not the developer's:
+    DEF-0024 is `fix-claimed` against f5fc400, waiting on the tester's own re-run. The other 23 are
+    `verified`. So the session went to F-122, and the baseline is what opened it.
+    ⛔ THE BASELINE FAILED TWO TESTS, AND THE CAUSE WAS NOT EITHER TEST. `npm run test` reported 2
+    failed / 2610 passed --- DEF-0020 and DEF-0022, both timeouts. `docker ps` listed NINE
+    containers: `supabase_edge_runtime_production_scheduler` had exited (255) overnight. Restarting
+    it and re-running gave `129 passed (129)` / `2612 passed (2612)`, session 99's numbers exactly.
+    ⭐ BUT THE INTERESTING PART IS WHAT THE PIN DID WHILE THE CONTAINER WAS DEAD, AND IT IS NOT
+    "FAILED". Measured three ways rather than reasoned: function served, the DEF-0020 body takes
+    ~678ms and makes four real round trips --- `1 passed`. Container dead long enough for kong to
+    notice, the probe gets a 503 in 7ms, `functionServed()` answers false, and the body takes 19ms
+    making ZERO network calls --- `1 passed`. Container freshly stopped, kong has not noticed, the
+    probe HANGS with no deadline on it, the 5s budget goes --- `1 failed`. Three states, two of them
+    reporting the same word, and the pin only ever went red BY ACCIDENT: when the failure happened
+    to be slow rather than fast.
+    ⚠️ SO F-122'S OWN LEAD WAS WRONG, AND SAYING SO IS THE POINT OF THE CARD. It suspected parallel
+    workers colliding on shared auth rows. Run alone at the default 5s the file passed 4 for 4; the
+    failure tracks the dead container, not company. The lead had actually NAMED the container
+    ("a function the tester separately noted as no longer served") and then reasoned past it to
+    contention. Neither of its two candidate fixes was taken: pinning to one worker would have fixed
+    a collision that was never there, and promoting DEF-0020 to a fixture would have deleted the
+    live round trip, which is the only part of it with any value.
+    ⭐ THE MAINTAINER CHOSE A THIRD, SHOWN THE THREE STATES AS A TABLE: *"Make the skips loud."*
+    R-362. One honest skip survives --- `hasRealBackend` false, meaning this run was never pointed
+    at a stack, which is CI's deliberate state. Every other unreachable dependency now throws through
+    a new `liveBackendGone` in `e2e/env.ts`, put THERE because that file's own comment has said the
+    rule in prose since it was written (*"A stopped Supabase is a FAILURE, not a skip --- a suite
+    that goes quiet when the database is down is how a green run stops meaning anything"*) and
+    nothing ever enforced it. Three sites moved: "the invite function is not being served", "could
+    not sign in as Dana", "Operator A2 not found". The last two are the worse pair --- neither means
+    the stack is off; both mean it is ON and broken, recorded as green.
+    ⭐ AND THE FIX PULLS IN BOTH DIRECTIONS ON PURPOSE, WHICH IS THE HALF THAT IS EASY TO GET
+    BACKWARDS. Stricter about pretending to pass; MORE PATIENT about being slow. The pins carry an
+    explicit 30s `LIVE_PIN_TIMEOUT_MS` instead of vitest's 5s, and the served-probe carries its own
+    10s `AbortSignal` --- discovered mid-fix, because the first version still reported a bare 30s
+    "Test timed out" against a stopped container instead of the new message: a hang is not a refusal,
+    and without a deadline the probe eats whatever budget it is given.
+    ⛔ THE AUDIT WRITTEN TO PREVENT A TEST THAT CANNOT FAIL COULD NOT FAIL, ON ITS FIRST VERSION.
+    `src/test/livePinDiscipline.test.ts` asked `text.includes("LIVE_PIN_TIMEOUT_MS")`. Deleting the
+    timeout ARGUMENT from DEF-0022 left the identifier in the import list and the file still reported
+    `5 passed` --- DEF-0024's exact shape (a slice that does not stop where the thing it asserts
+    stops), reproduced by the session that was fixing that class. Caught only by mutating it. The
+    search now starts after the import, so an imported-but-unused name satisfies nothing, and it
+    asserts `liveBackendGone(` --- the call --- rather than the bare name.
+    ⭐ EVERYTHING PROVED BY MUTATION, RESTORED FROM COPIES RATHER THAN FROM HEAD. Stopping the edge
+    runtime turns DEF-0020 red in ~10s with its reason and the way back; a wrong password and a
+    non-existent operator name each turn DEF-0022 red with theirs; reintroducing the silent-skip
+    shape turns the audit red naming the count. All three files `diff`-clean against their copies
+    afterwards.
+    ⚠️ TWO THINGS LEFT ALONE, DELIBERATELY, AND BOTH ARE THE MAINTAINER'S. `.claude/settings.json`
+    was dirty on arrival (a plugin enable) and unformatted, which fails CI's `format:check` two steps
+    before the tests --- prettier run over it, change left UNCOMMITTED since the plugin choice is
+    theirs. And `Claude outputs/voice-commands-plan.md` is untracked, is NOT gitignored, and is a
+    REVISED version of `docs/voice-commands-plan.md` ("revised the same day with the chatbot and
+    packaging") whose changes exist nowhere in git. It is the only thing `prettier --check .` still
+    flags locally; CI never sees it. Not moved, not deleted, not committed.
+    ⛔ F-123 FILED, AND IT WAS FOUND BY WALKING INTO IT WHILE WRITING THIS ENTRY. F-122's
+    correction first went into a `resolution:` key on the finding. `npm run plan` said *"plan.yaml
+    ok"*; grepping `docs/plan.html` for a sentence out of it returned ZERO. `findingCard()` emits
+    one body field, `story`, and nothing else --- and that is not only about a key I invented:
+    F-121 and F-122 both carry a `lead:` (the tester's suspicion about the cause) written in
+    sessions 98 and 99, and NEITHER has ever appeared on the page. The correction was moved into
+    `story` so it is visible now. The two real fixes --- render a finding's `lead`, and make the
+    validator REJECT an unknown key instead of dropping it --- are queued, not done: both change
+    output the maintainer reads, and the second may turn other existing keys red.
+    ⭐ THE NUMBERS, RUN HERE. `Test Files 130 passed (130)` / `Tests 2617 passed (2617)` --- 2612
+    plus the audit's 5. `tsc -b --force` 0; eslint 0; `format:check` clean over everything tracked.
+    `db_checks: 804` and `migrations: 71` are CARRIED FORWARD from session 98 and were NOT
+    re-measured: this session changed no SQL and no application code, only three test/helper files.
+  shipped: []
 - id: 99
   date: 2026-09-08
   title: 'A test that could not fail, and a search that answered "nowhere" when it meant "I could not tell"'
@@ -16098,6 +16297,24 @@ next:
 # entry sat in the queue for a session after the work landed; caught by the
 # requirement audit re-reading `next` against `docs/plan.yaml`, not assumed current.
 # ---------------------------------------------------------------------------
+- kind: task
+  text: The plan page drops what it is not expecting --- render a finding's `lead`, and make the validator refuse an unknown key
+  why: >-
+    F-123, found 9 Sept by grepping the generated HTML for a sentence that was definitely in the
+    YAML and definitely not on the page. `findingCard()` in `scripts/render-plan.mjs` emits exactly
+    one body field, `story`. A finding's `lead` --- the tester's suspicion about the cause, which is
+    the most useful paragraph on the card for whoever picks the work up --- is written by
+    `docs/plan-format.md`'s own conventions everywhere EXCEPT its finding spec, and renders as
+    nothing. F-121 and F-122 both carry one and neither has ever been seen.
+    ⭐ TWO INDEPENDENT FIXES AND THE SECOND IS THE ONE THAT MATTERS. Rendering `lead` repairs the two
+    cards that exist. Making the validator REJECT an unknown key on a finding, requirement, stage or
+    session --- rather than accepting and silently dropping it --- is what stops the next one, and it
+    would have turned the mistake red in the same second it was written instead of leaving it to a
+    hunch and a grep. Today the validator only checks that required keys are PRESENT; nothing checks
+    that a key which is present will ever be READ.
+    ⚠️ EXPECT THE SECOND TO GO RED ON THINGS THAT ARE ALREADY THERE, which is the whole reason it is
+    a queue item with a decision in it rather than a drive-by: each key it flags is either content
+    nobody can see (fix the renderer) or a typo (fix the file), and telling those apart is the work.
 - kind: task
   text: Two small holes wave four left open on purpose --- the CSV import cannot record part of a day, and a block refusal names no hours
   why: >-
