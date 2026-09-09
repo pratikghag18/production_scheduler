@@ -12475,6 +12475,83 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 115
+  date: 2026-09-09
+  title: First run on the tester's own stack -- F-127 settled clean, DEF-0026 filed on R-366's mail-catcher gap
+  commits:
+  - d338a98
+  numbers:
+    app_tests: 2663
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here: 2663 in 131 files, matching session 114 exactly. `db_checks`,
+    `migrations` and the 44-case e2e baseline are CARRIED FORWARD -- no SQL changed this session,
+    and the browser suite figure is the one from the non-fixture run (39 passed, 5 failed, see
+    below), which is the same 44 total sessions 105-111 have been reporting.
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded 4e6dce5 to 09a3ea4 cleanly. My own brief
+    changed (R-366) and I read it before running anything. Three sessions landed: R-365 (a drag
+    that would detach or re-parent a chip now asks first), F-128 found and fixed in the same
+    session (StrictMode double-write), and R-366 (the tester's own port and Supabase stack, built
+    directly in answer to my own F-127). One open defect on arrival was none -- F-127 was left
+    `open` on its own card for me to close, not filed as a blocking defect.
+    BROUGHT UP THE TESTER'S OWN STACK FOR THE FIRST REAL USE. `node scripts/tester-stack.mjs up`
+    generated the sibling workdir, ten `_tester` containers came up beside the developer's ten, and
+    `tester-run.mjs --sql --e2e` picked it up on its own (confirmed by its own first line: "pointed
+    at the tester's own stack"). All 68 numbered SQL files plus dev_demo: 823 checks, 0 failures.
+    Vitest matches the plan exactly: 2663 in 131.
+    F-128 (STRICTMODE DOUBLE-WRITE) INDEPENDENTLY MUTATION-TESTED. Reverted `confirmYes` to the old
+    shape (the side effect back inside the `setPopover` updater) on a scratch copy: the pinned
+    StrictMode case failed by name ("expected... to be called 1 times, but got 2 times"), 20 of 21
+    cases in the file stayed green. Restored, clean.
+    F-127 SETTLED, EXACTLY THE WAY THE DEVELOPER'S OWN NOTE SAID IT WOULD. Applied
+    `scripts/load/fixture.sql` to the TESTER's own database (not the shared one), started a dev
+    server on the tester's own port with the tester's own credentials exported, and ran
+    `loadSanity.spec.ts` three times with no developer session anywhere near the folder. Three real
+    commits: `1 PATCH to assignments; 1 row(s) moved, put back and read back`, every time --
+    "from Continue to settled" (R-365's prompt), nothing like the old "committed nothing" or the
+    off-screen-chip shape. Confirmed at the database after all three: `run_id IS NULL` count 0.
+    Fixture torn down clean. The developer's diagnosis (a shared dev server, not the fix itself) was
+    exactly right. F-127 closed `fixed`.
+    DEF-0026 FILED, AND IT WAS FOUND BY THE FIRST REAL USE OF WHAT THIS SESSION WAS BUILT TO PROVE
+    SAFE. `invite.spec.ts` and `passwordReset.spec.ts` both still hard-code the DEVELOPER's
+    mail-catcher port (54324) to read back an email their OWN live test just sent; the tester's
+    stack's inbucket is a different port under the same +100 shift (54424), so the email the
+    tester's own Supabase sends is delivered correctly -- to the wrong mailbox. Read rather than
+    guessed: `invite.spec.ts`'s own `FUNCTIONS_BASE` is built from `supabaseUrl` two lines above the
+    hard-coded `MAIL_BASE`, so the file already knows the pattern and simply never applied it to
+    this one constant. 5 of 44 browser cases fail, deterministically, every one of them an
+    email-following case in these two files -- not a flake, reproduced exactly on the first attempt
+    and matching the root cause precisely (2 invite cases, 3 passwordReset cases). R-366 back to
+    `contradicted`.
+    ⚠️ A LIGHTER LEAD, NOT FILED: `scripts/lib/testerStack.mjs`'s `assertGeneratedConfig` checks for
+    a surviving developer port with a hardcoded `/5432\d/` pattern rather than deriving "unshifted"
+    from the actual ports `transformConfig` read out of the real config --- correct today (the repo's
+    ports really are in that range), but a silent blind spot if Supabase's own default port scheme
+    ever moves, checked live against a synthetic config with ports renumbered to the 60000s. Noted,
+    not filed: nothing is wrong today, and TS7/TS8 already prove the CURRENT shape can fail.
+    format:check (379 files) and db:types' stale warning are the same `core.autocrlf` local
+    artifact from session 98, re-confirmed against the tester's own fresh database too.
+    R-365's screen was checked live rather than by hand-walking it a second time: the loadSanity
+    runs above drove a real browser through the actual Continue prompt three times, which is the
+    same proof a manual walk would give for this specific gesture. `attachmentChangeMessage`'s own
+    "compares run IDs, not labels" hardening (session 112's review) has no case naming it directly --
+    read the code rather than assumed: the only call site already filters on ID before calling this
+    pure formatter, so the gap is real but the scenario that would exercise it (two different run
+    ids sharing one formatted label) could not be constructed from the fixture without inventing a
+    stale-closure scenario; left as a lead for whoever touches this function next, not a defect,
+    since nothing here is currently wrong.
+    F-125 (the client-side nine seconds) and F-126 (the fixture's own room-to-move limit) are both
+    still open, both awaiting a maintainer decision or a profiler session -- nothing to add.
+    Sweeps: nothing new. Sweep 2 named the same three `week_template_items` columns already
+    explained as SQL-RPC-only reads.
+  shipped: []
 - id: 114
   date: 2026-09-09
   title: R-366 built --- the tester's port and Supabase stack are its own, and the developer exports nothing
