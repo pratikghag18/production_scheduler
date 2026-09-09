@@ -1719,7 +1719,7 @@ stages:
   track: core
   num: 34
   title: The browser tests get past the front door
-  status: now
+  status: done
   owner: agent
   refs:
   - session 71
@@ -1746,13 +1746,23 @@ stages:
     case could have found it — they mock `useSession`, and the bug is two instances of `useSession`
     disagreeing.
   state: >-
-    **Built in session 83; proven by the next push.** Twenty browser cases are green locally, fifteen of
-    them signed in. `scripts/ci-e2e.sh` stands up a fresh Supabase stack, loads the migrations, the seed
-    and the demo world, exports the stack's own URL and key, and runs every case; the workflow calls it
-    for the e2e step and keeps the dummy values for the unit, typecheck, lint and build steps, which the
-    reviewer proved read them at import time. The script resets and stops only a stack it started. The
-    database half was proven on an isolated scratch database; the runner half is proven when the next
-    push's e2e step reports the cases as run, not skipped, and green. Until then this stage stays `now`.
+    **Built in session 83; PROVEN ON A PUSH, 9 Sept, and closed in session 103.** `scripts/ci-e2e.sh`
+    stands up a fresh Supabase stack, loads the migrations, the seed and the demo world, exports the
+    stack's own URL and key, and runs every case; the workflow calls it for the e2e step and keeps the
+    dummy values for the unit, typecheck, lint and build steps, which the reviewer proved read them at
+    import time. The script resets and stops only a stack it started.
+    ⭐ THE CONDITION THIS STAGE SET FOR ITSELF WAS MET, AND IT WAS READ OFF THE RUN RATHER THAN
+    ASSUMED. This entry said the runner half is proven "when the next push's e2e step reports the
+    cases as run, not skipped, and green". GitHub run 34366609685 (Development, 9 Sept, success in
+    7m16s) prints, in order: `starting a fresh Supabase stack via Docker`; `loading migrations +
+    seed.sql + dev_demo.sql (supabase db reset)`; `app will use
+    VITE_SUPABASE_URL=http://127.0.0.1:54321` --- a REAL stack, not `example.supabase.co`; then
+    `Running 43 tests using 1 worker` and `43 passed (2.1m)`. Forty-three is the whole suite, not the
+    five signed-out smoke cases, so the signed-in specs ran rather than skipping. The stack was torn
+    down by the script's own cleanup.
+    ⚠️ AND THE UNIT STEP IN THE SAME RUN CORRECTLY SKIPPED THE TWO LIVE PINS, naming the dummy URL ---
+    which is R-362 working as designed: CI is deliberately pointed at no backend for that step, and
+    that is the ONE reason a live pin may go quiet.
 - id: S35
   track: core
   num: 35
@@ -11988,6 +11998,53 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 103
+  date: 2026-09-09
+  title: Job A was already done --- S34 closed on a real push's own log, and the half of its queue line that is NOT done cut out into its own entry
+  commits: []
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 815
+    migrations: 72
+  confirmed: true
+  summary: >-
+    Asked to explain "Job A" --- the CI database, the queue's second live item --- and the honest
+    answer turned out to be that there is nothing to explain because it is finished. This is the
+    fourth time this queue has held an entry describing work the code had already done (the four on
+    4 Sept, the eligibility switch on 5 Sept, the resize on 8 Sept), and the rule that catches it is
+    the same every time: read the code, not the entry.
+    ⭐ BUT THIS ONE WAS NOT SETTLED BY READING CODE, BECAUSE S34 DID NOT ASK FOR CODE. `scripts/ci-e2e.sh`
+    existed and `.github/workflows/ci.yml` already called it, so the build half was plainly done ---
+    session 83 did it. S34 was left at `now` for a reason it stated precisely: *"the runner half is
+    proven when the next push's e2e step reports the cases as run, not skipped, and green."* That is
+    a claim about a RUN, and the only thing that can settle it is a run.
+    ⭐ SO IT WAS READ OFF THE RUN. GitHub run 34366609685 (Development, 9 Sept, success, 7m16s)
+    prints, in order: `starting a fresh Supabase stack via Docker`; `loading migrations + seed.sql +
+    dev_demo.sql (supabase db reset)`; `app will use VITE_SUPABASE_URL=http://127.0.0.1:54321` --- a
+    REAL stack rather than `example.supabase.co`; then `Running 43 tests using 1 worker` and `43
+    passed (2.1m)`. Forty-three is the whole browser suite, not the five signed-out smoke cases, so
+    the signed-in specs RAN rather than skipped. That is exactly the condition S34 set for itself, so
+    S34 is `done` and the queue entry is out.
+    ⭐ AND THE SAME RUN INCIDENTALLY PROVED R-362 IN THE PLACE IT MATTERS. Its unit step shows both
+    live pins skipping and naming the dummy URL --- which is the ONE reason a live pin may go quiet,
+    and CI is deliberately in exactly that state. The fix from session 100 is doing on a real push
+    what it was measured doing locally.
+    ⚠️ ONE HALF OF THAT QUEUE LINE IS GENUINELY NOT DONE, AND IT DID NOT GET CARRIED OUT WITH THE
+    REST. The line read "Phase 1 --- E2E test pass (Playwright) + load sanity". The load sanity ---
+    hundreds of rows, thousands of assignments --- has never been attempted: all 43 browser cases
+    drive the DEMO world, which is three plants and a handful of people. Retiring the whole line
+    would have quietly disposed of a real question, so it is cut out into its own `next` entry rather
+    than left in a removal comment where nothing would ever look for it again. The entry names why
+    this board's cost is not linear (`board_window`'s single payload, `boardIndex`'s maps over all of
+    it, `computeFitScale`'s measure-and-remeasure) and leaves the "gate in CI or measure once" choice
+    to the maintainer, since a slow test on every push has its own cost.
+    ⚠️ NO CODE CHANGED IN THIS SESSION. The numbers are session 102's, re-stated rather than
+    re-measured, and the tree is byte-identical to that session's tip apart from `docs/`.
+  shipped:
+  - S34
 - id: 102
   date: 2026-09-09
   title: Wave four's two holes closed --- the refusal that would not say which hours, and the sheet that could not record half a day
@@ -16527,44 +16584,23 @@ next:
 # named, and the drag TOAST, which had no Absent branch at all and printed a uuid.
 # The import half turned out to need a MIGRATION (0073), which the entry did not
 # say and 0069's own header had already found and deferred.
+#
+# Removed on 9 Sept, DONE and CHECKED AGAINST A RUN rather than against the entry:
+# "Phase 1 --- E2E test pass (Playwright) + load sanity". Its own last update said
+# job B was finished locally and "the remaining work is exactly the CI database",
+# pointing at S34. S34 had been BUILT in session 83 and left at `now` pending one
+# thing: a push whose e2e step reports the cases as RUN, not skipped, and green.
+# GitHub run 34366609685 does exactly that --- a real stack stood up, the demo
+# world loaded, 43 of 43 browser cases passed against http://127.0.0.1:54321. So
+# the entry had been describing finished work for a session, and S34 is now `done`.
+#
+# ⚠️ ONE PIECE OF THE ORIGINAL LINE IS GENUINELY NOT DONE AND IS NOT SILENTLY
+# CARRIED HERE: the LOAD SANITY the roadmap asked for (hundreds of rows, thousands
+# of assignments). Nothing in e2e/ generates that volume. It is a separate,
+# smaller question --- does the board stay usable at scale --- and it belongs in
+# its own entry when the maintainer wants it, not hidden inside a line whose
+# other half is finished.
 # ---------------------------------------------------------------------------
-- kind: task
-  text: Phase 1 — E2E test pass (Playwright) + load sanity
-  why: >-
-    ⚠️ MEASURED 5 SEPT, AND IT IS TWO JOBS RATHER THAN ONE. This line used to read, in full,
-    *"Unchecked Phase 1 item."* — five words, which is why it was described to the maintainer as a
-    medium-sized testing task and then corrected in the same conversation. What is actually in it was
-    found by reading `playwright.config.ts` and `.github/workflows/ci.yml` rather than the line.
-    ⛔ THE BROWSER TESTS CANNOT SIGN IN, AND NOTHING BEHIND THE SIGN-IN SCREEN HAS EVER BEEN DRIVEN.
-    Both the local config and CI point at `https://example.supabase.co` with `dummy-anon-key` — chosen
-    deliberately so the build and the smoke test run without secrets, and correct for what the smoke
-    test does. The consequence is that all five cases in `e2e/smoke.spec.ts` are SIGNED-OUT cases: the
-    redirect to sign-in, the sign-in page carrying no shell, `/admin` redirecting rather than rendering
-    its refusal, the gate remembering path and query, and an unknown route being gated too. Each is
-    right and worth keeping. None of them reaches the board, the admin rail, or any of the 279
-    requirements this app is mostly made of.
-    ⭐ SO JOB A IS PLUMBING AND JOB B IS TESTING, and A blocks B. A: stand a real database up for the
-    test run — a Postgres/Supabase service container in CI, the 52 migrations applied, a fixture
-    loaded, and real `VITE_SUPABASE_*` values handed to the app instead of the dummies. B: the
-    walkthroughs — sign in as each of the dev switcher's four people, open the board, drag an
-    assignment, walk the admin rail — plus the load sanity the roadmap line asks for (hundreds of rows,
-    thousands of assignments).
-    ⛔ UPDATE, SESSION 71: JOB B IS DONE LOCALLY AND JOB A IS THE WHOLE OF WHAT IS LEFT. The premise
-    above was half wrong and the correction is worth keeping: A does not block B, because `.env.local`
-    already points the LOCAL run at the running stack. `e2e/signedIn.spec.ts` signs in as three roles
-    and reads the admin rail, green locally, skipping where there is no backend. So the remaining work
-    is exactly the CI database, and the reward for it is already written and waiting. See S34.
-    ⭐ AND JOB A IS SMALLER THAN IT LOOKS, BECAUSE THE FIXTURE ALREADY EXISTS AND IS ALREADY TESTED.
-    `supabase/dev_demo.sql` builds three plants, a line-scoped supervisor and the people the switcher
-    signs in as, and DEF-0006 put it on its own runner in session 56 (`supabase/tests/dev_demo_test.sql`)
-    precisely so it cannot half-run again. The work is making the test run LOAD what is already there,
-    not inventing test data.
-    ⚠️ AND IT IS THE LANE THAT MUST NOT BE RUN BESIDE A FEATURE THAT ADDS A MIGRATION. Job A is
-    rewriting what the schema is for the test run; Copy Week adds one. Worse, B writes assertions
-    describing the board while Copy Week changes the board — F-090's shape exactly, a shared FACT
-    rather than a shared file, which splitting by file does not prevent. A beside Copy Week is safe (A
-    never touches `src/` and never asserts about a screen); B belongs after the board has stopped
-    moving, and can then cover Copy Week too.
 - kind: task
   text: Wave three’s last loose end — the emailed reset link lands where the dev server does not answer
   why: >-
@@ -16575,6 +16611,25 @@ next:
     re-read in the code before this entry was cut, not assumed. What is left is configuration, not
     code: the emailed reset link lands on 127.0.0.1, where the dev server does not answer, until the
     local stack restarts with the redirect allow-list F-106 added. Restart the stack and walk it once.
+- kind: task
+  text: Load sanity --- does the board stay usable with hundreds of rows and thousands of assignments
+  why: >-
+    THE HALF OF "Phase 1 --- E2E test pass + load sanity" THAT WAS NOT DONE, cut out on 9 Sept when
+    the other half closed rather than being carried along inside a line that read as finished. The
+    browser suite now runs 43 cases against a real stack on every push (S34), but every one of them
+    drives the DEMO world, which is three plants and a handful of people --- nothing in `e2e/`
+    generates volume, so nothing has ever asked whether the board is usable at scale.
+    ⚠️ AND IT IS A REAL QUESTION HERE RATHER THAN A GENERIC ONE, because this board's cost is not
+    linear in rows. `board_window` returns runs, assignments, operators and their homes for a whole
+    subtree over a window in ONE payload; `boardIndex` builds several maps over all of it on every
+    load; and `computeFitScale` measures and re-measures to fit the window's height. Any of those
+    could be the thing that gives first, and guessing which is the wrong way to find out.
+    ⭐ THE SHAPE OF THE WORK: a fixture that seeds volume (a plant with hundreds of cells, a week
+    with thousands of assignments) on the SAME path `dev_demo.sql` uses so it cannot half-run
+    unnoticed (DEF-0006's lesson), then one measurement of the board's first paint and of a drag,
+    with a number written into the plan rather than an impression. Whether it becomes a gate in CI or
+    a thing measured once and revisited is the maintainer's call --- a slow test that runs on every
+    push has its own cost.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   requirement: R-016
