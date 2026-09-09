@@ -162,6 +162,94 @@ test("a forgotten password is reset by email and the new one works", async ({ pa
   ).toBeVisible({ timeout: 15_000 });
 });
 
+/**
+ * ⭐⭐ THE EMAILED LINK ITSELF, FOLLOWED THE WAY A BROWSER FOLLOWS IT (F-106).
+ *
+ * ⛔ WHY THIS EXISTS BESIDE THE TEST ABOVE, WHICH LOOKS LIKE IT ALREADY COVERS
+ * THIS. It does not, and the difference is the whole bug. `recoveryHash` pulls
+ * the token out of the mail and calls `verifyOtp` THROUGH THE API, then builds
+ * the URL hash itself and navigates straight to `/reset-password`. So it proves
+ * the reset SCREEN works while never once travelling through GoTrue's own
+ * `/auth/v1/verify` redirect --- and that redirect is the only place the bug
+ * lives. F-106: a `redirect_to` whose host is neither `site_url` nor on
+ * `additional_redirect_urls` is rejected, GoTrue falls back to the site_url ROOT
+ * and STRIPS THE PATH, and the recovery tokens land on `/` --- so the board
+ * renders for someone who has not chosen the password they are now signed in
+ * with, and the reset form never appears. The existing test cannot fail on that.
+ *
+ * ⭐ SO THIS ONE NAVIGATES TO THE RAW LINK OUT OF THE EMAIL and asserts where the
+ * browser ENDS UP. It is the only case in the suite that exercises the
+ * configuration rather than the code, which is what F-106 turned out to be:
+ * `supabase/config.toml` lists `http://localhost:5173/**`, and that line does
+ * nothing until the stack is restarted.
+ *
+ * ⚠️ IT ASSERTS THE PATH, NOT THE FORM ALONE. A test that only waited for the
+ * password fields could pass on a redirect to `/` if the route gate happened to
+ * bounce a recovery session to the reset screen --- which it deliberately does
+ * (R-347's `recovery` flag is the belt to this braces). Both are wanted, and
+ * they are different promises: the flag makes a stripped link recoverable, this
+ * makes the link land right in the first place. Asserting the URL keeps them
+ * apart, so a regression in the CONFIG cannot hide behind the flag.
+ *
+ * Measured both ways on 9 Sept before this was written: asking for
+ * `localhost:5173/reset-password` (on the list) answers a 303 to
+ * `http://localhost:5173/reset-password#access_token=...&type=recovery`, while
+ * asking for an off-list host answers a 303 to `http://127.0.0.1:5173#...` ---
+ * the site_url root, path gone, tokens still attached.
+ */
+test("the emailed reset link lands on the reset screen, not the board", async ({
+  page,
+  baseURL,
+}) => {
+  const email = `link-${Date.now()}@example.test`;
+  const client = createClient(supabaseUrl, supabaseAnonKey);
+
+  const signUp = await client.auth.signUp({ email, password: "initial-pass-1" });
+  expect(signUp.error, signUp.error?.message).toBeNull();
+
+  // The app asks for `window.location.origin + "/reset-password"`; `baseURL` IS
+  // that origin under Playwright, so this is the real request rather than a
+  // hard-coded copy of it that could drift from ForgotPasswordPage.
+  const redirectTo = `${baseURL}/reset-password`;
+  const reset = await client.auth.resetPasswordForEmail(email, { redirectTo });
+  expect(reset.error, reset.error?.message).toBeNull();
+
+  // The raw link, exactly as it appears in the mail -- no verifyOtp, no
+  // hand-built hash. Everything after this is GoTrue's own redirect.
+  const link = await fetchResetLink(email);
+
+  /*
+   * ⭐ ASSERT THE LINK BEFORE FOLLOWING IT, so a regression fails HERE with the
+   * cause in the message rather than four steps later with a symptom. GoTrue
+   * rewrites `redirect_to` in the mail itself when the host is not allowed, so
+   * this one parameter IS the bug, readable without a browser. Measured under a
+   * deliberately off-list host: the link comes back carrying
+   * `redirect_to=http://127.0.0.1:5173` -- the site_url root, path gone.
+   *
+   * ⚠️ AND WITHOUT THIS THE FAILURE IS ACTIVELY MISLEADING ON THIS MACHINE.
+   * Following the stripped link puts the browser on `http://127.0.0.1:5173`,
+   * where Vite is not listening (it binds `localhost`), so the run dies with a
+   * bare `net::ERR_CONNECTION_REFUSED` that reads like the dev server is down
+   * rather than like the auth config is wrong. That is the queue entry's own
+   * words for this bug -- "lands on 127.0.0.1, where the dev server does not
+   * answer" -- and it is exactly the wrong place to start debugging from.
+   */
+  const asked = new URL(link).searchParams.get("redirect_to");
+  expect(
+    asked,
+    `GoTrue rewrote the emailed link's redirect_to. Asked for ${redirectTo}, the mail carries ${asked}. ` +
+      "That means the host is not on the auth server's allow-list, so it fell back to site_url's ROOT " +
+      "and stripped the path (F-106). Check `additional_redirect_urls` in supabase/config.toml -- and " +
+      "remember that line does nothing until the stack is restarted (`supabase stop && supabase start`).",
+  ).toBe(redirectTo);
+
+  await page.goto(link);
+
+  // WHERE IT LANDED is the second assertion. A stripped path puts this on `/`.
+  await expect(page).toHaveURL(/\/reset-password/, { timeout: 15_000 });
+  await expect(page.getByLabel("New password", { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
 test("a signed-in viewer changes her own password and stays signed in", async ({ page }) => {
   const tempPassword = "vina-temp-pass-7";
   try {

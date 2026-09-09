@@ -8081,6 +8081,24 @@ requirements:
   - kind: e2e
     file: e2e/passwordReset.spec.ts
     cases: >-
+      session 105 --- "the emailed reset link lands on the reset screen, not the board", the only
+      case in the suite that travels through GoTrue's own `/auth/v1/verify` redirect. The case
+      beside it could not: `recoveryHash` pulls the token out of the mail, calls `verifyOtp` THROUGH
+      THE API and builds the URL hash itself, so it proves the reset SCREEN while never touching the
+      redirect where F-106 lives. This one asserts the mail's own `redirect_to` still carries the
+      path BEFORE following it --- so a regression fails naming the cause and the fix rather than
+      four steps later as a bare ERR_CONNECTION_REFUSED --- then follows the raw link and asserts the
+      browser ends on /reset-password with the form up
+  - kind: mutation
+    file: e2e/passwordReset.spec.ts
+    cases: >-
+      proved able to fail. Asking for an off-allow-list host reproduces the exact reported symptom:
+      the mail comes back carrying `redirect_to=http://127.0.0.1:5173` --- site_url's ROOT, path
+      stripped --- the case goes red naming both, and following it lands on 127.0.0.1 where Vite is
+      not listening, which is the queue entry's own words for this bug. Restored from a copy.
+  - kind: e2e
+    file: e2e/passwordReset.spec.ts
+    cases: >-
       "a forgotten password is reset by email and the new one works" (a throwaway account, the
       emailed token exchanged live, the new password set on /reset-password and then used to sign
       in); "a recovery session dropped on the board's URL is sent to the reset screen" (the tokens
@@ -11998,6 +12016,67 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 105
+  date: 2026-09-09
+  title: The reset link lands where it should, and the test that could not see it now can
+  commits: []
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 815
+    migrations: 72
+    e2e: 44
+  confirmed: true
+  summary: >-
+    Merged `tester` first: session 104 filed nothing, reproduced 0073's mutation independently on a
+    scratch copy rather than taking this branch's word, and read every client-side claim in the code.
+    The merge conflicted the way CLAUDE.md predicts --- both sides adding a session at the top of
+    `plan.yaml` --- and both were kept, newest first, the tester's becoming 104 on commit time
+    (11:30 against 11:22).
+    ⭐ THE QUEUE'S SMALLEST ITEM, AND IT WAS CONFIGURATION EXACTLY AS THE ENTRY SAID. `config.toml`
+    has carried `additional_redirect_urls = [..., "http://localhost:5173/**"]` since F-106, with a
+    comment saying it takes effect at the next `supabase start`. It never had one. MEASURED rather
+    than assumed before asking the maintainer to restart: the running container answered
+    `GOTRUE_URI_ALLOW_LIST=https://127.0.0.1:5173` --- one entry, no localhost. The maintainer
+    restarted the stack; it now answers `https://127.0.0.1:5173,http://localhost:5173/**`.
+    ⭐ WALKED THE REAL LINK, BOTH WAYS, BEFORE WRITING ANYTHING. A throwaway script signed an account
+    up, asked for a reset, pulled the mail out of the catcher and followed the link with
+    `redirect: "manual"` to read the Location header GoTrue actually sets. On the allow-list: `303`
+    to `http://localhost:5173/reset-password#access_token=...&type=recovery` --- path kept, tokens
+    attached. Off it: `303` to `http://127.0.0.1:5173#...` --- the site_url ROOT, path gone, tokens
+    still attached, which is F-106's whole story reproduced on demand. The migration applied by hand
+    in session 102 survived the restart (the volume is preserved), confirmed by reading the live
+    function body rather than assuming.
+    ⛔ AND THE TEST THAT WAS SUPPOSED TO COVER THIS COULD NOT SEE IT --- THE REASON THIS SESSION IS
+    NOT JUST A RESTART. `e2e/passwordReset.spec.ts` already had "a forgotten password is reset by
+    email and the new one works", which reads like exactly this. It is not: `recoveryHash` pulls the
+    token out of the mail, calls `verifyOtp` THROUGH THE API, builds the URL hash itself and
+    navigates straight to `/reset-password`. So it proves the reset SCREEN and never once travels
+    through GoTrue's `/auth/v1/verify` redirect --- which is the only place the bug lives. The suite
+    would have stayed green through the entire outage. Same class as DEF-0024 and session 100's live
+    pins: a test whose slice stops short of the thing it is named for.
+    ⭐ SO A CASE THAT FOLLOWS THE RAW LINK, and it asserts the mail's own `redirect_to` BEFORE
+    following it. That ordering is deliberate and was chosen from a measurement: with the assertion
+    after the navigation, the mutation died as a bare `net::ERR_CONNECTION_REFUSED` at
+    `http://127.0.0.1:5173`, because Vite binds `localhost` and not the loopback IP --- which reads
+    like the dev server is down rather than like the auth config is wrong, and is the worst possible
+    place to start debugging. Asserting the link first fails with the cause and the cure in one
+    sentence, naming `additional_redirect_urls` and the restart it needs. It also asserts the URL
+    rather than only the form, so a config regression cannot hide behind R-347's `recovery` flag,
+    which would bounce a stripped link to the reset screen anyway --- two different promises, kept
+    apart on purpose.
+    ⚠️ WHAT IS NOT PROVEN HERE. The mutation used an off-allow-list HOST to reproduce the stripped
+    path, because the real regression --- the allow-list losing `localhost` --- lives in
+    `config.toml` and costs a stack restart to induce. The two produce the identical GoTrue
+    behaviour, which was measured directly at the redirect, but they are not the same edit and this
+    entry does not claim they are.
+    ⭐ THE NUMBERS. `Test Files 130 passed (130)` / `Tests 2645 passed (2645)`; the browser suite is
+    `44 passed`, up from 43. tsc 0; eslint 0; format:check clean over everything tracked.
+    `db_checks: 815` and `migrations: 72` are carried from session 102 and were NOT re-measured ---
+    no SQL changed and the migration tree is byte-identical.
+  shipped: []
 - id: 104
   date: 2026-09-09
   title: Wave four's two holes tested -- the import migration's mutation reproduced cold, the zone fallback read in the code
@@ -16660,17 +16739,19 @@ next:
 # smaller question --- does the board stay usable at scale --- and it belongs in
 # its own entry when the maintainer wants it, not hidden inside a line whose
 # other half is finished.
+#
+# Removed on 9 Sept, DONE: "wave three's last loose end --- the emailed reset link
+# lands where the dev server does not answer". It was configuration exactly as the
+# entry said. The running auth container answered with a one-entry allow-list, the
+# maintainer restarted the stack, and it now carries `http://localhost:5173/**`;
+# the real emailed link was then walked end to end and keeps its path.
+#
+# ⚠️ AND IT LEFT SOMETHING BEHIND THAT IS NOW COVERED RATHER THAN LOST: the suite
+# could not have seen this. The existing reset case calls `verifyOtp` through the
+# API and builds the URL hash itself, so it never travels through the redirect the
+# bug lives in. A case that follows the RAW emailed link is now in
+# `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
-- kind: task
-  text: Wave three’s last loose end — the emailed reset link lands where the dev server does not answer
-  why: >-
-    ONE THING, NOT THREE. This entry named three, and the tester was right that two of them were
-    already closed by F-111 in the same session that named them: the board’s fetch bounds now follow
-    the plant-local day boundaries the axis uses (R-353), and the crew-drag toast names the absent
-    person (R-357, `useDragGesture.ts` line 687, pinned by dragGesture.test.ts’s R-357 case). Both
-    re-read in the code before this entry was cut, not assumed. What is left is configuration, not
-    code: the emailed reset link lands on 127.0.0.1, where the dev server does not answer, until the
-    local stack restarts with the redirect allow-list F-106 added. Restart the stack and walk it once.
 - kind: task
   text: Load sanity --- does the board stay usable with hundreds of rows and thousands of assignments
   why: >-
