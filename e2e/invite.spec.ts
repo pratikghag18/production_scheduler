@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
-import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from "./env";
+import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey, e2eBaseUrl } from "./env";
 
 /**
  * The INVITE loop (P1-6c, S24), driven end to end against the live local stack
@@ -137,7 +137,9 @@ async function callInvite(
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${token}`,
-      Origin: "http://localhost:5173",
+      // R-366: the origin a real browser would send is wherever THIS run's
+      // dev server is listening, not always 5173 — the tester's is 5174.
+      Origin: e2eBaseUrl,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),

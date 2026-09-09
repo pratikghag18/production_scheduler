@@ -11,6 +11,10 @@ export default defineConfig({
     },
   },
   server: {
+    // R-366: the tester runs its own dev server on a port of its own, passed
+    // as `npm run dev -- --port <E2E_PORT>` (playwright.config.ts, via
+    // e2e/env.ts). The CLI flag overrides this default, so it stays 5173 for
+    // the developer, who exports nothing.
     port: 5173,
   },
   build: {

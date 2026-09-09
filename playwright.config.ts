@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { supabaseUrl, supabaseAnonKey } from "./e2e/env";
+import { supabaseUrl, supabaseAnonKey, e2ePort, e2eBaseUrl } from "./e2e/env";
 
 /*
  * ⚠️ THE CREDENTIALS AND THE "IS THERE A BACKEND" VERDICT LIVE IN `e2e/env.ts`,
@@ -10,6 +10,13 @@ import { supabaseUrl, supabaseAnonKey } from "./e2e/env";
  *
  * HealthPill going "unreachable" against the dummy URL is expected and must not
  * fail the smoke test.
+ *
+ * ⭐ THE PORT LIVES THERE TOO (R-366), same reason: `e2ePort`/`e2eBaseUrl` come
+ * from `e2e/env.ts` so this file and the specs that build a URL by hand agree
+ * on where the dev server actually is. `--strictPort` turns a taken port into
+ * an error instead of Vite silently hopping to the next free one — a silent
+ * hop is exactly how a tester run ends up talking to the wrong server, which is
+ * the failure R-366 exists to stop.
  */
 
 export default defineConfig({
@@ -20,7 +27,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: "html",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: e2eBaseUrl,
     trace: "on-first-retry",
   },
   projects: [
@@ -48,8 +55,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev",
-    url: "http://localhost:5173",
+    command: `npm run dev -- --port ${e2ePort} --strictPort`,
+    url: e2eBaseUrl,
+    // Reusing a server already on THIS run's port is still fine — including
+    // the tester's own port, once it has one of its own.
     reuseExistingServer: !process.env.CI,
     env: {
       VITE_SUPABASE_URL: supabaseUrl,

@@ -38,7 +38,11 @@
 # it asks the built world the questions R-D112 actually makes, from outside.
 # ---------------------------------------------------------------------------
 set -uo pipefail
-C=supabase_db_production_scheduler
+# R-366: the tester's own Supabase stack names its db container
+# ..._production_scheduler_tester; SUPABASE_DB_CONTAINER (set by
+# `scripts/tester-stack.mjs env`) lets this reach it. Unset, or on the
+# developer's machine, nothing changes.
+C="${SUPABASE_DB_CONTAINER:-supabase_db_production_scheduler}"
 DB=sql_test_db
 DEMO_DB=sql_demo_db
 DEMO_TEST=dev_demo_test.sql

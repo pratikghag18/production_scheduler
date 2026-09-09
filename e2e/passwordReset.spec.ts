@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
-import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from "./env";
+import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey, e2eBaseUrl } from "./env";
 
 /**
  * The password RESET / CHANGE loop, driven end to end in a real browser against
@@ -115,7 +115,9 @@ async function recoveryHash(email: string): Promise<string> {
   expect(signUp.error, signUp.error?.message).toBeNull();
 
   const reset = await admin.auth.resetPasswordForEmail(email, {
-    redirectTo: "http://localhost:5173/reset-password",
+    // R-366: this run's own port, not always 5173 — the tester's is 5174,
+    // and `supabase/config.toml`'s allow-list must name whichever it is.
+    redirectTo: `${e2eBaseUrl}/reset-password`,
   });
   expect(reset.error, reset.error?.message).toBeNull();
 

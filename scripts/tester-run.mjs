@@ -25,6 +25,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
+import { resolveWorkdir, statusFilePath } from "./lib/testerStack.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = new Set(process.argv.slice(2));
@@ -33,6 +34,40 @@ const WANT_E2E = args.has("--e2e");
 const SKIP_TYPES = args.has("--no-types");
 const isWin = process.platform === "win32";
 const npm = isWin ? "npm.cmd" : "npm";
+
+// ---------------------------------------------------------------- -1. which stack this run is pointed at
+// R-366: `scripts/tester-stack.mjs up` writes `tester-stack.json` in its
+// generated workdir. When that file exists, point THIS run at it — but only
+// for a variable the environment has not already set, so a session that
+// exported its own values (or the `tester` subagent, delegated from the
+// developer session against whatever is on disk) is never silently
+// overridden. `run()` below hands every child process `process.env` as-is
+// (no `env:` override is passed to spawnSync), so setting it here is enough
+// for the SQL runs and `npm run e2e` alike to inherit it. When the file does
+// not exist, this run is on the developer's shared stack and port — the
+// behaviour from before R-366, unchanged.
+const TESTER_WORKDIR = resolveWorkdir(ROOT);
+const TESTER_STACK_FILE = statusFilePath(TESTER_WORKDIR);
+if (existsSync(TESTER_STACK_FILE)) {
+  const stack = JSON.parse(readFileSync(TESTER_STACK_FILE, "utf8"));
+  const setUnlessPresent = (key, value) => {
+    if (!process.env[key]) process.env[key] = String(value);
+  };
+  setUnlessPresent("VITE_SUPABASE_URL", stack.supabaseUrl);
+  setUnlessPresent("VITE_SUPABASE_ANON_KEY", stack.anonKey);
+  setUnlessPresent("SUPABASE_DB_CONTAINER", stack.dbContainer);
+  setUnlessPresent("E2E_PORT", stack.port);
+  if (!process.env.SUPABASE_WORKDIR) process.env.SUPABASE_WORKDIR = TESTER_WORKDIR;
+  console.log(
+    `tester-run: pointed at the tester's own stack — ${process.env.VITE_SUPABASE_URL}, ` +
+      `container ${process.env.SUPABASE_DB_CONTAINER}, port ${process.env.E2E_PORT}.`,
+  );
+} else {
+  console.log(
+    `tester-run: no tester stack found at ${TESTER_STACK_FILE} — running against the ` +
+      "developer's shared stack and port 5173 (run `node scripts/tester-stack.mjs up` for a stack of your own).",
+  );
+}
 
 const report = [];
 const summary = [];
@@ -86,11 +121,45 @@ run("plan validates", "node", ["scripts/render-plan.mjs", "--check"]);
 
 // ---------------------------------------------------------------- 2. generated types, then tsc
 if (!SKIP_TYPES) {
-  const before = existsSync(join(ROOT, "src/lib/database.types.ts"))
-    ? readFileSync(join(ROOT, "src/lib/database.types.ts"), "utf8")
-    : "";
-  const r = run("db:types (regenerate from the local database)", npm, ["run", "db:types"]);
-  const after = readFileSync(join(ROOT, "src/lib/database.types.ts"), "utf8");
+  const typesPath = join(ROOT, "src/lib/database.types.ts");
+  const before = existsSync(typesPath) ? readFileSync(typesPath, "utf8") : "";
+  // R-366: `npm run db:types` always targets the CLI's default workdir (the
+  // developer's) — that script is left alone on purpose, since a second knob
+  // there is not what anyone asked for. On a tester stack (SUPABASE_WORKDIR
+  // set above) the CLI is called directly with --workdir instead, writing the
+  // same file the npm script writes; confirmed 9 Sept that this CLI version
+  // honours --workdir for `gen types --local`.
+  let r;
+  if (process.env.SUPABASE_WORKDIR) {
+    const cmdArgs = [
+      "supabase",
+      "gen",
+      "types",
+      "typescript",
+      "--local",
+      "--workdir",
+      process.env.SUPABASE_WORKDIR,
+    ];
+    H(`db:types (regenerate from the tester's stack) — \`npx ${cmdArgs.join(" ")}\``);
+    const t0 = Date.now();
+    const spawn = spawnSync("npx", cmdArgs, {
+      cwd: ROOT,
+      encoding: "utf8",
+      shell: isWin,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const secs = ((Date.now() - t0) / 1000).toFixed(0);
+    r = { ok: spawn.status === 0, out: (spawn.stdout ?? "") + (spawn.stderr ?? "") };
+    if (r.ok) writeFileSync(typesPath, spawn.stdout ?? "");
+    CODE(r.ok ? spawn.stdout || "(no output)" : r.out || "(no output)");
+    P(`exit ${spawn.status} · ${secs}s`);
+    summary.push(
+      `${r.ok ? "ok  " : "FAIL"}  db:types (tester stack)${r.ok ? "" : ` (exit ${spawn.status})`}`,
+    );
+  } else {
+    r = run("db:types (regenerate from the local database)", npm, ["run", "db:types"]);
+  }
+  const after = readFileSync(typesPath, "utf8");
   if (r.ok && before !== after) {
     P(
       "⚠️ **`database.types.ts` CHANGED when regenerated.** The committed types did not match the database. That is a finding (doc-drift class) — the developer committed a migration without regenerating, or regenerated against a different stack.",

@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Browser, type Locator } from "@playwright/test";
-import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { hasRealBackend, NO_BACKEND_REASON, e2eBaseUrl } from "./env";
 
 /**
  * THE NET FOR THE "RESOLVED THROUGH THE CALLER'S OWN VIEW" CLASS OF DEFECT.
@@ -44,9 +44,11 @@ test.skip(!hasRealBackend, NO_BACKEND_REASON);
 
 const PASSWORD = "devpassword";
 // newContext() does not inherit use.baseURL from the config, so the manually
-// created contexts in this file carry it themselves. Matches the config's
-// webServer url.
-const BASE_URL = "http://localhost:5173";
+// created contexts in this file carry it themselves. R-366: this is
+// `e2eBaseUrl` from e2e/env.ts, the same value the config's webServer url
+// uses, so a tester run on its own port (5174) does not silently point these
+// contexts back at the developer's 5173.
+const BASE_URL = e2eBaseUrl;
 
 type Kind = "company-admin" | "site-admin" | "supervisor" | "viewer";
 

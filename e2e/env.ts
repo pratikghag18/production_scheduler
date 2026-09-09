@@ -65,6 +65,22 @@ export const supabaseUrl = pick("VITE_SUPABASE_URL", DUMMY_URL);
 export const supabaseAnonKey = pick("VITE_SUPABASE_ANON_KEY", DUMMY_ANON_KEY);
 
 /**
+ * ⭐ THE TESTER'S PORT KNOB (R-366). One Vite dev server on a fixed
+ * `localhost:5173` meant the tester's browser runs executed whatever was on
+ * the developer's disk mid-edit (F-127's four attempts). `E2E_PORT` lets a
+ * run choose its own port; the default, 5173, is the developer's port
+ * unchanged, so a developer session that exports nothing behaves exactly as
+ * before. `playwright.config.ts` needs this value for `use.baseURL` AND
+ * `webServer.url`/`command`, and a few specs need it directly (a redirect URL,
+ * an `Origin` header, a manually-created browser context that does not
+ * inherit `use.baseURL`) — the same "needed in more than one place" shape as
+ * `supabaseUrl` above, so it is computed once here rather than risking a
+ * second copy that drifts from this one.
+ */
+export const e2ePort = Number(process.env.E2E_PORT || 5173);
+export const e2eBaseUrl = `http://localhost:${e2ePort}`;
+
+/**
  * ⭐ THE VERDICT, AND IT IS DELIBERATELY ABOUT THE URL RATHER THAN ABOUT `CI`.
  * A developer with no `.env.local` gets the same skip a CI run does, which is
  * the honest answer for both: there is no backend here. Keying on

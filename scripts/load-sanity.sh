@@ -21,7 +21,10 @@
 # real `authenticated` session with a real grant.
 set -uo pipefail
 
-C=supabase_db_production_scheduler
+# R-366: reach the named Supabase stack (SUPABASE_DB_CONTAINER, set by
+# `scripts/tester-stack.mjs env` on the tester's stack); unset, this is the
+# developer's own container, unchanged.
+C="${SUPABASE_DB_CONTAINER:-supabase_db_production_scheduler}"
 DB=load_test_db
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KEEP=0

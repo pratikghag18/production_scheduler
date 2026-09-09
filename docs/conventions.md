@@ -22,3 +22,12 @@ the rules.
 - Files: components `PascalCase.tsx`, everything else `camelCase.ts`. One React component per
   file, default-exported only for route-level pages; everything else named exports.
 - Migrations are append-only (see P1-2). Never edit a migration that has run.
+
+## Local setup: the developer's stack and the tester's
+
+R-366. Two knobs keep the developer's dev server/Supabase stack and the tester's apart, so a
+developer's edits or fixtures never reach a tester run: `E2E_PORT` (default 5173, read in
+`e2e/env.ts`) picks the Vite port `playwright.config.ts` and Vite start on, and `TESTER_STACK_DIR`
+(default `<repo>/../scheduler-test-stack`) is where `scripts/tester-stack.mjs up` generates the
+tester's own Supabase workdir, ports, and `project_id`. Neither changes anything for the developer
+until exported; the tester exports what `scripts/tester-stack.mjs env` prints.

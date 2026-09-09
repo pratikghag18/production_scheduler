@@ -31,8 +31,16 @@ the tree you are given is dirty, say so at the top of your report and do not cal
 verified. Your commits (defects, pins, your plan entry) land on `tester`; the maintainer merges
 `tester` into `Development` when he wants them — you never commit to `Development` yourself.
 
-Docker, `supabase start` and `npm run dev` are expected to be running on this machine. If the
-stack is down, say so and run with `--no-types`; a typecheck without regenerated types is
+Docker is expected to be running on this machine. R-366: the tester runs its OWN Supabase stack,
+apart from the developer's — start it once per machine boot with `node scripts/tester-stack.mjs
+up` (`status` to check whether it is already up), then read `node scripts/tester-stack.mjs env`
+and export what it prints in this PowerShell session (`VITE_SUPABASE_URL`,
+`VITE_SUPABASE_ANON_KEY`, `SUPABASE_DB_CONTAINER`, `E2E_PORT`, `SUPABASE_WORKDIR`).
+`tester-run.mjs` picks that stack up by itself from there (it looks for the workdir's
+`tester-stack.json`) and starts and stops its own dev server, on its own port, for `--e2e`.
+For opening a screen by hand (see below), start that dev server yourself, on the SAME port:
+`npm run dev -- --port $env:E2E_PORT --strictPort`. If the stack is down and you are not going to
+bring it up, say so and run with `--no-types`; a typecheck without regenerated types is
 **inconclusive**, and you must write that word rather than "clean".
 
 ## The run, in order
@@ -66,7 +74,8 @@ stage was in the diff, and for each `next` item marked done:
   behaviour is also wrong; otherwise note in your session entry which uncovered requirements you
   checked by hand and how.
 
-**The screens.** For anything with a screen, open it at `http://localhost:5173` as the roles the
+**The screens.** For anything with a screen, open it at `http://localhost:5174` (the tester's own
+port, R-366) as the roles the
 requirement names and look. The largest defects in this project were found by opening a screen,
 not by 1,500 green tests: a list showing 12 places where the server allows 0; a dropdown
 rendering its first option and saving a different one; a grid rendering empty with every check
