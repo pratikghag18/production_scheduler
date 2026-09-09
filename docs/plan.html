@@ -121,7 +121,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">823</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">73</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
-  <div class="stat "><span class="n">258 / 308</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">258 / 309</span><span class="l">requirements covered by a test</span></div>
 </div>
   <p class="fine">Measured at commit <code>d26d3f5</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -3021,7 +3021,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>308 requirements · 258 covered · 26 uncovered · 0 contradicted · 24 superseded</caption>
+<caption>309 requirements · 258 covered · 27 uncovered · 0 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -5177,6 +5177,13 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
       <br><span class="fine">session 110 conversation · maintainer · BUILT 9 Sept (session 111, 021f56b). DECIDED 9 Sept (maintainer, session 110), out of F-126 / DEF-0025, where a load-sanity drag silently detached a chip. The alternative on the table --- truncate the chip to fit its run and then ask --- was rejected: it restores the clamp P1-4e lifted (`boundsFor` in `useDragGesture.ts`) and takes away the move-between-runs gesture D66 exists for, and it changes the shape the person asked for (an 8-hour block becomes a 7-hour one) rather than saying what will happen. The mechanism already exists: `askConfirm` on run resize (&quot;N crew assignments fall outside the new run window. Continue?&quot;) is the same two-button prompt, anchored at the drop. A &quot;keep inside the run&quot; third answer was considered and deferred until someone asks for it. Knock-on: `e2e/loadSanity.spec.ts`'s drag will have to click Continue before it can time the save; its four-column restore is needed either way.</span></td>
   <td class="fine">vitest · <code>src/test/dragGesture.test.ts</code> R-365 describe: detach asks; re-parent asks; in-run nudge does not ask; Cancel writes and toasts nothing; F-128 StrictMode sends the write once<br>vitest · <code>src/test/interaction.test.ts</code> case21a-case21e (attachmentChangeMessage)<br>e2e · <code>e2e/loadSanity.spec.ts</code> the drag meets the prompt, clicks Continue, and the row is put back</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-uncovered" id="R-366">
+  <td class="g-n">R-366</td>
+  <td class="reqmain"><b>The tester's browser runs and its database are its own --- nothing the developer edits or seeds can reach a tester run, and nothing changes for the developer</b><br><span class="fine">The tester worktree runs its Playwright suite against a dev server on a port of its own and a Supabase stack of its own --- its own containers, its own ports, its own data --- so a developer session hot-editing this folder, or seeding a fixture into the developer's database, cannot change what a tester run sees, and a tester's fixture or teardown cannot touch the developer's data. The developer's own <code>supabase start</code> and <code>npm run dev</code> keep working exactly as before with nothing exported and nothing configured: the port and the stack are knobs with the current values as their defaults, never a second copy of a setting. The SQL runner (<code>scripts/run-sql-test.sh</code>) and <code>db:types</code> reach whichever stack the run names.</span>
+      <br><span class="fine">session 113 conversation · maintainer · DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed `localhost:5173`) while a build lane was editing the R-365 prompt into it, and read an old spec against a new app as &quot;drag started, nothing written&quot;. In the same window both sessions applied and tore down the load fixture in the one shared database. The alternative --- a rule in `tester.md` that browser runs never overlap a developer's edits --- was rejected as relying on nobody forgetting. Mechanism chosen: `E2E_PORT` (default 5173) threaded through `e2e/env.ts`, `playwright.config.ts` and Vite; a script that generates a SIBLING Supabase workdir with its own `project_id` and ports and copies of `migrations/`, `seed.sql`, `dev_demo.sql`, `tests/` and `functions/` in step with the worktree's commit, because the committed `config.toml` cannot carry two port sets and `env()` substitution has no defaults; the tester runner exports what that script prints.</span></td>
+  <td class="fine">—</td>
+  <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr></tbody></table></div>
 </section>
 

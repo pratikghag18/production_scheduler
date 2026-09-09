@@ -9007,6 +9007,35 @@ requirements:
     at the drop. A "keep inside the run" third answer was considered and deferred until someone asks
     for it. Knock-on: `e2e/loadSanity.spec.ts`'s drag will have to click Continue before it can time
     the save; its four-column restore is needed either way.
+- id: R-366
+  title: The tester's browser runs and its database are its own --- nothing the developer edits or seeds can reach a tester run, and nothing changes for the developer
+  source:
+  - session 113 conversation
+  stated_by: maintainer
+  claim: >-
+    The tester worktree runs its Playwright suite against a dev server on a port of its own and a
+    Supabase stack of its own --- its own containers, its own ports, its own data --- so a
+    developer session hot-editing this folder, or seeding a fixture into the developer's database,
+    cannot change what a tester run sees, and a tester's fixture or teardown cannot touch the
+    developer's data. The developer's own `supabase start` and `npm run dev` keep working exactly
+    as before with nothing exported and nothing configured: the port and the stack are knobs with
+    the current values as their defaults, never a second copy of a setting. The SQL runner
+    (`scripts/run-sql-test.sh`) and `db:types` reach whichever stack the run names.
+  verified_by: []
+  status: uncovered
+  note: >-
+    DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
+    attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
+    `localhost:5173`) while a build lane was editing the R-365 prompt into it, and read an old spec
+    against a new app as "drag started, nothing written". In the same window both sessions applied
+    and tore down the load fixture in the one shared database. The alternative --- a rule in
+    `tester.md` that browser runs never overlap a developer's edits --- was rejected as relying on
+    nobody forgetting. Mechanism chosen: `E2E_PORT` (default 5173) threaded through `e2e/env.ts`,
+    `playwright.config.ts` and Vite; a script that generates a SIBLING Supabase workdir with its own
+    `project_id` and ports and copies of `migrations/`, `seed.sql`, `dev_demo.sql`, `tests/` and
+    `functions/` in step with the worktree's commit, because the committed `config.toml` cannot
+    carry two port sets and `env()` substitution has no defaults; the tester runner exports what
+    that script prints.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
