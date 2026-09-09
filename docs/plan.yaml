@@ -12365,6 +12365,66 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 111
+  date: 2026-09-09
+  title: DEF-0025 re-verified at the database, and the developer's own fix could not repeat its own measurement
+  commits:
+  - 80ccd7d
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded 571347b to 39c5af7 cleanly. One session landed
+    on DEF-0025: the developer agreed with the tester's diagnosis in writing, then found the deeper
+    half of it was wrong -- the spec had never dragged anything, `.first()` picking a chip scrolled
+    off screen -- fixed it, filed F-126, and the maintainer decided R-365 out of it. One open defect
+    on arrival, `fix-claimed`.
+    Ran `node scripts/tester-run.mjs --sql --e2e`, stack up. Count matches exactly: 2645 tests in
+    130 files. All 67 numbered SQL files plus dev_demo.sql: 823 checks, 0 failures. Full 45-case
+    browser suite this run was 44 (the load fixture was correctly absent, so `loadSanity.spec.ts`
+    skipped as designed) -- ALL PASSED, no flake this time, the first clean e2e run in four
+    sessions running.
+    DEF-0025 RE-VERIFIED AT THE DATABASE, NOT FROM THE SPEC'S OWN PRINT LINE. Re-applied
+    `scripts/load/fixture.sql` by hand to the running stack's own database and ran the fixed spec
+    (`fd35a20`) live, three times, plus one ad-hoc probe with a larger delta to rule out a
+    coincidence. Queried `load_plant`'s 5,760 assignments directly after every attempt:
+    `updated_at = created_at` on all of them, zero `run_id IS NULL`, throughout. DEF-0025's actual
+    claim -- drift left behind -- does not occur. Verified. Tore the fixture back down afterwards
+    (`teardown.sql` printed 0 nodes / 0 operators left behind).
+    BUT NONE OF THE FOUR ATTEMPTS REPRODUCED THE DEVELOPER'S OWN RESULT, WHICH IS WORTH A CARD OF
+    ITS OWN. The developer measured three real commits at 8.3-8.4s each at this exact commit. Mine:
+    three runs each passed the spec's own `.dragging` assertion (a drag genuinely started) and then
+    reported "0 PATCH to assignments; committed nothing" -- and a fourth, larger-delta probe
+    reproduced the ORIGINAL off-screen-chip shape (`.first()` resolving to a box at x = -514) that
+    `scrollIntoViewIfNeeded()` was supposed to have closed. Filed as F-127 rather than reopening
+    DEF-0025 (R-364's own claim holds either way -- nothing was written in any of my four attempts,
+    which is the safe direction) but the discrepancy is real and matters: F-126's own 8.3-8.4s
+    number cannot be assumed reproducible on someone else's machine, or even on a second run of the
+    same one.
+    R-364 CHECKED BY HAND AND LEFT `uncovered`, NOT FORCED TO `covered`. Session 110 left it
+    `contradicted` "for the tester to re-judge." Added a `kind: manual` verified_by entry and tried
+    `covered` first; the validator was right to refuse it (`status is covered but nothing
+    non-manual verifies it`) -- this is a rule about a scratch database's state after a browser
+    drag, which no vitest/SQL case can hold open as the kind of durable proof `covered` means
+    elsewhere in this plan. `uncovered` is the honest status: checked and sound today, re-check by
+    hand next time the spec changes. Also weighed in on the audit-trail question the developer left
+    open for the maintainer (an `assignments_audit` row and an `updated_at` bump from a
+    commit-and-revert pair are the record of a change, not the change itself, so R-364's own words
+    are met) -- a judgment, not a fact, and said so.
+    format:check (379 files) and db:types' stale warning are the same `core.autocrlf` local
+    artifact from session 98, re-confirmed rather than assumed.
+    R-365 is `uncovered` with no code shipped yet -- nothing for this session to test. F-125 (the
+    client-side nine seconds) and F-126 (the fixture's own room-to-move limit) are both still open,
+    both explicitly awaiting a maintainer decision or a profiler session -- nothing to add there.
+    Sweeps: nothing new. Sweep 2 named the same three `week_template_items` columns already
+    explained as SQL-RPC-only reads.
+  shipped: []
 - id: 110
   date: 2026-09-09
   title: The load-sanity drag was releasing the mouse over empty space, and a real one costs eight seconds
