@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: eb68708
+  tip: 32c327a
   baseline:
-    app_tests: 2665
+    app_tests: 2667
     app_test_files: 131
     tsc: 0
     eslint: 0
@@ -9233,7 +9233,7 @@ findings:
 - id: F-125
   title: A plant board spends nine seconds in the browser without drawing it --- the DOM ends up with eleven tracks
   tag: The nine seconds nobody is drawing
-  status: open
+  status: fixed
   found_by: agent
   refs:
   - F-124
@@ -9278,6 +9278,22 @@ findings:
     per assignment across all 5,760 on every render pass. A Chrome performance trace over the switch
     would name it in one run and cost nothing to be wrong about, which is the opposite of the last
     two attempts.
+  fix: >-
+    32c327a (session 118), from a profile rather than a guess. `e2e/loadProfile.spec.ts` (12aa122)
+    took a sampling CPU profile and the renderer's counters over the switch: 13,470 ms wall,
+    10,626 ms of SCRIPT against 122 ms of layout in six layouts --- so not rendering, not
+    `computeFitScale`, not virtualisation. 62% of all sampled CPU was `formatClock` /
+    `formatDayLabel` in `time.ts`, and by inclusive time `OperatorPanel` owned 64% of the wait:
+    it built a tooltip for every assignment of every person (5,760) inside render, on every
+    render, and each `formatFull` constructed three fresh `Intl.DateTimeFormat`s. Construction
+    is the expensive part; formatting with one is microseconds. Fix: one memoised formatter per
+    (zone, options) in `lib/format/timezones.ts` used at every construction site except the
+    `isUsableTimezone` probe, and the panel's tooltips computed once per change of
+    assignments/nodes/window/zone. Output byte-identical; two new cases pin the cache count and
+    the exact tooltip text. Measured on one scratch stack before and after, by two people: arrival
+    13,470 to 3,087 ms (profiler) and ~17,000 to 3,300-3,500 ms (loadSanity); a drag's settle
+    3,600-4,200 to 45-49 ms. The drag number this card once read as "using a big board is cheap"
+    is now TRUE, for the first time, and for a reason.
 - id: F-124
   title: A plant-sized board takes over two seconds on the server, and nearly all of it is row-level security asked once per row
   tag: The guard that runs 11,520 times
@@ -12506,6 +12522,60 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 118
+  date: 2026-09-09
+  title: The nine seconds found and removed --- a plant board arrives in three, and a drag settles in fifty milliseconds
+  commits:
+  - 12aa122
+  - 32c327a
+  numbers:
+    app_tests: 2667
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here: 2667 in 131 files --- session 116's 2665 plus the cache-count case in
+    `boardTime.test.ts` and the tooltip-text case in `absenceOnBoard.test.tsx`. `tsc -b` and
+    `eslint .` clean; no migration or RPC touched, so `tsc` is conclusive. `db_checks`,
+    `migrations` and `e2e` carried from the tester's session 115. Browser runs this session:
+    `loadProfile.spec.ts` twice and `loadSanity.spec.ts` three times, all on a scratch tester
+    stack (R-366) with the fixture in it, never the developer's.
+  summary: >-
+    THE MAINTAINER SAID "GO AHEAD WITH #2" AND ASKED THAT THE BUILD GO TO SONNET. So: the
+    instrument was written here (`e2e/loadProfile.spec.ts`, a CDP sampling profile plus
+    `Performance.getMetrics` over the plant switch, printing by file, by self time and by
+    inclusive time, and writing the raw `.cpuprofile` for DevTools), the reading was done here,
+    and the fix was briefed to a Sonnet lane with the numbers, the two causes, the exact files
+    and the measurement commands, then reviewed with one job, break it.
+    ⛔ ONE RUN, NO GUESS. 13,470 ms wall, 518 ms RPC; 10,626 ms of script against 122 ms of
+    layout in six layouts. Both suspects on F-125's card --- `computeFitScale`'s re-measuring and
+    the virtualiser --- were innocent. 62% of all CPU: `formatClock` 4,177 ms, `formatDayLabel`
+    2,205 ms, its inner `named` 1,991 ms. Inclusive: `OperatorPanel` 8,740 ms of a 13,663 ms
+    profile, through `chip` and its per-assignment `.map` into `formatFull`.
+    ⭐ TWO CAUSES, STACKED. Every formatter built a fresh `Intl.DateTimeFormat` per call (the
+    construction is the cost; formatting is microseconds), and the panel built a tooltip for all
+    5,760 assignments inside render on every render --- which is also exactly why a single drag
+    took 3.6-4.2 s to settle: the same panel, re-rendered. Fix: one memoised formatter per (zone,
+    options) in `lib/format/timezones.ts`, used everywhere but the `isUsableTimezone` probe; the
+    panel's tooltips in a `useMemo` keyed on assignments, nodes, the window instant and the zone.
+    ⭐ BYTE-IDENTICAL, AND PINNED. Every existing time and panel case passes unchanged. New: a
+    counting subclass of `Intl.DateTimeFormat` proves 500 `formatFull` calls add at most three
+    constructions; a panel case pins the exact tooltip string so a stale-memo mistake would show.
+    ⭐ MEASURED BEFORE AND AFTER ON THE SAME SCRATCH STACK, BY TWO PEOPLE. Profiler: 13,470 to
+    3,087 ms wall, script 10,626 to 1,398 ms; `time.ts` from 62% of CPU to 6%. loadSanity:
+    Load Plant ~17,000 to 3,293 ms (Sonnet) and 3,522 ms (this session); drag from Continue to
+    settled 49 ms and 45 ms, 1 PATCH, row put back. F-125 `fixed`; its queue item retired.
+    ⚠️ WHAT IS LEFT OF THE THREE SECONDS is now mostly React mounting 7,600 DOM nodes and the
+    data path (`boardIndex`, `serde`), each under 4% --- a different, smaller question, not on
+    the queue.
+    ⚠️ THE CACHE IS UNBOUNDED, and that is fine: the set of (zone, options) pairs is a handful of
+    zones times six fixed option shapes. Named here so nobody later passes a per-call options
+    object into it.
+  shipped: []
 - id: 116
   date: 2026-09-09
   title: DEF-0026 fixed --- the tester's stack reads its own mail --- and the queue explained in plain terms
@@ -17878,23 +17948,6 @@ next:
 # bug lives in. A case that follows the RAW emailed link is now in
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
-- kind: task
-  text: Find the nine seconds the browser spends on a plant board without drawing it
-  why: >-
-    F-125, measured 9 Sept in a real browser against 5,760 blocks. The board takes 9,710ms to appear
-    and only 719ms of that is the `board_window` RPC --- the server half is fixed (R-363). The other
-    nine seconds are client time AFTER the payload arrives, and they are not rendering: a DOM census
-    at the end of the same wait finds 2,333 elements, 11 tracks and 33 chips, because the board
-    virtualises. A drag once there is 14-37ms, so this is a cost of arriving at a big board rather
-    than of using one.
-    ⛔ THE NEXT STEP IS A PROFILER, NOT A FOURTH GUESS. Two guesses about this board have already been
-    wrong in one day: the per-node policy resolver (44-89ms of 2,630) and "the client is innocent"
-    (true of the 120ms data path, false of the nine seconds around it). A Chrome performance trace
-    over the plant switch would name the cause in one run. The candidates worth eliminating in that
-    order are on F-125's own card.
-    ⭐ RE-RUN IT WITH `npx playwright test e2e/loadSanity.spec.ts`. It needs the volume fixture in the
-    developer's database (`scripts/load/fixture.sql`, removed by `scripts/load/teardown.sql`) and
-    SKIPS honestly when it is absent.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   decided: true
