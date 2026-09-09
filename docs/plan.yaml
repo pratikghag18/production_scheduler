@@ -4211,15 +4211,20 @@ requirements:
       path <@ p_root_path --- each of those three read from a slice bounded by the body's OWN
       parentheses rather than by a character budget, with the two field cases additionally asserting
       their slice did not reach the following field, so the bound is falsifiable rather than assumed
-  status: contradicted
+  status: covered
   note: >-
-    FIX CLAIMED 8 Sept (session 99, at f5fc400) AND STILL MARKED CONTRADICTED ON PURPOSE: the
-    validator will not let a requirement read `covered` while a defect against it is short of
-    `verified`, and that is right --- only the tester closes DEF-0024. The claim about the server was
-    always true; what was false was the test's ability to notice if it stopped being true. The three
-    cases now walk the body's own parentheses, and each was mutation-tested one at a time against the
-    real migration --- deleting the runs window, deleting the assignments window, and replacing
-    scoped_nodes' path ancestor test each turn exactly one case red. Prior note: CONTRADICTED 8 Sept
+    VERIFIED 9 Sept (tester, session 101, DEF-0024): re-ran the original reproduction cold at
+    dc7825d (dropping the runs sub-select's own `&& v_window`) and the runs case alone goes red;
+    repeated on the assignments field and only the assignments case goes red, confirming the bound
+    holds in both directions, not just the one the original reproduction exercised. Restored both
+    times, migration byte-identical. DEF-0024 closed. Prior note: FIX CLAIMED 8 Sept (session 99,
+    at f5fc400) AND STILL MARKED CONTRADICTED ON PURPOSE: the validator will not let a requirement
+    read `covered` while a defect against it is short of `verified`, and that is right --- only the
+    tester closes DEF-0024. The claim about the server was always true; what was false was the
+    test's ability to notice if it stopped being true. The three cases now walk the body's own
+    parentheses, and each was mutation-tested one at a time against the real migration --- deleting
+    the runs window, deleting the assignments window, and replacing scoped_nodes' path ancestor
+    test each turn exactly one case red. Prior note: CONTRADICTED 8 Sept
     (tester, session 98, DEF-0024): the runs-field and assignments-field cases extracted each field
     with a 300-character lookahead that ran through the field's own closing paren and into the NEXT
     field in board_window's JSON literal, so a runs sub-select with NO time-window predicate still
