@@ -5251,6 +5251,12 @@ requirements:
     mirror in the app -- `canDropOn` has its own row (R-069), so does `canEditProduct` (R-308) -- but the
     general-purpose case this row is naming, not a full inventory of every client pre-check. Part two (the
     complete level list) is `findLevelOrderProblems` (levelDraft.ts, §19.30), proven by S1's fixture.
+    TESTER SPOT-CHECKED 8 Sept, session 98 (discuss-item review): E1 is the company-admin control, not the
+    proof; E11-E13 and E15 fail open as a `viewer` fixture, the role the claim is actually about. Also
+    spot-checked R-D88's closure (both R-353 and R-354's own cited test files exist and their
+    `verified_by` entries are current) and R-D97's (requireAdmin.test.tsx carries G1/G2/G3b exactly as
+    cited, and G3b's own comment fixes a supervisor as the admitted role, not an admin). All three read
+    against the actual evidence rather than trusted from the commit message; no mis-linked closure found.
 - id: R-063
   title: Names are trimmed with the ECMAScript whitespace set on both sides
   source:
