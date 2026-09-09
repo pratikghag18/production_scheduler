@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: c95f1f0
+  tip: fd35a20
   baseline:
     app_tests: 2645
     app_test_files: 130
@@ -8935,7 +8935,63 @@ requirements:
     move (see DEF-0025) with no revert, so every run silently shifts one `Load Op N` assignment's
     time by an hour in whichever database the run is pointed at -- cumulative across runs, and never
     torn down by `teardown.sql`, which only ever removes the plant and the operators it added.
+    ⚠️ FIX CLAIMED 9 Sept (developer, session 110, fd35a20), AND THE CONTRADICTION ABOVE IS ITSELF
+    HALF WRONG. The spec was writing nothing at all -- it was releasing the mouse over a chip
+    scrolled off the left edge -- and `teardown.sql` does delete every assignment under
+    `load_plant`, so no drift could outlive the fixture. Both shown in DEF-0025's developer note.
+    The spec now drags for real and restores what it moves, proved by a placement checksum over
+    every `load_plant` assignment taken before and after three runs. Left `contradicted` for the
+    tester to re-judge: only the tester sets `covered`.
+    ⚠️ AND ONE QUESTION FOR THE MAINTAINER RIDES ON IT (F-126). A release that genuinely commits
+    leaves an `assignments_audit` row and a bumped `updated_at` that nothing may tidy away. If this
+    requirement is meant to forbid those too, it cannot be met at the same time as measuring a real
+    release, and one of the two has to give.
 findings:
+- id: F-126
+  title: The one number that said a big board was cheap to USE was measuring a mouse-up over empty space
+  tag: A measurement that never happened
+  status: open
+  found_by: agent
+  refs:
+  - F-125
+  - F-124
+  - DEF-0025
+  violates: [R-364]
+  story: >-
+    Found 9 Sept while fixing DEF-0025, which said `e2e/loadSanity.spec.ts`'s drag committed a real
+    move on every run and never undid it. The undoing half was true and is fixed. The committing
+    half was not, and what was actually happening is worse.
+    ⛔ THE SPEC WAS DRAGGING NOTHING. `page.getByLabel(/^Load Op \d+ on /).first()` picks the first
+    chip in DOM ORDER, not the first one a person can see. On the 384-cell board that chip's
+    `boundingBox()` comes back at **x = -574** --- scrolled off the left edge --- and a mouse press
+    at a negative coordinate lands on nothing. Probed before anything was changed: no `.dragging`
+    class mid-gesture, no pop-up after the release, not one non-GET request, and `updated_at =
+    created_at` on all 5,760 fixture assignments afterwards (`assignments_set_updated_at` fires on
+    any UPDATE, so that is proof no write reached a row rather than an absence of evidence).
+    ⛔ AND THE NUMBER IT PRINTED WAS BEING REASONED FROM. Six sessions of "drag on the big board:
+    14-37 ms" was the cost of releasing a mouse button over empty space. F-125 read that column as
+    "a drag once there is fine --- whatever this is, it is a cost of ARRIVING at a big board rather
+    than of using one", and every conversation about the nine seconds since has rested on it.
+    ⛔ WITH A REAL GESTURE IT IS 8.3-8.4 SECONDS. Measured three times at `fd35a20` against the
+    volume fixture, from mouse-up to the board settling --- and the split says **no `board_window`
+    answered during that window at all**, so none of it is the server or a refetch. It is the same
+    client-side cost F-125 located on arrival, paid again on every single interaction. Using a
+    plant board is as expensive as arriving at one; F-125's question just got twice as important.
+    ⚠️ WHAT THE FIXTURE CANNOT ASK, AND THIS IS THE MAINTAINER'S CALL. Every fixture assignment
+    exactly fills its own run --- 5,760 of 5,760, checked in the database. So a chip has no room to
+    move inside its run, and the only gesture available is the one that pushes it out and DETACHES
+    it (`run_id` to null, `product_id` to the run's product). The commoner gesture, an ordinary
+    nudge inside a run, is not measured and cannot be until the fixture gives its runs more room
+    than their assignments. That is a one-line change to `scripts/load/fixture.sql` and it changes
+    the shape every recorded load number was taken against, which is why it is not made here.
+  lead: >-
+    A suspicion, not a fact, and it is F-125's suspicion rather than a new one. The same ~8 seconds
+    appearing on ARRIVAL and on a single optimistic patch, with no network in either, points at
+    something that re-runs over the whole board on any state change and is not the DOM (the census
+    finds 2,333 elements, 11 tracks, 33 chips). `computeFitScale` measuring and re-measuring real
+    element heights is the candidate the spec's own header already named. ⛔ STILL A PROFILER
+    QUESTION, NOT A FOURTH GUESS --- but it is now a much cheaper one to ask, because a drag
+    reproduces it in 8 seconds without a 17-second page load in front of it.
 - id: F-125
   title: A plant board spends nine seconds in the browser without drawing it --- the DOM ends up with eleven tracks
   tag: The nine seconds nobody is drawing
@@ -8959,6 +9015,14 @@ findings:
     nor the server, nor the elements on screen.
     ⚠️ AND A DRAG, ONCE THERE, IS FINE: 14-37ms from mouse-up to settled across three runs. Whatever
     this is, it is a cost of ARRIVING at a big board rather than of using one.
+    ⛔⛔ WITHDRAWN 9 Sept (session 110, F-126). That last paragraph is the one wrong thing on this
+    card and it is the paragraph everything else was resting on. Those 14-37ms measured a mouse-up
+    over EMPTY SPACE: the spec grabbed the first chip in DOM order, whose box sits at x = -574,
+    scrolled off the left edge. No drag ever began. A real drag on this board costs **8.3-8.4
+    seconds** from mouse-up to settled, with NO `board_window` answering in that window -- so it is
+    not a refetch, it is the same client-side cost as arriving, paid again on every interaction.
+    Using a plant board is exactly as expensive as arriving at one, and this card's own question is
+    now the whole question rather than half of it.
     ⛔ WHAT THIS CARD DOES NOT SAY IS WHY, AND THAT IS DELIBERATE. Two guesses have already been
     wrong today. F-124's lead guessed the per-node policy resolver and it was 44-89ms of 2,630. Then
     F-124's own story said "the client is INNOCENT" on the strength of measuring `JSON.parse` (30ms),
@@ -12204,6 +12268,71 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 110
+  date: 2026-09-09
+  title: The load-sanity drag was releasing the mouse over empty space, and a real one costs eight seconds
+  commits:
+  - fd35a20
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 45
+  confirmed: true
+  numbers_note: >-
+    `npm run test` was run here: 2645 in 130 files, matching session 109 exactly. `tsc -b` and
+    `eslint .` clean. `db_checks` and `migrations` are CARRIED FORWARD from session 109 and were
+    not re-run --- no SQL changed this session. `e2e` likewise: only `loadSanity.spec.ts` was run,
+    four times, and it is not in the 45 (it skips without the volume fixture).
+  summary: >-
+    Merged `tester` (the working tree was dirty at session start, so the hook skipped it; committed
+    the in-flight brief edit first, then merged clean). One open defect, DEF-0025.
+    ⛔ THE DEFECT WAS HALF RIGHT AND THE OTHER HALF WAS WORSE. It said the drag in
+    `e2e/loadSanity.spec.ts` commits a real move every run and never undoes it. Traced the commit
+    path, agreed with it in writing, and then found the spec had never dragged anything at all:
+    `.first()` picks the first chip in DOM order, whose box sits at **x = -574**, off the left edge
+    of the board, and a mouse press at a negative coordinate lands on nothing. Probed it --- no
+    `.dragging` class, no request, no write, `updated_at = created_at` on all 5,760 fixture
+    assignments after a full run. Six sessions of "drag on the big board: 14-37 ms" were the cost
+    of releasing a mouse button over empty space. F-126 filed; F-125's closing paragraph, which
+    read that column as proof that using a big board is cheap, is WITHDRAWN on its own card.
+    ⛔ A REAL DRAG IS 8.3-8.4 SECONDS, AND NO `board_window` ANSWERS IN THAT WINDOW. Three
+    measured runs. So the nine seconds F-125 located on ARRIVAL is not an arrival cost: the same
+    client-side work is paid again on a single optimistic patch, with no network involved. Using a
+    plant board is as expensive as arriving at one. That makes F-125's profiler session more
+    valuable and much cheaper to run --- a drag reproduces it in 8 seconds without a 17-second load
+    in front of it.
+    ⭐ THE FIX KEEPS THE WRITE INSTEAD OF ESCAPING IT. The defect's own lead was `touch.spec.ts`
+    T2's `Escape` before the release. Refused it in writing: that keeps a number that measures
+    nothing in a column the plan reasons from. The drag now scrolls its chip into view, grabs a
+    point inside both the chip and the window, and ASSERTS the block marks itself `.dragging`
+    before timing anything --- the assertion that would have caught all six sessions.
+    ⭐ AND WHAT IT MOVES IT PUTS BACK, PROVED RATHER THAN BELIEVED. The dragged person's rows are
+    read out of the database before and after, anything that moved is restored, and the restore is
+    read back a third time; the UPDATE asks PostgREST for the rows it touched, so an RLS-filtered
+    write cannot report success over zero rows.
+    ⛔ AND THE FIRST VERSION OF THAT RESTORE HAD THE DEFECT'S OWN SHAPE IN A DIFFERENT COLUMN. It
+    carried the cell and the hours only. Pushing a chip past the end of its run does not move it,
+    it DETACHES it (`run_id` to null, `product_id` to the run's product, one patch) --- so the
+    restore reported "put back and read back" over a row that was still detached, and one run left
+    `detached = 1` in the database. Caught by a checksum taken outside the spec, not by the spec.
+    It carries all four columns now, and the checksum over every `load_plant` assignment is
+    byte-identical across three further runs. The stray row was repaired and the fixture torn down,
+    so the machine is as it was found.
+    ⚠️ TWO TRACES ARE LEFT ON PURPOSE: the `assignments_audit` row and the `updated_at` bump from
+    the commit and its undo. They are the record of a change, not the change. If R-364 is meant to
+    forbid those too it cannot also ask for a real release to be measured, and the maintainer
+    should say which one gives. R-364 left `contradicted` for the tester to re-judge.
+    ⚠️ ONE THING NOT FIXED, DELIBERATELY, AND IT NEEDS A DECISION. Every fixture assignment exactly
+    fills its own run (5,760 of 5,760), so the only gesture available is the detaching one; an
+    ordinary nudge INSIDE a run cannot be measured until the fixture gives its runs more room than
+    their assignments. That is one line in `scripts/load/fixture.sql`, and it changes the shape
+    every recorded load number was taken against --- so it is the maintainer's call, not a thing to
+    slip into a defect fix.
+  shipped: []
 - id: 109
   date: 2026-09-09
   title: R-363's cross-org mutation reproduced cold, and the measurement spec that measures the database wrong
