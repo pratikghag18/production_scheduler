@@ -57,6 +57,8 @@ if (existsSync(TESTER_STACK_FILE)) {
   setUnlessPresent("VITE_SUPABASE_ANON_KEY", stack.anonKey);
   setUnlessPresent("SUPABASE_DB_CONTAINER", stack.dbContainer);
   setUnlessPresent("E2E_PORT", stack.port);
+  // DEF-0026: the email-following specs read their own stack's mail catcher.
+  setUnlessPresent("E2E_MAIL_URL", stack.mailUrl);
   if (!process.env.SUPABASE_WORKDIR) process.env.SUPABASE_WORKDIR = TESTER_WORKDIR;
   console.log(
     `tester-run: pointed at the tester's own stack — ${process.env.VITE_SUPABASE_URL}, ` +

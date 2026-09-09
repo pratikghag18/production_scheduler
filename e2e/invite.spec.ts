@@ -1,6 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
-import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey, e2eBaseUrl } from "./env";
+import {
+  hasRealBackend,
+  NO_BACKEND_REASON,
+  supabaseUrl,
+  supabaseAnonKey,
+  e2eBaseUrl,
+  mailUrl,
+} from "./env";
 
 /**
  * The INVITE loop (P1-6c, S24), driven end to end against the live local stack
@@ -20,7 +27,8 @@ import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey, e2eBas
 
 test.skip(!hasRealBackend, NO_BACKEND_REASON);
 
-const MAIL_BASE = "http://127.0.0.1:54324";
+// DEF-0026: this run's OWN mail catcher, from e2e/env.ts -- never a literal port.
+const MAIL_BASE = mailUrl;
 const FUNCTIONS_BASE = `${supabaseUrl.replace(/\/$/, "")}/functions/v1`;
 const PASSWORD = "devpassword";
 

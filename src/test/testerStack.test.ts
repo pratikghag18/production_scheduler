@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   assertGeneratedConfig,
   extractProjectId,
@@ -72,5 +72,32 @@ describe("R-366: the tester's config.toml is generated, never shared", () => {
     expect(() => assertGeneratedConfig(sameId, TESTER_PORT, "production_scheduler")).toThrow(
       /project_id/,
     );
+  });
+
+  /*
+   * DEF-0026: the first real use of the tester's stack found both
+   * email-following specs still reading the DEVELOPER's mail catcher by
+   * literal port. `tsc` cannot see a string; these two can.
+   */
+  it("TS9 / DEF-0026: no e2e spec names a Supabase service port by literal -- every per-stack URL comes from e2e/env.ts", () => {
+    for (const f of ["e2e/invite.spec.ts", "e2e/passwordReset.spec.ts", "e2e/roleWalk.spec.ts"]) {
+      const text = readFileSync(f, "utf8").replace(/^\s*(\/\/|\*).*$/gm, ""); // comments may cite a port; code may not
+      expect(text, `${f} names a stack port by literal`).not.toMatch(
+        /127\.0\.0\.1:5\d{4}|localhost:5\d{4}/,
+      );
+    }
+  });
+
+  it("TS10 / DEF-0026: e2e/env.ts's mailUrl follows E2E_MAIL_URL, and defaults to the developer's inbucket", async () => {
+    vi.stubEnv("E2E_MAIL_URL", "http://127.0.0.1:54424");
+    vi.resetModules();
+    const withKnob = await import("../../e2e/env");
+    expect(withKnob.mailUrl).toBe("http://127.0.0.1:54424");
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    const fallback = await import("../../e2e/env");
+    // `.env.local` may or may not carry the knob on a given machine; either the
+    // developer's default or whatever that file says, never the tester's.
+    expect(fallback.mailUrl).not.toBe("http://127.0.0.1:54424");
   });
 });

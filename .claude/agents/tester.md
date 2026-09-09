@@ -35,7 +35,7 @@ Docker is expected to be running on this machine. R-366: the tester runs its OWN
 apart from the developer's — start it once per machine boot with `node scripts/tester-stack.mjs
 up` (`status` to check whether it is already up), then read `node scripts/tester-stack.mjs env`
 and export what it prints in this PowerShell session (`VITE_SUPABASE_URL`,
-`VITE_SUPABASE_ANON_KEY`, `SUPABASE_DB_CONTAINER`, `E2E_PORT`, `SUPABASE_WORKDIR`).
+`VITE_SUPABASE_ANON_KEY`, `SUPABASE_DB_CONTAINER`, `E2E_PORT`, `E2E_MAIL_URL`, `SUPABASE_WORKDIR`).
 `tester-run.mjs` picks that stack up by itself from there (it looks for the workdir's
 `tester-stack.json`) and starts and stops its own dev server, on its own port, for `--e2e`.
 For opening a screen by hand (see below), start that dev server yourself, on the SAME port:

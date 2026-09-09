@@ -158,12 +158,23 @@ function cmdUp() {
       `tester-stack.mjs: \`status -o env\` did not print API_URL/ANON_KEY. Got keys: ${Object.keys(env).join(", ") || "(none)"}`,
     );
   }
+  // DEF-0026: the mail catcher is a per-stack service the email-following
+  // specs read back from; the CLI prints it under INBUCKET_URL (older) or
+  // MAILPIT_URL (newer), both present on this version. A stack without either
+  // is refused here rather than left for five specs to time out on.
+  const mailUrl = env.INBUCKET_URL || env.MAILPIT_URL;
+  if (!mailUrl) {
+    throw new Error(
+      `tester-stack.mjs: \`status -o env\` printed neither INBUCKET_URL nor MAILPIT_URL. Got keys: ${Object.keys(env).join(", ")}`,
+    );
+  }
 
   const record = {
     supabaseUrl: env.API_URL,
     anonKey: env.ANON_KEY,
     dbContainer: `supabase_db_${projectId}`,
     port: TESTER_PORT,
+    mailUrl,
   };
   writeFileSync(STATUS_FILE, JSON.stringify(record, null, 2) + "\n");
   console.log(`tester-stack.mjs: wrote ${STATUS_FILE}`);
@@ -189,6 +200,7 @@ function printPowerShellExports(record) {
   console.log(`$env:VITE_SUPABASE_ANON_KEY = "${record.anonKey}"`);
   console.log(`$env:SUPABASE_DB_CONTAINER = "${record.dbContainer}"`);
   console.log(`$env:E2E_PORT = "${record.port}"`);
+  console.log(`$env:E2E_MAIL_URL = "${record.mailUrl}"`);
   console.log(`$env:SUPABASE_WORKDIR = "${WORKDIR}"`);
 }
 

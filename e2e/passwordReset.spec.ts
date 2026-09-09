@@ -1,6 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
-import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey, e2eBaseUrl } from "./env";
+import {
+  hasRealBackend,
+  NO_BACKEND_REASON,
+  supabaseUrl,
+  supabaseAnonKey,
+  e2eBaseUrl,
+  mailUrl,
+} from "./env";
 
 /**
  * The password RESET / CHANGE loop, driven end to end in a real browser against
@@ -31,7 +38,8 @@ test.skip(!hasRealBackend, NO_BACKEND_REASON);
 
 const PASSWORD = "devpassword";
 const VIEWER = "vina@example.test"; // Plant C viewer — the least-privileged demo person
-const MAIL_BASE = "http://127.0.0.1:54324";
+// DEF-0026: this run's OWN mail catcher, from e2e/env.ts -- never a literal port.
+const MAIL_BASE = mailUrl;
 
 /** Sign in through the real form and wait for the redirect to be FOLLOWED. */
 async function signIn(page: Page, email: string, password: string, path = "/"): Promise<void> {

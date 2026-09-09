@@ -29,5 +29,7 @@ R-366. Two knobs keep the developer's dev server/Supabase stack and the tester's
 developer's edits or fixtures never reach a tester run: `E2E_PORT` (default 5173, read in
 `e2e/env.ts`) picks the Vite port `playwright.config.ts` and Vite start on, and `TESTER_STACK_DIR`
 (default `<repo>/../scheduler-test-stack`) is where `scripts/tester-stack.mjs up` generates the
-tester's own Supabase workdir, ports, and `project_id`. Neither changes anything for the developer
-until exported; the tester exports what `scripts/tester-stack.mjs env` prints.
+tester's own Supabase workdir, ports, and `project_id`; `E2E_MAIL_URL` (default the developer's
+inbucket, DEF-0026) is where the email-following specs read their own run's mail. None changes
+anything for the developer until exported; the tester exports what `scripts/tester-stack.mjs env`
+prints.

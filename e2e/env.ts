@@ -81,6 +81,20 @@ export const e2ePort = Number(process.env.E2E_PORT || 5173);
 export const e2eBaseUrl = `http://localhost:${e2ePort}`;
 
 /**
+ * ⛔ THE MAIL CATCHER IS PER STACK TOO (DEF-0026). `invite.spec.ts` and
+ * `passwordReset.spec.ts` follow a real email their own run just sent, and
+ * both had `http://127.0.0.1:54324` written into them -- the DEVELOPER's
+ * inbucket. The tester's stack sends its mail to ITS inbucket (54424 under
+ * the +100 shift), so on the first real use of R-366 every email-following
+ * case timed out, deterministically, against a mailbox that was full. Same
+ * loader as `supabaseUrl`: process env first (what `scripts/tester-stack.mjs
+ * env` prints, read straight off `supabase status`), then `.env.local`, then
+ * the developer's default -- never derived from the API port, because "+3"
+ * is a coincidence of today's port scheme, not a contract.
+ */
+export const mailUrl = pick("E2E_MAIL_URL", "http://127.0.0.1:54324");
+
+/**
  * ⭐ THE VERDICT, AND IT IS DELIBERATELY ABOUT THE URL RATHER THAN ABOUT `CI`.
  * A developer with no `.env.local` gets the same skip a CI run does, which is
  * the honest answer for both: there is no backend here. Keying on
