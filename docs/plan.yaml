@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: cb5a650
+  tip: c393429
   baseline:
     app_tests: 2617
     app_test_files: 130
@@ -11946,6 +11946,8 @@ sessions:
   title: The pin that reported "passed" three ways, and the audit that repeated its mistake on the first try
   commits:
   - cb5a650
+  - 64a585b
+  - c393429
   numbers:
     app_tests: 2617
     app_test_files: 130
