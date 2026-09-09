@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: 32c327a
+  tip: 83e8481
   baseline:
-    app_tests: 2667
+    app_tests: 2669
     app_test_files: 131
     tsc: 0
     eslint: 0
@@ -4829,6 +4829,9 @@ requirements:
     file: src/test/absenceOnBoard.test.tsx
     cases: R-038a avatar/name/skill badges, R-038b count pill shows N and is absent with none, R-038c
       title attribute lists node/times/efficiency, R-038d dimmed ("full" class) only when fully allocated
+  - kind: vitest
+    file: src/test/absenceOnBoard.test.tsx
+    cases: "R-038c (F-125) pins the exact tooltip string; R-038c (DEF-0028) x2 rerender the panel with the same assignmentsByOperator and nodeById instances and only windowStart, then only zone, changed, and assert the title follows -- each goes red when its key is dropped from the memo"
   status: contradicted
   note: >-
     Linked 8 Sept (requirement audit) -- new cases in an existing file.
@@ -4837,6 +4840,13 @@ requirements:
     bug by definition only shows on a second render with a dependency changed. Removed
     `windowStart.getTime()` and `zone` from `OperatorPanel`'s tooltip memo and every test touching
     the component, 122 cases across seven files, stayed green.
+    ⚠️ FIX CLAIMED 9 Sept (developer, session 120, 83e8481): test-only. `renderPanel` builds every
+    collection once and hands back a `rerender` that changes only `windowStart` or `zone`; two new
+    cases rerender with the same Map instances and assert the title follows. Checked by the tester's
+    own mutation and by each key alone: both dropped fails both, `windowStart` alone fails the window
+    case, `zone` alone fails the zone case. The first draft built a fresh `nodeById` per render and
+    stayed green under the mutation --- the same trap, one layer down --- so the helper's comment
+    names it. Left `contradicted` until the tester verifies DEF-0028.
 - id: R-039
   title: Shift templates attach to any node and resolve nearest-ancestor
   source:
@@ -9046,7 +9056,7 @@ requirements:
     steps: "node scripts/tester-stack.mjs up (TESTER_STACK_DIR set to a scratch path): docker ps shows ten supabase_*_production_scheduler_tester containers beside the developer's ten; bash scripts/run-sql-test.sh --rebuild with SUPABASE_DB_CONTAINER set runs in the tester container (docker logs); npx playwright test e2e/smoke.spec.ts with E2E_PORT=5174 hits 5174 while 5173 keeps listening; down returns docker ps to the original ten"
   - kind: vitest
     file: src/test/testerStack.test.ts
-    cases: "TS9-TS10 (DEF-0026): no e2e spec names a stack port by literal in code; e2e/env.ts's mailUrl follows E2E_MAIL_URL and defaults to the developer's inbucket"
+    cases: "TS9-TS10 (DEF-0026): no e2e spec names a stack port by literal in code; e2e/env.ts's mailUrl follows E2E_MAIL_URL and defaults to the developer's inbucket. TS10 (DEF-0027) takes an ambient E2E_MAIL_URL out of process.env for its fallback half and restores it, so it is green on a tester run too"
   - kind: e2e
     file: e2e/invite.spec.ts
     cases: "with the tester stack's env exported (E2E_MAIL_URL from tester-stack.mjs env) and E2E_PORT=5174, invite.spec.ts and passwordReset.spec.ts pass -- the five email-following cases DEF-0026 named among them"
@@ -9093,6 +9103,11 @@ requirements:
     compares the tester's own mail port to itself and fails the `.not.toBe`. Filed as DEF-0027 ---
     not a reopening of DEF-0026, whose own reproduction (the two specs) is genuinely green, but a
     defect in the proof that sits inside this requirement's own `verified_by` list.
+    ⚠️ FIX CLAIMED 9 Sept (developer, session 120, 83e8481): test-only. TS10 saves the ambient
+    `E2E_MAIL_URL`, deletes it from `process.env` for the fallback import (a stub overlay cannot
+    remove what was real before vitest started), and restores it in a `finally`. Reproduced with the
+    variable exported: 1 failed (TS10) before, 10 of 10 after; the full suite is 2669 either way.
+    Left `contradicted` until the tester verifies DEF-0027 on its own run.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12542,6 +12557,53 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 120
+  date: 2026-09-09
+  title: DEF-0027 and DEF-0028 fixed --- both were holes in the proof, and both fixes are tests
+  commits:
+  - 83e8481
+  numbers:
+    app_tests: 2669
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here: 2669 in 131 files --- session 119's 2667 plus the two DEF-0028 rerender
+    cases. `tsc -b`, `eslint`, `prettier --check` clean on the two files; no migration or RPC
+    touched, so `tsc` is conclusive. `db_checks`, `migrations` and `e2e` carried from the tester's
+    session 119, which ran them on its own stack; no browser run this session, nothing role-shaped
+    changed. Ran `testerStack.test.ts` and `absenceOnBoard.test.tsx` with `E2E_MAIL_URL` exported to
+    the tester's port as the DEF-0027 reproduction: 46 of 46.
+  summary: >-
+    `git merge --ff-only tester` brought session 119 in clean (the inbox had skipped it for an
+    untracked folder, not a real dirt). Two defects, both `minor`, both against the proof rather
+    than the product, both agreed with in writing before touching code.
+    ⛔ DEF-0027: TS10 FAILED ON EVERY REAL TESTER RUN. `vi.unstubAllEnvs()` removes a stub, not a
+    variable `scripts/tester-run.mjs` put in the real environment before vitest started, so the
+    case's "fallback" half read the tester's own mail port and failed its own `.not.toBe`. Fixed
+    where the tester's lead pointed: save the ambient value, delete it from `process.env` for the
+    fallback import, restore it in a `finally`. Reproduced red with the variable exported, green
+    after, and a plain run unchanged.
+    ⛔ DEF-0028: THE F-125 CASE COULD NOT FAIL. A memo that ignores a key only shows on a SECOND
+    render with that key changed and the rest held by reference; the case rendered once. Two new
+    cases rerender `OperatorPanel` with the same `assignmentsByOperator` and `nodeById` instances
+    and change only `windowStart`, then only `zone`. The F-125 case keeps its exact-string pin and
+    drops the claim it could not keep.
+    ⚠️ THE FIRST DRAFT HAD THE SAME HOLE ONE LAYER DOWN. `renderPanel` built a fresh `nodeById` Map
+    inside the element, so every rerender invalidated the memo by itself and the tester's mutation
+    stayed green against the new cases too. Caught by running the mutation before believing the
+    cases, not by reading them; the helper now builds every collection once and its comment says
+    why. Checked each key alone afterwards: both dropped fails both cases, `windowStart` alone fails
+    the window case, `zone` alone fails the zone case, and the product file was restored from a copy
+    each time --- never `git checkout`.
+    R-366 and R-038 stay `contradicted` with a FIX CLAIMED line each, the way session 117 learned
+    the validator wants it: a `fix-claimed` defect is still an open one until the tester verifies.
+    Nothing on the product side changed; the queue is where session 118 left it.
+  shipped: []
 - id: 119
   date: 2026-09-09
   title: "Tester run: DEF-0026 verified clean, and re-verifying it found two new defects in the proof itself"
