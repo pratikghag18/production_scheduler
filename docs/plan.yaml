@@ -8917,6 +8917,24 @@ requirements:
     read, which for a company admin is the whole org --- hundreds today, thousands for a large
     customer. Cheap to hash, but it is a materialisation where there was none, and it is the first
     thing to look at if a much larger org is ever slower than F-124's measurement predicts.
+- id: R-364
+  title: A measurement spec leaves the shared database exactly as it found it, beyond what it deliberately seeds and tears down
+  source:
+  - session 109 conversation
+  stated_by: agent
+  claim: >-
+    `e2e/loadSanity.spec.ts`'s own header states the standard it is supposed to meet: "`fixture.sql`
+    adds a plant called 'Load Plant' and 420 `LOAD-%` operators and touches nothing else;
+    `teardown.sql` removes exactly those." A spec that is explicitly a MEASUREMENT rather than a
+    promise, run repeatedly against the developer's own live database, must not otherwise change any
+    row it did not seed --- least of all a real write a person would have to notice and undo by hand.
+  verified_by: []
+  status: contradicted
+  note: >-
+    CONTRADICTED 9 Sept (tester, session 109, DEF-0025): the spec's own drag section commits a real
+    move (see DEF-0025) with no revert, so every run silently shifts one `Load Op N` assignment's
+    time by an hour in whichever database the run is pointed at -- cumulative across runs, and never
+    torn down by `teardown.sql`, which only ever removes the plant and the operators it added.
 findings:
 - id: F-125
   title: A plant board spends nine seconds in the browser without drawing it --- the DOM ends up with eleven tracks
