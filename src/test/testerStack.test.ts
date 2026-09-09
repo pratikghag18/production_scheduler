@@ -89,15 +89,29 @@ describe("R-366: the tester's config.toml is generated, never shared", () => {
   });
 
   it("TS10 / DEF-0026: e2e/env.ts's mailUrl follows E2E_MAIL_URL, and defaults to the developer's inbucket", async () => {
-    vi.stubEnv("E2E_MAIL_URL", "http://127.0.0.1:54424");
-    vi.resetModules();
-    const withKnob = await import("../../e2e/env");
-    expect(withKnob.mailUrl).toBe("http://127.0.0.1:54424");
-    vi.unstubAllEnvs();
-    vi.resetModules();
-    const fallback = await import("../../e2e/env");
-    // `.env.local` may or may not carry the knob on a given machine; either the
-    // developer's default or whatever that file says, never the tester's.
-    expect(fallback.mailUrl).not.toBe("http://127.0.0.1:54424");
+    // DEF-0027: `scripts/tester-run.mjs` sets E2E_MAIL_URL in the REAL
+    // environment before vitest starts, so on a tester run the variable is
+    // ambient, not a stub, and `vi.unstubAllEnvs()` cannot remove it -- the
+    // "fallback" half below then read the tester's own port and compared it
+    // to itself. The ambient value is taken out of `process.env` directly for
+    // the fallback import and put back afterwards, whatever it was.
+    const ambient = process.env.E2E_MAIL_URL;
+    try {
+      vi.stubEnv("E2E_MAIL_URL", "http://127.0.0.1:54424");
+      vi.resetModules();
+      const withKnob = await import("../../e2e/env");
+      expect(withKnob.mailUrl).toBe("http://127.0.0.1:54424");
+      vi.unstubAllEnvs();
+      delete process.env.E2E_MAIL_URL;
+      vi.resetModules();
+      const fallback = await import("../../e2e/env");
+      // `.env.local` may or may not carry the knob on a given machine; either the
+      // developer's default or whatever that file says, never the tester's.
+      expect(fallback.mailUrl).not.toBe("http://127.0.0.1:54424");
+      expect(fallback.mailUrl).toMatch(/^https?:\/\//);
+    } finally {
+      if (ambient === undefined) delete process.env.E2E_MAIL_URL;
+      else process.env.E2E_MAIL_URL = ambient;
+    }
   });
 });

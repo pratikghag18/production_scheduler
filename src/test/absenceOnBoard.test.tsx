@@ -288,6 +288,8 @@ function renderPanel(
     nodeById?: Map<string, unknown>;
     capacityCap?: number;
     operators?: BoardOperator[];
+    windowStart?: Date;
+    zone?: string;
   } = {},
 ) {
   const ops = opts.operators ?? [ELENA, RAY];
@@ -297,23 +299,46 @@ function renderPanel(
     endPanelDrag: vi.fn(),
     cancelDrag: vi.fn(),
   };
-  render(
+  // DEF-0028: the F-125 memo cases need a SECOND render with one memo input
+  // changed and the rest held by reference, so the element is built by a
+  // function of the two inputs that vary and the helper hands back `rerender`.
+  // Every collection is built ONCE here, not inside `element`: a fresh Map
+  // per render would invalidate the memo on its own and the rerender cases
+  // would stay green with the key wrong (the first draft of this did exactly
+  // that, and the tester's mutation passed against it).
+  const DEFAULT_WINDOW_START = new Date("2026-09-07T00:00:00.000Z");
+  const hereOperatorIds = new Set(ops.map((o) => o.id));
+  const skillById = opts.skillById ?? new Map<string, Skill>();
+  const nodeById = (opts.nodeById as never) ?? new Map();
+  const assignmentsByOperator = opts.assignmentsByOperator ?? new Map();
+  const element = (windowStart: Date, zone: string | undefined) => (
     <OperatorPanel
       operators={ops}
-      hereOperatorIds={new Set(ops.map((o) => o.id))}
+      hereOperatorIds={hereOperatorIds}
       absences={absences}
-      skillById={opts.skillById ?? new Map<string, Skill>()}
-      nodeById={(opts.nodeById as never) ?? new Map()}
-      assignmentsByOperator={opts.assignmentsByOperator ?? new Map()}
-      windowStart={new Date("2026-09-07T00:00:00.000Z")}
+      skillById={skillById}
+      nodeById={nodeById}
+      assignmentsByOperator={assignmentsByOperator}
+      windowStart={windowStart}
       windowMinutes={1440}
+      zone={zone}
       capacityCap={opts.capacityCap ?? 1}
       open={true}
       onToggleOpen={vi.fn()}
       draggingOperatorId={null}
       dragApi={dragApi}
-    />,
+    />
   );
+  const { rerender } = render(element(opts.windowStart ?? DEFAULT_WINDOW_START, opts.zone));
+  return {
+    rerender: (next: { windowStart?: Date; zone?: string }) =>
+      rerender(
+        element(
+          next.windowStart ?? opts.windowStart ?? DEFAULT_WINDOW_START,
+          "zone" in next ? next.zone : opts.zone,
+        ),
+      ),
+  };
 }
 
 /** A minimal IndexedAssignment carrying only the fields OperatorPanel's
@@ -379,12 +404,12 @@ describe("operator panel (R-038): avatar, name, skill badges, count pill, dimmed
     expect(elenaChip.title).toMatch("50%");
   });
 
-  it("R-038c (F-125): the title reads exactly `<node> · <start>–<end> · <eff>%`, so a memo-key mistake that froze a stale title would be caught", () => {
+  it("R-038c (F-125): the title reads exactly `<node> · <start>–<end> · <eff>%`, off the same helpers the memo calls", () => {
     // OperatorPanel used to build this string inline in chip() on every
     // render; it is now a useMemo keyed on
     // [assignmentsByOperator, nodeById, windowStart.getTime(), zone]. This
-    // pins the exact rendered string, unchanged, off the same helpers the
-    // memo calls.
+    // pins the exact rendered string, unchanged. The memo's KEY is pinned by
+    // the two rerender cases below (DEF-0028), not by this one.
     const windowStart = new Date("2026-09-07T00:00:00.000Z"); // matches renderPanel's fixture
     const assignments = new Map<string, IndexedAssignment[]>([
       [ELENA.id, [assignmentFor(NODE, 360, 480, 50)]], // 06:00-08:00, 50%
@@ -393,6 +418,51 @@ describe("operator panel (R-038): avatar, name, skill badges, count pill, dimmed
     const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
     const expected = `${NODE} · ${formatFull(addMinutes(windowStart, 360), undefined, undefined)}–${formatClock(addMinutes(windowStart, 480), undefined)} · 50%`;
     expect(elenaChip.title).toBe(expected);
+  });
+
+  /*
+   * DEF-0028: a memo that ignores a dependency only shows on a SECOND render
+   * with that dependency changed and every other input held by reference.
+   * The tester dropped `windowStart.getTime()` and `zone` from the tooltip
+   * memo's key and every case touching the component stayed green, because
+   * none rendered it twice. These two do: the same `assignmentsByOperator`
+   * and `nodeById` Map instances across the rerender, one of the other two
+   * keys changed, and the title must follow it.
+   */
+  it("R-038c (DEF-0028): a rerender with the same assignments but a later windowStart rebuilds the title -- the memo is keyed on the window", () => {
+    const assignments = new Map<string, IndexedAssignment[]>([
+      [ELENA.id, [assignmentFor(NODE, 360, 480, 50)]],
+    ]);
+    const day1 = new Date("2026-09-07T00:00:00.000Z");
+    const day2 = new Date("2026-09-08T00:00:00.000Z");
+    const { rerender } = renderPanel([], { assignmentsByOperator: assignments, windowStart: day1 });
+    const chip = () => screen.getByText("Elena").closest("div") as HTMLElement;
+    const titleFor = (d: Date) =>
+      `${NODE} · ${formatFull(addMinutes(d, 360), undefined, undefined)}–${formatClock(addMinutes(d, 480), undefined)} · 50%`;
+    expect(chip().title).toBe(titleFor(day1));
+    rerender({ windowStart: day2 });
+    expect(chip().title).toBe(titleFor(day2));
+    expect(chip().title).not.toBe(titleFor(day1));
+  });
+
+  it("R-038c (DEF-0028): a rerender with the same assignments but a different zone rebuilds the title -- the memo is keyed on the zone", () => {
+    const assignments = new Map<string, IndexedAssignment[]>([
+      [ELENA.id, [assignmentFor(NODE, 360, 480, 50)]],
+    ]);
+    const windowStart = new Date("2026-09-07T00:00:00.000Z");
+    const { rerender } = renderPanel([], {
+      assignmentsByOperator: assignments,
+      windowStart,
+      zone: "UTC",
+    });
+    const chip = () => screen.getByText("Elena").closest("div") as HTMLElement;
+    const titleIn = (zone: string) =>
+      `${NODE} · ${formatFull(addMinutes(windowStart, 360), undefined, zone)}–${formatClock(addMinutes(windowStart, 480), zone)} · 50%`;
+    expect(chip().title).toBe(titleIn("UTC"));
+    rerender({ zone: "America/Chicago" });
+    expect(chip().title).toBe(titleIn("America/Chicago"));
+    // The two zones read the same instants differently, or this case proves nothing.
+    expect(titleIn("America/Chicago")).not.toBe(titleIn("UTC"));
   });
 
   it("R-038d: a chip renders dimmed (the `full` class) when its operator is fully allocated over the window, and not otherwise", () => {
