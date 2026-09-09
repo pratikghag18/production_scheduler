@@ -8946,6 +8946,33 @@ requirements:
     leaves an `assignments_audit` row and a bumped `updated_at` that nothing may tidy away. If this
     requirement is meant to forbid those too, it cannot be met at the same time as measuring a real
     release, and one of the two has to give.
+- id: R-365
+  title: A drag that would take a chip off its run, or onto another run, asks before it saves
+  source:
+  - session 110 conversation
+  stated_by: maintainer
+  claim: >-
+    When a chip is dropped where it no longer fits inside its own run --- so the app would DETACH it
+    to a standalone assignment, or RE-PARENT it to another run on the same track (D66) --- the app
+    asks first, in the board's own confirm prompt: it names the person, the run they are leaving and
+    what will happen ("This takes Op 107 off the 08:00-16:00 run and makes them a standalone
+    assignment. Continue?" / "Move Op 107 from run A to run B?"), with Continue and Cancel. Cancel
+    snaps the chip back to where it was and writes nothing. An ordinary move that stays inside the
+    same run does not ask. The drop is never truncated or clamped to fit the run: what the person
+    dragged is what is saved, or nothing is.
+  verified_by: []
+  status: uncovered
+  note: >-
+    DECIDED 9 Sept (maintainer, session 110), out of F-126 / DEF-0025, where a load-sanity drag
+    silently detached a chip. The alternative on the table --- truncate the chip to fit its run and
+    then ask --- was rejected: it restores the clamp P1-4e lifted (`boundsFor` in
+    `useDragGesture.ts`) and takes away the move-between-runs gesture D66 exists for, and it
+    changes the shape the person asked for (an 8-hour block becomes a 7-hour one) rather than
+    saying what will happen. The mechanism already exists: `askConfirm` on run resize ("N crew
+    assignments fall outside the new run window. Continue?") is the same two-button prompt, anchored
+    at the drop. A "keep inside the run" third answer was considered and deferred until someone asks
+    for it. Knock-on: `e2e/loadSanity.spec.ts`'s drag will have to click Continue before it can time
+    the save; its four-column restore is needed either way.
 findings:
 - id: F-126
   title: The one number that said a big board was cheap to USE was measuring a mouse-up over empty space
@@ -17297,6 +17324,16 @@ next:
 # bug lives in. A case that follows the RAW emailed link is now in
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
+- kind: task
+  text: Ask before a drag detaches a chip from its run or moves it onto another (R-365)
+  why: >-
+    R-365, decided 9 Sept. Today a chip pushed past the end of its run is detached without a word
+    (D66); the maintainer wants the move kept and a Continue/Cancel prompt in front of it, using the
+    same `askConfirm` run resize already uses. Cancel snaps back and writes nothing; a move that
+    stays inside its run does not ask. The drop must NOT be clamped or truncated to fit. Prove it
+    with a vitest case in `src/test/` beside the existing drag tests (detach asks; re-parent asks;
+    in-run move does not; cancel writes nothing) and update `e2e/loadSanity.spec.ts` to click
+    Continue. Then set R-365 `verified_by` and `status: covered`.
 - kind: task
   text: Find the nine seconds the browser spends on a plant board without drawing it
   why: >-
