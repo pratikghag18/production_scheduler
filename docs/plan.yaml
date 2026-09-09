@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: d26d3f5
+  tip: 99ef996
   baseline:
-    app_tests: 2645
-    app_test_files: 130
+    app_tests: 2663
+    app_test_files: 131
     tsc: 0
     eslint: 0
     db_checks: 823
@@ -9021,10 +9021,15 @@ requirements:
     as before with nothing exported and nothing configured: the port and the stack are knobs with
     the current values as their defaults, never a second copy of a setting. The SQL runner
     (`scripts/run-sql-test.sh`) and `db:types` reach whichever stack the run names.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/testerStack.test.ts
+    cases: "TS1-TS8: the generator over the REAL config.toml -- project id changed, every port line shifted by 100, no developer port or 5173 survives, and an unfamiliar port key or an unchanged project id is refused"
+  - kind: manual
+    steps: "node scripts/tester-stack.mjs up (TESTER_STACK_DIR set to a scratch path): docker ps shows ten supabase_*_production_scheduler_tester containers beside the developer's ten; bash scripts/run-sql-test.sh --rebuild with SUPABASE_DB_CONTAINER set runs in the tester container (docker logs); npx playwright test e2e/smoke.spec.ts with E2E_PORT=5174 hits 5174 while 5173 keeps listening; down returns docker ps to the original ten"
+  status: covered
   note: >-
-    DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
+    BUILT 9 Sept (session 114, 99ef996). DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
     attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
     `localhost:5173`) while a build lane was editing the R-365 prompt into it, and read an old spec
     against a new app as "drag started, nothing written". In the same window both sessions applied
@@ -12449,6 +12454,63 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 114
+  date: 2026-09-09
+  title: R-366 built --- the tester's port and Supabase stack are its own, and the developer exports nothing
+  commits:
+  - 99ef996
+  numbers:
+    app_tests: 2663
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here: 2663 in 131 files --- session 113's 2655 plus the eight cases of the
+    new `src/test/testerStack.test.ts`. `tsc -b`, `eslint .` and `prettier --check` clean.
+    `db_checks`, `migrations` and `e2e` carried from the tester's session 111; no SQL changed, and
+    the only browser spec run this session was `smoke.spec.ts` against the tester's own port, by
+    the build lane, as R-366's live proof.
+  summary: >-
+    THE MAINTAINER CHOSE OPTION 1 (a port and a database of the tester's own) over a rule in
+    `tester.md`, and R-366 was written into `requirements` at 18e704e before the brief. A Sonnet
+    lane built it; this session reviewed it with one job, break it, and added the pin that makes
+    `covered` honest.
+    ⭐ TWO KNOBS, BOTH DEFAULTING TO TODAY. `E2E_PORT` (default 5173) lives in `e2e/env.ts`, the
+    one place the e2e run reads its environment, and is threaded through `playwright.config.ts`
+    and the three specs that build a URL by hand (`invite`'s Origin header, `passwordReset`'s
+    redirectTo, `roleWalk`'s hand-made contexts); `--strictPort` makes a taken port an error
+    rather than Vite's silent hop to 5174, which is exactly how a run lands on the wrong server.
+    `TESTER_STACK_DIR` (default `<repo>/../scheduler-test-stack`) is where
+    `scripts/tester-stack.mjs up` generates a SIBLING Supabase workdir: copies of `migrations/`,
+    `seed.sql`, `dev_demo.sql`, `tests/`, `functions/` in step with the worktree's commit, and a
+    `config.toml` rewritten to `project_id = production_scheduler_tester`, every port +100, and
+    the auth allow-list on the tester's port. The committed `config.toml` cannot carry two port
+    sets and `env()` has no defaults, so generation is the only shape that leaves the developer's
+    `supabase start` untouched.
+    ⭐ THE GENERATOR REFUSES BEFORE IT WRITES. A generated config that still names a developer
+    port, or keeps the developer's project id, throws rather than starts. Pulled the pure half
+    into `scripts/lib/testerStack.mjs` (with a `.d.mts` so a strict TS test can import it) and
+    pinned it against the REAL `supabase/config.toml` in `src/test/testerStack.test.ts` --- TS7
+    adds an `inspector_port = 54327` line the shifter does not know and asserts refusal, which is
+    the one failure that would quietly put the tester back on the developer's database.
+    ⭐ PROVED LIVE BY THE LANE, RE-CHECKED HERE. Ten `*_tester` containers came up beside the
+    developer's ten; one SQL file ran in the tester container (docker logs); `smoke.spec.ts` hit
+    5174 while 5173 stayed listening; `down` returned `docker ps` byte-identical. After the lane
+    finished this session confirmed: no `_tester` container left, the scratch workdir gone, the
+    developer's dev server answering 200 on 5173. `gen types --local --workdir` works on this CLI,
+    so `tester-run.mjs` regenerates types from the tester's stack without touching `package.json`.
+    ⚠️ WHAT THE TESTER HAS TO DO ONCE. `tester.md` now says: `node scripts/tester-stack.mjs up`
+    once per boot, export what `env` prints, and open screens on 5174. The next tester run is the
+    first real use; if `--ff-only` brings the new brief in cleanly the tester will read it before
+    it runs anything.
+    ⚠️ LEFT AS THEY ARE, ON PURPOSE: `scripts/ci-e2e.sh`'s `SITE_URL=localhost:5173` (CI is one
+    stack, one port, and the default) and DEF-0020's vitest pin sending `Origin: localhost:5173`
+    (a developer-stack live pin by design, not an e2e spec).
+  shipped: []
 - id: 113
   date: 2026-09-09
   title: Merged the tester's session 111 --- DEF-0025 verified, and its F-127 answered with the shared dev server
