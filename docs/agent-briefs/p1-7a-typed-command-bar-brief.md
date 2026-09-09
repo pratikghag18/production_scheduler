@@ -77,7 +77,15 @@ can produce the SAME form and hand it to the SAME resolver (that is the point
 of separating parse from resolve: the model replaces `parse.ts` one day and
 nothing else moves).
 
-### `src/features/board/lib/command/parse.ts`
+They live under **`src/lib/command/`**, not under the board feature. `src/lib`
+is the home for non-React pure helpers (`docs/conventions.md`), and the
+name-matching and cell-resolving rules these modules hold are the same ones a
+later app-wide question panel ("who is free on Line 1 this afternoon?") will
+need; the feature-first rule forbids that panel importing from
+`src/features/board/`, so putting them in `lib` now saves a move later. Nothing
+in them may import from a feature.
+
+### `src/lib/command/parse.ts`
 
 ```ts
 /** A clock time on the board's own clock (BOARD_ZONE in time.ts), 24h. */
@@ -130,7 +138,7 @@ export function formatCommand(command: AssignCommand): string;
 export function expectedShape(): string;
 ```
 
-### `src/features/board/lib/command/resolve.ts`
+### `src/lib/command/resolve.ts`
 
 ```ts
 import type { AssignCommand } from "./parse.ts";
@@ -541,8 +549,8 @@ between `BoardToolbar` and the grid, only when `commandCtx !== null`.
 
 **Add**
 
-- `src/features/board/lib/command/parse.ts` — pure, no imports.
-- `src/features/board/lib/command/resolve.ts` — pure, `import type` from `./parse.ts` only.
+- `src/lib/command/parse.ts` — pure, no imports.
+- `src/lib/command/resolve.ts` — pure, `import type` from `./parse.ts` only.
 - `src/features/board/components/CommandBar.tsx`
 - `src/features/board/components/CommandBar.module.css`
 - `src/test/commandParse.test.ts` — vitest, `describe`/`it`/`expect`, **one plain `it()` per case, no `it.each`** (brief rule 5/11), cases P1–P24.
