@@ -8864,6 +8864,57 @@ requirements:
     right branch. That half is the mutation rows above, recorded rather than automated because
     automating it means killing a container inside a unit run.
 findings:
+- id: F-124
+  title: A plant-sized board takes over two seconds on the server, and nearly all of it is row-level security asked once per row
+  tag: The guard that runs 11,520 times
+  status: open
+  found_by: agent
+  refs:
+  - R-006
+  story: >-
+    Measured 9 Sept on a purpose-built fixture --- one plant, 8 departments, 48 lines, 384 work
+    cells, 420 people, and a working week of 5,760 runs and 5,760 assignments --- on a scratch
+    database, never the dev one. `scripts/load-sanity.sh` rebuilds and re-measures the whole thing in
+    one command, so none of what follows is an impression.
+    ⛔ THE HEADLINE. Loading a PLANT board takes **2.1 to 2.7 seconds** on the server and returns a
+    **7.3 MB** payload. A department is ~375ms and 1.0 MB; a line, which is what a supervisor
+    actually opens, is ~155ms and 275 KB. The seed's four-cell plant is ~110ms. So it is roughly
+    linear in rows and the constant is far too big.
+    ⭐ AND THE CAUSE IS NOT WHERE THE QUEUE ENTRY GUESSED, WHICH IS THE POINT OF MEASURING. That entry
+    named three suspects: `board_window`'s single payload, `boardIndex`'s maps, and
+    `computeFitScale`'s measure-and-remeasure. The client is INNOCENT --- on the real 7.13 MB payload,
+    `JSON.parse` is 30ms, `parseBoardWindow` 25ms and `buildBoardIndex` 64ms, about 120ms of work for
+    a payload that took the server twenty times longer to produce. The developer's own first guess
+    was wrong too: `node_policies`, which calls `app_resolve_node_setting` once per node, is 44-89ms
+    of the total.
+    ⛔ IT IS THE `runs` AND `assignments` READS, AND WITHIN THEM IT IS RLS. Timed piece by piece
+    against the same fixture: `scoped_nodes` 16-20ms, `node_policies` 44-89ms, `app_operator_homes`
+    35-42ms --- and then runs at ~1,000ms and assignments at ~1,010ms, together about 80% of the
+    whole. The same two aggregations over the same rows with RLS BYPASSED (superuser) take **6ms and
+    4ms**. That is a ~150x difference, and it is the only variable that changed.
+    ⭐ WHY, EXACTLY. `runs_select` is `app_can_read_node(node_id)` --- a `SECURITY DEFINER` helper
+    that looks the node up, calls `app_current_org()`, calls `app_is_admin()`, and may walk
+    `app_grant_paths`. Postgres evaluates it once PER ROW: 5,760 times for runs and 5,760 for
+    assignments, ~170 microseconds each. But there are only **384 distinct node ids** among those
+    11,520 rows, and `board_window` has ALREADY computed the readable set --- `scoped_nodes`, at the
+    top of the same function, through the same RLS --- and already constrains both reads with
+    `node_id IN (SELECT id FROM scoped_nodes)`. So the expensive question is asked 11,520 times to
+    re-derive an answer the function is holding 384 of.
+    ⚠️ WHAT THIS IS NOT. It is not a bug in the policy: the policy is correct, and it must keep
+    guarding direct table reads, which are exactly what RLS is for. It is not the client's fault. And
+    it is not something to "fix" by weakening a security boundary --- which is why this is a card and
+    a queue item rather than a change made on the way past.
+  lead: >-
+    A suspicion, not a fact, and the choice is the maintainer's. THREE candidate shapes, in
+    increasing order of how much they touch. (1) Leave it, and cap what a person can open --- the
+    plant board may simply not be a thing anyone should load, and a department at 375ms is fine
+    today. (2) Make `board_window` SECURITY DEFINER and do the scoping itself, which it already does
+    once for `scoped_nodes`; that removes the per-row call entirely but moves this function into the
+    class CLAUDE.md warns hardest about, and every guard it then owns has to be re-proved rather than
+    inherited. (3) Leave the policy alone but help the planner reuse the answer --- a Memoize over
+    384 distinct arguments, or expressing the check set-wise so it plans as one hash join rather than
+    11,520 calls. (3) is the least invasive and the most uncertain; it needs an EXPLAIN before anyone
+    believes it. Do not take (2) without deciding it deliberately.
 - id: F-120
   title: A run or a direct assignment can be created on a node whose level is not schedulable, and nothing on the server says no
   tag: The gate the app assumes and the server never built
@@ -12016,6 +12067,62 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 106
+  date: 2026-09-09
+  title: Load sanity, measured rather than guessed --- a plant board is 2.4 seconds and 7.3 MB, and four fifths of it is RLS asked once per row
+  commits: []
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 815
+    migrations: 72
+    e2e: 44
+  confirmed: true
+  summary: >-
+    The queue's last live item, and the first one in a while whose answer nobody could have reasoned
+    to. `scripts/load-sanity.sh` now builds a throwaway database, seeds a plant of 384 work cells,
+    420 people and a working week of 5,760 runs and 5,760 assignments, measures, and drops it again
+    --- one command, repeatable, and it never touches the dev database.
+    ⛔ THE ANSWER: A PLANT BOARD IS 2.1-2.7 SECONDS ON THE SERVER AND 7.3 MB ON THE WIRE. A department
+    is ~375ms and 1.0 MB; a line --- what a supervisor actually opens --- is ~155ms and 275 KB. So
+    the shape is roughly linear in rows and the constant is much too large at the top end.
+    ⭐ AND EVERY GUESS ABOUT WHERE THE TIME WENT WAS WRONG, WHICH IS THE ARGUMENT FOR MEASURING. The
+    queue entry named three suspects and the client was all of them: `board_window`'s payload,
+    `boardIndex`'s maps, `computeFitScale`. On the REAL 7.13 MB payload the client does ~120ms of
+    work in total --- `JSON.parse` 30ms, `parseBoardWindow` 25ms, `buildBoardIndex` 64ms. It is
+    innocent. The developer's own first guess, `node_policies` calling a resolver once per node, is
+    44-89ms. Also wrong.
+    ⛔ IT IS RLS, ASKED ONCE PER ROW, AND THE CONTRAST IS THE PROOF. Timed piece by piece:
+    `scoped_nodes` 16-20ms, `node_policies` 44-89ms, `app_operator_homes` 35-42ms, then runs
+    ~1,000ms and assignments ~1,010ms --- together about 80% of the whole. The SAME two aggregations
+    over the SAME rows with RLS bypassed take 6ms and 4ms. A ~150x difference with one variable
+    changed. `runs_select` is `app_can_read_node(node_id)`, a SECURITY DEFINER helper, evaluated
+    5,760 times per table at ~170 microseconds each --- to re-derive an answer that has only 384
+    distinct values, which `board_window` has ALREADY computed as `scoped_nodes` at the top of the
+    same function and is already filtering both reads against.
+    ⚠️ TWO MEASUREMENT MISTAKES MADE AND CAUGHT HERE, BOTH RECORDED IN THE SCRIPT SO THEY ARE NOT
+    MADE AGAIN. First, the run was done without a jwt sub: `board_window` is STABLE rather than
+    DEFINER, so it runs as the caller, `app_current_org()` was NULL, the subtree filtered away, and
+    all four scopes came back as an empty payload in ~1.4ms --- four identical, entirely convincing,
+    entirely meaningless numbers. Second, the fixture's node paths are derived from NAMES by a
+    trigger ("Dept 1" becomes `dept_1`), so the labels the INSERTs supplied were rewritten and the
+    first corrected run measured a LINE subtree THAT DOES NOT EXIST: 0 nodes, 0 runs, a flat ~90ms
+    that read as a perfectly good answer for a line. Both are the same failure --- a number that
+    looks right because nothing in it disagrees with anything.
+    ⭐ F-124 FILED, NOT FIXED, AND DELIBERATELY SO. The policy is CORRECT and must keep guarding
+    direct table reads; the fix is not to weaken a security boundary on the way past. Three candidate
+    shapes are named on the card with the trade-off of each, and the choice --- including "leave it
+    and never open a plant board" --- is the maintainer's.
+    ⚠️ NOTHING WAS MADE A CI GATE. The script prints numbers and asserts nothing, because "is this
+    fast enough" is a judgement and a threshold nobody has agreed would become a flaky test on
+    somebody else's laptop. It is a tool to re-run after a change, not a promise.
+    ⭐ THE NUMBERS. Unchanged from session 105 and NOT re-measured beyond the gate: `Test Files 130
+    passed (130)` / `Tests 2645 passed (2645)`, tsc 0, eslint 0, format:check clean over everything
+    tracked. No migration, no application code, no SQL test file changed --- this session adds a
+    measurement harness under `scripts/` and two plan entries.
+  shipped: []
 - id: 105
   date: 2026-09-09
   title: The reset link lands where it should, and the test that could not see it now can
@@ -16754,24 +16861,37 @@ next:
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
 - kind: task
-  text: Load sanity --- does the board stay usable with hundreds of rows and thousands of assignments
+  text: The board's cost at scale is row-level security asked once per row --- decide what to do about it
   why: >-
-    THE HALF OF "Phase 1 --- E2E test pass + load sanity" THAT WAS NOT DONE, cut out on 9 Sept when
-    the other half closed rather than being carried along inside a line that read as finished. The
-    browser suite now runs 43 cases against a real stack on every push (S34), but every one of them
-    drives the DEMO world, which is three plants and a handful of people --- nothing in `e2e/`
-    generates volume, so nothing has ever asked whether the board is usable at scale.
-    ⚠️ AND IT IS A REAL QUESTION HERE RATHER THAN A GENERIC ONE, because this board's cost is not
-    linear in rows. `board_window` returns runs, assignments, operators and their homes for a whole
-    subtree over a window in ONE payload; `boardIndex` builds several maps over all of it on every
-    load; and `computeFitScale` measures and re-measures to fit the window's height. Any of those
-    could be the thing that gives first, and guessing which is the wrong way to find out.
-    ⭐ THE SHAPE OF THE WORK: a fixture that seeds volume (a plant with hundreds of cells, a week
-    with thousands of assignments) on the SAME path `dev_demo.sql` uses so it cannot half-run
-    unnoticed (DEF-0006's lesson), then one measurement of the board's first paint and of a drag,
-    with a number written into the plan rather than an impression. Whether it becomes a gate in CI or
-    a thing measured once and revisited is the maintainer's call --- a slow test that runs on every
-    push has its own cost.
+    F-124, measured 9 Sept on a purpose-built 384-cell fixture rather than guessed. A plant board is
+    2.1-2.7 seconds on the server and 7.3 MB on the wire; a department ~375ms, a line ~155ms. About
+    80% of the plant number is the `runs` and `assignments` reads, and within those it is RLS: the
+    same aggregations over the same rows take 6ms and 4ms with the policy bypassed against ~1,000ms
+    each with it. `runs_select` is `app_can_read_node(node_id)`, a SECURITY DEFINER helper evaluated
+    once per row --- 11,520 times --- to re-derive an answer with only 384 distinct values, which
+    `board_window` has already computed as `scoped_nodes` and is already filtering both reads
+    against.
+    ⭐ THE CLIENT IS NOT THE PROBLEM AND THAT WAS MEASURED TOO: on the real 7.13 MB payload,
+    `JSON.parse` 30ms, `parseBoardWindow` 25ms, `buildBoardIndex` 64ms. Roughly 120ms against the
+    server's 2,400.
+    ⚠️ THE DECISION IS THE MAINTAINER'S AND IT INCLUDES "DO NOTHING". Three shapes on F-124's own
+    card: cap what a person may open, since a plant board may not be a thing anyone should load and a
+    department is fine today; make `board_window` SECURITY DEFINER and let it own the scoping it
+    already computes, which removes the per-row call but moves the function into the class CLAUDE.md
+    warns hardest about; or leave the policy and help the planner reuse the answer, which is least
+    invasive and least certain and needs an EXPLAIN before anyone believes it. Do not take the
+    definer route without deciding it deliberately.
+    ⭐ RE-RUN THE NUMBERS ANY TIME WITH `scripts/load-sanity.sh` --- it builds a throwaway database,
+    seeds the volume, measures, and drops it, and never touches the dev database. It asserts nothing
+    on purpose: "fast enough" is a judgement, and a threshold nobody has agreed to would become a
+    flaky test on somebody else's laptop.
+#
+# Removed on 9 Sept, DONE as specified: "load sanity --- does the board stay
+# usable with hundreds of rows and thousands of assignments". The entry asked for
+# a fixture on a path that cannot half-run, and one measurement of the board with
+# a number written into the plan rather than an impression. Both exist:
+# scripts/load-sanity.sh and F-124. What the measurement FOUND is now its own item
+# above, because finding the cause is not the same as choosing what to do about it.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   requirement: R-016
