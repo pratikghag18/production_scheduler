@@ -12000,6 +12000,66 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 103
+  date: 2026-09-09
+  title: Wave four's two holes tested -- the import migration's mutation reproduced cold, the zone fallback read in the code
+  commits:
+  - cfcf4d4
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 815
+    migrations: 72
+  confirmed: true
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded 0e5421f to 7acdb5f cleanly (one CRLF-only
+    `database.types.ts` artifact discarded first, confirmed a no-op via `git diff` before merging).
+    Session 102 closed both halves of wave four's known gap (R-359): the refusal sentence now
+    names the hours through `leaveLine`, and 0073 lets the CSV import write a part-day row. Zero
+    open defects on arrival.
+    Ran `node scripts/tester-run.mjs --sql --e2e`, stack up, all ten containers healthy. Count
+    matches exactly: 2645 tests in 130 files. All 66 numbered SQL files plus dev_demo.sql: 815
+    checks, 0 failures, including the new 94_imported_absence_hours_test.sql (IH0-IH9 with IH4b,
+    11 of 11).
+    EXTRACTION CHECKED, NOT TAKEN ON FAITH. Read `import_absences`' last two emissions side by
+    side (0066 to 0073): the diff is exactly the part-day rules the header describes -- org
+    scoping, the edit-rights gate, the exclusion handler, `security definer`, `search_path` all
+    byte-identical. Then reproduced the developer's own mutation independently on a scratch copy:
+    dropped `timerange` from 0073's INSERT column list, the exact 0066 bug this migration exists
+    to close. `sql_test_db` rebuilt and re-run: IH1, IH6 and IH7 go red by name, 8 of 11 still
+    green, IH7 failing on BEHAVIOUR (a shift merely touching an imported part-day absence wrongly
+    answers `absent: true`), not merely a null column. Restored from the pre-mutation copy,
+    `git diff --exit-code` clean, `sql_test_db` rebuilt again and 94 back to 11 of 11.
+    THE CLIENT-SIDE CLAIMS READ IN THE CODE, ONE BY ONE. `errors.ts`'s `AbsentOperator` lifts
+    `starts_at`/`ends_at` only as a pair (`{}` otherwise), matching the "half a pair degrades to
+    whole-day" claim. `AssignmentPopover.tsx`'s `describeRefusal` and `useSchedulerToast.ts`'s
+    `Absent` branch both route through the same `leaveLine`, so the pop-up and the drag toast
+    cannot phrase the same fact two ways. `useDragGesture.ts` threads `dateFormat` from its own
+    existing `UseDragGestureArgs` and `index.zone` into the toast context, not a UTC default.
+    `AbsencesImport.tsx`'s `zoneByNodeId` only records a plant once its query `isSuccess`, so a
+    still-loading zone is ABSENT from the map rather than resolving through `coerceTimezone(undefined)`
+    to UTC -- `zoneFor` then returns null and the planner errors that row rather than guessing it
+    whole-day, which is the one failure mode this whole piece exists to close. No DDL in 0073 (a
+    function replacement only), so Sweep 1 had nothing to find; confirmed by reading the migration
+    rather than trusting the header. R-359's note carries the detail.
+    format:check (379 files) and db:types' stale warning are the same `core.autocrlf`/no-
+    `.gitattributes` local artifact from session 98, re-confirmed rather than assumed this time
+    since a real migration landed: `git diff` after `db:types` regenerated the file shows nothing,
+    matching the developer's own "no diff, signature unchanged" claim.
+    ONE E2E TIMEOUT, SECOND SESSION RUNNING WITH THE SAME SHAPE. `absences.spec.ts`'s "Ana records
+    an absence" case timed out waiting for the Absences tab under the full 6-worker run; re-ran
+    that file alone (3 passed, 4.8s) and the full suite again (43 passed) and it did not recur.
+    Session 101 saw the identical shape on a different file (`copyWeek.spec.ts`) and it didn't
+    reproduce either. Two sessions, two different specs, always exactly one test, never on retry
+    or alone -- reads as local worker contention rather than a product defect: `playwright.config.ts`
+    already runs CI at `workers: 1` with `retries: 2`, so CI never sees this shape. Worth naming
+    twice rather than filing, since the failing test differs each time and nothing about it points
+    at the code either session actually changed.
+    Sweeps: nothing new. Sweep 2 named the same three `week_template_items` columns already
+    explained as SQL-RPC-only reads.
+  shipped: []
 - id: 102
   date: 2026-09-09
   title: Wave four's two holes closed --- the refusal that would not say which hours, and the sheet that could not record half a day
