@@ -4204,8 +4204,14 @@ requirements:
       p_root_path/p_from/p_to; the server function's own body scopes both runs and assignments by
       scoped_nodes (subtree) and && v_window (time), and scoped_nodes is itself bounded by org_id and
       path <@ p_root_path
-  status: covered
+  status: contradicted
   note: >-
+    CONTRADICTED 8 Sept (tester, session 98, DEF-0024): the runs-field and assignments-field cases in
+    boardWindowScoping.test.ts extract each field with a 300-character lookahead that runs straight
+    through the field's own closing paren and into the NEXT field in board_window's JSON literal --
+    runs is immediately followed by assignments in the query, so a runs sub-select with NO time-window
+    predicate at all still matches "&& v_window" (the assignments field's own). The live server is
+    correct today (measured directly); the test cannot tell you if that ever changes. Prior note:
     Checked 8 Sept (requirement audit): confirmed genuinely untested at the time, then closed with a new
     audit-style test. useBoardWindow.ts is exercised indirectly through this audit rather than by name.
 - id: R-007
@@ -8597,7 +8603,7 @@ requirements:
       leaveLine renders a part-day hit as the day plus the hours in the given zone, and a whole-day
       hit's sentence is unchanged; a raw part-day payload round-trips through the parser into the
       sentence
-  status: contradicted
+  status: covered
   note: >-
     ✅ DEF-0022 VERIFIED 8 Sept, cold, at 6b0f750: AB23 and AB24 are now real and independently
     provable by mutation (the exact reported '[)' to '[]' mutation turns AB23 red by name, and also
@@ -8606,15 +8612,11 @@ requirements:
     convention regardless of the absence's stored boundary type, which is not a defect, just a
     one-sided fragility this rule happens to have). AB25 (two part-day absences that merely touch)
     is real too.
-    ⛔ STILL CONTRADICTED, now by DEF-0023 (tester, minor, doc-drift), filed 8 Sept against a smaller
-    claim in the SAME sentence DEF-0022 fixed: the corrected wording above says all three client
-    boundary cases are "each mirrored in 88_absences_test.sql by the name it carries there," but the
-    third one -- "a shift starting exactly when the absence starts, which does clash" -- has no
-    counterpart anywhere in 88_absences_test.sql, named or otherwise. A fully-open mutation ('[)' to
-    '()') confirmed this specific clause is not a live risk (any window with real duration overlaps
-    an absence's interior regardless of the absence's own start being inclusive or exclusive, so a
-    genuinely boundary-sensitive case here is not constructible), so this is a record-accuracy defect
-    in the plan's own claim, not a product or coverage gap the way DEF-0022 was.
+    ✅ DEF-0023 VERIFIED 8 Sept, cold, at 2016c69: the wording above no longer claims the third
+    boundary case is mirrored by name anywhere in 88_absences_test.sql -- it now says plainly that
+    it is deliberately NOT mirrored and explains why (no window with positive duration can
+    distinguish an inclusive absence start from an exclusive one). Re-read against the current plan
+    tip and confirmed the corrected sentence still stands, unchanged since the fix commit.
 - id: R-360
   title: A person's own absences are read, recorded and removed on their record in the Operators tab
   source:
