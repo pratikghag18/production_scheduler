@@ -135,17 +135,39 @@ export function OperatorPanel({
     [visible, hereOperatorIds],
   );
 
+  // F-125: every chip's tooltip `title`, computed once per change instead of
+  // once per render. Before this memo, `chip()` built the string in render —
+  // 5,760 assignments' worth on the 384-cell profiled board, ~4
+  // `Intl.DateTimeFormat` constructions each (`formatFull` alone is three:
+  // `formatDayLabel`, its inner `named`, and `formatClock`) — and did it
+  // again on EVERY render, including the settle after a single drag that
+  // changes one assignment, which measured 3.6-4.2 s. `OperatorPanel` owned
+  // 64% of the board's inclusive wait by that path. Keyed the same shape as
+  // `absentIds` above (`windowStart.getTime()`, not the `Date` object, so a
+  // same-instant re-render doesn't invalidate the cache).
+  const titles = useMemo(() => {
+    const m = new Map<string, string | undefined>();
+    for (const [operatorId, mine] of assignmentsByOperator) {
+      m.set(
+        operatorId,
+        mine.length
+          ? mine
+              .map((a) => {
+                const nodeName = nodeById.get(a.nodeId)?.name ?? a.nodeId;
+                return `${nodeName} · ${formatFull(addMinutes(windowStart, a.startMin), undefined, zone)}–${formatClock(addMinutes(windowStart, a.endMin), zone)} · ${a.efficiencyPercent}%`;
+              })
+              .join("\n")
+          : undefined,
+      );
+    }
+    return m;
+    // The window instant is what the strings turn on; key on its time.
+  }, [assignmentsByOperator, nodeById, windowStart.getTime(), zone]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function chip(o: BoardOperator, outside: boolean) {
     const mine = assignmentsByOperator.get(o.id) ?? [];
     const full = isFullyAllocated(mine, windowMinutes, capacityCap);
-    const title = mine.length
-      ? mine
-          .map((a) => {
-            const nodeName = nodeById.get(a.nodeId)?.name ?? a.nodeId;
-            return `${nodeName} · ${formatFull(addMinutes(windowStart, a.startMin), undefined, zone)}–${formatClock(addMinutes(windowStart, a.endMin), zone)} · ${a.efficiencyPercent}%`;
-          })
-          .join("\n")
-      : undefined;
+    const title = titles.get(o.id);
     return (
       <div
         key={o.id}

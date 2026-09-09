@@ -121,10 +121,39 @@ export function supportedTimezones(): string[] {
 }
 
 /**
+ * A memoised `Intl.DateTimeFormat` per (zone, options): CONSTRUCTING one is
+ * the expensive part (F-125 measured 0.1-1 ms each), `format()`/
+ * `formatToParts()` on an already-built one is microseconds. Every formatter
+ * in this file and in `board/lib/time.ts` was building a fresh one on every
+ * call — 5,760 assignments' worth of tooltips on `OperatorPanel` alone — which
+ * was 62% of the CPU on a 384-cell board. Locale is fixed at `"en-US"`, as
+ * every call site already used; `options` is keyed by its `JSON.stringify`,
+ * which is stable because every call site passes the same object literal
+ * (same key order) each time it runs.
+ */
+const dtfCache = new Map<string, Intl.DateTimeFormat>();
+export function dateTimeFormat(
+  zone: string,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat {
+  const key = `${zone}|${JSON.stringify(options)}`;
+  const cached = dtfCache.get(key);
+  if (cached) return cached;
+  const f = new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone });
+  dtfCache.set(key, f);
+  return f;
+}
+
+/**
  * Is `z` a zone this runtime's `Intl` can actually format with? An unusable
  * zone name would make every `Intl.DateTimeFormat({ timeZone: z })` on the
  * board throw, blanking it — so a value read off the wire is checked here once
  * and replaced with `UTC` if the engine rejects it. Never throws.
+ *
+ * ⚠️ DELIBERATELY NOT `dateTimeFormat` (F-125): this is the one place a fresh
+ * construction is the point — it PROBES whether the zone throws, and caching
+ * a throwing construction would mean nothing to hit. Every zone that reaches
+ * here is checked at most once per session by its callers anyway.
  */
 export function isUsableTimezone(z: unknown): z is string {
   if (typeof z !== "string" || z.length === 0) return false;
@@ -155,10 +184,8 @@ export function coerceTimezone(v: unknown): string {
  */
 export function timezoneLabel(z: string, at: Date = new Date()): string {
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: z,
-      timeZoneName: "shortOffset",
-    }).formatToParts(at);
+    // F-125: cached construction, see `dateTimeFormat` above.
+    const parts = dateTimeFormat(z, { timeZoneName: "shortOffset" }).formatToParts(at);
     const off = parts.find((p) => p.type === "timeZoneName")?.value;
     return off ? `${z} (${off})` : z;
   } catch {
@@ -193,8 +220,9 @@ export interface WallParts {
 
 /** The wall-clock `zone` shows for the instant `d`, as calendar numbers. */
 export function partsInZone(d: Date, zone: string): WallParts {
-  const p = new Intl.DateTimeFormat("en-US", {
-    timeZone: zone,
+  // F-125: cached construction, see `dateTimeFormat` above — this is called
+  // for every offset lookup the day axis makes, twice a cell.
+  const p = dateTimeFormat(zone, {
     hourCycle: "h23",
     year: "numeric",
     month: "2-digit",

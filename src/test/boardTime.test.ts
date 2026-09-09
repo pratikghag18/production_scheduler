@@ -17,6 +17,40 @@ import {
 } from "@/features/board/lib/time";
 
 /**
+ * F-125: `formatClock`/`formatDayLabel` (and `partsInZone` beneath them) used
+ * to build a fresh `Intl.DateTimeFormat` on every call — measured as 62% of
+ * all CPU on a 384-cell board. `dateTimeFormat` in `lib/format/timezones.ts`
+ * now caches one per (zone, options). This proves the cache is doing its job,
+ * without depending on the exact count any other case has already warmed the
+ * shared module-level cache to.
+ */
+describe("F-125: Intl.DateTimeFormat construction is cached", () => {
+  it("formatFull reuses formatters instead of building one per call", () => {
+    const Real = Intl.DateTimeFormat;
+    let constructions = 0;
+    class Counting extends Real {
+      constructor(...args: ConstructorParameters<typeof Real>) {
+        super(...args);
+        constructions++;
+      }
+    }
+    (Intl as unknown as { DateTimeFormat: unknown }).DateTimeFormat = Counting;
+    try {
+      for (let i = 0; i < 500; i++) {
+        formatFull(new Date("2026-08-17T06:00:00Z"), "d_mon_yyyy", "America/Chicago");
+      }
+    } finally {
+      (Intl as unknown as { DateTimeFormat: unknown }).DateTimeFormat = Real;
+    }
+    // formatFull touches at most 3 distinct option sets (formatDayLabel's
+    // parts, its inner `named`, and formatClock) — however many of those the
+    // cache had already warmed before this case, 500 more calls must add at
+    // most 3 new constructions, never one per call.
+    expect(constructions).toBeLessThanOrEqual(3);
+  });
+});
+
+/**
  * §12 case 1-3, ported to Vitest. Authored, not run in this container (no
  * npm) — the harness under /tmp/harness proved these exact assertions
  * against this exact code (see the agent report).

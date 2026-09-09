@@ -33,6 +33,7 @@ import { AssignmentPopover, describeRefusal } from "@/features/board/components/
 import { OperatorPanel } from "@/features/board/components/OperatorPanel";
 import type { IndexedAssignment } from "@/features/board/lib/boardIndex";
 import { leaveLine } from "@/features/board/lib/leave";
+import { addMinutes, formatClock, formatFull } from "@/features/board/lib/time";
 
 const NODE = "n-cell";
 
@@ -376,6 +377,22 @@ describe("operator panel (R-038): avatar, name, skill badges, count pill, dimmed
     const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
     expect(elenaChip.title).toMatch(NODE);
     expect(elenaChip.title).toMatch("50%");
+  });
+
+  it("R-038c (F-125): the title reads exactly `<node> · <start>–<end> · <eff>%`, so a memo-key mistake that froze a stale title would be caught", () => {
+    // OperatorPanel used to build this string inline in chip() on every
+    // render; it is now a useMemo keyed on
+    // [assignmentsByOperator, nodeById, windowStart.getTime(), zone]. This
+    // pins the exact rendered string, unchanged, off the same helpers the
+    // memo calls.
+    const windowStart = new Date("2026-09-07T00:00:00.000Z"); // matches renderPanel's fixture
+    const assignments = new Map<string, IndexedAssignment[]>([
+      [ELENA.id, [assignmentFor(NODE, 360, 480, 50)]], // 06:00-08:00, 50%
+    ]);
+    renderPanel([], { assignmentsByOperator: assignments });
+    const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
+    const expected = `${NODE} · ${formatFull(addMinutes(windowStart, 360), undefined, undefined)}–${formatClock(addMinutes(windowStart, 480), undefined)} · 50%`;
+    expect(elenaChip.title).toBe(expected);
   });
 
   it("R-038d: a chip renders dimmed (the `full` class) when its operator is fully allocated over the window, and not otherwise", () => {

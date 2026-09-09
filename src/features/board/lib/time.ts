@@ -18,7 +18,7 @@
  * always kept and only the date part follows the token.
  */
 import type { DateFormat } from "@/lib/format/dates";
-import { partsInZone, zonedTimeToInstant } from "@/lib/format/timezones";
+import { partsInZone, zonedTimeToInstant, dateTimeFormat } from "@/lib/format/timezones";
 
 /** The default zone: the pre-D88 axis, and what a single-zone customer runs on. */
 export const BOARD_ZONE = "UTC";
@@ -38,10 +38,13 @@ export function addMinutes(base: Date, minutes: number): Date {
  * "06:00" / "22:30" — 24h clock, in `zone`. `hourCycle: "h23"` (not
  * `hour12: false`) is deliberate: some ICU implementations render midnight as
  * "24:00" under `hour12: false`, and this board must never print that.
+ *
+ * F-125: uses the cached `dateTimeFormat` — this was the single hottest self
+ * time on a 384-cell board (4,177 ms building a fresh formatter on every
+ * call, from `OperatorPanel`'s per-assignment tooltips above all).
  */
 export function formatClock(d: Date, zone: string = BOARD_ZONE): string {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: zone,
+  return dateTimeFormat(zone, {
     hourCycle: "h23",
     hour: "2-digit",
     minute: "2-digit",
@@ -57,14 +60,19 @@ export function formatClock(d: Date, zone: string = BOARD_ZONE): string {
  * PLANT, not UTC — that is the whole of D88a. Month NAMES are reached through
  * `Intl` (month:"short"/"long"), never a month array, so the day-seam audit
  * stays green here.
+ *
+ * F-125: both formatters below use the cached `dateTimeFormat` (2,205 ms self
+ * time measured across a 384-cell board before the cache, 1,991 ms of it in
+ * `named`'s own construction). `named`'s options depend on `length`, so it
+ * caches to two entries per zone (short/long) — that is fine, both are reused
+ * across every call at that length.
  */
 export function formatDayLabel(
   d: Date,
   fmt: DateFormat = "d_mon_yyyy",
   zone: string = BOARD_ZONE,
 ): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: zone,
+  const parts = dateTimeFormat(zone, {
     weekday: "short",
     year: "numeric",
     month: "2-digit",
@@ -76,8 +84,7 @@ export function formatDayLabel(
   const mm = get("month");
   const dd = get("day");
   const named = (length: "short" | "long"): { month: string; day: string } => {
-    const p = new Intl.DateTimeFormat("en-US", {
-      timeZone: zone,
+    const p = dateTimeFormat(zone, {
       month: length,
       day: "numeric",
     }).formatToParts(d);
