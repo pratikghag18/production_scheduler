@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: fd35a20
+  tip: 021f56b
   baseline:
     app_tests: 2645
     app_test_files: 130
@@ -8960,10 +8960,19 @@ requirements:
     snaps the chip back to where it was and writes nothing. An ordinary move that stays inside the
     same run does not ask. The drop is never truncated or clamped to fit the run: what the person
     dragged is what is saved, or nothing is.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "R-365 describe: detach asks; re-parent asks; in-run nudge does not ask; Cancel writes and toasts nothing; F-127 StrictMode sends the write once"
+  - kind: vitest
+    file: src/test/interaction.test.ts
+    cases: "case21a-case21e (attachmentChangeMessage)"
+  - kind: e2e
+    file: e2e/loadSanity.spec.ts
+    cases: "the drag meets the prompt, clicks Continue, and the row is put back"
+  status: covered
   note: >-
-    DECIDED 9 Sept (maintainer, session 110), out of F-126 / DEF-0025, where a load-sanity drag
+    BUILT 9 Sept (session 111, 021f56b). DECIDED 9 Sept (maintainer, session 110), out of F-126 / DEF-0025, where a load-sanity drag
     silently detached a chip. The alternative on the table --- truncate the chip to fit its run and
     then ask --- was rejected: it restores the clamp P1-4e lifted (`boundsFor` in
     `useDragGesture.ts`) and takes away the move-between-runs gesture D66 exists for, and it
@@ -8974,6 +8983,39 @@ requirements:
     for it. Knock-on: `e2e/loadSanity.spec.ts`'s drag will have to click Continue before it can time
     the save; its four-column restore is needed either way.
 findings:
+- id: F-127
+  title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
+  tag: One click, two writes
+  status: fixed
+  found_by: agent
+  refs:
+  - R-365
+  - F-126
+  story: >-
+    Found 9 Sept, the first time R-365 put a confirm prompt in front of a real write.
+    `e2e/loadSanity.spec.ts` counts the PATCH requests the browser sends to `assignments` during
+    its drag, and every run before the prompt existed printed **1 PATCH**. The first run with the
+    prompt printed **2**. The restore that follows only ever saw one changed row, so the database
+    was fine --- the second write carried the identical patch --- but the audit log took two rows
+    for one decision, and it would have been two of anything.
+    ⛔ THE CAUSE IS A SHAPE, NOT A TYPO. `confirmYes` in `useDragGesture.ts` called the prompt's
+    `onConfirm()` INSIDE its `setPopover((p) => ...)` updater. `src/main.tsx` mounts the app in
+    `<StrictMode>`, and StrictMode invokes state updaters twice in development precisely to flush
+    out side effects hidden in them. So in the app a person uses day to day, one Continue was two
+    mutations. The run-resize confirm has had this since it replaced `window.confirm`; nothing
+    counted its requests, and `useDragGesture`'s tests render the hook WITHOUT StrictMode, so they
+    could not see it either.
+    ⭐ PINNED THE WAY THE APP RUNS. A new case wraps the hook in `<StrictMode>` and asserts the
+    write is sent exactly once; it failed at "called 2 times" before the fix and passes after. The
+    updater now only clears the popover, and the side effect runs once outside it.
+  lead: >-
+    Anywhere else a `setState` updater does more than compute the next state is the same bug
+    waiting. A grep for `setPopover((` and `setActiveDrag((` bodies that call anything is the
+    cheap audit; not done this session.
+  fix: >-
+    021f56b: `confirmYes` reads the rendered `popover`, clears it, then calls `onConfirm` once.
+    Pinned by the StrictMode case in `src/test/dragGesture.test.ts`; confirmed live by
+    `loadSanity.spec.ts` printing 1 PATCH again on two runs.
 - id: F-126
   title: The one number that said a big board was cheap to USE was measuring a mouse-up over empty space
   tag: A measurement that never happened
@@ -12295,6 +12337,56 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 111
+  date: 2026-09-09
+  title: R-365 built --- a drop that would take a chip off its run asks first --- and the prompt exposed a double write
+  commits:
+  - 39c5af7
+  - 021f56b
+  numbers:
+    app_tests: 2655
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 45
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here: 2655 in 130 files --- session 110's 2645 plus nine cases from the
+    build and one StrictMode case added in review. `tsc -b` and `eslint .` clean. `db_checks`,
+    `migrations` and `e2e` are CARRIED FORWARD from session 109; no SQL changed, and the only
+    Playwright spec run was `loadSanity.spec.ts` (three times, against the fixture, which is not
+    in the 45).
+  summary: >-
+    THE MAINTAINER DECIDED R-365 IN CONVERSATION and it was written into `requirements` at
+    39c5af7 before any code, as CLAUDE.md asks; a Sonnet lane wrote it from a brief. The build was
+    delegated to a second Sonnet lane with a brief naming the branch, the mechanism (`askConfirm`,
+    already used by run resize), the pure helper, the four vitest cases, and the e2e change; this
+    session reviewed it with one job, break it.
+    ⭐ THE BUILD HELD. `attachmentChangeMessage` in `interaction.ts` is pure and tested on its own
+    (case21a-e); the hook reuses the SAME `targetRun` the edit already chose so the prompt and the
+    write cannot disagree; the warn mirrors moved inside the commit closure so Cancel toasts
+    nothing; `boundsFor` untouched, so nothing is clamped. No existing case needed changing --- every
+    R-361 nudge is a direct chip far from any run, and the builder answers null for that. One
+    hardening in review: the decision now compares run IDS, not the labels the message shows;
+    equal labels imply the same run only because `findRunOverlap` forbids overlap on a track, and
+    that is a rule in another function.
+    ⛔ AND THE E2E RUN CAUGHT WHAT THE UNIT TESTS COULD NOT. `loadSanity.spec.ts` counts the
+    browser's PATCHes; it printed 2 where every earlier run printed 1. `confirmYes` called
+    `onConfirm()` inside its `setPopover` updater, the app mounts in StrictMode, and StrictMode
+    runs updaters twice in development --- one Continue, two writes, since the day the confirm
+    replaced `window.confirm`. F-127, fixed in the same commit, pinned by a case that renders the
+    hook inside StrictMode and failed at "called 2 times" before the fix.
+    ⚠️ THE FIXTURE WAS IN THE MAINTAINER'S DATABASE FOR ABOUT FORTY MINUTES, applied with their
+    say-so this time (session 110 applied it without asking first, which the maintainer noticed as
+    "it came back on its own"). Three spec runs: the placement checksum over every `load_plant`
+    assignment was identical before and after each, nothing detached, then `teardown.sql`.
+    ⚠️ A NUMBER MOVED AND IS NOT EXPLAINED. With the prompt in front of the write, the settle is
+    3.6-4.2s from Continue, against 8.3-8.4s from mouse-up before the prompt existed. Not
+    investigated: F-125's profiler session owns it, and it now has two shapes of the same wait to
+    compare.
+  shipped: []
 - id: 110
   date: 2026-09-09
   title: The load-sanity drag was releasing the mouse over empty space, and a real one costs eight seconds
@@ -17324,16 +17416,6 @@ next:
 # bug lives in. A case that follows the RAW emailed link is now in
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
-- kind: task
-  text: Ask before a drag detaches a chip from its run or moves it onto another (R-365)
-  why: >-
-    R-365, decided 9 Sept. Today a chip pushed past the end of its run is detached without a word
-    (D66); the maintainer wants the move kept and a Continue/Cancel prompt in front of it, using the
-    same `askConfirm` run resize already uses. Cancel snaps back and writes nothing; a move that
-    stays inside its run does not ask. The drop must NOT be clamped or truncated to fit. Prove it
-    with a vitest case in `src/test/` beside the existing drag tests (detach asks; re-parent asks;
-    in-run move does not; cancel writes nothing) and update `e2e/loadSanity.spec.ts` to click
-    Continue. Then set R-365 `verified_by` and `status: covered`.
 - kind: task
   text: Find the nine seconds the browser spends on a plant board without drawing it
   why: >-
