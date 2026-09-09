@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/li
 import type { IndexedAssignment, IndexedRun } from "../lib/boardIndex";
 import { absenceGaps, type AbsenceRow } from "@/lib/absence";
 import { leaveLine } from "../lib/leave";
-import { formatClock, formatFull, addMinutes } from "../lib/time";
+import { formatClock, formatFull, addMinutes, BOARD_ZONE } from "../lib/time";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
@@ -76,18 +76,43 @@ import styles from "./AssignmentPopover.module.css";
  * does not know names; this pop-up does, so it says "Operator A2 would reach
  * 200%" rather than a uuid (measured on the live app, session 76).
  */
-export function describeRefusal(refusal: SchedulerError, personName: string): string {
+export function describeRefusal(
+  refusal: SchedulerError,
+  personName: string,
+  dateFormat: DateFormat = DEFAULT_DATE_FORMAT,
+  zone: string = BOARD_ZONE,
+): string {
   if (refusal.kind === "CapacityExceeded") {
     return `${personName} would reach ${Math.round(refusal.peak * 100)}% of capacity at this time (limit ${Math.round(refusal.cap * 100)}%).`;
   }
   // R-357: this pop-up reassigns one person, so an `absent` refusal names that
   // one. Say it with the name it knows rather than the id `describeSchedulerError`
-  // is left with; the dates are the server's own `YYYY-MM-DD`.
+  // is left with.
+  //
+  // ⭐ R-359: AND THROUGH `leaveLine`, WHICH IS THE POINT. This sentence used to
+  // build its own ` ${from} – ${to}` from the two date fields, so a refusal
+  // against a PART-DAY absence read "10 Jun – 10 Jun" — true about the day and
+  // silent about the hours, which reads as the whole day being gone when only
+  // the morning is. `leaveLine` is the one place a board surface phrases an
+  // absence, and it already knows how to say "10 Jun 2026, 09:00–13:00"; the
+  // hours now reach here because `AbsentOperator` lifts the server's own
+  // `starts_at`/`ends_at`. Routing through it means this sentence and the
+  // pop-up's own leave line CANNOT drift into two phrasings of the same fact.
   if (refusal.kind === "Absent" && refusal.operators.length === 1) {
     const o = refusal.operators[0];
-    const range = o.from !== null && o.to !== null ? ` ${o.from} – ${o.to}` : "";
-    const reason = o.reason !== null ? `: ${o.reason}` : "";
-    return `${personName} is on leave${range}${reason}.`;
+    // `leaveLine` needs the days; without them there is no sentence to phrase
+    // and the bare form is all that is true.
+    if (o.from === null || o.to === null) {
+      const reason = o.reason !== null ? `: ${o.reason}` : "";
+      return `${personName} is on leave${reason}.`;
+    }
+    const line = leaveLine(
+      { from: o.from, to: o.to, reason: o.reason ?? "", startsAt: o.startsAt, endsAt: o.endsAt },
+      dateFormat,
+      zone,
+    );
+    // "On leave 10 Jun 2026, 09:00–13:00: sick" -> "Ana is on leave 10 Jun ...".
+    return `${personName} is ${line.charAt(0).toLowerCase()}${line.slice(1)}.`;
   }
   return describeSchedulerError(refusal);
 }
@@ -608,7 +633,7 @@ export function AssignmentPopover({
           // — a race backstop, since Save is already refused in place under
           // block; `describeRefusal` names the person and the leave (R-357).
           <p className={styles.refusal} role="alert">
-            {describeRefusal(refusal, chosenName)}
+            {describeRefusal(refusal, chosenName, dateFormat, zone)}
           </p>
         )}
 

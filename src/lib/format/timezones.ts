@@ -165,3 +165,80 @@ export function timezoneLabel(z: string, at: Date = new Date()): string {
     return z;
   }
 }
+
+// ---------------------------------------------------------------------------
+// ⭐ WALL CLOCK <-> INSTANT, AND WHY IT LIVES HERE RATHER THAN ON THE BOARD.
+//
+// These three moved out of `src/features/board/lib/time.ts` on 9 Sept, whole
+// and unedited, when the ABSENCE CSV IMPORT needed the same conversion (R-359).
+// `src/features/admin/lib/absenceImport.ts` is a dependency-free planner, and a
+// planner reaching into `src/features/board/` is exactly the cross-feature
+// import the layering rule forbids -- two admin COMPONENTS already do it and
+// adding a third from a lib would have made the wart the convention.
+//
+// This file is the right home and says so in its own header: a leaf, no React,
+// no CSS, whose one runtime touch is `Intl`. That is all this maths is.
+// `board/lib/time.ts` re-exports `zonedTimeToInstant`, so every existing call
+// site is untouched.
+// ---------------------------------------------------------------------------
+
+export interface WallParts {
+  year: number;
+  month: number; // 1-based
+  day: number;
+  hour: number; // 0..23
+  minute: number;
+  second: number;
+}
+
+/** The wall-clock `zone` shows for the instant `d`, as calendar numbers. */
+export function partsInZone(d: Date, zone: string): WallParts {
+  const p = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(d);
+  const m: Record<string, number> = {};
+  for (const x of p) if (x.type !== "literal") m[x.type] = Number(x.value);
+  // h23 gives 00 at midnight, but guard the "24" some engines still emit.
+  const hour = m.hour === 24 ? 0 : m.hour;
+  return { year: m.year, month: m.month, day: m.day, hour, minute: m.minute, second: m.second };
+}
+
+/** `zone`'s offset from UTC, in ms, at the instant `d` (east of UTC is +ve). */
+function zoneOffsetMs(d: Date, zone: string): number {
+  const w = partsInZone(d, zone);
+  const asUTC = Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second);
+  return asUTC - d.getTime();
+}
+
+/**
+ * The absolute instant that reads wall-clock `y-mo-d h:mi` in `zone`. `mo` is
+ * 1-based; `d`, `h`, `mi` may be out of range (e.g. a negative day, or 26:00)
+ * and are normalised by `Date.UTC`, which is what lets the day-axis add days and
+ * carry overnight minutes without special cases.
+ *
+ * Two offset passes handle the DST fold: the first offset (at the naive UTC
+ * guess) places the instant, and if the zone's offset at THAT instant differs
+ * (a spring-forward/fall-back boundary sits between), one correction lands it.
+ */
+export function zonedTimeToInstant(
+  zone: string,
+  y: number,
+  mo: number,
+  d: number,
+  h: number,
+  mi: number,
+): Date {
+  const utcGuess = Date.UTC(y, mo - 1, d, h, mi);
+  const off1 = zoneOffsetMs(new Date(utcGuess), zone);
+  let ts = utcGuess - off1;
+  const off2 = zoneOffsetMs(new Date(ts), zone);
+  if (off2 !== off1) ts = utcGuess - off2;
+  return new Date(ts);
+}

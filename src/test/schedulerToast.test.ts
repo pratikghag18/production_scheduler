@@ -99,4 +99,96 @@ describe("buildSchedulerErrorToast (R-D37)", () => {
     expect(capacity.message).toContain("— reverted.");
     expect(eligible.message).toContain("— reverted.");
   });
+
+  /*
+   * R-357/R-359. `Absent` had no branch here at all: it fell through to
+   * `describeSchedulerError`, which is DELIBERATELY raw -- the contract layer
+   * has no operator list, no date format and no zone. On a toast that read
+   * "Operator 4f3c...-9a21 is on leave 2026-06-10 - 2026-06-10." for someone
+   * away only 09:00-13:00: a uuid nobody can look up, and a day that is not the
+   * whole story. This branch has all three things the fallback lacks.
+   */
+  describe("an absent refusal names the person and, when it is part-day, the hours", () => {
+    const wholeDay: SchedulerError = {
+      kind: "Absent",
+      nodeId: "node1",
+      policy: "block",
+      operators: [{ operatorId: "op1", from: "2026-06-10", to: "2026-06-12", reason: "sick" }],
+    } as SchedulerError;
+
+    const partDay: SchedulerError = {
+      kind: "Absent",
+      nodeId: "node1",
+      policy: "block",
+      operators: [
+        {
+          operatorId: "op1",
+          from: "2026-06-10",
+          to: "2026-06-10",
+          reason: "appointment",
+          startsAt: "2026-06-10T09:00:00.000Z",
+          endsAt: "2026-06-10T13:00:00.000Z",
+        },
+      ],
+    } as SchedulerError;
+
+    const zoned: ToastResolveCtx = { ...ctx, dateFormat: "d_mon_yyyy", zone: "UTC" };
+
+    it("names the person rather than the raw operator id", () => {
+      const t = buildSchedulerErrorToast(wholeDay, zoned);
+      expect(t.message).toContain("Sam Torres");
+      expect(t.message).not.toContain("op1");
+      expect(t.kind).toBe("warn");
+    });
+
+    it("a part-day absence names the hours", () => {
+      const t = buildSchedulerErrorToast(partDay, zoned);
+      expect(t.message).toContain("09:00");
+      expect(t.message).toContain("13:00");
+      expect(t.message).toContain("Sam Torres");
+      expect(t.message).toContain("— reverted.");
+    });
+
+    it("a whole-day absence invents no hours", () => {
+      const t = buildSchedulerErrorToast(wholeDay, zoned);
+      expect(t.message).not.toMatch(/\d\d:\d\d/);
+      expect(t.message).toContain("sick");
+    });
+
+    it("reads the hours in the ctx's zone, not always UTC", () => {
+      const utc = buildSchedulerErrorToast(partDay, zoned);
+      const chicago = buildSchedulerErrorToast(partDay, { ...zoned, zone: "America/Chicago" });
+      expect(utc.message).not.toBe(chicago.message);
+      expect(chicago.message).toContain("04:00");
+    });
+
+    it("a crew refusal names every absent person, not a bare count", () => {
+      const crew: SchedulerError = {
+        kind: "Absent",
+        nodeId: "node1",
+        policy: "block",
+        operators: [
+          { operatorId: "op1", from: "2026-06-10", to: "2026-06-10", reason: "sick" },
+          { operatorId: "op2", from: "2026-06-10", to: "2026-06-10", reason: "training" },
+        ],
+      } as SchedulerError;
+      const t = buildSchedulerErrorToast(crew, {
+        ...zoned,
+        operatorById: new Map([
+          ["op1", { displayName: "Sam Torres" }],
+          ["op2", { displayName: "Ana Reyes" }],
+        ]),
+      });
+      expect(t.message).toContain("Sam Torres");
+      expect(t.message).toContain("Ana Reyes");
+      expect(t.message).toContain("are on leave");
+    });
+
+    it("with no dateFormat or zone in ctx it still says something true", () => {
+      // Every existing call site passed neither before this landed.
+      const t = buildSchedulerErrorToast(partDay, ctx);
+      expect(t.message).toContain("Sam Torres");
+      expect(t.message).toContain("on leave");
+    });
+  });
 });

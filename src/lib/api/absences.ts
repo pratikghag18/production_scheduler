@@ -55,6 +55,20 @@ export interface AbsenceImportRow {
   to: string;
   reason: string;
   externalId: string | null;
+  /**
+   * R-359: the part-day window, as ISO instants, present together or not at
+   * all. Absent on a whole-day row, which is every row a sheet without time
+   * columns produces -- `import_absences` (migration 0073) reads a missing key
+   * as NULL and writes the whole-day row it always did.
+   *
+   * ⚠️ THESE ARE INSTANTS, NOT WALL CLOCK. The CSV says "09:00" and the person
+   * who typed it meant nine o'clock at THEIR plant; turning that into an
+   * instant needs a zone, and the zone is the absent PERSON'S own plant
+   * (R-359 decision 4), not the reader's plant filter. `planAbsenceImport`
+   * does that conversion and is handed the zones -- see its own header.
+   */
+  startsAt?: string;
+  endsAt?: string;
 }
 
 /** The `{inserted, updated, failed}` envelope `import_absences` returns. */
@@ -277,6 +291,12 @@ export async function importAbsences(
     to: r.to,
     reason: r.reason,
     external_id: r.externalId,
+    // R-359. Sent as a PAIR or not at all: 0073 fails a row carrying one
+    // without the other, deliberately, because half a window cannot be stored.
+    // A whole-day row omits both keys and the function reads them as NULL.
+    ...(r.startsAt !== undefined && r.endsAt !== undefined
+      ? { starts_at: r.startsAt, ends_at: r.endsAt }
+      : {}),
   }));
   const { data, error } = await supabase.rpc("import_absences", { p_rows: payload });
   if (error) throw toSchedulerError(error);

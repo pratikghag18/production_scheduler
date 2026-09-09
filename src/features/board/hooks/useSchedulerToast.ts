@@ -23,6 +23,9 @@
 import { create } from "zustand";
 import type { SchedulerError } from "@/lib/api";
 import { describeSchedulerError } from "@/lib/api";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
+import { leaveLine } from "../lib/leave";
+import { BOARD_ZONE } from "../lib/time";
 
 export type ToastKind = "" | "warn" | "crit";
 
@@ -77,6 +80,14 @@ export interface ToastResolveCtx {
   /** Needed only to format a RunOverlap/CapacityExceeded timerange as a
    *  clock range; omit to fall back to the raw ISO text. */
   formatRange?: (startMin: number, endMin: number) => string;
+  /** R-359: how to phrase an `Absent` refusal's DAYS and HOURS. Both optional
+   *  and both defaulted, so a caller holding neither still gets a true
+   *  sentence -- the org's date format, and the zone the hours are read in,
+   *  which must be the board's own (the absence is judged against this
+   *  board's window). Without them the days show in the default format and
+   *  the hours in UTC, which is what every caller got before they existed. */
+  dateFormat?: DateFormat;
+  zone?: string;
 }
 
 function resolveOperatorName(ctx: ToastResolveCtx, operatorId: string): string {
@@ -157,6 +168,50 @@ export function buildSchedulerErrorToast(
     case "NotPermitted": {
       const cell = resolveNodeName(ctx, err.nodeId);
       return { message: `You don't have permission to edit ${cell}.`, kind: "crit" };
+    }
+    /*
+     * R-357/R-359. This used to fall through to `describeSchedulerError`, and
+     * that fallback is deliberately raw: the contract layer has no operator
+     * list, no date format and no zone, so it prints a UUID and the server's
+     * bare `YYYY-MM-DD`. On a toast that read
+     * "Operator 4f3c...-9a21 is on leave 10 Jun - 10 Jun." for a person who is
+     * only away 09:00-13:00 -- an id nobody can look up, and a day that is not
+     * the whole story. This branch has all three things the fallback lacks.
+     *
+     * The hours reach here because `AbsentOperator` now lifts the server's own
+     * `starts_at`/`ends_at`, and they are phrased by `leaveLine`, the one place
+     * a board surface says "on leave", so this toast and both pop-ups cannot
+     * drift into three wordings of the same fact.
+     */
+    case "Absent": {
+      if (err.operators.length === 1) {
+        const o = err.operators[0];
+        const name = resolveOperatorName(ctx, o.operatorId);
+        if (o.from === null || o.to === null) {
+          const reason = o.reason !== null ? `: ${o.reason}` : "";
+          return { message: `${name} is on leave${reason} — reverted.`, kind: "warn" };
+        }
+        const line = leaveLine(
+          {
+            from: o.from,
+            to: o.to,
+            reason: o.reason ?? "",
+            startsAt: o.startsAt,
+            endsAt: o.endsAt,
+          },
+          ctx.dateFormat ?? DEFAULT_DATE_FORMAT,
+          ctx.zone ?? BOARD_ZONE,
+        );
+        return {
+          message: `${name} is ${line.charAt(0).toLowerCase()}${line.slice(1)} — reverted.`,
+          kind: "warn",
+        };
+      }
+      const names = err.operators.map((o) => resolveOperatorName(ctx, o.operatorId));
+      return {
+        message: `${names.join(", ")} ${names.length === 1 ? "is" : "are"} on leave for this window — reverted.`,
+        kind: "warn",
+      };
     }
     case "InvalidArgument":
     case "RunNodeMismatch":

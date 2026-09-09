@@ -453,6 +453,113 @@ describe("errors.ts: the `absent` describer", () => {
     const err = refusal({ error: "absent", operator_id: ELENA.id, policy: "block" });
     expect(err.kind).toBe("Unknown");
   });
+
+  /*
+   * R-359, the third surface in this family. `absence_overlap` has emitted
+   * `starts_at`/`ends_at` since migration 0069, additively, exactly when the
+   * matched row is PART-DAY. `AbsentOperator` did not lift them, so a placement
+   * refused against a 09:00-13:00 absence was refused CORRECTLY -- the server
+   * decides by the hours -- and then explained as "10 Jun - 10 Jun", which reads
+   * as the whole day being gone when the afternoon is free.
+   */
+  describe("a part-day refusal says WHICH hours (R-359)", () => {
+    const partDay = {
+      error: "absent",
+      operator_id: ELENA.id,
+      node_id: NODE,
+      absence: {
+        absent: true,
+        from: "2026-06-10",
+        to: "2026-06-10",
+        reason: "appointment",
+        starts_at: "2026-06-10T09:00:00.000Z",
+        ends_at: "2026-06-10T13:00:00.000Z",
+      },
+      policy: "block",
+    };
+
+    it("lifts the server's own starts_at/ends_at onto the refusal", () => {
+      const err = refusal(partDay);
+      expect(err.kind).toBe("Absent");
+      if (err.kind !== "Absent") throw new Error("unreachable");
+      expect(err.operators[0].startsAt).toBe("2026-06-10T09:00:00.000Z");
+      expect(err.operators[0].endsAt).toBe("2026-06-10T13:00:00.000Z");
+    });
+
+    it("names the hours, not just the day", () => {
+      const err = refusal(partDay);
+      const sentence = describeRefusal(err, "Elena", "d_mon_yyyy", "UTC");
+      expect(sentence).toContain("09:00");
+      expect(sentence).toContain("13:00");
+      expect(sentence).toContain("Elena");
+      // The old sentence, and the thing a reader mis-concluded from.
+      expect(sentence).not.toMatch(/2026-06-10 – 2026-06-10/);
+    });
+
+    it("phrases it through leaveLine, so it cannot drift from the pop-up's own line", () => {
+      const err = refusal(partDay);
+      const hit: AbsenceHit = {
+        from: "2026-06-10",
+        to: "2026-06-10",
+        reason: "appointment",
+        startsAt: "2026-06-10T09:00:00.000Z",
+        endsAt: "2026-06-10T13:00:00.000Z",
+      };
+      const line = leaveLine(hit, "d_mon_yyyy", "UTC");
+      // Same words, only the subject and the full stop differ.
+      expect(describeRefusal(err, "Elena", "d_mon_yyyy", "UTC")).toBe(
+        `Elena is ${line.charAt(0).toLowerCase()}${line.slice(1)}.`,
+      );
+    });
+
+    it("reads the hours in the zone it is given, not in UTC by accident", () => {
+      const err = refusal(partDay);
+      const utc = describeRefusal(err, "Elena", "d_mon_yyyy", "UTC");
+      const chicago = describeRefusal(err, "Elena", "d_mon_yyyy", "America/Chicago");
+      expect(utc).not.toBe(chicago);
+      expect(chicago).toContain("04:00");
+    });
+
+    it("a WHOLE-DAY refusal is unchanged -- no hours invented", () => {
+      const err = refusal({
+        error: "absent",
+        operator_id: ELENA.id,
+        node_id: NODE,
+        absence: { absent: true, from: "2026-09-28", to: "2026-10-01", reason: "sick" },
+        policy: "block",
+      });
+      if (err.kind !== "Absent") throw new Error("unreachable");
+      expect(err.operators[0].startsAt).toBeUndefined();
+      const sentence = describeRefusal(err, "Elena", "d_mon_yyyy", "UTC");
+      expect(sentence).not.toMatch(/\d\d:\d\d/);
+      expect(sentence).toMatch(/^Elena is on leave/);
+      expect(sentence).toContain("sick");
+    });
+
+    it("half a pair is not half a sentence -- it degrades to the whole-day form", () => {
+      // The server emits both or neither; a malformed answer must not print a
+      // range with one end missing.
+      const err = refusal({
+        error: "absent",
+        operator_id: ELENA.id,
+        node_id: NODE,
+        absence: {
+          absent: true,
+          from: "2026-06-10",
+          to: "2026-06-10",
+          reason: "appointment",
+          starts_at: "2026-06-10T09:00:00.000Z",
+        },
+        policy: "block",
+      });
+      if (err.kind !== "Absent") throw new Error("unreachable");
+      expect(err.operators[0].startsAt).toBeUndefined();
+      expect(err.operators[0].endsAt).toBeUndefined();
+      const sentence = describeRefusal(err, "Elena", "d_mon_yyyy", "UTC");
+      expect(sentence).not.toMatch(/\d\d:\d\d/);
+      expect(sentence).toContain("10 Jun 2026");
+    });
+  });
 });
 
 describe("shapes.ts: the warn-path payload keys are parsed, never raw", () => {

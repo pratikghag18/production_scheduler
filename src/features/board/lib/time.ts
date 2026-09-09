@@ -18,6 +18,7 @@
  * always kept and only the date part follows the token.
  */
 import type { DateFormat } from "@/lib/format/dates";
+import { partsInZone, zonedTimeToInstant } from "@/lib/format/timezones";
 
 /** The default zone: the pre-D88 axis, and what a single-zone customer runs on. */
 export const BOARD_ZONE = "UTC";
@@ -129,66 +130,12 @@ export function formatFull(
 // `Intl.formatToParts` offset trick used everywhere zoned time is done by hand.
 // ---------------------------------------------------------------------------
 
-interface WallParts {
-  year: number;
-  month: number; // 1-based
-  day: number;
-  hour: number; // 0..23
-  minute: number;
-  second: number;
-}
-
-/** The wall-clock `zone` shows for the instant `d`, as calendar numbers. */
-function partsInZone(d: Date, zone: string): WallParts {
-  const p = new Intl.DateTimeFormat("en-US", {
-    timeZone: zone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(d);
-  const m: Record<string, number> = {};
-  for (const x of p) if (x.type !== "literal") m[x.type] = Number(x.value);
-  // h23 gives 00 at midnight, but guard the "24" some engines still emit.
-  const hour = m.hour === 24 ? 0 : m.hour;
-  return { year: m.year, month: m.month, day: m.day, hour, minute: m.minute, second: m.second };
-}
-
-/** `zone`'s offset from UTC, in ms, at the instant `d` (east of UTC is +ve). */
-function zoneOffsetMs(d: Date, zone: string): number {
-  const w = partsInZone(d, zone);
-  const asUTC = Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second);
-  return asUTC - d.getTime();
-}
-
-/**
- * The absolute instant that reads wall-clock `y-mo-d h:mi` in `zone`. `mo` is
- * 1-based; `d`, `h`, `mi` may be out of range (e.g. a negative day, or 26:00)
- * and are normalised by `Date.UTC`, which is what lets the day-axis add days and
- * carry overnight minutes without special cases.
- *
- * Two offset passes handle the DST fold: the first offset (at the naive UTC
- * guess) places the instant, and if the zone's offset at THAT instant differs
- * (a spring-forward/fall-back boundary sits between), one correction lands it.
- */
-export function zonedTimeToInstant(
-  zone: string,
-  y: number,
-  mo: number,
-  d: number,
-  h: number,
-  mi: number,
-): Date {
-  const utcGuess = Date.UTC(y, mo - 1, d, h, mi);
-  const off1 = zoneOffsetMs(new Date(utcGuess), zone);
-  let ts = utcGuess - off1;
-  const off2 = zoneOffsetMs(new Date(ts), zone);
-  if (off2 !== off1) ts = utcGuess - off2;
-  return new Date(ts);
-}
+// ⭐ MOVED, NOT DELETED (9 Sept). `partsInZone` / `zoneOffsetMs` /
+// `zonedTimeToInstant` now live in `@/lib/format/timezones` so the admin
+// absence-import planner can share the conversion without importing from this
+// feature. Re-exported here because every existing caller imports it from this
+// module and the move is not their business.
+export { zonedTimeToInstant } from "@/lib/format/timezones";
 
 /** Local midnight (the instant) of the calendar day containing `d` in `zone`. */
 export function startOfDay(d: Date, zone: string = BOARD_ZONE): Date {

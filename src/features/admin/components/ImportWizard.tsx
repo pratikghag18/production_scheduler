@@ -13,7 +13,7 @@
    there. The admin gate is the caller's `canImport` (importing creates
    company-wide rows, a company-admin act).
    --------------------------------------------------------------------------- */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 import { toCsv, parseCsvTable, type CsvTable } from "../lib/csv";
 import { hasWork, type FieldDef, type ImportTemplate, type ImportView } from "../lib/importView";
@@ -50,6 +50,14 @@ export interface ImportWizardProps {
   /** The entity's own reads (existing rows + plants) — for the loading/error gates. */
   dataLoading: boolean;
   dataError: SchedulerError | null;
+  /**
+   * R-359: an optional line under the column mapping, for anything the mapping
+   * itself cannot say. The absences lane uses it to name the CLOCK its two time
+   * columns are read in -- a wall-clock reading in a sheet is not a time until
+   * you know whose clock it is, and a reader who is not told will assume their
+   * own. Nothing else needs it, so it is optional and drawn only when given.
+   */
+  mappingNote?: ReactNode;
 }
 
 export function ImportWizard(props: ImportWizardProps) {
@@ -186,6 +194,9 @@ export function ImportWizard(props: ImportWizardProps) {
                       " or the ",
                     )}. Map them above before you can import.`}
               </p>
+            )}
+            {props.mappingNote !== undefined && props.mappingNote !== null && (
+              <div className={styles.hint}>{props.mappingNote}</div>
             )}
           </section>
 

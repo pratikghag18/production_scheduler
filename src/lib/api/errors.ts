@@ -38,12 +38,24 @@ export interface ExpiringSkillRef extends SkillRef {
 }
 
 /** One person named in an `absent` refusal (R-357). `from`/`to` are inclusive
- *  `YYYY-MM-DD`, each null when the raise carried no dated absence. */
+ *  `YYYY-MM-DD`, each null when the raise carried no dated absence.
+ *
+ *  ⭐ `startsAt`/`endsAt` ARE THE HOURS, AND THEY WERE ALREADY IN THE PAYLOAD.
+ *  `absence_overlap` has emitted them since migration 0069 (R-359) as ADDITIVE
+ *  keys, present together exactly when the matched row is a PART-DAY absence
+ *  and absent on a whole-day one. This interface simply did not lift them, so a
+ *  placement refused against a 09:00–13:00 absence was refused CORRECTLY — the
+ *  server decides by the hours — and then explained in a sentence that said
+ *  "10 Jun – 10 Jun", which reads as the whole day being gone when the
+ *  afternoon is free. Same optionality as `AbsenceHit`, so the two are shaped
+ *  alike and `leaveLine` can phrase either. */
 export interface AbsentOperator {
   operatorId: string;
   from: string | null;
   to: string | null;
   reason: string | null;
+  startsAt?: string;
+  endsAt?: string;
 }
 
 /** The closed set of machine error codes P1-3a/P1-5b can raise (docs/api.md §1). */
@@ -614,14 +626,25 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
 }
 
 /** Lifts `{from, to, reason}` off an `absence_overlap` answer, tolerating a
- *  bare or absent object (each field then null). R-357. */
+ *  bare or absent object (each field then null). R-357.
+ *
+ *  ⚠️ `starts_at`/`ends_at` ARE TAKEN ONLY AS A PAIR (R-359). The server emits
+ *  them together or not at all, and half a pair cannot be phrased — an
+ *  `endsAt` with no `startsAt` would print a range with one end missing. So a
+ *  malformed answer carrying exactly one of them degrades to the whole-day
+ *  sentence, which is still TRUE (the day is right; only the hours are
+ *  unavailable) rather than half a sentence. */
 function absentOperatorFrom(operatorId: string, absence: unknown): AbsentOperator {
   const a = isPlainObject(absence) ? absence : {};
+  const startsAt = typeof a.starts_at === "string" ? a.starts_at : undefined;
+  const endsAt = typeof a.ends_at === "string" ? a.ends_at : undefined;
+  const hours = startsAt !== undefined && endsAt !== undefined ? { startsAt, endsAt } : {};
   return {
     operatorId,
     from: typeof a.from === "string" ? a.from : null,
     to: typeof a.to === "string" ? a.to : null,
     reason: typeof a.reason === "string" ? a.reason : null,
+    ...hours,
   };
 }
 

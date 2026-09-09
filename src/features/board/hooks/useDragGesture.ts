@@ -302,7 +302,7 @@ export interface TrackCreateDescriptor {
   offsetXPx: number;
 }
 
-function toastCtx(index: BoardIndex): ToastResolveCtx {
+function toastCtx(index: BoardIndex, dateFormat: DateFormat): ToastResolveCtx {
   // P1-4e: `index.runById` (§9 debt 1) now carries exactly this shape —
   // the ad-hoc rebuild this function used to do is no longer needed.
   return {
@@ -312,6 +312,10 @@ function toastCtx(index: BoardIndex): ToastResolveCtx {
     runById: index.runById,
     formatRange: (s, e) =>
       `${formatClock(addMinutes(index.windowStart, s), index.zone)}–${formatClock(addMinutes(index.windowStart, e), index.zone)}`,
+    // R-359: so an `Absent` refusal's hours are read in the board's own zone
+    // rather than UTC. The days follow the caller's date format at the call site.
+    zone: index.zone,
+    dateFormat,
   };
 }
 
@@ -374,7 +378,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     dropRowResolverRef.current = fn;
   }, []);
 
-  const ctx = toastCtx(index);
+  const ctx = toastCtx(index, dateFormat);
 
   // --- T13: identity change cancels any in-flight drag, no mutation. -----
   // T25: a SPLIT popover open when identity changes is closed too, with
