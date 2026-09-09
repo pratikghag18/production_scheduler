@@ -109,6 +109,13 @@ grid-template-columns:repeat(auto-fit,minmax(160px,1fr));overflow:hidden}
 .measure{background:var(--ground);border:1px solid var(--line-soft);border-radius:5px;padding:10px 13px;font-family:"IBM Plex Mono",monospace;
 font-size:12.5px;line-height:1.75;overflow-x:auto;white-space:pre;color:var(--ink-2)}
 .fine{font-size:13.5px;color:var(--ink-3)}
+/* A labelled aside on a card: a finding's lead or fix, a session's numbers_note.
+   Each of these was written into plan.yaml and rendered as NOTHING until F-123
+   (9 Sept) -- the label matters as much as the text, because a "lead" is the
+   suspicion at the time and a "fix" is what was actually done, and a reader who
+   cannot tell them from the story cannot tell a guess from a fact. */
+.aside{margin:10px 0 0;padding:2px 0 2px 13px;border-left:2px solid var(--line-soft)}
+.aside>.k{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:3px}
 .lead{font-size:18px;color:var(--ink-2);max-width:64ch}
 div.lead{display:flex;flex-direction:column;gap:8px}
 footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);font-size:13.5px;color:var(--ink-3)}
@@ -166,6 +173,89 @@ const inEnum = (where, obj, key, list) => {
   if (!list.includes(obj[key])) fail(where, `\`${key}\` must be one of ${list.join(" | ")}`);
 };
 
+/**
+ * ⭐⭐ EVERY KEY MUST BE ONE THE RENDERER READS. F-123, 9 Sept.
+ *
+ * Until this existed the validator only asked whether REQUIRED keys were
+ * PRESENT. Nothing asked the other question --- will a key that IS present ever
+ * be read? --- so an invented or misspelt key was accepted in silence and
+ * dropped in silence, and both ends looked fine: the writer saw "plan.yaml ok",
+ * the reader saw a card that simply did not mention the thing. Three keys were
+ * in that state when this was written, and one of them was a correction to a
+ * `confirmed: true` test count.
+ *
+ * ⛔ SO THE LISTS BELOW ARE NOT DOCUMENTATION, THEY ARE THE CONTRACT. Adding a
+ * key here without teaching the renderer to emit it recreates the exact bug
+ * this check exists to stop. Add the render first, then the name.
+ */
+const onlyKeys = (where, obj, allowed) => {
+  for (const k of Object.keys(obj)) {
+    if (!allowed.includes(k)) {
+      fail(
+        where,
+        `unknown key \`${k}\`. Nothing renders it, so it would be dropped in silence. ` +
+          `Either it is a typo, or the renderer needs to learn it FIRST and then be listed here. ` +
+          `Known: ${allowed.join(", ")}`,
+      );
+    }
+  }
+};
+
+const KEYS = {
+  track: ["id", "title", "heading", "lead"],
+  stage: [
+    "id",
+    "track",
+    "num",
+    "title",
+    "status",
+    "owner",
+    "refs",
+    "delivers",
+    "what",
+    "state",
+    "measure",
+    "measure_note",
+  ],
+  requirement: [
+    "id",
+    "title",
+    "source",
+    "stated_by",
+    "claim",
+    "verified_by",
+    "status",
+    "note",
+    "superseded_by",
+  ],
+  verifiedBy: ["kind", "file", "cases", "steps"],
+  finding: [
+    "id",
+    "title",
+    "tag",
+    "status",
+    "found_by",
+    "story",
+    "lead",
+    "fix",
+    "refs",
+    "stage",
+    "violates",
+  ],
+  session: [
+    "id",
+    "date",
+    "title",
+    "commits",
+    "numbers",
+    "numbers_note",
+    "confirmed",
+    "summary",
+    "shipped",
+  ],
+  next: ["kind", "text", "why", "decided", "requirement", "stage"],
+};
+
 for (const key of ["meta", "tracks", "stages", "requirements", "findings", "sessions", "next"]) {
   if (!(key in plan)) fail("plan.yaml", `top-level \`${key}\` is missing`);
 }
@@ -183,6 +273,7 @@ const claim = (id, where) => {
 };
 const trackIds = new Set();
 for (const t of plan.tracks) {
+  onlyKeys(`tracks[${t.id}]`, t, KEYS.track);
   need(`tracks[${t.id}]`, t, "id");
   need(`tracks[${t.id}]`, t, "title");
   trackIds.add(t.id);
@@ -194,6 +285,7 @@ const findIds = new Set(plan.findings.map((f) => f.id));
 for (const s of plan.stages) {
   const w = `stage ${s.id}`;
   claim(s.id, w);
+  onlyKeys(w, s, KEYS.stage);
   need(w, s, "title");
   need(w, s, "what");
   need(w, s, "num", (v) => Number.isInteger(v));
@@ -207,6 +299,7 @@ for (const s of plan.stages) {
 for (const r of plan.requirements) {
   const w = `requirement ${r.id}`;
   claim(r.id, w);
+  onlyKeys(w, r, KEYS.requirement);
   need(w, r, "title");
   need(w, r, "claim");
   need(w, r, "source", (v) => isList(v) && v.length > 0);
@@ -214,6 +307,7 @@ for (const r of plan.requirements) {
   inEnum(w, r, "status", ENUMS.reqStatus);
   if (!isList(r.verified_by)) fail(w, "`verified_by` must be a list (empty means uncovered)");
   for (const v of r.verified_by ?? []) {
+    onlyKeys(`${w} verified_by`, v, KEYS.verifiedBy);
     inEnum(`${w} verified_by`, v, "kind", ENUMS.verifyKind);
     if (v.kind === "manual" || v.kind === "screen") need(`${w} verified_by`, v, "steps");
     else need(`${w} verified_by`, v, "file");
@@ -236,6 +330,7 @@ for (const r of plan.requirements) {
 for (const f of plan.findings) {
   const w = `finding ${f.id}`;
   claim(f.id, w);
+  onlyKeys(w, f, KEYS.finding);
   need(w, f, "title");
   need(w, f, "story");
   inEnum(w, f, "status", ENUMS.findingStatus);
@@ -249,6 +344,7 @@ let confirmedSeen = false;
 for (const s of plan.sessions) {
   const w = `session ${s.id}`;
   claim(`session:${s.id}`, w);
+  onlyKeys(w, s, KEYS.session);
   need(w, s, "title");
   need(w, s, "summary");
   need(w, s, "date", isDate);
@@ -275,6 +371,7 @@ for (const [i, n] of (plan.next ?? []).entries()) {
   // points a reader straight at the line to fix.
   const label = n.text ?? n.stage ?? n.requirement ?? `#${i}`;
   const w = `next[${i}] (${label})`;
+  onlyKeys(w, n, KEYS.next);
   if (!NEXT_KINDS.includes(n.kind)) fail(w, `\`kind\` must be one of ${NEXT_KINDS.join(" | ")}`);
   if (n.stage && !stageIds.has(n.stage)) fail(w, `stage ${n.stage} does not exist`);
   if (n.requirement && !reqIds.has(n.requirement))
@@ -447,6 +544,22 @@ function stageCard(s) {
 </div>`;
 }
 
+/**
+ * A labelled aside, or nothing at all when the key is absent.
+ *
+ * ⛔ THIS EXISTS BECAUSE THREE KEYS WERE BEING SILENTLY DROPPED (F-123, 9 Sept).
+ * `findingCard` emitted `story` and nothing else, so a finding's `lead` (F-121,
+ * F-122) and `fix` (F-121) rendered as nothing; `sessionEntry` did the same to
+ * session 62's `numbers_note`, which is a CORRECTION to a `confirmed: true`
+ * count --- the single most load-bearing kind of note in this file. All three
+ * validated as "ok" the whole time, because the validator checks that required
+ * keys are PRESENT and never that a present key will be READ. The unknown-key
+ * check added below is the half that stops the next one; this is the half that
+ * repairs the three already written.
+ */
+const aside = (label, text) =>
+  nonEmpty(text) ? `<div class="aside"><span class="k">${esc(label)}</span>${md(text)}</div>` : "";
+
 function findingCard(f) {
   const stage = f.stage ? ` · <a href="#${f.stage}">${esc(f.stage)}</a>` : "";
   const who = {
@@ -462,6 +575,8 @@ function findingCard(f) {
   <span class="tag">${esc(f.tag || f.id)} · ${esc(status)} · ${esc(who)}${stage}</span>
   <h3>${esc(f.title)}</h3>
   ${md(f.story)}
+  ${aside("Lead — the suspicion at the time", f.lead)}
+  ${aside("Fix", f.fix)}
   ${(f.refs ?? []).length ? `<p class="fine">${esc(f.refs.join(" · "))}</p>` : ""}
 </div>`;
 }
@@ -547,6 +662,7 @@ function sessionEntry(s, open) {
   <summary><b>Session ${esc(s.id)}</b> · ${esc(iso(s.date))} · ${esc(s.title)} ${s.confirmed ? chip("done", "counts confirmed") : chip("q", "counts not confirmed")}</summary>
   <div class="inner">
     ${md(s.summary)}
+    ${aside("A note on these numbers", s.numbers_note)}
     <p class="fine">${esc(nums)}${(s.commits ?? []).length ? ` · commits ${esc(s.commits.join(", "))}` : ""}${(s.shipped ?? []).length ? ` · shipped ${s.shipped.map((x) => `<a href="#${x}">${esc(x)}</a>`).join(", ")}` : ""}</p>
   </div>
 </details>`;

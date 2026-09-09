@@ -8852,38 +8852,48 @@ findings:
     again. Not a live defect here (there is nothing to find), but worth the record: this is a guard,
     not a cleanup, and the next person who inherits a database that predates it should not assume one.
 - id: F-123
-  title: A finding's `lead` never reaches the page, and the validator calls the file ok while dropping it
+  title: A finding's `lead`, a finding's `fix` and a session's `numbers_note` never reached the page, and the validator called the file ok while dropping all three
   tag: The record that renders as nothing
-  status: open
+  status: fixed
   found_by: agent
   story: >-
     Found 9 Sept by walking into it. Writing F-122's correction I added a `resolution:` key to the
     finding, ran `npm run plan`, and got *"plan.yaml ok"* --- then grepped `docs/plan.html` for a
     sentence from it and found ZERO. `findingCard()` in `scripts/render-plan.mjs` emits exactly one
-    body field, `${f.story}`; there is no `resolution` in it, and there is no `lead` either. The
-    `.lead` at line 620 is a TRACK's lead, not a finding's.
-    ⛔ SO THIS IS NOT ONLY ABOUT A KEY I INVENTED. F-121 and F-122 both carry a `lead:` --- the
-    tester's suspicion about the cause, the most useful paragraph on a card for whoever picks the
-    work up --- written into `docs/plan.yaml` in sessions 98 and 99, and NEITHER has ever been
-    visible on the generated page. `docs/plan-format.md`'s finding spec does not list `lead` at all,
-    so it was adopted from the defect files' own `## Lead` section into a place nothing renders it.
-    Two cards' worth of reasoning is in the file and not on the page.
+    body field, `story`. The `.lead` at line 620 is a TRACK's lead, not a finding's.
+    ⛔ AND IT WAS NOT ONE KEY, IT WAS THREE. A census of every key actually present in `plan.yaml`
+    against every key the renderer actually reads --- run rather than eyeballed --- turned up three
+    that were being written and dropped. `lead` on F-121 and F-122: the tester's suspicion about the
+    cause, the most useful paragraph on a card for whoever picks the work up, written in sessions 98
+    and 99. `fix` on F-121: the entire account of what was done about the `maxBuffer` bug, including
+    the proof from both sides. And `numbers_note` on session 62, which is the worst of them --- it
+    is a CORRECTION to a `confirmed: true` test count, recording that the entry first claimed 1998
+    tests read one commit too early. A note about the one number this project treats as load-bearing,
+    invisible since the day it was written. `docs/plan-format.md`'s specs list none of the three, so
+    each was adopted from a neighbouring convention into a place nothing renders it.
     ⚠️ THE HAZARD IS THE WORD "OK". CLAUDE.md says the plan is part of the deliverable and a red
     validator is a finished piece with a hole in its record. The converse is what bit here: a GREEN
-    validator on a file with a hole in it. The validator checks that required keys are PRESENT
-    (`need(w, f, "story")`); nothing checks that a key which is present will ever be READ. Every
-    unknown key is silently accepted and silently dropped, so the failure mode is invisible from
-    both ends --- the writer sees "ok", the reader sees a card that simply does not mention the
-    thing.
-    ⭐ THE FIX IS TWO SMALL ONES AND THEY ARE INDEPENDENT. Render `lead` on a finding card (it is
-    already written, twice, and wanted); and have the validator REJECT an unknown key on a finding,
-    requirement, stage or session instead of ignoring it, which would have turned my `resolution:`
-    red in the same second I wrote it rather than leaving me to grep the HTML on a hunch. The second
-    is the one that stops the next occurrence; the first only repairs this one.
-    ⚠️ NOT DONE HERE, DELIBERATELY. F-122's correction was moved into `story` so the record is
-    visible NOW, which is what mattered this session; changing what the page renders and tightening
-    the validator both alter output the maintainer reads, and the validator change may well turn
-    other existing keys red. That is a queue item with a decision in it, not a drive-by.
+    validator on a file with three holes in it. The validator asked whether required keys were
+    PRESENT (`need(w, f, "story")`) and never whether a key that IS present would ever be READ, so
+    both ends looked fine --- the writer sees "ok", the reader sees a card that simply does not
+    mention the thing.
+  fix: >-
+    Fixed the same session, in two halves that do different jobs. The repairing half: an `aside()`
+    helper renders a finding's `lead` and `fix` and a session's `numbers_note`, each under its own
+    label, because a reader who cannot tell a `lead` from a `story` cannot tell a suspicion from a
+    fact. All three previously-invisible blocks confirmed present in the generated HTML by grep.
+    ⭐ THE HALF THAT STOPS THE NEXT ONE IS `onlyKeys`, and it is wired into all seven collections ---
+    tracks, stages, requirements, `verified_by` entries, findings, sessions and `next`. An unknown
+    key now FAILS with the offending name, the entry it is on, and the list of keys that do render.
+    Proved by mutation rather than assumed: reintroducing the exact `resolution:` key that started
+    this turns it red on F-123, and planted keys on a session, a requirement and a `verified_by`
+    entry each turn it red in their own loop. `plan.yaml` restored byte-identical afterwards.
+    ⚠️ THE KEY LISTS ARE THE CONTRACT, NOT DOCUMENTATION, and the code says so where someone will be
+    tempted: adding a name to `KEYS` without teaching the renderer to emit it recreates precisely
+    this bug. Render first, then list. The census also confirmed the two keys that looked suspicious
+    and were fine --- `measure_note` on S20 renders at line 439, and `backlog` is a real top-level
+    collection with its own validation and rendering that was simply missing from the required-keys
+    list.
   refs:
   - F-121
   - F-122
@@ -12008,9 +12018,22 @@ sessions:
     one body field, `story`, and nothing else --- and that is not only about a key I invented:
     F-121 and F-122 both carry a `lead:` (the tester's suspicion about the cause) written in
     sessions 98 and 99, and NEITHER has ever appeared on the page. The correction was moved into
-    `story` so it is visible now. The two real fixes --- render a finding's `lead`, and make the
-    validator REJECT an unknown key instead of dropping it --- are queued, not done: both change
-    output the maintainer reads, and the second may turn other existing keys red.
+    `story` so it is visible now.
+    ⛔ AND ASKED WHY IT WAS BEING QUEUED RATHER THAN FINISHED, THE MAINTAINER WAS RIGHT AND THE
+    QUEUE ENTRY CAME BACK OUT. The stated reason --- tightening the validator might turn existing
+    keys red --- was a guess dressed as a decision. A census of every key present in plan.yaml
+    against every key the renderer actually reads answered it in one run: THREE invisible keys,
+    not one. `lead` on F-121 and F-122, `fix` on F-121 (the whole account of what was done about
+    the maxBuffer bug), and `numbers_note` on session 62 --- a CORRECTION to a `confirmed: true`
+    test count, which is the one number this project treats as load-bearing, invisible since the
+    day it was written. Two more that looked suspicious were fine: `measure_note` renders, and
+    `backlog` is a real collection merely missing from the required-keys list.
+    ⭐ SO F-123 IS FIXED, IN TWO HALVES. An `aside()` helper renders all three under their own
+    labels, because a reader who cannot tell a `lead` from a `story` cannot tell a suspicion from
+    a fact. And `onlyKeys` --- wired into all seven collections --- now FAILS on an unknown key,
+    naming it, the entry, and the keys that do render. Proved by mutation: the exact `resolution:`
+    key that started this turns it red, as do planted keys on a session, a requirement and a
+    verified_by entry. plan.yaml restored byte-identical after each.
     ⭐ THE NUMBERS, RUN HERE. `Test Files 130 passed (130)` / `Tests 2617 passed (2617)` --- 2612
     plus the audit's 5. `tsc -b --force` 0; eslint 0; `format:check` clean over everything tracked.
     `db_checks: 804` and `migrations: 71` are CARRIED FORWARD from session 98 and were NOT
@@ -16297,25 +16320,14 @@ next:
 # `supabase/tests/88_absences_test.sql` cases AB26-AB34 cover the trigger. This
 # entry sat in the queue for a session after the work landed; caught by the
 # requirement audit re-reading `next` against `docs/plan.yaml`, not assumed current.
+#
+# Added and removed on 9 Sept in the same session, which is why it never appears
+# above: "the plan page drops what it is not expecting". Filed as F-123, queued
+# because tightening the validator looked like it would go red on keys already in
+# the file, then done in the same session once a key census showed exactly what it
+# would flag -- three invisible keys to render and two false alarms. The queue is
+# for decisions, and there was no decision left in it.
 # ---------------------------------------------------------------------------
-- kind: task
-  text: The plan page drops what it is not expecting --- render a finding's `lead`, and make the validator refuse an unknown key
-  why: >-
-    F-123, found 9 Sept by grepping the generated HTML for a sentence that was definitely in the
-    YAML and definitely not on the page. `findingCard()` in `scripts/render-plan.mjs` emits exactly
-    one body field, `story`. A finding's `lead` --- the tester's suspicion about the cause, which is
-    the most useful paragraph on the card for whoever picks the work up --- is written by
-    `docs/plan-format.md`'s own conventions everywhere EXCEPT its finding spec, and renders as
-    nothing. F-121 and F-122 both carry one and neither has ever been seen.
-    ⭐ TWO INDEPENDENT FIXES AND THE SECOND IS THE ONE THAT MATTERS. Rendering `lead` repairs the two
-    cards that exist. Making the validator REJECT an unknown key on a finding, requirement, stage or
-    session --- rather than accepting and silently dropping it --- is what stops the next one, and it
-    would have turned the mistake red in the same second it was written instead of leaving it to a
-    hunch and a grep. Today the validator only checks that required keys are PRESENT; nothing checks
-    that a key which is present will ever be READ.
-    ⚠️ EXPECT THE SECOND TO GO RED ON THINGS THAT ARE ALREADY THERE, which is the whole reason it is
-    a queue item with a decision in it rather than a drive-by: each key it flags is either content
-    nobody can see (fix the renderer) or a typo (fix the file), and telling those apart is the work.
 - kind: task
   text: Two small holes wave four left open on purpose --- the CSV import cannot record part of a day, and a block refusal names no hours
   why: >-

@@ -90,6 +90,10 @@ name it under `violates`.
   violates: [R-109]      # optional requirement ids — VALIDATED
   story: >-              # the plain-language card body. Markdown; paragraphs separated by blank lines.
     ...
+  lead: >-               # optional — the SUSPICION about the cause, at the time. Rendered under its
+    ...                  # own label so a reader can tell a guess from a fact.
+  fix: >-                # optional — what was actually done about it, once it was done.
+    ...
 ```
 
 ## `sessions[]`
@@ -108,6 +112,8 @@ name it under `violates`.
     db_checks: 522
     migrations: 35
   confirmed: true        # true only when the counts were read off the runner's own total line
+  numbers_note: >-       # optional — anything qualifying the numbers above, especially a CORRECTION
+    ...                  # to a confirmed count. Rendered beside them.
   summary: >-
     ...
 ```
@@ -146,6 +152,24 @@ test path under `src/test/defects/`). Body sections: **Reproduction**, **Expecte
 **Actual** (runner output verbatim), **Lead** (a suspicion, not a fact).
 
 **Only the tester moves a defect to `verified`. Only the developer moves it to `fix-claimed`.**
+
+## Every key must be one the renderer reads
+
+`npm run plan` FAILS on an unknown key anywhere in `tracks`, `stages`, `requirements`,
+a `verified_by` entry, `findings`, `sessions` or `next`, naming the key, the entry it sits
+on, and the keys that do render.
+
+This is not tidiness. Until 9 Sept the validator only asked whether REQUIRED keys were
+*present*; nothing asked whether a key that IS present would ever be *read*, so an invented
+or misspelt key was accepted in silence and dropped in silence. Three were in that state
+when it was found (F-123) — a finding's `lead` on two cards, a finding's `fix`, and a
+session's `numbers_note` that recorded a **correction to a `confirmed: true` test count**.
+Each looked fine from both ends: the writer saw `plan.yaml ok`, the reader saw a card that
+simply did not mention the thing.
+
+**So the key lists in `scripts/render-plan.mjs` are the contract, not documentation.**
+Adding a name to `KEYS` without teaching the renderer to emit it recreates exactly the bug
+the check exists to stop. Render first, then list, then write the key here.
 
 ## Ids never change
 
