@@ -8918,9 +8918,10 @@ requirements:
     customer. Cheap to hash, but it is a materialisation where there was none, and it is the first
     thing to look at if a much larger org is ever slower than F-124's measurement predicts.
 - id: R-364
-  title: A measurement spec leaves the shared database exactly as it found it, beyond what it deliberately seeds and tears down
+  title: A measurement spec leaves the shared database exactly as it found it, beyond what it deliberately seeds and tears down --- the audit trail of a commit-and-undo is allowed
   source:
   - session 109 conversation
+  - session 117 conversation
   stated_by: agent
   claim: >-
     `e2e/loadSanity.spec.ts`'s own header states the standard it is supposed to meet: "`fixture.sql`
@@ -8928,7 +8929,14 @@ requirements:
     `teardown.sql` removes exactly those." A spec that is explicitly a MEASUREMENT rather than a
     promise, run repeatedly against the developer's own live database, must not otherwise change any
     row it did not seed --- least of all a real write a person would have to notice and undo by hand.
+    MAINTAINER, 9 Sept (session 117): "exactly as it found it" is about what a person sees on a
+    board. A measurement that commits a real move and provably puts it back may leave the
+    `assignments_audit` rows and the `updated_at` stamp of that pair behind; they are the record of
+    a change, not the change, and nothing may reach into the audit log to tidy them away.
   verified_by:
+  - kind: e2e
+    file: e2e/loadSanity.spec.ts
+    cases: "putBack: the dragged person's placements (cell, hours, run, product) are read before the drag and after the restore and must be equal; the restore UPDATE must touch exactly one row"
   - kind: manual
     steps: >-
       Re-applied scripts/load/fixture.sql by hand to the database the running stack points at, ran
@@ -8936,7 +8944,7 @@ requirements:
       5,760 assignments directly: updated_at = created_at on every row and zero run_id IS NULL,
       before and after all four attempts. Torn down clean with scripts/load/teardown.sql afterwards
       (0 nodes, 0 operators left behind, printed by the script's own count).
-  status: uncovered
+  status: covered
   note: >-
     CONTRADICTED 9 Sept (tester, session 109, DEF-0025): the spec's own drag section commits a real
     move (see DEF-0025) with no revert, so every run silently shifts one `Load Op N` assignment's
@@ -8971,6 +8979,9 @@ requirements:
     one reproduced the original off-screen-chip shape. R-364 holds either way (nothing was written),
     but the spec's numbers are not reliably reproducible, which is a different question from whether
     the database is left clean.
+    ⭐ DECIDED 9 Sept (maintainer, session 117): the audit trail is allowed --- see the claim's
+    last sentence. With that, the spec's own `putBack` is the non-manual proof this requirement
+    lacked, and it is `covered`; the tester's hand check stays listed as the second witness.
 - id: R-365
   title: A drag that would take a chip off its run, or onto another run, asks before it saves
   source:
@@ -9170,7 +9181,7 @@ findings:
 - id: F-126
   title: The one number that said a big board was cheap to USE was measuring a mouse-up over empty space
   tag: A measurement that never happened
-  status: open
+  status: fixed
   found_by: agent
   refs:
   - F-125
@@ -9212,6 +9223,13 @@ findings:
     element heights is the candidate the spec's own header already named. ⛔ STILL A PROFILER
     QUESTION, NOT A FOURTH GUESS --- but it is now a much cheaper one to ask, because a drag
     reproduces it in 8 seconds without a 17-second page load in front of it.
+  fix: >-
+    fd35a20 (session 110): the spec scrolls its chip into view, asserts `.dragging` before timing,
+    commits for real and puts the row back, proved at the database. The second half of this card
+    --- the fixture's runs exactly fill their assignments, so an ordinary in-run nudge cannot be
+    timed --- was PARKED by the maintainer on 9 Sept (session 117): F-125's profile will say where
+    the time goes on any commit, so a second gesture is not needed to find the cause; revisit only
+    if the profile says the two gestures differ. Recorded under `next` as parked, decided.
 - id: F-125
   title: A plant board spends nine seconds in the browser without drawing it --- the DOM ends up with eleven tracks
   tag: The nine seconds nobody is drawing
@@ -17878,6 +17896,14 @@ next:
     developer's database (`scripts/load/fixture.sql`, removed by `scripts/load/teardown.sql`) and
     SKIPS honestly when it is absent.
 # ------------------------------- PARKED ------------------------------------
+- kind: parked
+  decided: true
+  text: Give the load fixture's runs more room than their assignments, so an in-run nudge can be timed (F-126)
+  why: >-
+    Parked by the maintainer, 9 Sept (session 117). One line in `scripts/load/fixture.sql`, but it
+    changes the shape every recorded load number was taken against, and F-125's profiler session
+    finds the cause of a slow commit without it. Revisit only if that profile says a detaching drag
+    and an in-run nudge cost differently.
 - kind: parked
   requirement: R-016
   decided: true
