@@ -16,7 +16,7 @@ ANALYZE nodes; ANALYZE runs; ANALYZE assignments; ANALYZE operators; ANALYZE pro
 BEGIN;
 DO $$
 DECLARE
-  v_from timestamptz := date_trunc('day', now()) + interval '7 days';
+  v_from timestamptz := date_trunc('week', now()); -- the week the fixture seeds
   v_to   timestamptz := v_from + interval '7 days';
   -- ⚠️ THE REAL PATHS, READ OUT OF THE TABLE. A trigger derives `path` from the
   -- NAME ("Dept 1" -> `dept_1`), so the labels this fixture's INSERTs supplied

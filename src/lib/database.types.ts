@@ -1377,6 +1377,7 @@ export type Database = {
         Args: { p_profile_id: string }
         Returns: boolean
       }
+      app_readable_node_ids: { Args: never; Returns: string[] }
       app_relevel_subtree: {
         Args: { p_delta: number; p_new_parent_id: string; p_node_id: string }
         Returns: Json

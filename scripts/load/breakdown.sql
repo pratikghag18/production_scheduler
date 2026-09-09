@@ -4,10 +4,10 @@
 BEGIN;
 DO $$
 DECLARE
-  v_from timestamptz := date_trunc('day', now()) + interval '7 days';
+  v_from timestamptz := date_trunc('week', now());
   v_to   timestamptz := v_from + interval '7 days';
-  v_win  tstzrange   := tstzrange(date_trunc('day', now()) + interval '7 days',
-                                  date_trunc('day', now()) + interval '14 days');
+  v_win  tstzrange   := tstzrange(date_trunc('week', now()),
+                                  date_trunc('week', now()) + interval '7 days');
   t0 timestamptz; ms numeric; v_j jsonb; v_n int;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);

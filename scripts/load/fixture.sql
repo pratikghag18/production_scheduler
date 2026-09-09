@@ -22,7 +22,11 @@ DECLARE
   v_dept  uuid := '20000000-0000-0000-0000-000000000001';
   v_line  uuid := '20000000-0000-0000-0000-000000000002';
   v_cell  uuid := '20000000-0000-0000-0000-000000000003';
-  v_prod  uuid := '60000000-0000-0000-0000-000000000001';
+  -- ⚠️ RESOLVED, NOT HARD-CODED. The seed's own product ids exist only in the
+  -- seed world; the DEMO world (dev_demo.sql) has different ones, so a literal
+  -- here worked on the scratch database and silently found nothing on the dev
+  -- one. Any product of this org will do -- the measurement is about the READ.
+  v_prod  uuid;
   N_DEPT  int := 8;
   N_LINE  int := 6;
   N_CELL  int := 8;
@@ -33,10 +37,22 @@ DECLARE
   v_d uuid; v_l uuid; v_c uuid;
   d int; l int; c int; i int; day int; sh int;
   v_start timestamptz;
-  v_base  timestamptz := date_trunc('day', now()) + interval '7 days';
+  -- ⛔ THE CURRENT WEEK, AND THE FIRST VERSION GOT THIS WRONG. It seeded
+  -- `now() + 7 days` to stay clear of the demo world's own data. Harmless for
+  -- the SQL measurement, which passes its own window -- and silently fatal for
+  -- the BROWSER one: the board defaults to the current week and has no control
+  -- to leave it, so a board pointed at this plant drew 384 empty tracks, fetched
+  -- zero runs, and reported a plant-sized load as 234ms. Nothing collides
+  -- anyway: every node and every person here is new.
+  v_base  timestamptz := date_trunc('week', now());
   v_ops uuid[];
   v_slot int;
 BEGIN
+  SELECT id INTO v_prod FROM products WHERE org_id = v_org ORDER BY created_at LIMIT 1;
+  IF v_prod IS NULL THEN
+    RAISE EXCEPTION 'no product in org %; seed one before measuring', v_org;
+  END IF;
+
   -- The plant.
   v_plant := gen_random_uuid();
   INSERT INTO nodes (id, org_id, level_id, parent_id, name, path, sort_order)

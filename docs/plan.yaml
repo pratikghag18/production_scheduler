@@ -10,8 +10,8 @@ meta:
     app_test_files: 130
     tsc: 0
     eslint: 0
-    db_checks: 815
-    migrations: 72
+    db_checks: 823
+    migrations: 73
     mutations: 509 of 536
 tracks:
 - id: core
@@ -8863,11 +8863,65 @@ requirements:
     no-backend one and that the loud exit is called somewhere, NOT that the loud exit hangs off the
     right branch. That half is the mutation rows above, recorded rather than automated because
     automating it means killing a container inside a unit run.
+- id: R-363
+  title: The board's read rule is asked once per query, not once per row --- and asking it differently changes nobody's visibility
+  source:
+  - session 107 conversation
+  - F-124
+  stated_by: maintainer
+  claim: >-
+    The maintainer, 9 Sept, shown F-124's three options and what each would cost: *"lets try option
+    C"* --- leave the security rule exactly as it is and stop asking it once per row.
+    ⭐ THE RULE. `app_can_read_node(n)` says a node is readable when it is in the caller's org AND
+    either the caller is an admin OR the node sits under one of their grants. `runs_select` and
+    `assignments_select` now express THAT SAME predicate as a set --- `node_id IN (SELECT
+    app_readable_node_ids())` --- so the planner builds the answer once per query and probes it per
+    row, instead of calling a SECURITY DEFINER helper 11,520 times on a plant-sized board.
+    ⛔ AND THE REQUIREMENT IS THE SECURITY HALF, NOT THE SPEED. What must be true is that VISIBILITY
+    IS IDENTICAL: every person sees exactly the rows they saw before, no more and no fewer. A faster
+    policy that shows one extra row to a line supervisor is not an optimisation, it is a breach, and
+    the speed number is worthless until that is settled.
+    ⚠️ THE WRITE POLICIES ARE DELIBERATELY UNTOUCHED. Every INSERT/UPDATE/DELETE policy still calls
+    `app_can_edit_node` per row, because a write touches one row at a time and the per-row shape
+    costs nothing there. Rewriting a guard nobody measured would be change without evidence.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/95_readable_nodes_as_a_set_test.sql
+    cases: >-
+      RN0-RN7 --- the set-based policy and the per-row helper agree, person by person and row by row,
+      not merely in count: the set function's answer equals the set of nodes app_can_read_node says
+      yes to, for a company admin, an Assembly supervisor, a Machining supervisor and a viewer; runs
+      and assignments visible through the policy equal exactly those whose node the helper admits; a
+      supervisor still cannot see the other department's rows; and the function is authenticated-only
+  - kind: sql
+    file: supabase/tests/52_scope_and_colour_test.sql
+    cases: >-
+      the whole 815-check suite re-run against the new policy, unchanged --- the scoping, tenancy and
+      role files are where a widened read would surface first
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: >-
+      the browser suite re-run against the changed policy on the live stack, 45 passed --- every demo
+      person walked through the board and the rail, which is the level at which a person seeing rows
+      they should not would actually show
+  - kind: mutation
+    file: supabase/tests/95_readable_nodes_as_a_set_test.sql
+    cases: >-
+      measured before the change was believed: visible row counts for three people taken BEFORE the
+      policy swap and again after, on the same 384-cell fixture --- company admin 5,768 runs / 5,772
+      assignments, Assembly supervisor 5 / 9, Machining supervisor 3 / 3, identical both times. Only
+      then the speed: board_window on a plant fell from ~2,630ms to ~700ms
+  status: covered
+  note: >-
+    The cost this adds, named so it is not a surprise later: the set is every node id the caller may
+    read, which for a company admin is the whole org --- hundreds today, thousands for a large
+    customer. Cheap to hash, but it is a materialisation where there was none, and it is the first
+    thing to look at if a much larger org is ever slower than F-124's measurement predicts.
 findings:
 - id: F-124
   title: A plant-sized board takes over two seconds on the server, and nearly all of it is row-level security asked once per row
   tag: The guard that runs 11,520 times
-  status: open
+  status: fixed
   found_by: agent
   refs:
   - R-006
@@ -8915,6 +8969,25 @@ findings:
     384 distinct arguments, or expressing the check set-wise so it plans as one hash join rather than
     11,520 calls. (3) is the least invasive and the most uncertain; it needs an EXPLAIN before anyone
     believes it. Do not take (2) without deciding it deliberately.
+  fix: >-
+    ⭐ OPTION (3) WAS TAKEN --- THE MAINTAINER, 9 Sept: *"lets try option C"* --- and it worked.
+    Migration 0074 adds `app_readable_node_ids()`, which is `app_can_read_node`'s own predicate
+    extracted rather than retyped and asked over the whole table instead of one row, and rewrites
+    `runs_select` and `assignments_select` as `node_id IN (SELECT app_readable_node_ids())`. The rule
+    is unchanged; only how often it is asked.
+    ⭐ THE SECURITY HALF WAS SETTLED BEFORE THE SPEED WAS BELIEVED. Visible row counts for three
+    people on the same fixture, before the swap against after: company admin 5,768 runs / 5,772
+    assignments, Assembly supervisor 5 / 9, Machining supervisor 3 / 3 --- identical. Then
+    `board_window` on a plant fell from ~2,630ms to ~700ms, runs from 960ms to 78ms and assignments
+    from 990ms to 114ms. The whole 823-check SQL suite and all 45 browser cases are green against
+    the new policy.
+    ⚠️ THE LEAD WAS RIGHT ABOUT THE DIRECTION AND WRONG ABOUT THE CERTAINTY: it called (3) "the most
+    uncertain" and it needed no EXPLAIN in the end, because the fix was not a planner hint but a
+    reformulation the planner could obviously use. What the lead got right is that it was the least
+    invasive --- no security boundary moved, and (2)'s definer rewrite was not needed. R-363 and
+    `supabase/tests/95_readable_nodes_as_a_set_test.sql` hold the line: they compare the two
+    formulations SET AGAINST SET, person by person, and go red on the mutation somebody would
+    actually make (dropping the org filter, which a single-org fixture would not notice).
 - id: F-120
   title: A run or a direct assignment can be created on a node whose level is not schedulable, and nothing on the server says no
   tag: The gate the app assumes and the server never built
@@ -12067,6 +12140,70 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 107
+  date: 2026-09-09
+  title: Option C taken --- the read rule asked once per query instead of once per row, visibility proved identical first
+  commits: []
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 45
+  confirmed: true
+  summary: >-
+    The maintainer, shown F-124's three options and what each would cost: *"lets try option C"* ---
+    leave the security rule exactly as it is and stop asking it once per row. R-363.
+    ⭐ THE SECURITY HALF WAS MEASURED FIRST, AND DELIBERATELY SO. Before any timing was believed, the
+    experiment recorded VISIBLE ROW COUNTS for three different people on the 384-cell fixture,
+    swapped the policy, and recorded them again: company admin 5,768 runs / 5,772 assignments,
+    Assembly supervisor 5 / 9, Machining supervisor 3 / 3 --- identical both times. A faster policy
+    that shows one extra row to a line supervisor is not an optimisation, it is a breach, and the
+    speed number is worthless until that is settled.
+    ⭐ THEN THE SPEED. `board_window` on a plant: **2,630ms to ~700ms**. The two fields that were the
+    problem: runs 960ms to 78ms, assignments 990ms to 114ms. The change is one migration (0074): a
+    new `app_readable_node_ids()` --- `app_can_read_node`'s own predicate, extracted rather than
+    retyped, asked over the whole table instead of one row --- and the two SELECT policies rewritten
+    as `node_id IN (SELECT app_readable_node_ids())`.
+    ⚠️ THE WRITE POLICIES ARE UNTOUCHED ON PURPOSE. Every INSERT/UPDATE/DELETE policy still calls
+    `app_can_edit_node` per row: a write touches one row at a time, so the per-row shape costs
+    nothing there, and rewriting a guard nobody measured would be change without evidence.
+    `app_can_read_node` also stays --- other policies still call it, and it remains the single
+    definition of the rule the set-based form mirrors.
+    ⭐ 95_readable_nodes_as_a_set_test.sql IS THE GUARD, AND IT COMPARES SETS RATHER THAN COUNTS.
+    RN0-RN7: the two formulations agree row by row for a company admin, an Assembly supervisor and a
+    Machining supervisor; the supervisor's set is a strict subset of the admin's, so RN1 cannot pass
+    by everyone seeing everything; Machining's supervisor reads no Assembly node; the runs and
+    assignments visible THROUGH the policy equal exactly those the old helper admits; a run made on
+    an Assembly cell is visible to the person who made it and invisible to Machining's supervisor,
+    so the equality cases cannot pass by everything being invisible; and the function is
+    authenticated-only.
+    ⭐ PROVED ABLE TO FAIL, AND THE MUTATION WAS CHOSEN AS THE ONE SOMEBODY WOULD ACTUALLY MAKE:
+    dropping the org filter from the set function, which is what "tidying" it would look like and
+    which a single-org fixture would not notice. Four cases go red and they name the right thing ---
+    RN1 "5 nodes the SET admits and the helper does not --- a WIDENED read", and RN4/RN5 catching the
+    live cross-tenant leak, "policy shows 6, helper admits 5". Migration restored from a copy,
+    byte-identical, suite back to 8 of 8.
+    ⚠️ AND THE COST IT ADDS IS WRITTEN DOWN RATHER THAN DISCOVERED LATER. The set is every node id
+    the caller may read --- for a company admin, the whole org. Hundreds today, thousands for a large
+    customer: cheap to hash, but a materialisation where there was none, and the first thing to look
+    at if a much bigger org is ever slower than F-124's measurement predicts.
+    ⛔ THE BROWSER HALF OF LOAD SANITY IS STILL NOT DONE, AND THE REASON IS A FIXTURE BUG OF MINE.
+    `e2e/loadSanity.spec.ts` exists and runs, and its numbers so far are worthless: the fixture
+    seeded NEXT week while the board defaults to THIS week and has no control to leave it, so the
+    board drew 384 empty tracks, fetched zero runs, and reported a plant-sized load as 234ms --- and
+    an earlier version of the same spec was wrong twice over, waiting on "any track" (still on screen
+    from the previous board) and then switching away-and-back so react-query served the timed load
+    from cache. All three are fixed in the fixture and the spec; what is missing is a re-seed of the
+    developer's database, which is the maintainer's to run.
+    ⭐ THE NUMBERS. `Test Files 130 passed (130)` / `Tests 2645 passed (2645)`; the browser suite 45
+    passed AGAINST THE CHANGED POLICY on the live stack, which is where a widened read would actually
+    show; 823 database checks over 73 migrations, both re-measured; tsc 0 after `db:types` (the new
+    function adds one line to the generated types and nothing calls it from the client); eslint 0;
+    format:check clean over everything tracked.
+  shipped: []
 - id: 106
   date: 2026-09-09
   title: Load sanity, measured rather than guessed --- a plant board is 2.4 seconds and 7.3 MB, and four fifths of it is RLS asked once per row
@@ -16862,37 +16999,30 @@ next:
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
 - kind: task
-  text: The board's cost at scale is row-level security asked once per row --- decide what to do about it
+  text: The browser half of load sanity --- paint and a drag on a plant-sized board
   why: >-
-    F-124, measured 9 Sept on a purpose-built 384-cell fixture rather than guessed. A plant board is
-    2.1-2.7 seconds on the server and 7.3 MB on the wire; a department ~375ms, a line ~155ms. About
-    80% of the plant number is the `runs` and `assignments` reads, and within those it is RLS: the
-    same aggregations over the same rows take 6ms and 4ms with the policy bypassed against ~1,000ms
-    each with it. `runs_select` is `app_can_read_node(node_id)`, a SECURITY DEFINER helper evaluated
-    once per row --- 11,520 times --- to re-derive an answer with only 384 distinct values, which
-    `board_window` has already computed as `scoped_nodes` and is already filtering both reads
-    against.
-    ⭐ THE CLIENT IS NOT THE PROBLEM AND THAT WAS MEASURED TOO: on the real 7.13 MB payload,
-    `JSON.parse` 30ms, `parseBoardWindow` 25ms, `buildBoardIndex` 64ms. Roughly 120ms against the
-    server's 2,400.
-    ⚠️ THE DECISION IS THE MAINTAINER'S AND IT INCLUDES "DO NOTHING". Three shapes on F-124's own
-    card: cap what a person may open, since a plant board may not be a thing anyone should load and a
-    department is fine today; make `board_window` SECURITY DEFINER and let it own the scoping it
-    already computes, which removes the per-row call but moves the function into the class CLAUDE.md
-    warns hardest about; or leave the policy and help the planner reuse the answer, which is least
-    invasive and least certain and needs an EXPLAIN before anyone believes it. Do not take the
-    definer route without deciding it deliberately.
-    ⭐ RE-RUN THE NUMBERS ANY TIME WITH `scripts/load-sanity.sh` --- it builds a throwaway database,
-    seeds the volume, measures, and drops it, and never touches the dev database. It asserts nothing
-    on purpose: "fast enough" is a judgement, and a threshold nobody has agreed to would become a
-    flaky test on somebody else's laptop.
+    The SERVER half is done and F-124 is fixed: a plant board went from 2.4 seconds to ~700ms
+    (R-363, migration 0074). What is still not measured is what happens after the payload arrives ---
+    React rendering 384 tracks, and `computeFitScale` measuring and re-measuring real element
+    heights, which jsdom cannot answer because it reports every height as 0.
+    ⛔ `e2e/loadSanity.spec.ts` EXISTS AND ITS NUMBERS SO FAR ARE WORTHLESS, which is worth knowing
+    before anyone reads them. Three separate mistakes, all now fixed in the spec and the fixture, all
+    of the same family --- a number that looks right because nothing in it disagrees with anything.
+    It waited on "any track", which is still on screen from the PREVIOUS board, so the assertion
+    passed instantly. It then switched away and back, so react-query served the timed load from
+    cache. And the fixture seeded NEXT week while the board defaults to THIS week and has no control
+    to leave it, so the board drew 384 EMPTY tracks and reported a plant-sized load as 234ms.
+    ⭐ WHAT IS LEFT IS ONE RE-SEED AND ONE RUN. The developer's database still holds the OLD fixture
+    (next week's data): `scripts/load/teardown.sql` then `scripts/load/fixture.sql` puts the
+    corrected one in, and the spec then reports real paint and drag numbers. Both are one line each
+    and both are the maintainer's to run, since they write to the database being used.
 #
-# Removed on 9 Sept, DONE as specified: "load sanity --- does the board stay
-# usable with hundreds of rows and thousands of assignments". The entry asked for
-# a fixture on a path that cannot half-run, and one measurement of the board with
-# a number written into the plan rather than an impression. Both exist:
-# scripts/load-sanity.sh and F-124. What the measurement FOUND is now its own item
-# above, because finding the cause is not the same as choosing what to do about it.
+# Removed on 9 Sept, DECIDED AND DONE: "the board's cost at scale is row-level
+# security asked once per row". The maintainer chose option C --- leave the rule,
+# stop asking it per row --- and it is shipped as migration 0074 with R-363 and
+# 95_readable_nodes_as_a_set_test.sql behind it. A plant board went from ~2,630ms
+# to ~700ms with every person's visibility proved identical BEFORE the speed was
+# believed. F-124 carries the numbers.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   requirement: R-016

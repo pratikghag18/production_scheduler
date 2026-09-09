@@ -7,15 +7,15 @@
 SELECT count(*) FROM (
   SELECT jsonb_agg(to_jsonb(r) ORDER BY r.timerange) FROM runs r
    WHERE r.node_id IN (SELECT id FROM nodes WHERE path <@ 'load_plant')
-     AND r.timerange && tstzrange(date_trunc('day',now())+interval '7 days',
-                                  date_trunc('day',now())+interval '14 days')
+     AND r.timerange && tstzrange(date_trunc('week',now()),
+                                  date_trunc('week',now())+interval '7 days')
 ) x;
 
 SELECT count(*) FROM (
   SELECT jsonb_agg(to_jsonb(a) ORDER BY a.timerange) FROM assignments a
    WHERE a.node_id IN (SELECT id FROM nodes WHERE path <@ 'load_plant')
-     AND a.timerange && tstzrange(date_trunc('day',now())+interval '7 days',
-                                  date_trunc('day',now())+interval '14 days')
+     AND a.timerange && tstzrange(date_trunc('week',now()),
+                                  date_trunc('week',now())+interval '7 days')
 ) x;
 
 \echo '=== AUTHENTICATED: the same, with RLS ==='
@@ -26,15 +26,15 @@ SET LOCAL ROLE authenticated;
 SELECT count(*) FROM (
   SELECT jsonb_agg(to_jsonb(r) ORDER BY r.timerange) FROM runs r
    WHERE r.node_id IN (SELECT id FROM nodes WHERE path <@ 'load_plant')
-     AND r.timerange && tstzrange(date_trunc('day',now())+interval '7 days',
-                                  date_trunc('day',now())+interval '14 days')
+     AND r.timerange && tstzrange(date_trunc('week',now()),
+                                  date_trunc('week',now())+interval '7 days')
 ) x;
 
 SELECT count(*) FROM (
   SELECT jsonb_agg(to_jsonb(a) ORDER BY a.timerange) FROM assignments a
    WHERE a.node_id IN (SELECT id FROM nodes WHERE path <@ 'load_plant')
-     AND a.timerange && tstzrange(date_trunc('day',now())+interval '7 days',
-                                  date_trunc('day',now())+interval '14 days')
+     AND a.timerange && tstzrange(date_trunc('week',now()),
+                                  date_trunc('week',now())+interval '7 days')
 ) x;
 
 RESET ROLE;
