@@ -10,6 +10,7 @@ import {
   resizeRange,
   findRunOverlap,
   classifyCrewAgainstRun,
+  attachmentChangeMessage,
 } from "@/features/board/lib/interaction";
 
 /**
@@ -234,5 +235,53 @@ describe("interaction.ts — the shared drag threshold (P1-5l §4.1)", () => {
   it("case20: board and lib see the same DRAG_THRESHOLD_PX, and it is still 4", () => {
     expect(BOARD_DRAG_THRESHOLD_PX).toBe(SHARED_DRAG_THRESHOLD_PX);
     expect(SHARED_DRAG_THRESHOLD_PX).toBe(4);
+  });
+});
+
+/**
+ * R-365: the confirm prompt's message, built ahead of the write so
+ * `commitBlockDrag` can decide whether to ask at all. Four shapes: no
+ * change (same run both sides, or both null) asks nothing; a detach; a
+ * re-parent between two runs; and picking up a run from a standalone chip.
+ */
+describe("interaction.ts — R-365 attachmentChangeMessage", () => {
+  it("case21a: the same run on both sides is not a change — null", () => {
+    expect(
+      attachmentChangeMessage({
+        person: "Ana",
+        from: "Housing A 08:00–16:00",
+        to: "Housing A 08:00–16:00",
+      }),
+    ).toBe(null);
+  });
+
+  it("case21b: no run on either side (an ordinary direct-assignment nudge) is not a change — null", () => {
+    expect(attachmentChangeMessage({ person: "Ana", from: null, to: null })).toBe(null);
+  });
+
+  it("case21c: a run to no run is a detach", () => {
+    expect(
+      attachmentChangeMessage({ person: "Ana", from: "Housing A 08:00–16:00", to: null }),
+    ).toBe(
+      "This takes Ana off the Housing A 08:00–16:00 run and makes them a standalone assignment. Continue?",
+    );
+  });
+
+  it("case21d: a run to a different run is a re-parent", () => {
+    expect(
+      attachmentChangeMessage({
+        person: "Ana",
+        from: "Housing A 08:00–16:00",
+        to: "Housing B 08:00–16:00",
+      }),
+    ).toBe(
+      "This moves Ana from the Housing A 08:00–16:00 run to the Housing B 08:00–16:00 run. Continue?",
+    );
+  });
+
+  it("case21e: no run to a run is picking up an attachment", () => {
+    expect(
+      attachmentChangeMessage({ person: "Ana", from: null, to: "Housing A 08:00–16:00" }),
+    ).toBe("This puts Ana on the Housing A 08:00–16:00 run. Continue?");
   });
 });

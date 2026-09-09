@@ -330,3 +330,31 @@ export function assignmentFitsRun(
 ): boolean {
   return assignment.startMin >= run.startMin && assignment.endMin <= run.endMin;
 }
+
+/**
+ * R-365: the sentence the confirm prompt shows when a drop would change
+ * which run a chip belongs to, or `null` when it would not — the signal
+ * `commitBlockDrag`'s assignment branch uses to decide whether to ask at
+ * all. `from`/`to` are already-formatted run LABELS (D66: "<product name>
+ * <start>-<end>"), or `null` for "no run" (a direct/standalone
+ * assignment). Same run both sides (including both `null`, an ordinary
+ * same-run nudge) is not a change and returns `null` — the maintainer's
+ * decision was that only an ordinary move stays silent; anything that
+ * would DETACH or RE-PARENT the chip asks first, named plainly, never
+ * clamped to fit (see the plan note this requirement cites).
+ */
+export function attachmentChangeMessage(args: {
+  person: string;
+  from: string | null;
+  to: string | null;
+}): string | null {
+  const { person, from, to } = args;
+  if (from === to) return null;
+  if (from !== null && to === null) {
+    return `This takes ${person} off the ${from} run and makes them a standalone assignment. Continue?`;
+  }
+  if (from !== null && to !== null) {
+    return `This moves ${person} from the ${from} run to the ${to} run. Continue?`;
+  }
+  return `This puts ${person} on the ${to} run. Continue?`;
+}

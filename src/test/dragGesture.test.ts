@@ -1,5 +1,6 @@
 import {
   createElement,
+  StrictMode,
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -896,6 +897,258 @@ describe("useDragGesture", () => {
 
       await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
       expect(toastMessages()).toEqual([]);
+    });
+  });
+
+  /**
+   * R-365 — A DROP THAT CHANGES A CHIP'S RUN ASKS FIRST. `commitBlockDrag`'s
+   * assignment branch already computes `stillFitsHome`/`otherFit` (D66) to
+   * decide the `edit`'s `runId`/`productId`; R-365 reuses that SAME choice
+   * to decide whether to ask before writing at all, via `attachmentChangeMessage`
+   * (`src/features/board/lib/interaction.ts`) and the existing `askConfirm`
+   * mechanism (§9 debt 2, already used by run resize). Detach and re-parent
+   * ask; a nudge that stays inside its own run does not; Cancel writes
+   * nothing because `endBlockDrag` already cleared `activeDrag` (T11)
+   * before `commitBlockDrag` ran, so a prompted-and-cancelled drop leaves
+   * the chip exactly where the untouched index has it.
+   */
+  describe("R-365: a drop that changes a chip's run asks first", () => {
+    const runFixtureB: IndexedRun = {
+      ...runFixture,
+      id: "run-2",
+      productId: "prod-2",
+      timerange: "[2026-08-24 10:00:00+00,2026-08-24 15:00:00+00)",
+      startMin: 600,
+      endMin: 900,
+    };
+
+    function chipDescriptor(
+      a: IndexedAssignment,
+      homeRun: IndexedRun | null,
+      runsOnNode: IndexedRun[],
+    ) {
+      return {
+        nodeId: "cell-1",
+        subject: { kind: "assignment" as const, assignment: a, homeRun },
+        original: { startMin: a.startMin, endMin: a.endMin },
+        pxPerHour: 100,
+        windowMinutes: WINDOW_MINUTES,
+        template: null,
+        dayCount: 1,
+        dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
+        zoomIndex: 1 as const,
+        handlePx: 8,
+        blockWidthPx: 200,
+        offsetXPx: 100, // body zone, same grip math runDescriptor's comment gives
+        runsOnNode,
+        crew: [] as IndexedAssignment[],
+      };
+    }
+
+    function nameOperator(index: BoardIndex) {
+      index.operatorById.set("op-1", {
+        id: "op-1",
+        homeNodeId: null,
+        displayName: "Elena",
+        employeeRef: null,
+        active: true,
+        siteNodeId: "cell-1",
+        sitePath: "plant_1.cell_1",
+        skillIds: [],
+        skillExpiries: [],
+      });
+    }
+
+    function confirmMessage(result: { popover: unknown }): string | null {
+      const p = result.popover as { kind: string; message?: string } | null;
+      return p && p.kind === "confirm" ? (p.message ?? null) : null;
+    }
+
+    it("a nudge that takes a chip off its run asks before writing (detach)", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = crewFixture(); // 360-600, attached to run-1, matching the run's own window exactly
+      const index = buildIndex([a]);
+      nameOperator(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(
+          chipDescriptor(a, runFixture, [runFixture]),
+          fakePointerEvent(500, 300),
+        );
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300)); // 60px -> +30min: 360-600 -> 390-630, past the run's own end
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      expect(result.current.popover?.kind).toBe("confirm");
+      expect(confirmMessage(result.current)).toMatch(
+        /off the .* run and makes them a standalone assignment/,
+      );
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.confirmYes();
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent?.runId).toBe(null);
+      expect(sent?.productId).toBe(runFixture.productId);
+    });
+
+    it("F-127: Continue sends the write exactly ONCE under StrictMode, which the app runs in", async () => {
+      // `src/main.tsx` mounts the app in <StrictMode>, and StrictMode invokes
+      // state UPDATER functions twice in development to flush out side effects
+      // hidden inside them. `confirmYes` used to call `onConfirm()` inside its
+      // `setPopover` updater -- so every Continue sent its write twice, seen
+      // as "2 PATCH to assignments" in loadSanity.spec.ts's own print line the
+      // first time R-365 put a prompt in front of a real write. The run-resize
+      // confirm had the same shape from the day it replaced window.confirm.
+      // The other cases in this block render WITHOUT StrictMode and could not
+      // see it; this one renders the way the app does.
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = crewFixture();
+      const index = buildIndex([a]);
+      nameOperator(index);
+      const strictWrapper = ({ children }: { children: ReactNode }) =>
+        createElement(StrictMode, null, createElement(wrapper, null, children));
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), {
+        wrapper: strictWrapper,
+      });
+
+      act(() => {
+        result.current.beginBlockDrag(
+          chipDescriptor(a, runFixture, [runFixture]),
+          fakePointerEvent(500, 300),
+        );
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+      expect(result.current.popover?.kind).toBe("confirm");
+
+      act(() => {
+        result.current.confirmYes();
+      });
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalled());
+      // Give a second, double-invoked call every chance to land before counting.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1);
+      expect(result.current.popover).toBe(null);
+    });
+
+    it("a nudge that moves a chip fully onto a different run asks before writing (re-parent)", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      // Attached to run-1 (360-600) but sitting near its right edge (540-600)
+      // so a 60-minute nudge lands it entirely inside run-2 (600-900) and no
+      // longer inside run-1.
+      const a: IndexedAssignment = { ...crewFixture(), startMin: 540, endMin: 600 };
+      const index: BoardIndex = {
+        ...buildIndex([a]),
+        runsByNode: new Map([["cell-1", [runFixture, runFixtureB]]]),
+        runById: new Map([
+          ["run-1", runFixture],
+          ["run-2", runFixtureB],
+        ]),
+      };
+      nameOperator(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(
+          chipDescriptor(a, runFixture, [runFixture, runFixtureB]),
+          fakePointerEvent(500, 300),
+        );
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(620, 300)); // 120px -> +60min: 540-600 -> 600-660, inside run-2 only
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(620, 300));
+      });
+
+      expect(result.current.popover?.kind).toBe("confirm");
+      expect(confirmMessage(result.current)).toMatch(/from the .* run to the .* run/);
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.confirmYes();
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent?.runId).toBe(runFixtureB.id);
+      expect(sent?.productId).toBe(null);
+    });
+
+    it("a nudge that stays inside its own run does not ask", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      // 400-550, well inside run-1 (360-600) on both sides of a 30-minute nudge.
+      const a: IndexedAssignment = { ...crewFixture(), startMin: 400, endMin: 550 };
+      const index = buildIndex([a]);
+      nameOperator(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(
+          chipDescriptor(a, runFixture, [runFixture]),
+          fakePointerEvent(500, 300),
+        );
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300)); // 60px -> +30min: 400-550 -> 430-580, still inside 360-600
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      expect(result.current.popover).toBe(null);
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent && "runId" in sent).toBe(false);
+      expect(sent?.timerange).toBeDefined();
+    });
+
+    it("Cancel writes nothing and toasts nothing — the chip is already back where it was", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = crewFixture();
+      const index = buildIndex([a]);
+      nameOperator(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(
+          chipDescriptor(a, runFixture, [runFixture]),
+          fakePointerEvent(500, 300),
+        );
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+      expect(result.current.popover?.kind).toBe("confirm");
+
+      act(() => {
+        result.current.confirmNo();
+      });
+
+      expect(result.current.popover).toBe(null);
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+      expect(useToastStore.getState().toasts).toEqual([]);
     });
   });
 });

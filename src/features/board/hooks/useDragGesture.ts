@@ -55,6 +55,7 @@ import {
   findRunOverlap,
   classifyCrewAgainstRun,
   assignmentFitsRun,
+  attachmentChangeMessage,
   splitEvenly,
   splitFits,
   type DragMode,
@@ -848,68 +849,126 @@ export function useDragGesture(args: UseDragGestureArgs) {
           // runId/productId change, just the time move.
         }
 
-        // P1-4e considered, and rejected, running a `capacity_probe` +
-        // split-coverage popover ahead of an EXISTING chip's own time
-        // move (brief §5 step 1 lists "chip move" as a split-coverage
-        // trigger). `apply_split_coverage`'s `p_adjustments` shape
-        // (docs/api.md §3) only ever carries `{assignment_id, efficiency}`
-        // — no `timerange` — so an existing assignment that is both
-        // MOVING and needing its efficiency dialled down cannot be
-        // expressed as that call's `p_new_assignment` (reserved for a
-        // brand-new INSERT) either. Making this case go through the split
-        // flow would need a second write after `apply_split_coverage`,
-        // which hazard #4 forbids ("never several calls"). Left as the
-        // ordinary `updateAssignmentFields` PATCH below; the
-        // `assignments_capacity` trigger still guards it exactly as
-        // before P1-4e, and a rejection surfaces through the existing
-        // `CapacityExceeded` toast path (`failWith`), unchanged.
-        //
-        // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge,
-        // or a same-cell nudge) — migration 0070's `assignments_resize_guard`
-        // now asks `check_eligibility`/`absence_overlap` on it exactly as the
-        // four scheduler RPCs do. Under `block` a refusal comes back as
-        // `NotEligible`/`Absent` and `failWith` below shows it, unchanged. A
-        // trigger cannot return a warning, so under `warn` the client runs
-        // the SAME two mirrors the create/reassign pop-ups already run
-        // (`certificateGaps`, `absenceGaps`) against the window it is about
-        // to write, and on a hit toasts the SAME wording the crew-drag
-        // success toast already uses above (`commitBlockDrag`'s `run`/`move`
-        // branch) — count 1, not invented copy. A departed person's row
-        // (`a.operatorId === null`, D110) has nobody to ask about and is
-        // skipped, matching the trigger's own guard.
-        if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
-          const operatorId = a.operatorId;
-          const windowEnd = minuteDate(index.windowStart, candidate.endMin);
-          const operatorRecord = index.operatorById.get(operatorId);
-          const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
-          const operatorName = operatorRecord?.displayName ?? operatorId;
+        // R-365 / D66: the RUN the candidate ends up attached to — the same
+        // choice `edit` above already made (`stillFitsHome` keeps `homeRun`,
+        // otherwise `otherFit`, which is `null` for a detach or an
+        // already-direct chip that still fits nothing). Reusing the value
+        // rather than recomputing it is what keeps the confirm prompt and
+        // the write it guards from ever disagreeing about what is about to
+        // happen.
+        const targetRun = stillFitsHome ? homeRun : otherFit;
+        const runLabel = (run: IndexedRun | null): string | null => {
+          if (run === null) return null;
+          const p = productViewFor(run, index.productById);
+          return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`.trim();
+        };
+        // D110: a departed person's row has `operatorId === null` — nobody
+        // to name in the prompt, so it falls back the same way the mirror
+        // toasts below already do.
+        const person =
+          a.operatorId !== null
+            ? (index.operatorById.get(a.operatorId)?.displayName ?? "This person")
+            : "This person";
+        // Decided on run IDS here, not on the labels the message shows: two
+        // runs on one track cannot overlap (`findRunOverlap`), so equal labels
+        // do imply the same run today -- but that is a rule living in another
+        // function, and "is it the same run?" is a fact this branch already
+        // holds. `attachmentChangeMessage`'s own label compare is a guard, not
+        // the decision.
+        const attachmentMessage =
+          (homeRun?.id ?? null) === (targetRun?.id ?? null)
+            ? null
+            : attachmentChangeMessage({
+                person,
+                from: runLabel(homeRun),
+                to: runLabel(targetRun),
+              });
 
-          if (operatorRecord) {
-            const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
-            const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
-            if (gaps.length > 0) {
+        // R-365: everything from the R-361 mirror toasts through the write
+        // itself is deferred into this closure so a prompted drop toasts and
+        // writes NOTHING until Continue — the mirrors must not run ahead of
+        // the confirm, because a toast (unlike the mutation) cannot be
+        // un-sent on Cancel.
+        const commitAssignmentMove = () => {
+          // P1-4e considered, and rejected, running a `capacity_probe` +
+          // split-coverage popover ahead of an EXISTING chip's own time
+          // move (brief §5 step 1 lists "chip move" as a split-coverage
+          // trigger). `apply_split_coverage`'s `p_adjustments` shape
+          // (docs/api.md §3) only ever carries `{assignment_id, efficiency}`
+          // — no `timerange` — so an existing assignment that is both
+          // MOVING and needing its efficiency dialled down cannot be
+          // expressed as that call's `p_new_assignment` (reserved for a
+          // brand-new INSERT) either. Making this case go through the split
+          // flow would need a second write after `apply_split_coverage`,
+          // which hazard #4 forbids ("never several calls"). Left as the
+          // ordinary `updateAssignmentFields` PATCH below; the
+          // `assignments_capacity` trigger still guards it exactly as
+          // before P1-4e, and a rejection surfaces through the existing
+          // `CapacityExceeded` toast path (`failWith`), unchanged.
+          //
+          // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge,
+          // or a same-cell nudge) — migration 0070's `assignments_resize_guard`
+          // now asks `check_eligibility`/`absence_overlap` on it exactly as the
+          // four scheduler RPCs do. Under `block` a refusal comes back as
+          // `NotEligible`/`Absent` and `failWith` below shows it, unchanged. A
+          // trigger cannot return a warning, so under `warn` the client runs
+          // the SAME two mirrors the create/reassign pop-ups already run
+          // (`certificateGaps`, `absenceGaps`) against the window it is about
+          // to write, and on a hit toasts the SAME wording the crew-drag
+          // success toast already uses above (`commitBlockDrag`'s `run`/`move`
+          // branch) — count 1, not invented copy. A departed person's row
+          // (`a.operatorId === null`, D110) has nobody to ask about and is
+          // skipped, matching the trigger's own guard.
+          if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
+            const operatorId = a.operatorId;
+            const windowEnd = minuteDate(index.windowStart, candidate.endMin);
+            const operatorRecord = index.operatorById.get(operatorId);
+            const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
+            const operatorName = operatorRecord?.displayName ?? operatorId;
+
+            if (operatorRecord) {
+              const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
+              const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
+              if (gaps.length > 0) {
+                toast.info(
+                  `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
+                );
+              }
+            }
+
+            const absenceHit = absenceGaps(resizeAbsences, operatorId, {
+              start: minuteDate(index.windowStart, candidate.startMin),
+              end: windowEnd,
+            });
+            if (absenceHit !== null) {
+              const when = leaveLine(absenceHit, dateFormat, index.zone);
               toast.info(
-                `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
+                `1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`,
               );
             }
           }
 
-          const absenceHit = absenceGaps(resizeAbsences, operatorId, {
-            start: minuteDate(index.windowStart, candidate.startMin),
-            end: windowEnd,
-          });
-          if (absenceHit !== null) {
-            const when = leaveLine(absenceHit, dateFormat, index.zone);
-            toast.info(
-              `1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`,
-            );
-          }
-        }
+          updateAssignmentFields.mutate(
+            { assignmentId: a.id, edit },
+            { onError: (err) => failWith(err, revertLabel(d.subject)) },
+          );
+        };
 
-        updateAssignmentFields.mutate(
-          { assignmentId: a.id, edit },
-          { onError: (err) => failWith(err, revertLabel(d.subject)) },
-        );
+        if (attachmentMessage === null) {
+          // No attachment change (same run both sides, or an already-direct
+          // chip staying direct) — R-365 only asks when the run a chip
+          // belongs to would change, so this is the unchanged, un-prompted
+          // path.
+          commitAssignmentMove();
+        } else {
+          // R-365: Cancel needs no extra code here. `endBlockDrag` (above)
+          // already cleared `activeDrag` before calling `commitBlockDrag`
+          // (T11), and `commitAssignmentMove` has not run yet, so nothing
+          // has been written or optimistically patched — the chip is
+          // already back where the (untouched) index has it. `confirmNo`
+          // just closes the popover.
+          askConfirm(attachmentMessage, anchor, commitAssignmentMove);
+        }
       }
     },
     [
@@ -1570,13 +1629,21 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const cancelSplit = useCallback(() => setPopover(null), []); // D62: Cancel reverts, sends nothing.
 
+  /* ⛔ F-127: `onConfirm()` used to run INSIDE the `setPopover` updater, and
+   * `src/main.tsx` mounts the app in <StrictMode>, which invokes state
+   * updaters TWICE in development to flush out exactly that -- so every
+   * Continue sent its write twice. Seen as "2 PATCH to assignments" in
+   * `loadSanity.spec.ts`'s own print line the first time R-365 put a prompt
+   * in front of a real write; the run-resize confirm had the same shape from
+   * the day it replaced `window.confirm`, and nothing counted its requests.
+   * The updater now only clears; the side effect runs once, outside it, off
+   * the rendered `popover` this callback closes over. */
   const confirmYes = useCallback(() => {
-    setPopover((p) => {
-      if (!p || p.kind !== "confirm") return p;
-      p.onConfirm();
-      return null;
-    });
-  }, []);
+    if (popover === null || popover.kind !== "confirm") return;
+    const { onConfirm } = popover;
+    setPopover(null);
+    onConfirm();
+  }, [popover]);
   const confirmNo = useCallback(() => setPopover(null), []);
 
   const saveRunFields = useCallback(

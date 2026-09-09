@@ -289,6 +289,12 @@ test("how long a plant-sized board takes to draw, and a drag on it", async ({ pa
    * written. That is the wrong trade HERE, and only here: a release that writes
    * nothing is the very thing that made these numbers meaningless. So the write
    * stays and `putBack` undoes it, provably.
+   *
+   * ⚠️ R-365: THE RELEASE NOW ASKS BEFORE IT WRITES. The fixture's chips exactly
+   * fill their runs, so an hour's push always detaches -- `commitBlockDrag`
+   * asks Continue/Cancel rather than committing on mouse-up. The timed window
+   * moves to the CLICK: it is the answer to the prompt, not the mouse coming
+   * up, that a person is actually waiting on the settle from.
    */
   let dragMs = -1;
   let dragRpcMs = -1;
@@ -349,23 +355,29 @@ test("how long a plant-sized board takes to draw, and a drag on it", async ({ pa
         timeout: 5_000,
       });
 
+      // R-365: the release opens the confirm popover instead of committing --
+      // the fixture chip exactly fills its run, so an hour's push always
+      // detaches it. Continue has to be clicked before there is anything to
+      // settle or refetch.
+      await page.mouse.up();
+
       /*
        * Split the settle the same way the two cold loads above are split: a
        * committed drag invalidates the board, so part of the wait is the
        * `board_window` RPC answering again and the rest is the client drawing
-       * what came back. Armed BEFORE the release, because the refetch starts on
-       * the same tick the mutation succeeds.
+       * what came back. Armed right before the Continue click, because the
+       * refetch starts on the same tick the mutation succeeds.
        */
       // Declared before the listener that closes over it: the listener only
-      // reads it once the release has stamped it.
+      // reads it once the click has stamped it.
       let tUp = 0;
       const refetched = page
         .waitForResponse((r) => r.url().includes("board_window"), { timeout: 60_000 })
         .then(() => Date.now() - tUp)
         .catch(() => -1);
 
+      await page.getByRole("button", { name: "Continue" }).click();
       tUp = Date.now();
-      await page.mouse.up();
       await page.waitForTimeout(0);
       await expect(trackNamed("Cell 1-1-1")).toBeVisible({ timeout: 60_000 });
       dragMs = Date.now() - tUp;
@@ -393,8 +405,8 @@ test("how long a plant-sized board takes to draw, and a drag on it", async ({ pa
       `  DOM on the big board            ${dom.total} elements, ${dom.tracks} tracks, ${dom.chips} chips`,
       dragMs >= 0
         ? dragRpcMs >= 0
-          ? `  drag on the big board           ${dragMs} ms from mouse-up to settled, of which ${dragRpcMs} ms was the board_window RPC answering again`
-          : `  drag on the big board           ${dragMs} ms from mouse-up to settled, and NO board_window answered in that window -- all of it is client work on the optimistic patch`
+          ? `  drag on the big board           ${dragMs} ms from Continue to settled, of which ${dragRpcMs} ms was the board_window RPC answering again`
+          : `  drag on the big board           ${dragMs} ms from Continue to settled, and NO board_window answered in that window -- all of it is client work on the optimistic patch`
         : "  drag                            no block found to drag",
       `  what the release wrote          ${patches} PATCH to assignments; ${dragNote === "" ? "no drag happened" : dragNote}`,
       "",
