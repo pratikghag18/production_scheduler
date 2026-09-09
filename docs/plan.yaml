@@ -8918,6 +8918,46 @@ requirements:
     customer. Cheap to hash, but it is a materialisation where there was none, and it is the first
     thing to look at if a much larger org is ever slower than F-124's measurement predicts.
 findings:
+- id: F-125
+  title: A plant board spends nine seconds in the browser without drawing it --- the DOM ends up with eleven tracks
+  tag: The nine seconds nobody is drawing
+  status: open
+  found_by: agent
+  refs:
+  - F-124
+  - R-363
+  story: >-
+    Measured 9 Sept in a real browser, once the fixture was in the developer's own database and
+    `board_window` had already been fixed (R-363 took the server from 2.4s to ~0.7s).
+    `e2e/loadSanity.spec.ts` signs in as a company admin, switches the board to the 384-cell plant on
+    a freshly loaded page, and splits the wait at the `board_window` response.
+    ⛔ THE SPLIT IS THE FINDING. On the big plant: **9,710ms total, of which 719ms was the RPC** ---
+    so roughly **nine seconds of CLIENT time** after the payload has arrived. On Plant A, for
+    comparison, 1,225ms total of which 214ms was the RPC. The server half is now a tenth of the
+    problem it was and a fourteenth of what is left.
+    ⛔ AND IT IS NOT DRAWING THE BOARD, WHICH IS WHAT MAKES IT ODD. A DOM census taken at the end of
+    that same wait finds **2,333 elements, 11 tracks and 33 chips**. The board virtualises: it is not
+    building 384 rows or 5,760 chips. So nine seconds are going somewhere that is neither the network,
+    nor the server, nor the elements on screen.
+    ⚠️ AND A DRAG, ONCE THERE, IS FINE: 14-37ms from mouse-up to settled across three runs. Whatever
+    this is, it is a cost of ARRIVING at a big board rather than of using one.
+    ⛔ WHAT THIS CARD DOES NOT SAY IS WHY, AND THAT IS DELIBERATE. Two guesses have already been
+    wrong today. F-124's lead guessed the per-node policy resolver and it was 44-89ms of 2,630. Then
+    F-124's own story said "the client is INNOCENT" on the strength of measuring `JSON.parse` (30ms),
+    `parseBoardWindow` (25ms) and `buildBoardIndex` (64ms) --- about 120ms of data handling, on the
+    real 7.13 MB payload, in Node. That measurement was right and the conclusion drawn from it was
+    wrong: it covered the data path and not the nine seconds around it. The honest state is that the
+    cost has been LOCATED (client, after the response, not in the rendered DOM) and not yet
+    EXPLAINED.
+  lead: >-
+    A suspicion, not a fact, and it should be settled with a profiler rather than a third guess. The
+    candidates worth eliminating in order: `computeFitScale`, which reads natural heights and is the
+    one thing in the board deliberately described as measuring and re-measuring --- if it forces a
+    layout per candidate row it would be a reflow storm; whatever decides WHICH tracks to virtualise,
+    since that has to consider all 384 even to show 11; and the possibility that something recomputes
+    per assignment across all 5,760 on every render pass. A Chrome performance trace over the switch
+    would name it in one run and cost nothing to be wrong about, which is the opposite of the last
+    two attempts.
 - id: F-124
   title: A plant-sized board takes over two seconds on the server, and nearly all of it is row-level security asked once per row
   tag: The guard that runs 11,520 times
@@ -8936,9 +8976,15 @@ findings:
     linear in rows and the constant is far too big.
     ⭐ AND THE CAUSE IS NOT WHERE THE QUEUE ENTRY GUESSED, WHICH IS THE POINT OF MEASURING. That entry
     named three suspects: `board_window`'s single payload, `boardIndex`'s maps, and
-    `computeFitScale`'s measure-and-remeasure. The client is INNOCENT --- on the real 7.13 MB payload,
+    `computeFitScale`'s measure-and-remeasure. The DATA PATH is cheap --- on the real 7.13 MB payload,
     `JSON.parse` is 30ms, `parseBoardWindow` 25ms and `buildBoardIndex` 64ms, about 120ms of work for
-    a payload that took the server twenty times longer to produce. The developer's own first guess
+    a payload that took the server twenty times longer to produce.
+    ⛔ THIS PARAGRAPH ONCE SAID "THE CLIENT IS INNOCENT" AND THAT WAS WRONG --- corrected here rather
+    than quietly reworded, because it is the same mistake this card was written to warn about. The
+    120ms above is real and covers the data path; the conclusion drawn from it was not, because a
+    browser had not been near this at the time. Once one was (F-125), a plant board turned out to
+    spend ~9,000ms of CLIENT time after the response arrives, against the server's 719ms. The
+    measurement was sound and the inference from it was too big. The developer's own first guess
     was wrong too: `node_policies`, which calls `app_resolve_node_setting` once per node, is 44-89ms
     of the total.
     ⛔ IT IS THE `runs` AND `assignments` READS, AND WITHIN THEM IT IS RLS. Timed piece by piece
@@ -12140,6 +12186,51 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 108
+  date: 2026-09-09
+  title: The browser half of load sanity --- the server is fixed and the client is where the nine seconds are
+  commits: []
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 45
+  confirmed: true
+  summary: >-
+    The maintainer re-seeded the corrected fixture into their own database and the browser
+    measurement finally ran against a board with 5,760 blocks actually on it.
+    ⭐ OPTION C IS CONFIRMED IN THE PLACE THAT COUNTS. The `board_window` RPC, measured from the
+    browser rather than from psql, answers in **719ms** on the 384-cell plant against Plant A's
+    214ms. Before R-363 that call was 2.4 seconds.
+    ⛔ AND THE BOARD STILL TAKES NINE AND A HALF SECONDS TO APPEAR. 9,710ms total, 719ms of it the
+    RPC --- so roughly **nine seconds of client time after the payload lands**. F-125.
+    ⛔ WHICH IS NOT RENDERING, AND THAT IS THE STRANGE PART. A DOM census at the end of the same wait
+    finds 2,333 elements, 11 tracks and 33 chips: the board virtualises, so it is not building 384
+    rows or 5,760 chips. Nine seconds are going somewhere that is neither the network, nor the
+    server, nor the elements on screen. A drag once there is 14-37ms across three runs --- this is a
+    cost of ARRIVING at a big board, not of using one.
+    ⚠️ F-124'S "THE CLIENT IS INNOCENT" IS CORRECTED IN PLACE RATHER THAN QUIETLY REWORDED. That
+    sentence rested on measuring `JSON.parse` (30ms), `parseBoardWindow` (25ms) and `buildBoardIndex`
+    (64ms) on the real payload --- all correct, all about the DATA PATH, and none of them a browser.
+    The measurement was sound and the inference drawn from it was too big. That is now the second
+    wrong guess about this board in one day (the first was the per-node policy resolver, 44-89ms of
+    2,630), which is exactly why F-125 stops at "located, not explained" and asks for a profiler
+    instead of a third.
+    ⭐ THE SPEC IS NOW HONEST, HAVING BEEN WRONG THREE WAYS FIRST, all recorded in its own header: it
+    waited on "any track" (still on screen from the previous board, so the assertion passed
+    instantly, reporting the big plant at 192ms); then switched away-and-back (react-query served the
+    timed load from cache, 234ms); and the fixture seeded NEXT week while the board defaults to THIS
+    week with no control to leave it (384 empty tracks, zero runs fetched). Each produced a number
+    that looked reasonable and was backwards. It now waits on a cell name only that plant has, loads
+    a fresh page per measurement, splits the wait at the RPC response, and counts the DOM.
+    ⭐ THE NUMBERS. Unchanged and not re-measured beyond the gate: `Test Files 130 passed (130)` /
+    `Tests 2645 passed (2645)`, 45 browser cases, 823 database checks over 73 migrations, tsc 0,
+    eslint 0, format:check clean over everything tracked. No migration and no application code
+    changed in this session --- one e2e spec and two plan entries.
+  shipped: []
 - id: 107
   date: 2026-09-09
   title: Option C taken --- the read rule asked once per query instead of once per row, visibility proved identical first
@@ -17000,30 +17091,22 @@ next:
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
 - kind: task
-  text: The browser half of load sanity --- paint and a drag on a plant-sized board
+  text: Find the nine seconds the browser spends on a plant board without drawing it
   why: >-
-    The SERVER half is done and F-124 is fixed: a plant board went from 2.4 seconds to ~700ms
-    (R-363, migration 0074). What is still not measured is what happens after the payload arrives ---
-    React rendering 384 tracks, and `computeFitScale` measuring and re-measuring real element
-    heights, which jsdom cannot answer because it reports every height as 0.
-    ⛔ `e2e/loadSanity.spec.ts` EXISTS AND ITS NUMBERS SO FAR ARE WORTHLESS, which is worth knowing
-    before anyone reads them. Three separate mistakes, all now fixed in the spec and the fixture, all
-    of the same family --- a number that looks right because nothing in it disagrees with anything.
-    It waited on "any track", which is still on screen from the PREVIOUS board, so the assertion
-    passed instantly. It then switched away and back, so react-query served the timed load from
-    cache. And the fixture seeded NEXT week while the board defaults to THIS week and has no control
-    to leave it, so the board drew 384 EMPTY tracks and reported a plant-sized load as 234ms.
-    ⭐ WHAT IS LEFT IS ONE RE-SEED AND ONE RUN. The developer's database still holds the OLD fixture
-    (next week's data): `scripts/load/teardown.sql` then `scripts/load/fixture.sql` puts the
-    corrected one in, and the spec then reports real paint and drag numbers. Both are one line each
-    and both are the maintainer's to run, since they write to the database being used.
-#
-# Removed on 9 Sept, DECIDED AND DONE: "the board's cost at scale is row-level
-# security asked once per row". The maintainer chose option C --- leave the rule,
-# stop asking it per row --- and it is shipped as migration 0074 with R-363 and
-# 95_readable_nodes_as_a_set_test.sql behind it. A plant board went from ~2,630ms
-# to ~700ms with every person's visibility proved identical BEFORE the speed was
-# believed. F-124 carries the numbers.
+    F-125, measured 9 Sept in a real browser against 5,760 blocks. The board takes 9,710ms to appear
+    and only 719ms of that is the `board_window` RPC --- the server half is fixed (R-363). The other
+    nine seconds are client time AFTER the payload arrives, and they are not rendering: a DOM census
+    at the end of the same wait finds 2,333 elements, 11 tracks and 33 chips, because the board
+    virtualises. A drag once there is 14-37ms, so this is a cost of arriving at a big board rather
+    than of using one.
+    ⛔ THE NEXT STEP IS A PROFILER, NOT A FOURTH GUESS. Two guesses about this board have already been
+    wrong in one day: the per-node policy resolver (44-89ms of 2,630) and "the client is innocent"
+    (true of the 120ms data path, false of the nine seconds around it). A Chrome performance trace
+    over the plant switch would name the cause in one run. The candidates worth eliminating in that
+    order are on F-125's own card.
+    ⭐ RE-RUN IT WITH `npx playwright test e2e/loadSanity.spec.ts`. It needs the volume fixture in the
+    developer's database (`scripts/load/fixture.sql`, removed by `scripts/load/teardown.sql`) and
+    SKIPS honestly when it is absent.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   requirement: R-016

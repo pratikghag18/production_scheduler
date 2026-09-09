@@ -88,17 +88,40 @@ test("how long a plant-sized board takes to draw, and a drag on it", async ({ pa
       await page.goto("/");
       await expect(picker).toBeVisible({ timeout: 60_000 });
     }
+    // Split the wait: how long the SERVER+NETWORK take (the board_window RPC
+    // answering) against how long the CLIENT then takes to put a track on
+    // screen. Without the split, "9.6 seconds" says nothing about which half to
+    // look at -- and the DOM census shows the board virtualises to ~11 tracks,
+    // so "it is drawing 5,760 chips" is already ruled out.
     const t0 = Date.now();
+    const responded = page
+      .waitForResponse((r) => r.url().includes("board_window"), { timeout: 180_000 })
+      .then(() => Date.now() - t0)
+      .catch(() => -1);
     await picker.selectOption(value);
+    const rpcMs = await responded;
     await expect(trackNamed(cell)).toBeVisible({ timeout: 180_000 });
-    return Date.now() - t0;
+    return { total: Date.now() - t0, rpc: rpcMs };
   }
 
   const small = options.find((o) => o.value !== "load_plant")!;
   // Plant A's first cell is "Cell 1"; the fixture's is "Cell 1-1-1". `^Cell 1 `
   // cannot match "Cell 1-1-1", so the two are genuinely distinguishable.
-  const smallMs = await timeCold(small.value, "Cell 1");
-  const bigMs = await timeCold("load_plant", "Cell 1-1-1");
+  const smallT = await timeCold(small.value, "Cell 1");
+  const bigT = await timeCold("load_plant", "Cell 1-1-1");
+  const smallMs = smallT.total;
+  const bigMs = bigT.total;
+
+  /*
+   * How much DOM the big board actually builds. The point is to tell "384 track
+   * rows are expensive" apart from "5,760 chips are expensive", which decides
+   * whether the answer is virtualisation, fewer chips, or neither.
+   */
+  const dom = await page.evaluate(() => ({
+    total: document.querySelectorAll("*").length,
+    tracks: document.querySelectorAll('[aria-label$="press Enter to create"]').length,
+    chips: document.querySelectorAll('[aria-label*=" on "]').length,
+  }));
 
   // The drag: pick the first block on the big board and move it one hour right.
   // Measured from mouse-up to the board settling, which is what a person feels.
@@ -124,8 +147,10 @@ test("how long a plant-sized board takes to draw, and a drag on it", async ({ pa
   console.log(
     [
       "",
-      `  ${small.text.trim()} (small)      ${smallMs} ms to first track`,
-      `  Load Plant (384 cells)          ${bigMs} ms to first track`,
+      `  ${small.text.trim()} (small)      ${smallMs} ms total, of which ${smallT.rpc} ms was the board_window RPC`,
+      `  Load Plant (384 cells)          ${bigMs} ms total, of which ${bigT.rpc} ms was the board_window RPC`,
+      `                                  so the client half is ~${bigMs - Math.max(bigT.rpc, 0)} ms on the big board`,
+      `  DOM on the big board            ${dom.total} elements, ${dom.tracks} tracks, ${dom.chips} chips`,
       dragMs >= 0
         ? `  drag on the big board           ${dragMs} ms from mouse-up to settled`
         : "  drag                            no block found to drag",
