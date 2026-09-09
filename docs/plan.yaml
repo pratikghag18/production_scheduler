@@ -12204,6 +12204,66 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 109
+  date: 2026-09-09
+  title: R-363's cross-org mutation reproduced cold, and the measurement spec that measures the database wrong
+  commits:
+  - a24043c
+  numbers:
+    app_tests: 2645
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 45
+  confirmed: true
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded 5957ea6 to 980d1d3 cleanly. Four sessions
+    landed since the last tester run: the reset-link config fix (105), load sanity measured (106,
+    F-124 filed), option C taken (107, R-363, migration 0074), and the browser half of load sanity
+    (108, F-125 filed, open). Zero open defects on arrival.
+    Ran `node scripts/tester-run.mjs --sql --e2e`, stack up. Count matches exactly: 2645 tests in
+    130 files. All 67 numbered SQL files plus dev_demo.sql: 823 checks, 0 failures, including the
+    new 95_readable_nodes_as_a_set_test.sql (RN0-RN7, 8 of 8).
+    THE RLS REWRITE, THE RISKIEST CHANGE IN THE DIFF, CHECKED INDEPENDENTLY BEFORE TRUSTING THE
+    WRITE-UP. Read `app_readable_node_ids`'s predicate against `app_can_read_node`'s own actual last
+    emission (20260825000012_tenant_scope_node_access.sql:90, confirmed by grep rather than taken
+    from the migration's own citation) -- byte-identical past the single-row lookup. Then reproduced
+    the developer's own cross-org mutation on a scratch copy: dropping the org filter from
+    `app_readable_node_ids` turns RN1, RN2, RN4 and RN5 red, with the exact messages the write-up
+    quotes ("5 nodes the SET admits and the helper does not --- a WIDENED read", "policy shows 6,
+    helper admits 5"). RN3 and RN6 correctly stay green -- they guard the DEPARTMENT boundary within
+    one org, not the org boundary this mutation breaks, so their being unaffected is the right
+    answer, not a gap. Restored from the pre-mutation copy, `git diff --exit-code` clean, suite
+    rebuilt and back to 8 of 8. Confirmed no DDL in 0074 (function replacement plus two policy
+    swaps only), so Sweep 1 had nothing to find. `database.types.ts` already carries
+    `app_readable_node_ids` with no client call site (grepped `src/`), matching the "nothing calls
+    it" claim; db:types regeneration produced no diff.
+    DEF-0025 FILED: `e2e/loadSanity.spec.ts`'s OWN drag measurement breaks the promise its header
+    makes. Read `useDragGesture.ts`'s commit path (`endBlockDrag` -> `commitBlockDrag` ->
+    `updateAssignmentFields.mutate()` on plain pointerup, no confirmation) and compared the spec's
+    drag against `touch.spec.ts`'s T2, the suite's only other bare drag, which presses Escape
+    specifically so the release commits nothing. `loadSanity.spec.ts` has no such step. Confirmed
+    live rather than only in the reading: this session's own harness run executed the spec against
+    the developer's real database (the load fixture was present) and reported a clean successful
+    drag with no error -- meaning every run of this spec silently shifts one real assignment's time
+    by an hour, permanently, with nothing in `teardown.sql` able to undo it. Added R-364 (the rule
+    the spec's own header already states) and filed against it; a fix is one line (`Escape` before
+    release, mirroring T2) and left for the developer since it touches only test code.
+    format:check (379 files) and db:types' stale warning are the same `core.autocrlf` local
+    artifact from session 98, re-confirmed rather than assumed.
+    ONE E2E TIMEOUT, THIRD SESSION RUNNING WITH THE SAME SHAPE. `copyWeek.spec.ts`'s "applies the
+    copy" case timed out waiting for its dialog to close under the full parallel run (now six
+    workers plus `loadSanity.spec.ts`'s own ~22s run competing for the same pool); re-ran the file
+    alone and all three passed in 16.9s. Sessions 101 and 103 saw the identical shape on two other,
+    different specs, never on retry or alone; `playwright.config.ts` runs CI single-worker with
+    retries, so CI never sees any of these. Named again rather than filed, same reasoning as before.
+    F-125 (the client-side nine seconds) is still open and explicitly deferred to a profiler
+    session by the maintainer's own decision -- nothing for this session to add there.
+    Sweeps: nothing new. Sweep 2 named the same three `week_template_items` columns already
+    explained as SQL-RPC-only reads.
+  shipped: []
 - id: 108
   date: 2026-09-09
   title: The browser half of load sanity --- the server is fixed and the client is where the nine seconds are
