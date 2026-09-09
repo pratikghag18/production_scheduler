@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: 1f824a6
+  tip: c95f1f0
   baseline:
     app_tests: 2645
     app_test_files: 130
@@ -12143,7 +12143,8 @@ sessions:
 - id: 107
   date: 2026-09-09
   title: Option C taken --- the read rule asked once per query instead of once per row, visibility proved identical first
-  commits: []
+  commits:
+  - c95f1f0
   numbers:
     app_tests: 2645
     app_test_files: 130
