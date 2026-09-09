@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { hasRealBackend, NO_BACKEND_REASON, supabaseUrl, supabaseAnonKey } from "./env";
 
 /**
  * ⭐⭐ THE HALF OF LOAD SANITY A DATABASE CANNOT ANSWER (F-124, session 107).
@@ -25,11 +26,155 @@ import { hasRealBackend, NO_BACKEND_REASON } from "./env";
  * has made yet (F-124's own decision), and a threshold picked here would become
  * a flaky test on somebody else's laptop. It prints numbers and checks only that
  * the board renders AT ALL, which is the one thing that is not a matter of taste.
+ *
+ * ⛔ WITH ONE EXCEPTION, AND IT IS THE PART OF THIS FILE THAT IS NOT A
+ * MEASUREMENT AT ALL (DEF-0025, R-364). The drag below is a real release, and a
+ * real release WRITES -- it detaches a chip from its run and moves it an hour.
+ * So what it moves it puts back, and the putting back is PROVED rather than
+ * believed: the person's rows are read out of the DATABASE before the drag and
+ * again after it, anything that moved is restored, and the restore is read back
+ * a third time. Those checks are allowed to fail the run. A measurement that
+ * quietly leaves a developer's board an hour out is worse than a red one.
+ *
+ * ⚠️ WHAT IT DOES NOT PUT BACK, AND WILL NOT. A committed write leaves an
+ * `assignments_audit` row and a bumped `updated_at` behind it, and the restore
+ * leaves a second pair. Those are the RECORD of a change, not the change; a
+ * measurement that reached into the audit log to tidy itself away would be a
+ * worse thing than the trace it removed. R-364 is met in the sense that matters:
+ * nobody's board moves.
+ *
+ * ⛔ AND DEF-0025's OWN ACCOUNT WAS WRONG ABOUT THE DAMAGE, WHICH MATTERS
+ * BECAUSE THE TRUTH IS WORSE. It reported that every run shifted a real
+ * assignment and never put it back. It never did: `.first()` was picking a chip
+ * scrolled off the left edge (box at x = -574), so the release landed on nothing
+ * at all -- no drag, no request, no write. Six sessions of "drag on the big
+ * board: 14-37 ms" were the cost of releasing a mouse button over empty space.
+ * See the comment on the drag itself.
  */
 test.skip(!hasRealBackend, NO_BACKEND_REASON);
 
 const ADMIN = "admin@example.test";
 const PASSWORD = "devpassword";
+
+/*
+ * Where one assignment sits -- and it is FOUR columns, not two.
+ *
+ * ⛔ THE FIRST VERSION OF THIS CARRIED `node_id` AND `timerange` ONLY, AND THAT
+ * WAS A HOLE THE SIZE OF THE DEFECT IT WAS FIXING. Pushing a chip past the end
+ * of its own run does not merely move it: `useDragGesture` looks for a run that
+ * contains the new window, finds none, and DETACHES -- `run_id` to null and
+ * `product_id` to the run's product, in the same patch. A restore that put the
+ * hours back and not the run reported "put back and read back" over a row that
+ * was still detached, which is the same lie in a different column. Measured, not
+ * reasoned: one run of the earlier version left `detached = 1` behind.
+ */
+type Placement = {
+  node_id: string;
+  timerange: string;
+  run_id: string | null;
+  product_id: string | null;
+};
+
+/*
+ * ⚠️ UNTYPED ON PURPOSE, AND THE ROWS ARE CAST WHERE THEY ARRIVE. The generated
+ * `Database` type lives under `src/`, which `tsconfig.node.json` does not list
+ * -- importing it from a spec is the TS6307 its own comment warns about. Three
+ * columns of two tables are named here instead, right where they are read.
+ */
+type Db = SupabaseClient;
+
+/** The columns this file reads, named once so the select and the restore agree. */
+type AssignmentRow = { id: string } & Placement;
+
+/** The one list, so the read and the write can never drift apart. */
+const PLACEMENT_COLUMNS = "id, node_id, timerange, run_id, product_id";
+
+/**
+ * Every assignment the named person holds, read from the DATABASE and not from
+ * the board. The board is the thing under measurement here; asking it whether
+ * the drag was undone would be asking the optimistic patch, which says yes the
+ * instant the mouse comes up and keeps saying it while the server refuses.
+ */
+async function placementsOf(db: Db, person: string): Promise<Map<string, Placement>> {
+  const found = await db.from("operators").select("id").eq("display_name", person);
+  expect(found.error, found.error?.message).toBeNull();
+  const people = (found.data ?? []) as unknown as { id: string }[];
+  const id = people[0]?.id;
+  // Not a matter of taste either: the fixture is present (the picker offered
+  // "load_plant" or this spec would have skipped), so a `Load Op N` the board
+  // just drew and the database will not name is a broken assumption, not a
+  // reason to carry on and print a number.
+  expect(id, `${person} is on the board, so the database should name them`).toBeTruthy();
+  const rows = await db.from("assignments").select(PLACEMENT_COLUMNS).eq("operator_id", id);
+  expect(rows.error, rows.error?.message).toBeNull();
+  const held = (rows.data ?? []) as unknown as AssignmentRow[];
+  return new Map(
+    held.map((r) => [
+      r.id,
+      {
+        node_id: r.node_id,
+        timerange: r.timerange,
+        run_id: r.run_id,
+        product_id: r.product_id,
+      },
+    ]),
+  );
+}
+
+/**
+ * Undo whatever the drag committed, and prove it.
+ *
+ * ⛔ THE ROW COUNT IS THE POINT (CLAUDE.md section 4). `assignments_update` is an
+ * RLS policy: an UPDATE the policy filters out removes zero rows, raises
+ * nothing, and reports success. `.select()` makes PostgREST return the rows it
+ * actually touched, so "exactly one" is asserted rather than assumed -- and then
+ * the person's whole set is read a third time and compared with what was there
+ * before the drag, which is the claim this function is really making.
+ */
+async function putBack(db: Db, person: string, before: Map<string, Placement>): Promise<string> {
+  const after = await placementsOf(db, person);
+  const same = (a?: Placement, b?: Placement) =>
+    a?.node_id === b?.node_id &&
+    a?.timerange === b?.timerange &&
+    a?.run_id === b?.run_id &&
+    a?.product_id === b?.product_id;
+  const moved = [...before].filter(([id, was]) => !same(after.get(id), was));
+
+  if (moved.length === 0) {
+    // Worth printing rather than swallowing: it means the release committed
+    // nothing, so the number beside it timed a no-op and is not the "what a
+    // person waits for after letting go" that F-125 reads it as.
+    return "committed nothing, so the number above timed a release that did not write";
+  }
+
+  for (const [id, was] of moved) {
+    const back = await db
+      .from("assignments")
+      // All four in ONE update: `assignments_run_consistency` requires the row
+      // to fit its run, so putting the run back in a second write -- before the
+      // hours it has to contain -- is refused.
+      .update({
+        node_id: was.node_id,
+        timerange: was.timerange,
+        run_id: was.run_id,
+        product_id: was.product_id,
+      })
+      .eq("id", id)
+      .select("id");
+    expect(back.error, `putting ${id} back: ${back.error?.message ?? ""}`).toBeNull();
+    expect(
+      back.data ?? [],
+      `putting ${id} back should touch exactly one row -- zero means the policy filtered the UPDATE and said nothing`,
+    ).toHaveLength(1);
+  }
+
+  const restored = await placementsOf(db, person);
+  expect(
+    Object.fromEntries(restored),
+    `${person}'s assignments should be exactly where the fixture left them`,
+  ).toEqual(Object.fromEntries(before));
+  return `${moved.length} row(s) moved, put back and read back`;
+}
 
 test("how long a plant-sized board takes to draw, and a drag on it", async ({ page }) => {
   test.setTimeout(180_000);
@@ -123,25 +268,120 @@ test("how long a plant-sized board takes to draw, and a drag on it", async ({ pa
     chips: document.querySelectorAll('[aria-label*=" on "]').length,
   }));
 
-  // The drag: pick the first block on the big board and move it one hour right.
-  // Measured from mouse-up to the board settling, which is what a person feels.
+  /*
+   * The drag: take a block on the big board, push it an hour right, and time
+   * the release. Measured from mouse-up to the board settling, which is what a
+   * person feels.
+   *
+   * ⛔⛔ FOR SIX SESSIONS THIS MEASURED NOTHING AT ALL, AND SAID SO IN A COLUMN
+   * OF NUMBERS THAT LOOKED FINE. `.first()` picks the first chip in DOM order,
+   * not the first chip a person can see: on this board its box came back at
+   * x = -574, scrolled off the left edge. `page.mouse.move` to a negative
+   * coordinate lands on nothing, so no drag ever began -- no `.dragging` class,
+   * no request, no write -- and "32 ms from mouse-up to settled" was the cost of
+   * releasing a mouse button over empty space. F-125 reads that column as "a
+   * drag once there is 14-37ms, so this is a cost of arriving at a big board
+   * rather than of using one"; that reading rests on this line, so this line now
+   * proves it dragged before it prints a number.
+   *
+   * ⛔ AND WHAT IT MOVES IT PUTS BACK (DEF-0025). The narrow fix for that defect
+   * was `touch.spec.ts` T2's -- press Escape before the release so nothing is
+   * written. That is the wrong trade HERE, and only here: a release that writes
+   * nothing is the very thing that made these numbers meaningless. So the write
+   * stays and `putBack` undoes it, provably.
+   */
   let dragMs = -1;
+  let dragRpcMs = -1;
+  let dragNote = "";
+  let patches = 0;
+  page.on("request", (r) => {
+    if (r.method() === "PATCH" && r.url().includes("/rest/v1/assignments")) patches += 1;
+  });
+
   // The chip's own label is "<person> on <product>, HH:MM to HH:MM"; the
   // fixture's people are all called "Load Op N", so this cannot pick up a chip
   // from another plant left over on screen.
   const block = page.getByLabel(/^Load Op \d+ on /).first();
   if ((await block.count()) > 0) {
+    // Read the person's name off the chip that is about to be dragged: the drag
+    // moves an assignment of THEIRS, so their rows are the set that has to come
+    // back unchanged. Signed in a second time, as a client rather than a
+    // browser, because the board cannot be asked what the server actually holds
+    // -- the optimistic patch says "moved" the instant the mouse comes up and
+    // keeps saying it while the server refuses.
+    const label = (await block.getAttribute("aria-label")) ?? "";
+    const person = /^Load Op \d+/.exec(label)?.[0] ?? "";
+    expect(person, `the chip's label should name the person: ${label}`).not.toBe("");
+    const db = createClient(supabaseUrl, supabaseAnonKey);
+    const signedIn = await db.auth.signInWithPassword({ email: ADMIN, password: PASSWORD });
+    expect(signedIn.error, signedIn.error?.message).toBeNull();
+    const before = await placementsOf(db, person);
+
+    await block.scrollIntoViewIfNeeded();
     const box = await block.boundingBox();
     if (box !== null) {
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      /*
+       * Grab a point that is inside the chip AND inside the window, with 60px
+       * of room to the right of it. A fixture chip is eight hours wide, so its
+       * own centre is routinely off-screen even once it has been scrolled to.
+       */
+      const view = page.viewportSize() ?? { width: 1280, height: 720 };
+      const left = Math.max(box.x + 6, 6);
+      const right = Math.min(box.x + box.width - 6, view.width - 70);
+      expect(right, "the chip needs 60px of visible width to be dragged by").toBeGreaterThan(left);
+      const grabX = (left + right) / 2;
+      const grabY = Math.min(Math.max(box.y + box.height / 2, 6), view.height - 6);
+
+      await page.mouse.move(grabX, grabY);
       await page.mouse.down();
-      await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 8 });
-      const t0 = Date.now();
+      await page.mouse.move(grabX + 60, grabY, { steps: 8 });
+
+      /*
+       * ⭐ THE ASSERTION THAT WOULD HAVE CAUGHT THE SIX SESSIONS. A block that
+       * is being dragged marks itself `.dragging`, and only while the gesture
+       * is live (`touch.spec.ts` T2 leans on the same class for the same
+       * reason). Below `DRAG_THRESHOLD_PX` -- or on nothing at all -- the class
+       * never appears and the release opens the read-only pop-up instead. This
+       * is a measurement spec and asserts almost nothing on purpose, but "the
+       * thing being measured happened" is not a matter of taste.
+       */
+      await expect(page.locator('[role="button"][class*="dragging"]').first()).toBeVisible({
+        timeout: 5_000,
+      });
+
+      /*
+       * Split the settle the same way the two cold loads above are split: a
+       * committed drag invalidates the board, so part of the wait is the
+       * `board_window` RPC answering again and the rest is the client drawing
+       * what came back. Armed BEFORE the release, because the refetch starts on
+       * the same tick the mutation succeeds.
+       */
+      // Declared before the listener that closes over it: the listener only
+      // reads it once the release has stamped it.
+      let tUp = 0;
+      const refetched = page
+        .waitForResponse((r) => r.url().includes("board_window"), { timeout: 60_000 })
+        .then(() => Date.now() - tUp)
+        .catch(() => -1);
+
+      tUp = Date.now();
       await page.mouse.up();
       await page.waitForTimeout(0);
       await expect(trackNamed("Cell 1-1-1")).toBeVisible({ timeout: 60_000 });
-      dragMs = Date.now() - t0;
+      dragMs = Date.now() - tUp;
+      // The settle has already happened, so a refetch that was going to come has
+      // come. The short race is what stops a release that refetches NOTHING from
+      // sitting here for the full timeout.
+      dragRpcMs = await Promise.race([
+        refetched,
+        new Promise<number>((resolve) => setTimeout(() => resolve(-1), 500)),
+      ]);
     }
+
+    // Unconditional on the box: if the gesture never started there is nothing
+    // to undo and this says so, and if it started and committed this is the
+    // only thing that undoes it.
+    dragNote = await putBack(db, person, before);
   }
 
   console.log(
@@ -152,8 +392,11 @@ test("how long a plant-sized board takes to draw, and a drag on it", async ({ pa
       `                                  so the client half is ~${bigMs - Math.max(bigT.rpc, 0)} ms on the big board`,
       `  DOM on the big board            ${dom.total} elements, ${dom.tracks} tracks, ${dom.chips} chips`,
       dragMs >= 0
-        ? `  drag on the big board           ${dragMs} ms from mouse-up to settled`
+        ? dragRpcMs >= 0
+          ? `  drag on the big board           ${dragMs} ms from mouse-up to settled, of which ${dragRpcMs} ms was the board_window RPC answering again`
+          : `  drag on the big board           ${dragMs} ms from mouse-up to settled, and NO board_window answered in that window -- all of it is client work on the optimistic patch`
         : "  drag                            no block found to drag",
+      `  what the release wrote          ${patches} PATCH to assignments; ${dragNote === "" ? "no drag happened" : dragNote}`,
       "",
     ].join("\n"),
   );
