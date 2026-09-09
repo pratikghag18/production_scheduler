@@ -4829,8 +4829,14 @@ requirements:
     file: src/test/absenceOnBoard.test.tsx
     cases: R-038a avatar/name/skill badges, R-038b count pill shows N and is absent with none, R-038c
       title attribute lists node/times/efficiency, R-038d dimmed ("full" class) only when fully allocated
-  status: covered
-  note: Linked 8 Sept (requirement audit) -- new cases in an existing file.
+  status: contradicted
+  note: >-
+    Linked 8 Sept (requirement audit) -- new cases in an existing file.
+    ⛔ CONTRADICTED 9 Sept (tester, session 119, DEF-0028): the F-125 case added to R-038c ("so a
+    memo-key mistake ... would be caught") does not catch one -- it renders once, and a stale-memo
+    bug by definition only shows on a second render with a dependency changed. Removed
+    `windowStart.getTime()` and `zone` from `OperatorPanel`'s tooltip memo and every test touching
+    the component, 122 cases across seven files, stayed green.
 - id: R-039
   title: Shift templates attach to any node and resolve nearest-ancestor
   source:
@@ -9073,6 +9079,20 @@ requirements:
     stack on 5174: 7 of 7 in the two files pass. Left `contradicted` --- the validator is right
     that a `fix-claimed` defect is still an open one --- until the tester verifies DEF-0026 on its
     own stack and sets this `covered` on the pins already listed above.
+    ✅ DEF-0026 VERIFIED 9 Sept (tester, session 119), cold, at `eb68708`: `node scripts/tester-run.mjs
+    --sql --e2e` against a freshly generated stack, both specs' five previously-failing cases pass,
+    44 of 44 browser cases green. The mail-catcher half of this requirement's promise holds.
+    ⛔ STILL CONTRADICTED, ON A NEW DEFECT THE VERIFICATION ITSELF FOUND: `TS10`, one of the two pins
+    this requirement's own `verified_by` cites as proof, fails every time `node scripts/tester-run.mjs`
+    is actually run against the tester's own stack, on both a clean shell and one carrying
+    `tester-stack.mjs up`'s own printed exports --- 2666 of 2667 vitest cases, deterministically, the
+    one failure always `TS10`. A plain `npx vitest run` with no tester variables present passes
+    2667/2667, so the trigger is precisely the condition `tester-run.mjs` creates on purpose (handing
+    vitest the same real `process.env` it just set `E2E_MAIL_URL` in): `vi.unstubAllEnvs()` cannot
+    erase a variable that was genuinely ambient before vitest started, so TS10's "fallback" half
+    compares the tester's own mail port to itself and fails the `.not.toBe`. Filed as DEF-0027 ---
+    not a reopening of DEF-0026, whose own reproduction (the two specs) is genuinely green, but a
+    defect in the proof that sits inside this requirement's own `verified_by` list.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12522,6 +12542,87 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 119
+  date: 2026-09-09
+  title: "Tester run: DEF-0026 verified clean, and re-verifying it found two new defects in the proof itself"
+  commits: []
+  numbers:
+    app_tests: 2667
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npx vitest run` in a clean shell (no tester-stack variable exported): `Test Files 131 passed
+    (131)`, `Tests 2667 passed (2667)` -- matches session 118's baseline exactly. Run again through
+    `node scripts/tester-run.mjs --sql --e2e` on the tester's own freshly generated stack: `Tests 1
+    failed | 2666 passed (2667)`, same total, one failure -- `TS10`, filed as DEF-0027 below, not a
+    count mismatch to chase as a collection failure. `db_checks`: summed every `---- file : N passed`
+    line in the report by hand, 823 across 58 files, matching the plan exactly; no migration since
+    the tip (73 files, unchanged). `tsc -b` and `eslint .` clean. `npm run db:types` against the
+    tester's own stack regenerated `database.types.ts` with a line-ending-only diff (`git diff`
+    empty, `core.autocrlf` warning on checkout) -- the same standing local artifact session 98
+    found, reverted rather than committed. `format:check`'s ~379-file list is the same artifact.
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded 57c8645 to e4ee80c cleanly (7 commits: DEF-0026
+    fixed and fix-claimed, R-364's audit-trail decided and covered, F-126's fixture room parked, and
+    F-125 found, profiled and fixed). My own brief gained one line (`E2E_MAIL_URL` in the export
+    list) and I read it before running anything. Brought the tester's own stack up fresh
+    (`node scripts/tester-stack.mjs up`, a clean generated workdir) since it was down on arrival.
+    DEF-0026 VERIFIED, COLD. `node scripts/tester-run.mjs --sql --e2e` against the fresh stack: the
+    five previously-failing email-following cases in `invite.spec.ts` and `passwordReset.spec.ts`
+    all pass, 44 of 44 browser cases green (`loadProfile`/`loadSanity` correctly skip -- no volume
+    fixture in this database). The fix is exactly where the developer said: `mailUrl` in
+    `e2e/env.ts` reads `E2E_MAIL_URL`, and `tester-stack.mjs env` prints it off the tester's own
+    `supabase status`. Set `verified`.
+    DEF-0027 FILED, FOUND BY VERIFYING DEF-0026 THE WAY THE BRIEF SAYS TO. `TS10` -- one of the two
+    pins DEF-0026's own fix added, and one of R-366's own `verified_by` witnesses -- fails
+    deterministically every time `node scripts/tester-run.mjs` runs against the tester's own stack,
+    on a clean shell letting the script set `E2E_MAIL_URL` itself and on one carrying
+    `tester-stack.mjs up`'s own exports alike: `expected 'http://127.0.0.1:54424' not to be
+    'http://127.0.0.1:54424'`. `vi.unstubAllEnvs()` cannot erase a variable that was genuinely
+    ambient in `process.env` before vitest started, and `tester-run.mjs` hands vitest that same real
+    environment on purpose (its own comment says so) after setting `E2E_MAIL_URL` in it -- so the
+    test's own "fallback" half is comparing the tester's mail port to itself. A plain `npx vitest
+    run` with nothing exported passes 2667/2667, proving the trigger is precisely the tester's own
+    documented workflow. `severity: minor` (a test-harness self-check, not a product behaviour), but
+    it means the count check every tester session is told to run first will show a spurious failure
+    forever until this is fixed. R-366 stays `contradicted` on this new defect; DEF-0026 itself is
+    not reopened, since its own reproduction is genuinely green.
+    ONE ADVERSARIAL PASS, ON F-125'S FIX -- THE RISKIEST CHANGE IN THE DIFF. `OperatorPanel`'s new
+    tooltip memo (`titles`, keyed on `[assignmentsByOperator, nodeById, windowStart.getTime(),
+    zone]`) is exactly the shape of thing that goes stale quietly. Dropped `windowStart.getTime()`
+    and `zone` from the key on a scratch copy and ran every file under `src/test/` that imports
+    `OperatorPanel` -- 122 cases across 7 files, all green, including the brand-new `R-038c (F-125)`
+    case whose own comment claims it would catch exactly this ("a memo-key mistake that froze a
+    stale title"). It renders once; a stale-memo bug only shows on a second render with a dependency
+    changed and the memoised inputs held the same, and nothing in the suite does that. Filed
+    DEF-0028 (`test-cannot-fail`) against R-038, mutation reverted before writing this up.
+    ⚠️ THE LEAD IN DEF-0028 IS THE HONEST STATE, NOT A SOFTER VERSION OF IT. Traced `BoardPage.tsx`:
+    today, `assignmentsByOperator`/`nodeById` and `zone`/`windowStart` all derive from the same
+    `boardQuery.data` (`index`'s own `useMemo` depends on `[boardQuery.data, from, to, density]`;
+    `zone` reads `boardQuery.data?.timezone` directly), so any real change to the two dropped
+    dependencies already implies a new `assignmentsByOperator` reference today -- which is exactly
+    why the mutation is invisible through `BoardPage` and why this is `minor`, not `major`. The gap
+    is in the PROOF, not (yet) in the product; the moment `zone` or `windowStart` can vary
+    independently of `assignmentsByOperator`'s identity, the memo would serve a stale tooltip and
+    nothing under `src/test/` would say so.
+    F-125's OWN CLAIM (byte-identical output, before and after) stands on what it was checked
+    against: every pre-existing formatting case in `boardTime.test.ts` and `absenceOnBoard.test.tsx`
+    passed unchanged, and the new counting-formatter case correctly shows the cache doing its job
+    (at most 3 constructions across 500 calls). `roleWalk.spec.ts` drove nine personas through their
+    boards in the same e2e run with no alert and matching shapes (Admin, Dana, Quinn, Rosa, Ana,
+    Marco, and the three viewers) -- the least-privileged walk CLAUDE.md asks for, done by the
+    automated suite rather than a second manual pass, since nothing about this diff is
+    role-shaped. `isUsableTimezone` was correctly left uncached (its own new comment says why: it
+    exists to probe whether a zone throws, and caching a throw would defeat the probe) -- read, not
+    assumed.
+    Sweeps: nothing new. Same 3 dark `week_template_items` columns, same standing `company-wide`
+    comment census (no migration since the tip to have moved either).
+  shipped: []
 - id: 118
   date: 2026-09-09
   title: The nine seconds found and removed --- a plant board arrives in three, and a drag settles in fifty milliseconds
