@@ -8790,6 +8790,41 @@ findings:
     before this fix would keep it silently forever unless that exact row's `node_id` were written
     again. Not a live defect here (there is nothing to find), but worth the record: this is a guard,
     not a cleanup, and the next person who inherits a database that predates it should not assume one.
+- id: F-121
+  title: 'The tester''s own dark-column and drift sweeps can silently report a false positive for any common short name --- one is doing it right now'
+  tag: The sweep that goes quiet instead of red
+  status: open
+  found_by: tester
+  story: >-
+    Found 8 Sept reading Sweep 2's own output, which named `audit_log.at` as a dark column (shipped,
+    read by nothing). It is not: `AuditPanel.tsx:991` reads it directly (`formatInstant(e.at, fmt)`).
+    Traced why the sweep missed something that direct. `scripts/tester-run.mjs`'s `grepSrc()` runs
+    `git grep --fixed-strings -- <column> src/` through `spawnSync` with NO `maxBuffer` set, so it
+    inherits Node's 1 MB default; the sibling `run()` function three lines above it sets
+    `maxBuffer: 64 * 1024 * 1024` explicitly, so this is an omission, not a considered choice. The
+    literal substring "at" matches over a megabyte of `src/` (measured directly: 20,274 lines, ~1.05
+    MB of stdout) -- `spawnSync` kills the child, `r.status` comes back `null` rather than `0`, and
+    `grepSrc`'s own `if (r.status !== 0) return [];` turns a buffer overflow into "found nowhere,"
+    indistinguishable from a genuinely dark column. Confirmed by replicating the exact call: `status:
+    null`, `stdout.length: 1045919`, one byte short of the 1,048,576-byte default.
+    ⚠️ THIS IS NOT A ONE-COLUMN PROBLEM. `grepSrc` backs Sweep 1's NOT-NULL guard check, Sweep 2's dark-
+    column check, and Sweep 3's drift-phrase search, all three sharing the same silent-truncation
+    failure mode -- any column name or phrase common enough to cross roughly a megabyte of matches in
+    `src/` reports as absent rather than as "too common to search this way," and a sweep that goes
+    quiet instead of red is the one shape of failure a runner-output report cannot itself flag.
+    The other three columns Sweep 2 named this run (`week_template_items.day_offset`/`item_ref`/
+    `run_ref`) are a DIFFERENT, milder false positive: all three are read, but only inside SQL RPC
+    bodies (`apply_week_template`/`save_week_template`, migration 0067), never by `src/`. The sweep's
+    own stated scope is client-side use, so this is the search doing exactly what it is built to do
+    (find a column no CLIENT file mentions) on columns that were never meant to be client-read --
+    worth knowing, not a defect the way the buffer overflow is.
+  lead: >-
+    Add `maxBuffer: 64 * 1024 * 1024` to `grepSrc`'s own `spawnSync` call, matching `run()` three
+    lines above it, and change `if (r.status !== 0) return [];` to distinguish "no matches" (status 1,
+    the normal grep-found-nothing exit) from anything else (status null or a nonzero code other than
+    1), surfacing the latter as a warning in the report rather than an empty, confident list. This is
+    scripts/tester-run.mjs, outside the tester's own edit boundary (src/test/defects/ only) -- left
+    for the developer.
 - id: F-119
   title: CI's browser step had never once been reached, and when it finally was, a helper that stops scrolling too early was waiting
   tag: The step nobody had run
@@ -11734,6 +11769,101 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 98
+  date: 2026-09-08
+  title: Tester run
+  commits:
+  - 7d13921
+  - 6dcda5d
+  - 52b5001
+  - f3fb727
+  numbers:
+    app_tests: 2612
+    app_test_files: 129
+    tsc: 0
+    eslint: 0
+    db_checks: 804
+    migrations: 71
+  confirmed: true
+  summary: >-
+    Fast-forwarded onto Development's tip (c8f47cb) and confirmed the working tree clean throughout;
+    `npm ci` not needed (package-lock unchanged). `npm run db:types` regenerated with no real content
+    change (line-count identical, byte diff zero once CRLF/LF noise is discounted -- this worktree
+    runs `core.autocrlf=true` with no `.gitattributes`, so a raw byte compare and `format:check` both
+    report false drift locally; replicated CI's own LF-blob check by hand across every tracked file
+    and it is clean once `.prettierignore`'s `docs/` exclusion is honoured, so typecheck is CONCLUSIVE
+    and tsc/eslint are genuinely 0/0). `npm run test`, run clean and alone after an earlier full-suite
+    pass showed two transient failures (DEF-0020's live pin timing out with the invite function no
+    longer served, `sessionProvider.test.tsx` S11 failing under parallel-worker sessionStorage
+    contention): **2612 tests in 129 files**, matching this session's own DEF-0024 pin added to the
+    prior 2609/128. All 65 numbered SQL files plus `dev_demo.sql`: 804 checks, 0 failures. Playwright
+    the way CI actually invokes it (`bash scripts/ci-e2e.sh`, no project filter, reusing the already-
+    running stack) -- 43 passed including T2 and T5, confirming F-119's fix holds; the pre-commit hook
+    (F-118) self-installs via the `prepare` lifecycle script (verified: unset `core.hooksPath`, `npm
+    run prepare`, it comes back) and genuinely refuses a deliberately mangled staged file.
+
+    DEF-0023 re-verified cold: R-359 no longer claims a SQL mirror for its third boundary case that
+    does not exist. Verified.
+
+    The resize fix (R-361, migrations 070/071) reproduced live and cold, not from the SQL suite: a
+    block-policy resize onto an absence is refused and the row does not move; the same resize under
+    warn succeeds and the row demonstrably moves (read back, not inferred from no error); an
+    efficiency-only UPDATE is untouched even under block with an absence in effect; owner context (no
+    jwt sub) is exempt; a signed-in session with a real uid and no `user_profiles` row is refused "you
+    cannot see that place". Widened 071's exemption to `app_current_org() IS NULL` (DEF-0019's own
+    shape) on a live scratch copy of the function: the profile-less-session case AB34 pins went wrong
+    exactly as predicted -- the row moved when it must not -- then restored and confirmed the refusal
+    returned, migration file untouched throughout.
+
+    F-120, the maintainer's specific ask, given full adversarial treatment: reproduced live as Ana, a
+    real supervisor whose only grant is on Line 1 (non-schedulable) -- `create_run`, `create_assignment`
+    and `move_run` all refused onto her own Line, all succeeded onto a Work Cell under it as a control;
+    a raw INSERT and a raw UPDATE of `assignments.node_id`, no RPC at all, both refused identically,
+    row read back to confirm it had not moved. Stripped `is_schedulable` from `app_guard_run_scope`
+    alone on a scratch copy (migration file plus a matching live function redefinition): `create_run`/
+    `move_run` onto a Line wrongly succeeded (93's CS1 and CS5 red by name) while `app_guard_assignment_
+    scope`, untouched, still independently refused a raw UPDATE onto the same Line -- the two triggers
+    do not cover for one another. Both copies restored and confirmed byte-identical to HEAD. Traced two
+    of the five claimed fixture bugs to real row ids (53's R9-R11 onto a 3-level ad-hoc Line; 88's AB32
+    using the CNC Line's own id where Cell 6's belonged, both confirmed live) and read the other three
+    against their diffs. The running database holds zero runs/assignments on a non-schedulable node
+    today, but the migration neither validates nor backfills, so a database that already held one from
+    before 8 Sept would keep it silently -- recorded, not a live defect.
+
+    Six of the ~20 new coverage-audit test files mutation-tested: snapIsClientOnly, operatorActive,
+    schedulerToast and splitEvenly all caught their own reintroduced bug by name; noArchivePartitionTables
+    already carries its own non-empty-migrations guard. boardWindowScoping did NOT catch a runs
+    sub-select stripped of its own time-window predicate -- its 300-character field-extraction regex
+    bleeds into the neighbouring `assignments` field and reads ITS predicate instead. Filed DEF-0024
+    (test-cannot-fail) against R-006 and set R-006 to `contradicted`; the live server is correct today,
+    the gap is in the proof. Also mutation-tested `92_attachment_read_scoping_test.sql` (R-266): widening
+    both attachment tables' SELECT policies to drop node-level scoping turned RT2/RT4 red by name while
+    RT1/RT3/RT5 (including the "refusal is scoped, not global" control) stayed green.
+
+    Three discuss-item closures spot-checked against their actual cited evidence rather than the commit
+    messages (R-D88/R-353/R-354, R-062/editRights.test.ts, R-081/R-293, R-D97/requireAdmin.test.tsx):
+    all four hold up, including that R-062's citation of E1 is a company-admin control and the real
+    fail-open proof sits in E11-E13/E15 against a `viewer` fixture. No mis-linked closure found.
+
+    Filed F-121: the tester-run script's own `grepSrc()` helper omits the `maxBuffer` its sibling
+    `run()` sets, so a `git grep` for a common short string (the literal column name "at",
+    `audit_log.at`) silently exceeds Node's 1 MB default, `spawnSync` kills the child, and the
+    resulting `status !== 0` is read as "found nowhere" -- Sweep 2 named `audit_log.at` dark when
+    `AuditPanel.tsx:991` reads it directly. This is a shared failure mode across all three sweeps, not
+    a one-column accident; left for the developer (outside the tester's edit boundary). The other three
+    columns Sweep 2 named (`week_template_items.day_offset`/`item_ref`/`run_ref`) are read, but only
+    inside SQL RPC bodies never reached from `src/` -- a milder, expected-shape false positive given
+    the sweep's own stated client-only scope, not a defect.
+
+    Sweep 1 (migration 072 alone is new since the plan's own tip, 5c9e6d4 -- 070/071 predate it, already
+    swept by an earlier session) found no NOT NULL drops. Sweep 3's "company-wide" and "no longer" hits
+    were read in the files this batch actually touched (useDragGesture.ts, AbsencesPanel/OperatorAbsences)
+    and are ordinary English, not stale server-rule claims; nothing in the resize area still says the
+    resize "does not yet" check anything.
+
+    `meta.tip` is unchanged (5c9e6d4, the developer's own field, last set at session 96's close) --
+    noting it is one commit behind F-120 and several behind this run's own HEAD is a developer
+    bookkeeping observation, not something this session corrects.
 - id: 97
   date: 2026-09-08
   title: 'F-120 closes: the schedulable-node floor the app assumed and the server never built'
