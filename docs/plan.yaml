@@ -8754,6 +8754,27 @@ findings:
     refused the same way, with no RPC and no client involved. `npm run db:types` confirms no schema/RPC
     signature changed (trigger bodies only), and the migration was applied to the local dev stack via
     `supabase migration up`, not `db:reset`.
+    ✅ TESTER-VERIFIED 8 Sept, session 98, live and cold, not by reading the SQL suite. As Ana (a real
+    supervisor whose only grant is on Line 1, not the company admin), `create_run`, `create_assignment`
+    and `move_run` were each attempted directly against her own Line 1 (non-schedulable) and refused
+    `not_schedulable`; the identical calls onto a Work Cell under the same Line succeeded as a control.
+    A raw INSERT and a raw UPDATE of `assignments.node_id` -- no RPC, run as Ana's own authenticated
+    role -- were refused the same way, and the row was read back to confirm it had not moved. Stripped
+    the `is_schedulable` check from `app_guard_run_scope` alone on a scratch copy: `create_run` and
+    `move_run` onto a Line then wrongly succeeded (93's CS1 and CS5 went red by name, 5 of 7 still
+    green), while `app_guard_assignment_scope` -- untouched -- still independently refused a raw
+    UPDATE of an assignment's `node_id` onto the same Line, proving the two triggers do not share or
+    rely on one another. Traced two of the five claimed fixture bugs by hand against their diffs
+    (53_read_scoping_test.sql's R9-R11 inserted runs straight onto a 3-level ad-hoc Line before the fix;
+    88_absences_test.sql's AB32 used `30000000-...-006`, confirmed live to be the CNC Line, not
+    `3000000a-...-00c`, confirmed live to be Cell 6 as the comment always claimed) and spot-read the
+    other three (67, 78, 89) against their diffs without re-deriving the fixtures myself. Checked for
+    retroactive risk: the running database carries zero existing runs or assignments on a
+    non-schedulable node today, and the migration itself neither validates nor backfills existing rows
+    -- it only guards future writes to `node_id` -- so a database that already held a bad row from
+    before this fix would keep it silently forever unless that exact row's `node_id` were written
+    again. Not a live defect here (there is nothing to find), but worth the record: this is a guard,
+    not a cleanup, and the next person who inherits a database that predates it should not assume one.
 - id: F-119
   title: CI's browser step had never once been reached, and when it finally was, a helper that stops scrolling too early was waiting
   tag: The step nobody had run
