@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-08'
-  tip: 5c9e6d4
+  tip: f5fc400
   baseline:
-    app_tests: 2502
-    app_test_files: 111
+    app_tests: 2612
+    app_test_files: 129
     tsc: 0
     eslint: 0
-    db_checks: 773
-    migrations: 70
+    db_checks: 804
+    migrations: 71
     mutations: 509 of 536
 tracks:
 - id: core
@@ -4208,17 +4208,24 @@ requirements:
       writes/read-backs via .eq("id", ...)); fetchBoardWindow calls only the board_window RPC with
       p_root_path/p_from/p_to; the server function's own body scopes both runs and assignments by
       scoped_nodes (subtree) and && v_window (time), and scoped_nodes is itself bounded by org_id and
-      path <@ p_root_path
+      path <@ p_root_path --- each of those three read from a slice bounded by the body's OWN
+      parentheses rather than by a character budget, with the two field cases additionally asserting
+      their slice did not reach the following field, so the bound is falsifiable rather than assumed
   status: contradicted
   note: >-
-    CONTRADICTED 8 Sept (tester, session 98, DEF-0024): the runs-field and assignments-field cases in
-    boardWindowScoping.test.ts extract each field with a 300-character lookahead that runs straight
-    through the field's own closing paren and into the NEXT field in board_window's JSON literal --
-    runs is immediately followed by assignments in the query, so a runs sub-select with NO time-window
-    predicate at all still matches "&& v_window" (the assignments field's own). The live server is
-    correct today (measured directly); the test cannot tell you if that ever changes. Prior note:
-    Checked 8 Sept (requirement audit): confirmed genuinely untested at the time, then closed with a new
-    audit-style test. useBoardWindow.ts is exercised indirectly through this audit rather than by name.
+    FIX CLAIMED 8 Sept (session 99, at f5fc400) AND STILL MARKED CONTRADICTED ON PURPOSE: the
+    validator will not let a requirement read `covered` while a defect against it is short of
+    `verified`, and that is right --- only the tester closes DEF-0024. The claim about the server was
+    always true; what was false was the test's ability to notice if it stopped being true. The three
+    cases now walk the body's own parentheses, and each was mutation-tested one at a time against the
+    real migration --- deleting the runs window, deleting the assignments window, and replacing
+    scoped_nodes' path ancestor test each turn exactly one case red. Prior note: CONTRADICTED 8 Sept
+    (tester, session 98, DEF-0024): the runs-field and assignments-field cases extracted each field
+    with a 300-character lookahead that ran through the field's own closing paren and into the NEXT
+    field in board_window's JSON literal, so a runs sub-select with NO time-window predicate still
+    matched "&& v_window" (the assignments field's own). Prior note: Checked 8 Sept (requirement
+    audit): confirmed genuinely untested at the time, then closed with a new audit-style test.
+    useBoardWindow.ts is exercised indirectly through this audit rather than by name.
 - id: R-007
   title: A losing concurrent write gets a 409 and reverts
   source:
@@ -8790,10 +8797,39 @@ findings:
     before this fix would keep it silently forever unless that exact row's `node_id` were written
     again. Not a live defect here (there is nothing to find), but worth the record: this is a guard,
     not a cleanup, and the next person who inherits a database that predates it should not assume one.
+- id: F-122
+  title: 'DEF-0020''s pin talks to the running stack and fails only in company --- twice now, and never alone'
+  tag: The pin that passes on its own
+  status: open
+  found_by: agent
+  refs:
+  - R-D112
+  story: >-
+    Seen twice on 8 Sept by two different sessions on the same day, which is what makes it worth a
+    card rather than a shrug. `src/test/defects/DEF-0020.test.ts` drives the LIVE local stack (it
+    invites `sofia@contoso.example` and expects the `other_org` answer rather than a raw database
+    error). Under a full `vitest run` it failed once and passed on the immediately following
+    identical run; run alone it passes every time. The tester saw the same file fail in its own full
+    run and recorded it in session 98 as a transient, alongside `sessionProvider.test.tsx` S11
+    failing under parallel-worker sessionStorage contention --- a different file, the same shape.
+    ⚠️ THE COST IS NOT THE FLAKE, IT IS WHAT A FLAKE DOES TO A BASELINE. This project confirms every
+    session against an exact test count, and CLAUDE.md says a different number means a file did not
+    load and to chase that first. A pin that fails one run in two teaches the opposite habit --- run
+    it again --- which is the habit that hides a real regression.
+  lead: >-
+    A suspicion, not a fact. Vitest runs files across parallel workers against ONE local stack, so
+    two files touching the same auth rows or the same edge function can collide; DEF-0020's own
+    invite path is served by a function the tester separately noted as "no longer served" during its
+    run, which would produce a timeout rather than a wrong answer. Two candidate fixes, and the
+    choice is the maintainer's: pin these live files to a single worker (or a shared sequential
+    pool), which keeps the coverage and costs wall-clock; or promote DEF-0020 the way CLAUDE.md
+    intends --- it is `verified`, so its pin is eligible --- rewriting the promoted test against a
+    fixture rather than the live stack, which removes the collision and the coverage of the live
+    round trip at the same time. Do not simply retry it.
 - id: F-121
   title: 'The tester''s own dark-column and drift sweeps can silently report a false positive for any common short name --- one is doing it right now'
   tag: The sweep that goes quiet instead of red
-  status: open
+  status: fixed
   found_by: tester
   story: >-
     Found 8 Sept reading Sweep 2's own output, which named `audit_log.at` as a dark column (shipped,
@@ -8825,6 +8861,17 @@ findings:
     1), surfacing the latter as a warning in the report rather than an empty, confident list. This is
     scripts/tester-run.mjs, outside the tester's own edit boundary (src/test/defects/ only) -- left
     for the developer.
+  fix: >-
+    Fixed 8 Sept, session 99, at f5fc400, exactly as the lead described plus the part the lead could
+    not reach: the three CALL SITES. `grepSrc` now returns NULL, not `[]`, when the question went
+    unanswered, so Sweep 1 prints "COULD NOT BE SEARCHED" instead of "mentioned in NOTHING", Sweep 2
+    keeps a separate `unsearchable` list that never reaches the dark list, and Sweep 3 skips the
+    phrase rather than reporting "None." Both lists push their own `READ` line into the summary, so
+    the quiet failure now has to say something. Proved from both sides: with `maxBuffer` forced to
+    4096 the run reported 85 unsearchable columns and 87 failed searches and `audit_log.at` was no
+    longer called dark; with the real buffer it is back to the three `week_template_items` columns
+    the tester had already explained as read only inside SQL bodies, and zero failures. The needle
+    that started it, "at", answers 2,107,928 bytes across 339 files --- twice the default buffer.
 - id: F-119
   title: CI's browser step had never once been reached, and when it finally was, a helper that stops scrolling too early was waiting
   tag: The step nobody had run
@@ -11769,6 +11816,78 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 99
+  date: 2026-09-08
+  title: 'A test that could not fail, and a search that answered "nowhere" when it meant "I could not tell"'
+  commits:
+  - f5fc400
+  numbers:
+    app_tests: 2612
+    app_test_files: 129
+    tsc: 0
+    eslint: 0
+    db_checks: 804
+    migrations: 71
+  confirmed: true
+  summary: >-
+    Merged `tester` (fast-forward, no conflict) and took its one new defect and one new finding.
+    Both are about INSTRUMENTS rather than about the product, and neither would ever have shown a
+    person using the app anything wrong --- which is exactly why they are worth the session: one was
+    a test that could not fail, the other a search that could not tell absence from silence.
+    ⭐ DEF-0024, MINOR, AND THE TESTER'S DIAGNOSIS WAS EXACT. `boardWindowScoping.test.ts` sliced
+    `board_window`'s body with a CHARACTER BUDGET --- 300 characters after `FROM runs r` --- and the
+    function builds its `runs` and `assignments` JSON fields back to back, so the slice ran past the
+    end of the runs field and matched the assignments field's own `&& v_window`. Reproduced before
+    touching anything, by deleting the runs field's time-window predicate from the last emission of
+    `board_window` and watching the file report `5 passed`, the case named for that exact clause
+    among them.
+    ⚠️ ONE CORRECTION TO THE RECORD, IN THE TESTER'S FAVOUR ON THE PRINCIPLE AND AGAINST IT ON THE
+    COUNT. Only the RUNS case was actually false-passing today. The assignments slice does reach into
+    the `operators` field that follows it --- measured --- but `operators` carries no `v_window` for
+    it to find, and the `scoped_nodes` slice was never at risk because the CTE's own text sits
+    inside its budget. So it was one live false pass with a second slice already across its field
+    boundary and one unrelated edit from becoming the same thing. That is luck, not design.
+    ⭐ FIXED BY REMOVING THE BUDGET, NOT BY WIDENING IT. All three cases now walk the body's own
+    parentheses --- skipping quoted literals and `--` comments so a paren inside either cannot throw
+    the count --- and the two field cases additionally assert their slice did NOT reach the following
+    field, which makes the bound itself falsifiable rather than assumed. Then mutation-tested one at
+    a time against the real migration, restored from a COPY between runs rather than from HEAD:
+    deleting the runs window, deleting the assignments window, and replacing `scoped_nodes`' path
+    ancestor test each turn exactly one case red, and the migration ends byte-identical
+    (`git diff --quiet supabase/migrations/`). R-006 goes back to `covered`.
+    ⛔ F-121 IS THE ONE THAT MATTERED MORE, BECAUSE IT WAS IN THE INSTRUMENT THIS PROJECT TRUSTS TO
+    TELL IT WHAT IT DOES NOT KNOW. `grepSrc` in `scripts/tester-run.mjs` called `spawnSync` with no
+    `maxBuffer` while the `run()` function three lines above sets 64 MB explicitly, so it inherited
+    Node's 1 MB default. Measured here: the needle `at` answers 2,107,928 bytes across 339 files ---
+    twice the default --- the child is KILLED, `status` comes back `null`, and the function's own
+    `status !== 0 -> []` turned a buffer overflow into "found nowhere". That is how `audit_log.at`
+    was reported as a dark column while `AuditPanel.tsx:991` reads it directly. THREE sweeps run
+    through that function.
+    ⭐ FIXED AT THE FUNCTION AND AT ALL THREE CALL SITES, which is the half the finding's own lead
+    could not reach from inside the tester's edit boundary. It takes the same 64 MB, distinguishes
+    exit 1 (git grep found nothing, the real answer) from anything else, and returns NULL rather than
+    an empty list when the question went unanswered. Sweep 1 prints "COULD NOT BE SEARCHED" instead
+    of "mentioned in NOTHING"; Sweep 2 keeps an `unsearchable` list that never reaches the dark
+    list; Sweep 3 skips the phrase rather than reporting "None." Both push a `READ` line into the
+    summary, so the quiet failure now has to say something. PROVED FROM BOTH SIDES rather than
+    argued: with `maxBuffer` forced to 4096 the run reported 85 unsearchable columns and 87 failed
+    searches with `audit_log.at` no longer called dark, and with the real buffer restored the sweep
+    is back to the three `week_template_items` columns the tester had already explained as read only
+    inside SQL RPC bodies, with zero failures.
+    ⚠️ F-122 FILED, NOT FIXED. `DEF-0020`'s pin drives the live stack and failed once under a full
+    `vitest run`, then passed on the identical next run and every run alone. The tester saw the same
+    file fail in its own session-98 run. Two sightings in a day is a card, not a shrug: this project
+    confirms sessions against an exact count, and a pin that fails one run in two teaches "run it
+    again", which is the habit that hides a real regression. Two candidate fixes named, both the
+    maintainer's call.
+    ⚠️ THE DEF-0024 PIN WAS COMMITTED REFORMATTED. It was written in the tester's worktree, which does
+    not run `format:check` --- F-118's shape exactly, caught this time by the gate rather than by CI.
+    ⭐ THE NUMBERS, RUN HERE. `Test Files 129 passed (129)` / `Tests 2612 passed (2612)`; tsc 0;
+    eslint 0; `format:check` clean over everything tracked. `db_checks: 804` and `migrations: 71`
+    are CARRIED FORWARD from session 98 and were NOT re-measured: this session changed no SQL and no
+    application code, only two test/script files, and the migration tree is byte-identical to that
+    session's tip.
+  shipped: []
 - id: 98
   date: 2026-09-08
   title: Tester run
