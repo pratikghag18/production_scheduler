@@ -79,27 +79,73 @@ describe("R-006: the server-side board_window function scopes both by subtree an
     return body;
   }
 
+  /**
+   * DEF-0024. Slicing the body with a CHARACTER BUDGET ("300 characters after
+   * FROM runs") cannot tell one JSON field from the next: `board_window`
+   * builds `runs` and `assignments` back to back, so a runs field that had
+   * lost its time-window predicate entirely still matched `&& v_window` --
+   * the assignments field's. The slice must end where the thing being asserted
+   * ends, so these two walk the body's own parentheses instead of counting
+   * characters. Quoted literals and `--` comments are skipped so a paren
+   * inside either cannot throw the count off.
+   */
+  function balancedGroupAfter(body: string, from: number): string {
+    const open = body.indexOf("(", from);
+    if (open < 0) throw new Error(`no '(' after offset ${from}`);
+    let depth = 0;
+    for (let k = open; k < body.length; k++) {
+      const c = body[k];
+      if (c === "'") {
+        const close = body.indexOf("'", k + 1);
+        k = close < 0 ? body.length : close;
+        continue;
+      }
+      if (c === "-" && body[k + 1] === "-") {
+        const nl = body.indexOf("\n", k);
+        k = nl < 0 ? body.length : nl;
+        continue;
+      }
+      if (c === "(") depth++;
+      else if (c === ")" && --depth === 0) return body.slice(open, k + 1);
+    }
+    throw new Error("unbalanced parentheses");
+  }
+
+  /** The COALESCE argument list of one top-level JSON field, and nothing after it. */
+  function jsonField(body: string, key: string): string {
+    const at = body.search(new RegExp(`'${key}'\\s*,\\s*COALESCE`, "i"));
+    if (at < 0) throw new Error(`board_window has no '${key}' field`);
+    return balancedGroupAfter(body, at + key.length + 2);
+  }
+
+  /** One CTE's own body, and nothing after it. */
+  function cte(body: string, name: string): string {
+    const at = body.search(new RegExp(`\\b${name}\\s+AS\\s*\\(`, "i"));
+    if (at < 0) throw new Error(`board_window has no ${name} CTE`);
+    return balancedGroupAfter(body, at);
+  }
+
   it("the runs sub-select is scoped by scoped_nodes (subtree) and && v_window (time)", () => {
-    const body = lastFunctionBody("board_window");
-    const runsBlock = /FROM\s+runs\s+\w[\s\S]{0,300}/i.exec(body);
-    expect(runsBlock).not.toBeNull();
-    expect(runsBlock![0]).toMatch(/scoped_nodes/);
-    expect(runsBlock![0]).toMatch(/&&\s*v_window/);
+    const runsBlock = jsonField(lastFunctionBody("board_window"), "runs");
+    // The bound is the assertion's foundation, so prove it holds: the runs
+    // field must not have swallowed the assignments field that follows it.
+    expect(runsBlock).not.toMatch(/'assignments'/i);
+    expect(runsBlock).toMatch(/FROM\s+runs\s+\w/i);
+    expect(runsBlock).toMatch(/scoped_nodes/);
+    expect(runsBlock).toMatch(/&&\s*v_window/);
   });
 
   it("the assignments sub-select is scoped by scoped_nodes (subtree) and && v_window (time)", () => {
-    const body = lastFunctionBody("board_window");
-    const assignmentsBlock = /FROM\s+assignments\s+\w[\s\S]{0,300}/i.exec(body);
-    expect(assignmentsBlock).not.toBeNull();
-    expect(assignmentsBlock![0]).toMatch(/scoped_nodes/);
-    expect(assignmentsBlock![0]).toMatch(/&&\s*v_window/);
+    const assignmentsBlock = jsonField(lastFunctionBody("board_window"), "assignments");
+    expect(assignmentsBlock).not.toMatch(/'operators'/i);
+    expect(assignmentsBlock).toMatch(/FROM\s+assignments\s+\w/i);
+    expect(assignmentsBlock).toMatch(/scoped_nodes/);
+    expect(assignmentsBlock).toMatch(/&&\s*v_window/);
   });
 
   it("scoped_nodes itself is bounded by an org filter and a path ancestor/descendant test, not the whole table", () => {
-    const body = lastFunctionBody("board_window");
-    const scopedNodesBlock = /scoped_nodes\s+AS\s*\([\s\S]{0,300}/i.exec(body);
-    expect(scopedNodesBlock).not.toBeNull();
-    expect(scopedNodesBlock![0]).toMatch(/org_id\s*=\s*v_org_id/);
-    expect(scopedNodesBlock![0]).toMatch(/path\s*<@\s*p_root_path/);
+    const scopedNodesBlock = cte(lastFunctionBody("board_window"), "scoped_nodes");
+    expect(scopedNodesBlock).toMatch(/org_id\s*=\s*v_org_id/);
+    expect(scopedNodesBlock).toMatch(/path\s*<@\s*p_root_path/);
   });
 });

@@ -167,6 +167,11 @@ if (WANT_SQL) {
 if (WANT_E2E) run("playwright e2e", npm, ["run", "e2e"]);
 
 // ---------------------------------------------------------------- 5. sweeps no runner performs
+// F-121. Searches that could not be COMPLETED, as distinct from searches that
+// completed and found nothing. A sweep that cannot answer must say so; the one
+// failure a runner-output report cannot flag is a sweep that goes quiet.
+const grepFailures = [];
+
 H("Sweep 1 — columns made NULLABLE since the plan's tip");
 P(
   "A migration that drops NOT NULL is a CLIENT change db:types does not surface: the app keeps compiling and starts refusing real rows (§19.76). For each column below, read every guard in `src/` that mentions it.",
@@ -192,7 +197,13 @@ for (const m of newMigrations) {
   for (const col of drops) {
     const hits = grepSrc(col);
     P(
-      `  - \`${col}\` is mentioned in: ${hits.length ? hits.join(", ") : "NOTHING in src/ — either unused or read through a wildcard select; check the parsers"}`,
+      `  - \`${col}\` is mentioned in: ${
+        hits === null
+          ? "COULD NOT BE SEARCHED — the search itself failed, see the unsearchable list below; read this column by hand"
+          : hits.length
+            ? hits.join(", ")
+            : "NOTHING in src/ — either unused or read through a wildcard select; check the parsers"
+      }`,
     );
   }
   if (drops.length)
@@ -206,10 +217,16 @@ P(
 const typesSrc = readFileSync(join(ROOT, "src/lib/database.types.ts"), "utf8");
 const tables = [...typesSrc.matchAll(/^\s{6}(\w+): \{\s*\n\s{8}Row: \{([\s\S]*?)\n\s{8}\}/gm)];
 const dark = [];
+const unsearchable = [];
 for (const [, table, body] of tables) {
   for (const [, col] of body.matchAll(/^\s{10}(\w+)\??:/gm)) {
     if (["id", "org_id", "created_at", "updated_at"].includes(col)) continue;
-    if (grepSrc(col).length === 0) dark.push(`${table}.${col}`);
+    const hits = grepSrc(col);
+    // F-121: null is "the search did not complete", which looks identical to
+    // "found nowhere" if you only test .length. Calling such a column dark is
+    // how `audit_log.at` was reported unread while AuditPanel.tsx read it.
+    if (hits === null) unsearchable.push(`${table}.${col}`);
+    else if (hits.length === 0) dark.push(`${table}.${col}`);
   }
 }
 if (dark.length) {
@@ -218,6 +235,14 @@ if (dark.length) {
     `READ  ${dark.length} dark column(s): ${dark.slice(0, 6).join(", ")}${dark.length > 6 ? "…" : ""}`,
   );
 } else P("None.");
+if (unsearchable.length) {
+  P(
+    `⚠️ ${unsearchable.length} column(s) could NOT be searched and are NOT claimed either way: ${unsearchable.map((d) => `\`${d}\``).join(", ")}. A name this common floods the search; read these by hand.`,
+  );
+  summary.push(
+    `READ  ${unsearchable.length} column(s) unsearchable by this sweep — not dark, unanswered`,
+  );
+}
 
 H("Sweep 3 — sentences in the code that may describe a rule the server no longer has");
 P(
@@ -234,17 +259,50 @@ const phrases = [
   "the server will",
 ];
 const driftHits = [];
-for (const ph of phrases) for (const h of grepSrc(ph, true)) driftHits.push(`${h}  «${ph}»`);
+for (const ph of phrases) {
+  const hits = grepSrc(ph, true);
+  if (hits === null) continue; // already logged; do not report it as "None."
+  for (const h of hits) driftHits.push(`${h}  «${ph}»`);
+}
 if (driftHits.length) P(driftHits.map((d) => `- ${d}`).join("\n"));
-else P("None.");
+else P(grepFailures.length ? "No hits among the phrases that could be searched." : "None.");
+if (grepFailures.length) {
+  P(
+    `⚠️ ${grepFailures.length} search(es) across all three sweeps did not complete and were NOT counted as absent: ${grepFailures.join("; ")}.`,
+  );
+  summary.push(
+    `READ  ${grepFailures.length} sweep search(es) failed to complete — their subjects are unanswered, not clean`,
+  );
+}
 
 // ---------------------------------------------------------------- 6. write the report
+/**
+ * Files under src/ mentioning `needle`, or NULL when the search could not be
+ * completed — which is not the same answer as "nowhere" and must never be
+ * collapsed into it (F-121).
+ *
+ * The maxBuffer is the same 64 MB `run()` sets above; omitting it here
+ * inherited Node's 1 MB default, and a needle as short as "at" produced
+ * 1,045,919 bytes of matches on this tree. spawnSync then KILLS the child and
+ * reports `status: null`, which the old `status !== 0 -> []` read as "found
+ * nowhere" — reporting `audit_log.at` as a dark column while
+ * AuditPanel.tsx:991 read it directly.
+ */
 function grepSrc(needle, withLine = false) {
   const r = spawnSync("git", ["grep", "-n", "-I", "--fixed-strings", "--", needle, "src/"], {
     cwd: ROOT,
     encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
   });
-  if (r.status !== 0) return [];
+  // git grep: 0 = matched, 1 = no match. Anything else — an error, or null for
+  // a child killed on buffer or signal — means the question went unanswered.
+  if (r.status === 1) return [];
+  if (r.status !== 0) {
+    grepFailures.push(
+      `\`${needle}\` (exit ${r.status}${r.error ? `: ${r.error.message}` : ""}, ${(r.stdout || "").length} bytes read)`,
+    );
+    return null;
+  }
   const lines = r.stdout.split("\n").filter((l) => l && !l.startsWith("src/lib/database.types.ts"));
   if (withLine) return lines.map((l) => l.split(":").slice(0, 2).join(":"));
   return [...new Set(lines.map((l) => l.split(":")[0]))];
