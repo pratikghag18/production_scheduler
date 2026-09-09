@@ -4186,6 +4186,11 @@ requirements:
     audit-style test matching scaleAudit.test.ts's pattern. Side note: orgs.settings.default_snap_minutes
     exists as a seeded default but is read by zero server functions and zero client code outside one
     explanatory comment in SettingsPanel.tsx -- inert, doesn't touch this claim either way.
+    TESTER-CHECKED 8 Sept, session 98 (mutation, not just reading): inserted a comment containing the
+    word "snap" into create_run's last-emitted body on a scratch copy of its migration file -- the case
+    for that function went red by name, and the other three write paths stayed green, confirming the
+    audit reads the LAST emission of each and is sensitive to the one clause it names. Reverted; the
+    migration file is unchanged from HEAD.
 - id: R-006
   title: Board loads are one subtree-by-time-window query
   source:
@@ -6710,6 +6715,10 @@ requirements:
     check_eligibility's own scoping was already well-tested (53_read_scoping_test.sql R12/R13) but that's a
     different mechanism from a direct SELECT on these tables being RLS-scoped, which this suite tests
     directly.
+    TESTER-CHECKED 8 Sept, session 98: widened both tables' own SELECT policies on the scratch database
+    to drop the app_can_read_node(node_id) clause (org_id = app_current_org() alone). RT2 and RT4 both
+    went red by name (Plant 2's admin read Plant 1's row, count=1 where 0 was wanted); RT1/RT3/RT5 stayed
+    green. Rebuilt the scratch database afterward to restore the real policies.
 - id: R-267
   title: A person may only hold a training on their own branch
   source:
