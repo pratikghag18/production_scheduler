@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: 4aeb4ca
+  tip: 62482af
   baseline:
     app_tests: 2645
     app_test_files: 130
@@ -12019,7 +12019,8 @@ sessions:
 - id: 105
   date: 2026-09-09
   title: The reset link lands where it should, and the test that could not see it now can
-  commits: []
+  commits:
+  - 62482af
   numbers:
     app_tests: 2645
     app_test_files: 130
