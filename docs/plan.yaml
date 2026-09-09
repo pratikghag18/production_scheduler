@@ -9033,7 +9033,7 @@ requirements:
   - kind: e2e
     file: e2e/invite.spec.ts
     cases: "with the tester stack's env exported (E2E_MAIL_URL from tester-stack.mjs env) and E2E_PORT=5174, invite.spec.ts and passwordReset.spec.ts pass -- the five email-following cases DEF-0026 named among them"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 9 Sept (session 114, 99ef996). DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
     attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
@@ -9059,8 +9059,9 @@ requirements:
     `E2E_MAIL_URL` which `tester-stack.mjs` takes straight off `supabase status` (INBUCKET_URL /
     MAILPIT_URL) and refuses a stack that prints neither; both specs read it; two pins (TS9, TS10)
     keep a literal port out of spec code. Reproduced the defect's own run against a scratch tester
-    stack on 5174: 7 of 7 in the two files pass. Set back to `covered` on that proof; the tester
-    re-verifies DEF-0026 on its own stack.
+    stack on 5174: 7 of 7 in the two files pass. Left `contradicted` --- the validator is right
+    that a `fix-claimed` defect is still an open one --- until the tester verifies DEF-0026 on its
+    own stack and sets this `covered` on the pins already listed above.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12530,8 +12531,10 @@ sessions:
     ⭐ REPRODUCED THE DEFECT'S OWN RUN. Scratch tester stack (`TESTER_STACK_DIR` under the job's
     tmp), `env` now printing `E2E_MAIL_URL = http://127.0.0.1:54424`, the two specs on 5174:
     7 passed in 9.0s, the five that failed for the tester among them. `down`; the developer's ten
-    containers and 5173 untouched throughout. DEF-0026 `fix-claimed` at eb68708; R-366 back to
-    `covered` on the new pins and the live run, for the tester to re-judge.
+    containers and 5173 untouched throughout. DEF-0026 `fix-claimed` at eb68708; R-366 stays
+    `contradicted` --- first written as `covered`, and the validator refused it: a `fix-claimed`
+    defect is still open, so only the tester's verification lifts it. The pins and the live run
+    are on its `verified_by` ready for that.
     ⚠️ TWO LEADS THE TESTER LEFT, NOT FILED, NOT TAKEN HERE: `assertGeneratedConfig`'s `/5432\d/`
     is a literal range rather than "the ports the transform actually read", a blind spot only if
     Supabase's default port scheme moves; and `attachmentChangeMessage`'s id-not-label hardening
