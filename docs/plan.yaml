@@ -11946,6 +11946,61 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 101
+  date: 2026-09-09
+  title: DEF-0024 re-verified live, cold, and in both directions; R-006 back to covered
+  commits:
+  - cb5e516
+  numbers:
+    app_tests: 2617
+    app_test_files: 130
+    tsc: 0
+    eslint: 0
+    db_checks: 804
+    migrations: 71
+  confirmed: true
+  summary: >-
+    On the tester's own worktree/branch; `git merge --ff-only Development` fast-forwarded 95a4681
+    to dc7825d cleanly (nothing dirty, nothing to reconcile). One defect waiting, and it was mine
+    to close: DEF-0024 fix-claimed against f5fc400 since session 99.
+    Ran `node scripts/tester-run.mjs --sql --e2e` with the stack up (all ten containers healthy).
+    Count matches exactly: 2617 tests in 130 files, the plan's own newest confirmed number, copied
+    from the runner's line. All 65 numbered SQL files plus dev_demo.sql: 804 checks, 0 failures.
+    DEF-0024 RE-VERIFIED, NOT JUST RE-READ. Reproduced the original defect cold: dropped
+    `AND r.timerange && v_window` from `board_window`'s runs sub-select (last emission,
+    20260907000063_plant_timezone.sql) and ran `boardWindowScoping.test.ts` -- the case named for
+    that exact clause went red alone, 4 of 5 still green, `AssertionError` naming the runs block's
+    own text. Restored, `git diff --exit-code` clean. Then went one further than the original
+    reproduction: dropped the ASSIGNMENTS field's own window instead -- only the assignments case
+    went red this time, the runs case stayed green, which is the direction that would have caught
+    the original bug's mirror image (a fix that only bounded one field). Restored, clean. R-006
+    set back to `covered`; DEF-0024 `verified`. No pin promotion: `src/test/defects/DEF-0024.test.ts`
+    is a synthetic regex demonstration, not a live exercise of the fixed file, so there is nothing
+    in it to fold in -- left for the developer to judge as redundant or not.
+    ONE ADVERSARIAL PASS ON THE OTHER NEW INSTRUMENT CODE, SINCE THIS PROJECT HAS BEEN BURNED BY
+    THIS EXACT SHAPE TWICE (DEF-0024, and the audit meant to prevent its recurrence almost repeating
+    it in session 100's own account). Reproduced the developer's own mutation independently rather
+    than trusting the write-up: on a scratch copy of `DEF-0022.test.ts`, dropped the
+    `LIVE_PIN_TIMEOUT_MS` argument the same way the original bug did, and `livePinDiscipline.test.ts`
+    caught it, same failure the developer recorded. Restored, clean. Separately, planted the exact
+    key that caused F-123 (`resolution:` on a finding) back onto F-121 and confirmed `onlyKeys`
+    still fails it by name; restored, clean.
+    TWO THINGS CHECKED AND NOT FILED. `format:check` failed on 379 files and `db:types` reported the
+    committed types as stale on regeneration -- both reproduce the exact false positive session 98
+    already explained: this worktree runs `core.autocrlf=true` with no `.gitattributes`, so files
+    checked out with CRLF read as unformatted against LF-emitting tools. Confirmed directly:
+    `git show HEAD:src/App.tsx` is LF-only (0 CRLF, 20 LF), the working copy has 20 CRLF, and
+    `git diff` after `db:types` regenerated the file shows no real change. Local artifact, not a
+    defect. `npx playwright test` failed once on `copyWeek.spec.ts`'s "opens Copy week" case
+    (15s timeout waiting for the button) under the full 6-worker run; re-ran that file alone (3
+    passed) and the full suite again (43 passed) and it did not recur -- one sighting, unlike
+    F-122's two, so recorded here rather than filed.
+    SWEEPS: Sweep 1 (newly-nullable columns) and Sweep 3 (stale-rule phrases) found nothing to
+    report, same as session 99. Sweep 2 named the same three `week_template_items` columns already
+    explained as SQL-RPC-only reads, no new dark columns.
+    Nothing else outstanding: 23 of 24 defects were already `verified` on arrival, this session's
+    the 24th. `docs/defects/` is now empty of anything open or fix-claimed.
+  shipped: []
 - id: 100
   date: 2026-09-09
   title: The pin that reported "passed" three ways, and the audit that repeated its mistake on the first try
