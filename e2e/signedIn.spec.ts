@@ -91,8 +91,8 @@ test("a company admin signs in and gets the whole admin rail", async ({ page }) 
     "Cycle times",
     "Import",
     "Templates",
-    "Settings",
     "Activity",
+    "Settings",
   ]);
 });
 

@@ -32,6 +32,51 @@ const MAIL_BASE = mailUrl;
 const FUNCTIONS_BASE = `${supabaseUrl.replace(/\/$/, "")}/functions/v1`;
 const PASSWORD = "devpassword";
 
+/**
+ * ⭐ DEF-0033 / R-370: LEAVE THE DEMO WORLD AS IT WAS FOUND. The two cases below
+ * each land a real viewer grant on Plant A for a throwaway `invitee-`/`orphan-`
+ * address; without this the Access tab's "Has access" list grows by a row every
+ * run, forever. Each such case records its address here and `afterAll` removes
+ * the grant as Dana, the same `remove_site_member` a real admin uses.
+ *
+ * BEST-EFFORT ON PURPOSE: a teardown that cannot reach the stack must never turn
+ * a passing test red, so every step is guarded and failures are swallowed — the
+ * tester's cold run is what proves the list stays put. The `auth.users` row
+ * itself would need a service-role delete this suite holds no key for; removing
+ * the GRANT is what takes the address out of the member list, which is exactly
+ * R-370's claim. `weekTemplates.spec.ts` states the same intent for its own rows.
+ */
+const mintedGrants: string[] = [];
+
+test.afterAll(async () => {
+  if (!hasRealBackend || mintedGrants.length === 0) return;
+  try {
+    const dana = await tokenFor("dana@example.test");
+    const plantA = await plantAId(dana);
+    const client = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${dana}` } },
+    });
+    for (const email of mintedGrants) {
+      try {
+        const { data } = await client.rpc("site_people", { p_node_id: plantA, p_search: email });
+        const people =
+          (data as { people?: { profileId?: string; email?: string }[] } | null)?.people ?? [];
+        const person = people.find((p) => p.email === email);
+        if (person?.profileId) {
+          await client.rpc("remove_site_member", {
+            p_node_id: plantA,
+            p_profile_id: person.profileId,
+          });
+        }
+      } catch {
+        // best-effort: never fail a green suite over cleanup
+      }
+    }
+  } catch {
+    // best-effort: the stack may be gone by afterAll
+  }
+});
+
 /** Is the invite function actually being served? A live probe, not a guess. */
 async function functionServed(): Promise<boolean> {
   try {
@@ -210,6 +255,9 @@ test("an admin invites by email; the person sets a password and lands with their
   await expect(page.getByRole("banner").getByRole("button", { name: "Sign out" })).toBeVisible({
     timeout: 15_000,
   });
+
+  // DEF-0033: this address now holds a real viewer grant on Plant A — clean it up.
+  mintedGrants.push(email);
 });
 
 /**
@@ -256,6 +304,9 @@ test("a refused grant on a fresh invite leaves no orphan: the address invites af
   ).toBe(true);
   const link = await fetchInviteLink(email);
   expect(link, "the corrected invite must send a fresh email").toBeTruthy();
+
+  // DEF-0033: the corrected invite landed a real viewer grant on Plant A — clean it up.
+  mintedGrants.push(email);
 });
 
 test("a supervisor cannot invite: the function refuses her directly", async () => {
