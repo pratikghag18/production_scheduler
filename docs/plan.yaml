@@ -6,7 +6,7 @@ meta:
   updated: '2026-09-10'
   tip: 4905caf
   baseline:
-    app_tests: 2699
+    app_tests: 2707
     app_test_files: 132
     tsc: 0
     eslint: 0
@@ -9210,6 +9210,48 @@ requirements:
     clean; no migration, so tsc is conclusive here. NOT independently verified and NOT walked in a
     live browser this session -- `covered` rests on the two vitest suites; the tester's cold run is
     the outside check still owed.
+- id: R-368
+  title: A member's access level and place are each an editable column on their row --- a person granted a line is changed in place, not by opening the line first
+  source:
+  - session 125 conversation
+  stated_by: maintainer
+  claim: >-
+    On the Access tab every member's row carries the controls to change them, in their own columns:
+    an "Access level" column (the role) and a "Place" column (the node their grant sits on). This
+    holds however deep the grant is --- a person granted a LINE below the plant root (Ana) is
+    re-roled and moved from the plant view itself, without first opening that line. The role menu
+    follows the grant's own node (admin only at a plant root), the self-rule still forbids stripping
+    your own admin, and a company admin's row stays read-only to a site admin. Only a system admin or
+    a site admin sees the controls. Where more than one grant sits below the viewed node the row is
+    genuinely ambiguous and still offers a way in to each node rather than guessing.
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: "R-368: rowGrant resolves the grant a row edits (the one on the viewed node, direct; or a lone grant below it, not direct; null when none or when more than one sits below); grantRoleOptions carries the node's role menu and the self-admin lock to that grant, and keeps a legacy admin-below-root on the menu; canRemoveGrant carries the company-admin and own-admin refusals to the resolved grant"
+  - kind: vitest
+    file: src/test/siteAccessNodePicker.test.tsx
+    cases: "R-368 on the DOM: a supervisor's Place picker moves the grant (set-new then remove-old, role carried) and the Access level picker re-roles it on its own node; Ana, granted Line 1 below the root, shows both controls in place, offers supervisor/viewer only, and re-roles her OWN node not the plant root; an admin has a level control but no Place picker; both controls are hidden from a non-admin"
+  - kind: manual
+    steps: "10 Sept, developer stack: the cause read from dev_demo.sql and the render -- Ana is seeded supervisor on Line 1 (two levels below Plant A's root), Dana admin on the root; before this the plant view showed Ana no control, only a link to open her line. Live browser walk (as the company admin, change Ana's level and move her; change Dana's level) left for the tester's cold run."
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 126, following R-367 in the same conversation). DECIDED 10 Sept
+    (maintainer, from the running app as the company admin): *"Let's move the assign of people in the
+    access tab to its own column, I can't still see how to change it for ana and dana ... Is Ana hard
+    coded? There is no option to change her access level."*
+    Ana was not hard coded. R-367 had put a node picker on the Add flow and a Move line on a member
+    row, but a member whose grant sat on a sub-node still had NO inline control at the plant view ---
+    her row showed a direct role of null and only a subtle link to open the line, exactly the
+    discoverability failure this session was told about. The fix is a real restructure of the member
+    row: `rowGrant` resolves the one grant a row edits (the direct one, or a single one below), and
+    the role and place become two columns on the row itself, editable in place, so Ana is changed
+    from the plant view like Dana. `grantRoleOptions` and `canRemoveGrant` carry the existing menus
+    and refusals to the resolved grant (an inherited grant obeys the admin-only-at-root and
+    self-admin rules too). The R-367 full-width Move line and the `Move to`/`nodeRow` styling are
+    gone, folded into the Place column. Only the genuinely ambiguous multi-grant-below case keeps the
+    open-the-node link. Baseline 2699 -> 2707; tsc and eslint clean; no migration.
+    NOT independently verified and NOT walked in a live browser this session --- `covered` rests on
+    the two vitest suites; the tester's cold run is the outside check still owed.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12659,6 +12701,46 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 126
+  date: 2026-09-10
+  title: "Access rows made editable in place: level and place are each their own column, so Ana (granted a line) is changed from the plant view (R-368)"
+  commits: []
+  numbers:
+    app_tests: 2707
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run in this session, the total line copied: `Test Files 132 passed (132)`,
+    `Tests 2707 passed (2707)`. Up from 2699 by 8: six pure cases for `rowGrant`/`grantRoleOptions`/
+    `canRemoveGrant` in `siteAccess.test.ts`, and the DOM suite re-cut from a Move-line shape to an
+    edit-in-place shape (the R-367 add cases kept, the move cases replaced by five that drive the
+    two new columns, Ana among them). `db_checks` (823) and `migrations` (73) carried unchanged ---
+    no SQL. `e2e` (44) carried, NOT re-run.
+  summary: >-
+    Straight continuation of session 125's R-367, from the maintainer looking at the running app as
+    the company admin: *"Let's move the assign of people in the access tab to its own column, I can't
+    still see how to change it for ana and dana ... Is Ana hard coded? There is no option to change
+    her access level."*
+    ⭐ ANA IS NOT HARD CODED --- CHECKED, NOT ASSUMED. `dev_demo.sql` seeds her supervisor on Line 1,
+    two levels below Plant A's root, and Dana admin on the root. R-367's controls only appeared when
+    the grant sat on the viewed node, so at the plant view Ana's row had a null direct role and
+    showed only a faint link to open her line --- the exact thing the maintainer could not find.
+    ⭐ THE FIX IS A ROW RESTRUCTURE (R-368), NOT A NEW MIGRATION. `rowGrant` resolves the one grant a
+    member row edits --- the direct one, or a single one below --- and the role and the node become
+    two columns ON the row, "Access level" and "Place", editable in place. `grantRoleOptions` and
+    `canRemoveGrant` carry the admin-only-at-root menu, the self-admin lock and the company-admin
+    read-only rule to the resolved grant, so an inherited grant obeys them too. The R-367 full-width
+    Move line is gone, folded into the Place column; the open-the-node link survives only for the
+    genuinely ambiguous case of more than one grant below the plant. Server unchanged ---
+    `set_site_member` always took any node the caller administers.
+    NOT independently verified: `covered` rests on the two vitest suites. The tester's cold browser
+    walk --- change Ana's level and move her, change Dana's level, roleWalk parity --- is the outside
+    check owed for both R-367 and R-368.
 - id: 125
   date: 2026-09-10
   title: "Access can name the hierarchy node: a person is added at, or moved to, a chosen line or cell, admins only (R-367)"

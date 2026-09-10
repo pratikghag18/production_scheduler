@@ -3,18 +3,20 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { describeSchedulerError, invite, type InviteResult, type SchedulerError } from "@/lib/api";
 import {
   accessPanelState,
-  allowedRoles,
   buildAccessRows,
   canManageAccess,
   canRemoveAccess,
+  canRemoveGrant,
   canSetRole,
   describeAccess,
+  grantRoleOptions,
   moveTargets,
   partitionAccess,
   removalNote,
   removalReason,
   resolvePlace,
   rolesForNode,
+  rowGrant,
   subtreeOptions,
   type AccessNode,
   type AccessPlace,
@@ -203,11 +205,6 @@ export function SiteAccessPanel({
     setRowError((cur) => (cur !== null && cur.profileId === profileId ? null : cur));
   }
 
-  function runSetMember(row: AccessRow, role: GrantRole) {
-    if (activeNodeId === null) return;
-    runSetMemberAt(row, activeNodeId, role);
-  }
-
   // ⭐ GRANT AT A NAMED NODE (R-367), not only at the node the screen is on.
   // `set_site_member` has always taken any node the caller administers; this is
   // the Add control finally naming one. The node comes from the plant subtree
@@ -233,10 +230,8 @@ export function SiteAccessPanel({
   // unchanged; `moveTargets` has already excluded any node where that role
   // would be refused (an admin below a plant root), so the new grant cannot be
   // the thing that fails.
-  function runMoveMember(row: AccessRow, toNodeId: string) {
-    if (activeNodeId === null || row.directRole === null || toNodeId === activeNodeId) return;
-    const fromNodeId = activeNodeId;
-    const role = row.directRole;
+  function runMove(row: AccessRow, fromNodeId: string, role: GrantRole, toNodeId: string) {
+    if (toNodeId === fromNodeId) return;
     clearRowError(row.profileId);
     setPendingProfileId(row.profileId);
     setMemberMutation.mutate(
@@ -262,12 +257,14 @@ export function SiteAccessPanel({
     );
   }
 
-  function runRemoveMember(row: AccessRow) {
-    if (activeNodeId === null) return;
+  // Removes the resolved grant's node (R-368), not only the viewed node: a
+  // person whose single grant sits on a line is revoked from that line in
+  // place, without opening it first.
+  function runRemoveMember(row: AccessRow, nodeId: string) {
     clearRowError(row.profileId);
     setPendingProfileId(row.profileId);
     removeMemberMutation.mutate(
-      { nodeId: activeNodeId, profileId: row.profileId },
+      { nodeId, profileId: row.profileId },
       {
         onSuccess: () => setConfirmingProfileId((cur) => (cur === row.profileId ? null : cur)),
         onError: (err: SchedulerError) =>
@@ -415,10 +412,16 @@ export function SiteAccessPanel({
             : `Nobody with access here matches “${query.trim()}”.`}
         </p>
       )}
+      {/* ⭐ ACCESS LEVEL AND PLACE ARE EACH THEIR OWN COLUMN (R-368). The role
+          used to be the only control on the row and only when the grant sat on
+          the viewed node; a person granted a LINE (Ana) showed no control at
+          all, just a link to open that line. Now `rowGrant` resolves the one
+          grant the row edits — direct, or a single one below — and the role and
+          the node sit on the row, editable in place. */}
       <div className={styles.head} aria-hidden="true" hidden={members.length === 0}>
         <span>Person</span>
-        <span>Access here</span>
-        <span>Role</span>
+        <span>Access level</span>
+        <span>Place</span>
         <span />
       </div>
       <ul className={styles.list}>
@@ -428,16 +431,18 @@ export function SiteAccessPanel({
           const isPending = pendingProfileId === row.profileId;
           const error =
             rowError !== null && rowError.profileId === row.profileId ? rowError.message : null;
-          // ⭐ WHERE THIS GRANT COULD MOVE (R-367). Only rows with a grant on
-          // THIS node (`directRole`) can be moved from here — an inherited
-          // grant is edited by opening its own node, exactly as its role is.
-          // `moveTargets` returns just the root for an admin, so the length
-          // test below hides the control rather than offering a move that
-          // would be a no-op or a refusal.
-          const moveOpts =
-            canManage && row.directRole !== null && canSetRole(row, viewerIsCompanyAdmin)
-              ? moveTargets(nodes, siteNodeId, row.directRole)
-              : [];
+          // ⭐ THE ONE GRANT THIS ROW EDITS (R-368): the grant on the viewed
+          // node, or a lone grant below it. `null` when there is nothing to
+          // edit here (no grant) or too many below to pick without opening one.
+          const g = rowGrant(row, activeNodeId);
+          const editable = canManage && g !== null && canSetRole(row, viewerIsCompanyAdmin);
+          const placeOpts = editable && g !== null ? moveTargets(nodes, siteNodeId, g.role) : [];
+          const placeName =
+            g === null
+              ? ""
+              : g.direct
+                ? (view.nodeName ?? "this plant")
+                : (row.inheritedGrants[0]?.nodeName ?? "");
 
           return (
             <li key={row.profileId} className={styles.row}>
@@ -449,7 +454,6 @@ export function SiteAccessPanel({
                   </span>
                 )}
               </span>
-              <span className={styles.desc}>{describeAccess(row, view.nodeName)}</span>
 
               {isConfirming ? (
                 <div className={styles.confirm}>
@@ -458,7 +462,7 @@ export function SiteAccessPanel({
                     type="button"
                     className={styles.dangerBtn}
                     disabled={isPending}
-                    onClick={() => runRemoveMember(row)}
+                    onClick={() => g !== null && runRemoveMember(row, g.nodeId)}
                   >
                     Remove
                   </button>
@@ -471,29 +475,69 @@ export function SiteAccessPanel({
                     Cancel
                   </button>
                 </div>
-              ) : (
+              ) : editable && g !== null ? (
                 <>
-                  {/* 0022: a company admin's row is not a site admin's to
-                      edit, and the SERVER refuses it — this mirrors that
-                      rather than leading it. `canSetRole` is separate from
-                      `allowedRoles` on purpose: one decides whether the
-                      control belongs on the row at all, the other narrows
-                      which options it offers. */}
-                  {row.directRole !== null && canSetRole(row, viewerIsCompanyAdmin) && (
+                  {/* Access level — the grant's OWN node decides the menu, so an
+                      inherited supervisor on a line is offered supervisor and
+                      viewer, an admin on the root all three, and the self-rule
+                      still forbids stripping your own admin. */}
+                  <select
+                    aria-label={`Access level for ${label}`}
+                    className={`${styles.select} ${styles.roleCol}`}
+                    value={g.role}
+                    disabled={isPending}
+                    onChange={(e) => runSetMemberAt(row, g.nodeId, e.target.value as GrantRole)}
+                  >
+                    {grantRoleOptions(row, viewerIsCompanyAdmin, g, siteNodeId).map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Place — a picker when there is somewhere else in the plant
+                      to move the grant to, the node's name in plain text when
+                      there is not (an admin, who fits only the plant root). */}
+                  {placeOpts.length > 1 ? (
                     <select
-                      aria-label={`Role for ${label}`}
-                      className={styles.select}
-                      value={row.directRole}
+                      aria-label={`Place for ${label}`}
+                      className={`${styles.select} ${styles.placeCol}`}
+                      value={g.nodeId}
                       disabled={isPending}
-                      onChange={(e) => runSetMember(row, e.target.value as GrantRole)}
+                      onChange={(e) => runMove(row, g.nodeId, g.role, e.target.value)}
                     >
-                      {allowedRoles(row, viewerIsCompanyAdmin, atPlantRoot).map((r) => (
-                        <option key={r} value={r}>
-                          {r}
+                      {placeOpts.map((o) => (
+                        <option key={o.nodeId} value={o.nodeId}>
+                          {nodeOptionLabel(o.depth, o.name)}
                         </option>
                       ))}
                     </select>
+                  ) : (
+                    <span className={styles.placeText}>{placeName}</span>
                   )}
+
+                  {canRemoveGrant(row, viewerIsCompanyAdmin, g) ? (
+                    <button
+                      type="button"
+                      aria-label={`Remove access for ${label}`}
+                      className={styles.removeBtn}
+                      disabled={isPending}
+                      onClick={() => setConfirmingProfileId(row.profileId)}
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    <span className={styles.note}>{removalNote(row, viewerIsCompanyAdmin)}</span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Not editable from here: a company admin's row (0022), a
+                      viewer without the rights, or somebody with MORE than one
+                      grant below the plant — the A5 case, where which grant to
+                      change is genuinely ambiguous and opening the node is the
+                      honest way to pick one. */}
+                  <span className={styles.descWide}>{describeAccess(row, view.nodeName)}</span>
 
                   {canRemoveAccess(row, viewerIsCompanyAdmin) ? (
                     <button
@@ -508,56 +552,31 @@ export function SiteAccessPanel({
                   ) : (
                     <span className={styles.note}>
                       {removalNote(row, viewerIsCompanyAdmin)}
-                      {/* The one reason that needs a way in rather than
-                          prose. Switching on the REASON, not on the sentence,
-                          so the two cannot drift — case D6. */}
+                      {/* Switching on the REASON, not the sentence, so the two
+                          cannot drift — case D6. For a multi-grant person each
+                          node is a way in to change that one grant. */}
                       {removalReason(row, viewerIsCompanyAdmin) === "inherited" &&
-                        row.inheritedGrants.map((g) => (
+                        row.inheritedGrants.map((gr) => (
                           <button
-                            key={g.nodeId}
+                            key={gr.nodeId}
                             type="button"
                             className={styles.linkBtn}
-                            aria-label={`Open ${g.nodeName} to change access for ${label}`}
+                            aria-label={`Open ${gr.nodeName} to change access for ${label}`}
                             onClick={() =>
                               siteNodeId !== null &&
                               setFocus({
                                 root: siteNodeId,
                                 rootName: view.nodeName ?? "the plant",
-                                nodeId: g.nodeId,
+                                nodeId: gr.nodeId,
                               })
                             }
                           >
-                            {g.nodeName}
+                            {gr.nodeName}
                           </button>
                         ))}
                     </span>
                   )}
                 </>
-              )}
-
-              {/* ⭐ MOVE THIS PERSON TO ANOTHER NODE (R-367) — its own
-                  full-width line, shown only when there is somewhere else in
-                  the plant to move the grant to. Answers the maintainer's
-                  "Ana is supervisor on Line 1 ... no way to change or modify
-                  it": open her line, and this reassigns her without losing the
-                  role. */}
-              {!isConfirming && moveOpts.length > 1 && (
-                <label className={styles.nodeRow}>
-                  <span className={styles.nodeLabel}>Move to</span>
-                  <select
-                    aria-label={`Move ${label} to a different place`}
-                    className={styles.nodeSelect}
-                    value={activeNodeId ?? ""}
-                    disabled={isPending}
-                    onChange={(e) => runMoveMember(row, e.target.value)}
-                  >
-                    {moveOpts.map((o) => (
-                      <option key={o.nodeId} value={o.nodeId}>
-                        {nodeOptionLabel(o.depth, o.name)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               )}
 
               {error && (
@@ -586,8 +605,8 @@ export function SiteAccessPanel({
       ) : null}
       <div className={styles.head} aria-hidden="true" hidden={candidates.length === 0}>
         <span>Person</span>
-        <span>Access here</span>
-        <span>Role to give</span>
+        <span>Access level</span>
+        <span>Place</span>
         <span />
       </div>
       <ul className={styles.list}>
@@ -612,31 +631,51 @@ export function SiteAccessPanel({
           return (
             <li key={row.profileId} className={styles.row}>
               <span className={styles.email}>{row.email ?? "(no address on file)"}</span>
-              {/* Rendered for candidates too — it reads "No access", which is
-                  true and keeps column 2 from being a hole that makes the two
-                  lists look like different tables. */}
-              <span className={styles.desc}>{describeAccess(row, view.nodeName)}</span>
+
+              {/* Access level (col 2) — the roles `rolesForNode` allows on the
+                  CHOSEN node, not `GRANT_ROLES`: two controls on one screen
+                  disagreeing about admin-only-at-a-root is how DEF-0010 got
+                  here. Below a plant root this is supervisor and viewer. */}
               <select
                 aria-label={`Role to give ${label}`}
-                className={styles.select}
+                className={`${styles.select} ${styles.roleCol}`}
                 value={selectedRole}
                 disabled={isPending}
                 onChange={(e) =>
                   setAddRoles((prev) => ({ ...prev, [row.profileId]: e.target.value as GrantRole }))
                 }
               >
-                {/* ⚠️ THE ROLES `rolesForNode` ALLOWS ON THE CHOSEN NODE, NOT
-                    `GRANT_ROLES`. This picker offered `admin` on any node while
-                    `allowedRoles` was about to stop doing so -- two controls on
-                    one screen disagreeing about the same rule is how DEF-0010
-                    got here. Below a plant root this is supervisor and viewer,
-                    which is what 0053 will accept. */}
                 {nodeRoles.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>
                 ))}
               </select>
+
+              {/* Place (col 3, R-367/R-368) — the node picker sits in its own
+                  column like the members' does, an admin naming a line or cell.
+                  A single-node plant, or a non-admin, gets the plant name in
+                  plain text so the column is not a hole. */}
+              {canPickNode ? (
+                <select
+                  aria-label={`Place to give ${label} access`}
+                  className={`${styles.select} ${styles.placeCol}`}
+                  value={selectedNode}
+                  disabled={isPending}
+                  onChange={(e) =>
+                    setAddNodes((prev) => ({ ...prev, [row.profileId]: e.target.value }))
+                  }
+                >
+                  {plantSubtree.map((o) => (
+                    <option key={o.nodeId} value={o.nodeId}>
+                      {nodeOptionLabel(o.depth, o.name)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className={styles.placeText}>{view.nodeName ?? "this plant"}</span>
+              )}
+
               <button
                 type="button"
                 aria-label={`Give ${label} access`}
@@ -648,32 +687,6 @@ export function SiteAccessPanel({
               >
                 Add
               </button>
-
-              {/* ⭐ THE NODE PICKER (R-367) — its own full-width line, the same
-                  treatment `.note` and the confirm row get, because a fifth
-                  control will not fit the four fixed columns and a plant with
-                  deep names needs the width. Shown only to an admin, and only
-                  when the plant has more than one node to choose between. */}
-              {canPickNode && (
-                <label className={styles.nodeRow}>
-                  <span className={styles.nodeLabel}>Place</span>
-                  <select
-                    aria-label={`Place to give ${label} access`}
-                    className={styles.nodeSelect}
-                    value={selectedNode}
-                    disabled={isPending}
-                    onChange={(e) =>
-                      setAddNodes((prev) => ({ ...prev, [row.profileId]: e.target.value }))
-                    }
-                  >
-                    {plantSubtree.map((o) => (
-                      <option key={o.nodeId} value={o.nodeId}>
-                        {nodeOptionLabel(o.depth, o.name)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
 
               {error && (
                 <p className={styles.errorLine} role="alert">

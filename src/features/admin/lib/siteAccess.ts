@@ -669,3 +669,85 @@ export function canManageAccess(
 ): boolean {
   return viewerIsCompanyAdmin || viewerAdminAnywhere;
 }
+
+// ---------------------------------------------------------------------------
+// EDITING A ROW'S GRANT IN PLACE (R-368). The maintainer, from the running app
+// as the company admin: *"I can't still see how to change it for ana and dana
+// ... There is no option to change her access level."* Ana's grant sits on a
+// LINE two levels below the plant root, so at the plant view her row had a
+// direct role of null and showed only a subtle link to open that line -- no
+// visible control. These resolve the ONE grant a member row can edit from here,
+// direct or a single one below, so the role and place controls sit on the row
+// itself, in their own columns, for Ana exactly as for Dana (admin on the root).
+// ---------------------------------------------------------------------------
+
+/** The one grant a member row edits from this screen: which node, which role. */
+export interface RowGrant {
+  nodeId: string;
+  role: GrantRole;
+  /** On the node being viewed (a re-role writes THIS node) vs a single grant below it. */
+  direct: boolean;
+}
+
+/**
+ * The single grant this row can edit inline, or `null` when there is nothing to
+ * edit here (no grant at all) or too many to pick from without disambiguating
+ * (more than one grant BELOW the viewed node -- the A5 case). A grant on the
+ * viewed node wins, exactly as `describeAccess` orders "the most powerful route
+ * in"; failing that, a lone grant beneath it is unambiguous and editable too.
+ */
+export function rowGrant(row: AccessRow, activeNodeId: string | null): RowGrant | null {
+  if (row.directRole !== null && activeNodeId !== null) {
+    return { nodeId: activeNodeId, role: row.directRole, direct: true };
+  }
+  if (row.directRole === null && row.inheritedGrants.length === 1) {
+    const g = row.inheritedGrants[0];
+    return { nodeId: g.nodeId, role: g.role, direct: false };
+  }
+  return null;
+}
+
+/**
+ * The roles offerable for an existing grant on its own node: `admin` only at a
+ * plant root, supervisor/viewer below -- but a grant already HOLDING a role the
+ * node would no longer offer (an `admin` on a branch, from before 0053, or made
+ * by hand) keeps it on the menu rather than showing a value with no option,
+ * the same rule `allowedRoles` states for its `['admin']` floor.
+ */
+export function rolesForGrant(grant: RowGrant, rootNodeId: string | null): readonly GrantRole[] {
+  const base = rolesForNode(grant.nodeId, rootNodeId);
+  return base.includes(grant.role) ? base : [grant.role, ...base];
+}
+
+/**
+ * The role menu for a row's grant, self-rule included: a person looking at
+ * their OWN admin grant (and not a company admin) is offered only `admin`, so
+ * they cannot strip their own access -- the same lock `allowedRoles` applies,
+ * carried to the resolved grant so an inherited one obeys it too.
+ */
+export function grantRoleOptions(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  grant: RowGrant,
+  rootNodeId: string | null,
+): readonly GrantRole[] {
+  if (row.isSelf && !viewerIsCompanyAdmin && grant.role === "admin") return ["admin"] as const;
+  return rolesForGrant(grant, rootNodeId);
+}
+
+/**
+ * May this row's grant be removed from here? The two refusals `canRemoveAccess`
+ * makes, carried to the resolved grant: a company admin's row is not a site
+ * admin's to touch, and nobody drops their own admin. Unlike `canRemoveAccess`
+ * this does NOT require the grant to be on the viewed node -- a single grant
+ * below it is removable in place, which is the whole point of R-368.
+ */
+export function canRemoveGrant(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  grant: RowGrant,
+): boolean {
+  if (protectedRow(row, viewerIsCompanyAdmin)) return false;
+  if (row.isSelf && !viewerIsCompanyAdmin && grant.role === "admin") return false;
+  return true;
+}

@@ -60,6 +60,14 @@ const PAYLOAD = {
       grants: [{ nodeId: "plantA", nodeName: "Plant A", role: "admin" }],
     },
     {
+      // Ana: her single grant is on a LINE below the plant root -- the case
+      // that showed no control at all before R-368.
+      profileId: "ana",
+      email: "ana@example.test",
+      companyAdmin: false,
+      grants: [{ nodeId: "lineA1", nodeName: "Line 1", role: "supervisor" }],
+    },
+    {
       profileId: "nobody",
       email: "nobody@example.test",
       companyAdmin: false,
@@ -152,11 +160,11 @@ describe("R-367 Add flow: the node picker", () => {
   });
 });
 
-describe("R-367 Move flow: an existing member", () => {
-  it("shows a Move control for a supervisor and composes set-new then remove-old", () => {
+describe("R-368 Edit in place: a member's level and place are each their own column", () => {
+  it("a supervisor's Place picker moves the grant: set-new then remove-old, role carried", () => {
     render(panel(), { wrapper: wrapper() });
-    const move = screen.getByLabelText(/Move sam@example.test to a different place/i);
-    fireEvent.change(move, { target: { value: "lineA1" } });
+    const place = screen.getByLabelText(/Place for sam@example.test/i);
+    fireEvent.change(place, { target: { value: "lineA1" } });
     // set at the NEW node, carrying the role...
     expect(spies.set).toHaveBeenCalledTimes(1);
     expect(spies.set.mock.calls[0][0]).toMatchObject({
@@ -169,13 +177,53 @@ describe("R-367 Move flow: an existing member", () => {
     expect(spies.remove.mock.calls[0][0]).toMatchObject({ nodeId: "plantA", profileId: "sam" });
   });
 
-  it("offers no Move for an admin, whose only valid node is the plant root", () => {
+  it("a supervisor's Access level picker re-roles the grant on its own node", () => {
     render(panel(), { wrapper: wrapper() });
-    expect(screen.queryByLabelText(/Move boss@example.test to a different place/i)).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Access level for sam@example.test/i), {
+      target: { value: "viewer" },
+    });
+    expect(spies.set).toHaveBeenCalledTimes(1);
+    expect(spies.set.mock.calls[0][0]).toMatchObject({
+      nodeId: "plantA",
+      profileId: "sam",
+      role: "viewer",
+    });
+    expect(spies.remove).not.toHaveBeenCalled();
   });
 
-  it("is hidden from someone who is neither a system admin nor a site admin", () => {
+  it("⭐ Ana, granted a LINE below the root, is editable in place -- no opening the line first", () => {
+    render(panel(), { wrapper: wrapper() });
+    // Her level control is present and shows supervisor...
+    const level = screen.getByLabelText(/Access level for ana@example.test/i);
+    expect((level as HTMLSelectElement).value).toBe("supervisor");
+    // ...admin is not on offer below a root...
+    expect(
+      within(level as HTMLElement)
+        .getAllByRole("option")
+        .map((o) => (o as HTMLOptionElement).value),
+    ).toEqual(["supervisor", "viewer"]);
+    // ...and her Place control shows the line she is on, ready to move.
+    const place = screen.getByLabelText(/Place for ana@example.test/i);
+    expect((place as HTMLSelectElement).value).toBe("lineA1");
+    // Re-roling writes her OWN node (Line 1), not the plant root.
+    fireEvent.change(level, { target: { value: "viewer" } });
+    expect(spies.set.mock.calls[0][0]).toMatchObject({
+      nodeId: "lineA1",
+      profileId: "ana",
+      role: "viewer",
+    });
+  });
+
+  it("an admin has an Access level control but no Place picker -- an admin runs the whole plant", () => {
+    render(panel(), { wrapper: wrapper() });
+    expect(screen.getByLabelText(/Access level for boss@example.test/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/Place for boss@example.test/i)).toBeNull();
+  });
+
+  it("both controls are hidden from someone who is neither a system nor a site admin", () => {
     render(panel({ companyAdmin: false, adminAnywhere: false }), { wrapper: wrapper() });
-    expect(screen.queryByLabelText(/Move sam@example.test to a different place/i)).toBeNull();
+    expect(screen.queryByLabelText(/Access level for sam@example.test/i)).toBeNull();
+    expect(screen.queryByLabelText(/Place for sam@example.test/i)).toBeNull();
+    expect(screen.queryByLabelText(/Access level for ana@example.test/i)).toBeNull();
   });
 });

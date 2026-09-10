@@ -48,6 +48,9 @@ import {
   rolesForNode,
   moveTargets,
   canManageAccess,
+  canRemoveGrant,
+  grantRoleOptions,
+  rowGrant,
   type AccessNode,
   type AccessPlace,
   type AccessRow,
@@ -1142,5 +1145,92 @@ check(
     if (!canManageAccess(false, true)) return "site admin (adminAnywhere) was refused";
     if (canManageAccess(false, false)) return "a supervisor was allowed to manage nodes";
     return true;
+  },
+);
+
+// ---------------------------------------------------------------------------
+// R-368 -- editing a row's grant in place. rowGrant resolves which grant a row
+// edits; grantRoleOptions and canRemoveGrant carry the role menu and the two
+// removal refusals to that grant, direct or a single one below.
+// ---------------------------------------------------------------------------
+
+const directGrant = { nodeId: PLANT, role: "supervisor" as GrantRole, direct: true };
+const lineGrant = { nodeId: LINE1, role: "supervisor" as GrantRole, direct: false };
+
+check("R-368 rowGrant: a grant on the viewed node is the editable one, marked direct", () => {
+  const g = rowGrant(byId(P_SAM), PLANT);
+  return g !== null && g.nodeId === PLANT && g.role === "supervisor" && g.direct
+    ? true
+    : `got ${JSON.stringify(g)}`;
+});
+
+check(
+  "R-368 rowGrant: a single grant BELOW the viewed node is editable in place, not direct",
+  () => {
+    // raj holds one grant, on Assembly, below Plant 1.
+    const g = rowGrant(byId(P_RAJ), PLANT);
+    return g !== null && g.nodeId === DEPT && g.role === "admin" && !g.direct
+      ? true
+      : `got ${JSON.stringify(g)}`;
+  },
+);
+
+check(
+  "R-368 rowGrant: more than one grant below is ambiguous -- null, so the row opens a node",
+  () => {
+    // mixed holds admin ON Plant 1 and viewer on Assembly. Direct wins here, so
+    // build a purely-multi-inherited row to hit the ambiguous branch.
+    const multi = stranger({
+      directRole: null,
+      inheritedGrants: [grant(DEPT, "Assembly", "viewer"), grant(LINE1, "Line 1", "supervisor")],
+      hasAccess: true,
+    });
+    if (rowGrant(multi, PLANT) !== null) return "two grants below resolved to one";
+    // and the no-grant row is null too
+    return rowGrant(byId(P_NONE), PLANT) === null ? true : "a person with no grant resolved one";
+  },
+);
+
+check(
+  "R-368 grantRoleOptions: the grant's own node decides the menu; a legacy admin-below-root keeps admin",
+  () => {
+    if (
+      grantRoleOptions(byId(P_SAM), false, directGrant, PLANT).join(",") !== GRANT_ROLES.join(",")
+    ) {
+      return "root grant did not offer all three";
+    }
+    if (
+      grantRoleOptions(byId(P_SAM), false, lineGrant, PLANT).join(",") !==
+      ROLES_BELOW_ROOT.join(",")
+    ) {
+      return "line grant offered admin";
+    }
+    const adminBelow = { nodeId: DEPT, role: "admin" as GrantRole, direct: false };
+    const opts = grantRoleOptions(byId(P_RAJ), false, adminBelow, PLANT);
+    return opts.includes("admin") ? true : `admin-below-root lost admin: ${opts.join(",")}`;
+  },
+);
+
+check("R-368 grantRoleOptions: you cannot strip your own admin -- only admin offered", () => {
+  const self = stranger({ isSelf: true, directRole: "admin", hasAccess: true });
+  const g = { nodeId: PLANT, role: "admin" as GrantRole, direct: true };
+  return grantRoleOptions(self, false, g, PLANT).join(",") === "admin"
+    ? true
+    : "self admin was offered a downgrade";
+});
+
+check(
+  "R-368 canRemoveGrant: refuses a company admin's row and your own admin, allows the rest",
+  () => {
+    const boss = byId(P_BOSS); // company admin, no grant
+    if (canRemoveGrant(boss, false, directGrant))
+      return "a company admin's row was removable by a site admin";
+    const selfAdmin = stranger({ isSelf: true, directRole: "admin", hasAccess: true });
+    if (canRemoveGrant(selfAdmin, false, { nodeId: PLANT, role: "admin", direct: true })) {
+      return "own admin was removable";
+    }
+    return canRemoveGrant(byId(P_SAM), false, directGrant)
+      ? true
+      : "an ordinary supervisor was not removable";
   },
 );
