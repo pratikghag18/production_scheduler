@@ -42,7 +42,9 @@ cannot quietly drift; add a surface to the standard and the audit checks it.
   both register the same way, so there is no need to rebuild an editor as a `<table>` to comply.
   Guarded by `src/test/stickyHeaderStandard.test.ts`, which registers each list surface (naming its
   scroll-container class and its header class) and fails if the scroll container is unbounded or the
-  header is not sticky. New long-row tabs register there.
+  header is not sticky. Every current long-row admin tab is registered — Activity, Access, Operators,
+  Products, Trainings, Shifts, Absences, the Matrix (whose two stacked header rows freeze as one
+  `<thead>`) and Cycle times — and any new one must register there too.
 
 ## Local setup: the developer's stack and the tester's
 

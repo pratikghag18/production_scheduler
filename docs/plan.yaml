@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 5ed4507
+  tip: 5c7cf3d
   baseline:
-    app_tests: 2730
+    app_tests: 2737
     app_test_files: 133
     tsc: 0
     eslint: 0
@@ -9434,7 +9434,14 @@ requirements:
     recorded: the standard is the BEHAVIOUR (bounded scroll + frozen header), not the tag --- a
     read-only tabular tab satisfies it with a `<table>`/`<th>`, an interactive editor with a sticky
     grid header. Access (SiteAccessPanel) was brought under the standard this session with a sticky
-    `.head` and is now a second registered surface in `stickyHeaderStandard.test.ts`.
+    `.head` and is now a second registered surface in `stickyHeaderStandard.test.ts`. ROLLOUT
+    COMPLETED 10 Sept (session 135): the maintainer pushed back that queuing the other tabs missed
+    the point --- the standard is for ALL current tabs. Operators, Products, Trainings, Shifts,
+    Absences, the Matrix and Cycle times were all brought under it in one pass, so the audit now
+    guards EIGHT surfaces. The Matrix, whose header is two stacked rows, freezes its whole `<thead>`
+    as one block (a single `top: 0` cannot pin the second row); the accent bleed (F-129) was re-fixed
+    the same session with an inset box-shadow after the border approach proved insufficient under
+    `border-collapse`.
 - id: R-373
   title: A week template can be expanded to show what it holds --- its runs and people, per day
   source:
@@ -9510,11 +9517,15 @@ findings:
     ⛔ THE CAUSE. The 3px action accent was a `border-left` on the `<tr>` (`.row`), which sits at the
     table's very left edge, OUTSIDE every cell's box. The sticky header is made of `<th>` CELLS; they
     cover their own width but not the tr's left-edge border, so a body row scrolling up showed its
-    coloured strip in the header band. FIX: the accent moved onto the first body cell (`.when`) with
-    `.th:first-child` reserving the identical 3px --- now it is ordinary in-flow cell decoration and
-    scrolls UNDER the header's opaque background. Same visual (a constant-width left bar per row); no
-    tr border to escape the header. Guarded by a DOM assertion in `auditPanel.test.tsx` that the
-    accent rides the first cell, not the row.
+    coloured strip in the header band. FIRST FIX (session 134) moved the accent onto the first body
+    cell (`.when`) as a border --- but the maintainer reported it STILL bleeding. Under
+    `border-collapse: collapse` a cell's left border still contributes to the table's shared
+    outer-left edge, so the coloured strip kept reaching the header. RE-FIXED (session 135) as an
+    inset `box-shadow` on `.when`: a shadow is painted inside the cell and clipped to it, so it can
+    never reach the table edge or escape above the sticky header, and it takes no layout space so no
+    header strip needs reserving. Same visual (a constant-width left bar per row). Guarded in
+    `auditPanel.test.tsx`: the accent selectors must be `box-shadow: inset` and no `border-left`
+    remains on `.when` or a reserved `.th:first-child`.
 - id: F-130
   title: Four CSS modules reference an undefined --ink-1 token, so those colours silently fall back
   tag: A colour token that isn't there
@@ -12979,6 +12990,47 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 135
+  date: 2026-09-10
+  title: "The frozen-header standard applied to EVERY long-row tab (R-372 rollout done); Access actions given equal-sized columns; the Activity accent re-fixed with a box-shadow (F-129)"
+  commits: [1d805aa, 1c52842, 5c7cf3d]
+  numbers:
+    app_tests: 2737
+    app_test_files: 133
+    tsc: 8
+    eslint: 0
+    db_checks: 823
+    migrations: 75
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` (vitest run) this session: `Test Files 133 passed (133)`, `Tests 2737 passed
+    (2737)` --- up from 2730 by the six newly-registered sticky-header surfaces (plus the not-vacuous
+    case) in `stickyHeaderStandard.test.ts`. `eslint` clean. `tsc` still shows the SAME 8 errors as
+    session 134 --- migrations 0075/0076 are not yet in `database.types.ts` (no new migration this
+    session); it clears once the maintainer runs `supabase migration up` + `npm run db:types` in the
+    WSL stack. The 8-surface audit passes; the panel edits are CSS/layout only.
+  summary: >-
+    The maintainer, from the running app and rightly frustrated: the standard was meant for ALL tabs,
+    the Access action buttons were mismatched and crammed into one column, the Activity accent still
+    bled into the headers, and the Templates "Show contents" errored.
+    ⭐ THE STANDARD, EVERYWHERE (R-372). Session 134 applied it to Activity and Access and QUEUED the
+    rest --- that was the miss. Operators, Products, Trainings, Shifts, Absences, the Matrix and Cycle
+    times are now all under it, each with a bounded scroll region and a frozen header (a grid `.head`
+    / `.listHead` / `.peopleHead`, a table's `.th`, or the Matrix's whole `<thead>` for its two
+    stacked header rows), and all are registered in the audit --- eight surfaces, the build fails if
+    any loses its bounded scroll or sticky header.
+    ⭐ ACCESS ACTION COLUMNS (R-374). Remove and Deactivate now sit in their own equal-width columns
+    (a five-column row), and every row button shares one size class --- no more mismatched buttons on
+    one line.
+    ⭐ THE ACCENT, PROPERLY (F-129). The session-134 fix moved the accent onto the first cell's
+    border, but under `border-collapse` a cell border still joins the table's shared outer-left edge,
+    so it kept bleeding. It is now an inset box-shadow, painted inside the cell and clipped to it ---
+    it cannot reach the edge or escape the sticky header.
+    ⭐ TEMPLATES "SHOW CONTENTS" (R-373). Not a code bug --- the client parser matches the RPC output
+    exactly and the SQL test passes. The dev DB the app talks to is four migrations behind (at 0072),
+    so `list_week_template_items` does not exist there and the call 404s. The fix is applying the
+    migrations to that stack; the feature is correct.
 - id: 134
   date: 2026-09-10
   title: "Week-template contents view (R-373); deactivate a user, reversibly (R-374); the frozen-header standard extended to Access and its accent-bleed fixed (R-372/F-129)"
@@ -19194,18 +19246,6 @@ next:
 # bug lives in. A case that follows the RAW emailed link is now in
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
-- kind: task
-  requirement: R-372
-  text: Bring the remaining long-row tabs under the frozen-header standard (Operators, Products, Matrix, Trainings, Cycle times, Shifts)
-  why: >-
-    R-372 shipped the standard and applied it to Activity; session 134 added Access, which PROVED the
-    CSS-grid path (a sticky `.head` row, not a `<thead>`) works and registers in the audit the same
-    way. The rule is "in ALL tabs where there could be a large amount of rows." Each remaining
-    long-row tab needs a bounded scroll container with a sticky header and a row added to
-    `STICKY_HEADER_SURFACES` in `src/test/stickyHeaderStandard.test.ts`, which turns the audit on for
-    it. The same recipe (bounded `overflow:auto` container, `position:sticky; top:0` header) applies
-    to both a `<table>` and a CSS-grid `ul`, but each is its own small layout change and wants a look
-    in the running app.
 - kind: task
   requirement: R-373
   text: Sweep the undefined --ink-1 token from the four CSS modules that use it (F-130)
