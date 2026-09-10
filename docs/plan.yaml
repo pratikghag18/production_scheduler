@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 5e17205
+  tip: c494cfe
   baseline:
     app_tests: 2712
     app_test_files: 132
@@ -12778,6 +12778,42 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 129
+  date: 2026-09-10
+  title: "Tester's two e2e-hygiene defects fix-claimed: the stale rail-order pin (DEF-0032) and the unbounded invite-grant leak (DEF-0033)"
+  commits: [c494cfe]
+  numbers:
+    app_tests: 2712
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 46
+  confirmed: false
+  numbers_note: >-
+    No unit run this session --- the changes are e2e-only (`e2e/signedIn.spec.ts`,
+    `e2e/invite.spec.ts`), the unit baseline unchanged from session 128 (2712 in 132), carried NOT
+    re-measured, so `confirmed: false`. `tsc` and `eslint` clean on the two changed specs. `e2e`
+    carried at 46, the count session 128 corrected to; the fixes are NOT run locally --- both defects
+    are fix-claimed for the tester's cold `--e2e`.
+  summary: >-
+    Merged `tester` (fast-forward to e018677): the tester walked R-367/R-368/R-369 live and the
+    FEATURES HELD --- no defect against their correctness. Fixed the two e2e-hygiene defects it found
+    on the way.
+    ⭐ DEF-0032 (minor, R-369), MINE. The Activity/Settings swap updated three vitest copies of the
+    rail order but not the fourth, `e2e/signedIn.spec.ts`, so a correctly-ordered rail failed the
+    browser suite; missed because session 127 carried `e2e` rather than re-running it. The spec's
+    array now matches the app.
+    ⭐ DEF-0033 (minor, R-370). `e2e/invite.spec.ts`'s two completed-invite cases each land a real
+    viewer grant on Plant A for a throwaway address and never removed it, so the Access member list
+    grew by two rows every `--e2e` run. Best-effort fix: each case records its address and `afterAll`
+    removes the grant as Dana via `site_people` + `remove_site_member`, guarded so a cleanup that
+    cannot reach the stack never fails a green test. Stated limit: no service-role key here, so the
+    grant goes but the `auth.users` row remains (grant-less, out of the member list, which is R-370's
+    claim). R-370 stays `contradicted` until the tester verifies.
+    Both fix-claimed at c494cfe; neither run locally. The three older open defects (DEF-0029/30/31,
+    all seed/test-data, none in the Access surface) are untouched, awaiting their own turn.
 - id: 128
   date: 2026-09-10
   title: "Tester run: R-367/R-368/R-369 (Access tab) walked live and found correct; one stale rail-order pin and one unbounded invite-leak found on the way"
