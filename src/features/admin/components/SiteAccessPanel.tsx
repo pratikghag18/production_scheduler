@@ -297,42 +297,37 @@ export function SiteAccessPanel({
     );
   }
 
-  // ⭐ THE PERSON-LEVEL ACTION, ON ITS OWN LINE. Deactivate/Reactivate is not a
-  // node action like Remove (which sits in the aligned action column); it flips
-  // the whole account, so it takes its own full-width line under the row —
-  // visually separate, and free of the 6.5rem action column that would wrap
-  // its label. Rendered only for a company admin acting on someone else
+  // ⭐ THE PERSON-LEVEL ACTION, ITS OWN COLUMN (column 5). Deactivate/Reactivate
+  // flips the whole account, distinct from the node-scoped Remove in column 4;
+  // the maintainer asked for the two side by side in their own columns, same
+  // size. Rendered only for a company admin acting on someone else
   // (`canDeactivate` / `canReactivate`); exactly one button ever shows.
   function renderAccountLine(row: AccessRow) {
     const isPending = pendingProfileId === row.profileId;
     if (canDeactivate(row, viewerIsCompanyAdmin)) {
       return (
-        <div className={styles.accountLine}>
-          <button
-            type="button"
-            aria-label={`Deactivate ${labelFor(row)}`}
-            className={styles.deactivateBtn}
-            disabled={isPending}
-            onClick={() => runSetActive(row, false)}
-          >
-            Deactivate account
-          </button>
-        </div>
+        <button
+          type="button"
+          aria-label={`Deactivate ${labelFor(row)}`}
+          className={styles.deactivateBtn}
+          disabled={isPending}
+          onClick={() => runSetActive(row, false)}
+        >
+          Deactivate
+        </button>
       );
     }
     if (canReactivate(row, viewerIsCompanyAdmin)) {
       return (
-        <div className={styles.accountLine}>
-          <button
-            type="button"
-            aria-label={`Reactivate ${labelFor(row)}`}
-            className={styles.reactivateBtn}
-            disabled={isPending}
-            onClick={() => runSetActive(row, true)}
-          >
-            Reactivate account
-          </button>
-        </div>
+        <button
+          type="button"
+          aria-label={`Reactivate ${labelFor(row)}`}
+          className={styles.reactivateBtn}
+          disabled={isPending}
+          onClick={() => runSetActive(row, true)}
+        >
+          Reactivate
+        </button>
       );
     }
     return null;
@@ -506,6 +501,7 @@ export function SiteAccessPanel({
               <span>Person</span>
               <span>Access level</span>
               <span>Place</span>
+              <span />
               <span />
             </div>
             <ul className={styles.list}>
@@ -716,6 +712,7 @@ export function SiteAccessPanel({
                 <span>Person</span>
                 <span>Access level</span>
                 <span>Place</span>
+                <span />
                 <span />
               </div>
               <ul className={styles.list}>

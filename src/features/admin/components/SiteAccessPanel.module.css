@@ -82,7 +82,12 @@
      their own columns, rather than the place hiding in a link or a full-width
      line). Place is elastic because a node name can be long; the role and the
      action stay fixed so the right edge does not zig-zag. */
-  grid-template-columns: minmax(9rem, 1.7fr) 8.5rem minmax(7rem, 1.5fr) 6.5rem;
+  /* Person | Access level | Place | Remove | Deactivate. The two ACTION columns
+     are each their own fixed track (R-374): Remove is node-scoped, Deactivate is
+     account-scoped, and the maintainer asked for them side by side in their own
+     columns rather than stacked or crammed into one. Both fixed and equal so the
+     two buttons are the same width and the right edge does not zig-zag. */
+  grid-template-columns: minmax(8rem, 1.6fr) 8rem minmax(6rem, 1.3fr) 6.75rem 6.75rem;
   align-items: center;
   column-gap: 0.75rem;
   row-gap: 0.375rem;
@@ -178,9 +183,14 @@
   overflow-wrap: anywhere;
 }
 
+/* ⭐ ONE ROW-BUTTON SIZE, EVERY ACTION (the standard the maintainer expected).
+   Remove, Add, Deactivate and Reactivate share this exact box -- same width,
+   padding, border and radius -- so no two buttons on a row are different sizes.
+   Only the COLUMN and the text COLOUR change per action. */
 .removeBtn,
-.addBtn {
-  grid-column: 4;
+.addBtn,
+.deactivateBtn,
+.reactivateBtn {
   width: 100%;
   font-size: 0.7188rem;
   padding: 0.3125rem 0.5rem;
@@ -189,14 +199,33 @@
   background: var(--page);
   color: var(--ink-2);
   cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
 }
 
-.removeBtn {
+.removeBtn,
+.addBtn {
+  grid-column: 4;
+}
+.deactivateBtn,
+.reactivateBtn {
+  grid-column: 5;
+}
+
+/* Remove and Deactivate both take away access, so both are crit ink; Reactivate
+   restores it, so it reads as the positive action. */
+.removeBtn,
+.deactivateBtn {
   color: var(--crit);
+}
+.reactivateBtn {
+  color: var(--signal-ok, var(--ink));
 }
 
 .removeBtn:disabled,
-.addBtn:disabled {
+.addBtn:disabled,
+.deactivateBtn:disabled,
+.reactivateBtn:disabled {
   color: var(--muted);
   cursor: default;
 }
@@ -420,33 +449,6 @@
   letter-spacing: 0.03em;
   vertical-align: middle;
 }
-
-/* The person-level action sits on its own full-width line under the row (not in
-   the 6.5rem action column that would wrap its label), right-aligned so it does
-   not read as a fourth column control. */
-.accountLine {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.deactivateBtn,
-.reactivateBtn {
-  font-size: 0.7188rem;
-  padding: 0.25rem 0.625rem;
-  border-radius: 0.4375rem;
-  border: 1px solid var(--axis);
-  background: var(--page);
-  cursor: pointer;
-}
-.deactivateBtn {
-  color: var(--crit);
-}
-.reactivateBtn {
-  color: var(--signal-ok, var(--ink));
-}
-.deactivateBtn:disabled,
-.reactivateBtn:disabled {
-  color: var(--muted);
-  cursor: default;
-}
+/* The Deactivate / Reactivate button styling lives with the other row buttons
+   up top (`.removeBtn, .addBtn, .deactivateBtn, .reactivateBtn`), so every
+   action on a row is the same size; it sits in its own grid column (5). */
