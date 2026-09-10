@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 1246204
+  tip: '1246204'
   baseline:
     app_tests: 2714
     app_test_files: 132
@@ -12848,7 +12848,7 @@ sessions:
 - id: 132
   date: 2026-09-10
   title: "Activity tab gains a legend for its row accent colours (R-371)"
-  commits: [1246204]
+  commits: ['1246204']
   numbers:
     app_tests: 2714
     app_test_files: 132
