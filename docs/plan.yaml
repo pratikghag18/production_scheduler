@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 4905caf
+  tip: b3cf2bb
   baseline:
     app_tests: 2707
     app_test_files: 132
@@ -12704,7 +12704,7 @@ sessions:
 - id: 126
   date: 2026-09-10
   title: "Access rows made editable in place: level and place are each their own column, so Ana (granted a line) is changed from the plant view (R-368)"
-  commits: []
+  commits: [b3cf2bb]
   numbers:
     app_tests: 2707
     app_test_files: 132
