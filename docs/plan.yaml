@@ -4832,7 +4832,7 @@ requirements:
   - kind: vitest
     file: src/test/absenceOnBoard.test.tsx
     cases: "R-038c (F-125) pins the exact tooltip string; R-038c (DEF-0028) x2 rerender the panel with the same assignmentsByOperator and nodeById instances and only windowStart, then only zone, changed, and assert the title follows -- each goes red when its key is dropped from the memo"
-  status: contradicted
+  status: covered
   note: >-
     Linked 8 Sept (requirement audit) -- new cases in an existing file.
     ⛔ CONTRADICTED 9 Sept (tester, session 119, DEF-0028): the F-125 case added to R-038c ("so a
@@ -4847,6 +4847,10 @@ requirements:
     case, `zone` alone fails the zone case. The first draft built a fresh `nodeById` per render and
     stayed green under the mutation --- the same trap, one layer down --- so the helper's comment
     names it. Left `contradicted` until the tester verifies DEF-0028.
+    ✅ VERIFIED 9 Sept (tester, session 121), cold, at `83e8481`: re-ran the exact mutation
+    (`windowStart.getTime()` and `zone` dropped from the tooltip memo's key) against the fixed file
+    -- both new rerender cases go red by name (`AssertionError: expected '... Mon Sep 7 ...' to be
+    '... Tue Sep 8 ...'` and the zone equivalent), mutation reverted, tree clean after. `covered`.
 - id: R-039
   title: Shift templates attach to any node and resolve nearest-ancestor
   source:
@@ -9060,7 +9064,7 @@ requirements:
   - kind: e2e
     file: e2e/invite.spec.ts
     cases: "with the tester stack's env exported (E2E_MAIL_URL from tester-stack.mjs env) and E2E_PORT=5174, invite.spec.ts and passwordReset.spec.ts pass -- the five email-following cases DEF-0026 named among them"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 9 Sept (session 114, 99ef996). DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
     attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
@@ -9108,6 +9112,10 @@ requirements:
     remove what was real before vitest started), and restores it in a `finally`. Reproduced with the
     variable exported: 1 failed (TS10) before, 10 of 10 after; the full suite is 2669 either way.
     Left `contradicted` until the tester verifies DEF-0027 on its own run.
+    ✅ DEF-0027 VERIFIED 9 Sept (tester, session 121), cold, at `83e8481`: `node scripts/tester-run.mjs
+    --sql --e2e` against the tester's own stack, nothing exported by hand -- `ok vitest`, `ok count
+    matches the plan: 2669 in 131`, `playwright e2e` 44/44. No open defect remains against this
+    requirement. `covered`.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12557,6 +12565,49 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 121
+  date: 2026-09-09
+  title: "Tester run: DEF-0027 and DEF-0028 both verified clean -- R-366 and R-038 covered again"
+  commits: []
+  numbers:
+    app_tests: 2669
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `node scripts/tester-run.mjs --sql --e2e` against the tester's own stack, cold, nothing
+    exported by hand: `ok vitest`, `ok count matches the plan: 2669 in 131`. `db_checks` and
+    `migrations` unchanged (no SQL touched since the tip); `playwright e2e` 44/44 (the two
+    volume-fixture specs correctly skip). `database.types.ts` regenerated with the same
+    line-ending-only diff as every prior session on this stack (`git diff` empty after checkout);
+    `format:check`'s list is the same standing artifact.
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded c28b6d0 to 4cff93e cleanly (the developer's
+    session 120, one fix commit for both defects filed last session). Tester's own stack was still
+    up from session 119 (some optional containers -- imgproxy, analytics, vector, pooler -- had
+    stopped on their own; the ten this project actually uses were all healthy).
+    BOTH DEFECTS RE-VERIFIED COLD, AGAINST THE ACTUAL FIX RATHER THAN THE COMMIT MESSAGE'S ACCOUNT
+    OF IT. DEF-0027: the full tester run that used to show `1 failed | 2666 passed (2667)` on TS10
+    now reports `ok vitest` / `ok count matches the plan: 2669 in 131` with nothing exported by
+    hand -- read the fix first: TS10 now takes the ambient `E2E_MAIL_URL` out of `process.env`
+    directly for its fallback import and restores it in a `finally`, rather than trusting
+    `vi.unstubAllEnvs()` to remove a variable it never set. DEF-0028: reran the exact mutation
+    (`windowStart.getTime()` and `zone` dropped from `OperatorPanel`'s tooltip memo key) against the
+    fixed test file rather than taking the fix's own mutation account on trust -- both new rerender
+    cases go red by name this time (`expected '... Mon Sep 7 ...' to be '... Tue Sep 8 ...'` and the
+    zone equivalent), mutation reverted, tree clean after.
+    Both set `verified`. R-366 and R-038 both back to `covered` -- no open or reopened defect
+    remains anywhere in `docs/defects/`, confirmed by reading every file's `status` line rather than
+    assumed from the two just closed.
+    Nothing else in the diff since session 119's own run (this session's only commits are the
+    developer's test-only fix), so no new adversarial pass or screen walk was owed -- the one
+    performed last session against F-125's fix stands, and this session's job was narrowly to check
+    the two claims the developer made about closing the gaps it found.
+  shipped: []
 - id: 120
   date: 2026-09-09
   title: DEF-0027 and DEF-0028 fixed --- both were holes in the proof, and both fixes are tests
