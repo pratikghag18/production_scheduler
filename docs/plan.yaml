@@ -4,10 +4,10 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: '1246204'
+  tip: d0021ba
   baseline:
-    app_tests: 2714
-    app_test_files: 132
+    app_tests: 2716
+    app_test_files: 133
     tsc: 0
     eslint: 0
     db_checks: 823
@@ -9396,6 +9396,39 @@ requirements:
     black-and-white legibility but was never named. The legend is built from `ACTION_FILTERS` minus
     "all" and its swatches reuse the same `data-action` -> token mapping the accents do, so there is
     one source for which colour is which action. No migration; presentation only.
+- id: R-372
+  title: Long-row tabs freeze the column header while the rows scroll within a bounded region --- an app-wide standard
+  source:
+  - session 133 conversation
+  stated_by: maintainer
+  claim: >-
+    Any tab that can list a large number of rows scrolls the rows within a bounded region, not the
+    page, so the column header (and any header controls) stay frozen while the body scrolls. It is
+    an app-wide DESIGN STANDARD, recorded in `docs/conventions.md` and enforced by an audit the way
+    the pop-up standard is: the scroll container is bounded (`max-height`) and scrolls
+    (`overflow: auto`), and the header cells are `position: sticky; top: 0`. The Activity tab is the
+    first surface under it; the other long-row tabs (Operators, Products, Matrix, Trainings, Cycle
+    times) join it as they are brought under the standard.
+  verified_by:
+  - kind: vitest
+    file: src/test/stickyHeaderStandard.test.ts
+    cases: "the registered Activity surface's scroll container is bounded and scrolls and its header is position:sticky top:0; and the offence function is not vacuous -- it flags an unbounded container and a non-sticky header on synthetic CSS"
+  - kind: manual
+    steps: "10 Sept, developer stack, Activity tab: scrolling a long log keeps the When/Who/What/Change header row visible instead of losing it off the top --- left for a live/tester confirm in the browser; the audit proves the CSS recipe is in place."
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 133). DECIDED 10 Sept (maintainer): *"in all tabs where there could be a
+    large amount of rows like the activity, we should have the rows scrolled within the window
+    keeping the top portion frozen ... Right now, I scroll and the top portion goes away and I can't
+    see the column names at all ... It should be recorded as a standard design choice just like we
+    have for pop up window."* The Activity `.th` was already `position: sticky; top: 0`, but `.scroll`
+    only set `overflow-x` with no height bound, so the region grew to its content and the PAGE
+    scrolled --- taking the header with it. `.scroll` now sets `overflow: auto` and
+    `max-height: min(65dvh, 44rem)`, which is what makes the sticky header real. Recorded as a
+    standard in `docs/conventions.md` under "Design standards" beside the pop-up one, and enforced by
+    `stickyHeaderStandard.test.ts`, a registry-plus-offence-function audit in the same shape as
+    `popoverStandard.test.ts`. Activity is the one registered surface; rolling the other long-row
+    tabs into the registry is queued (`next`). No migration; presentation only.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12845,6 +12878,41 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 133
+  date: 2026-09-10
+  title: "Frozen table headers made an app-wide standard, applied to Activity (R-372); the rollout to the other long-row tabs queued"
+  commits: [d0021ba]
+  numbers:
+    app_tests: 2716
+    app_test_files: 133
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run this session: `Test Files 133 passed (133)`, `Tests 2716 passed (2716)` ---
+    up from 2714 by the two cases in the new `stickyHeaderStandard.test.ts` (the +1 file). `tsc` and
+    `eslint` clean. No SQL, no migration.
+  summary: >-
+    Maintainer: *"in all tabs where there could be a large amount of rows like the activity, we
+    should have the rows scrolled within the window keeping the top portion frozen ... the top
+    portion goes away and I can't see the column names ... recorded as a standard design choice just
+    like we have for pop up window."* The Activity `.th` was already `position: sticky; top: 0`, but
+    `.scroll` set only `overflow-x` with no height cap, so the region grew to its content and the
+    PAGE scrolled --- the header left with it. `.scroll` now sets `overflow: auto` and
+    `max-height: min(65dvh, 44rem)`, which makes the sticky header real.
+    ⭐ RECORDED AS A STANDARD, ENFORCED. Added a "Design standards" section to `docs/conventions.md`
+    beside the pop-up standard, and `stickyHeaderStandard.test.ts` --- a registry of list surfaces
+    plus a pure offence function, the same shape as `popoverStandard.test.ts` --- fails the build if
+    a registered surface's scroll container is unbounded or its header is not sticky. Activity is the
+    first registered surface.
+    NOT DONE, QUEUED (`next`, R-372): the other long-row tabs (Operators, Products, Matrix,
+    Trainings, Cycle times) join the standard one at a time --- several are CSS-grid `ul` lists whose
+    header is a `.head` row, so each is its own small layout change best done with a look at the
+    running app. The reported tab (Activity) is fixed now.
+    Also this session: R-371 (the Activity colour legend) shipped just before, at 1246204.
 - id: 132
   date: 2026-09-10
   title: "Activity tab gains a legend for its row accent colours (R-371)"
@@ -18978,6 +19046,17 @@ next:
 # bug lives in. A case that follows the RAW emailed link is now in
 # `e2e/passwordReset.spec.ts` and is named in R-347.
 # ---------------------------------------------------------------------------
+- kind: task
+  requirement: R-372
+  text: Bring the other long-row tabs under the frozen-header standard (Operators, Products, Matrix, Trainings, Cycle times)
+  why: >-
+    R-372 shipped the standard and applied it to Activity, the tab the maintainer reported. The rule
+    is "in ALL tabs where there could be a large amount of rows." Each remaining long-row tab needs a
+    bounded scroll container with a sticky header and a row added to `STICKY_HEADER_SURFACES` in
+    `src/test/stickyHeaderStandard.test.ts`, which turns the audit on for it. Several use a CSS-grid
+    `ul` rather than a `<table>`, so the header there is the `.head` row, not a `<thead>` -- the same
+    recipe (bounded `overflow:auto` container, `position:sticky; top:0` header) applies, but each is
+    its own small layout change and wants a look in the running app.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   decided: true
