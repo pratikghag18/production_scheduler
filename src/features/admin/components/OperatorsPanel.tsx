@@ -719,30 +719,39 @@ export function OperatorsPanel() {
             <span>Show deactivated people</span>
           </label>
 
-          <ul className={styles.peopleList}>
-            {rows.map((row) => (
-              <li key={row.id}>
-                <button
-                  type="button"
-                  className={row.id === selectedId ? styles.personOn : styles.person}
-                  onClick={() => {
-                    setSelectedId(row.id);
-                    setRenaming(false);
-                    setConfirmDelete(false);
-                    setNotice(null);
-                  }}
-                >
-                  <span className={styles.personName}>{row.displayName}</span>
-                  <span className={styles.personMeta}>
-                    {row.employeeRef ?? "no reference"} ·{" "}
-                    {row.ticketCount === 1 ? "1 training" : `${row.ticketCount} trainings`}
-                    {!row.active && <span className={styles.badge}>deactivated</span>}
-                  </span>
-                </button>
-              </li>
-            ))}
-            {rows.length === 0 && <li className={styles.status}>Nobody matches that.</li>}
-          </ul>
+          {/* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers",
+              R-372). The people list can run to a hundred rows; it scrolls
+              WITHIN this bounded box so `.peopleHead` stays put rather than
+              the whole page scrolling and the column head leaving with it. */}
+          <div className={styles.tableScroll}>
+            <div className={styles.peopleHead} aria-hidden="true">
+              Person
+            </div>
+            <ul className={styles.peopleList}>
+              {rows.map((row) => (
+                <li key={row.id}>
+                  <button
+                    type="button"
+                    className={row.id === selectedId ? styles.personOn : styles.person}
+                    onClick={() => {
+                      setSelectedId(row.id);
+                      setRenaming(false);
+                      setConfirmDelete(false);
+                      setNotice(null);
+                    }}
+                  >
+                    <span className={styles.personName}>{row.displayName}</span>
+                    <span className={styles.personMeta}>
+                      {row.employeeRef ?? "no reference"} ·{" "}
+                      {row.ticketCount === 1 ? "1 training" : `${row.ticketCount} trainings`}
+                      {!row.active && <span className={styles.badge}>deactivated</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {rows.length === 0 && <li className={styles.status}>Nobody matches that.</li>}
+            </ul>
+          </div>
           {/* ⚠️ TRIMMED, NOT SILENT — the same rule as the two footnotes under
               the places list, and the one the maintainer will look at first.
               Named by `plant.label`, which is the chosen plant's OWN NAME:

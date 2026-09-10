@@ -162,11 +162,33 @@
 }
 
 /* ---- the grid ---- */
+/* ⭐ THE FROZEN-HEADER STANDARD (docs/conventions.md "Frozen table headers",
+   R-372). The matrix can run long in BOTH directions, so it keeps its existing
+   horizontal scroll and gains a vertical bound: `overflow: auto` (not
+   `overflow-x` alone) plus a viewport-relative `max-height` is what makes the
+   region actually scroll instead of growing to its content and handing the
+   scroll to the page -- see `.thead` below for the sticky half. */
 .scroll {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: min(60dvh, 40rem);
+  overscroll-behavior: contain;
   border: 1px solid var(--axis);
   border-radius: 0.625rem;
   background: var(--surface);
+}
+
+/* The header is TWO stacked rows (the area/line bands, then the training
+   names), so no single `top: 0` on a header cell has anywhere fixed to pin --
+   the second row's offset would depend on the first row's rendered height,
+   which varies with `headerRows`. Sticking the `<thead>` itself pins both
+   rows as one block; the frozen `.op` corner cell inside it only has to
+   handle its own axis (`left: 0`, already on `.op`) because it is already
+   riding inside a thead that no longer moves vertically once stuck. */
+.thead {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--page);
 }
 
 .mx {

@@ -1250,7 +1250,11 @@ export function ShiftsPanel() {
                   : `No shift patterns in ${plant.label}.`}
               </p>
             ) : (
-              <>
+              /* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers",
+                 R-372). `.listHead` pins to the top of this bounded box while
+                 every row underneath it — live AND retired — scrolls beneath,
+                 so the column names never leave with the page. */
+              <div className={styles.tableScroll}>
                 <div className={styles.listHead}>
                   <span>Pattern</span>
                   <span>Owned by</span>
@@ -1291,7 +1295,7 @@ export function ShiftsPanel() {
                     <ul className={styles.list}>{retiredPatterns.map(renderPattern)}</ul>
                   </>
                 )}
-              </>
+              </div>
             )}
 
             {/* ⚠️ TRIMMED, NOT SILENT — and named by `plant.label` rather than

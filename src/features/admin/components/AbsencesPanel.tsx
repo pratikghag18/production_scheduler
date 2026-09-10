@@ -375,56 +375,63 @@ export function AbsencesPanel() {
       {rows.length === 0 ? (
         <p className={styles.muted}>No absences recorded for the people in view.</p>
       ) : (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Person</th>
-              <th>From</th>
-              <th>To</th>
-              <th>Hours</th>
-              <th>Reason</th>
-              <th aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => {
-              // R-359: a part-day row's own person's zone — never the plant
-              // filter (decision 4) — resolved above per distinct place needed.
-              const zone =
-                a.startsAt !== undefined
-                  ? (zoneByNodeId.get(siteNodeIdByOperator.get(a.operatorId) ?? "") ?? null)
-                  : null;
-              return (
-                <tr key={a.id}>
-                  <td>{nameById.get(a.operatorId) ?? "—"}</td>
-                  <td>{formatCalendarDay(a.from, dateFormat)}</td>
-                  <td>{formatCalendarDay(a.to, dateFormat)}</td>
-                  <td>
-                    {a.startsAt !== undefined && a.endsAt !== undefined && zone !== null
-                      ? `${formatClock(new Date(a.startsAt), zone)}–${formatClock(new Date(a.endsAt), zone)} (${zone})`
-                      : "—"}
-                  </td>
-                  <td>{a.reason}</td>
-                  <td className={styles.actions}>
-                    <button
-                      className={fieldStyles.btn}
-                      type="button"
-                      onClick={() => remove(a.id)}
-                      disabled={removeMutation.isPending}
-                    >
-                      Remove
-                    </button>
-                    {rowError !== null && rowError.id === a.id && (
-                      <span className={styles.error} role="alert">
-                        {rowError.message}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        /* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers", R-372).
+           The list of absences can run long; it scrolls WITHIN this bounded box
+           so the column header (`.th`, sticky) stays put instead of leaving
+           with the page. Same standard as Activity, which this panel — with no
+           `.card` of its own — otherwise matches most closely. */
+        <div className={styles.scroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th className={styles.th}>Person</th>
+                <th className={styles.th}>From</th>
+                <th className={styles.th}>To</th>
+                <th className={styles.th}>Hours</th>
+                <th className={styles.th}>Reason</th>
+                <th className={styles.th} aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((a) => {
+                // R-359: a part-day row's own person's zone — never the plant
+                // filter (decision 4) — resolved above per distinct place needed.
+                const zone =
+                  a.startsAt !== undefined
+                    ? (zoneByNodeId.get(siteNodeIdByOperator.get(a.operatorId) ?? "") ?? null)
+                    : null;
+                return (
+                  <tr key={a.id}>
+                    <td>{nameById.get(a.operatorId) ?? "—"}</td>
+                    <td>{formatCalendarDay(a.from, dateFormat)}</td>
+                    <td>{formatCalendarDay(a.to, dateFormat)}</td>
+                    <td>
+                      {a.startsAt !== undefined && a.endsAt !== undefined && zone !== null
+                        ? `${formatClock(new Date(a.startsAt), zone)}–${formatClock(new Date(a.endsAt), zone)} (${zone})`
+                        : "—"}
+                    </td>
+                    <td>{a.reason}</td>
+                    <td className={styles.actions}>
+                      <button
+                        className={fieldStyles.btn}
+                        type="button"
+                        onClick={() => remove(a.id)}
+                        disabled={removeMutation.isPending}
+                      >
+                        Remove
+                      </button>
+                      {rowError !== null && rowError.id === a.id && (
+                        <span className={styles.error} role="alert">
+                          {rowError.message}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

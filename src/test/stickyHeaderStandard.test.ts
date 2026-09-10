@@ -58,6 +58,56 @@ export const STICKY_HEADER_SURFACES: ReadonlyArray<{
     scroll: "tableScroll",
     header: "head",
   },
+  // Every long-row admin tab, brought under the standard together (R-372, the
+  // maintainer: it must apply to ALL current and future tabs). A grid list uses
+  // a sticky `.head`/`.listHead`/`.peopleHead`; a `<table>` uses sticky `.th`.
+  {
+    name: "Operators (OperatorsPanel)",
+    cssModule: "src/features/admin/components/OperatorsPanel.module.css",
+    scroll: "tableScroll",
+    header: "peopleHead",
+  },
+  {
+    name: "Products (ProductsPanel)",
+    cssModule: "src/features/admin/components/ProductsPanel.module.css",
+    scroll: "tableScroll",
+    header: "head",
+  },
+  {
+    name: "Trainings (TrainingsPanel)",
+    cssModule: "src/features/admin/components/TrainingsPanel.module.css",
+    scroll: "tableScroll",
+    header: "head",
+  },
+  {
+    name: "Shifts (ShiftsPanel)",
+    cssModule: "src/features/admin/components/ShiftsPanel.module.css",
+    scroll: "tableScroll",
+    header: "listHead",
+  },
+  {
+    name: "Absences (AbsencesPanel)",
+    cssModule: "src/features/admin/components/AbsencesPanel.module.css",
+    scroll: "scroll",
+    header: "th",
+  },
+  {
+    // The Matrix has TWO stacked header rows (area/line bands, then training
+    // names), so the whole `<thead>` is made sticky as one block rather than
+    // per-cell — a single `top: 0` cannot pin the second row, whose offset
+    // depends on the first row's height. The left frozen-label column composes
+    // with this on its own `left: 0` axis.
+    name: "Matrix (MatrixPanel)",
+    cssModule: "src/features/admin/components/MatrixPanel.module.css",
+    scroll: "scroll",
+    header: "thead",
+  },
+  {
+    name: "Cycle times (CycleTimesPanel)",
+    cssModule: "src/features/admin/components/CycleTimesPanel.module.css",
+    scroll: "scroll",
+    header: "colHead",
+  },
 ];
 
 function stripComments(css: string): string {

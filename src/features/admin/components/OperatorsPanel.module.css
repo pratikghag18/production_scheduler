@@ -131,9 +131,33 @@
   gap: 0.25rem;
 }
 
-.peopleList {
-  max-height: 22rem;
-  overflow-y: auto;
+/* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers", R-372). Same
+   recipe as SiteAccessPanel's `.tableScroll`/`.head`: the people list can run
+   to a hundred rows, so it scrolls WITHIN this bounded box while `.peopleHead`
+   stays pinned to the top of it. `dvh` follows the visible viewport on mobile
+   chrome; `min` caps it on a tall screen. `overscroll-behavior` keeps a
+   scroll gesture that reaches the end from scrolling the page behind it. */
+.tableScroll {
+  overflow: auto;
+  max-height: min(55dvh, 32rem);
+  overscroll-behavior: contain;
+}
+
+/* The one-word column head above the people list — decorative (each row
+   already names itself via `.personName`/`.personMeta`), same treatment as
+   SiteAccessPanel's `aria-hidden` grid header. Opaque background matches the
+   `.people` card it sits inside, and a z-index above the rows is what stops a
+   scrolling row showing through it. */
+.peopleHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
 }
 
 .person,

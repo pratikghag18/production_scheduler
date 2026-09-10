@@ -880,15 +880,21 @@ export function ProductsPanel() {
         {active.length === 0 ? (
           <p className={styles.status}>Nothing here yet.</p>
         ) : (
-          <ul className={styles.list}>
-            <li className={styles.head}>
-              <span>Code</span>
-              <span>Name</span>
-              <span>Made in</span>
-              <span />
-            </li>
-            {active.map(renderRow)}
-          </ul>
+          // ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers", R-372).
+          // The catalogue can run to a hundred parts; it scrolls WITHIN this
+          // bounded box so the column header stays put, the same standard
+          // Access satisfies with a sticky grid header rather than a <table>.
+          <div className={styles.tableScroll}>
+            <ul className={styles.list}>
+              <li className={styles.head}>
+                <span>Code</span>
+                <span>Name</span>
+                <span>Made in</span>
+                <span />
+              </li>
+              {active.map(renderRow)}
+            </ul>
+          </div>
         )}
 
         {/* Retired products are an ordinary, populated part of this screen —

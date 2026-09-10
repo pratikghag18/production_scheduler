@@ -1180,15 +1180,22 @@ export function TrainingsPanel() {
         {live.length === 0 ? (
           <p className={styles.status}>Nothing here yet.</p>
         ) : (
-          <ul className={styles.list}>
-            <li className={styles.head}>
-              <span>Name</span>
-              <span>Document number</span>
-              <span>Belongs to</span>
-              <span />
-            </li>
-            {live.map(renderRow)}
-          </ul>
+          /* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers", R-372).
+             The in-use list can run long; it scrolls WITHIN this bounded box so
+             `.head` stays put instead of leaving with the page. Same standard as
+             Activity and Access, satisfied here by a sticky grid header — this
+             list is a `<ul>` of grid rows, not a `<table>`. */
+          <div className={styles.tableScroll}>
+            <ul className={styles.list}>
+              <li className={styles.head}>
+                <span>Name</span>
+                <span>Document number</span>
+                <span>Belongs to</span>
+                <span />
+              </li>
+              {live.map(renderRow)}
+            </ul>
+          </div>
         )}
 
         {/* Retired trainings are an ordinary, populated part of this screen —

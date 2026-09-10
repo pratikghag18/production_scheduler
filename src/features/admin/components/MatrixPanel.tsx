@@ -385,7 +385,7 @@ export function MatrixPanel() {
       ) : (
         <div className={styles.scroll}>
           <table className={styles.mx}>
-            <thead>
+            <thead className={styles.thead}>
               {columns.bands.map((band, b) => (
                 <tr key={b} className={styles.groupRow}>
                   {b === 0 && (

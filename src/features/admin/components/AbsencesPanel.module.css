@@ -44,6 +44,23 @@
   color: var(--muted);
 }
 
+/* ⭐ THE BOUNDED SCROLL REGION (docs/conventions.md "Frozen table headers",
+   R-372). This panel has no `.card` of its own — like Activity, the table sits
+   directly on the page — so the scroll box carries its own surface, border and
+   radius rather than borrowing a card's. The absence list scrolls WITHIN this
+   box, not the page, so the sticky `.th` stays put. `dvh` follows the visible
+   viewport on mobile chrome; `min` caps it on a tall screen.
+   `overscroll-behavior` keeps a scroll gesture that reaches the end from
+   scrolling the page behind it. */
+.scroll {
+  overflow: auto;
+  max-height: min(60dvh, 40rem);
+  overscroll-behavior: contain;
+  border: 1px solid var(--grid);
+  border-radius: 0.375rem;
+  background: var(--surface);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -61,6 +78,19 @@
 .table th {
   font-weight: 600;
   color: var(--muted);
+}
+
+/* The sticky header cell itself. A SEPARATE class from the `.table th` tag
+   selector above (which still supplies the padding, weight and colour): the
+   two rules union on the actual `<th>`, exactly like `.head`/`.row` elsewhere
+   in this codebase. An OPAQUE background is what stops a scrolling row
+   showing through it — `--page`, matching Activity's `.th`, since this box's
+   own background is `--surface`. */
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--page);
 }
 
 .actions {

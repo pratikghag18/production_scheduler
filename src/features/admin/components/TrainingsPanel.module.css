@@ -156,12 +156,31 @@
 }
 
 .head {
+  /* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers", R-372). The
+     header is a sticky grid row: it pins to the top of `.tableScroll` while the
+     rows scroll under it. An OPAQUE background (the card's own `--surface`) and
+     a z-index above the rows are what stop a scrolling row showing through it. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
   padding-top: 0;
   padding-bottom: 0.25rem;
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--muted);
+}
+
+/* ⭐ THE BOUNDED SCROLL REGION (R-372). The in-use list can run to a hundred
+   trainings; it scrolls WITHIN this box, not the page, so the sticky `.head`
+   above stays put. `dvh` follows the visible viewport on mobile chrome; `min`
+   caps it on a tall screen. `overscroll-behavior` keeps a scroll gesture that
+   reaches the end from scrolling the page behind it. */
+.tableScroll {
+  overflow: auto;
+  max-height: min(55dvh, 34rem);
+  overscroll-behavior: contain;
 }
 
 .row {

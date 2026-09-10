@@ -146,12 +146,30 @@
 }
 
 .head {
+  /* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers", R-372). Same
+     recipe as SiteAccessPanel's `.head`: a sticky grid row, pinned to the top
+     of `.tableScroll`, opaque so a scrolling row cannot show through it. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
   padding-top: 0;
   padding-bottom: 0.25rem;
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--muted);
+}
+
+/* ⭐ THE BOUNDED SCROLL REGION (R-372). The "in use" catalogue can run to a
+   hundred parts; it scrolls WITHIN this box, not the page, so the sticky
+   `.head` above stays put. `dvh` follows the visible viewport on mobile
+   chrome; `min` caps it on a tall screen. `overscroll-behavior` keeps a
+   scroll gesture that reaches the end from scrolling the page behind it. */
+.tableScroll {
+  overflow: auto;
+  max-height: min(55dvh, 34rem);
+  overscroll-behavior: contain;
 }
 
 .row {
