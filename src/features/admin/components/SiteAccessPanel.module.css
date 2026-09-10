@@ -355,3 +355,20 @@
   letter-spacing: 0.03em;
   vertical-align: middle;
 }
+
+/* ---------------------------------------------------------------------------
+   ADD ABOVE MEMBERS (R-369). The member list can be long; the add/invite block
+   belongs by the search, not a hundred rows below it. The DOM keeps the member
+   list first (a screen reader reads the standing list before the transient add
+   results); `order` alone moves the paint, so the add block sits on top.
+   --------------------------------------------------------------------------- */
+.lists {
+  display: flex;
+  flex-direction: column;
+}
+.addBlock {
+  order: 1;
+}
+.membersBlock {
+  order: 2;
+}

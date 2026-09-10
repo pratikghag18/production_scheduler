@@ -227,3 +227,26 @@ describe("R-368 Edit in place: a member's level and place are each their own col
     expect(screen.queryByLabelText(/Access level for ana@example.test/i)).toBeNull();
   });
 });
+
+describe("R-369 Layout: order and the add section", () => {
+  it("the member list is highest access first, then A–Z (boss admin, then ana, then sam)", () => {
+    render(panel(), { wrapper: wrapper() });
+    const emails = screen
+      .getAllByText(/@example\.test$/)
+      .map((n) => n.textContent)
+      .filter((t) => t && !t.includes("nobody"));
+    // boss (admin) outranks the two supervisors; ana before sam within the tier.
+    expect(emails.slice(0, 3)).toEqual([
+      "boss@example.test",
+      "ana@example.test",
+      "sam@example.test",
+    ]);
+  });
+
+  it("the Add someone section is hidden until a search is running", () => {
+    render(panel(), { wrapper: wrapper() });
+    expect(screen.queryByRole("heading", { name: "Add someone" })).toBeNull();
+    searchFor("nobody@example.test");
+    expect(screen.getByRole("heading", { name: "Add someone" })).toBeTruthy();
+  });
+});

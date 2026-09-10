@@ -6,7 +6,7 @@ meta:
   updated: '2026-09-10'
   tip: b3cf2bb
   baseline:
-    app_tests: 2707
+    app_tests: 2712
     app_test_files: 132
     tsc: 0
     eslint: 0
@@ -9252,6 +9252,55 @@ requirements:
     open-the-node link. Baseline 2699 -> 2707; tsc and eslint clean; no migration.
     NOT independently verified and NOT walked in a live browser this session --- `covered` rests on
     the two vitest suites; the tester's cold run is the outside check still owed.
+- id: R-369
+  title: The Access list reads highest-access-first then A–Z, the Add block sits by the search not the bottom, and Activity precedes Settings in the rail
+  source:
+  - session 127 conversation
+  stated_by: maintainer
+  claim: >-
+    Three orderings on the admin surfaces the maintainer asked for together. (1) The "Has access"
+    list is sorted from the highest access level to the lowest --- a company admin first, then admin,
+    supervisor, viewer --- and alphabetically by email within each tier, an address-less row last.
+    (2) The "Add someone" results and the invite sit BY THE SEARCH BOX, above the member list, and
+    do not stand as an empty section at the bottom of a long list; adding is driven from the search.
+    (3) In the admin rail, Activity comes before Settings.
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: "R-369: accessRank ranks company admin above admin above supervisor above viewer, by the most powerful route in; sortMembers orders by tier then email A–Z (case-insensitive), an address-less row last, and returns a copy rather than sorting in place"
+  - kind: vitest
+    file: src/test/siteAccessNodePicker.test.tsx
+    cases: "R-369 on the DOM: the member list paints highest-access-first then A–Z (an admin above two supervisors, ana before sam); the Add someone section is absent until a search is running and appears when one is"
+  - kind: vitest
+    file: src/test/scaleAudit.test.ts
+    cases: "H2: the rail's twelve ids in order now read ... templates, audit, settings (Activity before Settings)"
+  - kind: vitest
+    file: src/test/adminNoGrants.test.tsx
+    cases: "N7: a company admin's full rail labels end ... Templates, Activity, Settings"
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 127). DECIDED 10 Sept (maintainer, from the running app): *"we want to
+    display the list from highest access level to lowest and then alphabetically within that tier ...
+    The add someone at the bottom, is it redundant since there is no option to add someone from
+    there? No one is going to scroll down if there are 100 operators ... Swap the settings and
+    activity tab."*
+    Three ordering changes, no migration. `accessRank`/`sortMembers` sort the member list (pure,
+    tested); the panel sorts what `partitionAccess` returns. The Add block is rendered only while a
+    search is running and `order`ed above the member list (the DOM keeps the standing list first for
+    a screen reader; `order` moves only the paint), which drops the dead "Add someone / search above"
+    section that used to sit a hundred rows down --- the maintainer's "redundant" and "no one
+    scrolls". The `settings`/`audit` entries in `SECTIONS` are swapped, and the two order pins that
+    guard the rail (`scaleAudit` H2, `adminNoGrants` N7) plus the `DEF-0008` rail pin were updated to
+    the new order. Baseline 2707 -> 2712; tsc and eslint clean.
+    ⚠️ SEPARATE, AND ANSWERED NOT BUILT: *"There is only a button to remove a user, no way to
+    deactivate one, is this an issue?"* Assessed, no code. Remove here revokes a login/management
+    GRANT (profile_grants); it does not touch the person's account or their OPERATOR record, which
+    already carries its own active/Deactivate (operators.active, `deletion.ts`). So Remove is not
+    destructive to history and re-adding restores access. A soft "suspend access" that keeps the
+    grant but disables it would be a real new feature (a column on `profile_grants` plus server
+    support); left for the maintainer to call. Recorded here so the decision is not lost.
+    NOT independently verified and NOT walked in a live browser --- `covered` rests on the vitest
+    suites; the tester's cold run is the outside check still owed for R-367/R-368/R-369.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12701,6 +12750,41 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 127
+  date: 2026-09-10
+  title: "Access list sorted highest-access-first then A–Z, Add block moved up by the search, Activity before Settings; deactivate-vs-remove assessed not built (R-369)"
+  commits: []
+  numbers:
+    app_tests: 2712
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run in this session, the total line copied: `Test Files 132 passed (132)`,
+    `Tests 2712 passed (2712)`. Up from 2707 by 5: three pure sort cases in `siteAccess.test.ts` and
+    two DOM cases in `siteAccessNodePicker.test.tsx`. Three existing order pins were UPDATED, not
+    added, for the tab swap (`scaleAudit` H2, `adminNoGrants` N7, `defects/DEF-0008`). `db_checks`
+    (823) and `migrations` (73) carried --- no SQL. `e2e` (44) carried, NOT re-run.
+  summary: >-
+    Four things from the maintainer looking at the Access tab, three built and one answered. BUILT
+    (R-369): the member list now reads highest access first then A–Z within the tier
+    (`accessRank`/`sortMembers`, pure and tested); the "Add someone" block is rendered only while a
+    search runs and painted above the member list by flex `order`, so the dead bottom section a
+    hundred rows down is gone --- the maintainer's *"redundant ... no one is going to scroll down if
+    there are 100 operators"*; and Activity is swapped above Settings in the rail, with the three
+    order pins that guard it updated to match.
+    ANSWERED, NOT BUILT: *"There is only a button to remove a user, no way to deactivate one, is this
+    an issue?"* Remove here revokes a login/management GRANT, not the person's account or their
+    operator record (which already has its own Deactivate). So it is not destructive and re-adding
+    restores access; a soft suspend-access that keeps the grant disabled would be a genuine new
+    feature and is left for the maintainer to call. Written into R-369's note so the decision is not
+    lost.
+    Continuation of R-367 (session 125) and R-368 (session 126); the tester's cold browser walk is
+    the outside check owed for all three.
 - id: 126
   date: 2026-09-10
   title: "Access rows made editable in place: level and place are each their own column, so Ana (granted a line) is changed from the plant view (R-368)"

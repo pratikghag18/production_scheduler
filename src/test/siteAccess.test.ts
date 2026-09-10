@@ -44,9 +44,11 @@ import {
   resolvePlace,
   ROLES_BELOW_ROOT,
   GRANT_ROLES,
+  sortMembers,
   subtreeOptions,
   rolesForNode,
   moveTargets,
+  accessRank,
   canManageAccess,
   canRemoveGrant,
   grantRoleOptions,
@@ -1234,3 +1236,46 @@ check(
       : "an ordinary supervisor was not removable";
   },
 );
+
+// ---------------------------------------------------------------------------
+// R-369 -- the member list order: highest access tier first, then email A–Z.
+// ---------------------------------------------------------------------------
+
+check("R-369 accessRank: company admin outranks admin, then supervisor, then viewer", () => {
+  const boss = byId(P_BOSS); // company admin
+  const dana = stranger({ directRole: "admin", hasAccess: true });
+  const sam = byId(P_SAM); // supervisor on plant
+  const viva = stranger({ directRole: "viewer", hasAccess: true });
+  const inh = byId(P_RAJ); // admin, but INHERITED (below) -> still ranks as admin
+  const order = [boss, dana, sam, viva].map(accessRank).join(",");
+  if (order !== "0,1,2,3") return `ranks wrong: ${order}`;
+  return accessRank(inh) === 1 ? true : `inherited admin ranked ${accessRank(inh)}`;
+});
+
+check("R-369 sortMembers: tier first, then email A–Z, address-less last, and it is a copy", () => {
+  const rows: AccessRow[] = [
+    stranger({ email: "zoe@x", directRole: "viewer", hasAccess: true }),
+    stranger({ email: "ana@x", directRole: "admin", hasAccess: true }),
+    stranger({ email: null, directRole: "admin", hasAccess: true }),
+    stranger({ email: "bob@x", directRole: "admin", hasAccess: true }),
+    stranger({ email: "cara@x", companyAdmin: true, hasAccess: true }),
+  ];
+  const before = rows.slice();
+  const got = sortMembers(rows).map((r) => r.email);
+  // company admin first; then the three admins A–Z with the null last; then the viewer.
+  if (JSON.stringify(got) !== JSON.stringify(["cara@x", "ana@x", "bob@x", null, "zoe@x"])) {
+    return `order: ${JSON.stringify(got)}`;
+  }
+  return rows.every((r, i) => r === before[i]) ? true : "sorted in place instead of copying";
+});
+
+check("R-369 sortMembers: the A–Z within a tier is case-insensitive", () => {
+  const rows: AccessRow[] = [
+    stranger({ email: "Bianca@x", directRole: "supervisor", hasAccess: true }),
+    stranger({ email: "alan@x", directRole: "supervisor", hasAccess: true }),
+  ];
+  const got = sortMembers(rows).map((r) => r.email);
+  return JSON.stringify(got) === JSON.stringify(["alan@x", "Bianca@x"])
+    ? true
+    : JSON.stringify(got);
+});

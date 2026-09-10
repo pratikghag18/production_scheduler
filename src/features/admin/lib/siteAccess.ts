@@ -751,3 +751,37 @@ export function canRemoveGrant(
   if (row.isSelf && !viewerIsCompanyAdmin && grant.role === "admin") return false;
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// ORDERING THE MEMBER LIST (R-369). The maintainer: *"we want to display the
+// list from highest access level to lowest and then alphabetically within that
+// tier."* Highest first: a company admin outranks any grant, then admin,
+// supervisor, viewer; within a tier, by email A–Z with an address-less row
+// last (it can never be the thing you scanned the column for).
+// ---------------------------------------------------------------------------
+
+/** 0 (highest) to 4. Ranks by the MOST powerful route in, as `describeAccess` reads it. */
+export function accessRank(row: AccessRow): number {
+  if (row.companyAdmin) return 0;
+  const roles: (GrantRole | null)[] = [row.directRole, ...row.inheritedGrants.map((g) => g.role)];
+  if (roles.includes("admin")) return 1;
+  if (roles.includes("supervisor")) return 2;
+  if (roles.includes("viewer")) return 3;
+  return 4;
+}
+
+/** Access tier first, then email A–Z (case-insensitive); a row with no address sorts last. */
+export function compareMembers(a: AccessRow, b: AccessRow): number {
+  const ra = accessRank(a);
+  const rb = accessRank(b);
+  if (ra !== rb) return ra - rb;
+  if (a.email === null && b.email === null) return 0;
+  if (a.email === null) return 1;
+  if (b.email === null) return -1;
+  return a.email.localeCompare(b.email, "en", { sensitivity: "base" });
+}
+
+/** The member list in display order (R-369). A copy; never sorts in place. */
+export function sortMembers(rows: readonly AccessRow[]): AccessRow[] {
+  return rows.slice().sort(compareMembers);
+}

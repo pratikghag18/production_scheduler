@@ -317,8 +317,8 @@ describe("the admin screen explains an empty scope instead of showing one", () =
       "Cycle times",
       "Import",
       "Templates",
-      "Settings",
       "Activity",
+      "Settings",
     ]);
   });
 

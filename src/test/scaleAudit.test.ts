@@ -507,20 +507,17 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       // R-356 / 0067: named week templates for the chosen plant, admins only.
       // The id is in SECTIONS and has a render branch, which is what H2 guards.
       "templates",
+      // ⭐ R-369: Activity now sits ABOVE Settings — the maintainer's "swap the
+      // settings and activity tab". The audit log, company-admin ONLY, a
+      // stricter gate than any other section's because `audit_log_select`
+      // (0008) hands a SITE admin zero rows rather than a refusal.
+      "audit",
       // Settings. 0037 shipped it org-wide (the date format) and it was
       // system-admin only; 0050 and 0052 made every setting on it PER-PLANT, so
       // DEF-0007 took `companyAdminOnly` off it and a plant admin is offered it
       // like any other tab. The id is in SECTIONS and has a render branch, which
       // is what H2 guards.
       "settings",
-      // The audit log, read for the first time. Company-admin ONLY — a stricter
-      // gate than any other section's, because `audit_log_select` (0008) hands a
-      // SITE admin zero rows rather than a refusal, and an empty list reads like
-      // "nothing has ever changed here". The ONLY tab filtered on
-      // `companyAdminOnly` — see `settings` above for why it is no longer the
-      // second; the id is in SECTIONS, so it is here and has a render branch,
-      // which is what H2 guards.
-      "audit",
     ]);
   });
 

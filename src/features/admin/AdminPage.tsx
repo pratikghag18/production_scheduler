@@ -137,6 +137,20 @@ const SECTIONS: ReadonlyArray<{
   // in `adminSectionsFor`'s supervisor list, and "all" covers admins. Saving
   // and applying live on the board; this section renames and deletes.
   { id: "templates", label: "Templates", enabled: TEMPLATES_PANEL_READY },
+  // ⭐⭐ COMPANY-ADMIN ONLY, AND THE FLAG IS DECIDING THE SAME THING THE
+  // POLICY DOES. `audit_log_select` (0008) is `app_is_admin() and org_id =
+  // app_current_org()`, and `app_is_admin()` is `user_profiles.role = 'admin'`
+  // (0018) — the ORG-WIDE role, which is `isCompanyAdmin` below. For a SITE
+  // admin the first term is false, so the read returns ZERO ROWS: not an error,
+  // not a refusal, an empty list indistinguishable from *"nothing has ever
+  // changed here"*. `adminSectionsFor` cannot express that (it returns "all" for
+  // anybody with `adminAnywhere`), which is exactly why this second axis exists
+  // and why Settings already uses it. `auditAccess.test.tsx` holds the two
+  // together.
+  //
+  // ⭐ ACTIVITY SITS ABOVE SETTINGS (R-369, maintainer: "swap the settings and
+  // activity tab"). Order in this array is order in the rail.
+  { id: "audit", label: "Activity", enabled: AUDIT_PANEL_READY, companyAdminOnly: true },
   // ⭐⭐ NO `companyAdminOnly` — AND ITS ABSENCE IS THE FIX FOR DEF-0007, so it is
   // worth a sentence rather than a blank. Settings is per-plant (R-333): the tab
   // follows the plant control at the top, and `set_node_setting` takes a plant
@@ -149,17 +163,6 @@ const SECTIONS: ReadonlyArray<{
   // pickers, and on a plant they may only read it shows no control and says
   // whose place it is.
   { id: "settings", label: "Settings", enabled: SETTINGS_PANEL_READY },
-  // ⭐⭐ COMPANY-ADMIN ONLY, AND THE FLAG IS DECIDING THE SAME THING THE
-  // POLICY DOES. `audit_log_select` (0008) is `app_is_admin() and org_id =
-  // app_current_org()`, and `app_is_admin()` is `user_profiles.role = 'admin'`
-  // (0018) — the ORG-WIDE role, which is `isCompanyAdmin` below. For a SITE
-  // admin the first term is false, so the read returns ZERO ROWS: not an error,
-  // not a refusal, an empty list indistinguishable from *"nothing has ever
-  // changed here"*. `adminSectionsFor` cannot express that (it returns "all" for
-  // anybody with `adminAnywhere`), which is exactly why this second axis exists
-  // and why Settings already uses it. `auditAccess.test.tsx` holds the two
-  // together.
-  { id: "audit", label: "Activity", enabled: AUDIT_PANEL_READY, companyAdminOnly: true },
 ];
 
 /**

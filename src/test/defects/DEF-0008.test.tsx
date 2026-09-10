@@ -217,8 +217,8 @@ describe("DEF-0008: the rail a person with no admin grant is offered, as a whole
       "Cycle times",
       "Import",
       "Templates",
-      "Settings",
       "Activity",
+      "Settings",
     ]);
   });
 });
