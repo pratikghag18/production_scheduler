@@ -132,14 +132,10 @@
   white-space: nowrap;
 }
 
-/* Reserves the same 3px strip the body's `.when` cell carries its accent in
-   (see THE ACTION ACCENT below), transparent here, so "When" does not sit
-   visibly left of the timestamps under it. Because this is a CELL and not the
-   `<tr>`, the header's own opaque `background` covers the strip -- see the note
-   on why the accent moved off the row. */
-.th:first-child {
-  border-left: 0.1875rem solid transparent;
-}
+/* No accent reservation is needed on the header: the body accent is a
+   box-shadow (see THE ACTION ACCENT below), which takes no layout space, so the
+   header cell and the body cell align at the same padding edge with nothing to
+   reserve. */
 
 /* ---------------------------------------------------------------------------
    THE ACTION ACCENT.
@@ -170,15 +166,16 @@
    colour mean two things. An edit therefore takes the neutral `--ink-2` — it is
    the ordinary case and the majority of rows, so a quiet mark is the right one.
 
-   ⚠️ THE ACCENT LIVES ON THE FIRST CELL (`.when`), NOT THE `<tr>`. A border on
-   the row element sits at the table's left EDGE, outside every cell's box, so it
-   scrolls PAST the sticky header's left side rather than under its opaque
-   background — a deleted row's red bar kept showing beside "When" once the row
-   had scrolled up under the frozen head (reported from the running app). Moving
-   the border onto `.when` makes it an ordinary in-flow cell decoration that
-   scrolls under the header like the rest of the cell's content; `.th:first-child`
-   (above) reserves the identical 3px strip, transparent, and its own opaque
-   `background` covers it.
+   ⚠️ THE ACCENT IS AN INSET BOX-SHADOW ON THE FIRST CELL (`.when`), NOT A BORDER.
+   A border on the `<tr>` sits at the table's left EDGE, outside every cell, and a
+   border on a cell under `border-collapse: collapse` still contributes to the
+   table's shared outer-left edge -- either way the coloured strip kept showing
+   beside "When" once a row scrolled up under the frozen header (reported twice
+   from the running app). An inset box-shadow is painted INSIDE the cell's box and
+   clipped to it, so it cannot reach the table edge and cannot escape above the
+   sticky header; when the cell scrolls under the header's opaque background it is
+   hidden like any other cell content. It also takes no layout space, so no strip
+   needs reserving on the header for alignment.
    --------------------------------------------------------------------------- */
 
 .row {
@@ -187,15 +184,15 @@
 }
 
 .row[data-action="insert"] .when {
-  border-left-color: var(--signal-ok);
+  box-shadow: inset 0.1875rem 0 0 0 var(--signal-ok);
 }
 
 .row[data-action="update"] .when {
-  border-left-color: var(--ink-2);
+  box-shadow: inset 0.1875rem 0 0 0 var(--ink-2);
 }
 
 .row[data-action="delete"] .when {
-  border-left-color: var(--crit);
+  box-shadow: inset 0.1875rem 0 0 0 var(--crit);
 }
 
 /* ⭐ THE STRIKETHROUGH COMES OFF A DELETION. `.from` means "this value was
@@ -222,11 +219,12 @@
   /* Tabular figures so a column of timestamps lines up on the colon rather than
      jittering row to row. */
   font-variant-numeric: tabular-nums;
-  /* THE ACTION ACCENT lands here, not on `.row` -- see the note above `.row`.
-     In `rem` (D84): a 3px bar is a real dimension, not a hairline, so it scales
-     with the root font-size like everything else on this surface. Transparent
-     by default so the accent is a COLOUR change only, never a width change. */
-  border-left: 0.1875rem solid transparent;
+  /* THE ACTION ACCENT lands here as an INSET BOX-SHADOW, not a border -- see the
+     note above `.row`. A box-shadow is painted inside the cell's own box and
+     clipped to it, so it can never reach the table's outer edge and bleed past
+     the sticky header the way a `<tr>` (or a collapsed-border cell) accent did.
+     It also takes no layout space, so header and body align with nothing to
+     reserve. In `rem` (D84) so the 3px bar scales with the root font-size. */
 }
 
 .who {

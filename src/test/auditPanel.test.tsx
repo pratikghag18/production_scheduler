@@ -963,27 +963,25 @@ describe("a deletion is visible at a glance", () => {
     for (const m of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       rules.set(m[1].trim().replace(/\s+/g, " "), m[2]);
     }
-    // ⚠️ ON `.when`, THE FIRST BODY CELL, NOT ON `.row`. A border on the `<tr>`
-    // sits outside every cell's box, at the table's left edge, which is why it
-    // used to scroll past the sticky header's opaque left edge instead of under
-    // it (reported from the running app: the accent bled into the column
-    // names). See the note above `.row` in the stylesheet.
+    // ⚠️ AN INSET BOX-SHADOW ON `.when`, THE FIRST BODY CELL — NOT A BORDER on
+    // the `<tr>` and not a border on the cell either. A `<tr>` border sits at the
+    // table's left edge, and a cell border under `border-collapse: collapse`
+    // still contributes to the table's shared outer-left edge; both bled past the
+    // sticky header (reported twice from the running app). A box-shadow is
+    // painted inside the cell and clipped to it, so it cannot reach the edge.
     for (const action of ["insert", "update", "delete"]) {
       const sel = `.row[data-action="${action}"] .when`;
       const body = rules.get(sel);
       expect(body, `${sel} must set its own accent colour`).toBeTruthy();
-      expect(/border-left-color\s*:/.test(body ?? "")).toBe(true);
+      expect(/box-shadow\s*:\s*inset/.test(body ?? "")).toBe(true);
     }
     expect(rules.get('.row[data-action="delete"] .when')).toContain("--crit");
     expect(rules.get('.row[data-action="insert"] .when')).not.toContain("--crit");
     expect(rules.get('.row[data-action="update"] .when')).not.toContain("--crit");
-    // Every row gets a bar, so the accent is a signal and not a width change.
-    expect(/\.when\s*\{[^}]*border-left:/.test(clean)).toBe(true);
-    // The header reserves the identical strip on its own first cell, so "When"
-    // does not sit visibly left of the timestamps under it, and — because it is
-    // a cell and not the row — the header's opaque background actually covers
-    // a scrolled-up row's accent instead of letting it show past the edge.
-    expect(/\.th:first-child\s*\{[^}]*border-left:/.test(clean)).toBe(true);
+    // The accent must NOT be a border (the mechanism that bled): no border-left
+    // on `.when`, and no reserved `.th:first-child` border-left strip either.
+    expect(/\.when\s*\{[^}]*border-left\s*:/.test(clean)).toBe(false);
+    expect(/\.th:first-child\s*\{[^}]*border-left\s*:/.test(clean)).toBe(false);
   });
 
   it("does not strike through the fields of a deleted row", () => {
