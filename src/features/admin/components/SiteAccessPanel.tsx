@@ -4,7 +4,9 @@ import { describeSchedulerError, invite, type InviteResult, type SchedulerError 
 import {
   accessPanelState,
   buildAccessRows,
+  canDeactivate,
   canManageAccess,
+  canReactivate,
   canRemoveAccess,
   canRemoveGrant,
   canSetRole,
@@ -36,6 +38,7 @@ import {
 import {
   siteAccessKeys,
   useRemoveSiteMember,
+  useSetProfileActive,
   useSetSiteMember,
   useSitePeople,
 } from "../hooks/useSiteAccess";
@@ -143,6 +146,7 @@ export function SiteAccessPanel({
   const peopleQuery = useSitePeople(activeNodeId, !treeLoading);
   const setMemberMutation = useSetSiteMember();
   const removeMemberMutation = useRemoveSiteMember();
+  const setActiveMutation = useSetProfileActive();
 
   const [query, setQuery] = useState("");
   const [confirmingProfileId, setConfirmingProfileId] = useState<string | null>(null);
@@ -273,6 +277,65 @@ export function SiteAccessPanel({
         onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
       },
     );
+  }
+
+  // ⭐ DEACTIVATE / REACTIVATE (R-XXX, migration 0076). A PERSON-level flip, not
+  // a node one: it keeps every grant and locks the person out of the whole org
+  // (or lets them back in). Company admins only, gated by `canDeactivate` /
+  // `canReactivate`; the server refuses self and the last active admin loudly.
+  // Fired from a click handler, never a state updater (StrictMode §6).
+  function runSetActive(row: AccessRow, active: boolean) {
+    clearRowError(row.profileId);
+    setPendingProfileId(row.profileId);
+    setActiveMutation.mutate(
+      { profileId: row.profileId, active },
+      {
+        onError: (err: SchedulerError) =>
+          setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
+        onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
+      },
+    );
+  }
+
+  // ⭐ THE PERSON-LEVEL ACTION, ON ITS OWN LINE. Deactivate/Reactivate is not a
+  // node action like Remove (which sits in the aligned action column); it flips
+  // the whole account, so it takes its own full-width line under the row —
+  // visually separate, and free of the 6.5rem action column that would wrap
+  // its label. Rendered only for a company admin acting on someone else
+  // (`canDeactivate` / `canReactivate`); exactly one button ever shows.
+  function renderAccountLine(row: AccessRow) {
+    const isPending = pendingProfileId === row.profileId;
+    if (canDeactivate(row, viewerIsCompanyAdmin)) {
+      return (
+        <div className={styles.accountLine}>
+          <button
+            type="button"
+            aria-label={`Deactivate ${labelFor(row)}`}
+            className={styles.deactivateBtn}
+            disabled={isPending}
+            onClick={() => runSetActive(row, false)}
+          >
+            Deactivate account
+          </button>
+        </div>
+      );
+    }
+    if (canReactivate(row, viewerIsCompanyAdmin)) {
+      return (
+        <div className={styles.accountLine}>
+          <button
+            type="button"
+            aria-label={`Reactivate ${labelFor(row)}`}
+            className={styles.reactivateBtn}
+            disabled={isPending}
+            onClick={() => runSetActive(row, true)}
+          >
+            Reactivate account
+          </button>
+        </div>
+      );
+    }
+    return null;
   }
 
   if (state === "pending") {
@@ -431,179 +494,207 @@ export function SiteAccessPanel({
           all, just a link to open that line. Now `rowGrant` resolves the one
           grant the row edits — direct, or a single one below — and the role and
           the node sit on the row, editable in place. */}
-          <div className={styles.head} aria-hidden="true" hidden={members.length === 0}>
-            <span>Person</span>
-            <span>Access level</span>
-            <span>Place</span>
-            <span />
-          </div>
-          <ul className={styles.list}>
-            {members.map((row) => {
-              const label = labelFor(row);
-              const isConfirming = confirmingProfileId === row.profileId;
-              const isPending = pendingProfileId === row.profileId;
-              const error =
-                rowError !== null && rowError.profileId === row.profileId ? rowError.message : null;
-              // ⭐ THE ONE GRANT THIS ROW EDITS (R-368): the grant on the viewed
-              // node, or a lone grant below it. `null` when there is nothing to
-              // edit here (no grant) or too many below to pick without opening one.
-              const g = rowGrant(row, activeNodeId);
-              const editable = canManage && g !== null && canSetRole(row, viewerIsCompanyAdmin);
-              const placeOpts =
-                editable && g !== null ? moveTargets(nodes, siteNodeId, g.role) : [];
-              const placeName =
-                g === null
-                  ? ""
-                  : g.direct
-                    ? (view.nodeName ?? "this plant")
-                    : (row.inheritedGrants[0]?.nodeName ?? "");
+          {/* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers", R-372).
+          The member list can run to a hundred people; it scrolls WITHIN this
+          bounded box so the column header stays put. The header is a sticky
+          grid row with an opaque background, so rows scroll UNDER it rather
+          than the whole page scrolling and the columns leaving with it. Same
+          standard as the Activity log, satisfied here by a sticky grid header
+          rather than a <table> (this list is an interactive editor). */}
+          <div className={styles.tableScroll} hidden={members.length === 0}>
+            <div className={styles.head} aria-hidden="true">
+              <span>Person</span>
+              <span>Access level</span>
+              <span>Place</span>
+              <span />
+            </div>
+            <ul className={styles.list}>
+              {members.map((row) => {
+                const label = labelFor(row);
+                const isConfirming = confirmingProfileId === row.profileId;
+                const isPending = pendingProfileId === row.profileId;
+                const error =
+                  rowError !== null && rowError.profileId === row.profileId
+                    ? rowError.message
+                    : null;
+                // ⭐ THE ONE GRANT THIS ROW EDITS (R-368): the grant on the viewed
+                // node, or a lone grant below it. `null` when there is nothing to
+                // edit here (no grant) or too many below to pick without opening one.
+                const g = rowGrant(row, activeNodeId);
+                const editable = canManage && g !== null && canSetRole(row, viewerIsCompanyAdmin);
+                const placeOpts =
+                  editable && g !== null ? moveTargets(nodes, siteNodeId, g.role) : [];
+                const placeName =
+                  g === null
+                    ? ""
+                    : g.direct
+                      ? (view.nodeName ?? "this plant")
+                      : (row.inheritedGrants[0]?.nodeName ?? "");
 
-              return (
-                <li key={row.profileId} className={styles.row}>
-                  <span className={styles.email}>
-                    {row.email ?? "(no address on file)"}
-                    {invitedPending.has(row.profileId) && (
-                      <span className={styles.invitedTag} title="Invited — hasn't signed in yet">
-                        invited
-                      </span>
-                    )}
-                  </span>
-
-                  {isConfirming ? (
-                    <div className={styles.confirm}>
-                      <span>Remove {label}&apos;s access?</span>
-                      <button
-                        type="button"
-                        className={styles.dangerBtn}
-                        disabled={isPending}
-                        onClick={() => g !== null && runRemoveMember(row, g.nodeId)}
-                      >
-                        Remove
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.cancelBtn}
-                        disabled={isPending}
-                        onClick={() => setConfirmingProfileId(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : editable && g !== null ? (
-                    <>
-                      {/* Access level — the grant's OWN node decides the menu, so an
-                      inherited supervisor on a line is offered supervisor and
-                      viewer, an admin on the root all three, and the self-rule
-                      still forbids stripping your own admin. */}
-                      <select
-                        aria-label={`Access level for ${label}`}
-                        className={`${styles.select} ${styles.roleCol}`}
-                        value={g.role}
-                        disabled={isPending}
-                        onChange={(e) => runSetMemberAt(row, g.nodeId, e.target.value as GrantRole)}
-                      >
-                        {grantRoleOptions(row, viewerIsCompanyAdmin, g, siteNodeId).map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
-
-                      {/* Place — a picker when there is somewhere else in the plant
-                      to move the grant to, the node's name in plain text when
-                      there is not (an admin, who fits only the plant root). */}
-                      {placeOpts.length > 1 ? (
-                        <select
-                          aria-label={`Place for ${label}`}
-                          className={`${styles.select} ${styles.placeCol}`}
-                          value={g.nodeId}
-                          disabled={isPending}
-                          onChange={(e) => runMove(row, g.nodeId, g.role, e.target.value)}
-                        >
-                          {placeOpts.map((o) => (
-                            <option key={o.nodeId} value={o.nodeId}>
-                              {nodeOptionLabel(o.depth, o.name)}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className={styles.placeText}>{placeName}</span>
+                return (
+                  <li
+                    key={row.profileId}
+                    className={row.active ? styles.row : `${styles.row} ${styles.deactivated}`}
+                  >
+                    <span className={styles.email}>
+                      {row.email ?? "(no address on file)"}
+                      {invitedPending.has(row.profileId) && (
+                        <span className={styles.invitedTag} title="Invited — hasn't signed in yet">
+                          invited
+                        </span>
                       )}
+                      {!row.active && (
+                        <span
+                          className={styles.deactivatedTag}
+                          title="Deactivated — kept, but locked out until reactivated"
+                        >
+                          deactivated
+                        </span>
+                      )}
+                    </span>
 
-                      {canRemoveGrant(row, viewerIsCompanyAdmin, g) ? (
+                    {isConfirming ? (
+                      <div className={styles.confirm}>
+                        <span>Remove {label}&apos;s access?</span>
                         <button
                           type="button"
-                          aria-label={`Remove access for ${label}`}
-                          className={styles.removeBtn}
+                          className={styles.dangerBtn}
                           disabled={isPending}
-                          onClick={() => setConfirmingProfileId(row.profileId)}
+                          onClick={() => g !== null && runRemoveMember(row, g.nodeId)}
                         >
                           Remove
                         </button>
-                      ) : (
-                        <span className={styles.note}>
-                          {removalNote(row, viewerIsCompanyAdmin)}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {/* Not editable from here: a company admin's row (0022), a
+                        <button
+                          type="button"
+                          className={styles.cancelBtn}
+                          disabled={isPending}
+                          onClick={() => setConfirmingProfileId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : editable && g !== null ? (
+                      <>
+                        {/* Access level — the grant's OWN node decides the menu, so an
+                      inherited supervisor on a line is offered supervisor and
+                      viewer, an admin on the root all three, and the self-rule
+                      still forbids stripping your own admin. */}
+                        <select
+                          aria-label={`Access level for ${label}`}
+                          className={`${styles.select} ${styles.roleCol}`}
+                          value={g.role}
+                          disabled={isPending}
+                          onChange={(e) =>
+                            runSetMemberAt(row, g.nodeId, e.target.value as GrantRole)
+                          }
+                        >
+                          {grantRoleOptions(row, viewerIsCompanyAdmin, g, siteNodeId).map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Place — a picker when there is somewhere else in the plant
+                      to move the grant to, the node's name in plain text when
+                      there is not (an admin, who fits only the plant root). */}
+                        {placeOpts.length > 1 ? (
+                          <select
+                            aria-label={`Place for ${label}`}
+                            className={`${styles.select} ${styles.placeCol}`}
+                            value={g.nodeId}
+                            disabled={isPending}
+                            onChange={(e) => runMove(row, g.nodeId, g.role, e.target.value)}
+                          >
+                            {placeOpts.map((o) => (
+                              <option key={o.nodeId} value={o.nodeId}>
+                                {nodeOptionLabel(o.depth, o.name)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className={styles.placeText}>{placeName}</span>
+                        )}
+
+                        {canRemoveGrant(row, viewerIsCompanyAdmin, g) ? (
+                          <button
+                            type="button"
+                            aria-label={`Remove access for ${label}`}
+                            className={styles.removeBtn}
+                            disabled={isPending}
+                            onClick={() => setConfirmingProfileId(row.profileId)}
+                          >
+                            Remove
+                          </button>
+                        ) : (
+                          <span className={styles.note}>
+                            {removalNote(row, viewerIsCompanyAdmin)}
+                          </span>
+                        )}
+                        {renderAccountLine(row)}
+                      </>
+                    ) : (
+                      <>
+                        {/* Not editable from here: a company admin's row (0022), a
                       viewer without the rights, or somebody with MORE than one
                       grant below the plant — the A5 case, where which grant to
                       change is genuinely ambiguous and opening the node is the
                       honest way to pick one. */}
-                      <span className={styles.descWide}>{describeAccess(row, view.nodeName)}</span>
+                        <span className={styles.descWide}>
+                          {describeAccess(row, view.nodeName)}
+                        </span>
 
-                      {canRemoveAccess(row, viewerIsCompanyAdmin) ? (
-                        <button
-                          type="button"
-                          aria-label={`Remove access for ${label}`}
-                          className={styles.removeBtn}
-                          disabled={isPending}
-                          onClick={() => setConfirmingProfileId(row.profileId)}
-                        >
-                          Remove
-                        </button>
-                      ) : (
-                        <span className={styles.note}>
-                          {removalNote(row, viewerIsCompanyAdmin)}
-                          {/* Switching on the REASON, not the sentence, so the two
+                        {canRemoveAccess(row, viewerIsCompanyAdmin) ? (
+                          <button
+                            type="button"
+                            aria-label={`Remove access for ${label}`}
+                            className={styles.removeBtn}
+                            disabled={isPending}
+                            onClick={() => setConfirmingProfileId(row.profileId)}
+                          >
+                            Remove
+                          </button>
+                        ) : (
+                          <span className={styles.note}>
+                            {removalNote(row, viewerIsCompanyAdmin)}
+                            {/* Switching on the REASON, not the sentence, so the two
                           cannot drift — case D6. For a multi-grant person each
                           node is a way in to change that one grant. */}
-                          {removalReason(row, viewerIsCompanyAdmin) === "inherited" &&
-                            row.inheritedGrants.map((gr) => (
-                              <button
-                                key={gr.nodeId}
-                                type="button"
-                                className={styles.linkBtn}
-                                aria-label={`Open ${gr.nodeName} to change access for ${label}`}
-                                onClick={() =>
-                                  siteNodeId !== null &&
-                                  setFocus({
-                                    root: siteNodeId,
-                                    rootName: view.nodeName ?? "the plant",
-                                    nodeId: gr.nodeId,
-                                  })
-                                }
-                              >
-                                {gr.nodeName}
-                              </button>
-                            ))}
-                        </span>
-                      )}
-                    </>
-                  )}
+                            {removalReason(row, viewerIsCompanyAdmin) === "inherited" &&
+                              row.inheritedGrants.map((gr) => (
+                                <button
+                                  key={gr.nodeId}
+                                  type="button"
+                                  className={styles.linkBtn}
+                                  aria-label={`Open ${gr.nodeName} to change access for ${label}`}
+                                  onClick={() =>
+                                    siteNodeId !== null &&
+                                    setFocus({
+                                      root: siteNodeId,
+                                      rootName: view.nodeName ?? "the plant",
+                                      nodeId: gr.nodeId,
+                                    })
+                                  }
+                                >
+                                  {gr.nodeName}
+                                </button>
+                              ))}
+                          </span>
+                        )}
+                        {renderAccountLine(row)}
+                      </>
+                    )}
 
-                  {error && (
-                    <p className={styles.errorLine} role="alert">
-                      {error}
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                    {error && (
+                      <p className={styles.errorLine} role="alert">
+                        {error}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </div>
 
         {/* ⭐ ADDING IS AN ACTION, NOT A STANDING LIST (R-368), AND NOT ONE AT
@@ -620,108 +711,110 @@ export function SiteAccessPanel({
                 Nobody else in the company matches “{query.trim()}”.
               </p>
             )}
-            <div className={styles.head} aria-hidden="true" hidden={candidates.length === 0}>
-              <span>Person</span>
-              <span>Access level</span>
-              <span>Place</span>
-              <span />
-            </div>
-            <ul className={styles.list}>
-              {candidates.map((row) => {
-                const label = labelFor(row);
-                const isPending = pendingProfileId === row.profileId;
-                const error =
-                  rowError !== null && rowError.profileId === row.profileId
-                    ? rowError.message
-                    : null;
-                // ⭐ WHICH NODE, WHICH ROLE (R-367). The node defaults to the one the
-                // screen is on; the role list follows the CHOSEN node, so `admin`
-                // disappears the moment a line is picked and reappears at the root —
-                // the same rule `allowedRoles` and migration 0053 enforce. A role
-                // that was legal at the old node but not the new one is coerced to
-                // the first legal one rather than left selected-but-refused.
-                const selectedNode = canPickNode
-                  ? (addNodes[row.profileId] ?? activeNodeId ?? "")
-                  : (activeNodeId ?? "");
-                const nodeRoles = rolesForNode(
-                  selectedNode === "" ? null : selectedNode,
-                  siteNodeId,
-                );
-                const wanted = addRoles[row.profileId] ?? "supervisor";
-                const selectedRole = nodeRoles.includes(wanted) ? wanted : nodeRoles[0];
+            <div className={styles.tableScroll} hidden={candidates.length === 0}>
+              <div className={styles.head} aria-hidden="true">
+                <span>Person</span>
+                <span>Access level</span>
+                <span>Place</span>
+                <span />
+              </div>
+              <ul className={styles.list}>
+                {candidates.map((row) => {
+                  const label = labelFor(row);
+                  const isPending = pendingProfileId === row.profileId;
+                  const error =
+                    rowError !== null && rowError.profileId === row.profileId
+                      ? rowError.message
+                      : null;
+                  // ⭐ WHICH NODE, WHICH ROLE (R-367). The node defaults to the one the
+                  // screen is on; the role list follows the CHOSEN node, so `admin`
+                  // disappears the moment a line is picked and reappears at the root —
+                  // the same rule `allowedRoles` and migration 0053 enforce. A role
+                  // that was legal at the old node but not the new one is coerced to
+                  // the first legal one rather than left selected-but-refused.
+                  const selectedNode = canPickNode
+                    ? (addNodes[row.profileId] ?? activeNodeId ?? "")
+                    : (activeNodeId ?? "");
+                  const nodeRoles = rolesForNode(
+                    selectedNode === "" ? null : selectedNode,
+                    siteNodeId,
+                  );
+                  const wanted = addRoles[row.profileId] ?? "supervisor";
+                  const selectedRole = nodeRoles.includes(wanted) ? wanted : nodeRoles[0];
 
-                return (
-                  <li key={row.profileId} className={styles.row}>
-                    <span className={styles.email}>{row.email ?? "(no address on file)"}</span>
+                  return (
+                    <li key={row.profileId} className={styles.row}>
+                      <span className={styles.email}>{row.email ?? "(no address on file)"}</span>
 
-                    {/* Access level (col 2) — the roles `rolesForNode` allows on the
+                      {/* Access level (col 2) — the roles `rolesForNode` allows on the
                   CHOSEN node, not `GRANT_ROLES`: two controls on one screen
                   disagreeing about admin-only-at-a-root is how DEF-0010 got
                   here. Below a plant root this is supervisor and viewer. */}
-                    <select
-                      aria-label={`Role to give ${label}`}
-                      className={`${styles.select} ${styles.roleCol}`}
-                      value={selectedRole}
-                      disabled={isPending}
-                      onChange={(e) =>
-                        setAddRoles((prev) => ({
-                          ...prev,
-                          [row.profileId]: e.target.value as GrantRole,
-                        }))
-                      }
-                    >
-                      {nodeRoles.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Place (col 3, R-367/R-368) — the node picker sits in its own
-                  column like the members' does, an admin naming a line or cell.
-                  A single-node plant, or a non-admin, gets the plant name in
-                  plain text so the column is not a hole. */}
-                    {canPickNode ? (
                       <select
-                        aria-label={`Place to give ${label} access`}
-                        className={`${styles.select} ${styles.placeCol}`}
-                        value={selectedNode}
+                        aria-label={`Role to give ${label}`}
+                        className={`${styles.select} ${styles.roleCol}`}
+                        value={selectedRole}
                         disabled={isPending}
                         onChange={(e) =>
-                          setAddNodes((prev) => ({ ...prev, [row.profileId]: e.target.value }))
+                          setAddRoles((prev) => ({
+                            ...prev,
+                            [row.profileId]: e.target.value as GrantRole,
+                          }))
                         }
                       >
-                        {plantSubtree.map((o) => (
-                          <option key={o.nodeId} value={o.nodeId}>
-                            {nodeOptionLabel(o.depth, o.name)}
+                        {nodeRoles.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
                           </option>
                         ))}
                       </select>
-                    ) : (
-                      <span className={styles.placeText}>{view.nodeName ?? "this plant"}</span>
-                    )}
 
-                    <button
-                      type="button"
-                      aria-label={`Give ${label} access`}
-                      className={styles.addBtn}
-                      disabled={isPending}
-                      onClick={() =>
-                        selectedNode !== "" && runSetMemberAt(row, selectedNode, selectedRole)
-                      }
-                    >
-                      Add
-                    </button>
+                      {/* Place (col 3, R-367/R-368) — the node picker sits in its own
+                  column like the members' does, an admin naming a line or cell.
+                  A single-node plant, or a non-admin, gets the plant name in
+                  plain text so the column is not a hole. */}
+                      {canPickNode ? (
+                        <select
+                          aria-label={`Place to give ${label} access`}
+                          className={`${styles.select} ${styles.placeCol}`}
+                          value={selectedNode}
+                          disabled={isPending}
+                          onChange={(e) =>
+                            setAddNodes((prev) => ({ ...prev, [row.profileId]: e.target.value }))
+                          }
+                        >
+                          {plantSubtree.map((o) => (
+                            <option key={o.nodeId} value={o.nodeId}>
+                              {nodeOptionLabel(o.depth, o.name)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className={styles.placeText}>{view.nodeName ?? "this plant"}</span>
+                      )}
 
-                    {error && (
-                      <p className={styles.errorLine} role="alert">
-                        {error}
-                      </p>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                      <button
+                        type="button"
+                        aria-label={`Give ${label} access`}
+                        className={styles.addBtn}
+                        disabled={isPending}
+                        onClick={() =>
+                          selectedNode !== "" && runSetMemberAt(row, selectedNode, selectedRole)
+                        }
+                      >
+                        Add
+                      </button>
+
+                      {error && (
+                        <p className={styles.errorLine} role="alert">
+                          {error}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
 
             {/* ⭐ INVITE — offered only when the email search matched nobody already
           in the company. The role menu is `inviteRoles(atPlantRoot)`, the same

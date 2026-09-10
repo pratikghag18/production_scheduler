@@ -72,6 +72,13 @@ export interface AccessRow {
   hasAccess: boolean;
   /** Is this the person looking at the screen? */
   isSelf: boolean;
+  /**
+   * Is the account active? `false` = deactivated (migration 0076): the grants
+   * are kept but the person is locked out org-wide. Defaults to `true` when the
+   * payload omits it, so an older server (or a partial read) reads as active
+   * rather than silently locking everyone out.
+   */
+  active: boolean;
 }
 
 export interface AccessView {
@@ -173,6 +180,10 @@ export function buildAccessRows(payload: unknown, viewerProfileId: string | null
       inheritedGrants: grants.filter((g) => g !== direct),
       hasAccess: companyAdmin || grants.length > 0,
       isSelf: viewerProfileId !== null && profileId === viewerProfileId,
+      // Deactivated ONLY when the payload says so explicitly. A missing flag
+      // (older server, partial read) reads as active — the safe direction: the
+      // screen never invents a lock-out nobody asked for.
+      active: entry.active !== false,
     });
   }
   return { nodeId, nodeName, rows, skipped };
@@ -296,6 +307,32 @@ export function canRemoveAccess(row: AccessRow, viewerIsCompanyAdmin: boolean): 
   if (row.directRole === null) return false;
   if (protectedRow(row, viewerIsCompanyAdmin)) return false;
   return !selfLocked(row, viewerIsCompanyAdmin);
+}
+
+/**
+ * ⭐ DEACTIVATE / REACTIVATE — A COMPANY ADMIN'S POWER, MIRRORING
+ * `set_profile_active` (migration 0076).
+ *
+ * Deactivation locks a person out of the whole ORG (the identity chokepoint
+ * `app_current_profile_id` skips an inactive profile), so unlike node-scoped
+ * remove it is offered ONLY to a company admin — a site admin must not lock
+ * someone out of a plant they do not run. The two client-visible guards mirror
+ * the server: not a company admin → nothing offered; your OWN row → nothing
+ * offered (you cannot lock yourself out). The server's third guard — the last
+ * active admin cannot be deactivated — is NOT mirrored here: whether another
+ * active admin exists is a fact this row does not carry, so the screen offers
+ * the control and the server refuses it loudly (the same reasoning
+ * `canRemoveAccess` gives for not copying "you do not administer this place").
+ *
+ * The two are exclusive by the `active` flag: exactly one is ever true for a
+ * row a company admin may act on.
+ */
+export function canDeactivate(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && row.active;
+}
+
+export function canReactivate(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && !row.active;
 }
 
 /**

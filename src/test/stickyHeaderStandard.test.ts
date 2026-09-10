@@ -47,18 +47,42 @@ export const STICKY_HEADER_SURFACES: ReadonlyArray<{
     scroll: "scroll",
     header: "th",
   },
+  {
+    // Access is an interactive editor, not a read-only table, so it satisfies
+    // the SAME standard with a sticky GRID header (`.head`) rather than a
+    // `<table>`'s `<th>` — the standard is the behaviour (bounded scroll +
+    // frozen header), not the tag. Both its member list and its add list wear
+    // `.tableScroll`, so one registration covers both.
+    name: "Access (SiteAccessPanel)",
+    cssModule: "src/features/admin/components/SiteAccessPanel.module.css",
+    scroll: "tableScroll",
+    header: "head",
+  },
 ];
 
 function stripComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-/** The declaration body of the first rule whose selector list names `.<cls>`. */
+/**
+ * The declaration bodies of EVERY rule whose selector list names `.<cls>`,
+ * joined. A class can be styled by more than one rule — a shared layout rule
+ * (`.head, .row { display: grid }`) AND a dedicated one (`.head { position:
+ * sticky }`) — and the standard's properties may be split across them, so the
+ * check must see their union, not whichever comes first. Returns `null` only
+ * when no rule names the class at all. (These modules have no `@media`/nested
+ * blocks — asserted by the audit's own scope — so a flat rule split is exact.)
+ */
 export function ruleBody(css: string, cls: string): string | null {
   const src = stripComments(css);
-  const re = new RegExp("(?:^|})\\s*[^{}]*\\." + cls + "\\b[^{}]*\\{([^}]*)\\}", "m");
-  const m = re.exec(src);
-  return m ? m[1] : null;
+  const rule = /([^{}]*)\{([^}]*)\}/g;
+  const named = new RegExp("\\." + cls + "\\b");
+  const bodies: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = rule.exec(src)) !== null) {
+    if (named.test(m[1])) bodies.push(m[2]);
+  }
+  return bodies.length > 0 ? bodies.join("\n") : null;
 }
 
 /**

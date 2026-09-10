@@ -82,6 +82,11 @@ export interface RemoveSiteMemberInput {
   profileId: string;
 }
 
+export interface SetProfileActiveInput {
+  profileId: string;
+  active: boolean;
+}
+
 /**
  * `site_people(p_node_id uuid)`. Raises: `invalid_argument` (no such node),
  * `not_permitted` (you do not administer this place).
@@ -209,6 +214,25 @@ export async function removeSiteMember(input: RemoveSiteMemberInput): Promise<vo
   const { error } = await supabase.rpc("remove_site_member", {
     p_node_id: input.nodeId,
     p_profile_id: input.profileId,
+  });
+  if (error) throw toSchedulerError(error);
+}
+
+/**
+ * `set_profile_active(p_profile_id, p_active)`. Deactivate (active=false) or
+ * reactivate (true) a person org-wide, keeping their grants and history — the
+ * reversible alternative to `removeSiteMember` (migration 0076).
+ *
+ * Raises: `not_permitted` (not a company admin; your own account; the last
+ * active admin), `invalid_argument` (no such person in your org — a foreign or
+ * bogus id answers the same, no existence leak). Like `removeSiteMember`, the
+ * return value is discarded: the loudness is the server's pre-check raising,
+ * and the panel re-reads `site_people` on success for the new state.
+ */
+export async function setProfileActive(input: SetProfileActiveInput): Promise<void> {
+  const { error } = await supabase.rpc("set_profile_active", {
+    p_profile_id: input.profileId,
+    p_active: input.active,
   });
   if (error) throw toSchedulerError(error);
 }

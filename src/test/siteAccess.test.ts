@@ -33,6 +33,8 @@ import { expect, it } from "vitest";
 import {
   allowedRoles,
   buildAccessRows,
+  canDeactivate,
+  canReactivate,
   canRemoveAccess,
   canSetRole,
   describeAccess,
@@ -152,6 +154,7 @@ const byId = (id: string): AccessRow =>
     inheritedGrants: [],
     hasAccess: false,
     isSelf: false,
+    active: true,
   };
 
 const stranger = (over: Partial<AccessRow> = {}): AccessRow => ({
@@ -162,6 +165,7 @@ const stranger = (over: Partial<AccessRow> = {}): AccessRow => ({
   inheritedGrants: [],
   hasAccess: false,
   isSelf: false,
+  active: true,
   ...over,
 });
 
@@ -519,6 +523,75 @@ check("A26 ⭐: and a COMPANY admin can remove their own admin grant", () => {
 
 check("A27: somebody else's grant on this node is removable", () => {
   return canRemoveAccess(stranger({ directRole: "supervisor" }), false) === true || "hidden";
+});
+
+// ---------------------------------------------------------------------------
+// AD1–AD8 — canDeactivate / canReactivate. The person-level switch (0076).
+// Mirrors set_profile_active: company admins only, never your own row, and the
+// two are exclusive by the `active` flag. The last-active-admin refusal is the
+// server's, deliberately not mirrored (the row does not carry that fact).
+// ---------------------------------------------------------------------------
+check("AD1: a company admin can deactivate an active person", () => {
+  return canDeactivate(stranger({ active: true }), true) === true || "hidden";
+});
+
+check("AD2: a company admin sees Reactivate, not Deactivate, on a deactivated person", () => {
+  const row = stranger({ active: false });
+  return (
+    (canReactivate(row, true) === true && canDeactivate(row, true) === false) ||
+    `deactivate=${canDeactivate(row, true)} reactivate=${canReactivate(row, true)}`
+  );
+});
+
+check("AD3 ⭐: a SITE admin (not company) is offered neither — it is org-wide", () => {
+  const active = stranger({ active: true });
+  const off = stranger({ active: false });
+  return (
+    (canDeactivate(active, false) === false && canReactivate(off, false) === false) ||
+    `deactivate=${canDeactivate(active, false)} reactivate=${canReactivate(off, false)}`
+  );
+});
+
+check("AD4 ⭐: you cannot deactivate your OWN account", () => {
+  return canDeactivate(stranger({ isSelf: true, active: true }), true) === false || "offered self";
+});
+
+check("AD5 ⭐: nor reactivate your own (you could not be here if inactive)", () => {
+  return canReactivate(stranger({ isSelf: true, active: false }), true) === false || "offered self";
+});
+
+check("AD6: the two are mutually exclusive for a row an admin may act on", () => {
+  const active = stranger({ active: true });
+  const off = stranger({ active: false });
+  return (
+    (canDeactivate(active, true) !== canReactivate(active, true) &&
+      canDeactivate(off, true) !== canReactivate(off, true)) ||
+    "both true or both false"
+  );
+});
+
+check("AD7: buildAccessRows reads active:false from the payload", () => {
+  const v = buildAccessRows(
+    {
+      nodeId: PLANT,
+      nodeName: "Plant 1",
+      people: [{ profileId: "p", email: "p@x.test", active: false, grants: [] }],
+    },
+    null,
+  );
+  return v.rows[0]?.active === false || `active=${v.rows[0]?.active}`;
+});
+
+check("AD8 ⭐: a MISSING active flag reads as active — never invent a lock-out", () => {
+  const v = buildAccessRows(
+    {
+      nodeId: PLANT,
+      nodeName: "Plant 1",
+      people: [{ profileId: "p", email: "p@x.test", grants: [] }],
+    },
+    null,
+  );
+  return v.rows[0]?.active === true || `active=${v.rows[0]?.active}`;
 });
 
 check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {

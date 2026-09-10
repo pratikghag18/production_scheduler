@@ -114,11 +114,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
       const { data, error } = await supabase
         .from("user_profiles")
-        .select("id, org_id, user_id, role, default_create_mode")
+        .select("id, org_id, user_id, role, default_create_mode, active")
         .eq("user_id", nextSession.user.id)
         .maybeSingle();
       if (cancelled) return;
-      if (error || !data) {
+      // A deactivated account (migration 0076, `active = false`) is locked out
+      // org-wide by the server — every data read denies. Treat it here the same
+      // as "no profile" so the app shows its coherent no-access state instead
+      // of a shell whose every query fails. `active` defaults to true when a
+      // pre-0076 server omits the column.
+      if (error || !data || data.active === false) {
         setProfile(null);
         return;
       }

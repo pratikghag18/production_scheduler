@@ -15,9 +15,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchSitePeople,
   removeSiteMember,
+  setProfileActive,
   setSiteMember,
   type RemoveSiteMemberInput,
   type SchedulerError,
+  type SetProfileActiveInput,
   type SetSiteMemberInput,
 } from "@/lib/api";
 
@@ -66,6 +68,22 @@ export function useRemoveSiteMember() {
 
   return useMutation<void, SchedulerError, RemoveSiteMemberInput>({
     mutationFn: (input) => removeSiteMember(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
+    },
+  });
+}
+
+/**
+ * `set_profile_active`. Deactivates or reactivates a person org-wide, keeping
+ * their grants. Invalidates the same key so the row re-renders in its new
+ * state (no optimistic update, for the reason this file's header gives).
+ */
+export function useSetProfileActive() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, SetProfileActiveInput>({
+    mutationFn: (input) => setProfileActive(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
     },

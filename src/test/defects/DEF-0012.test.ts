@@ -53,6 +53,7 @@ function row(over: Partial<AccessRow> = {}): AccessRow {
     inheritedGrants: [],
     hasAccess: true,
     isSelf: false,
+    active: true,
     ...over,
   };
 }
