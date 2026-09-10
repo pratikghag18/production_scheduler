@@ -36,9 +36,13 @@ cannot quietly drift; add a surface to the standard and the audit checks it.
   frozen while the body scrolls. The recipe: the scroll container sets `overflow: auto` with a
   viewport-relative `max-height` (e.g. `min(65dvh, 44rem)`), and the header cells are
   `position: sticky; top: 0` with an opaque `background` and a `z-index` above the body. Reported
-  from the running app: scrolling the Activity log made the column names disappear. Guarded by
-  `src/test/stickyHeaderStandard.test.ts`, which registers each list surface and fails if its
-  scroll container is unbounded or its header is not sticky. New long-row tabs register there.
+  from the running app: scrolling the Activity log made the column names disappear. **The standard is
+  the behaviour, not the markup:** a read-only tabular tab satisfies it with a `<table>` and sticky
+  `<th>` cells (Activity), an interactive editor with a sticky grid-header row (Access's `.head`) —
+  both register the same way, so there is no need to rebuild an editor as a `<table>` to comply.
+  Guarded by `src/test/stickyHeaderStandard.test.ts`, which registers each list surface (naming its
+  scroll-container class and its header class) and fails if the scroll container is unbounded or the
+  header is not sticky. New long-row tabs register there.
 
 ## Local setup: the developer's stack and the tester's
 

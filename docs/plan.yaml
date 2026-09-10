@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: d0021ba
+  tip: 5ed4507
   baseline:
-    app_tests: 2716
+    app_tests: 2730
     app_test_files: 133
     tsc: 0
     eslint: 0
     db_checks: 823
-    migrations: 73
+    migrations: 75
     mutations: 509 of 536
 tracks:
 - id: core
@@ -9428,8 +9428,109 @@ requirements:
     standard in `docs/conventions.md` under "Design standards" beside the pop-up one, and enforced by
     `stickyHeaderStandard.test.ts`, a registry-plus-offence-function audit in the same shape as
     `popoverStandard.test.ts`. Activity is the one registered surface; rolling the other long-row
-    tabs into the registry is queued (`next`). No migration; presentation only.
+    tabs into the registry is queued (`next`). No migration; presentation only. REFINED 10 Sept
+    (session 134): the maintainer reported the row accent bleeding into the column headers when the
+    log is scrolled (F-129, fixed), and asked whether Access should be a `<table>` too. Decision
+    recorded: the standard is the BEHAVIOUR (bounded scroll + frozen header), not the tag --- a
+    read-only tabular tab satisfies it with a `<table>`/`<th>`, an interactive editor with a sticky
+    grid header. Access (SiteAccessPanel) was brought under the standard this session with a sticky
+    `.head` and is now a second registered surface in `stickyHeaderStandard.test.ts`.
+- id: R-373
+  title: A week template can be expanded to show what it holds --- its runs and people, per day
+  source:
+  - session 132 conversation
+  - session 134 conversation
+  stated_by: maintainer
+  claim: >-
+    The Templates tab shows, on demand, what each template contains: a read-only expansion of the
+    saved week grouped by day of week, listing each run (its cell, product, hours and planned
+    headcount) with the people assigned to it, plus any standalone assignments. Names are resolved
+    server-side (the items carry no foreign keys, D110, so a removed product/operator degrades to a
+    plain label). Editing a template's contents is deliberately NOT built --- the maintainer chose
+    the "lighter" option (read-only expand; change a template by re-saving from the board), with
+    in-place editing kept as a possible future enhancement.
+  verified_by:
+  - kind: vitest
+    file: src/test/weekTemplates.test.ts
+    cases: "listWeekTemplateItems parses a well-formed multi-item payload (run, attached assignment, standalone assignment, every nullable field incl. removed names) and throws shapeMismatch on an invalid kind or a missing field"
+  - kind: sql
+    file: supabase/tests/89_week_templates_test.sql
+    cases: "TP-ITEMS-1 an admin reads the saved template's items with names/day/minutes resolved incl. the overnight run; TP-ITEMS-2 a viewer who can read the plant can also read them; TP-ITEMS-VIS a caller who cannot read the plant is refused and a bogus/foreign-org template id answers no_such_template indistinguishably (no existence leak, the DEF-0021 shape)"
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 134). New DEFINER RPC `list_week_template_items(p_template_id)` (migration
+    0075) resolves node/product/operator names by LEFT JOIN and guards the plant read exactly as
+    `list_week_templates` does; the panel gains a per-row "Show contents" toggle available to anyone
+    who can see the row. No editing surface --- the maintainer's "lighter" choice, 10 Sept: *"Use the
+    Lighter proposal for now, lets keep the editing as a potential future enhancement if ever."*
+- id: R-374
+  title: A user can be deactivated (reversibly locked out) as an alternative to removing their access
+  source:
+  - session 134 conversation
+  stated_by: maintainer
+  claim: >-
+    From the Access tab, a company (system) admin can DEACTIVATE a person --- a reversible lock-out
+    that keeps every grant and all history, distinct from REMOVE which revokes a grant on a node.
+    Deactivation is org-wide, enforced at the single identity chokepoint (`app_current_profile_id`
+    gains `AND active`), so a deactivated person resolves to no profile and every read/write denies;
+    reactivation restores them. It is a company-admin power only (a site admin must not lock someone
+    out of a plant they do not run), refuses acting on your own account, and never leaks the
+    existence of a profile in another org. Deactivated people stay visible in the list (greyed, with
+    Reactivate) so they can be restored. The client mirrors the lock-out: a deactivated account loads
+    as "no profile" rather than a shell whose every query fails.
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: "AD1-AD8 --- a company admin can deactivate an active person and sees Reactivate on a deactivated one; a site admin is offered neither (org-wide); you cannot act on your own row; the two predicates are mutually exclusive; buildAccessRows reads active:false and defaults a missing flag to active"
+  - kind: sql
+    file: supabase/tests/91_deactivate_a_user_test.sql
+    cases: "Y1 a company admin's deactivate flips the row and keeps the grant; Y2 (the enforcement case) a deactivated person's app_current_profile_id resolves to NULL; Y3 reactivation lets them back in; Y4 a site admin is refused; Y5 you cannot deactivate your own account; Y6 a bogus/foreign id answers no such person; Y7 site_people carries the active flag and follows the switch"
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 134). DECIDED 10 Sept (maintainer): *"there is only a remove option for a
+    user, I had asked you to check to see if we could have a deactivate option ... We should make it
+    possible."* Follows the schema's existing reversible-off-switch pattern (`nodes.active`,
+    `operators.active`, `delete_node p_mode 'deactivate'`). Migration 0076 adds `user_profiles.active`
+    (NOT NULL default true --- additive, never DROP NOT NULL), gates the chokepoint, and adds the
+    company-admin-only DEFINER `set_profile_active`; `site_people` re-emitted to carry `active` (one
+    added field, DEF-0011 discipline). NO last-admin guard: the caller is always an active admin and
+    self-deactivation is refused, so zero active admins is unreachable --- a guard for it would be
+    dead code (gotcha 17).
 findings:
+- id: F-129
+  title: The Activity row accent bled into the column headers when the log was scrolled
+  tag: Colour in the header
+  status: fixed
+  found_by: maintainer
+  refs:
+  - R-372
+  story: >-
+    Reported 10 Sept (session 134) from the running app: with the frozen header in place, scrolling
+    the Activity log showed the row's coloured left accent creeping up beside the column names.
+    ⛔ THE CAUSE. The 3px action accent was a `border-left` on the `<tr>` (`.row`), which sits at the
+    table's very left edge, OUTSIDE every cell's box. The sticky header is made of `<th>` CELLS; they
+    cover their own width but not the tr's left-edge border, so a body row scrolling up showed its
+    coloured strip in the header band. FIX: the accent moved onto the first body cell (`.when`) with
+    `.th:first-child` reserving the identical 3px --- now it is ordinary in-flow cell decoration and
+    scrolls UNDER the header's opaque background. Same visual (a constant-width left bar per row); no
+    tr border to escape the header. Guarded by a DOM assertion in `auditPanel.test.tsx` that the
+    accent rides the first cell, not the row.
+- id: F-130
+  title: Four CSS modules reference an undefined --ink-1 token, so those colours silently fall back
+  tag: A colour token that isn't there
+  status: open
+  found_by: agent
+  refs:
+  - R-373
+  story: >-
+    Noticed 10 Sept (session 134) by the Templates-contents lane while working in
+    `TemplatesPanel.module.css`. `var(--ink-1)` is used by `TemplatesPanel`, `BoardToolbar`,
+    `CopyWeekDialog` and `SaveTemplateDialog` module CSS, but `src/styles/tokens.css` defines only
+    `--ink` and `--ink-2` --- there is no `--ink-1`. An undefined custom property makes the whole
+    declaration invalid, so those elements fall back to their inherited colour rather than the
+    intended one. Pre-existing and latent (not introduced this session); the new Templates-contents
+    classes deliberately use the real tokens. Small, cosmetic, and worth a sweep: either define
+    `--ink-1` or replace the four uses with `--ink`/`--ink-2`. Queued in `next`.
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
   tag: One click, two writes
@@ -12878,6 +12979,53 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 134
+  date: 2026-09-10
+  title: "Week-template contents view (R-373); deactivate a user, reversibly (R-374); the frozen-header standard extended to Access and its accent-bleed fixed (R-372/F-129)"
+  commits: [2900610, 6e1eb16, 5ed4507]
+  numbers:
+    app_tests: 2730
+    app_test_files: 133
+    tsc: 8
+    eslint: 0
+    db_checks: 823
+    migrations: 75
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` (vitest run) run this session: `Test Files 133 passed (133)`, `Tests 2730 passed
+    (2730)` --- up from 2716 by the deactivate predicate/parse cases (siteAccess AD1-AD8), the
+    template-items parser cases (weekTemplates), and the accent-placement guard (auditPanel). `eslint`
+    clean. The two new SQL tests pass on the scratch DB (`91_deactivate_a_user_test.sql` 8/8,
+    `89_week_templates_test.sql` 14/14 incl. the new TP-ITEMS cases), and all migrations apply on a
+    rebuild. `tsc` is INCONCLUSIVE, not clean: migrations 0075/0076 add an RPC and a column that are
+    not in `src/lib/database.types.ts` until `npm run db:types` is run against a stack with the
+    migrations applied --- 8 errors, all of that one cause (the new-RPC names and `user_profiles.active`).
+    The supabase CLI lives in the WSL stack and is not reachable from the dev shells here, so applying
+    the migrations forward (`supabase migration up`) and regenerating types is left to the maintainer;
+    once run, `tsc` is expected clean.
+  summary: >-
+    Three pieces, two in parallel Sonnet lanes (Templates, the accent-bleed) and the security-sensitive
+    Access lane in the main session.
+    ⭐ TEMPLATES CONTENTS (R-373). The maintainer's "lighter" choice: a read-only "Show contents"
+    expansion of a week template --- runs and people grouped by day --- with NO editing surface.
+    New DEFINER RPC `list_week_template_items` (migration 0075) resolves names server-side and guards
+    the plant read like `list_week_templates`.
+    ⭐ DEACTIVATE A USER (R-374). A reversible lock-out kept distinct from Remove. Migration 0076 adds
+    `user_profiles.active`, gates the ONE identity chokepoint (`app_current_profile_id` gains `AND
+    active`) so a deactivated person is denied org-wide, and adds a company-admin-only
+    `set_profile_active`; `site_people` re-emitted to carry the flag. The panel greys deactivated
+    people and offers Reactivate; the client treats a deactivated account as "no profile". No
+    last-admin guard --- it would be unreachable (the caller is always an active admin, self is
+    refused), so building it would be dead code.
+    ⭐ FROZEN HEADER, ACCESS + A BUG (R-372/F-129). The maintainer asked whether Access should be a
+    `<table>` too; decision recorded that the standard is the BEHAVIOUR (bounded scroll + frozen
+    header), satisfiable by a `<table>` OR a sticky grid header, so Access keeps its interactive grid
+    and gains a sticky `.head` --- now a second registered surface in the audit. And the reported
+    accent-into-headers bleed (F-129) was fixed by moving the accent from the `<tr>` onto the first
+    cell, so it scrolls under the opaque header.
+    Also filed F-130: four CSS modules reference an undefined `--ink-1` token (pre-existing), queued
+    for a sweep.
 - id: 133
   date: 2026-09-10
   title: "Frozen table headers made an app-wide standard, applied to Activity (R-372); the rollout to the other long-row tabs queued"
@@ -13076,7 +13224,7 @@ sessions:
 - id: 128
   date: 2026-09-10
   title: "Tester run: R-367/R-368/R-369 (Access tab) walked live and found correct; one stale rail-order pin and one unbounded invite-leak found on the way"
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2712
     app_test_files: 132
@@ -13288,7 +13436,7 @@ sessions:
 - id: 124
   date: 2026-09-10
   title: "Tester run: R-031 reviewed from outside, one real coverage gap found by mutation; two unrelated defects found chasing an e2e failure"
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2685
     app_test_files: 131
@@ -13409,7 +13557,7 @@ sessions:
 - id: 122
   date: 2026-09-09
   title: Backlog audit --- seven of the old roadmap's rows said open for work the stages record as shipped
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2669
     app_test_files: 131
@@ -13452,7 +13600,7 @@ sessions:
 - id: 121
   date: 2026-09-09
   title: "Tester run: DEF-0027 and DEF-0028 both verified clean -- R-366 and R-038 covered again"
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2669
     app_test_files: 131
@@ -13542,7 +13690,7 @@ sessions:
 - id: 119
   date: 2026-09-09
   title: "Tester run: DEF-0026 verified clean, and re-verifying it found two new defects in the proof itself"
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2667
     app_test_files: 131
@@ -14145,7 +14293,7 @@ sessions:
 - id: 108
   date: 2026-09-09
   title: The browser half of load sanity --- the server is fixed and the client is where the nine seconds are
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2645
     app_test_files: 130
@@ -14434,7 +14582,7 @@ sessions:
 - id: 103
   date: 2026-09-09
   title: Job A was already done --- S34 closed on a real push's own log, and the half of its queue line that is NOT done cut out into its own entry
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2645
     app_test_files: 130
@@ -14890,7 +15038,7 @@ sessions:
 - id: 97
   date: 2026-09-08
   title: 'F-120 closes: the schedulable-node floor the app assumed and the server never built'
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2609
     app_test_files: 128
@@ -14967,7 +15115,7 @@ sessions:
 - id: 95
   date: 2026-09-08
   title: 'A requirement-coverage audit closes 21 rows without writing a line of test code'
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2502
     app_test_files: 111
@@ -15079,7 +15227,7 @@ sessions:
 - id: 93
   date: 2026-09-08
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2497
     app_test_files: 111
@@ -15643,7 +15791,7 @@ sessions:
 - id: 86
   date: 2026-09-07
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2272
     app_test_files: 92
@@ -15806,7 +15954,7 @@ sessions:
 - id: 82
   date: 2026-09-06
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2246
     app_test_files: 88
@@ -15943,7 +16091,7 @@ sessions:
 - id: 80
   date: 2026-09-06
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2237
     app_test_files: 87
@@ -16237,7 +16385,7 @@ sessions:
 - id: 75
   date: 2026-09-05
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2126
     app_test_files: 79
@@ -16376,7 +16524,7 @@ sessions:
 - id: 73
   date: 2026-09-05
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2121
     app_test_files: 78
@@ -16546,7 +16694,7 @@ sessions:
 - id: 71
   date: 2026-09-05
   title: The browser tests get past the front door, and find a defect in the first minute
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2107
     app_test_files: 75
@@ -16591,7 +16739,7 @@ sessions:
 - id: 70
   date: 2026-09-05
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2111
     app_test_files: 77
@@ -16685,7 +16833,7 @@ sessions:
 - id: 69
   date: 2026-09-05
   title: The buildout catches up with thirteen sessions of shipped work
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2106
     app_test_files: 75
@@ -16792,7 +16940,7 @@ sessions:
 - id: 67
   date: 2026-09-05
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2106
     app_test_files: 76
@@ -16904,7 +17052,7 @@ sessions:
 - id: 65
   date: 2026-09-05
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 2103
     app_test_files: 75
@@ -17241,7 +17389,7 @@ sessions:
 - id: 59
   date: 2026-09-04
   title: A certification cannot outlive the plant it was earned in (R-326, migration 0045)
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1800
     app_test_files: 62
@@ -17296,7 +17444,7 @@ sessions:
 - id: 58
   date: 2026-09-04
   title: The phantom table is gone and the generated types describe the migrations again
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1800
     app_test_files: 62
@@ -17396,7 +17544,7 @@ sessions:
 - id: 64
   date: 2026-09-04
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1791
     app_test_files: 61
@@ -17514,7 +17662,7 @@ sessions:
 - id: 55
   date: 2026-09-04
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1791
     app_test_files: 61
@@ -17686,7 +17834,7 @@ sessions:
 - id: 51
   date: 2026-09-04
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1786
     app_test_files: 60
@@ -17813,7 +17961,7 @@ sessions:
 - id: 48
   date: 2026-09-04
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1787
     app_test_files: 61
@@ -17950,7 +18098,7 @@ sessions:
 - id: 45
   date: 2026-09-04
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1758
     app_test_files: 59
@@ -18063,7 +18211,7 @@ sessions:
 - id: 43
   date: 2026-09-03
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1582
     app_test_files: 44
@@ -18096,7 +18244,7 @@ sessions:
 - id: 42
   date: 2026-09-02
   title: Tester run
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1582
     app_test_files: 44
@@ -18744,7 +18892,7 @@ sessions:
 - id: 18
   date: 2026-08-31
   title: Trainings get a tab and a sign-off; admin gets a plant filter
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1367
     app_test_files: 35
@@ -18796,7 +18944,7 @@ sessions:
 - id: 16
   date: 2026-08-28
   title: 'The ownership model itself changes: nothing is company-wide'
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 1105
     app_test_files: null
@@ -18815,7 +18963,7 @@ sessions:
 - id: 15
   date: 2026-08-28
   title: The product editor is found behind Rename; reads get scoped
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: null
     app_test_files: null
@@ -18911,7 +19059,7 @@ sessions:
 - id: '2026-08-24'
   date: 2026-08-24
   title: The board renders in the browser and gets its first interactions
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 132
     app_test_files: null
@@ -18928,7 +19076,7 @@ sessions:
 - id: '2026-08-22'
   date: 2026-08-22
   title: First acceptance run; the database API and its TypeScript half
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: 68
     app_test_files: null
@@ -18947,7 +19095,7 @@ sessions:
 - id: '2026-08-21'
   date: 2026-08-21
   title: Stack decided, scaffold authored, migrations built
-  commits: []
+  commits: [2900610, 6e1eb16, 5ed4507]
   numbers:
     app_tests: null
     app_test_files: null
@@ -19048,15 +19196,24 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   requirement: R-372
-  text: Bring the other long-row tabs under the frozen-header standard (Operators, Products, Matrix, Trainings, Cycle times)
+  text: Bring the remaining long-row tabs under the frozen-header standard (Operators, Products, Matrix, Trainings, Cycle times, Shifts)
   why: >-
-    R-372 shipped the standard and applied it to Activity, the tab the maintainer reported. The rule
-    is "in ALL tabs where there could be a large amount of rows." Each remaining long-row tab needs a
-    bounded scroll container with a sticky header and a row added to `STICKY_HEADER_SURFACES` in
-    `src/test/stickyHeaderStandard.test.ts`, which turns the audit on for it. Several use a CSS-grid
-    `ul` rather than a `<table>`, so the header there is the `.head` row, not a `<thead>` -- the same
-    recipe (bounded `overflow:auto` container, `position:sticky; top:0` header) applies, but each is
-    its own small layout change and wants a look in the running app.
+    R-372 shipped the standard and applied it to Activity; session 134 added Access, which PROVED the
+    CSS-grid path (a sticky `.head` row, not a `<thead>`) works and registers in the audit the same
+    way. The rule is "in ALL tabs where there could be a large amount of rows." Each remaining
+    long-row tab needs a bounded scroll container with a sticky header and a row added to
+    `STICKY_HEADER_SURFACES` in `src/test/stickyHeaderStandard.test.ts`, which turns the audit on for
+    it. The same recipe (bounded `overflow:auto` container, `position:sticky; top:0` header) applies
+    to both a `<table>` and a CSS-grid `ul`, but each is its own small layout change and wants a look
+    in the running app.
+- kind: task
+  requirement: R-373
+  text: Sweep the undefined --ink-1 token from the four CSS modules that use it (F-130)
+  why: >-
+    `var(--ink-1)` is referenced by TemplatesPanel, BoardToolbar, CopyWeekDialog and SaveTemplateDialog
+    module CSS but never defined (tokens.css has only `--ink`/`--ink-2`), so those colours fall back
+    to inherited. Pre-existing, cosmetic, low-risk: either define `--ink-1` or replace each use with
+    the intended `--ink`/`--ink-2`, then eyeball the four surfaces in the running app.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   decided: true
