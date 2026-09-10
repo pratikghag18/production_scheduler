@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 5c7cf3d
+  tip: 8e0c2d0
   baseline:
-    app_tests: 2737
+    app_tests: 2742
     app_test_files: 133
     tsc: 0
     eslint: 0
     db_checks: 823
-    migrations: 75
+    migrations: 77
     mutations: 509 of 536
 tracks:
 - id: core
@@ -9503,6 +9503,65 @@ requirements:
     added field, DEF-0011 discipline). NO last-admin guard: the caller is always an active admin and
     self-deactivation is refused, so zero active admins is unreachable --- a guard for it would be
     dead code (gotcha 17).
+- id: R-375
+  title: A template's contents show which line/cell each run is on (full path, adapting to the plant's dynamic hierarchy), and "All plants" lists every plant's templates
+  source:
+  - session 136 conversation
+  stated_by: maintainer
+  claim: >-
+    The "Show contents" view names the LINE OR CELL each run sits on --- its full path relative to
+    the plant (e.g. "Assembly › Line 1"), built from the node's ancestors so it adapts to
+    whatever dynamic hierarchy levels a plant has, shown prominently (primary ink) as the heading
+    each day's runs are grouped under. A node that no longer resolves falls back to its leaf name.
+    And on "All plants" the tab lists every readable plant's templates in a section per plant, rather
+    than showing nothing until one plant is chosen.
+  verified_by:
+  - kind: vitest
+    file: src/test/weekTemplates.test.ts
+    cases: "listWeekTemplateItems parses nodePath (a nested path string) on run and assignment items, and null when the node no longer resolves"
+  - kind: sql
+    file: supabase/tests/89_week_templates_test.sql
+    cases: "TP-ITEMS-1 asserts node_path shows the sub-hierarchy (Dept › Sub › Line) for runs below the plant root, not the bare leaf"
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 136). DECIDED 10 Sept: *"show contents don't [show] what line or
+    sub-hierarchy level ... All nodes are important ... we have dynamic hierarchy levels for plants,
+    they could be anything. It should adapt to the plant hierarchy."* Migration 0077 re-emits
+    `list_week_template_items` adding `node_path` = `string_agg(ancestor.name, ' › ' ORDER BY
+    nlevel(path))` for ancestors strictly below the plant root (so it is relative to the plant and
+    adapts to any depth), falling back to the leaf `node_name`. The contents view groups a day's runs
+    by node with the path as a prominent `var(--ink)` heading (was the faintest muted text before).
+    "All plants" renders one factored `PlantTemplates` per readable plant so the single-plant and
+    all-plants paths cannot drift.
+- id: R-376
+  title: A system admin can promote another person to system admin (and revoke it)
+  source:
+  - session 136 conversation
+  stated_by: maintainer
+  claim: >-
+    A system (company) admin can make another person a system admin, and revoke it --- so an org is
+    never stuck with a single system admin who could leave or be on vacation. It is offered only to a
+    system admin, on other people's rows, in the Access tab (a "Make system admin" control, a badge
+    and "Revoke" on those who hold it). Backed by `set_system_admin`, which sets the org-wide
+    `user_profiles.role` between 'admin' and 'viewer', refuses acting on your own account, and never
+    leaks a profile's existence in another org. Promotion writes only that flag (a system admin's
+    authority is the flag, not a grant); demotion keeps the person's node grants.
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: "SA1-SA5 --- a system admin can promote a non-admin and sees Revoke on an existing admin; a non-system-admin viewer is offered neither; you cannot change your own row; the two predicates are mutually exclusive by companyAdmin"
+  - kind: sql
+    file: supabase/tests/92_make_a_system_admin_test.sql
+    cases: "Z1 a promotion makes the person resolve app_is_admin() true; Z2 demotion sets viewer and keeps their grants; Z3 a site admin is refused; Z4 you cannot change your own status; Z5 a bogus/foreign id answers no such person"
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 136). DECIDED 10 Sept: *"there cannot be just one system admin, what if
+    that person leaves or is on vacation? ... how do I make someone else a system admin?"* Until now
+    the org-wide `user_profiles.role = 'admin'` could only be the company's founder; invited people
+    are org-wide 'viewer' with access via grants. Migration 0078 adds the system-admin-only DEFINER
+    `set_system_admin(p_profile_id, p_is_admin)`. NO last-admin guard, same reasoning as R-374: the
+    caller is always an active system admin and cannot change their own row, so zero admins is
+    unreachable.
 findings:
 - id: F-129
   title: The Activity row accent bled into the column headers when the log was scrolled
@@ -12990,6 +13049,45 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 136
+  date: 2026-09-10
+  title: "Template contents name the line/cell each run is on and 'All plants' lists everything (R-375); a system admin can promote another (R-376)"
+  commits: [bb4fe3a, 8e0c2d0]
+  numbers:
+    app_tests: 2742
+    app_test_files: 133
+    tsc: 1
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` (vitest run) this session: `Test Files 133 passed (133)`, `Tests 2742 passed
+    (2742)` --- up from 2737 by the SA1-SA5 system-admin predicate cases. `eslint` clean. New SQL on
+    the scratch DB: `92_make_a_system_admin_test.sql` 6/6, `89_week_templates_test.sql` 14/14 (its
+    node_path assertions), `91_deactivate_a_user_test.sql` 8/8 regression --- all migrations apply on
+    a rebuild. `tsc` is DOWN to 1 (from 8): the maintainer ran `supabase migration up` + `npm run
+    db:types` for 0075/0076, so those cleared; the one remaining is `set_system_admin` (migration
+    0078, added this session), which clears once 0077/0078 are applied and types regenerated. The
+    regenerated `database.types.ts` is left uncommitted for that final regen.
+  summary: >-
+    Two maintainer questions turned into two features.
+    ⭐ TEMPLATE CONTENTS NAME THE PLACE (R-375). The contents view showed the node as the faintest
+    text and only the leaf name; the maintainer: it does not show which line or sub-hierarchy a run
+    is on, and the hierarchy is dynamic. Migration 0077 re-emits `list_week_template_items` to return
+    the node's full path RELATIVE to the plant, built from ancestors through the ltree `path` so it
+    adapts to any depth; the view groups a day's runs by node with the path as a prominent heading.
+    And "All plants" now lists every readable plant's templates in a section per plant instead of a
+    prompt.
+    ⭐ A SECOND SYSTEM ADMIN (R-376). The maintainer: there cannot be just one system admin --- what
+    if they leave or are on holiday --- and nothing in the app could make another. Migration 0078
+    adds the system-admin-only `set_system_admin`, and the Access tab gains a quiet "Make system
+    admin" control (and a badge + "Revoke" on those who hold it). Same no-last-admin-guard reasoning
+    as R-374.
+    Also answered two questions without code: the Templates "All plants" blank was by design (now
+    changed), and the Access role dropdown's "admin" is a SITE admin at a plant root, distinct from a
+    system admin.
 - id: 135
   date: 2026-09-10
   title: "The frozen-header standard applied to EVERY long-row tab (R-372 rollout done); Access actions given equal-sized columns; the Activity accent re-fixed with a box-shadow (F-129)"
