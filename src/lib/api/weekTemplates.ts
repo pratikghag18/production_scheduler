@@ -56,6 +56,17 @@ export interface WeekTemplateItem {
   nodeId: string;
   /** Null when the node no longer exists. */
   nodeName: string | null;
+  /**
+   * The node's ancestors-and-self BELOW the template's plant, joined
+   * "Name › Name" (migration 0077, the maintainer 10 Sept: "show contents
+   * don't [show] what line or sub-hierarchy level the template is for ...
+   * we have dynamic hierarchy levels for plants ... it should adapt to the
+   * plant hierarchy"). Adapts to any depth because it is built from the
+   * node's ltree path, not a fixed join count. Null exactly when `nodeName`
+   * is (the node no longer resolves); falls back to the leaf name server-side
+   * when the item sits on the plant root itself.
+   */
+  nodePath: string | null;
   productId: string | null;
   /** Null when there is no product, or the product no longer exists. */
   productName: string | null;
@@ -88,6 +99,10 @@ const FI = {
   plannedHeadcount: "planned_headcount",
   nodeId: "node_id",
   nodeName: "node_name",
+  // 0077: the node's ancestors-and-self below the plant, adapting to any
+  // hierarchy depth. tsc is inconclusive on this column until `npm run
+  // db:types` has run after 0077 lands (CLAUDE.md §4).
+  nodePath: "node_path",
   productId: "product_id",
   productName: "product_name",
   operatorId: "operator_id",
@@ -157,6 +172,7 @@ function parseTemplateItem(v: Json | undefined): WeekTemplateItem | null {
   const plannedHeadcount = v[FI.plannedHeadcount];
   const nodeId = v[FI.nodeId];
   const nodeName = v[FI.nodeName];
+  const nodePath = v[FI.nodePath];
   const productId = v[FI.productId];
   const productName = v[FI.productName];
   const operatorId = v[FI.operatorId];
@@ -171,6 +187,7 @@ function parseTemplateItem(v: Json | undefined): WeekTemplateItem | null {
     !isNumOrNull(plannedHeadcount) ||
     !isStr(nodeId) ||
     !isStrOrNull(nodeName) ||
+    !isStrOrNull(nodePath) ||
     !isStrOrNull(productId) ||
     !isStrOrNull(productName) ||
     !isStrOrNull(operatorId) ||
@@ -188,6 +205,7 @@ function parseTemplateItem(v: Json | undefined): WeekTemplateItem | null {
     plannedHeadcount,
     nodeId,
     nodeName,
+    nodePath,
     productId,
     productName,
     operatorId,

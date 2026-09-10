@@ -14,9 +14,11 @@ import {
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { useEditRights } from "../hooks/useEditRights";
+import { type EditRights } from "../lib/editRights";
 import { canAdministerPlant, useDateFormat } from "../hooks/useOrgSettings";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import { usePlantFilter } from "../hooks/usePlantFilter";
+import { type PlantOption } from "../lib/plantFilter";
 import { formatCalendarDay, type DateFormat } from "@/lib/format/dates";
 import styles from "./TemplatesPanel.module.css";
 
@@ -58,20 +60,39 @@ interface DayRun {
   crew: WeekTemplateItem[];
 }
 
+/**
+ * One node's runs (and standalone assignments) within a day --- the
+ * maintainer, 10 Sept: "Show contents" must say WHICH line/cell each run is
+ * on, adapting to the plant's dynamic hierarchy. `label` is the node's full
+ * path relative to the plant (`nodePath`), falling back to the leaf
+ * (`nodeName`) and then "(removed)" --- the same fallback order the node no
+ * longer resolving already forces on every `*Name` field (0067 D110).
+ */
+interface NodeGroup {
+  nodeId: string;
+  label: string;
+  runs: DayRun[];
+  /** Assignments with no `runRef`, on this node --- not attached to any run. */
+  standalone: WeekTemplateItem[];
+}
+
 /** One day's worth of a template's contents, in the shape the list renders. */
 interface DayGroup {
   dayOffset: number;
-  runs: DayRun[];
-  /** Assignments with no `runRef` — not attached to any run in this template. */
-  standalone: WeekTemplateItem[];
+  nodes: NodeGroup[];
+}
+
+/** `nodePath` (0077), else the leaf `nodeName`, else "(removed)" — one place. */
+function nodeGroupLabel(item: WeekTemplateItem): string {
+  return item.nodePath ?? item.nodeName ?? "(removed)";
 }
 
 /**
  * Group a flat item list (server order: day, node, start, kind) into one
- * section per day, each run paired with its crew (assignments whose
- * `runRef === run.itemRef`) and standalone assignments listed alongside.
- * Read-only view; nothing here writes or re-orders what the server sent
- * beyond bucketing it by day.
+ * section per day, and within each day one section per NODE (line/cell) ---
+ * each run paired with its crew (assignments whose `runRef === run.itemRef`)
+ * and that node's standalone assignments listed alongside. Read-only view;
+ * nothing here writes or re-orders what the server sent beyond bucketing it.
  */
 function groupItemsByDay(items: WeekTemplateItem[]): DayGroup[] {
   const byDay = new Map<number, WeekTemplateItem[]>();
@@ -84,14 +105,39 @@ function groupItemsByDay(items: WeekTemplateItem[]): DayGroup[] {
     .sort((a, b) => a - b)
     .map((dayOffset) => {
       const dayItems = byDay.get(dayOffset) ?? [];
-      const runs: DayRun[] = dayItems
-        .filter((i) => i.kind === "run")
-        .map((run) => ({
-          run,
-          crew: dayItems.filter((i) => i.kind === "assignment" && i.runRef === run.itemRef),
-        }));
-      const standalone = dayItems.filter((i) => i.kind === "assignment" && i.runRef === null);
-      return { dayOffset, runs, standalone };
+
+      // One bucket per node, in first-seen (server) order.
+      const nodeIds: string[] = [];
+      const byNode = new Map<string, WeekTemplateItem[]>();
+      for (const item of dayItems) {
+        const bucket = byNode.get(item.nodeId);
+        if (bucket) bucket.push(item);
+        else {
+          byNode.set(item.nodeId, [item]);
+          nodeIds.push(item.nodeId);
+        }
+      }
+
+      const nodes: NodeGroup[] = nodeIds
+        .map((nodeId) => {
+          const nodeItems = byNode.get(nodeId) ?? [];
+          const runs: DayRun[] = nodeItems
+            .filter((i) => i.kind === "run")
+            .map((run) => ({
+              run,
+              // Crew is looked up across the whole day, not just this node's
+              // bucket: nothing guarantees an assignment shares its run's node.
+              crew: dayItems.filter((i) => i.kind === "assignment" && i.runRef === run.itemRef),
+            }));
+          const standalone = nodeItems.filter((i) => i.kind === "assignment" && i.runRef === null);
+          return { nodeId, label: nodeGroupLabel(nodeItems[0]), runs, standalone };
+        })
+        // A node bucket holding only OTHER nodes' crew (kind "assignment"
+        // with a runRef, filtered out of both runs and standalone above)
+        // would otherwise render as an empty, label-only group.
+        .filter((g) => g.runs.length > 0 || g.standalone.length > 0);
+
+      return { dayOffset, nodes };
     });
 }
 
@@ -103,8 +149,15 @@ function groupItemsByDay(items: WeekTemplateItem[]): DayGroup[] {
  *
  * ⚠️ RENAME/DELETE ARE GATED BY THE SAME PREDICATE THE SERVER RUNS
  * (`canAdministerPlant` on the plant's path = `app_is_admin_for`), so the panel
- * never offers a control the server would refuse (CLAUDE.md section 4). On "All
- * plants", or a plant the reader may only view, it lists and offers nothing.
+ * never offers a control the server would refuse (CLAUDE.md section 4). On a
+ * plant the reader may only view, it lists and offers nothing.
+ *
+ * ⭐ "ALL PLANTS" (R-358, the maintainer 10 Sept: "For all plants, show all
+ * templates.") is not one absent plant, it is EVERY readable plant: one
+ * section per plant (`PlantTemplates`, the same component and markup the
+ * single-plant path uses), each still gated on `canAdministerPlant` for that
+ * plant's own path --- an admin of Plant A and only a viewer of Plant B sees
+ * rename/delete on the first section and not the second.
  */
 export function TemplatesPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
@@ -124,33 +177,79 @@ export function TemplatesPanel() {
       : plantFilter.plants.length === 1
         ? plantFilter.plants[0]
         : null;
-  const mayAdminister = plant !== null && canAdministerPlant(plant.path, rights);
-  // Same seam every admin panel reads a calendar date through (dateSeam.test.ts):
-  // the plant's own override, or the company's, never a re-derived format.
-  const dateFormat = useDateFormat(canQuery, plant?.id ?? null);
 
-  const templatesQuery = useQuery<WeekTemplate[], SchedulerError>({
-    queryKey: templateKeys.forPlant(plant?.id ?? ""),
-    queryFn: () => listWeekTemplates(plant?.id ?? ""),
-    enabled: canQuery && plant !== null,
-  });
-
-  if (plant === null) {
+  if (plant !== null) {
     return (
-      <p className={styles.empty}>Choose a plant in “Showing”, at the top, to see its templates.</p>
+      <div className={styles.body}>
+        <p className={styles.plant}>{plant.name}</p>
+        {/* R-358: the panel lists, renames and deletes; it says nothing about
+            applying. Name the plant, what a template is, and the one route back
+            to the board. */}
+        <p className={styles.about}>
+          A template is a whole week's runs and their people, saved from {plant.name}. It is applied
+          from the board's toolbar, with “Apply a template”.
+        </p>
+        <PlantTemplates plant={plant} canQuery={canQuery} rights={rights} />
+      </div>
+    );
+  }
+
+  // "All plants" (the maintainer: "For all plants, show all templates.") ---
+  // no single plant resolved, but there IS more than one readable plant: a
+  // section per plant, each rendering with the exact same PlantTemplates
+  // markup the single-plant path above uses, so the two never drift apart.
+  // Fewer than two readable plants and no chosen one means the reader has
+  // nothing to see yet (loading, or none at all) --- the prompt below.
+  if (plantFilter.plants.length > 1) {
+    return (
+      <div className={styles.body}>
+        <p className={styles.about}>
+          A template is a whole week's runs and their people, saved from its plant. It is applied
+          from the board's toolbar, with “Apply a template”.
+        </p>
+        {plantFilter.plants.map((p) => (
+          <div key={p.id} className={styles.plantSection}>
+            <p className={styles.plant}>{p.name}</p>
+            <PlantTemplates plant={p} canQuery={canQuery} rights={rights} />
+          </div>
+        ))}
+      </div>
     );
   }
 
   return (
-    <div className={styles.body}>
-      <p className={styles.plant}>{plant.name}</p>
-      {/* R-358: the panel lists, renames and deletes; it says nothing about
-          applying. Name the plant, what a template is, and the one route back
-          to the board. */}
-      <p className={styles.about}>
-        A template is a whole week's runs and their people, saved from {plant.name}. It is applied
-        from the board's toolbar, with “Apply a template”.
-      </p>
+    <p className={styles.empty}>Choose a plant in “Showing”, at the top, to see its templates.</p>
+  );
+}
+
+/**
+ * One plant's template list --- the query, loading/error/empty states, and
+ * the `<ul>` of `TemplateRow`s. Factored out (R-358 / "All plants") so the
+ * single-plant path and every "All plants" section render this identically;
+ * neither may drift into its own copy of the query or the markup.
+ */
+function PlantTemplates({
+  plant,
+  canQuery,
+  rights,
+}: {
+  plant: PlantOption;
+  canQuery: boolean;
+  rights: EditRights;
+}) {
+  const mayAdminister = canAdministerPlant(plant.path, rights);
+  // Same seam every admin panel reads a calendar date through (dateSeam.test.ts):
+  // the plant's own override, or the company's, never a re-derived format.
+  const dateFormat = useDateFormat(canQuery, plant.id);
+
+  const templatesQuery = useQuery<WeekTemplate[], SchedulerError>({
+    queryKey: templateKeys.forPlant(plant.id),
+    queryFn: () => listWeekTemplates(plant.id),
+    enabled: canQuery,
+  });
+
+  return (
+    <>
       {templatesQuery.isLoading && <p className={styles.empty}>Loading templates…</p>}
       {templatesQuery.isError && (
         <p role="alert" className={styles.error}>
@@ -176,7 +275,7 @@ export function TemplatesPanel() {
           ))}
         </ul>
       )}
-    </div>
+    </>
   );
 }
 
@@ -339,58 +438,69 @@ function TemplateRow({
   );
 }
 
-/** The grouped, per-day read of a template's snapshot. `items` is non-empty. */
+/**
+ * The grouped, per-day read of a template's snapshot. `items` is non-empty.
+ * Reading order: Day -> Line/cell (`node.label`, prominent) -> the runs there
+ * -> their crew --- the maintainer, 10 Sept: "show contents don't [show] what
+ * line or sub-hierarchy level the template is for ... it should adapt to the
+ * plant hierarchy."
+ */
 function TemplateContents({ items }: { items: WeekTemplateItem[] }) {
   return (
     <div className={styles.days}>
       {groupItemsByDay(items).map((day) => (
         <div key={day.dayOffset} className={styles.day}>
           <p className={styles.dayLabel}>{DAY_NAMES[day.dayOffset]}</p>
-          <ul className={styles.runList}>
-            {day.runs.map(({ run, crew }) => (
-              <li key={run.itemRef} className={styles.runItem}>
-                <div className={styles.runHeader}>
-                  <span className={styles.runNode}>{run.nodeName ?? "(removed)"}</span>
-                  <span className={run.productName === null ? styles.removed : styles.runProduct}>
-                    {run.productName ?? "(removed product)"}
-                  </span>
-                  <span className={styles.runTime}>
-                    {formatDayTime(run.startMin)}–{formatDayTime(run.endMin)}
-                  </span>
-                  {run.plannedHeadcount !== null && (
-                    <span className={styles.runHeadcount}>{run.plannedHeadcount} planned</span>
-                  )}
-                </div>
-                {crew.length > 0 && (
-                  <ul className={styles.crewList}>
-                    {crew.map((a) => (
-                      <li key={a.itemRef} className={styles.crewItem}>
-                        <span className={a.operatorName === null ? styles.removed : undefined}>
-                          {a.operatorName ?? "(removed operator)"}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            ))}
-            {day.standalone.map((a) => (
-              <li key={a.itemRef} className={styles.standaloneItem}>
-                <span className={styles.runNode}>{a.nodeName ?? "(removed)"}</span>
-                <span className={a.operatorName === null ? styles.removed : undefined}>
-                  {a.operatorName ?? "(removed operator)"}
-                </span>
-                {a.productId !== null && (
-                  <span className={a.productName === null ? styles.removed : undefined}>
-                    {a.productName ?? "(removed product)"}
-                  </span>
-                )}
-                <span className={styles.runTime}>
-                  {formatDayTime(a.startMin)}–{formatDayTime(a.endMin)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {day.nodes.map((node) => (
+            <div key={node.nodeId} className={styles.node}>
+              <p className={styles.nodePath}>{node.label}</p>
+              <ul className={styles.runList}>
+                {node.runs.map(({ run, crew }) => (
+                  <li key={run.itemRef} className={styles.runItem}>
+                    <div className={styles.runHeader}>
+                      <span
+                        className={run.productName === null ? styles.removed : styles.runProduct}
+                      >
+                        {run.productName ?? "(removed product)"}
+                      </span>
+                      <span className={styles.runTime}>
+                        {formatDayTime(run.startMin)}–{formatDayTime(run.endMin)}
+                      </span>
+                      {run.plannedHeadcount !== null && (
+                        <span className={styles.runHeadcount}>{run.plannedHeadcount} planned</span>
+                      )}
+                    </div>
+                    {crew.length > 0 && (
+                      <ul className={styles.crewList}>
+                        {crew.map((a) => (
+                          <li key={a.itemRef} className={styles.crewItem}>
+                            <span className={a.operatorName === null ? styles.removed : undefined}>
+                              {a.operatorName ?? "(removed operator)"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+                {node.standalone.map((a) => (
+                  <li key={a.itemRef} className={styles.standaloneItem}>
+                    <span className={a.operatorName === null ? styles.removed : undefined}>
+                      {a.operatorName ?? "(removed operator)"}
+                    </span>
+                    {a.productId !== null && (
+                      <span className={a.productName === null ? styles.removed : undefined}>
+                        {a.productName ?? "(removed product)"}
+                      </span>
+                    )}
+                    <span className={styles.runTime}>
+                      {formatDayTime(a.startMin)}–{formatDayTime(a.endMin)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       ))}
     </div>

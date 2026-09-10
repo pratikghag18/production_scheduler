@@ -127,6 +127,7 @@ describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
         planned_headcount: 2,
         node_id: "n1",
         node_name: "Line T1",
+        node_path: "Dept T › Sub T › Line T1",
         product_id: "p1",
         product_name: "Widget T",
         operator_id: null,
@@ -142,6 +143,7 @@ describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
         planned_headcount: null,
         node_id: "n1",
         node_name: "Line T1",
+        node_path: "Dept T › Sub T › Line T1",
         product_id: null,
         product_name: null,
         operator_id: "o1",
@@ -150,7 +152,9 @@ describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
       {
         // a standalone assignment (no run_ref), and a name that no longer
         // resolves (0067 D110): the node/product/operator were deleted since
-        // the snapshot, so every *_name here is null though the ids remain.
+        // the snapshot, so every *_name here is null though the ids remain —
+        // node_path is null right alongside node_name (0077: nothing to walk
+        // ancestors from once the node itself is gone).
         item_ref: "e9000000-0000-0000-0000-000000000003",
         kind: "assignment",
         run_ref: null,
@@ -160,6 +164,7 @@ describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
         planned_headcount: null,
         node_id: "n1",
         node_name: null,
+        node_path: null,
         product_id: "p-gone",
         product_name: null,
         operator_id: "o-gone",
@@ -179,6 +184,7 @@ describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
       plannedHeadcount: 2,
       nodeId: "n1",
       nodeName: "Line T1",
+      nodePath: "Dept T › Sub T › Line T1",
       productId: "p1",
       productName: "Widget T",
       operatorId: null,
@@ -194,6 +200,7 @@ describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
       plannedHeadcount: null,
       nodeId: "n1",
       nodeName: "Line T1",
+      nodePath: "Dept T › Sub T › Line T1",
       productId: null,
       productName: null,
       operatorId: "o1",
@@ -209,6 +216,7 @@ describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
       plannedHeadcount: null,
       nodeId: "n1",
       nodeName: null,
+      nodePath: null,
       productId: "p-gone",
       productName: null,
       operatorId: "o-gone",

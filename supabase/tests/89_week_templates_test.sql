@@ -465,6 +465,18 @@ ROLLBACK TO SAVEPOINT sp_TPXT;
 -- reads the stored day_offset/start_min/end_min back as-is, unlike
 -- copy_week_plan's template arm which re-materialises them onto a target).
 -- TP-ITEMS-VIS mirrors TP-XT's no-leak shape for the new reader.
+--
+-- ⚠ ALSO UNVERIFIED (same caveat): TP-ITEMS-1 now also asserts `node_path`
+-- (migration 0077, the maintainer 10 Sept: "show contents" must name the
+-- line/cell, adapting to the plant's dynamic hierarchy, not just the leaf).
+-- Plant T's fixture (this file's DO block above, "fixture: the plant, its
+-- people, and the source week") is Plant T -> Dept T -> Sub T -> Line T1 /
+-- Line T2, four levels deep with only the last schedulable (F-120/R-002).
+-- run1 sits on Line T1, three levels below the plant root, so its relative
+-- path is "Dept T › Sub T › Line T1" --- the plant root itself (and Plant T's
+-- own name) is excluded, exactly as 0077 documents. run2 sits on Line T2:
+-- "Dept T › Sub T › Line T2". Both are BELOW the plant root, so this proves
+-- the sub-hierarchy shows, not just the leaf.
 
 \echo 'TP-ITEMS-1: tp_admin reads the saved template''s items --- names resolved, run+crew+standalone+overnight rows all present'
 SAVEPOINT sp_TPI1;
@@ -493,15 +505,18 @@ BEGIN
 
   IF jsonb_array_length(v_items) = 6  -- 2 runs + 4 assignments
      AND v_run1->>'kind' = 'run' AND v_run1->>'node_name' = 'Line T1'
+     AND v_run1->>'node_path' = 'Dept T › Sub T › Line T1'  -- 0077: relative to Plant T, sub-hierarchy shown
      AND v_run1->>'product_name' = 'Widget T' AND (v_run1->>'day_offset')::int = 0
      AND (v_run1->>'start_min')::int = 360 AND (v_run1->>'end_min')::int = 840
      AND (v_run1->>'planned_headcount')::int = 2 AND v_run1->>'run_ref' IS NULL
      AND v_crew_count = 2
      AND v_run2->>'node_name' = 'Line T2' AND v_run2->>'product_name' = 'Gadget T'
+     AND v_run2->>'node_path' = 'Dept T › Sub T › Line T2'  -- 0077
      AND (v_run2->>'day_offset')::int = 2
      AND (v_run2->>'start_min')::int = 1320 AND (v_run2->>'end_min')::int = 1800
      AND v_standalone->>'kind' = 'assignment' AND v_standalone->>'run_ref' IS NULL
      AND v_standalone->>'operator_name' = 'Theo' AND v_standalone->>'product_name' = 'Widget T'
+     AND v_standalone->>'node_path' = 'Dept T › Sub T › Line T1'  -- 0077: standalone also on Line T1
   THEN RAISE NOTICE 'PASS TP-ITEMS-1';
   ELSE RAISE NOTICE 'FAIL TP-ITEMS-1: run1=% run2=% standalone=% crew_count=% n=%',
     v_run1, v_run2, v_standalone, v_crew_count, jsonb_array_length(v_items); END IF;

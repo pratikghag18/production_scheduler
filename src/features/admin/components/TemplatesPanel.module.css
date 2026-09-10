@@ -11,6 +11,22 @@
   color: var(--ink-1);
 }
 
+/* "All plants" (R-358: "For all plants, show all templates."): one section
+ * per readable plant, each holding its own .plant heading and .list. A top
+ * rule separates one plant's templates from the next --- an adjacent-sibling
+ * rule, so the FIRST section carries none, never a border every section
+ * carries that a `:first-of-type` guess could get wrong. */
+.plantSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plantSection + .plantSection {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line-1, #e2e2e2);
+}
+
 .empty {
   margin: 0.5rem 0;
   font-size: 0.8125rem;
@@ -121,6 +137,26 @@
   color: var(--ink);
 }
 
+/* One line/cell within a day (R-358, the maintainer 10 Sept: "show contents
+ * don't [show] what line or sub-hierarchy level the template is for ... it
+ * should adapt to the plant hierarchy"). Indented under .dayLabel so the
+ * reading order stays Day -> node -> runs -> crew. */
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  padding-left: 0.5rem;
+}
+
+.nodePath {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  /* Primary ink, not muted --- this is the whole fix: a line/cell is as
+   * important as the day it runs on, not the faintest text on the row. */
+  color: var(--ink);
+}
+
 .runList {
   list-style: none;
   margin: 0;
@@ -142,11 +178,6 @@
   align-items: baseline;
   gap: 0.5rem;
   font-size: 0.8125rem;
-}
-
-.runNode {
-  color: var(--muted);
-  font-size: 0.6875rem;
 }
 
 .runProduct {
