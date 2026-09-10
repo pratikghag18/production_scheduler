@@ -35,6 +35,7 @@ import type { ReactNode } from "react";
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuditPanel } from "@/features/admin/components/AuditPanel";
+import styles from "@/features/admin/components/AuditPanel.module.css";
 import { useAdminViewStore } from "@/features/admin/store/adminView";
 /* ⚠️ THE REAL ONE, NOT A COPY. `entryPlaceIds` is how the panel decides which
    rows to MARK and how the server double below decides which rows to SERVE; a
@@ -903,6 +904,34 @@ describe("a deletion is visible at a glance", () => {
     expect(rows.map((r) => r.getAttribute("data-action"))).toEqual(["insert", "update", "delete"]);
   });
 
+  /* ⚠️ GUARDS THE SCROLL FIX, NOT A COLOUR. jsdom applies no CSS (`css: false`
+     in vitest.config.ts), so the border colour itself cannot be asserted here
+     — the stylesheet case above does that as text. What THIS case pins is the
+     STRUCTURE the fix depends on: the accent must live on the row's first cell
+     (`.when`), not on the `<tr>`, because a `<tr>` border sits outside every
+     cell's box and scrolls past the sticky header's edge instead of under it —
+     that was the bug (reported from the running app: "the accent colour goes
+     into column names as well" on scroll). */
+  it("carries the accent on the first cell, not the row, so it scrolls under the sticky header", async () => {
+    h.fetchPage.mockResolvedValue({
+      entries: [
+        entry({
+          id: 200,
+          tableName: "runs",
+          action: "delete",
+          before: { notes: "x" },
+          after: null,
+        }),
+      ],
+      hasMore: false,
+    });
+    show();
+    const row = (await screen.findByText("Run deleted")).closest("tr");
+    expect(row?.getAttribute("data-action")).toBe("delete");
+    const firstCell = row?.querySelector("td");
+    expect(firstCell?.classList.contains(styles.when)).toBe(true);
+  });
+
   it("keeps the word beside the accent, so colour is never the only signal", async () => {
     h.fetchPage.mockResolvedValue({
       entries: [
@@ -934,17 +963,27 @@ describe("a deletion is visible at a glance", () => {
     for (const m of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       rules.set(m[1].trim().replace(/\s+/g, " "), m[2]);
     }
+    // ⚠️ ON `.when`, THE FIRST BODY CELL, NOT ON `.row`. A border on the `<tr>`
+    // sits outside every cell's box, at the table's left edge, which is why it
+    // used to scroll past the sticky header's opaque left edge instead of under
+    // it (reported from the running app: the accent bled into the column
+    // names). See the note above `.row` in the stylesheet.
     for (const action of ["insert", "update", "delete"]) {
-      const sel = `.row[data-action="${action}"]`;
+      const sel = `.row[data-action="${action}"] .when`;
       const body = rules.get(sel);
       expect(body, `${sel} must set its own accent colour`).toBeTruthy();
       expect(/border-left-color\s*:/.test(body ?? "")).toBe(true);
     }
-    expect(rules.get('.row[data-action="delete"]')).toContain("--crit");
-    expect(rules.get('.row[data-action="insert"]')).not.toContain("--crit");
-    expect(rules.get('.row[data-action="update"]')).not.toContain("--crit");
+    expect(rules.get('.row[data-action="delete"] .when')).toContain("--crit");
+    expect(rules.get('.row[data-action="insert"] .when')).not.toContain("--crit");
+    expect(rules.get('.row[data-action="update"] .when')).not.toContain("--crit");
     // Every row gets a bar, so the accent is a signal and not a width change.
-    expect(/\.row\s*\{[^}]*border-left:/.test(clean)).toBe(true);
+    expect(/\.when\s*\{[^}]*border-left:/.test(clean)).toBe(true);
+    // The header reserves the identical strip on its own first cell, so "When"
+    // does not sit visibly left of the timestamps under it, and — because it is
+    // a cell and not the row — the header's opaque background actually covers
+    // a scrolled-up row's accent instead of letting it show past the edge.
+    expect(/\.th:first-child\s*\{[^}]*border-left:/.test(clean)).toBe(true);
   });
 
   it("does not strike through the fields of a deleted row", () => {

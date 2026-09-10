@@ -132,6 +132,15 @@
   white-space: nowrap;
 }
 
+/* Reserves the same 3px strip the body's `.when` cell carries its accent in
+   (see THE ACTION ACCENT below), transparent here, so "When" does not sit
+   visibly left of the timestamps under it. Because this is a CELL and not the
+   `<tr>`, the header's own opaque `background` covers the strip -- see the note
+   on why the accent moved off the row. */
+.th:first-child {
+  border-left: 0.1875rem solid transparent;
+}
+
 /* ---------------------------------------------------------------------------
    THE ACTION ACCENT.
 
@@ -160,33 +169,32 @@
    vocabulary rather than a status one; borrowing either here would make one
    colour mean two things. An edit therefore takes the neutral `--ink-2` — it is
    the ordinary case and the majority of rows, so a quiet mark is the right one.
+
+   ⚠️ THE ACCENT LIVES ON THE FIRST CELL (`.when`), NOT THE `<tr>`. A border on
+   the row element sits at the table's left EDGE, outside every cell's box, so it
+   scrolls PAST the sticky header's left side rather than under its opaque
+   background — a deleted row's red bar kept showing beside "When" once the row
+   had scrolled up under the frozen head (reported from the running app). Moving
+   the border onto `.when` makes it an ordinary in-flow cell decoration that
+   scrolls under the header like the rest of the cell's content; `.th:first-child`
+   (above) reserves the identical 3px strip, transparent, and its own opaque
+   `background` covers it.
    --------------------------------------------------------------------------- */
-/* ⚠️ THE HEADER RESERVES THE SAME WIDTH AND SHOWS NOTHING. Without it the head
-   row has no left border, the body rows have three pixels of one, and "When"
-   sits visibly left of the timestamps under it — a column that looks misaligned
-   because of a signal it does not carry. */
-.headRow {
-  border-left: 0.1875rem solid transparent;
-}
 
 .row {
   border-bottom: 1px solid var(--grid);
-  /* In `rem` (D84): a 3px bar is a real dimension, not a hairline, so it scales
-     with the root font-size like everything else on this surface. Declared on
-     every row so the accent is a COLOUR change and never a width change. */
-  border-left: 0.1875rem solid transparent;
   vertical-align: top;
 }
 
-.row[data-action="insert"] {
+.row[data-action="insert"] .when {
   border-left-color: var(--signal-ok);
 }
 
-.row[data-action="update"] {
+.row[data-action="update"] .when {
   border-left-color: var(--ink-2);
 }
 
-.row[data-action="delete"] {
+.row[data-action="delete"] .when {
   border-left-color: var(--crit);
 }
 
@@ -214,6 +222,11 @@
   /* Tabular figures so a column of timestamps lines up on the colon rather than
      jittering row to row. */
   font-variant-numeric: tabular-nums;
+  /* THE ACTION ACCENT lands here, not on `.row` -- see the note above `.row`.
+     In `rem` (D84): a 3px bar is a real dimension, not a hairline, so it scales
+     with the root font-size like everything else on this surface. Transparent
+     by default so the accent is a COLOUR change only, never a width change. */
+  border-left: 0.1875rem solid transparent;
 }
 
 .who {
