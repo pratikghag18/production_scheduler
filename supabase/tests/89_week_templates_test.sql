@@ -452,4 +452,146 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 ROLLBACK TO SAVEPOINT sp_TPXT;
 
+-- ⚠ UNVERIFIED, pending the developer's `npm run db:test` (or equivalent SQL
+-- run) under a reset database. Written by mirroring TP1/TP-ON/TP4/TP-XT's
+-- shape exactly; not executed by the build lane that wrote them (no local
+-- Postgres available to it). Added for migration 0075's
+-- `list_week_template_items` (R-356 surface: a read-only "what's inside"
+-- view). TP-ITEMS-1/2 read the SAVED template from TP0's fixture week
+-- (2099-07-06: a first-shift run with two crew, a Tuesday standalone
+-- assignment, and the Wed 22:00 -> Thu 06:00 overnight run with its one crew)
+-- and check names resolve and the overnight item's day/minutes survive
+-- unchanged (list_week_template_items does not re-window anything --- it
+-- reads the stored day_offset/start_min/end_min back as-is, unlike
+-- copy_week_plan's template arm which re-materialises them onto a target).
+-- TP-ITEMS-VIS mirrors TP-XT's no-leak shape for the new reader.
+
+\echo 'TP-ITEMS-1: tp_admin reads the saved template''s items --- names resolved, run+crew+standalone+overnight rows all present'
+SAVEPOINT sp_TPI1;
+DO $$
+DECLARE v_pt uuid; v_tid uuid; v_items jsonb;
+        v_run1 jsonb; v_run2 jsonb; v_standalone jsonb;
+        v_crew_count int;
+BEGIN
+  SELECT v INTO v_pt FROM t_fix WHERE k = 'pt';
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+  SET LOCAL ROLE authenticated;
+  v_tid   := (save_week_template(v_pt, '2099-07-06', 'Items 1')->>'id')::uuid;
+  v_items := list_week_template_items(v_tid);
+  RESET ROLE;
+
+  -- pg_temp.t_item matches on 'key' (copy_week_plan's shape); this RPC's rows
+  -- carry 'item_ref' instead, so select directly by item_ref.
+  SELECT i INTO v_run1 FROM jsonb_array_elements(v_items) i
+   WHERE i->>'item_ref' = 'e8000000-0000-0000-0000-000000000001';
+  SELECT i INTO v_run2 FROM jsonb_array_elements(v_items) i
+   WHERE i->>'item_ref' = 'e8000000-0000-0000-0000-000000000002';
+  SELECT i INTO v_standalone FROM jsonb_array_elements(v_items) i
+   WHERE i->>'item_ref' = 'e9000000-0000-0000-0000-000000000003';
+  SELECT count(*) INTO v_crew_count FROM jsonb_array_elements(v_items) i
+   WHERE i->>'run_ref' = 'e8000000-0000-0000-0000-000000000001';
+
+  IF jsonb_array_length(v_items) = 6  -- 2 runs + 4 assignments
+     AND v_run1->>'kind' = 'run' AND v_run1->>'node_name' = 'Line T1'
+     AND v_run1->>'product_name' = 'Widget T' AND (v_run1->>'day_offset')::int = 0
+     AND (v_run1->>'start_min')::int = 360 AND (v_run1->>'end_min')::int = 840
+     AND (v_run1->>'planned_headcount')::int = 2 AND v_run1->>'run_ref' IS NULL
+     AND v_crew_count = 2
+     AND v_run2->>'node_name' = 'Line T2' AND v_run2->>'product_name' = 'Gadget T'
+     AND (v_run2->>'day_offset')::int = 2
+     AND (v_run2->>'start_min')::int = 1320 AND (v_run2->>'end_min')::int = 1800
+     AND v_standalone->>'kind' = 'assignment' AND v_standalone->>'run_ref' IS NULL
+     AND v_standalone->>'operator_name' = 'Theo' AND v_standalone->>'product_name' = 'Widget T'
+  THEN RAISE NOTICE 'PASS TP-ITEMS-1';
+  ELSE RAISE NOTICE 'FAIL TP-ITEMS-1: run1=% run2=% standalone=% crew_count=% n=%',
+    v_run1, v_run2, v_standalone, v_crew_count, jsonb_array_length(v_items); END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL TP-ITEMS-1: unexpected exception % (%)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_TPI1;
+
+\echo 'TP-ITEMS-2: tp_view (can read Plant T, writes nothing) can also read the template''s items'
+SAVEPOINT sp_TPI2;
+DO $$
+DECLARE v_pt uuid; v_tid uuid; v_items jsonb;
+BEGIN
+  SELECT v INTO v_pt FROM t_fix WHERE k = 'pt';
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+  SET LOCAL ROLE authenticated;
+  v_tid := (save_week_template(v_pt, '2099-07-06', 'Items 2')->>'id')::uuid;
+  RESET ROLE;
+
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e3', true);
+  SET LOCAL ROLE authenticated;
+  v_items := list_week_template_items(v_tid);
+  RESET ROLE;
+
+  IF jsonb_array_length(v_items) = 6 THEN RAISE NOTICE 'PASS TP-ITEMS-2';
+  ELSE RAISE NOTICE 'FAIL TP-ITEMS-2: items=%', v_items; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL TP-ITEMS-2: unexpected exception % (%)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_TPI2;
+
+\echo 'TP-ITEMS-VIS ⚠ (DEF-0021 shape): a caller who cannot read the plant, and a foreign-org template id, both answer no_such_template with no existence leak'
+SAVEPOINT sp_TPIVIS;
+DO $$
+DECLARE v_org2 uuid := '10000000-0000-0000-0000-000000000002';
+        v_p2   uuid := '3000000b-0000-0000-0000-000000000001';   -- org 2's plant root
+        v_foreign uuid := '99999999-0000-0000-0000-000000000002';
+        v_bogus   uuid := '88888888-0000-0000-0000-000000000003';
+        v_pt uuid; v_tid uuid;
+        v_norea text; v_bogus_r text; v_foreign_r text;
+        v_ok boolean := true; v_why text := '';
+BEGIN
+  SELECT v INTO v_pt FROM t_fix WHERE k = 'pt';
+  -- A viewer with NO grant at all on Plant T (unlike e3/tp_view, who is
+  -- granted a viewer role there): a profile that exists in org 1 but cannot
+  -- read this plant, so the RPC's own read gate (not just the lookup) is
+  -- exercised too. Reuse the org-1 auth.users row created for a different
+  -- fixture would collide, so seed one here.
+  INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-0000000000e5');
+  INSERT INTO user_profiles (id, org_id, user_id, role) VALUES
+    ('e0000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001',
+     '00000000-0000-0000-0000-0000000000e5', 'viewer');
+  -- no profile_grants row for e5 anywhere: she can read nothing.
+
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+  SET LOCAL ROLE authenticated;
+  v_tid := (save_week_template(v_pt, '2099-07-06', 'Items VIS')->>'id')::uuid;
+  RESET ROLE;
+
+  -- The other company's template, written as owner.
+  INSERT INTO week_templates (id, org_id, plant_id, name, saved_from, created_by)
+  VALUES (v_foreign, v_org2, v_p2, 'Contoso Items', '2099-07-06', NULL);
+
+  -- e5: ungranted viewer in org 1, reading the real Plant T template --- must
+  -- be refused, but as a READ gate (cannot_read), never no_such_template: the
+  -- template genuinely exists in HER org.
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e5', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM list_week_template_items(v_tid); v_norea := 'no_raise';
+  EXCEPTION WHEN OTHERS THEN DECLARE d text; BEGIN GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL; v_norea := (d::jsonb)->>'reason'; EXCEPTION WHEN OTHERS THEN v_norea := 'no_detail'; END; END;
+  RESET ROLE;
+
+  -- e1 (tp_admin, org 1): a bogus id and the foreign-org id must both answer
+  -- no_such_template, indistinguishably (DEF-0021 shape).
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN PERFORM list_week_template_items(v_bogus); v_bogus_r := 'no_raise';
+  EXCEPTION WHEN OTHERS THEN DECLARE d text; BEGIN GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL; v_bogus_r := (d::jsonb)->>'reason'; EXCEPTION WHEN OTHERS THEN v_bogus_r := 'no_detail'; END; END;
+  BEGIN PERFORM list_week_template_items(v_foreign); v_foreign_r := 'no_raise';
+  EXCEPTION WHEN OTHERS THEN DECLARE d text; BEGIN GET STACKED DIAGNOSTICS d = PG_EXCEPTION_DETAIL; v_foreign_r := (d::jsonb)->>'reason'; EXCEPTION WHEN OTHERS THEN v_foreign_r := 'no_detail'; END; END;
+  RESET ROLE;
+
+  IF v_norea <> 'cannot_read' THEN v_ok := false; v_why := v_why || format(' ungranted=%s (expected cannot_read)', COALESCE(v_norea,'null')); END IF;
+  IF v_bogus_r <> 'no_such_template' THEN v_ok := false; v_why := v_why || format(' bogus=%s', COALESCE(v_bogus_r,'null')); END IF;
+  IF v_foreign_r <> 'no_such_template' THEN v_ok := false; v_why := v_why || format(' foreign=%s (leak: expected no_such_template)', COALESCE(v_foreign_r,'null')); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS TP-ITEMS-VIS';
+  ELSE RAISE NOTICE 'FAIL TP-ITEMS-VIS:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE; RAISE NOTICE 'FAIL TP-ITEMS-VIS: unexpected exception % (%)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_TPIVIS;
+
 ROLLBACK;

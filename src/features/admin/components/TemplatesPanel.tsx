@@ -4,10 +4,12 @@ import {
   deleteWeekTemplate,
   fetchHierarchyTree,
   listWeekTemplates,
+  listWeekTemplateItems,
   renameWeekTemplate,
   describeSchedulerError,
   type SchedulerError,
   type WeekTemplate,
+  type WeekTemplateItem,
 } from "@/lib/api";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
@@ -24,6 +26,74 @@ export const TEMPLATES_PANEL_READY = true;
 export const templateKeys = {
   forPlant: (plantId: string) => ["week-templates", plantId] as const,
 };
+
+/** `day_offset` 0-6, Monday first — the same convention migration 0067 stores. */
+const DAY_NAMES = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+] as const;
+
+/**
+ * Minutes from a day's midnight -> `H:MM`. An overnight item's `endMin`
+ * exceeds 1440 (migration 0067 §1): shown wrapped onto its own clock face
+ * with a `+1d` mark, so 1320-1800 (22:00 Wed -> 06:00 Thu) reads "22:00–6:00
+ * (+1d)" rather than a nonsensical "27:00".
+ */
+function formatDayTime(min: number): string {
+  const wrapped = ((min % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  const clock = `${h}:${String(m).padStart(2, "0")}`;
+  return min >= 1440 ? `${clock} (+1d)` : clock;
+}
+
+/** One run item, grouped with the assignment items whose `runRef` names it. */
+interface DayRun {
+  run: WeekTemplateItem;
+  crew: WeekTemplateItem[];
+}
+
+/** One day's worth of a template's contents, in the shape the list renders. */
+interface DayGroup {
+  dayOffset: number;
+  runs: DayRun[];
+  /** Assignments with no `runRef` — not attached to any run in this template. */
+  standalone: WeekTemplateItem[];
+}
+
+/**
+ * Group a flat item list (server order: day, node, start, kind) into one
+ * section per day, each run paired with its crew (assignments whose
+ * `runRef === run.itemRef`) and standalone assignments listed alongside.
+ * Read-only view; nothing here writes or re-orders what the server sent
+ * beyond bucketing it by day.
+ */
+function groupItemsByDay(items: WeekTemplateItem[]): DayGroup[] {
+  const byDay = new Map<number, WeekTemplateItem[]>();
+  for (const item of items) {
+    const bucket = byDay.get(item.dayOffset);
+    if (bucket) bucket.push(item);
+    else byDay.set(item.dayOffset, [item]);
+  }
+  return Array.from(byDay.keys())
+    .sort((a, b) => a - b)
+    .map((dayOffset) => {
+      const dayItems = byDay.get(dayOffset) ?? [];
+      const runs: DayRun[] = dayItems
+        .filter((i) => i.kind === "run")
+        .map((run) => ({
+          run,
+          crew: dayItems.filter((i) => i.kind === "assignment" && i.runRef === run.itemRef),
+        }));
+      const standalone = dayItems.filter((i) => i.kind === "assignment" && i.runRef === null);
+      return { dayOffset, runs, standalone };
+    });
+}
 
 /**
  * Templates (R-356). Lists the chosen plant's named week templates and lets the
@@ -124,11 +194,22 @@ function TemplateRow({
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(template.name);
   const [error, setError] = useState<string | null>(null);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: templateKeys.forPlant(plantId) });
+
+  // Read only, offered to everyone who can see the row (not gated on
+  // mayAdminister — Rename/Delete are the admin-only controls; this is a
+  // view). Fetches only once expanded, and only the once (React Query keeps
+  // it cached under its own key, distinct from the list's).
+  const itemsQuery = useQuery<WeekTemplateItem[], SchedulerError>({
+    queryKey: [...templateKeys.forPlant(plantId), template.id, "items"],
+    queryFn: () => listWeekTemplateItems(template.id),
+    enabled: expanded,
+  });
 
   const rename = useMutation<void, SchedulerError, string>({
     mutationFn: (next: string) => renameWeekTemplate(template.id, next),
@@ -175,6 +256,17 @@ function TemplateRow({
           {template.runs === 1 ? "run" : "runs"}, {template.assignments}{" "}
           {template.assignments === 1 ? "assignment" : "assignments"}
         </span>
+      </div>
+
+      <div className={styles.actions}>
+        <button
+          type="button"
+          className={styles.toggle}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Hide contents" : "Show contents"}
+        </button>
       </div>
 
       {mayAdminister && (
@@ -226,6 +318,81 @@ function TemplateRow({
           {error}
         </p>
       )}
+
+      {expanded && (
+        <div className={styles.contents}>
+          {itemsQuery.isLoading && <p className={styles.empty}>Loading contents…</p>}
+          {itemsQuery.isError && (
+            <p role="alert" className={styles.error}>
+              {describeSchedulerError(itemsQuery.error)}
+            </p>
+          )}
+          {itemsQuery.data && itemsQuery.data.length === 0 && (
+            <p className={styles.empty}>This template is empty.</p>
+          )}
+          {itemsQuery.data && itemsQuery.data.length > 0 && (
+            <TemplateContents items={itemsQuery.data} />
+          )}
+        </div>
+      )}
     </li>
+  );
+}
+
+/** The grouped, per-day read of a template's snapshot. `items` is non-empty. */
+function TemplateContents({ items }: { items: WeekTemplateItem[] }) {
+  return (
+    <div className={styles.days}>
+      {groupItemsByDay(items).map((day) => (
+        <div key={day.dayOffset} className={styles.day}>
+          <p className={styles.dayLabel}>{DAY_NAMES[day.dayOffset]}</p>
+          <ul className={styles.runList}>
+            {day.runs.map(({ run, crew }) => (
+              <li key={run.itemRef} className={styles.runItem}>
+                <div className={styles.runHeader}>
+                  <span className={styles.runNode}>{run.nodeName ?? "(removed)"}</span>
+                  <span className={run.productName === null ? styles.removed : styles.runProduct}>
+                    {run.productName ?? "(removed product)"}
+                  </span>
+                  <span className={styles.runTime}>
+                    {formatDayTime(run.startMin)}–{formatDayTime(run.endMin)}
+                  </span>
+                  {run.plannedHeadcount !== null && (
+                    <span className={styles.runHeadcount}>{run.plannedHeadcount} planned</span>
+                  )}
+                </div>
+                {crew.length > 0 && (
+                  <ul className={styles.crewList}>
+                    {crew.map((a) => (
+                      <li key={a.itemRef} className={styles.crewItem}>
+                        <span className={a.operatorName === null ? styles.removed : undefined}>
+                          {a.operatorName ?? "(removed operator)"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+            {day.standalone.map((a) => (
+              <li key={a.itemRef} className={styles.standaloneItem}>
+                <span className={styles.runNode}>{a.nodeName ?? "(removed)"}</span>
+                <span className={a.operatorName === null ? styles.removed : undefined}>
+                  {a.operatorName ?? "(removed operator)"}
+                </span>
+                {a.productId !== null && (
+                  <span className={a.productName === null ? styles.removed : undefined}>
+                    {a.productName ?? "(removed product)"}
+                  </span>
+                )}
+                <span className={styles.runTime}>
+                  {formatDayTime(a.startMin)}–{formatDayTime(a.endMin)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }

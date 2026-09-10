@@ -10,6 +10,7 @@ vi.mock("@/lib/supabase", () => ({ supabase: { rpc } }));
 
 const {
   listWeekTemplates,
+  listWeekTemplateItems,
   saveWeekTemplate,
   renameWeekTemplate,
   deleteWeekTemplate,
@@ -110,6 +111,143 @@ describe("weekTemplates.ts: list / rename / delete", () => {
 
     fail({ message: "no", code: "P0001", details: JSON.stringify({ reason: "not_admin" }) });
     await expect(deleteWeekTemplate("t1")).rejects.toThrow();
+  });
+});
+
+describe("weekTemplates.ts: list_week_template_items (R-356 surface)", () => {
+  it("parses a multi-item payload, including a standalone assignment and every nullable field", async () => {
+    ok([
+      {
+        item_ref: "e8000000-0000-0000-0000-000000000001",
+        kind: "run",
+        run_ref: null,
+        day_offset: 0,
+        start_min: 360,
+        end_min: 840,
+        planned_headcount: 2,
+        node_id: "n1",
+        node_name: "Line T1",
+        product_id: "p1",
+        product_name: "Widget T",
+        operator_id: null,
+        operator_name: null,
+      },
+      {
+        item_ref: "e9000000-0000-0000-0000-000000000001",
+        kind: "assignment",
+        run_ref: "e8000000-0000-0000-0000-000000000001",
+        day_offset: 0,
+        start_min: 360,
+        end_min: 840,
+        planned_headcount: null,
+        node_id: "n1",
+        node_name: "Line T1",
+        product_id: null,
+        product_name: null,
+        operator_id: "o1",
+        operator_name: "Tara",
+      },
+      {
+        // a standalone assignment (no run_ref), and a name that no longer
+        // resolves (0067 D110): the node/product/operator were deleted since
+        // the snapshot, so every *_name here is null though the ids remain.
+        item_ref: "e9000000-0000-0000-0000-000000000003",
+        kind: "assignment",
+        run_ref: null,
+        day_offset: 1,
+        start_min: 480,
+        end_min: 720,
+        planned_headcount: null,
+        node_id: "n1",
+        node_name: null,
+        product_id: "p-gone",
+        product_name: null,
+        operator_id: "o-gone",
+        operator_name: null,
+      },
+    ]);
+    const items = await listWeekTemplateItems("t1");
+    expect(rpc).toHaveBeenCalledWith("list_week_template_items", { p_template_id: "t1" });
+    expect(items).toHaveLength(3);
+    expect(items[0]).toEqual({
+      itemRef: "e8000000-0000-0000-0000-000000000001",
+      kind: "run",
+      runRef: null,
+      dayOffset: 0,
+      startMin: 360,
+      endMin: 840,
+      plannedHeadcount: 2,
+      nodeId: "n1",
+      nodeName: "Line T1",
+      productId: "p1",
+      productName: "Widget T",
+      operatorId: null,
+      operatorName: null,
+    });
+    expect(items[1]).toEqual({
+      itemRef: "e9000000-0000-0000-0000-000000000001",
+      kind: "assignment",
+      runRef: "e8000000-0000-0000-0000-000000000001",
+      dayOffset: 0,
+      startMin: 360,
+      endMin: 840,
+      plannedHeadcount: null,
+      nodeId: "n1",
+      nodeName: "Line T1",
+      productId: null,
+      productName: null,
+      operatorId: "o1",
+      operatorName: "Tara",
+    });
+    expect(items[2]).toEqual({
+      itemRef: "e9000000-0000-0000-0000-000000000003",
+      kind: "assignment",
+      runRef: null,
+      dayOffset: 1,
+      startMin: 480,
+      endMin: 720,
+      plannedHeadcount: null,
+      nodeId: "n1",
+      nodeName: null,
+      productId: "p-gone",
+      productName: null,
+      operatorId: "o-gone",
+      operatorName: null,
+    });
+
+    ok([]);
+    expect(await listWeekTemplateItems("t1")).toEqual([]);
+  });
+
+  it("throws a shapeMismatch on a malformed item (an invalid kind)", async () => {
+    ok([
+      {
+        item_ref: "x1",
+        kind: "sometimes",
+        run_ref: null,
+        day_offset: 0,
+        start_min: 0,
+        end_min: 60,
+        planned_headcount: null,
+        node_id: "n1",
+        node_name: "Line T1",
+        product_id: null,
+        product_name: null,
+        operator_id: null,
+        operator_name: null,
+      },
+    ]);
+    await expect(listWeekTemplateItems("t1")).rejects.toThrow();
+  });
+
+  it("throws a shapeMismatch when a required field is missing", async () => {
+    ok([{ item_ref: "x1", kind: "run", day_offset: 0, start_min: 0, end_min: 60 }]);
+    await expect(listWeekTemplateItems("t1")).rejects.toThrow();
+  });
+
+  it("throws a scheduler error on a PostgREST refusal (no_such_template)", async () => {
+    fail({ message: "no", code: "P0001", details: JSON.stringify({ reason: "no_such_template" }) });
+    await expect(listWeekTemplateItems("bogus")).rejects.toThrow();
   });
 });
 

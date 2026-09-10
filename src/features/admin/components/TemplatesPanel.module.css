@@ -83,3 +83,111 @@
   font-size: 0.75rem;
   color: var(--crit);
 }
+
+/* ----------------------------------------------------------------------
+ * "What's inside" (R-356 surface): the read-only toggle and its contents.
+ * Same type scale as the row above (.meta is 0.6875rem, .name is 0.875rem);
+ * nothing here introduces a new color, only --ink / --ink-2 / --muted.
+ * -------------------------------------------------------------------- */
+
+.toggle {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.contents {
+  flex-basis: 100%;
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line-1, #e2e2e2);
+}
+
+.days {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.dayLabel {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.runList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.runItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.runHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.runNode {
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.runProduct {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.runTime {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.runHeadcount {
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.crewList {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+}
+
+.crewItem {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.standaloneItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.removed {
+  color: var(--muted);
+  font-style: italic;
+}
