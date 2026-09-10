@@ -3,11 +3,11 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-09'
+  updated: '2026-09-10'
   tip: 3c47331
   baseline:
-    app_tests: 2685
-    app_test_files: 131
+    app_tests: 2699
+    app_test_files: 132
     tsc: 0
     eslint: 0
     db_checks: 823
@@ -9165,6 +9165,51 @@ requirements:
     --sql --e2e` against the tester's own stack, nothing exported by hand -- `ok vitest`, `ok count
     matches the plan: 2669 in 131`, `playwright e2e` 44/44. No open defect remains against this
     requirement. `covered`.
+- id: R-367
+  title: Access can name the hierarchy node --- a person is added at, or moved to, a chosen line or cell, not only the plant root
+  source:
+  - session 125 conversation
+  stated_by: maintainer
+  claim: >-
+    On the Access tab a system admin or a site admin can give a person a role on ANY node inside a
+    plant they administer --- a line, a cell, or the plant root --- by naming that node, not only the
+    plant root and not only a node someone already sits on. And a person who already has access can
+    be MOVED to a different node without losing their role. Only a system admin (org-wide `admin`) or
+    a site admin (`app_is_admin_anywhere`) sees these controls, never a plain supervisor. The role
+    offered follows the chosen node --- `admin` only at a plant root, supervisor and viewer anywhere
+    below --- so the screen never offers what migration 0053 would refuse.
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: "R-367: subtreeOptions returns the plant root and its descendants, parent before child, depth-tagged, and never a sibling plant's branch (a path prefix is not a label prefix -- plant_10 is not under plant_1); rolesForNode offers admin only at the root; moveTargets gives a supervisor the whole subtree and an admin only the root; canManageAccess admits a system or site admin and refuses a supervisor"
+  - kind: vitest
+    file: src/test/siteAccessNodePicker.test.tsx
+    cases: "R-367 on the DOM: the Add picker lists root+descendants and drops admin once a line is chosen; Add grants at the CHOSEN node, not the plant root; a supervisor member shows a Move control that composes set-at-new then remove-at-old carrying the role; an admin member offers no Move (only the root fits); both the picker and Move are hidden from a viewer who is neither a system nor a site admin"
+  - kind: manual
+    steps: "10 Sept, developer stack: read against the running app's own model rather than driven in a browser -- set_site_member (0053) already accepts any node the caller administers and refuses only admin below a root, so the change is client-only, no migration. The live browser walk (roleWalk parity, a real add-at-a-line and a move) is left for the tester to run cold on its own stack, the same loop every other requirement here closes through."
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 125). DECIDED 10 Sept (maintainer, from the running app): *"there is
+    currently no way to assign a hierarchy level to an individual. For example Ana is supervisor on
+    Line 1 for plant A, but there is no way to change or modify it. Same for any new user."* and, on
+    the boundary: *"Remember it is only for system admins and site admins."*
+    The gap was real and client-only. The Access panel scoped to a PLANT (its dropdown is filtered to
+    plant roots) and reached a sub-node only by following an existing member's grant link -- so a
+    node with nobody on it yet could not be reached at all, and the Add control always granted at the
+    plant root. `set_site_member(p_node_id, p_profile_id, p_role)` has ALWAYS taken any node the
+    caller administers (0021, narrowed by 0053); the client simply never named one. So: no migration.
+    Four pure helpers in `siteAccess.ts` (`subtreeOptions`, `rolesForNode`, `moveTargets`,
+    `canManageAccess`), a node `<select>` on the Add flow whose role list follows the chosen node,
+    and a Move `<select>` on a member row that composes the two RPCs that exist -- grant at the new
+    node FIRST, then remove the old, the safe order (a mid-way failure leaves an extra grant, never
+    none). There is no `move_site_member` RPC to retype; the compose is deliberate and the role is
+    carried across unchanged, with `moveTargets` having already excluded any node where that role
+    would be refused. `AdminPage` passes `data.nodes` (already `nodes_select`'s answer to what the
+    viewer may read) and `profile.adminAnywhere`; the panel scopes the nodes to the one plant its own
+    dropdown has chosen. Baseline 2685 -> 2699 (+14: seven pure, seven on the DOM); tsc and eslint
+    clean; no migration, so tsc is conclusive here. NOT independently verified and NOT walked in a
+    live browser this session -- `covered` rests on the two vitest suites; the tester's cold run is
+    the outside check still owed.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12614,6 +12659,51 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 125
+  date: 2026-09-10
+  title: "Access can name the hierarchy node: a person is added at, or moved to, a chosen line or cell, admins only (R-367)"
+  commits: []
+  numbers:
+    app_tests: 2699
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run in this session, the total line copied: `Test Files 132 passed (132)`,
+    `Tests 2699 passed (2699)`. Up from 2685 by 14: seven pure cases in `siteAccess.test.ts` and
+    seven on the DOM in the new `siteAccessNodePicker.test.tsx` (the +1 file). The one live pin
+    (`DEF-0020`, the invite Edge Function) needed the edge runtime, which was down on arrival and
+    reported its own honest failure; `docker start supabase_edge_runtime_production_scheduler`
+    brought it up and the full run is green. `db_checks` (823) and `migrations` (73) carried
+    unchanged --- no SQL this session. `e2e` (44) carried, NOT re-run: the browser walk for R-367 is
+    left for the tester's cold run.
+  summary: >-
+    Merged `tester` into Development by hand --- the session-start inbox skipped the merge on a dirty
+    tree, so it reported "no open defects" before the merge could bring three in. Fast-forwarded
+    a31a2ed: DEF-0029 (major, R-356 --- `dev_demo.sql` seeds only Mon-Wed of the current week, so any
+    board defaulting to "today" opens empty Thu-Sun and `weekTemplates.spec.ts` fails those days),
+    DEF-0030 (minor, R-356 --- the same spec's cleanup checks for its scratch row before the
+    Templates list has loaded, so it leaves rows behind every run) and DEF-0031 (minor, R-031 ---
+    no case pins "a scaled figure that rounds back to the typed one asks nothing"). All three read as
+    the tester filed them; all three are seed/test-data, none touches the Access tab, and the
+    maintainer directed this session at R-367, so they stay open for their own turn.
+    ⭐ R-367, THE WHOLE SESSION, DECIDED FROM THE RUNNING APP. The maintainer: *"there is currently
+    no way to assign a hierarchy level to an individual ... Ana is supervisor on Line 1 for plant A,
+    but there is no way to change or modify it. Same for any new user,"* and *"only for system admins
+    and site admins."* Confirmed the gap by reading: the Access panel scoped to a PLANT and reached a
+    sub-node only by following an existing grant link, so a line with nobody on it was unreachable and
+    Add always granted at the plant root. The server (`set_site_member`) already took any node the
+    caller administers, so the fix is client-only --- no migration. Added a node picker to the Add
+    flow (role list follows the chosen node, `admin` only at a root) and a Move control on a member
+    row (composes set-at-new then remove-at-old, role carried, admins offered no move below a root),
+    both gated to a system or site admin via `profile.adminAnywhere`. Four pure helpers, proved by
+    seven cases; the DOM wiring proved by seven more that capture the RPC node arguments.
+    NOT independently verified: `covered` rests on the two vitest suites, and the tester's cold
+    browser walk (roleWalk parity, a real add-at-a-line and a move) is the outside check still owed.
 - id: 124
   date: 2026-09-10
   title: "Tester run: R-031 reviewed from outside, one real coverage gap found by mutation; two unrelated defects found chasing an e2e failure"

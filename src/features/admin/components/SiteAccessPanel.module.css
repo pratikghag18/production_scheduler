@@ -325,3 +325,44 @@
   letter-spacing: 0.03em;
   vertical-align: middle;
 }
+
+/* ---------------------------------------------------------------------------
+   NODE PICKER (R-367). Assigning a person to a node when adding them, and
+   moving one already granted. A FULL-WIDTH LINE under the row, not a fifth
+   grid column: the four tracks are fixed on purpose (see the header at the top
+   of this file) and a plant with deep names needs the width a 6rem column
+   cannot give. Same treatment `.note` and `.confirm` take for the same reason.
+
+   The <select> sizes to its own content rather than borrowing `.select` (the
+   grid item), for the same reason `.placeSelect` does -- stretching a node
+   name across the whole card was the bug that comment records.
+   --------------------------------------------------------------------------- */
+.nodeRow {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.nodeLabel {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  flex: none;
+}
+
+.nodeSelect {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--axis);
+  border-radius: 0.375rem;
+  background: var(--page);
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+}
+
+.nodeSelect:disabled {
+  color: var(--muted);
+  cursor: default;
+}

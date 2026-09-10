@@ -45,9 +45,11 @@ function panel() {
   return (
     <SiteAccessPanel
       places={[{ nodeId: "plantA", name: "Plant A" }]}
+      nodes={[{ nodeId: "plantA", name: "Plant A", path: "plant_a" }]}
       treeLoading={false}
       viewerProfileId="viewer-1"
       viewerIsCompanyAdmin
+      viewerAdminAnywhere={false}
     />
   );
 }

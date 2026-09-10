@@ -549,6 +549,18 @@ export default function AdminPage() {
    */
   const visibleAccessPlaces = accessPlaces.filter((p) => plantNodeIds.has(p.nodeId));
 
+  // R-367: the node picker in `SiteAccessPanel` slices each plant's subtree out
+  // of this by path. `data.nodes` is already `nodes_select`'s answer to "what
+  // may you read", so it carries every plant the viewer administers and nothing
+  // else; the panel scopes it to the ONE plant its own dropdown has chosen.
+  // Only the three fields the picker needs, so the panel takes no dependency on
+  // `BoardNode`'s full shape.
+  const accessNodes = (data?.nodes ?? []).map((n) => ({
+    nodeId: n.id,
+    name: n.name,
+    path: n.path,
+  }));
+
   /* ---------------------------------------------------------------------
    * ⭐⭐ THE STRUCTURE PICKER IS NARROWED BY THE PLANT FILTER TOO, AND
    * WITHOUT THIS THE HIERARCHY TAB CARRIES TWO CONTROLS THAT DO THE SAME JOB.
@@ -859,9 +871,11 @@ export default function AdminPage() {
             <h1 className={styles.h1}>Access</h1>
             <SiteAccessPanel
               places={visibleAccessPlaces}
+              nodes={accessNodes}
               treeLoading={hierarchyLoading}
               viewerProfileId={profile?.id ?? null}
               viewerIsCompanyAdmin={profile?.role === "admin"}
+              viewerAdminAnywhere={profile?.adminAnywhere === true}
             />
           </>
         )}

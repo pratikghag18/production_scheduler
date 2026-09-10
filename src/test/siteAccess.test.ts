@@ -43,6 +43,12 @@ import {
   removalReason,
   resolvePlace,
   ROLES_BELOW_ROOT,
+  GRANT_ROLES,
+  subtreeOptions,
+  rolesForNode,
+  moveTargets,
+  canManageAccess,
+  type AccessNode,
   type AccessPlace,
   type AccessRow,
   type GrantRole,
@@ -1050,3 +1056,91 @@ check("G7 ⭐: whatever else is true of a protected row, it is never removable",
   }
   return true;
 });
+
+// ---------------------------------------------------------------------------
+// R-367 -- assigning and moving a person by hierarchy node. The node fixture
+// mirrors the tree above: Plant 1 owns Assembly, Assembly owns Line 1, and a
+// second plant sits alongside to prove a picker on Plant 1 never leaks it.
+// ---------------------------------------------------------------------------
+
+const LINE1 = "30000000-0000-0000-0000-000000000009";
+const PLANT2 = "30000000-0000-0000-0000-00000000000a";
+
+const NODES: readonly AccessNode[] = [
+  { nodeId: PLANT, name: "Plant 1", path: "plant_1" },
+  { nodeId: DEPT, name: "Assembly", path: "plant_1.assembly" },
+  { nodeId: LINE1, name: "Line 1", path: "plant_1.assembly.line_1" },
+  { nodeId: PLANT2, name: "Plant 2", path: "plant_2" },
+];
+
+check("R-367 subtreeOptions: the plant root and everything under it, parent before child", () => {
+  const opts = subtreeOptions(NODES, PLANT);
+  const ids = opts.map((o) => o.nodeId);
+  if (ids.join(",") !== [PLANT, DEPT, LINE1].join(",")) {
+    return `wrong nodes or order: ${JSON.stringify(ids)}`;
+  }
+  const depths = opts.map((o) => o.depth).join(",");
+  if (depths !== "0,1,2") return `wrong depths: ${depths}`;
+  if (!opts[0].isRoot || opts[1].isRoot || opts[2].isRoot) return "isRoot wrong";
+  return true;
+});
+
+check("R-367 subtreeOptions: a sibling plant's branch never appears", () => {
+  const ids = subtreeOptions(NODES, PLANT).map((o) => o.nodeId);
+  return ids.includes(PLANT2) ? "Plant 2 leaked into Plant 1's picker" : true;
+});
+
+check("R-367 subtreeOptions: empty input, unknown root and a null root all yield nothing", () => {
+  if (subtreeOptions([], PLANT).length !== 0) return "empty nodes was not empty";
+  if (subtreeOptions(NODES, "nope").length !== 0) return "unknown root was not empty";
+  if (subtreeOptions(NODES, null).length !== 0) return "null root was not empty";
+  return true;
+});
+
+check(
+  "R-367 subtreeOptions: a path prefix is not a label prefix -- plant_10 is not under plant_1",
+  () => {
+    const tricky: readonly AccessNode[] = [
+      { nodeId: PLANT, name: "Plant 1", path: "plant_1" },
+      { nodeId: PLANT2, name: "Plant 10", path: "plant_10" },
+    ];
+    const ids = subtreeOptions(tricky, PLANT).map((o) => o.nodeId);
+    return ids.length === 1 && ids[0] === PLANT ? true : `leaked: ${JSON.stringify(ids)}`;
+  },
+);
+
+check(
+  "R-367 rolesForNode: admin only at the plant root, supervisor/viewer below and when unchosen",
+  () => {
+    if (rolesForNode(PLANT, PLANT).join(",") !== GRANT_ROLES.join(","))
+      return "root did not offer admin";
+    if (rolesForNode(DEPT, PLANT).join(",") !== ROLES_BELOW_ROOT.join(","))
+      return "dept offered admin";
+    if (rolesForNode(null, PLANT).join(",") !== ROLES_BELOW_ROOT.join(","))
+      return "null offered admin";
+    return true;
+  },
+);
+
+check(
+  "R-367 moveTargets: supervisor may move anywhere in the subtree; an admin fits only the root",
+  () => {
+    const sup = moveTargets(NODES, PLANT, "supervisor").map((o) => o.nodeId);
+    if (sup.join(",") !== [PLANT, DEPT, LINE1].join(","))
+      return `supervisor targets wrong: ${JSON.stringify(sup)}`;
+    const adm = moveTargets(NODES, PLANT, "admin").map((o) => o.nodeId);
+    if (adm.join(",") !== [PLANT].join(","))
+      return `admin was offered a move below root: ${JSON.stringify(adm)}`;
+    return true;
+  },
+);
+
+check(
+  "R-367 canManageAccess: a system admin or a site admin may; a plain supervisor may not",
+  () => {
+    if (!canManageAccess(true, false)) return "company admin was refused";
+    if (!canManageAccess(false, true)) return "site admin (adminAnywhere) was refused";
+    if (canManageAccess(false, false)) return "a supervisor was allowed to manage nodes";
+    return true;
+  },
+);

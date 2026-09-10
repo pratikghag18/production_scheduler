@@ -541,3 +541,131 @@ export function resolvePlace(
   }
   return places[0].nodeId;
 }
+
+// ---------------------------------------------------------------------------
+// NODE ASSIGNMENT (R-367). Which hierarchy node a grant sits on -- picked when
+// adding a person, and changed when moving one -- rather than being forced to
+// the plant root or reachable only by following an existing grant down.
+//
+// The maintainer, on the running app: *"there is currently no way to assign a
+// hierarchy level to an individual ... Ana is supervisor on Line 1 for plant A,
+// but there is no way to change or modify it. Same for any new user."* The Add
+// control granted at the plant root only, and a sub-node (a line, a cell) was
+// reachable only by clicking an existing member's grant link -- so a node with
+// nobody on it yet could not be reached at all.
+//
+// The SERVER already accepts any node the caller administers:
+// `set_site_member(p_node_id, p_profile_id, p_role)` (0021, narrowed by 0053)
+// inserts or re-roles one grant and refuses only `admin` below a plant root.
+// This is the client half -- the same one-way invariant the rest of the file
+// keeps: everything offered here, the server also permits; never the converse.
+// No migration; the picker names a node the server was always willing to take.
+// ---------------------------------------------------------------------------
+
+/**
+ * One node the picker can offer, from the hierarchy read (`BoardNode`). Only
+ * the three fields the picker needs, kept dependency-free like the rest of
+ * this module: `path` is the dot-separated materialised path (migration 0001),
+ * which is how a subtree and a relative depth are computed without walking
+ * `parentId` chains.
+ */
+export interface AccessNode {
+  nodeId: string;
+  name: string;
+  path: string;
+}
+
+/** One entry in a node picker: a node, and how deep it sits below the plant root. */
+export interface NodeOption {
+  nodeId: string;
+  name: string;
+  /** Labels below the plant root: the root itself is 0, a line under it is 1. */
+  depth: number;
+  isRoot: boolean;
+}
+
+/** Label count of a dot-path: `""` -> 0, `"a"` -> 1, `"a.b.c"` -> 3. Local so
+ *  this module stays import-free (mirrors `hierarchy.ts::pathDepth`). */
+function nodePathDepth(path: string): number {
+  return path === "" ? 0 : path.split(".").length;
+}
+
+/**
+ * The plant root plus every node beneath it, as picker options ordered so a
+ * subtree stays together and a parent precedes its children (dot-path sort),
+ * each tagged with its depth below the root for indenting.
+ *
+ * Subtree membership is by PATH PREFIX, not by re-walking `parentId`: a
+ * descendant's path is the root's path followed by `"."` and more. `nodes` is
+ * already the server's answer to "what may you read" (`nodes_select`, 0019),
+ * so this offers exactly the nodes the viewer can see AND the plant they are
+ * standing on -- never a sibling plant's branches.
+ */
+export function subtreeOptions(
+  nodes: readonly AccessNode[],
+  rootNodeId: string | null,
+): readonly NodeOption[] {
+  if (rootNodeId === null || !Array.isArray(nodes)) return [];
+  const root = nodes.find((n) => n.nodeId === rootNodeId);
+  if (root === undefined) return [];
+  const prefix = root.path + ".";
+  const rootDepth = nodePathDepth(root.path);
+  return nodes
+    .filter((n) => n.nodeId === rootNodeId || n.path.startsWith(prefix))
+    .slice()
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .map((n) => ({
+      nodeId: n.nodeId,
+      name: n.name,
+      depth: nodePathDepth(n.path) - rootDepth,
+      isRoot: n.nodeId === rootNodeId,
+    }));
+}
+
+/**
+ * The roles that may be GIVEN when granting at `nodeId`, given which node is
+ * the plant root. `admin` only at the root, supervisor/viewer anywhere below
+ * -- the same rule `allowedRoles` applies to an existing row, and the same one
+ * migration 0053 enforces (`admin` refused where `parent_id IS NOT NULL`). A
+ * null node (nothing chosen yet) offers the below-root pair, the safe subset.
+ */
+export function rolesForNode(
+  nodeId: string | null,
+  rootNodeId: string | null,
+): readonly GrantRole[] {
+  return nodeId !== null && nodeId === rootNodeId ? GRANT_ROLES : ROLES_BELOW_ROOT;
+}
+
+/**
+ * Where a grant of `role` may be MOVED, within the plant. Supervisor and
+ * viewer may sit on any node in the subtree; `admin` fits only the plant root,
+ * because an admin runs a whole plant (DEF-0010) -- so the only target offered
+ * for an admin is the root, which the panel reads as "nowhere else to move it"
+ * and hides the control. Moving an admin down would be `admin_below_root`,
+ * which the server refuses; not offering it is this file's invariant.
+ */
+export function moveTargets(
+  nodes: readonly AccessNode[],
+  rootNodeId: string | null,
+  role: GrantRole,
+): readonly NodeOption[] {
+  const all = subtreeOptions(nodes, rootNodeId);
+  return role === "admin" ? all.filter((o) => o.isRoot) : all;
+}
+
+/**
+ * May the viewer assign a person to a node, or move one, on this screen? Only
+ * a system admin (`role = 'admin'`, org-wide) or a site admin (`adminAnywhere`,
+ * `app_is_admin_anywhere()`), never a plain supervisor -- the maintainer's own
+ * boundary for the feature. In practice the panel already only opens on plants
+ * the viewer administers (`editable_shape_ids`, 0021 §2), so a supervisor lands
+ * on the "no-place" branch and never reaches these controls; this is the
+ * explicit statement of that, and the guard on the edge where `adminAccess`
+ * (D114) admits a supervisor with no grants at all.
+ */
+export function canManageAccess(
+  viewerIsCompanyAdmin: boolean,
+  viewerAdminAnywhere: boolean,
+): boolean {
+  return viewerIsCompanyAdmin || viewerAdminAnywhere;
+}
