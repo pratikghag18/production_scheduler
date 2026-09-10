@@ -12565,6 +12565,49 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 122
+  date: 2026-09-09
+  title: Backlog audit --- seven of the old roadmap's rows said open for work the stages record as shipped
+  commits: []
+  numbers:
+    app_tests: 2669
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here after merging the tester's session 121: 2669 in 131 files, matching
+    session 121 exactly. Nothing under `src/` or `supabase/` changed this session; the rest is
+    carried from session 121. `npm run plan -- --check` ok.
+  summary: >-
+    `git merge --ff-only tester` brought session 121 in clean: DEF-0027 and DEF-0028 verified cold,
+    R-366 and R-038 covered again, no open defect anywhere. THE MAINTAINER THEN ASKED FOR THE
+    `backlog` SECTION TO BE CHECKED ("I feel there is a lot of stale data in the file") and for the
+    audit to go to a Sonnet lane. It did; this session reviewed the lane's every change against the
+    stage, requirement, migration or file it cited before accepting it.
+    ⛔ THE SECTION WAS A ROADMAP CHECKBOX LIST NOBODY HAD RE-READ SINCE THE ROADMAP WAS RETIRED. Six
+    rows said `open` or `partial` for work whose stage is `done` and whose requirements are
+    `covered`, and a seventh was held `partial` for a sub-item the queue records as dropped by
+    agreement (the tree CSV importer, "do not re-ask"): the audit log (S31, trigger since
+    migration 0007), the Playwright pass and load sanity (S34 plus the 5,760-assignment fixture that found F-124 and F-125), eligibility enforcement on
+    the board (S32, R-338, R-361), certificate expiry against a run's dates (S33, R-338), Copy Week
+    with a conflict preview (S35, R-339) and the subtree grants screen (S10, R-340). All seven are
+    `done` now, each with a note naming the evidence and a `stage:` link.
+    ⭐ ONE ROW WENT THE OTHER WAY, ON PURPOSE. "Shift admin UI + keep-or-scale prompt on resize"
+    is `partial`, not `done`: the Shifts admin shipped in S17, but R-031 is still `uncovered` and
+    a resize on a targeted assignment leaves `target_qty` alone and never asks. The row now says
+    exactly which half remains.
+    ⚠️ THREE ROWS STAY `open` AND SAY WHY: real-time (parked 4 Sept, nothing in `src/` subscribes),
+    mid-hierarchy level insertion (R-003 calls it "not a v1 feature", nothing built) and standard
+    targets from routing or MES data (R-316 is a manual cycle time, R-008 keeps the connector out).
+    Two notes that still spoke of an "unticked checkbox" were restated as facts. `text`, `phase`
+    and order untouched; nothing deleted --- the section retires by status like the rest of the file.
+    The page now lists seven roadmap rows as still open instead of fourteen, and every one of the
+    seven is either parked by decision or genuinely unbuilt.
+  shipped: []
 - id: 121
   date: 2026-09-09
   title: "Tester run: DEF-0027 and DEF-0028 both verified clean -- R-366 and R-038 covered again"
@@ -18304,10 +18347,13 @@ backlog:
   text: >-
     Org onboarding settings pages (same pattern as ⚙ Shifts): hierarchy level editor + node tree editor
     + CSV import (operators, products, tree)
-  status: partial
+  status: done
   note: >-
-    Unticked. Split into eight: P1-5a–f ✓, P1-5g built Aug 26, P1-5h products/people/trainings/certifications
-    shipped Sep 1; tree CSV import dropped.
+    Corrected 9 Sept (backlog audit): split into eight sub-items -- P1-5a-f, P1-5g (built Aug 26)
+    and P1-5h (products/people/trainings/certifications, shipped Sep 1) all shipped; the tree CSV
+    importer was dropped by agreement (parked in `next:` -- the starter library copies structure
+    and the visual editor beats a parents/children CSV -- not deferred, "do not re-ask"), so
+    nothing on this row will ever be built again and it is done.
   stage: S23
 - phase: 1
   text: >-
@@ -18322,7 +18368,8 @@ backlog:
     outside AppShell, a gate
   status: done
   note: >-
-    Checkbox still unticked; the text (session 19, restart prompt, P1-5h row) says it shipped Sep 1.
+    Corrected 9 Sept (backlog audit): shipped Sep 1 (session 19, restart prompt, P1-5h row);
+    restated in plain language now that the old roadmap-checkbox format is retired.
   stage: S24
 - phase: 1
   text: >-
@@ -18365,26 +18412,59 @@ backlog:
 - phase: 1
   text: 'Real-time: per-site channels, optimistic edits, conflict reconciliation, presence'
   status: open
+  note: >-
+    Corrected 9 Sept (backlog audit): stays open. Parked by the maintainer 4 Sept (`next:`) --
+    nothing in src/ subscribes to anything today (no `.channel(`, no `postgres_changes`), and it
+    is worth least until invitations put more than one person in the app at once.
 - phase: 1
   text: Audit log on all schedule mutations
-  status: open
+  status: done
+  note: >-
+    Corrected 9 Sept (backlog audit): the audit trigger has logged every insert/update/delete on
+    `runs` and `assignments` since migration 0007 (Aug 21), and the screen that reads it shipped
+    as S31 (R-328, R-329, R-330, all covered).
+  stage: S31
 - phase: 1
   text: E2E test pass (Playwright) + load sanity (hundreds of rows, thousands of assignments)
-  status: open
+  status: done
+  note: >-
+    Corrected 9 Sept (backlog audit): the Playwright half shipped as S34 (R-337, GitHub run
+    34366609685, green). The load-sanity half followed with a 384-cell/5,760-assignment fixture
+    (`scripts/load-sanity.sh`, `e2e/loadSanity.spec.ts`, hundreds of rows and thousands of
+    assignments as asked) that found and fixed two real defects -- F-124's per-row RLS cost and
+    F-125's client-side render cost; session 118 retired the last queue item behind this row,
+    board arrival now ~3.3s and a drag settles in 45-49ms.
+  stage: S34
 - phase: 2
   text: >-
     Skills matrix admin UI + eligibility enforcement (warn/block org policy) — the admin-side view is
     the OPERATOR TRAINING MATRIX
-  status: partial
-  note: Matrix stages M1–M4 shipped; eligibility enforcement on the board remains.
+  status: done
+  note: >-
+    Corrected 9 Sept (backlog audit): matrix stages M1-M5 shipped, and eligibility enforcement on
+    the board is built too -- `board_window`/`node_policies` resolve `eligibility_policy` per
+    plant (S32), and `CreatePopover`/`AssignmentPopover` and the drag/resize paths gate on `warn`
+    vs `block` (R-338, R-361, both covered).
 - phase: 2
   text: >-
     Certification expiry checks vs assignment dates — the matrix surfaces expiry; checking it against
     a run's dates on the board remains
-  status: partial
+  status: done
+  note: >-
+    Corrected 9 Sept (backlog audit): the board checks a certificate's expiry against the
+    assignment's own dates -- `certificateGaps` mirrors the server's `expires_at < upper(p_timerange)`
+    -- covered by R-338 and shipped in S33 (`src/test/certificateExpiry.test.tsx`).
+  stage: S33
 - phase: 2
   text: Copy Week with dry-run conflict preview
-  status: open
+  status: done
+  note: >-
+    Corrected 9 Sept (backlog audit): shipped as S35 (R-339, covered) -- every clash is listed
+    with both candidates and resolved one by one before anything is written
+    (`supabase/tests/78_copy_week_test.sql`, `src/test/copyWeek.test.tsx`, `e2e/copyWeek.spec.ts`).
+    The original agent-drafted claim (R-018, a weaker dry-run-only preview) was retired in favor
+    of the maintainer's fuller R-339 on 8 Sept.
+  stage: S35
 - phase: 2
   text: Named templates (relative-time placements)
   status: done
@@ -18392,10 +18472,13 @@ backlog:
   text: >-
     Shift admin UI in product (templates/breaks editor, node attachment) + target keep-or-scale prompt
     on resize
-  status: open
+  status: partial
   note: >-
-    The Shifts admin section landed Aug 27 (§19.64); the checkbox is still unticked and the resize prompt
-    is not recorded.
+    Corrected 9 Sept (backlog audit): the Shifts admin section (templates/breaks editor, node
+    attachment) shipped Aug 27 as part of S17. The keep-total-or-scale prompt on resize is
+    genuinely still unbuilt -- R-031 was re-checked against `mutations.ts` on 8 Sept and confirmed
+    unbuilt: a resize on a targeted assignment silently leaves `target_qty` unchanged and never
+    prompts.
   stage: S17
 - phase: 2
   text: PTO/absence source decision + conflict surfacing
@@ -18408,13 +18491,27 @@ backlog:
   status: open
 - phase: 3
   text: Subtree permission grants admin UI
-  status: open
+  status: done
+  note: >-
+    Corrected 9 Sept (backlog audit): shipped as S10, "Who can get in: the screen" (R-234-R-237,
+    P1-6a) -- `SiteAccessPanel` grants admin/supervisor/viewer at any node in a plant's subtree,
+    with the plant-root-only admin rule enforced server-side (R-340, covered).
+  stage: S10
 - phase: 3
   text: Mid-hierarchy level-insertion migration tool
   status: open
+  note: >-
+    Corrected 9 Sept (backlog audit): confirmed still genuinely open. R-003 says levels are
+    renamed and added at the bottom freely but explicitly calls mid-hierarchy insertion "a guided
+    tool, not a v1 feature"; no such tool exists in src/ or the migrations.
 - phase: 3
   text: Standard targets from routing data; efficiency vs actuals (needs MES data)
   status: open
+  note: >-
+    Corrected 9 Sept (backlog audit): confirmed still open. `standardTarget.ts` (R-316) derives a
+    default target from an admin-entered manual cycle time per cell, not from routing data or an
+    MES feed; there is still no ERP/MES connector (R-008 keeps `integration_connections` out of
+    the migrations) and no efficiency-vs-actuals comparison.
 - phase: 3
   text: Operator mobile read-only view
   status: open
