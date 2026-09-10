@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: c494cfe
+  tip: 3c82575
   baseline:
-    app_tests: 2712
+    app_tests: 2713
     app_test_files: 132
     tsc: 0
     eslint: 0
@@ -12778,6 +12778,48 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 130
+  date: 2026-09-10
+  title: "The three long-open defects cleared in parallel: a full-week seed (DEF-0029), the template-cleanup race (DEF-0030), and the keep-or-scale coverage gap (DEF-0031)"
+  commits: [3c82575]
+  numbers:
+    app_tests: 2713
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run this session, total line copied: `Test Files 132 passed (132)`, `Tests 2713
+    passed (2713)` --- up from 2712 by the one new unit case (R-031h, DEF-0031). `tsc` and `eslint`
+    clean across the changed files. `db_checks` (823) carried NOT re-measured: the two SQL edits
+    (`dev_demo.sql`, `dev_demo_test.sql`) run only under the SQL runner against a fresh reset, which
+    was NOT taken here (the maintainer's stack is in use), so DEF-0029's count move 36->84 is proved
+    by reading, not by a run. `e2e` (46) carried; DEF-0029 and DEF-0030 are browser-verified only on
+    the tester's cold run.
+  summary: >-
+    The maintainer set a standing rule --- always fix open defects before queued feature work --- and
+    directed the three that had sat open for four sessions to be cleared now, in parallel, handed to
+    Sonnet lanes with one exclusive file set each; the main session briefed, reviewed each to break
+    it, and kept the plan. All three are seed/test hygiene, none in the shipping app's logic.
+    ⭐ DEF-0029 (major, R-356). `dev_demo.sql` seeded only Mon-Wed of the current week, so the board
+    opened empty Thu-Sun. The day loop now runs the whole week (`0..2` -> `0..6`). That is the count
+    trap this repo warns about: seeded runs and assignments go 36 -> 84 (3 plants x 4 cells x 7
+    days), so the two self-checks that pin it --- `dev_demo.sql`'s own and `dev_demo_test.sql`'s D6
+    --- moved with it; `v_cells` stays 12. Reviewed that `loadSanity`/`copyWeek` read the schedule
+    dynamically and no other count assumes 36.
+    ⭐ DEF-0030 (minor, R-356). `weekTemplates.spec.ts`'s cleanup read the row count mid-load and
+    skipped its delete on a false zero. It now waits for the list with a retrying assertion, keeping
+    the genuine no-op so `afterAll` never throws on an absent row.
+    ⭐ DEF-0031 (minor, R-031). Added `R-031h`, an Alt-drag that changes a block's length but scales
+    back to the typed figure (`scaledTarget(80,1000,1001)` = 80) and must not prompt. Confirmed a
+    real pin: widening the guard fails only R-031h, source reverted. The lane caught that the
+    defect's own 10/1000/999 example does not round back and used a verified triple instead.
+    All three fix-claimed at 3c82575; the tester's cold `--sql --e2e` verifies the seed and the two
+    browser specs. No open defect remains but the two e2e-hygiene ones from session 129
+    (DEF-0032/0033), themselves fix-claimed and awaiting the same run.
 - id: 129
   date: 2026-09-10
   title: "Tester's two e2e-hygiene defects fix-claimed: the stale rail-order pin (DEF-0032) and the unbounded invite-grant leak (DEF-0033)"
