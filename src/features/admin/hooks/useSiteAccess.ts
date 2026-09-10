@@ -17,10 +17,12 @@ import {
   removeSiteMember,
   setProfileActive,
   setSiteMember,
+  setSystemAdmin,
   type RemoveSiteMemberInput,
   type SchedulerError,
   type SetProfileActiveInput,
   type SetSiteMemberInput,
+  type SetSystemAdminInput,
 } from "@/lib/api";
 
 export const siteAccessKeys = {
@@ -84,6 +86,22 @@ export function useSetProfileActive() {
 
   return useMutation<void, SchedulerError, SetProfileActiveInput>({
     mutationFn: (input) => setProfileActive(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
+    },
+  });
+}
+
+/**
+ * `set_system_admin`. Promotes or demotes a person's org-wide system-admin
+ * status. Invalidates the same key so the row re-renders with the new
+ * `companyAdmin` state.
+ */
+export function useSetSystemAdmin() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, SetSystemAdminInput>({
+    mutationFn: (input) => setSystemAdmin(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
     },

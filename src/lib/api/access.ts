@@ -87,6 +87,11 @@ export interface SetProfileActiveInput {
   active: boolean;
 }
 
+export interface SetSystemAdminInput {
+  profileId: string;
+  isAdmin: boolean;
+}
+
 /**
  * `site_people(p_node_id uuid)`. Raises: `invalid_argument` (no such node),
  * `not_permitted` (you do not administer this place).
@@ -233,6 +238,21 @@ export async function setProfileActive(input: SetProfileActiveInput): Promise<vo
   const { error } = await supabase.rpc("set_profile_active", {
     p_profile_id: input.profileId,
     p_active: input.active,
+  });
+  if (error) throw toSchedulerError(error);
+}
+
+/**
+ * `set_system_admin(p_profile_id, p_is_admin)`. Promote (isAdmin true) or demote
+ * (false) a person's ORG-WIDE system-admin status (migration 0078). System
+ * admins only. Raises: `not_permitted` (not a system admin; your own account),
+ * `invalid_argument` (no such person in your org). Return discarded; the panel
+ * re-reads `site_people` for the new `companyAdmin` state.
+ */
+export async function setSystemAdmin(input: SetSystemAdminInput): Promise<void> {
+  const { error } = await supabase.rpc("set_system_admin", {
+    p_profile_id: input.profileId,
+    p_is_admin: input.isAdmin,
   });
   if (error) throw toSchedulerError(error);
 }

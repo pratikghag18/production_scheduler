@@ -336,6 +336,24 @@ export function canReactivate(row: AccessRow, viewerIsCompanyAdmin: boolean): bo
 }
 
 /**
+ * ⭐ MAKE / REVOKE SYSTEM ADMIN — mirrors `set_system_admin` (migration 0078).
+ *
+ * The org-wide highest privilege, so it is offered ONLY to a system admin
+ * (`viewerIsCompanyAdmin`), and never on your OWN row (you cannot change your
+ * own system-admin status; the server refuses it too). Exactly one of the two
+ * is true for a row a system admin may act on, keyed by `companyAdmin` (which
+ * `site_people` reports as `up.role = 'admin'`). The server's "no last admin"
+ * case is not mirrored, for the reason `canDeactivate` gives.
+ */
+export function canGrantSystemAdmin(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && !row.companyAdmin;
+}
+
+export function canRevokeSystemAdmin(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && row.companyAdmin;
+}
+
+/**
  * The one-line explanation under a person's address. Pure, and here rather
  * than in the component for D90's reason: a sentence a screen shows is a
  * behaviour, and a behaviour a test cannot reach is a behaviour nobody checks.

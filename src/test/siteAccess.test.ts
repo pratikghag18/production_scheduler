@@ -34,8 +34,10 @@ import {
   allowedRoles,
   buildAccessRows,
   canDeactivate,
+  canGrantSystemAdmin,
   canReactivate,
   canRemoveAccess,
+  canRevokeSystemAdmin,
   canSetRole,
   describeAccess,
   accessPanelState,
@@ -592,6 +594,50 @@ check("AD8 ⭐: a MISSING active flag reads as active — never invent a lock-ou
     null,
   );
   return v.rows[0]?.active === true || `active=${v.rows[0]?.active}`;
+});
+
+// ---------------------------------------------------------------------------
+// SA1–SA5 — canGrantSystemAdmin / canRevokeSystemAdmin. The org-wide promote
+// (0078). System admins only, never your own row, exclusive by `companyAdmin`.
+// ---------------------------------------------------------------------------
+check("SA1: a system admin can promote a non-admin", () => {
+  return canGrantSystemAdmin(stranger({ companyAdmin: false }), true) === true || "hidden";
+});
+
+check("SA2: a system admin sees Revoke, not Make, on an existing system admin", () => {
+  const row = stranger({ companyAdmin: true });
+  return (
+    (canRevokeSystemAdmin(row, true) === true && canGrantSystemAdmin(row, true) === false) ||
+    `grant=${canGrantSystemAdmin(row, true)} revoke=${canRevokeSystemAdmin(row, true)}`
+  );
+});
+
+check("SA3 ⭐: a non-system-admin viewer is offered neither", () => {
+  const nonAdmin = stranger({ companyAdmin: false });
+  const admin = stranger({ companyAdmin: true });
+  return (
+    (canGrantSystemAdmin(nonAdmin, false) === false &&
+      canRevokeSystemAdmin(admin, false) === false) ||
+    `grant=${canGrantSystemAdmin(nonAdmin, false)} revoke=${canRevokeSystemAdmin(admin, false)}`
+  );
+});
+
+check("SA4 ⭐: you cannot change your OWN system-admin status", () => {
+  return (
+    (canGrantSystemAdmin(stranger({ isSelf: true, companyAdmin: false }), true) === false &&
+      canRevokeSystemAdmin(stranger({ isSelf: true, companyAdmin: true }), true) === false) ||
+    "offered self"
+  );
+});
+
+check("SA5: the two are mutually exclusive for a row a system admin may act on", () => {
+  const nonAdmin = stranger({ companyAdmin: false });
+  const admin = stranger({ companyAdmin: true });
+  return (
+    (canGrantSystemAdmin(nonAdmin, true) !== canRevokeSystemAdmin(nonAdmin, true) &&
+      canGrantSystemAdmin(admin, true) !== canRevokeSystemAdmin(admin, true)) ||
+    "both true or both false"
+  );
 });
 
 check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {

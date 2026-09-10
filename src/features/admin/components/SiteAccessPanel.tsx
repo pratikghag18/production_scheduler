@@ -5,10 +5,12 @@ import {
   accessPanelState,
   buildAccessRows,
   canDeactivate,
+  canGrantSystemAdmin,
   canManageAccess,
   canReactivate,
   canRemoveAccess,
   canRemoveGrant,
+  canRevokeSystemAdmin,
   canSetRole,
   describeAccess,
   grantRoleOptions,
@@ -40,6 +42,7 @@ import {
   useRemoveSiteMember,
   useSetProfileActive,
   useSetSiteMember,
+  useSetSystemAdmin,
   useSitePeople,
 } from "../hooks/useSiteAccess";
 import styles from "./SiteAccessPanel.module.css";
@@ -147,6 +150,7 @@ export function SiteAccessPanel({
   const setMemberMutation = useSetSiteMember();
   const removeMemberMutation = useRemoveSiteMember();
   const setActiveMutation = useSetProfileActive();
+  const setSystemAdminMutation = useSetSystemAdmin();
 
   const [query, setQuery] = useState("");
   const [confirmingProfileId, setConfirmingProfileId] = useState<string | null>(null);
@@ -328,6 +332,66 @@ export function SiteAccessPanel({
         >
           Reactivate
         </button>
+      );
+    }
+    return null;
+  }
+
+  // ⭐ MAKE / REVOKE SYSTEM ADMIN (R-XXX, migration 0078). The org-wide highest
+  // privilege, so it is offered ONLY to a system admin and never on their own
+  // row. It is rarer and weightier than the node actions, so it takes its own
+  // quiet full-width line under the row (a link-style control, not a fourth
+  // button competing with Remove/Deactivate) with a one-line explanation of
+  // what it grants. The server refuses self and a non-system-admin caller.
+  function runSetSystemAdmin(row: AccessRow, isAdmin: boolean) {
+    clearRowError(row.profileId);
+    setPendingProfileId(row.profileId);
+    setSystemAdminMutation.mutate(
+      { profileId: row.profileId, isAdmin },
+      {
+        onError: (err: SchedulerError) =>
+          setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
+        onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
+      },
+    );
+  }
+
+  function renderSystemAdminLine(row: AccessRow) {
+    const isPending = pendingProfileId === row.profileId;
+    if (canGrantSystemAdmin(row, viewerIsCompanyAdmin)) {
+      return (
+        <div className={styles.orgAdminLine}>
+          <button
+            type="button"
+            className={styles.linkBtn}
+            aria-label={`Make ${labelFor(row)} a system admin`}
+            disabled={isPending}
+            onClick={() => runSetSystemAdmin(row, true)}
+          >
+            Make system admin
+          </button>
+          <span className={styles.orgAdminHint}>
+            — can administer every plant and company settings
+          </span>
+        </div>
+      );
+    }
+    if (canRevokeSystemAdmin(row, viewerIsCompanyAdmin)) {
+      return (
+        <div className={styles.orgAdminLine}>
+          <button
+            type="button"
+            className={styles.linkBtn}
+            aria-label={`Revoke ${labelFor(row)}'s system admin`}
+            disabled={isPending}
+            onClick={() => runSetSystemAdmin(row, false)}
+          >
+            Revoke system admin
+          </button>
+          <span className={styles.orgAdminHint}>
+            — keeps their node access, loses company-wide authority
+          </span>
+        </div>
       );
     }
     return null;
@@ -547,6 +611,14 @@ export function SiteAccessPanel({
                           deactivated
                         </span>
                       )}
+                      {row.companyAdmin && (
+                        <span
+                          className={styles.sysAdminTag}
+                          title="System admin — administers every plant and company settings"
+                        >
+                          system admin
+                        </span>
+                      )}
                     </span>
 
                     {isConfirming ? (
@@ -628,6 +700,7 @@ export function SiteAccessPanel({
                           </span>
                         )}
                         {renderAccountLine(row)}
+                        {renderSystemAdminLine(row)}
                       </>
                     ) : (
                       <>
@@ -678,6 +751,7 @@ export function SiteAccessPanel({
                           </span>
                         )}
                         {renderAccountLine(row)}
+                        {renderSystemAdminLine(row)}
                       </>
                     )}
 
