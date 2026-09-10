@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: b3cf2bb
+  tip: 5e17205
   baseline:
     app_tests: 2712
     app_test_files: 132
@@ -12753,7 +12753,7 @@ sessions:
 - id: 127
   date: 2026-09-10
   title: "Access list sorted highest-access-first then A–Z, Add block moved up by the search, Activity before Settings; deactivate-vs-remove assessed not built (R-369)"
-  commits: []
+  commits: [5e17205]
   numbers:
     app_tests: 2712
     app_test_files: 132

@@ -123,7 +123,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <a class="stat act" href="#defects"><span class="n">3</span><span class="l">open defects — index</span></a>
   <div class="stat act"><span class="n">262 / 312</span><span class="l">requirements covered by a test · 2 contradicted</span></div>
 </div>
-  <p class="fine">Measured at commit <code>b3cf2bb</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>5e17205</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -5404,7 +5404,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="inner">
     <p>Four things from the maintainer looking at the Access tab, three built and one answered. BUILT (R-369): the member list now reads highest access first then A–Z within the tier (<code>accessRank</code>/<code>sortMembers</code>, pure and tested); the &quot;Add someone&quot; block is rendered only while a search runs and painted above the member list by flex <code>order</code>, so the dead bottom section a hundred rows down is gone --- the maintainer's <em>&quot;redundant ... no one is going to scroll down if there are 100 operators&quot;</em>; and Activity is swapped above Settings in the rail, with the three order pins that guard it updated to match. ANSWERED, NOT BUILT: <em>&quot;There is only a button to remove a user, no way to deactivate one, is this an issue?&quot;</em> Remove here revokes a login/management GRANT, not the person's account or their operator record (which already has its own Deactivate). So it is not destructive and re-adding restores access; a soft suspend-access that keeps the grant disabled would be a genuine new feature and is left for the maintainer to call. Written into R-369's note so the decision is not lost. Continuation of R-367 (session 125) and R-368 (session 126); the tester's cold browser walk is the outside check owed for all three.</p>
     <div class="aside"><span class="k">A note on these numbers</span><p><code>npm run test</code> run in this session, the total line copied: <code>Test Files 132 passed (132)</code>, <code>Tests 2712 passed (2712)</code>. Up from 2707 by 5: three pure sort cases in <code>siteAccess.test.ts</code> and two DOM cases in <code>siteAccessNodePicker.test.tsx</code>. Three existing order pins were UPDATED, not added, for the tab swap (<code>scaleAudit</code> H2, <code>adminNoGrants</code> N7, <code>defects/DEF-0008</code>). <code>db_checks</code> (823) and <code>migrations</code> (73) carried --- no SQL. <code>e2e</code> (44) carried, NOT re-run.</p></div>
-    <p class="fine">2712 app tests in 132 files · 823 database checks · 73 migrations · tsc 0 · eslint 0</p>
+    <p class="fine">2712 app tests in 132 files · 823 database checks · 73 migrations · tsc 0 · eslint 0 · commits 5e17205</p>
   </div>
 </details>
 <details class="donefold" >
