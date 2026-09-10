@@ -419,7 +419,7 @@ BEGIN
   v_day := date_trunc('week', now());
 
   FOREACH v_letter IN ARRAY ARRAY['A','B','C'] LOOP
-    FOR v_d IN 0..2 LOOP
+    FOR v_d IN 0..6 LOOP
       FOR v_i IN 1..4 LOOP
         SELECT v INTO v_cell FROM d_fix WHERE k = v_letter || ':cell' || v_i;
 
@@ -589,7 +589,7 @@ BEGIN
   IF v_placeless <> 0 THEN RAISE EXCEPTION 'dev_demo: % products offered in no plant, expected 0 (D115)', v_placeless; END IF;
   IF v_shared <> 2 THEN RAISE EXCEPTION 'dev_demo: the shared part is in % plants, expected 2 (D115)', v_shared; END IF;
   IF v_narrow < 6 THEN RAISE EXCEPTION 'dev_demo: only % product places below a root, expected >= 6 (D109)', v_narrow; END IF;
-  IF v_runs <> 36 THEN RAISE EXCEPTION 'dev_demo: % runs, expected 36', v_runs; END IF;
+  IF v_runs <> 84 THEN RAISE EXCEPTION 'dev_demo: % runs, expected 84', v_runs; END IF;
   IF v_orphan <> 0 THEN RAISE EXCEPTION 'dev_demo: % runs use a product owned outside them', v_orphan; END IF;
   IF v_logins <> 9 THEN RAISE EXCEPTION 'dev_demo: % of 9 accounts have a password', v_logins; END IF;
 END $$;

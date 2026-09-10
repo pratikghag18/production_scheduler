@@ -57,7 +57,13 @@ async function saveTemplate(page: Page, name: string): Promise<void> {
 /** Delete a named template in the admin Templates tab (admins only). No-op if absent. */
 async function deleteTemplate(page: Page, name: string): Promise<void> {
   const row = page.locator("li", { hasText: name });
-  if ((await row.count()) === 0) return;
+  // Wait for the list to load; if the row truly never appears, this is a
+  // legitimate no-op (already deleted), not a failure.
+  try {
+    await expect(row).toHaveCount(1, { timeout: 15_000 });
+  } catch {
+    return;
+  }
   await row.getByRole("button", { name: "Delete" }).click();
   await row.getByRole("button", { name: "Yes, delete" }).click();
   await expect(page.locator("li", { hasText: name })).toHaveCount(0, { timeout: 15_000 });

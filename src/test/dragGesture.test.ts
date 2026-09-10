@@ -1160,6 +1160,53 @@ describe("useDragGesture", () => {
       expect(sent && "runId" in sent).toBe(false); // no attachment change rides along
       expect(sent?.timerange?.end.toISOString()).toBe("2026-08-24T15:30:00.000Z");
     });
+
+    it("R-031h: an Alt-drag resize that changes the block's LENGTH but scales back to the same typed figure asks nothing (DEF-0031)", async () => {
+      // R-031a-g all drive a 30-minute-snapped drag, so `scaled` only ever
+      // equals `targetQty` via the zero-length-change branch (R-031e). This
+      // drives a genuine length change through the same "asks nothing" path:
+      // a direct block (bounds = the full window, so a 1000-minute length
+      // fits) carrying a typed target of 80, Alt-dragged (whole-minute
+      // snapping, `snapMinute`'s own branch) so its end moves by exactly 1
+      // minute, 1000 -> 1001. scaledTarget(80, 1000, 1001) =
+      // Math.max(1, roundTarget(80 * 1001 / 1000)) = Math.floor(80.08) = 80
+      // -- the SAME figure, so the "scaled === typed" guard in
+      // `useDragGesture` (the one DEF-0031 found unpinned) should skip the
+      // keep-or-scale prompt and commit the new window directly, exactly
+      // like R-031e/R-031f.
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a: IndexedAssignment = {
+        ...targetedChip(),
+        runId: null,
+        productId: "prod-1",
+        timerange: "[2026-08-24 00:00:00+00,2026-08-24 16:40:00+00)",
+        startMin: 0,
+        endMin: 1000,
+      };
+      const index = buildIndex([]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(descriptorFor(a, 195, null), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        // +1 minute at pxPerHour 100 is 1.6667px on X; the +4 on Y clears
+        // DRAG_THRESHOLD_PX (4px) without adding to the horizontal (minute)
+        // delta the Alt-drag resize reads.
+        result.current.updateBlockDrag(fakePointerEvent(501.6666666666667, 304, true));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(501.6666666666667, 304, true));
+      });
+
+      expect(result.current.popover).toBeNull();
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent && "targetQty" in sent).toBe(false);
+      expect(sent?.timerange?.end.toISOString()).toBe("2026-08-24T16:41:00.000Z");
+    });
   });
 
   describe("R-365: a drop that changes a chip's run asks first", () => {

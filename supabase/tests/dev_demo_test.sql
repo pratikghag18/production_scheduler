@@ -182,12 +182,12 @@ BEGIN
    WHERE r.org_id = '10000000-0000-0000-0000-000000000001'
      AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.run_id = r.id);
   -- and they are spread over the world rather than piled on one cell: three
-  -- plants x four cells. A total of 36 on a single cell passes a bare count.
+  -- plants x four cells. A total of 84 on a single cell passes a bare count.
   SELECT count(DISTINCT node_id) INTO v_cells
     FROM runs WHERE org_id = '10000000-0000-0000-0000-000000000001';
-  IF v_runs = 36 AND v_asg = 36 AND v_runless = 0 AND v_cells = 12
+  IF v_runs = 84 AND v_asg = 84 AND v_runless = 0 AND v_cells = 12
   THEN RAISE NOTICE 'PASS D6';
-  ELSE RAISE NOTICE 'FAIL D6: runs=% (want 36) assignments=% (want 36) runs_with_nobody=% (want 0) cells=% (want 12)',
+  ELSE RAISE NOTICE 'FAIL D6: runs=% (want 84) assignments=% (want 84) runs_with_nobody=% (want 0) cells=% (want 12)',
                     v_runs, v_asg, v_runless, v_cells; END IF;
 END $$;
 
