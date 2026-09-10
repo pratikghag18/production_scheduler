@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-09'
-  tip: 83e8481
+  tip: 3c47331
   baseline:
-    app_tests: 2669
+    app_tests: 2685
     app_test_files: 131
     tsc: 0
     eslint: 0
@@ -4671,13 +4671,39 @@ requirements:
   title: A target is a window total; unset renders NA
   source:
   - §14.2
+  - session 122 conversation
   stated_by: maintainer
   claim: >-
     target_qty is a total for the assignment window, not a rate, with free-text units. Resizing an assignment
     that carries a target prompts keep-total or scale-proportionally.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "R-031a-g: a real end-grip drag on a chip with a typed target opens the prompt before any write, naming the person, target, both lengths and the scaled figure; Keep writes the window without the target; Scale writes the scaled target on the same patch, unit untouched; Cancel writes nothing and Enter picks nothing; a move does not ask; a block with no typed target does not ask; a DIRECT block asks the same and writes the same"
+  - kind: vitest
+    file: src/test/standardTarget.test.ts
+    cases: "T18a-f: scaling by the derived target's rounding, held at the typed floor of 1; same length hands the quantity back; nothing to scale is null"
+  - kind: vitest
+    file: src/test/interaction.test.ts
+    cases: "case22a-c: the prompt sentence and the length format, never the literal \"units\""
+  - kind: manual
+    steps: "9 Sept, developer stack, as the admin: a target of 80 pieces typed on Operator A1's 06:00-14:00 block, the end grip dragged half an hour left, the prompt read on screen (\"Keep or scale?\" / \"... 80 pieces for 8h. It is now 7h 30m: keep 80 pieces as the total, or scale it to 75 pieces?\" / Cancel, Keep 80 pieces, Scale to 75 pieces), Cancel clicked, the block unchanged, the target cleared again"
+  status: covered
   note: >-
+    BUILT 9 Sept (session 123, 3c47331). Reviewed by a second Sonnet lane with one job, break it: it
+    confirmed one defect before commit --- the scaled figure could fall below the typed-target floor
+    of 1 that `normalizeTarget` enforces, so Scale could write what the field would refuse and a
+    later Save would silently clamp --- and one test gap, the direct block. Both fixed before commit.
+    Not built, on purpose and said here: a resize that also detaches cannot happen (a chip's resize
+    is clamped inside its run, and a move never changes length), so the two prompts never stack;
+    the code would ask R-031 first and R-365 second if it ever could.
+    DECIDED 9 Sept (maintainer, session 122): "We definitely need to fix shift resize." The
+    keep-total-or-scale prompt is built this session, in the board's own confirm prompt (the R-365
+    shell): an edge drag that changes the length of a block carrying a TYPED target asks, naming the
+    person, the target, the old and new lengths and the scaled figure, with Keep, Scale and Cancel.
+    A move never asks (the length is unchanged); a block with no typed target never asks (its derived
+    target already follows); Cancel writes nothing. Scaling rounds by the same rule as the derived
+    target (`roundTarget`), and a scaled figure equal to the typed one asks nothing.
     QUALIFIED BY R-316 (0040). "Unset renders NA" now reads "unset renders the standard the cell's cycle time
     implies, and NA only when there is no cycle time". target_qty itself is unchanged — still a window total,
     still the human's explicit override, still null when nothing was typed. The keep-total-or-scale prompt on
@@ -12565,6 +12591,61 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 123
+  date: 2026-09-09
+  title: A resize of a block with a typed target asks keep-or-scale (R-031) --- the last open half of the roadmap's Shifts row
+  commits:
+  - 3c47331
+  numbers:
+    app_tests: 2685
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run here: 2685 in 131 files --- session 122's 2669 plus sixteen: T18a-f, case22a-c and
+    R-031a-g. `tsc -b`, `eslint` and `prettier --check` clean; no migration or RPC touched, so `tsc`
+    is conclusive. `e2e/roleWalk.spec.ts` run against the developer's stack: 5 of 5, every persona's
+    board facts match. `db_checks`, `migrations` and the e2e total carried from the tester's session
+    121.
+  summary: >-
+    THE MAINTAINER: "We definitely need to fix shift resize." Written into R-031 as a decision before
+    the code, then built. A target is a total for the block's window, so a block dragged from 8h to
+    7h 30m that keeps its 80 now asks for more per hour; the design plan (§14.2) said the person
+    should be asked which they meant, and nothing ever asked --- the 8 Sept audit had confirmed a
+    resize left `target_qty` alone in silence.
+    ⭐ WHAT IT DOES. An edge drag that changes the length of a block carrying a TYPED target opens the
+    board's own confirm shell (R-365's) titled "Keep or scale?", with the person, the target and
+    unit, both lengths and the scaled figure, and three buttons: Cancel, Keep <n>, Scale to <m>.
+    Keep writes the window and leaves the target out of the patch; Scale writes the scaled quantity
+    on the same patch; Cancel writes nothing. A move never asks (its length is unchanged); a block
+    with no typed target never asks (its derived target already follows, R-316); a scaled figure
+    that rounds back to the typed one asks nothing. Scaling rounds by `roundTarget` and is held at
+    the typed floor of 1.
+    ⛔ THE REVIEW FOUND A REAL ONE BEFORE COMMIT. The maintainer asked mid-session that coding be
+    handed to a Sonnet lane; the prompt itself was already built and green here by then, so the
+    lane took the reviewer's seat with one job, break it. It confirmed that the scaled figure could
+    fall below 1 --- the floor `normalizeTarget` enforces on anything typed --- so Scale could write
+    0.1 and a later Save would silently clamp it back. A second Sonnet lane fixed the clamp and
+    added the direct-block case (R-031g) the review said was missing. Three suspicions were read
+    and left: the two prompts cannot stack today (a chip's resize is clamped inside its run, a
+    move never changes length); the three buttons wrap to two lines inside the popover and read
+    fine on screen; R-031f's guard is redundant with `scaledTarget`'s own, not a gap.
+    ⭐ READ ON THE SCREEN, NOT ONLY IN THE SUITE. A throwaway Playwright walk on the developer's
+    stack typed 80 pieces on Operator A1's block, dragged its end grip half an hour, screenshotted
+    the prompt ("80 pieces for 8h. It is now 7h 30m ... scale it to 75 pieces?"), clicked Cancel,
+    saw the block unchanged and cleared the target again; the spec was deleted afterwards. Checked
+    by mutation too: hiding the prompt fails three cases, writing the typed value on Scale fails
+    one.
+    ⚠️ THE BOARD OPENED ON THE WRONG DAY FOR THE WALK. Past midnight UTC the board's "today" is a
+    day the demo data does not cover, and the first attempt found no chips at all; the walk had to
+    step back a day. Named here because the next screen walk will hit the same thing in the
+    evening.
+    The roadmap's Shifts row, the one `partial` left after session 122's audit, is `done`.
+  shipped: []
 - id: 122
   date: 2026-09-09
   title: Backlog audit --- seven of the old roadmap's rows said open for work the stages record as shipped
@@ -18472,13 +18553,12 @@ backlog:
   text: >-
     Shift admin UI in product (templates/breaks editor, node attachment) + target keep-or-scale prompt
     on resize
-  status: partial
+  status: done
   note: >-
     Corrected 9 Sept (backlog audit): the Shifts admin section (templates/breaks editor, node
-    attachment) shipped Aug 27 as part of S17. The keep-total-or-scale prompt on resize is
-    genuinely still unbuilt -- R-031 was re-checked against `mutations.ts` on 8 Sept and confirmed
-    unbuilt: a resize on a targeted assignment silently leaves `target_qty` unchanged and never
-    prompts.
+    attachment) shipped Aug 27 as part of S17. The keep-total-or-scale prompt on resize was the
+    last half and shipped in session 123 (R-031, covered) --- the maintainer's own call the same
+    day: "We definitely need to fix shift resize."
   stage: S17
 - phase: 2
   text: PTO/absence source decision + conflict surfacing
