@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 3c82575
+  tip: 1246204
   baseline:
-    app_tests: 2713
+    app_tests: 2714
     app_test_files: 132
     tsc: 0
     eslint: 0
@@ -9374,6 +9374,28 @@ requirements:
     `remove_site_member`, best-effort and guarded. Confirmed on the tester's own stack, cold: both
     addresses from this run's `invite.spec.ts` cases hold zero grants afterward, read directly off
     `profile_grants` via a join, not inferred from the suite staying green.
+- id: R-371
+  title: The Activity tab carries a legend for what the row accent colours mean
+  source:
+  - session 132 conversation
+  stated_by: maintainer
+  claim: >-
+    The Activity (audit) tab marks each row with a coloured left accent keyed to its action ---
+    green for Added (insert), grey for Changed (update), red for Removed (delete). The screen shows
+    a legend naming those three colours, built from the same action list the accent and the filter
+    use so the three can never disagree.
+  verified_by:
+  - kind: vitest
+    file: src/test/auditPanel.test.tsx
+    cases: "the legend lists exactly Added / Changed / Removed in order, each swatch carrying the same data-action (insert/update/delete) the row accent and the filter use"
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 132). DECIDED 10 Sept (maintainer): *"In the activity tab, lets add a
+    legend for what the colours mean."* The row accent (added=`--signal-ok`, changed=`--ink-2`,
+    removed=`--crit`, `data-action` on each `.row`) already existed for colour-blind and
+    black-and-white legibility but was never named. The legend is built from `ACTION_FILTERS` minus
+    "all" and its swatches reuse the same `data-action` -> token mapping the accents do, so there is
+    one source for which colour is which action. No migration; presentation only.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12823,6 +12845,32 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 132
+  date: 2026-09-10
+  title: "Activity tab gains a legend for its row accent colours (R-371)"
+  commits: [1246204]
+  numbers:
+    app_tests: 2714
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` run this session: `Test Files 132 passed (132)`, `Tests 2714 passed (2714)` ---
+    up from 2713 by the one legend case in `auditPanel.test.tsx`. `tsc` and `eslint` clean. No SQL,
+    no migration; `db_checks`/`migrations`/`e2e` carried.
+  summary: >-
+    Maintainer: *"In the activity tab, lets add a legend for what the colours mean."* The row accent
+    (green Added / grey Changed / red Removed, `data-action` on each row, there since the panel
+    shipped for colour-blind and print legibility) was never named on screen. Added a legend built
+    from `ACTION_FILTERS` minus "all", its swatches reusing the same `data-action` -> token mapping
+    the accents use, so the swatch, the accent and the filter cannot drift. Presentation only.
+    Two more requests from the same message are NOT in this session: showing/editing what a week
+    template holds (a design discussion, R-356's surface), and frozen table headers on long-row tabs
+    recorded as a standard --- both taken up next.
 - id: 131
   date: 2026-09-10
   title: "Tester run: all five open defects (DEF-0029 through DEF-0033) re-verified cold and closed"
