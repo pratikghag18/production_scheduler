@@ -956,6 +956,21 @@ export function AuditPanel() {
             </div>
           </div>
 
+          {/* ⭐ WHAT THE ROW COLOURS MEAN (maintainer request). Built from the
+              SAME `ACTIONS` list the filter and the `data-action` accent use, so
+              the swatch, the accent and the filter can never disagree about
+              which colour is which action. `data-action` on the swatch reuses
+              the exact accent tokens (signal-ok / ink-2 / crit), not a second
+              copy of them — the one-source rule this file keeps everywhere. */}
+          <ul className={styles.legend} aria-label="What the row colours mean">
+            {ACTION_FILTERS.filter((a) => a.id !== "all").map((a) => (
+              <li key={a.id} className={styles.legendItem}>
+                <span className={styles.legendSwatch} data-action={a.id} aria-hidden="true" />
+                {a.label}
+              </li>
+            ))}
+          </ul>
+
           {entries.length > 0 && (
             <div className={styles.scroll}>
               <table className={styles.table}>

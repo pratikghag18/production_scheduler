@@ -285,6 +285,23 @@ describe("the screen answers what changed, when, and who did it", () => {
     expect(screen.getByRole("table").textContent).toContain("2026-09-0");
   });
 
+  it("shows a legend for what the row accent colours mean, keyed to the same actions", async () => {
+    // Maintainer request: the coloured left accent per row (added/changed/removed)
+    // needed a key. The legend is built from ACTION_FILTERS minus "all", so it
+    // lists exactly the three actions, in order, each swatch carrying the same
+    // `data-action` the row accent and the filter use.
+    show();
+    await screen.findByText("Product added");
+    const legend = screen.getByLabelText("What the row colours mean");
+    const items = within(legend).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(["Added", "Changed", "Removed"]);
+    expect(items.map((li) => li.querySelector("span")?.getAttribute("data-action"))).toEqual([
+      "insert",
+      "update",
+      "delete",
+    ]);
+  });
+
   it("names the reader's own change as theirs", async () => {
     show();
     expect(await screen.findByText("You")).toBeTruthy();
