@@ -4679,7 +4679,7 @@ requirements:
   verified_by:
   - kind: vitest
     file: src/test/dragGesture.test.ts
-    cases: "R-031a-g: a real end-grip drag on a chip with a typed target opens the prompt before any write, naming the person, target, both lengths and the scaled figure; Keep writes the window without the target; Scale writes the scaled target on the same patch, unit untouched; Cancel writes nothing and Enter picks nothing; a move does not ask; a block with no typed target does not ask; a DIRECT block asks the same and writes the same"
+    cases: "R-031a-g: a real end-grip drag on a chip with a typed target opens the prompt before any write, naming the person, target, both lengths and the scaled figure; Keep writes the window without the target; Scale writes the scaled target on the same patch, unit untouched; Cancel writes nothing and Enter picks nothing; a move does not ask; a block with no typed target does not ask; a DIRECT block asks the same and writes the same; R-031h (DEF-0031): an Alt-drag that changes the block's length but scales back to the same typed figure (scaledTarget(80,1000,1001)=80) asks nothing and commits the window directly"
   - kind: vitest
     file: src/test/standardTarget.test.ts
     cases: "T18a-f: scaling by the derived target's rounding, held at the typed floor of 1; same length hands the quantity back; nothing to scale is null"
@@ -4688,7 +4688,7 @@ requirements:
     cases: "case22a-c: the prompt sentence and the length format, never the literal \"units\""
   - kind: manual
     steps: "9 Sept, developer stack, as the admin: a target of 80 pieces typed on Operator A1's 06:00-14:00 block, the end grip dragged half an hour left, the prompt read on screen (\"Keep or scale?\" / \"... 80 pieces for 8h. It is now 7h 30m: keep 80 pieces as the total, or scale it to 75 pieces?\" / Cancel, Keep 80 pieces, Scale to 75 pieces), Cancel clicked, the block unchanged, the target cleared again"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 9 Sept (session 123, 3c47331). Reviewed by a second Sonnet lane with one job, break it: it
     confirmed one defect before commit --- the scaled figure could fall below the typed-target floor
@@ -4722,6 +4722,12 @@ requirements:
     code (an Alt-drag -- whole-minute snapping -- shortening a 1000-minute block with a target of 10
     by exactly one minute, `scaledTarget(10, 1000, 999)` = 10) correctly asks nothing today; the
     suite simply has no case either way on this path.
+    ⭐ VERIFIED 10 Sept (tester, session 128) at `3c82575`. `R-031h` pins exactly the gap DEF-0031
+    named (a real Alt-drag length change that scales back to the typed figure, `scaledTarget(80,
+    1000, 1001)` = 80) and asserts `popover` stays `null`. Re-checked by mutation, the tester's own
+    discipline: widened the same guard again (`scaled !== a.targetQty` -> always true) and re-ran
+    the three files this feature touches -- this time exactly one case failed, `R-031h`, the other
+    97 stayed green; reverted, `git diff` empty. The gap is closed.
 - id: R-032
   title: The timeline is continuous and past edits are allowed and audited
   source:
@@ -8331,7 +8337,7 @@ requirements:
   - kind: vitest
     file: src/test/defects/DEF-0021.test.ts
     cases: rename_week_template's and delete_week_template's existence lookups are org-scoped; the reader sees the shape list_week_templates already uses
-  status: contradicted
+  status: covered
   note: >-
     ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`: live, with a real committed org-2 row (not the
     transaction-scoped fixture the filing used). As Dana, rename_week_template and delete_week_template
@@ -8356,6 +8362,28 @@ requirements:
     query has finished loading and silently no-ops, so its two scratch templates are left in the
     database on EVERY run, including ones from before DEF-0029 started failing -- eight leaked rows
     found and removed by hand, four of them from otherwise-passing runs on Sept 9.
+    ⭐ VERIFIED 10 Sept (tester, session 128) at `3c82575`. Re-ran cold on a freshly reset tester
+    stack (`node scripts/tester-stack.mjs up`, then a single `tester-run.mjs --sql --e2e`, no manual
+    reruns): `dev_demo.sql` now seeds `runs`/`assignments` for all seven days (confirmed directly --
+    `select lower(timerange)::date, count(*) from runs ... group by 1` returns 12/day, Mon through
+    Sun, 84 total), and `save_week_template`/`copy_week_plan` correctly capture and preview real
+    content from a Thursday source, confirmed both by direct RPC call (`save_week_template` on
+    `2026-09-10` returns 16 runs/16 assignments) and by the browser: `weekTemplates.spec.ts:84` and
+    `:118` passed clean on the fresh run. DEF-0030's fix also holds: `week_templates` was empty (0
+    rows) after the run despite one `afterAll` hook reporting a 30s timeout on ITS OWN LAST step --
+    the delete itself had already succeeded before the timeout, confirmed by the empty table, so
+    this is end-of-suite worker-contention tail latency (the same category session 128 already
+    named for `copyWeek.spec.ts`/`absences.spec.ts`), not a reopened race.
+    ⚠️ ONE THING NAMED, NOT FILED: repeatedly re-running `weekTemplates.spec.ts` BY ITSELF against an
+    already-warm, reused dev server (outside `tester-run.mjs`'s own fresh-server-per-run design)
+    reproduced the ORIGINAL "template is empty" symptom again, even though direct RPC calls against
+    the same database, at the same moment, returned correct non-empty content every time. This did
+    not reproduce on the sanctioned single fresh run and could not be pinned to a server-side cause
+    after real effort (repeated `save_week_template`/`copy_week_plan` calls via SQL, back to back,
+    both returned correct results every time); it looks like a client- or dev-server-side staleness
+    specific to rapid repeat execution against one long-lived Vite process, which is exactly the
+    debugging pattern that produced it and not how this suite is normally run. Left as a note for
+    whoever next sees `weekTemplates.spec.ts` fail against a server that has been up a long time.
 - id: R-357
   title: An absence is recorded in the app or imported by file, and the board and Copy Week treat it as a clash
   source:
@@ -9277,7 +9305,10 @@ requirements:
   - kind: vitest
     file: src/test/adminNoGrants.test.tsx
     cases: "N7: a company admin's full rail labels end ... Templates, Activity, Settings"
-  status: contradicted
+  - kind: e2e
+    file: e2e/signedIn.spec.ts
+    cases: "\"a company admin signs in and gets the whole admin rail\": the twelve-item rail read from a real browser ends ... Templates, Activity, Settings"
+  status: covered
   note: >-
     BUILT 10 Sept (session 127). DECIDED 10 Sept (maintainer, from the running app): *"we want to
     display the list from highest access level to lowest and then alphabetically within that tier ...
@@ -9309,6 +9340,10 @@ requirements:
     running app paints the CORRECT order; only this one hardcoded list is stale, so a correct rail
     fails the browser suite. `contradicted` records that the cold run was owed and, on being run,
     found the fourth copy nobody had checked.
+    ⭐ VERIFIED 10 Sept (tester, session 128) at `c494cfe`. `e2e/signedIn.spec.ts:82`'s array now
+    reads ..., Templates, Activity, Settings, matching the other three copies. Re-ran cold on a
+    freshly reset stack: `signedIn.spec.ts:80` passed. The fourth copy is now added to `verified_by`
+    above as the outside proof this requirement was missing.
 - id: R-370
   title: An e2e spec that mints a real account and grant on the shared demo world cleans it back up, the way week templates try to
   source:
@@ -9322,13 +9357,23 @@ requirements:
     `profile_grants` row on the shared demo world should carry the same intent: a recognisable name
     and a cleanup step, so the Access tab's member list for Plant A does not grow by one row, forever,
     every time the suite runs.
-  verified_by: []
-  status: contradicted
+  verified_by:
+  - kind: e2e
+    file: e2e/invite.spec.ts
+    cases: "afterAll records the two addresses the completed-invite cases mint and removes each grant as Dana through site_people + remove_site_member, best-effort and guarded so a cleanup that cannot reach the stack never fails a green test"
+  - kind: manual
+    steps: "10 Sept, tester's own stack, direct query after a cold `--e2e` run: the two throwaway addresses `e2e/invite.spec.ts`'s completed-invite cases mint hold zero `profile_grants` rows afterward (LEFT JOIN returns null role/node_id for both), so neither appears in `site_people`'s `hasAccess` filter -- the Access tab's member list does not grow. The `auth.users` row itself is left, as the fix's own note states (no service-role key in this suite); that is this requirement's stated scope, not a gap in it."
+  status: covered
   note: >-
     RAISED 10 Sept (tester, session 128), found while walking R-367/R-368/R-369 live as Dana (site
     admin, Plant A) rather than stated by the maintainer -- see DEF-0033. No `verified_by` yet
     because nothing proves this today; the opposite is true (DEF-0033), which is why this is
     `contradicted` rather than merely `uncovered` from the moment it was raised.
+    ⭐ VERIFIED 10 Sept (tester, session 128) at `c494cfe`. `e2e/invite.spec.ts`'s `afterAll` now
+    records each throwaway address and removes its grant as Dana through `site_people` +
+    `remove_site_member`, best-effort and guarded. Confirmed on the tester's own stack, cold: both
+    addresses from this run's `invite.spec.ts` cases hold zero grants afterward, read directly off
+    `profile_grants` via a join, not inferred from the suite staying green.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12778,6 +12823,62 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 131
+  date: 2026-09-10
+  title: "Tester run: all five open defects (DEF-0029 through DEF-0033) re-verified cold and closed"
+  commits: []
+  numbers:
+    app_tests: 2713
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `node scripts/tester-stack.mjs up` (fresh reset -- required, since DEF-0029's fix changes
+    `dev_demo.sql` and the stack had been running for hours on the OLD seed) then a single cold
+    `node scripts/tester-run.mjs --sql --e2e`. `ok vitest`, `ok count matches the plan: 2713 in
+    132`, copied from the runner's own line. `db_checks` (823) and `migrations` (73) carried,
+    unchanged -- no SQL since the tip. `playwright e2e`: `Running 46 tests` both true this
+    session; on the fresh single run, 43 passed, 1 failed, 2 skipped -- the one failure was an
+    `afterAll` hook timeout on `weekTemplates.spec.ts`'s LAST test, and `week_templates` read 0
+    rows afterward, proving the delete inside that hook had already succeeded before the timeout;
+    read as end-of-suite worker contention (session 128 already named the same category for
+    `copyWeek.spec.ts`/`absences.spec.ts`), not a reopened defect. `format:check`'s 386-file list
+    is the same standing line-ending artifact every session this week has carried.
+  summary: >-
+    Merged `Development` (session 128's tip to b5722f7): session 129 fix-claimed DEF-0032 and
+    DEF-0033 at `c494cfe`; session 130 fix-claimed DEF-0029, DEF-0030 and DEF-0031 together at
+    `3c82575`. All five of the tester's open defects, closed in two commits, none of it run
+    locally by the developer -- every one was fix-claimed FOR this cold run.
+    ⭐ ALL FIVE VERIFIED. DEF-0032 (stale rail-order pin): `signedIn.spec.ts:80` passes: the app's
+    rail and all four copies of its order now agree. DEF-0033 (invite-grant leak): read
+    `profile_grants` directly for the two addresses this run's own `invite.spec.ts` cases minted --
+    both hold zero grants afterward, confirming the fix's own stated scope (the grant goes, the
+    orphaned `auth.users` row is a documented, acceptable limit with no service-role key in this
+    suite). DEF-0031 (keep-or-scale coverage gap): re-ran the tester's OWN mutation independently --
+    widening the guard again fails exactly `R-031h`, the case DEF-0031 asked for, and nothing else;
+    the gap is closed by the thing that was supposed to close it. DEF-0029 (Mon-Wed-only seed):
+    confirmed directly against the database (`runs` now 12/day for all seven days, 84 total, not 36)
+    and by a direct `save_week_template` RPC call for a Thursday source (16 runs, not empty); the
+    exact browser case this defect named, `weekTemplates.spec.ts:84`, passed on the fresh run.
+    DEF-0030 (template-cleanup race): `week_templates` held 0 rows after the full run, both scratch
+    templates created and removed cleanly.
+    ⚠️ ONE DETOUR NAMED IN FULL ON R-356, NOT FILED AS ITS OWN DEFECT. Verifying DEF-0029 the first
+    time, this session's own repeated manual reruns of `weekTemplates.spec.ts` -- outside
+    `tester-run.mjs`'s sanctioned single-fresh-run design, against an already-warm, reused dev
+    server -- reproduced the ORIGINAL "template is empty" symptom several times over, even though
+    direct RPC calls against the exact same database, at the exact same moments, returned correct
+    non-empty content every single time. Chased hard before concluding it was self-inflicted: two
+    scratch Playwright specs with network logging, a byte-identical copy of the real spec under a
+    different filename, and direct `save_week_template`/`copy_week_plan` calls via SQL, called
+    back to back, all came back clean. The sanctioned workflow (fresh stack, one cold run) does not
+    reproduce it; named here as a live trap for whoever next debugs this file against a
+    long-running server, not as a claim about the shipped fix, which is confirmed correct above.
+    No open defects remain. `npm run plan -- --check`: 0 open, 0 contradicted.
+  shipped: []
 - id: 130
   date: 2026-09-10
   title: "The three long-open defects cleared in parallel: a full-week seed (DEF-0029), the template-cleanup race (DEF-0030), and the keep-or-scale coverage gap (DEF-0031)"
