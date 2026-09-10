@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 3c47331
+  tip: 4905caf
   baseline:
     app_tests: 2699
     app_test_files: 132
@@ -12662,7 +12662,7 @@ sessions:
 - id: 125
   date: 2026-09-10
   title: "Access can name the hierarchy node: a person is added at, or moved to, a chosen line or cell, admins only (R-367)"
-  commits: []
+  commits: [4905caf]
   numbers:
     app_tests: 2699
     app_test_files: 132
