@@ -96,9 +96,18 @@
   max-width: 13rem;
 }
 
-/* The table's own scroller — see the header. */
+/* ⭐ THE FROZEN-HEADER STANDARD (docs/conventions.md "Frozen table headers").
+   A long list scrolls WITHIN this box, not the page, so the column header
+   stays put. `.th` is already `position: sticky; top: 0`, but sticky needs a
+   scroll ancestor that actually scrolls: `overflow-x` alone let the region
+   grow to its content and the page do the scrolling, so the header left with
+   it (reported from the running app). Bounding the height and scrolling on
+   BOTH axes is what makes the sticky header real. `dvh` follows the visible
+   viewport on mobile chrome; `min` keeps a sensible cap on a tall screen. */
 .scroll {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: min(65dvh, 44rem);
+  overscroll-behavior: contain;
   border: 1px solid var(--grid);
   border-radius: 0.375rem;
   background: var(--surface);

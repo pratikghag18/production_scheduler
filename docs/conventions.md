@@ -23,6 +23,23 @@ the rules.
   file, default-exported only for route-level pages; everything else named exports.
 - Migrations are append-only (see P1-2). Never edit a migration that has run.
 
+## Design standards
+
+These are the app-wide UI standards. Like the pop-up standard, each is enforced by an audit so it
+cannot quietly drift; add a surface to the standard and the audit checks it.
+
+- **Pop-ups go through one shell.** Every floating dialog is the shared `src/components/Popover.tsx`
+  (it sets `role="dialog"` once); no component hand-rolls a dialog. Guarded by
+  `src/test/popoverStandard.test.ts` (any `role="dialog"` outside the allowlisted module fails).
+- **Frozen table headers (R-372).** Any tab that can list a large number of rows scrolls the rows
+  **within a bounded region, not the page**, so the column header (and any header controls) stay
+  frozen while the body scrolls. The recipe: the scroll container sets `overflow: auto` with a
+  viewport-relative `max-height` (e.g. `min(65dvh, 44rem)`), and the header cells are
+  `position: sticky; top: 0` with an opaque `background` and a `z-index` above the body. Reported
+  from the running app: scrolling the Activity log made the column names disappear. Guarded by
+  `src/test/stickyHeaderStandard.test.ts`, which registers each list surface and fails if its
+  scroll container is unbounded or its header is not sticky. New long-row tabs register there.
+
 ## Local setup: the developer's stack and the tester's
 
 R-366. Two knobs keep the developer's dev server/Supabase stack and the tester's apart, so a
