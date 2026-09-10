@@ -59,7 +59,9 @@ import {
   splitEvenly,
   splitFits,
   type DragMode,
+  targetResizeMessage,
 } from "../lib/interaction";
+import { scaledTarget } from "../lib/standardTarget";
 import { useCreateRun, useUpdateRunFields, useDeleteRun, useMoveRun } from "./useRunMutations";
 import {
   useCreateAssignment,
@@ -178,7 +180,21 @@ export type PopoverState =
       message: string;
       anchor: { x: number; y: number };
       onConfirm: () => void;
+      /** R-031: when set, the prompt offers THESE buttons instead of a
+       *  single Continue, and `confirmChoose(i)` fires one of them; Cancel
+       *  is always there and always `confirmNo`. `confirmYes` does nothing
+       *  on a prompt with choices — there is no default answer to "keep or
+       *  scale?", and a stray Enter must not pick one. */
+      choices?: readonly ConfirmChoice[];
+      /** R-031: the popover's title; "Continue?" when absent. */
+      title?: string;
     };
+
+/** R-031: one button on a multi-choice confirm prompt. */
+export interface ConfirmChoice {
+  label: string;
+  onChoose: () => void;
+}
 
 export interface SnapConfig {
   useShiftSnap: boolean;
@@ -630,6 +646,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [],
   );
 
+  /** R-031: the same shell with more than one way to say yes. */
+  const askChoice = useCallback(
+    (
+      title: string,
+      message: string,
+      anchor: { x: number; y: number },
+      choices: readonly ConfirmChoice[],
+    ) => {
+      setPopover({ kind: "confirm", title, message, anchor, onConfirm: () => {}, choices });
+    },
+    [],
+  );
+
   const commitBlockDrag = useCallback(
     (d: InternalDragState, anchor: { x: number; y: number }) => {
       // DEF-0015: a viewer never commits a move/resize. In practice `moved`
@@ -954,21 +983,69 @@ export function useDragGesture(args: UseDragGestureArgs) {
           );
         };
 
-        if (attachmentMessage === null) {
-          // No attachment change (same run both sides, or an already-direct
-          // chip staying direct) — R-365 only asks when the run a chip
-          // belongs to would change, so this is the unchanged, un-prompted
-          // path.
-          commitAssignmentMove();
-        } else {
-          // R-365: Cancel needs no extra code here. `endBlockDrag` (above)
-          // already cleared `activeDrag` before calling `commitBlockDrag`
-          // (T11), and `commitAssignmentMove` has not run yet, so nothing
-          // has been written or optimistically patched — the chip is
-          // already back where the (untouched) index has it. `confirmNo`
-          // just closes the popover.
-          askConfirm(attachmentMessage, anchor, commitAssignmentMove);
+        const proceed = () => {
+          if (attachmentMessage === null) {
+            // No attachment change (same run both sides, or an already-direct
+            // chip staying direct) — R-365 only asks when the run a chip
+            // belongs to would change, so this is the unchanged, un-prompted
+            // path.
+            commitAssignmentMove();
+          } else {
+            // R-365: Cancel needs no extra code here. `endBlockDrag` (above)
+            // already cleared `activeDrag` before calling `commitBlockDrag`
+            // (T11), and `commitAssignmentMove` has not run yet, so nothing
+            // has been written or optimistically patched — the chip is
+            // already back where the (untouched) index has it. `confirmNo`
+            // just closes the popover.
+            askConfirm(attachmentMessage, anchor, commitAssignmentMove);
+          }
+        };
+
+        // R-031: a TYPED target is a total for the block's window, so a
+        // resize that changes the window's length changes what the number
+        // means. Ask which the person meant — keep the total, or scale it to
+        // the new length — before anything is written. Only an edge drag
+        // can get here with a different length (a move keeps it), only a
+        // typed target asks (a derived one already follows the resize, R-316),
+        // and a scaled figure that rounds back to the typed one has nothing
+        // to ask about. `edit` is the same object `commitAssignmentMove`
+        // reads, so choosing Scale sets the quantity on the very write the
+        // prompt guards, and the unit stays as typed. Cancel writes nothing,
+        // exactly as R-365's own prompt.
+        const oldMinutes = a.endMin - a.startMin;
+        const newMinutes = candidate.endMin - candidate.startMin;
+        const scaled =
+          a.targetQty !== null && newMinutes !== oldMinutes
+            ? scaledTarget(a.targetQty, oldMinutes, newMinutes)
+            : null;
+        if (a.targetQty !== null && scaled !== null && scaled !== a.targetQty) {
+          const typed = a.targetQty;
+          const unitSuffix = a.targetUnit ? ` ${a.targetUnit}` : "";
+          askChoice(
+            "Keep or scale?",
+            targetResizeMessage({
+              person,
+              qty: typed,
+              unit: a.targetUnit,
+              oldMinutes,
+              newMinutes,
+              scaled,
+            }),
+            anchor,
+            [
+              { label: `Keep ${typed}${unitSuffix}`, onChoose: proceed },
+              {
+                label: `Scale to ${scaled}${unitSuffix}`,
+                onChoose: () => {
+                  edit.targetQty = scaled;
+                  proceed();
+                },
+              },
+            ],
+          );
+          return;
         }
+        proceed();
       }
     },
     [
@@ -981,6 +1058,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       failWith,
       revertLabel,
       askConfirm,
+      askChoice,
       dateFormat,
       resizeAbsences,
     ],
@@ -1640,11 +1718,26 @@ export function useDragGesture(args: UseDragGestureArgs) {
    * the rendered `popover` this callback closes over. */
   const confirmYes = useCallback(() => {
     if (popover === null || popover.kind !== "confirm") return;
+    // R-031: a prompt with choices has no default answer.
+    if (popover.choices !== undefined) return;
     const { onConfirm } = popover;
     setPopover(null);
     onConfirm();
   }, [popover]);
   const confirmNo = useCallback(() => setPopover(null), []);
+  /** R-031: pick one of a multi-choice prompt's answers. Same shape as
+   *  `confirmYes` (F-128): the updater only clears, the side effect runs
+   *  once, outside it. */
+  const confirmChoose = useCallback(
+    (index: number) => {
+      if (popover === null || popover.kind !== "confirm" || popover.choices === undefined) return;
+      const choice = popover.choices[index];
+      if (!choice) return;
+      setPopover(null);
+      choice.onChoose();
+    },
+    [popover],
+  );
 
   const saveRunFields = useCallback(
     (runId: string, notes: string | null, plannedHeadcount: number | null) => {
@@ -1783,6 +1876,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     cancelSplit,
     confirmYes,
     confirmNo,
+    confirmChoose,
   };
 }
 

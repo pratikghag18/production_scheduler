@@ -358,3 +358,40 @@ export function attachmentChangeMessage(args: {
   }
   return `This puts ${person} on the ${to} run. Continue?`;
 }
+
+/**
+ * R-031: a length in minutes as a person says it — "4h", "3h 30m", "45m".
+ * Only the keep-or-scale prompt below needs it; the board's own clocks
+ * come from `time.ts`, which this file must not import (see the header).
+ */
+export function formatMinutes(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+/**
+ * R-031: the keep-or-scale question, in one place so the prompt and its
+ * test cannot drift. Names the person, the typed target with its unit, the
+ * length the target was typed against and the new one, and the scaled
+ * figure — everything the person needs to choose without looking away
+ * from the block. The unit rides along only when there is one, never the
+ * literal "units" (`TargetField.tsx`'s rule).
+ */
+export function targetResizeMessage(args: {
+  person: string;
+  qty: number;
+  unit: string | null;
+  oldMinutes: number;
+  newMinutes: number;
+  scaled: number;
+}): string {
+  const u = args.unit ? ` ${args.unit}` : "";
+  return (
+    `${args.person}'s block carries a target of ${args.qty}${u} for ${formatMinutes(args.oldMinutes)}. ` +
+    `It is now ${formatMinutes(args.newMinutes)}: keep ${args.qty}${u} as the total, or scale it to ${args.scaled}${u}?`
+  );
+}

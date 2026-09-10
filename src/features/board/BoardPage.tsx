@@ -812,6 +812,9 @@ export default function BoardPage() {
           anchor={popover.anchor}
           onConfirm={dragApi.confirmYes}
           onCancel={dragApi.confirmNo}
+          title={popover.title}
+          choices={popover.choices}
+          onChoose={dragApi.confirmChoose}
         />
       )}
 

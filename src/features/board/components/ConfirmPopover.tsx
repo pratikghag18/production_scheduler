@@ -14,23 +14,43 @@ export function ConfirmPopover({
   anchor,
   onConfirm,
   onCancel,
+  title = "Continue?",
+  choices,
+  onChoose,
 }: {
   message: string;
   anchor: { x: number; y: number };
   onConfirm: () => void;
   onCancel: () => void;
+  /** R-031: the heading; the crew and attachment prompts keep "Continue?". */
+  title?: string;
+  /**
+   * R-031: when given, these buttons stand where Continue would, one each,
+   * none of them primary — "keep or scale?" has no default answer, so no
+   * button is dressed as the expected one. Cancel is always first.
+   */
+  choices?: readonly { label: string }[];
+  onChoose?: (index: number) => void;
 }) {
   return (
-    <BoardPopover anchor={anchor} onClose={onCancel} title="Continue?">
+    <BoardPopover anchor={anchor} onClose={onCancel} title={title}>
       <div className={styles.body}>
         <p className={styles.message}>{message}</p>
         <div className={styles.row}>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className={styles.pri} onClick={onConfirm}>
-            Continue
-          </button>
+          {choices === undefined ? (
+            <button type="button" className={styles.pri} onClick={onConfirm}>
+              Continue
+            </button>
+          ) : (
+            choices.map((c, i) => (
+              <button key={c.label} type="button" onClick={() => onChoose?.(i)}>
+                {c.label}
+              </button>
+            ))
+          )}
         </div>
       </div>
     </BoardPopover>

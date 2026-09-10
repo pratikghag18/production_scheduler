@@ -11,6 +11,8 @@ import {
   findRunOverlap,
   classifyCrewAgainstRun,
   attachmentChangeMessage,
+  formatMinutes,
+  targetResizeMessage,
 } from "@/features/board/lib/interaction";
 
 /**
@@ -283,5 +285,48 @@ describe("interaction.ts — R-365 attachmentChangeMessage", () => {
     expect(
       attachmentChangeMessage({ person: "Ana", from: null, to: "Housing A 08:00–16:00" }),
     ).toBe("This puts Ana on the Housing A 08:00–16:00 run. Continue?");
+  });
+});
+
+/*
+ * R-031: the keep-or-scale question. One function, so the prompt the person
+ * reads and the sentence this file pins are the same string.
+ */
+describe("case22: the keep-or-scale prompt names everything the person needs to choose", () => {
+  it("case22a: a length reads as a person says it", () => {
+    expect(formatMinutes(240)).toBe("4h");
+    expect(formatMinutes(210)).toBe("3h 30m");
+    expect(formatMinutes(45)).toBe("45m");
+    expect(formatMinutes(0)).toBe("0m");
+  });
+
+  it("case22b: person, typed target with its unit, both lengths, and the scaled figure", () => {
+    expect(
+      targetResizeMessage({
+        person: "Elena",
+        qty: 80,
+        unit: "pieces",
+        oldMinutes: 240,
+        newMinutes: 210,
+        scaled: 70,
+      }),
+    ).toBe(
+      "Elena's block carries a target of 80 pieces for 4h. It is now 3h 30m: keep 80 pieces as the total, or scale it to 70 pieces?",
+    );
+  });
+
+  it('case22c: no unit means no unit word anywhere -- never the literal "units"', () => {
+    const msg = targetResizeMessage({
+      person: "Elena",
+      qty: 80,
+      unit: null,
+      oldMinutes: 240,
+      newMinutes: 300,
+      scaled: 100,
+    });
+    expect(msg).toBe(
+      "Elena's block carries a target of 80 for 4h. It is now 5h: keep 80 as the total, or scale it to 100?",
+    );
+    expect(msg).not.toContain("units");
   });
 });

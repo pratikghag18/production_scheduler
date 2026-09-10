@@ -912,6 +912,256 @@ describe("useDragGesture", () => {
    * before `commitBlockDrag` ran, so a prompted-and-cancelled drop leaves
    * the chip exactly where the untouched index has it.
    */
+  /*
+   * R-031 — A RESIZE OF A BLOCK WITH A TYPED TARGET ASKS: KEEP THE TOTAL, OR
+   * SCALE IT. Decided by the maintainer in session 122. The target is a total
+   * for the block's window, so changing the window's length changes what the
+   * number means; the prompt is the R-365 confirm shell with two answers and
+   * Cancel. These drive a REAL edge drag through the hook (offsetXPx in the
+   * end-handle zone, `hitTestBlock` picks "resize-end"), the way the R-365
+   * cases drive a move, and read the write that follows each answer.
+   */
+  describe("R-031: a resize of a block with a typed target asks keep-or-scale first", () => {
+    function targetedChip(): IndexedAssignment {
+      return { ...crewFixture(), targetQty: 80, targetUnit: "pieces" };
+    }
+
+    function descriptorFor(
+      a: IndexedAssignment,
+      offsetXPx: number,
+      homeRun: IndexedRun | null = runFixture,
+    ) {
+      return {
+        nodeId: "cell-1",
+        subject: { kind: "assignment" as const, assignment: a, homeRun },
+        original: { startMin: a.startMin, endMin: a.endMin },
+        pxPerHour: 100,
+        windowMinutes: WINDOW_MINUTES,
+        template: null,
+        dayCount: 1,
+        dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
+        zoomIndex: 1 as const,
+        handlePx: 8,
+        blockWidthPx: 200,
+        offsetXPx, // 195 is the end grip (`hitTestBlock`: >= width - 8); 100 is the body
+        runsOnNode: [runFixture],
+        crew: [] as IndexedAssignment[],
+      };
+    }
+
+    function name(index: BoardIndex) {
+      index.operatorById.set("op-1", {
+        id: "op-1",
+        homeNodeId: null,
+        displayName: "Elena",
+        employeeRef: null,
+        active: true,
+        siteNodeId: "cell-1",
+        sitePath: "plant_1.cell_1",
+        skillIds: [],
+        skillExpiries: [],
+      });
+    }
+
+    /** Drag the block's end grip 60px left: 600 -> 570, 4h -> 3h 30m. */
+    function shrinkFromEnd(
+      result: { current: ReturnType<typeof useDragGesture> },
+      a: IndexedAssignment,
+    ) {
+      act(() => {
+        result.current.beginBlockDrag(descriptorFor(a, 195), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(440, 300));
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(440, 300));
+      });
+    }
+
+    function prompt(result: { current: { popover: unknown } }) {
+      const p = result.current.popover as {
+        kind: string;
+        title?: string;
+        message?: string;
+        choices?: { label: string }[];
+      } | null;
+      return p && p.kind === "confirm" ? p : null;
+    }
+
+    it("R-031a: the resize asks before writing, naming the person, the target, both lengths and the scaled figure", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = targetedChip();
+      const index = buildIndex([a]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      shrinkFromEnd(result, a);
+
+      const p = prompt(result);
+      expect(p).not.toBeNull();
+      expect(p?.title).toBe("Keep or scale?");
+      expect(p?.message).toBe(
+        "Elena's block carries a target of 80 pieces for 4h. It is now 3h 30m: keep 80 pieces as the total, or scale it to 70 pieces?",
+      );
+      expect(p?.choices?.map((c) => c.label)).toEqual(["Keep 80 pieces", "Scale to 70 pieces"]);
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+    });
+
+    it("R-031b: Keep writes the new window and leaves the target out of the patch", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = targetedChip();
+      const index = buildIndex([a]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      shrinkFromEnd(result, a);
+      act(() => {
+        result.current.confirmChoose(0);
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent && "targetQty" in sent).toBe(false);
+      expect(sent?.timerange?.end.toISOString()).toBe("2026-08-24T09:30:00.000Z");
+      expect(result.current.popover).toBeNull();
+    });
+
+    it("R-031c: Scale writes the scaled target on the same patch as the new window, unit untouched", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = targetedChip();
+      const index = buildIndex([a]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      shrinkFromEnd(result, a);
+      act(() => {
+        result.current.confirmChoose(1);
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent?.targetQty).toBe(70);
+      expect(sent && "targetUnit" in sent).toBe(false);
+      expect(sent?.timerange?.end.toISOString()).toBe("2026-08-24T09:30:00.000Z");
+    });
+
+    it("R-031d: Cancel writes nothing and the prompt closes; Enter on a choice prompt picks nothing", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = targetedChip();
+      const index = buildIndex([a]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      shrinkFromEnd(result, a);
+      act(() => {
+        result.current.confirmYes(); // no default answer to "keep or scale?"
+      });
+      expect(prompt(result)).not.toBeNull();
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.confirmNo();
+      });
+      expect(result.current.popover).toBeNull();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+    });
+
+    it("R-031e: a MOVE of the same block does not ask -- its length is unchanged", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      // 300-540 inside the 360-600 run would leave the run (R-365 would ask);
+      // keep the nudge inside the run by starting the chip short of the run's end.
+      const a = {
+        ...targetedChip(),
+        timerange: "[2026-08-24 06:00:00+00,2026-08-24 09:00:00+00)",
+        endMin: 540,
+      };
+      const index = buildIndex([a]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(descriptorFor(a, 100), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(560, 300)); // +30min: 390-570, still inside 360-600
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+
+      expect(result.current.popover).toBeNull();
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent && "targetQty" in sent).toBe(false);
+    });
+
+    it("R-031f: a block with no typed target resizes without asking -- its derived target already follows (R-316)", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = crewFixture(); // targetQty null
+      const index = buildIndex([a]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      shrinkFromEnd(result, a);
+
+      expect(result.current.popover).toBeNull();
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent && "targetQty" in sent).toBe(false);
+      expect(sent?.timerange?.end.toISOString()).toBe("2026-08-24T09:30:00.000Z");
+    });
+
+    it("R-031g: a DIRECT block (no run, DirectBlock.tsx's own subject shape) asks the same question and Scale writes the same patch", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      // Direct: carries its own product, belongs to no run, and sits clear of
+      // run-1's window so no R-365 attachment question can join in.
+      const a: IndexedAssignment = {
+        ...targetedChip(),
+        runId: null,
+        productId: "prod-1",
+        timerange: "[2026-08-24 12:00:00+00,2026-08-24 16:00:00+00)",
+        startMin: 720,
+        endMin: 960,
+      };
+      const index = buildIndex([]);
+      name(index);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(descriptorFor(a, 195, null), fakePointerEvent(500, 300));
+      });
+      act(() => {
+        result.current.updateBlockDrag(fakePointerEvent(440, 300)); // end grip 60px left: 960 -> 930
+      });
+      act(() => {
+        result.current.endBlockDrag(fakePointerEvent(440, 300));
+      });
+
+      const p = prompt(result);
+      expect(p?.title).toBe("Keep or scale?");
+      expect(p?.choices?.map((c) => c.label)).toEqual(["Keep 80 pieces", "Scale to 70 pieces"]);
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.confirmChoose(1);
+      });
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent?.targetQty).toBe(70);
+      expect(sent && "runId" in sent).toBe(false); // no attachment change rides along
+      expect(sent?.timerange?.end.toISOString()).toBe("2026-08-24T15:30:00.000Z");
+    });
+  });
+
   describe("R-365: a drop that changes a chip's run asks first", () => {
     const runFixtureB: IndexedRun = {
       ...runFixture,

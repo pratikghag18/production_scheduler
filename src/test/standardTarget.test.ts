@@ -20,6 +20,7 @@ import {
   netMinutes,
   overlapMinutes,
   roundTarget,
+  scaledTarget,
   standardTargetQty,
   targetDisplay,
 } from "@/features/board/lib/standardTarget";
@@ -309,5 +310,45 @@ describe("T17: a block reads its typed target, else the standard, else NA", () =
       suffix: "",
       tip: " · target: NA",
     });
+  });
+});
+
+/*
+ * R-031: a typed target scaled to a new length. The prompt in the gesture
+ * hook shows this number and writes it on Scale; the rounding is
+ * `roundTarget`'s, so the scaled figure reads like the derived one does,
+ * but never below the typed-target floor of 1 that `normalizeTarget` holds
+ * a typed quantity to.
+ */
+describe("T18: a typed target scales with the block's length by the derived target's rounding", () => {
+  it("T18a: shrinking 4h to 3h 30m takes 80 to 70, exactly", () => {
+    expect(scaledTarget(80, 240, 210)).toBe(70);
+  });
+
+  it("T18b: growing 4h to 5h takes 80 to 100", () => {
+    expect(scaledTarget(80, 240, 300)).toBe(100);
+  });
+
+  it("T18c: a fraction floors above one, like the derived target (80 over 4h to 3h 20m is 66, not 66.67)", () => {
+    expect(scaledTarget(80, 240, 200)).toBe(66);
+  });
+
+  it("T18d: scaling never goes below the typed-target floor of 1 (normalizeTarget's own clamp), so Scale cannot write what the field would refuse", () => {
+    expect(scaledTarget(1, 480, 60)).toBe(1);
+    expect(scaledTarget(2, 480, 120)).toBe(1);
+    expect(scaledTarget(3, 480, 240)).toBe(1);
+  });
+
+  it("T18e: the same length hands the quantity back untouched, so a resize that snaps home asks nothing", () => {
+    expect(scaledTarget(80, 240, 240)).toBe(80);
+    expect(scaledTarget(12.5, 90, 90)).toBe(12.5);
+  });
+
+  it("T18f: nothing to scale is null, never zero or a guess", () => {
+    expect(scaledTarget(0, 240, 120)).toBe(null);
+    expect(scaledTarget(-5, 240, 120)).toBe(null);
+    expect(scaledTarget(80, 0, 120)).toBe(null);
+    expect(scaledTarget(80, 240, 0)).toBe(null);
+    expect(scaledTarget(Number.NaN, 240, 120)).toBe(null);
   });
 });
