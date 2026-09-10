@@ -4688,7 +4688,7 @@ requirements:
     cases: "case22a-c: the prompt sentence and the length format, never the literal \"units\""
   - kind: manual
     steps: "9 Sept, developer stack, as the admin: a target of 80 pieces typed on Operator A1's 06:00-14:00 block, the end grip dragged half an hour left, the prompt read on screen (\"Keep or scale?\" / \"... 80 pieces for 8h. It is now 7h 30m: keep 80 pieces as the total, or scale it to 75 pieces?\" / Cancel, Keep 80 pieces, Scale to 75 pieces), Cancel clicked, the block unchanged, the target cleared again"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 9 Sept (session 123, 3c47331). Reviewed by a second Sonnet lane with one job, break it: it
     confirmed one defect before commit --- the scaled figure could fall below the typed-target floor
@@ -4711,6 +4711,17 @@ requirements:
     one already follows a resize by being recomputed. Re-checked 8 Sept (requirement audit): confirmed still
     unbuilt against mutations.ts -- a resize on a targeted assignment silently leaves target_qty unchanged,
     never prompting. Not a test gap; the feature the claim describes does not exist yet.
+    ⛔ CONTRADICTED 10 Sept (tester, session 124, DEF-0031): checked by mutation, the way this
+    session checks every new requirement it touches. Widened the guard that skips the prompt when
+    the scaled figure rounds back to the typed one (`scaled !== a.targetQty` at
+    `useDragGesture.ts:1021`) so it always asks instead -- all 97 cases across the three files this
+    feature touches stayed green. The claim's own words are "a scaled figure that rounds back to the
+    typed one asks nothing"; nothing under `src/test/` proves that half, only the developer's own
+    pre-commit mutation pass proved the OTHER half (hiding the prompt, writing the wrong figure).
+    Confirmed the gap is real and reachable, not academic: a positive control against the UNMUTATED
+    code (an Alt-drag -- whole-minute snapping -- shortening a 1000-minute block with a target of 10
+    by exactly one minute, `scaledTarget(10, 1000, 999)` = 10) correctly asks nothing today; the
+    suite simply has no case either way on this path.
 - id: R-032
   title: The timeline is continuous and past edits are allowed and audited
   source:
@@ -8320,7 +8331,7 @@ requirements:
   - kind: vitest
     file: src/test/defects/DEF-0021.test.ts
     cases: rename_week_template's and delete_week_template's existence lookups are org-scoped; the reader sees the shape list_week_templates already uses
-  status: covered
+  status: contradicted
   note: >-
     ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`: live, with a real committed org-2 row (not the
     transaction-scoped fixture the filing used). As Dana, rename_week_template and delete_week_template
@@ -8333,6 +8344,18 @@ requirements:
     its own reproduction.
     ⛔ CONTRADICTED 7 Sept by DEF-0021 (tester, minor, cross-tenant): a real template id in another company
     answered not_permitted/not_admin where a bogus one answered no_such_template, two distinguishable refusals.
+    ⛔ CONTRADICTED AGAIN 10 Sept (tester, session 124, DEF-0029): the browser proof this requirement
+    cites, `e2e/weekTemplates.spec.ts`, fails deterministically every Thursday through Sunday --
+    `dev_demo.sql`'s own schedule section only ever populates Monday-Wednesday of its anchored week
+    (`FOR v_d IN 0..2 LOOP`), so a fresh re-seed taken THIS MOMENT, on a Thursday, still leaves the
+    board's default "today" view empty and the spec's freshly-saved template has nothing in it to
+    preview. Not R-031's doing and not a stale-clock incident like F-117; the seed's own header
+    ("so no board opens empty") contradicts its own loop bound on four days out of every seven.
+    ⚠️ A SECOND, INDEPENDENT DEFECT FOUND WHILE CHASING THE FIRST (DEF-0030, filed the same session):
+    `weekTemplates.spec.ts`'s own `afterAll` cleanup reads the Templates list's row count before the
+    query has finished loading and silently no-ops, so its two scratch templates are left in the
+    database on EVERY run, including ones from before DEF-0029 started failing -- eight leaked rows
+    found and removed by hand, four of them from otherwise-passing runs on Sept 9.
 - id: R-357
   title: An absence is recorded in the app or imported by file, and the board and Copy Week treat it as a clash
   source:
@@ -12591,6 +12614,72 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 124
+  date: 2026-09-10
+  title: "Tester run: R-031 reviewed from outside, one real coverage gap found by mutation; two unrelated defects found chasing an e2e failure"
+  commits: []
+  numbers:
+    app_tests: 2685
+    app_test_files: 131
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 44
+  confirmed: true
+  numbers_note: >-
+    `node scripts/tester-run.mjs --sql --e2e` against the tester's own stack, cold: `ok vitest`,
+    `ok count matches the plan: 2685 in 131`. `db_checks` (823) and `migrations` (73) carried,
+    unchanged -- no SQL since the tip. `playwright e2e`: 43 passed, 1 FAILED
+    (`weekTemplates.spec.ts`, DEF-0029), 2 skipped (no volume fixture) -- 44 is still the right
+    denominator, the failure is the finding, not a count to chase as a collection problem.
+    `database.types.ts` regenerated with the same line-ending-only diff as every prior session
+    (`git diff` empty after checkout); `format:check`'s list is the same standing artifact.
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded 54028ba to 03700f1 cleanly: session 122's
+    backlog audit (seven stale roadmap rows retired by status, no code) and session 123's R-031 (a
+    resize of a block with a typed target now asks keep-or-scale). My own brief unchanged. No open
+    or fix-claimed defect on arrival -- confirmed by reading every file's `status` line, not assumed
+    from the last session's clean close.
+    R-031 REVIEWED AS THE OUTSIDE READER, NOT THE SECOND REVIEWER WHO ALREADY BROKE IT ONCE. The
+    build lane's own pre-commit review found and fixed the below-floor scaling bug and the missing
+    direct-block case; this session's job was to find what THAT review's own mutation pass did not
+    try.
+    ⭐ START-GRIP PARITY CHECKED BY HAND, NOTHING WRONG. R-031a-g all drive the END grip; a scratch
+    hook-level test (written, run, deleted -- never committed) drove the START grip through both a
+    shrink and a grow on the same fixture shape and got the identical prompt, scaled figure and
+    patch either way, matching `scaledTarget`'s own edge-agnostic contract (it only ever sees the
+    two lengths, never which side moved). Evidence of looking, not a defect.
+    ⛔ DEF-0031 FILED, BY THE SAME MUTATION DISCIPLINE THE DEVELOPER'S OWN REVIEW USED. Widened the
+    guard that skips the prompt when a scaled figure rounds back to the typed one
+    (`scaled !== a.targetQty`) and ran all 97 cases across the three files R-031 touches: all green.
+    The claim's own words are "a scaled figure that rounds back to the typed one asks nothing";
+    nothing proves that half. Confirmed reachable, not academic, with a positive control against the
+    UNMUTATED code: an Alt-drag (whole-minute snap) shortening a 1000-minute, 10-unit-target block
+    by exactly one minute correctly asks nothing today (`scaledTarget(10, 1000, 999)` = 10) -- the
+    suite just has no case either way. R-031 `contradicted`.
+    ⛔ DEF-0029 FOUND CHASING AN UNRELATED E2E FAILURE, AND IT IS NOT R-031'S DOING.
+    `weekTemplates.spec.ts` failed on the full run: the freshly-saved template previewed as EMPTY
+    ("The template ... is empty, so there is nothing to copy") instead of naming counts. Read
+    `dev_demo.sql` rather than guessed: its own schedule section loops `FOR v_d IN 0..2` -- Monday
+    through Wednesday of `date_trunc('week', now())`, no matter when the seed runs -- so "today"
+    falls outside the populated days on any Thursday through Sunday, confirmed against the tester's
+    own database (12 runs each on Sep 7/8/9, none later). The section's own header says "so no board
+    opens empty"; the loop bound does not implement that claim, four days out of seven. R-356
+    `contradicted`. Session 123's own note ("the next screen walk will hit the same thing") named
+    this exactly, one session early.
+    ⚠️ DEF-0030 FOUND THE SAME WAY, INDEPENDENT OF DEF-0029. `weekTemplates.spec.ts`'s own `afterAll`
+    left eight `E2E %`-named templates in the tester's database -- two pairs from Sept 9, when the
+    main test was still passing cleanly, proving this is not downstream of DEF-0029. Reproduced with
+    a throwaway spec (written, run, deleted): `deleteTemplate`'s `row.count() === 0` guard reads the
+    Templates list before its query has resolved (`row.count() immediately: 0`, `after 500ms: 1`)
+    and silently no-ops, believing the row it just created does not exist. All eight leaked rows
+    removed by hand after confirming the mechanism; the 2028-dated rows in the same table are
+    `weekTemplates.spec.ts`/`copyWeek.spec.ts`'s own "120 weeks out" apply target, left there on
+    purpose per those files' own header ("a week nothing else touches") and not touched.
+    Sweeps: nothing new (no migration since the tip; the dark-column and comment-census lists are
+    unchanged from every session this week).
+  shipped: []
 - id: 123
   date: 2026-09-09
   title: A resize of a block with a typed target asks keep-or-scale (R-031) --- the last open half of the roadmap's Shifts row
