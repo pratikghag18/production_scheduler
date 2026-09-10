@@ -9277,7 +9277,7 @@ requirements:
   - kind: vitest
     file: src/test/adminNoGrants.test.tsx
     cases: "N7: a company admin's full rail labels end ... Templates, Activity, Settings"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 10 Sept (session 127). DECIDED 10 Sept (maintainer, from the running app): *"we want to
     display the list from highest access level to lowest and then alphabetically within that tier ...
@@ -9301,6 +9301,34 @@ requirements:
     support); left for the maintainer to call. Recorded here so the decision is not lost.
     NOT independently verified and NOT walked in a live browser --- `covered` rests on the vitest
     suites; the tester's cold run is the outside check still owed for R-367/R-368/R-369.
+    ⛔ CONTRADICTED 10 Sept (tester, session 128, DEF-0032). The three vitest pins that guard the
+    rail's order (`scaleAudit` H2, `adminNoGrants` N7, `DEF-0008`) were all updated for the
+    Activity/Settings swap in the same commit; a fourth copy of the same order,
+    `e2e/signedIn.spec.ts:82`'s `"a company admin signs in and gets the whole admin rail"`, was not
+    -- session 127's own numbers_note already named the reason ("e2e carried, NOT re-run"). The
+    running app paints the CORRECT order; only this one hardcoded list is stale, so a correct rail
+    fails the browser suite. `contradicted` records that the cold run was owed and, on being run,
+    found the fourth copy nobody had checked.
+- id: R-370
+  title: An e2e spec that mints a real account and grant on the shared demo world cleans it back up, the way week templates try to
+  source:
+  - session 128 conversation (tester, live walk of R-367/R-368/R-369)
+  stated_by: agent
+  claim: >-
+    `e2e/weekTemplates.spec.ts` names its scratch rows with an "E2E "-prefixed, per-run suffix and
+    tries to delete them in `afterAll` (the attempt itself is buggy, DEF-0030, but the INTENT --
+    leave the demo world as it was found -- is stated and aimed at). Any other e2e spec that invites
+    a real address through the live `invite` Edge Function and lands it with a real
+    `profile_grants` row on the shared demo world should carry the same intent: a recognisable name
+    and a cleanup step, so the Access tab's member list for Plant A does not grow by one row, forever,
+    every time the suite runs.
+  verified_by: []
+  status: contradicted
+  note: >-
+    RAISED 10 Sept (tester, session 128), found while walking R-367/R-368/R-369 live as Dana (site
+    admin, Plant A) rather than stated by the maintainer -- see DEF-0033. No `verified_by` yet
+    because nothing proves this today; the opposite is true (DEF-0033), which is why this is
+    `contradicted` rather than merely `uncovered` from the moment it was raised.
 findings:
 - id: F-128
   title: Every Continue on a board confirm sent its write twice, because the side effect lived inside a state updater and the app runs in StrictMode
@@ -12750,6 +12778,98 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 128
+  date: 2026-09-10
+  title: "Tester run: R-367/R-368/R-369 (Access tab) walked live and found correct; one stale rail-order pin and one unbounded invite-leak found on the way"
+  commits: []
+  numbers:
+    app_tests: 2712
+    app_test_files: 132
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 73
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `node scripts/tester-run.mjs --sql --e2e`, cold, run TWICE this session (the edge runtime
+    container was down on the first pass, which failed only `DEF-0020.test.ts` and skipped three
+    invite e2e cases honestly; started it and reran clean). Second run: `ok vitest`, `ok count
+    matches the plan: 2712 in 132`, copied from the runner's own line. `db_checks` (823) and
+    `migrations` (73) carried unchanged -- no SQL since the tip. `playwright e2e`: `Running 46
+    tests` both times (this session corrects the `44` prior sessions carried, which undercounted
+    against the runner's own number); second run: 39 passed, 5 failed, 2 skipped. Of the 5: two are
+    DEF-0029 and DEF-0032 (below), reproducible on demand; the other three (`copyWeek.spec.ts` x2,
+    `absences.spec.ts` "a bad row is refused") are NOT -- rerun in isolation, `--workers=1`, all six
+    of that pair of files' cases passed clean in 13.5s, so the full run's 6-worker contention is the
+    cause, not a regression; not filed, named here as looked-at.
+  summary: >-
+    `git merge --ff-only Development` fast-forwarded a31a2ed to 0e88783: sessions 125-127, R-367
+    (a person can be added at, or moved to, any node in the plant, admins only), R-368 (a member's
+    access level and place are each an editable column on their row, however deep the grant), and
+    R-369 (the member list reads highest-access-first then A-Z, Add sits by the search, Activity
+    precedes Settings) -- three sessions of Access-tab work, none of it walked in a browser yet, all
+    three notes saying so explicitly.
+    Three pre-existing defects reviewed, unchanged this session: DEF-0029 (major, R-356, the seed's
+    Mon-Wed-only week) and DEF-0030 (minor, R-356, weekTemplates.spec.ts's own cleanup race) both
+    still reproduce today, Thursday, exactly as filed; DEF-0031 (minor, test-cannot-fail, R-031)
+    untouched. All three stay open for their own turn -- the maintainer directed this run at
+    R-367/R-368/R-369 and none of the three touch the Access tab.
+    ⭐ R-367/R-368/R-369 READ FIRST, THEN WALKED LIVE, AND BOTH AGREE. `siteAccess.ts`'s new
+    functions read clean: `grantRoleOptions`/`canRemoveGrant` correctly carry the self-admin lock
+    and the company-admin protection to the RESOLVED grant (direct or the one inherited grant a row
+    edits), not just `row.directRole` the way the pre-R-368 functions did -- Ana's inherited case is
+    handled, not bolted on. The Add flow's role `<select>` and Add button are not themselves gated
+    on `canManageAccess`, only the node picker is (`canPickNode`); read against
+    `canRemoveAccess`'s own documented invariant ("this screen only ever opens for a place the
+    viewer administers... a client copy of that check could never be false and would be
+    untestable"), which is the same reliance R-367/R-368 make, not a new hole -- confirmed a plain
+    supervisor's rail (`adminSectionsFor`) never offers an Access tab at all (`signedIn.spec.ts`'s
+    own four-tab case), so the branch is unreachable, not merely untested.
+    Then driven live in a real browser as Dana (Plant A site admin, `dana@example.test`), a
+    throwaway Playwright spec (written, run, deleted, never committed): her own Access level and
+    Place selects work in place; moved Ana from Line 1 to Line 2 and back, role preserved as
+    supervisor throughout, no side effect left; the company admin's row (`admin@example.test`)
+    correctly offered no controls at all (0 selects); searched for Quinn (Plant B's site admin, not
+    yet granted on Plant A), the Add block appeared above the member list with a node picker scoped
+    to Plant A's own subtree, granted him supervisor at Line 2 (admin correctly absent from the
+    menu below the root), then removed the grant again, confirmed clean by direct query afterward.
+    R-369's sort order held exactly as specified even amid the DEF-0033 clutter below (company
+    admin, then admin, then supervisor/viewer tiers, A-Z within each). ⚠️ TOOLING NOTE, said plainly
+    because it cost real time: the first attempts at this walk connected to the MAINTAINER's own
+    local stack (port 54321) instead of the tester's own (54421), because `npx playwright test` was
+    invoked without `E2E_PORT`/`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` exported for that exact
+    command -- `playwright.config.ts`'s `webServer` with `reuseExistingServer: true` quietly reused
+    the maintainer's already-running dev server rather than starting one of its own. No lasting
+    change resulted (Ana's move and Quinn's grant were both confirmed reverted by direct query
+    against that stack afterward), and the client code under test was still this commit's either
+    way, but the walk was redone correctly, isolated, once the mistake was found. This is a gap in
+    how this session drove its own tools, not a product defect; `tester-run.mjs` itself is not
+    affected -- it exports these itself and was never at risk.
+    ⛔ DEF-0032 FILED. `e2e/signedIn.spec.ts`'s whole-rail assertion still hardcodes the OLD
+    Settings-before-Activity order; the three vitest pins that guard the same order were all updated
+    for R-369's swap in the same commit, this fourth copy was not (session 127's own numbers_note
+    already named why: "e2e carried, NOT re-run"). The app is right; this one list is stale. R-369
+    `contradicted`.
+    ⛔ DEF-0033 FILED, AND R-370 ADDED TO COVER IT (uncovered requirements this session created its
+    own defect against get `stated_by: agent`, per the tester's own brief). `e2e/invite.spec.ts`'s
+    two successful-grant cases mint a real account and a real Plant A viewer grant every run and
+    never clean up either, unlike `weekTemplates.spec.ts`'s own (buggy, DEF-0030) attempt. Confirmed
+    on the tester's own stack by direct query: 8 such accounts, growing by exactly 2 per `--e2e`
+    run, two of the eight added by this very session. The same mechanism was independently visible
+    at a much larger scale on the maintainer's own stack during the tooling detour above (44 total
+    Access-tab rows for Plant A, most `invitee-`/`orphan-` prefixed) -- named as corroboration, not
+    re-verified as a primary count, and clearly marked as such in the defect.
+    Sweeps: no migration since the tip, so no NULLABLE sweep. The 3 dark columns
+    (`week_template_items.day_offset`/`item_ref`/`run_ref`) are the same standing false positive
+    two prior sessions already read and recorded -- read only in SQL RPCs, not `src/`. The sentence
+    sweep's hits inside this session's own diff (`SiteAccessPanel.tsx`, `siteAccess.ts`) were read
+    against the current code and are accurate, not stale; the rest of the list is the same standing
+    set every session this week has carried.
+    `format:check`'s 386-file list is the same standing line-ending artifact every prior session has
+    named (`core.autocrlf=true` on this Windows worktree) -- `database.types.ts` regenerated with
+    the same empty `git diff` after checkout as always, and was checked out clean again afterward.
+  shipped: []
 - id: 127
   date: 2026-09-10
   title: "Access list sorted highest-access-first then A–Z, Add block moved up by the search, Activity before Settings; deactivate-vs-remove assessed not built (R-369)"
