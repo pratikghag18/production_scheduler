@@ -196,12 +196,14 @@ describe("R-368 Edit in place: a member's level and place are each their own col
     // Her level control is present and shows supervisor...
     const level = screen.getByLabelText(/Access level for ana@example.test/i);
     expect((level as HTMLSelectElement).value).toBe("supervisor");
-    // ...admin is not on offer below a root...
+    // ...Site admin is not on offer below a root (R-377: 'admin' only at a plant
+    // root), but a system-admin viewer is offered System admin on top, so the
+    // menu is system, supervisor, viewer.
     expect(
       within(level as HTMLElement)
         .getAllByRole("option")
         .map((o) => (o as HTMLOptionElement).value),
-    ).toEqual(["supervisor", "viewer"]);
+    ).toEqual(["system", "supervisor", "viewer"]);
     // ...and her Place control shows the line she is on, ready to move.
     const place = screen.getByLabelText(/Place for ana@example.test/i);
     expect((place as HTMLSelectElement).value).toBe("lineA1");

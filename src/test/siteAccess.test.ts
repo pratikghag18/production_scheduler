@@ -39,6 +39,9 @@ import {
   canRemoveAccess,
   canRevokeSystemAdmin,
   canSetRole,
+  currentLevel,
+  levelLabel,
+  levelOptions,
   describeAccess,
   accessPanelState,
   matchesQuery,
@@ -638,6 +641,74 @@ check("SA5: the two are mutually exclusive for a row a system admin may act on",
       canGrantSystemAdmin(admin, true) !== canRevokeSystemAdmin(admin, true)) ||
     "both true or both false"
   );
+});
+
+// ---------------------------------------------------------------------------
+// LV1–LV9 — the ONE access-level dropdown (R-377): currentLevel / levelLabel /
+// levelOptions. System admin / Site admin / Supervisor / Viewer in one control.
+// ---------------------------------------------------------------------------
+const siteAdminAtRoot = { nodeId: PLANT, role: "admin" as GrantRole, direct: true };
+const supOnLine = { nodeId: DEPT, role: "supervisor" as GrantRole, direct: true };
+
+check("LV1: the labels read System admin / Site admin / Supervisor / Viewer", () => {
+  const got = ["system", "admin", "supervisor", "viewer"]
+    .map((l) => levelLabel(l as never))
+    .join("|");
+  return got === "System admin|Site admin|Supervisor|Viewer" || got;
+});
+
+check("LV2: currentLevel is system for a company admin, else the grant role, else null", () => {
+  return (
+    (currentLevel(stranger({ companyAdmin: true }), siteAdminAtRoot) === "system" &&
+      currentLevel(stranger(), supOnLine) === "supervisor" &&
+      currentLevel(stranger(), null) === null) ||
+    "wrong current level"
+  );
+});
+
+check("LV3 ⭐: a system admin sees all four levels on a site admin at the root, in order", () => {
+  const got = levelOptions(stranger(), true, siteAdminAtRoot, PLANT, PLANT).join(",");
+  return got === "system,admin,supervisor,viewer" || got;
+});
+
+check(
+  "LV4: on a system-admin row (no node grant) the dropdown shows System admin as current",
+  () => {
+    const row = stranger({ companyAdmin: true });
+    const opts = levelOptions(row, true, null, PLANT, PLANT);
+    return (
+      (currentLevel(row, null) === "system" && opts[0] === "system" && opts.includes("viewer")) ||
+      `current=${currentLevel(row, null)} opts=${opts.join(",")}`
+    );
+  },
+);
+
+check("LV5 ⭐: a SITE admin (not system) is not offered System admin", () => {
+  const got = levelOptions(stranger(), false, supOnLine, PLANT, DEPT).join(",");
+  return got === "supervisor,viewer" || got;
+});
+
+check("LV6 ⭐: your OWN system-admin row is locked to System admin", () => {
+  const got = levelOptions(
+    stranger({ isSelf: true, companyAdmin: true }),
+    true,
+    null,
+    PLANT,
+    PLANT,
+  );
+  return (got.length === 1 && got[0] === "system") || got.join(",");
+});
+
+check("LV7 ⭐: your OWN admin grant is locked (0021 §4), when you are not a system admin", () => {
+  const got = levelOptions(stranger({ isSelf: true }), false, siteAdminAtRoot, PLANT, PLANT);
+  return (got.length === 1 && got[0] === "admin") || got.join(",");
+});
+
+check("LV8: below a plant root, Site admin is not on the menu (admin only at a root)", () => {
+  // A system admin viewing a supervisor on a line: system + the below-root
+  // roles, never 'admin'.
+  const got = levelOptions(stranger(), true, supOnLine, PLANT, DEPT).join(",");
+  return got === "system,supervisor,viewer" || got;
 });
 
 check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {

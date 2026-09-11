@@ -453,35 +453,6 @@
    up top (`.removeBtn, .addBtn, .deactivateBtn, .reactivateBtn`), so every
    action on a row is the same size; it sits in its own grid column (5). */
 
-/* ---------------------------------------------------------------------------
-   SYSTEM ADMIN (R-XXX, migration 0078). The org-wide highest privilege. A tag
-   marks who holds it (a WORD, not colour alone), and the toggle is a QUIET
-   link-style control on its own full-width line rather than a fourth button:
-   it is a rare, weighty action and reads better with a one-line explanation
-   than crammed into the action columns.
-   --------------------------------------------------------------------------- */
-.sysAdminTag {
-  margin-left: 0.4375rem;
-  padding: 0.0625rem 0.3125rem;
-  border-radius: 0.375rem;
-  border: 1px solid var(--accent, var(--axis));
-  background: var(--surface);
-  color: var(--accent, var(--ink-2));
-  font-size: 0.625rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  vertical-align: middle;
-}
-
-.orgAdminLine {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.375rem;
-  font-size: 0.75rem;
-}
-
-.orgAdminHint {
-  color: var(--muted);
-}
+/* System admin is now the top option of the one access-level dropdown (R-377,
+   `.roleCol`), not a separate tag or control --- so it needs no styling of its
+   own here. */

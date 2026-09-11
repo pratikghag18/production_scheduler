@@ -1113,6 +1113,7 @@ export type Database = {
       }
       user_profiles: {
         Row: {
+          active: boolean
           created_at: string
           default_create_mode: string
           display_name: string | null
@@ -1123,6 +1124,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          active?: boolean
           created_at?: string
           default_create_mode?: string
           display_name?: string | null
@@ -1133,6 +1135,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          active?: boolean
           created_at?: string
           default_create_mode?: string
           display_name?: string | null
@@ -1527,6 +1530,10 @@ export type Database = {
       }
       editable_shape_ids: { Args: never; Returns: Json }
       import_absences: { Args: { p_rows: Json }; Returns: Json }
+      list_week_template_items: {
+        Args: { p_template_id: string }
+        Returns: Json
+      }
       list_week_templates: { Args: { p_plant_id: string }; Returns: Json }
       move_node: {
         Args: {
@@ -1616,8 +1623,16 @@ export type Database = {
       set_org_date_format: { Args: { p_format: string }; Returns: Json }
       set_org_eligibility_policy: { Args: { p_policy: string }; Returns: Json }
       set_org_timezone: { Args: { p_tz: string }; Returns: Json }
+      set_profile_active: {
+        Args: { p_active: boolean; p_profile_id: string }
+        Returns: Json
+      }
       set_site_member: {
         Args: { p_node_id: string; p_profile_id: string; p_role: string }
+        Returns: Json
+      }
+      set_system_admin: {
+        Args: { p_is_admin: boolean; p_profile_id: string }
         Returns: Json
       }
       site_people: {

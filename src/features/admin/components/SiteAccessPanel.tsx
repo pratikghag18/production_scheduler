@@ -5,15 +5,15 @@ import {
   accessPanelState,
   buildAccessRows,
   canDeactivate,
-  canGrantSystemAdmin,
   canManageAccess,
   canReactivate,
   canRemoveAccess,
   canRemoveGrant,
-  canRevokeSystemAdmin,
   canSetRole,
+  currentLevel,
   describeAccess,
-  grantRoleOptions,
+  levelLabel,
+  levelOptions,
   moveTargets,
   partitionAccess,
   removalNote,
@@ -23,10 +23,12 @@ import {
   rowGrant,
   sortMembers,
   subtreeOptions,
+  type AccessLevel,
   type AccessNode,
   type AccessPlace,
   type AccessRow,
   type GrantRole,
+  type RowGrant,
 } from "../lib/siteAccess";
 import {
   buildInviteBody,
@@ -337,64 +339,62 @@ export function SiteAccessPanel({
     return null;
   }
 
-  // ⭐ MAKE / REVOKE SYSTEM ADMIN (R-XXX, migration 0078). The org-wide highest
-  // privilege, so it is offered ONLY to a system admin and never on their own
-  // row. It is rarer and weightier than the node actions, so it takes its own
-  // quiet full-width line under the row (a link-style control, not a fourth
-  // button competing with Remove/Deactivate) with a one-line explanation of
-  // what it grants. The server refuses self and a non-system-admin caller.
-  function runSetSystemAdmin(row: AccessRow, isAdmin: boolean) {
-    clearRowError(row.profileId);
-    setPendingProfileId(row.profileId);
-    setSystemAdminMutation.mutate(
-      { profileId: row.profileId, isAdmin },
-      {
-        onError: (err: SchedulerError) =>
-          setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
-        onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
-      },
-    );
-  }
+  // ⭐ SET A PERSON'S LEVEL FROM THE ONE DROPDOWN (R-377). The dropdown reads
+  // System admin / Site admin / Supervisor / Viewer; this maps the choice to the
+  // right write(s). 'system' is the org-wide flag (`set_system_admin`); the
+  // other three are the node grant (`set_site_member`), where 'admin' is a SITE
+  // admin of the node. Changing FROM system admin TO a node role is two writes,
+  // composed like `runMove`: drop the flag, then grant the node role, in the
+  // safe order (a failed second step leaves them a plain member, never nothing).
+  function runSetLevel(row: AccessRow, grant: RowGrant | null, level: AccessLevel) {
+    if (level === currentLevel(row, grant)) return;
 
-  function renderSystemAdminLine(row: AccessRow) {
-    const isPending = pendingProfileId === row.profileId;
-    if (canGrantSystemAdmin(row, viewerIsCompanyAdmin)) {
-      return (
-        <div className={styles.orgAdminLine}>
-          <button
-            type="button"
-            className={styles.linkBtn}
-            aria-label={`Make ${labelFor(row)} a system admin`}
-            disabled={isPending}
-            onClick={() => runSetSystemAdmin(row, true)}
-          >
-            Make system admin
-          </button>
-          <span className={styles.orgAdminHint}>
-            — can administer every plant and company settings
-          </span>
-        </div>
+    if (level === "system") {
+      clearRowError(row.profileId);
+      setPendingProfileId(row.profileId);
+      setSystemAdminMutation.mutate(
+        { profileId: row.profileId, isAdmin: true },
+        {
+          onError: (err: SchedulerError) =>
+            setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
+          onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
+        },
       );
+      return;
     }
-    if (canRevokeSystemAdmin(row, viewerIsCompanyAdmin)) {
-      return (
-        <div className={styles.orgAdminLine}>
-          <button
-            type="button"
-            className={styles.linkBtn}
-            aria-label={`Revoke ${labelFor(row)}'s system admin`}
-            disabled={isPending}
-            onClick={() => runSetSystemAdmin(row, false)}
-          >
-            Revoke system admin
-          </button>
-          <span className={styles.orgAdminHint}>
-            — keeps their node access, loses company-wide authority
-          </span>
-        </div>
+
+    // A node role. The node is the person's existing grant, or the node in view
+    // for someone who has none here (a system admin being given a place).
+    const nodeId = grant?.nodeId ?? activeNodeId;
+    if (nodeId === null) return;
+
+    if (row.companyAdmin) {
+      // Demote the org-wide flag first, then write the node grant.
+      clearRowError(row.profileId);
+      setPendingProfileId(row.profileId);
+      setSystemAdminMutation.mutate(
+        { profileId: row.profileId, isAdmin: false },
+        {
+          onSuccess: () =>
+            setMemberMutation.mutate(
+              { nodeId, profileId: row.profileId, role: level },
+              {
+                onError: (err: SchedulerError) =>
+                  setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
+                onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
+              },
+            ),
+          onError: (err: SchedulerError) => {
+            setRowError({ profileId: row.profileId, message: describeSchedulerError(err) });
+            setPendingProfileId((cur) => (cur === row.profileId ? null : cur));
+          },
+        },
       );
+      return;
     }
-    return null;
+
+    // Already a node-role member: just change the grant's role in place.
+    runSetMemberAt(row, nodeId, level);
   }
 
   if (state === "pending") {
@@ -581,9 +581,18 @@ export function SiteAccessPanel({
                 // node, or a lone grant below it. `null` when there is nothing to
                 // edit here (no grant) or too many below to pick without opening one.
                 const g = rowGrant(row, activeNodeId);
-                const editable = canManage && g !== null && canSetRole(row, viewerIsCompanyAdmin);
+                // ⭐ THE ONE LEVEL DROPDOWN (R-377). A row shows the level control
+                // when the viewer may edit it AND there is a level to edit --- a
+                // single node grant here, OR the org-wide system-admin flag (which
+                // a system admin can change even when the person holds no node
+                // grant). Everything else falls to the read-only description.
+                const showLevel =
+                  canManage &&
+                  canSetRole(row, viewerIsCompanyAdmin) &&
+                  (g !== null || row.companyAdmin);
+                const level = currentLevel(row, g);
                 const placeOpts =
-                  editable && g !== null ? moveTargets(nodes, siteNodeId, g.role) : [];
+                  showLevel && g !== null ? moveTargets(nodes, siteNodeId, g.role) : [];
                 const placeName =
                   g === null
                     ? ""
@@ -611,14 +620,6 @@ export function SiteAccessPanel({
                           deactivated
                         </span>
                       )}
-                      {row.companyAdmin && (
-                        <span
-                          className={styles.sysAdminTag}
-                          title="System admin — administers every plant and company settings"
-                        >
-                          system admin
-                        </span>
-                      )}
                     </span>
 
                     {isConfirming ? (
@@ -641,32 +642,36 @@ export function SiteAccessPanel({
                           Cancel
                         </button>
                       </div>
-                    ) : editable && g !== null ? (
+                    ) : showLevel ? (
                       <>
-                        {/* Access level — the grant's OWN node decides the menu, so an
-                      inherited supervisor on a line is offered supervisor and
-                      viewer, an admin on the root all three, and the self-rule
-                      still forbids stripping your own admin. */}
+                        {/* ⭐ THE ONE LEVEL DROPDOWN (R-377): System admin / Site
+                      admin / Supervisor / Viewer. `levelOptions` blends the
+                      org-wide system-admin flag with the node grant's roles
+                      (admin only at a plant root, the self-rule still forbids
+                      demoting your own admin/system). `runSetLevel` writes
+                      whichever the choice needs. */}
                         <select
                           aria-label={`Access level for ${label}`}
                           className={`${styles.select} ${styles.roleCol}`}
-                          value={g.role}
+                          value={level ?? ""}
                           disabled={isPending}
-                          onChange={(e) =>
-                            runSetMemberAt(row, g.nodeId, e.target.value as GrantRole)
-                          }
+                          onChange={(e) => runSetLevel(row, g, e.target.value as AccessLevel)}
                         >
-                          {grantRoleOptions(row, viewerIsCompanyAdmin, g, siteNodeId).map((r) => (
-                            <option key={r} value={r}>
-                              {r}
-                            </option>
-                          ))}
+                          {levelOptions(row, viewerIsCompanyAdmin, g, siteNodeId, activeNodeId).map(
+                            (lv) => (
+                              <option key={lv} value={lv}>
+                                {levelLabel(lv)}
+                              </option>
+                            ),
+                          )}
                         </select>
 
-                        {/* Place — a picker when there is somewhere else in the plant
-                      to move the grant to, the node's name in plain text when
-                      there is not (an admin, who fits only the plant root). */}
-                        {placeOpts.length > 1 ? (
+                        {/* Place — for a node grant, a picker to move it or the
+                      node's name; a system admin is org-wide, so their place is
+                      simply "everywhere". */}
+                        {g === null ? (
+                          <span className={styles.placeText}>everywhere</span>
+                        ) : placeOpts.length > 1 ? (
                           <select
                             aria-label={`Place for ${label}`}
                             className={`${styles.select} ${styles.placeCol}`}
@@ -684,7 +689,10 @@ export function SiteAccessPanel({
                           <span className={styles.placeText}>{placeName}</span>
                         )}
 
-                        {canRemoveGrant(row, viewerIsCompanyAdmin, g) ? (
+                        {/* Remove takes away the NODE grant, so it shows only for a
+                      node-role member. A system admin has none here --- lower
+                      them to a node role first, or deactivate the account. */}
+                        {g !== null && canRemoveGrant(row, viewerIsCompanyAdmin, g) ? (
                           <button
                             type="button"
                             aria-label={`Remove access for ${label}`}
@@ -694,13 +702,14 @@ export function SiteAccessPanel({
                           >
                             Remove
                           </button>
-                        ) : (
+                        ) : g !== null ? (
                           <span className={styles.note}>
                             {removalNote(row, viewerIsCompanyAdmin)}
                           </span>
+                        ) : (
+                          <span />
                         )}
                         {renderAccountLine(row)}
-                        {renderSystemAdminLine(row)}
                       </>
                     ) : (
                       <>
@@ -751,7 +760,6 @@ export function SiteAccessPanel({
                           </span>
                         )}
                         {renderAccountLine(row)}
-                        {renderSystemAdminLine(row)}
                       </>
                     )}
 

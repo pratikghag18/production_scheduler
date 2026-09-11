@@ -353,6 +353,79 @@ export function canRevokeSystemAdmin(row: AccessRow, viewerIsCompanyAdmin: boole
   return viewerIsCompanyAdmin && !row.isSelf && row.companyAdmin;
 }
 
+/* ---------------------------------------------------------------------------
+ * ⭐ ONE ACCESS-LEVEL CONTROL (R-377, the maintainer: the dropdown should read
+ * "System admin, Site admin, Supervisor, Viewer" --- one control, not a
+ * separate promote button).
+ *
+ * A person's LEVEL blends two pieces of data the screen used to edit apart:
+ *   - the ORG-WIDE flag `user_profiles.role = 'admin'` (a SYSTEM admin), and
+ *   - the NODE grant `profile_grants.role` on the node in view, where 'admin'
+ *     means a SITE admin OF THAT NODE.
+ * `AccessLevel` names all four; `levelLabel` gives the words; `currentLevel`
+ * reads which one a row holds; `levelOptions` is the menu; and the panel's
+ * change handler composes the right write(s) --- promote/demote via
+ * `set_system_admin`, a node role via `set_site_member`. `admin` as a value is
+ * still the site-admin GRANT role (so the server contract is unchanged); it is
+ * only RELABELLED "Site admin" for the reader.
+ * ------------------------------------------------------------------------- */
+export type AccessLevel = "system" | GrantRole;
+
+const LEVEL_ORDER: readonly AccessLevel[] = ["system", "admin", "supervisor", "viewer"];
+
+export function levelLabel(level: AccessLevel): string {
+  switch (level) {
+    case "system":
+      return "System admin";
+    case "admin":
+      return "Site admin";
+    case "supervisor":
+      return "Supervisor";
+    case "viewer":
+      return "Viewer";
+  }
+}
+
+/** The level a row currently holds: 'system' if the org-wide admin flag is set,
+ *  else the node grant's role, else null (no access here to show). */
+export function currentLevel(row: AccessRow, grant: RowGrant | null): AccessLevel | null {
+  if (row.companyAdmin) return "system";
+  return grant ? grant.role : null;
+}
+
+/**
+ * The dropdown menu for one row, in the fixed order System admin, Site admin,
+ * Supervisor, Viewer. The node roles come from the SAME rules the old role
+ * menu used (`rolesForGrant` / `rolesForNode` --- admin only at a plant root),
+ * so a line grant is still supervisor/viewer only. 'system' is added on top
+ * only when a system admin is offering it (`canGrantSystemAdmin`) or when the
+ * row already holds it (so the select can show the current value). Self is
+ * locked to the level it holds, in both shapes: a system admin cannot leave
+ * 'system' and a site admin cannot strip its own 'admin' (0021 §4) --- the
+ * server refuses both, and offering them would be a control that lies.
+ */
+export function levelOptions(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  grant: RowGrant | null,
+  rootNodeId: string | null,
+  viewedNodeId: string | null,
+): readonly AccessLevel[] {
+  if (row.isSelf && row.companyAdmin) return ["system"];
+  if (row.isSelf && !viewerIsCompanyAdmin && grant?.role === "admin") return ["admin"];
+
+  const nodeRoles: readonly GrantRole[] = grant
+    ? rolesForGrant(grant, rootNodeId)
+    : rolesForNode(viewedNodeId, rootNodeId);
+
+  const set = new Set<AccessLevel>(nodeRoles);
+  if (canGrantSystemAdmin(row, viewerIsCompanyAdmin) || row.companyAdmin) set.add("system");
+  const cur = currentLevel(row, grant);
+  if (cur !== null) set.add(cur);
+
+  return LEVEL_ORDER.filter((l) => set.has(l));
+}
+
 /**
  * The one-line explanation under a person's address. Pure, and here rather
  * than in the component for D90's reason: a sentence a screen shows is a
