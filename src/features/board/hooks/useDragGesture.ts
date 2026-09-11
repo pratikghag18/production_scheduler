@@ -27,6 +27,7 @@ import type {
   AssignmentFieldEdit,
   ReassignAssignmentInput,
   CapacityProbe,
+  AssignmentTarget,
 } from "@/lib/api";
 import {
   describeSchedulerError,
@@ -138,6 +139,14 @@ export type PopoverState =
       /** D65: set only when this popover was opened by a panel drop — the
        *  dropped operator, pre-selected, in forced "direct" mode. */
       presetOperatorId?: string;
+      /** P1-7a: set when a typed command resolved to a direct product target
+       *  (R-378) — preselects `CreatePopover`'s product select. */
+      presetProductId?: string;
+      /** P1-7a / R-383: set when a typed command resolved to an existing run
+       *  instead — `CreatePopover` shows a read-only "Joining <label>" line in
+       *  its place and sends this run as the target. `label` is `runLabelById`'s
+       *  own D66 format, so this and a drag's confirm prompt never disagree. */
+      presetRun?: { id: string; label: string };
     }
   | {
       kind: "run";
@@ -1491,6 +1500,41 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [index, ctx],
   );
 
+  /**
+   * P1-7a: `CommandBar`'s whole write path — opens the SAME create popover a
+   * drag opens, direct mode forced (`presetOperatorId`, exactly as D65's panel
+   * drop already forces it), with the resolved product or run as a preset.
+   * This is the tail of `endPanelDrag` (brief §6/§8) with the snapping removed
+   * — the resolver's minutes are already exact, never a drag pixel to round —
+   * and the target threaded through instead of always being the operator
+   * alone. `endPanelDrag` itself is untouched; see its own comment for why the
+   * five lines are deliberately duplicated rather than shared.
+   */
+  const openCreateFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      target: AssignmentTarget;
+      anchor: { x: number; y: number };
+    }) => {
+      const template = index.templateForNode.get(r.nodeId) ?? null;
+      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
+      setPopover({
+        kind: "create",
+        nodeId: r.nodeId,
+        range: r.range,
+        anchor: r.anchor,
+        shiftChips: chips,
+        presetOperatorId: r.operatorId,
+        ...(r.target.kind === "direct"
+          ? { presetProductId: r.target.productId }
+          : { presetRun: { id: r.target.runId, label: runLabelById(r.target.runId) } }),
+      });
+    },
+    [index, runLabelById],
+  );
+
   const submitCreateRun = useCallback(
     (nodeId: string, range: Range, productId: string, plannedHeadcount: number | undefined) => {
       const overlap = findRunOverlap(range, index.runsByNode.get(nodeId) ?? [], null);
@@ -1567,7 +1611,14 @@ export function useDragGesture(args: UseDragGestureArgs) {
       nodeId: string,
       range: Range,
       operatorId: string,
-      productId: string,
+      // P1-7a: was `productId: string`. `CreatePopover` now sends whichever
+      // target the person actually chose — the product select's own choice
+      // (D64, unchanged) or, when the popover opened with `presetRun`
+      // (R-383), the run that was joined — and this passes it straight
+      // through to `CreateAssignmentInput.target` instead of rebuilding a
+      // `{ kind: "direct", … }` here, so the popover stays the ONE door and a
+      // run target does not need a second submit path beside it.
+      target: AssignmentTarget,
       efficiencyPercent: number,
       targetQty: number | undefined,
       targetUnit: string | undefined,
@@ -1585,7 +1636,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const input: CreateAssignmentInput = {
         nodeId,
         operatorId,
-        target: { kind: "direct", productId },
+        target,
         start,
         end,
         efficiencyPercent,
@@ -1865,6 +1916,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     handleTrackKeyDown,
     submitCreateRun,
     submitCreateDirect,
+    openCreateFromCommand,
     saveRunFields,
     deleteRunWithMode,
     saveAssignmentFields,

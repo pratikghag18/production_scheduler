@@ -1,0 +1,486 @@
+/**
+ * P1-7a — `src/lib/command/resolve.ts`, brief §5's fixture and worked examples
+ * (R1–R33), run verbatim. The fixture below is copied from the brief exactly
+ * so a reviewer can diff this file against §5 rather than re-derive it.
+ *
+ * `runs` defaults to `[]`; `withRuns` builds the fixture WITH `run1` (and,
+ * for R32, `run2`) added, per row.
+ */
+import { describe, it, expect } from "vitest";
+import { resolveCommand, describeQuestion } from "@/lib/command/resolve";
+import type { ResolveContext, ContextRun, BoardDay, Candidate } from "@/lib/command/resolve";
+import type { AssignCommand, Attach } from "@/lib/command/parse";
+
+// ---------------------------------------------------------------------------
+// §5 fixture, verbatim.
+// ---------------------------------------------------------------------------
+
+const days: BoardDay[] = [
+  { index: 0, iso: "2026-08-31", weekday: 1 },
+  { index: 1, iso: "2026-09-01", weekday: 2 },
+  { index: 2, iso: "2026-09-02", weekday: 3 },
+  { index: 3, iso: "2026-09-03", weekday: 4 },
+  { index: 4, iso: "2026-09-04", weekday: 5 },
+  { index: 5, iso: "2026-09-05", weekday: 6 },
+  { index: 6, iso: "2026-09-06", weekday: 0 },
+];
+
+const wallToOffset = (d: number, m: number): number => d * 1440 + m;
+const wallToOffsetDst = (d: number, m: number): number => d * 1440 + m - (d >= 1 ? 60 : 0);
+
+const p1 = { id: "p1", name: "Plant 1", path: "plant_1" };
+const asm = { id: "asm", name: "Assembly", path: "plant_1.assembly" };
+const l1 = { id: "l1", name: "Line 1", path: "plant_1.assembly.line_1" };
+const l3 = { id: "l3", name: "Line 3", path: "plant_1.assembly.line_3" };
+const c1a = { id: "c1a", name: "Cell 1", path: "plant_1.assembly.line_1.cell_1" };
+const c2 = { id: "c2", name: "Cell 2", path: "plant_1.assembly.line_1.cell_2" };
+const c1b = { id: "c1b", name: "Cell 1", path: "plant_1.assembly.line_3.cell_1" };
+
+const allNodes = [p1, asm, l1, l3, c1a, c2, c1b];
+const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+
+const cells = [c1a, c2, c1b];
+
+const op1 = { id: "op1", displayName: "Operator 1", employeeRef: "E100", active: true };
+const sp = { id: "sp", displayName: "Sam Patel", employeeRef: null, active: true };
+const so = { id: "so", displayName: "Sam Ortiz", employeeRef: "E200", active: true };
+const lin = { id: "lin", displayName: "Lin On", employeeRef: null, active: true };
+const gone = { id: "gone", displayName: "Sam Gone", employeeRef: null, active: false };
+const operators = [op1, sp, so, lin, gone];
+
+const ha = { id: "ha", sku: "HA-1", name: "Housing A" };
+const hb = { id: "hb", sku: "HB-1", name: "Housing B" };
+const cov = { id: "cov", sku: "CV-9", name: "Cover" };
+const products = [ha, hb, cov];
+
+function offeredAt(nodeId: string): ReadonlyArray<{ id: string }> {
+  if (nodeId === "c1a" || nodeId === "c2") return [{ id: "ha" }, { id: "hb" }];
+  if (nodeId === "c1b") return [{ id: "cov" }];
+  return [];
+}
+
+function fitsRun(
+  a: { startMin: number; endMin: number },
+  run: { startMin: number; endMin: number },
+): boolean {
+  return a.startMin >= run.startMin && a.endMin <= run.endMin;
+}
+
+const run1: ContextRun = {
+  id: "run1",
+  nodeId: "c1a",
+  productId: "ha",
+  startMin: 3 * 1440 + 480,
+  endMin: 3 * 1440 + 960,
+  label: "Housing A 08:00–16:00",
+};
+
+const run2: ContextRun = {
+  id: "run2",
+  nodeId: "c1a",
+  productId: "ha",
+  startMin: 3 * 1440 + 540,
+  endMin: 3 * 1440 + 900,
+  label: "Housing A 09:00–15:00",
+};
+
+function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
+  return {
+    cells,
+    nodeById,
+    operators,
+    products,
+    offeredAt,
+    days,
+    todayIndex: 3,
+    wallToOffset,
+    runs: [],
+    fitsRun,
+    minDurationMinutes: 15,
+    ...overrides,
+  };
+}
+
+function withRuns(runs: ContextRun[], overrides: Partial<ResolveContext> = {}): ResolveContext {
+  return baseCtx({ runs, ...overrides });
+}
+
+function cmd(overrides: Partial<AssignCommand> = {}): AssignCommand {
+  return {
+    intent: "assign",
+    operator: "Operator 1",
+    product: "Housing A",
+    place: ["Cell 1", "Line 1"],
+    day: null,
+    start: { hour: 10, minute: 0 },
+    end: { hour: 14, minute: 0 },
+    attach: null,
+    ...overrides,
+  };
+}
+
+const R1_READOUT =
+  "Operator 1 → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00";
+
+describe("commandResolve: brief §5 worked examples", () => {
+  it("R1: ok, direct, today's index, the readout byte-for-byte", () => {
+    const res = resolveCommand(cmd(), baseCtx({ runs: [] }));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        target: { kind: "direct", productId: "ha" },
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
+        readout: R1_READOUT,
+      },
+    });
+  });
+
+  it("R2: too_short -- 9:00-9:10 is only 10 minutes", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 9, minute: 0 }, end: { hour: 9, minute: 10 } }),
+      baseCtx({ runs: [] }),
+    );
+    expect(res).toEqual({ ok: false, question: { kind: "too_short", minutes: 10, min: 15 } });
+  });
+
+  it("R3: 'Cell 1' alone, no qualifier -- ambiguous place, cells order", () => {
+    const res = resolveCommand(cmd({ place: ["Cell 1"] }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "place",
+        text: "Cell 1",
+        candidates: [
+          { id: "c1a", label: "Cell 1 — Plant 1 › Assembly › Line 1", word: "Cell 1" },
+          { id: "c1b", label: "Cell 1 — Plant 1 › Assembly › Line 3", word: "Cell 1" },
+        ] as Candidate[],
+      },
+    });
+  });
+
+  it("R4: 'Cell 1 in Line 3' with Cover -- ok, c1b", () => {
+    const res = resolveCommand(cmd({ place: ["Cell 1", "Line 3"], product: "Cover" }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.nodeId).toBe("c1b");
+      expect(res.resolved.productId).toBe("cov");
+    }
+  });
+
+  it("R5: 'Cell 1 in Line 2' -- place_mismatch, both cells listed elsewhere", () => {
+    const res = resolveCommand(cmd({ place: ["Cell 1", "Line 2"] }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "place_mismatch",
+        cell: "Cell 1",
+        qualifier: "Line 2",
+        elsewhere: [
+          { id: "c1a", label: "Cell 1 — Plant 1 › Assembly › Line 1", word: "Cell 1" },
+          { id: "c1b", label: "Cell 1 — Plant 1 › Assembly › Line 3", word: "Cell 1" },
+        ],
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "There is no Cell 1 in Line 2. Cell 1 is in Cell 1 — Plant 1 › Assembly › Line 1 / Cell 1 — Plant 1 › Assembly › Line 3.",
+      );
+    }
+  });
+
+  it("R6: 'Cell 9' -- unknown place", () => {
+    const res = resolveCommand(cmd({ place: ["Cell 9"] }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "place", text: "Cell 9" },
+    });
+    if (!res.ok)
+      expect(describeQuestion(res.question)).toBe('No cell called "Cell 9" on this board.');
+  });
+
+  it("R7: 'Sam' at c1a -- ambiguous operator, Sam Patel and Sam Ortiz, never Sam Gone", () => {
+    const res = resolveCommand(cmd({ operator: "Sam", place: ["Cell 1", "Line 1"] }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "operator",
+        text: "Sam",
+        candidates: [
+          { id: "sp", label: "Sam Patel", word: "Sam Patel" },
+          { id: "so", label: "Sam Ortiz", word: "Sam Ortiz" },
+        ],
+      },
+    });
+  });
+
+  it("R8: 'sam patel' -- ok, exact tier, case-insensitive", () => {
+    const res = resolveCommand(cmd({ operator: "sam patel" }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.operatorId).toBe("sp");
+  });
+
+  it("R9: 'E200' -- ok, employeeRef fallback", () => {
+    const res = resolveCommand(cmd({ operator: "E200" }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.operatorId).toBe("so");
+  });
+
+  it("R10: 'Pat' -- ok, contains tier, one hit", () => {
+    const res = resolveCommand(cmd({ operator: "Pat" }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.operatorId).toBe("sp");
+  });
+
+  it("R11: 'Nobody' -- unknown operator", () => {
+    const res = resolveCommand(cmd({ operator: "Nobody" }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "operator", text: "Nobody" },
+    });
+  });
+
+  it("R12: 'Housing' -- ambiguous product, ha and hb", () => {
+    const res = resolveCommand(cmd({ product: "Housing" }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "product",
+        text: "Housing",
+        candidates: [
+          { id: "ha", label: "Housing A", word: "Housing A" },
+          { id: "hb", label: "Housing B", word: "Housing B" },
+        ],
+      },
+    });
+  });
+
+  it("R13: 'HA-1' -- ok, ha (sku)", () => {
+    const res = resolveCommand(cmd({ product: "HA-1" }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.productId).toBe("ha");
+  });
+
+  it("R14: 'Product A/Housing A' -- ok, ha (one slash piece hits, the other hits nothing)", () => {
+    const res = resolveCommand(cmd({ product: "Product A/Housing A" }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.productId).toBe("ha");
+  });
+
+  it("R15: 'Cover' at c1a -- not_offered", () => {
+    const res = resolveCommand(cmd({ product: "Cover" }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "not_offered", product: "Cover", cell: "Cell 1" },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Cover is not made at Cell 1, so it cannot be scheduled there.",
+      );
+    }
+  });
+
+  it("R16: 'Gasket' -- unknown product", () => {
+    const res = resolveCommand(cmd({ product: "Gasket" }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "product", text: "Gasket" },
+    });
+  });
+
+  it("R17: day tomorrow -- index 4 (Fri)", () => {
+    const res = resolveCommand(cmd({ day: { kind: "tomorrow" } }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 4 * 1440 + 600, endMin: 4 * 1440 + 840 });
+    }
+  });
+
+  it("R17 twin: todayIndex 6 -- tomorrow is off the board", () => {
+    const res = resolveCommand(cmd({ day: { kind: "tomorrow" } }), baseCtx({ todayIndex: 6 }));
+    expect(res).toEqual({ ok: false, question: { kind: "day_off_board", text: "tomorrow" } });
+  });
+
+  it("R18: weekday 1 (Monday) -- day index 0", () => {
+    const res = resolveCommand(cmd({ day: { kind: "weekday", day: 1 } }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.range.startMin).toBe(0 * 1440 + 600);
+  });
+
+  it("R19: weekday 0 (Sunday) -- day index 6", () => {
+    const res = resolveCommand(cmd({ day: { kind: "weekday", day: 0 } }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.range.startMin).toBe(6 * 1440 + 600);
+  });
+
+  it("R20: date 2026-09-08 -- off the board", () => {
+    const res = resolveCommand(cmd({ day: { kind: "date", iso: "2026-09-08" } }), baseCtx());
+    expect(res).toEqual({ ok: false, question: { kind: "day_off_board", text: "2026-09-08" } });
+  });
+
+  it("R20 twin: date 2026-09-06 -- day index 6", () => {
+    const res = resolveCommand(cmd({ day: { kind: "date", iso: "2026-09-06" } }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.range.startMin).toBe(6 * 1440 + 600);
+  });
+
+  it("R21: day null with todayIndex null -- the window's first day", () => {
+    const res = resolveCommand(cmd({ day: null }), baseCtx({ todayIndex: null }));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.range.startMin).toBe(0 * 1440 + 600);
+  });
+
+  it("R22: both an unknown cell and an unknown operator -- the question is about the cell", () => {
+    const res = resolveCommand(cmd({ place: ["Cell 9"], operator: "Nobody" }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "place", text: "Cell 9" },
+    });
+  });
+
+  it("R23: ctx.cells = [] -- unknown place, never throws", () => {
+    const res = resolveCommand(cmd(), baseCtx({ cells: [] }));
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "place", text: "Cell 1" },
+    });
+  });
+
+  it("R24: exactly the minimum duration (15) is allowed", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 10, minute: 0 }, end: { hour: 10, minute: 15 } }),
+      baseCtx(),
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it("R25: DST stub -- the resolver uses ctx.wallToOffset, never dayIndex * 1440 + minute", () => {
+    const res = resolveCommand(
+      cmd({ day: { kind: "tomorrow" } }),
+      baseCtx({ wallToOffset: wallToOffsetDst }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({
+        startMin: 4 * 1440 + 600 - 60,
+        endMin: 4 * 1440 + 840 - 60,
+      });
+    }
+  });
+
+  it("R26: day today with todayIndex 5", () => {
+    const res = resolveCommand(cmd({ day: { kind: "today" } }), baseCtx({ todayIndex: 5 }));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.range.startMin).toBe(5 * 1440 + 600);
+  });
+
+  it("R26 twin: today with todayIndex null -- day_off_board", () => {
+    const res = resolveCommand(cmd({ day: { kind: "today" } }), baseCtx({ todayIndex: null }));
+    expect(res).toEqual({ ok: false, question: { kind: "day_off_board", text: "today" } });
+  });
+
+  it("R27: run1 exists on the cell/product/span -- run_exists, verbatim describeQuestion", () => {
+    const res = resolveCommand(cmd(), withRuns([run1]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "run_exists",
+        product: "Housing A",
+        cell: "Cell 1",
+        runs: [{ id: "run1", label: "Housing A 08:00–16:00", word: "" }],
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "A Housing A job is already booked on Cell 1, Housing A 08:00–16:00. Join it, or make a separate block?",
+      );
+    }
+  });
+
+  it("R28: attach run1 among the hits -- ok, target run, readout gains joining", () => {
+    const attach: Attach = { kind: "run", runId: "run1" };
+    const res = resolveCommand(cmd({ attach }), withRuns([run1]));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        target: { kind: "run", runId: "run1" },
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
+        readout: `${R1_READOUT} · joining Housing A 08:00–16:00`,
+      },
+    });
+  });
+
+  it("R29: attach direct -- ok, target direct, R1's readout", () => {
+    const attach: Attach = { kind: "direct" };
+    const res = resolveCommand(cmd({ attach }), withRuns([run1]));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        target: { kind: "direct", productId: "ha" },
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
+        readout: R1_READOUT,
+      },
+    });
+  });
+
+  it("R30: run1 exists but the span is not contained -- ok, target direct, no question", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 7, minute: 0 }, end: { hour: 14, minute: 0 } }),
+      withRuns([run1]),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.target).toEqual({ kind: "direct", productId: "ha" });
+  });
+
+  it("R31: run1 is for Housing A, this sentence asks for Housing B -- ok, target direct hb", () => {
+    const res = resolveCommand(cmd({ product: "Housing B" }), withRuns([run1]));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.target).toEqual({ kind: "direct", productId: "hb" });
+  });
+
+  it("R32: run1 AND run2 -- run_exists lists both, in runs order, plural describeQuestion", () => {
+    const res = resolveCommand(cmd(), withRuns([run1, run2]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "run_exists",
+        product: "Housing A",
+        cell: "Cell 1",
+        runs: [
+          { id: "run1", label: "Housing A 08:00–16:00", word: "" },
+          { id: "run2", label: "Housing A 09:00–15:00", word: "" },
+        ],
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "2 Housing A jobs are already booked on Cell 1. Join one, or make a separate block?",
+      );
+    }
+  });
+
+  it("R33: attach names a runId that is not among the hits -- run_exists again, never a silent direct", () => {
+    const attach: Attach = { kind: "run", runId: "run9" };
+    const res = resolveCommand(cmd({ attach }), withRuns([run1]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "run_exists",
+        product: "Housing A",
+        cell: "Cell 1",
+        runs: [{ id: "run1", label: "Housing A 08:00–16:00", word: "" }],
+      },
+    });
+  });
+});

@@ -6,8 +6,9 @@ import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { productsOfferedAtNode } from "@/features/admin/lib/scope";
 import { DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
-import { DEFAULT_TIMEZONE } from "@/lib/format/timezones";
-import { operatorViewFor } from "./lib/history";
+import { DEFAULT_TIMEZONE, partsInZone } from "@/lib/format/timezones";
+import type { ResolveContext, BoardDay, ContextRun } from "@/lib/command/resolve";
+import { operatorViewFor, productViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useAbsences } from "./hooks/useAbsences";
 import type { AbsenceRow } from "@/lib/absence";
@@ -18,10 +19,17 @@ import { useDragGesture } from "./hooks/useDragGesture";
 import { buildBoardIndex, policyForNode, type BoardIndex } from "./lib/boardIndex";
 import { outsideAreaOperatorIds as outsideAreaFor, splitPeopleFor } from "./lib/outsideArea";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
-import { splitFits } from "./lib/interaction";
+import { splitFits, assignmentFitsRun, MIN_DURATION_MINUTES } from "./lib/interaction";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
-import { addMinutes, boardFetchBounds, buildDayAxis, MINUTES_PER_DAY } from "./lib/time";
+import {
+  addMinutes,
+  boardFetchBounds,
+  buildDayAxis,
+  formatClock,
+  MINUTES_PER_DAY,
+} from "./lib/time";
 import { BoardToolbar } from "./components/BoardToolbar";
+import { CommandBar } from "./components/CommandBar";
 import { BoardGrid } from "./components/BoardGrid";
 import { OperatorPanel } from "./components/OperatorPanel";
 import { BoardEmptyState } from "./components/BoardEmptyState";
@@ -445,6 +453,76 @@ export default function BoardPage() {
    */
   const operatorPool = useMemo(() => boardQuery.data?.operators ?? [], [boardQuery.data]);
 
+  /**
+   * P1-7a: the typed command bar's whole view of the board (brief §6). Built
+   * beside `offeredProducts` above, from the SAME sources -- `operatorPool`
+   * itself, `productsOfferedAtNode`, `index.dayAxis`, `assignmentFitsRun` -- so
+   * the bar and the create pop-up cannot disagree about what is on offer; they
+   * are handed the same functions and the same lists, never a copy (brief §2).
+   * `null` before the board has data, which also gates the bar off screen.
+   */
+  const commandCtx = useMemo<ResolveContext | null>(() => {
+    if (!boardQuery.data || index === null) return null;
+    const active = boardQuery.data.products.filter((p) => p.active);
+    const axis = index.dayAxis;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const days: BoardDay[] = [];
+    for (let i = 0; i < axis.dayCount; i++) {
+      const p = partsInZone(axis.dayStarts[i], index.zone);
+      const iso = `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+      // A UTC method on a UTC-CONSTRUCTED instant, not a local-time read --
+      // D88a is about which day an instant falls ON (`partsInZone` above,
+      // already in the plant's zone), not about how a weekday number is read
+      // off an ISO string once that day is known. The date-seam audit bans
+      // `Intl`/`toLocale*`/month arrays, not this.
+      days.push({
+        index: i,
+        iso,
+        weekday: new Date(`${iso}T00:00:00Z`).getUTCDay() as BoardDay["weekday"],
+      });
+    }
+    const now = new Date();
+    const t = axis.dayStarts.findIndex(
+      (s, i) => i < axis.dayCount && now >= s && now < axis.dayStarts[i + 1],
+    );
+    const runs: ContextRun[] = [];
+    for (const [nodeId, list] of index.runsByNode) {
+      for (const r of list) {
+        const p = productViewFor(r, index.productById);
+        runs.push({
+          id: r.id,
+          nodeId,
+          productId: r.productId,
+          startMin: r.startMin,
+          endMin: r.endMin,
+          // The same D66 label `runLabelById` builds in `useDragGesture.ts`
+          // (`<product name> <start>–<end>`, board zone) -- REBUILT here
+          // rather than exposed from that hook, because this stage's file
+          // fence keeps `useDragGesture.ts`'s edits to the two preset fields,
+          // `openCreateFromCommand` and `submitCreateDirect`'s target only;
+          // adding a return value beyond those three is a fourth change to a
+          // file this lane does not otherwise touch. `productViewFor` and
+          // `formatClock` are the same two calls that label is built from, so
+          // the two cannot drift into different words for the same run.
+          label: `${p?.name ?? "Run"} ${formatClock(addMinutes(index.windowStart, r.startMin), index.zone)}–${formatClock(addMinutes(index.windowStart, r.endMin), index.zone)}`,
+        });
+      }
+    }
+    return {
+      cells: index.rows.filter((r) => r.isTrack).map((r) => r.node),
+      nodeById: index.nodeById,
+      operators: operatorPool,
+      products: active,
+      offeredAt: (nodeId: string) => productsOfferedAtNode(active, nodeId),
+      days,
+      todayIndex: t === -1 ? null : t,
+      wallToOffset: axis.wallToOffset,
+      runs,
+      fitsRun: assignmentFitsRun,
+      minDurationMinutes: MIN_DURATION_MINUTES,
+    };
+  }, [boardQuery.data, index, operatorPool]);
+
   /** A node's ltree path, or `null` when this window does not carry the node. */
   const pathOf = useCallback(
     (nodeId: string | null): string | null =>
@@ -657,6 +735,27 @@ export default function BoardPage() {
               dropped from the board.
             </p>
           )}
+          {/* P1-7a: the SAME server flag that gates the panel below and the
+              create pop-up further down (`canPlace`, DEF-0015/R-239) -- a
+              viewer never sees a bar whose pop-up cannot open. `commandCtx`
+              is null until the board has data, which the outer `hasData &&
+              index` guard already ensures once this renders. */}
+          {canPlace && commandCtx !== null && (
+            <CommandBar
+              ctx={commandCtx}
+              dateFormat={dateFormat}
+              zone={index.zone}
+              onOpen={(resolved, anchor) =>
+                dragApi.openCreateFromCommand({
+                  nodeId: resolved.nodeId,
+                  range: resolved.range,
+                  operatorId: resolved.operatorId,
+                  target: resolved.target,
+                  anchor,
+                })
+              }
+            />
+          )}
           {boardQuery.data.nodes.length === 0 ? (
             <BoardEmptyState />
           ) : (
@@ -756,6 +855,8 @@ export default function BoardPage() {
              server runs (`absenceGaps`). */
           absences={absences}
           presetOperatorId={popover.presetOperatorId}
+          presetProductId={popover.presetProductId}
+          presetRun={popover.presetRun}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
           onSubmitRun={dragApi.submitCreateRun}

@@ -104,7 +104,11 @@ describe("CreatePopover — the type selector (R-026)", () => {
     expect(onSubmitDirect).toHaveBeenCalledTimes(1);
     expect(onSubmitDirect.mock.calls[0][0]).toBe("cell-1");
     expect(onSubmitDirect.mock.calls[0][2]).toBe("op-1");
-    expect(onSubmitDirect.mock.calls[0][3]).toBe("prod-1");
+    // P1-7a: the contract changed here, not the case -- position 3 used to be
+    // the bare product id; it is now the target `create_assignment` already
+    // takes a discriminated union for (`AssignmentTarget`), so a run-attached
+    // create sent through the same popover can be told apart from this one.
+    expect(onSubmitDirect.mock.calls[0][3]).toEqual({ kind: "direct", productId: "prod-1" });
     expect(onSubmitRun).not.toHaveBeenCalled();
   });
 

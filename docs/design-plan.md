@@ -8947,3 +8947,52 @@ stays free-text and trimmed, a training owned elsewhere is named but not offered
 trainings gained the `active` field they always should have carried — without it the applicability
 filter drops every column, the omitted-field trap this suite is written against. Suite: 1582 tests in
 44 files (the 6 `buildOperatorMatrix` cases retired with the function).
+
+## §19.88 — D117: a typed command opens the create popover; it never writes (P1-7a, stage S40)
+
+> *"Assign operator 1 to work on Product A/Housing A on Cell 1 in Line 1 from 10AM to 2PM"* — the
+> maintainer, 3 Sept, on what they want to be able to say to the board. And on 11 Sept, asked
+> whether a sentence that lands inside a booked job should always make a direct block or ask:
+> *ask*.
+
+The plan this comes from is `docs/voice-commands-plan.md` (speech → text → a small local model → a
+form → the app matches names → confirmation → `create_assignment`). This section records the two
+decisions that make the typed half safe and the one that widened it.
+
+### D117 — one door. The bar fills in the form the pop-up already has
+
+Every assignment on the board goes through `createAssignment` → `create_assignment`, and on the
+screen the only caller for a NEW block is `submitCreateDirect`, called only by `CreatePopover`.
+The command bar adds nothing to that chain. Its whole job ends when it opens `CreatePopover` in
+direct mode with the operator, the part (or the run) and the times preset — the same way D65's
+panel drop opens it with the operator preset. So the training box, the area box, the leave line,
+the capacity probe, the split pop-up and the server's refusal are reached by typing exactly as by
+dragging, because they are the same code. `src/test/commandPurity.test.ts` turns this from a
+convention into a build failure: no runtime import under `src/lib/command/`, and no API client in
+the bar. There is no ESLint import boundary in this repo; this audit is that boundary for this
+stage.
+
+### The split: parse, then resolve, and both are pure
+
+`parse.ts` turns one fixed sentence shape into a form of WORDS (`operator: "Sam"`, never an id);
+`resolve.ts` turns words into records against a context `BoardPage` hands it. The split is the
+point: the later local model replaces `parse.ts` and nothing else moves, and one model serves
+every site because it never learns a name. The resolver holds no rule of its own — product scope
+(`productsOfferedAtNode`), run containment (`assignmentFitsRun`), the plant-local day axis
+(`dayAxis.wallToOffset`, `days`, `todayIndex` — D88a/D88b, so a DST changeover day is not 1440
+minutes and "today" is the plant's, not UTC's), the minimum duration — all are passed in, so the
+bar and the pop-up cannot disagree. Two candidates is a question with buttons, never the better
+guess.
+
+### The widening: join the job, or a separate block (R-383)
+
+No screen had ever created a run-attached block. The API's `AssignmentTarget` and the server's
+`p_run_id` both existed, but the pop-up only sent `{ kind: "direct", productId }`, and a chip joined
+a run only by being MOVED into one (D66/R-365). The maintainer's "ask" means the pop-up's submit
+learns the target the API already defines — the smallest change that keeps one door — and the
+resolver asks when the span is contained by a run of the same part on the same cell, using the
+same containment rule a drag uses. The server's run branch is read before the stage is called
+done, since the client has never exercised it.
+
+Brief: `docs/agent-briefs/p1-7a-typed-command-bar-brief.md` (4 Sept draft, refreshed 11 Sept
+against the tree; its §15 says what the refresh re-verified and what it did not run).

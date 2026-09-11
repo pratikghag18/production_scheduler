@@ -131,11 +131,44 @@ describe("the matcher can tell a shared pool from a fresh expression", () => {
   });
 });
 
+/**
+ * P1-7a: the typed command bar is a person picker too -- it resolves an
+ * operator name to a record the same way the popover does, and would drift
+ * from the panel/pop-up's own list exactly as easily as a fourth JSX prop
+ * would. It is not a JSX prop, though: `BoardPage` builds `commandCtx` in a
+ * plain object literal (`useMemo`) and hands the whole context to
+ * `<CommandBar ctx={commandCtx} .../>`, so there is no `operators={...}` tag
+ * attribute to read here -- the source-text check has to look for
+ * `operators: operatorPool` inside the `commandCtx` builder instead of
+ * `operators={...}` on an opening tag. Same idea as `operatorsPropOf`
+ * (a bare-identifier match, never an expression), a different shape of source.
+ */
+const COMMAND_CTX_SPAN = /\bconst\s+commandCtx\s*=\s*useMemo[\s\S]*?\n {2}\}, \[/;
+
+/** What `commandCtx`'s own `operators:` field is given, read the same way
+ *  `operatorsPropOf` reads a JSX prop -- a bare identifier only. */
+export function commandCtxOperatorsOf(src: string): string | null {
+  const clean = stripComments(src);
+  const span = COMMAND_CTX_SPAN.exec(clean);
+  if (span === null) return null;
+  const m = /\boperators:\s*([A-Za-z_$][\w$]*)\s*,/.exec(span[0]);
+  return m === null ? null : m[1];
+}
+
 describe("R-342: every person picker on the board is handed the same list", () => {
   const src = read(BOARD_PAGE);
 
   it("the page still defines the pool the left panel is built from", () => {
     expect(new RegExp(`\\bconst\\s+${POOL}\\s*=`).test(stripComments(src))).toBe(true);
+  });
+
+  it(`<CommandBar>'s ctx.operators is ${POOL} -- the typed bar must resolve names against the same list the panel and the pop-up show, or a person could match the bar and not exist to place (R-342)`, () => {
+    const given = commandCtxOperatorsOf(src);
+    expect(
+      given,
+      `commandCtx.operators must be the shared ${POOL}. It is currently ` +
+        `${given === null ? "an expression, or no `operators:` field at all" : `\`${given}\``}.`,
+    ).toBe(POOL);
   });
 
   for (const [name, why] of PERSON_PICKERS) {

@@ -1,0 +1,59 @@
+/* P1-7a — the typed command bar's own layout. The FIELD look (border, radius,
+   background) comes from `src/components/Field.module.css` on the input
+   itself (R-318) and the BUTTON look from the same module on the candidate
+   buttons -- this stylesheet only places things, and declares no border of
+   its own (`fieldStandard.test.ts`).
+
+   Sized off `BoardToolbar.module.css`'s own tokens (`--chrome-scale`, not
+   `--ui-scale` -- this bar sits in the toolbar's band, above the fitted
+   scroll container, so it is chrome by the same reasoning that file's header
+   comment gives). No colour introduced; `--ink-1` is never used (F-130). */
+
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--chrome-scale, 1));
+  padding: calc(8px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
+  background: var(--surface);
+  border-bottom: 1px solid var(--grid);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.statusLine {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Same visually-hidden shape as `NodeTreeEditor.module.css`'s `.srOnly` --
+   the accessible name for the input, off screen rather than in the
+   placeholder (a placeholder is not a name). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -193,6 +193,10 @@ interface BoardFacts {
   people: string[];
   /** Whether the left operator panel is present (R-346: a viewer gets none). */
   panelPresent: boolean;
+  /** P1-7a: whether the typed command bar is present -- gated on the same
+   *  `canPlace` the panel and the create pop-up are (R-378/§9), so a viewer
+   *  must never see a bar whose pop-up cannot open. */
+  commandBarPresent: boolean;
   /** role="alert" nodes on the board -- must be zero for everyone. */
   alertCount: number;
   /** Whether the board's catch-all "Something went wrong" copy is showing. */
@@ -279,6 +283,9 @@ async function observeBoard(page: Page, person: Person): Promise<BoardFacts> {
     .join(",");
 
   const panelPresent = (await page.getByRole("complementary", { name: "Operators" }).count()) > 0;
+  // P1-7a: same fact as `panelPresent`, for the typed command bar.
+  const commandBarPresent =
+    (await page.getByRole("textbox", { name: "Tell the board" }).count()) > 0;
 
   let shiftChips: string[] = [];
   let people: string[] = [];
@@ -313,6 +320,7 @@ async function observeBoard(page: Page, person: Person): Promise<BoardFacts> {
     shiftChips,
     people,
     panelPresent,
+    commandBarPresent,
     alertCount,
     sawSomethingWrong,
     canPlace: person.canPlace,
@@ -539,6 +547,16 @@ test("Viewer Viva (Plant A) and admin Dana (Plant A): the same shift bands, and 
   expect.soft(viva.panelPresent, `Viva (viewer, Plant A) gets no operator panel`).toBe(false);
   expect
     .soft(viva.canPlace, `Viva (viewer, Plant A) cannot place, so opens no create form`)
+    .toBe(false);
+
+  // P1-7a: the typed command bar is gated on the same `canPlace` flag as the
+  // panel and the create pop-up -- a viewer must never see a bar whose pop-up
+  // cannot open.
+  expect
+    .soft(dana.commandBarPresent, `Dana (admin, Plant A) sees the "Tell the board" bar`)
+    .toBe(true);
+  expect
+    .soft(viva.commandBarPresent, `Viva (viewer, Plant A) gets no "Tell the board" bar`)
     .toBe(false);
 });
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Product, BoardOperator, Skill } from "@/lib/api";
+import type { Product, BoardOperator, Skill, AssignmentTarget } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import { certificateGaps, type CertificateGap } from "../lib/boardIndex";
@@ -105,6 +105,8 @@ export function CreatePopover({
   eligibilityPolicy,
   absences = [],
   presetOperatorId,
+  presetProductId,
+  presetRun,
   onCancel,
   onSubmitRun,
   onSubmitDirect,
@@ -217,6 +219,24 @@ export function CreatePopover({
   absences?: readonly AbsenceRow[];
   /** D65: set only when this popover was opened by a panel drop. */
   presetOperatorId?: string;
+  /**
+   * P1-7a: set when this popover was opened from the typed command bar
+   * resolving to a direct product target (R-378) — preselects `productChoice`
+   * the same way `presetOperatorId` preselects the operator. The existing
+   * `productId` derivation (falls back to the first offered product when the
+   * choice is not on the list) already copes with a preset that turns out not
+   * to be offered here — belt, not braces: the resolver has already refused
+   * that case (`not_offered`) before this popover ever opens.
+   */
+  presetProductId?: string;
+  /**
+   * P1-7a / R-383: set when the typed command's span landed inside a job
+   * already booked for that part on that cell and the person chose to join it.
+   * There is nothing to pick — the part is the run's — so the product select
+   * is replaced by one read-only "Joining <label>" line, and Create sends this
+   * run as the target instead of `productId`.
+   */
+  presetRun?: { id: string; label: string };
   onCancel: () => void;
   onSubmitRun: (
     nodeId: string,
@@ -228,7 +248,10 @@ export function CreatePopover({
     nodeId: string,
     range: { startMin: number; endMin: number },
     operatorId: string,
-    productId: string,
+    /** P1-7a: was `productId: string` — now whichever target the person
+     *  actually chose (the product select, or the joined run's id under
+     *  `presetRun`), threaded straight through to `create_assignment`. */
+    target: AssignmentTarget,
     efficiencyPercent: number,
     targetQty: number | undefined,
     targetUnit: string | undefined,
@@ -271,7 +294,7 @@ export function CreatePopover({
   // user's CHOICE, and the effective id is DERIVED from it every render,
   // falling back to the first thing actually on offer (`""` when there is
   // nothing). No effect, and no render in between showing a stale value.
-  const [productChoice, setProductChoice] = useState("");
+  const [productChoice, setProductChoice] = useState(presetProductId ?? "");
   const firstOffered = products[0]?.id ?? "";
   const productId = products.some((p) => p.id === productChoice) ? productChoice : firstOffered;
   const [plannedHeadcount, setPlannedHeadcount] = useState("2");
@@ -392,10 +415,12 @@ export function CreatePopover({
   const ineligible = selectedGaps.length > 0;
   const blocked = ineligible && eligibilityPolicy === "block";
   const needsOverride = ineligible && eligibilityPolicy === "warn";
-  // Both modes send a product — `create_run` requires one and `submitCreateDirect`
-  // always builds a `{ kind: "direct", productId }` target — so an empty offer
+  // Both modes need a product on offer here — `create_run` requires one, and a
+  // direct Create needs SOME product selected even under `presetRun` (the run's
+  // own product is on offer at this cell by construction) — so an empty offer
   // list disables Create in either mode rather than posting `""` for the server
-  // to refuse.
+  // to refuse. `presetRun` itself changes WHICH target `onSubmitDirect` is sent
+  // (P1-7a), not this gate.
   const createDisabled =
     productId === "" ||
     (mode === "direct" &&
@@ -508,7 +533,10 @@ export function CreatePopover({
                 {showOthers ? "Hide" : "Show"} other people in this plant ({elsewhere.length})
               </button>
             )}
-            {products.length === 0 ? (
+            {presetRun ? (
+              // P1-7a / R-383: the part is the run's -- nothing to choose.
+              <p className={styles.time}>Joining {presetRun.label}</p>
+            ) : products.length === 0 ? (
               <p className={styles.time}>{NO_PRODUCTS_HERE}</p>
             ) : (
               <>
@@ -673,6 +701,12 @@ export function CreatePopover({
                 // Shared with the edit popover so the two cannot drift again: no
                 // quantity means no unit (never the literal "units").
                 const target = normalizeTarget(targetQty, targetUnit);
+                // P1-7a / R-383: joining an existing run sends its id; every
+                // other Create sends the product select's own choice, exactly
+                // as before this stage.
+                const assignmentTarget: AssignmentTarget = presetRun
+                  ? { kind: "run", runId: presetRun.id }
+                  : { kind: "direct", productId };
                 // D64: "never send an override the user did not tick" —
                 // `needsOverride && overrideChecked` is the only path that
                 // sends `eligibilityOverride: true`; every other case
@@ -682,7 +716,7 @@ export function CreatePopover({
                   nodeId,
                   range,
                   operatorId,
-                  productId,
+                  assignmentTarget,
                   eff,
                   target.qty ?? undefined,
                   target.unit ?? undefined,
