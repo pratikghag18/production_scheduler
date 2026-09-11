@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 2ba43f3
+  tip: 1620fc9
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -1972,6 +1972,7 @@ stages:
   - R-381
   - R-382
   - R-383
+  - R-384
   what: >-
     **The typed half of "talking to the board".** A scheduler types one line — *Assign Operator 1 to
     Housing A on Cell 1 in Line 1 from 10 to 2* — and the board works out which person, which part and
@@ -1993,6 +1994,10 @@ stages:
     every mutation in the brief's table caught by its named case. One thing it uncovered rather
     than caused: the server's run branch never checks that a joined block lies inside its job
     (F-131, queued).
+    **Session 140 (11 Sept), the maintainer after trying it:** Enter now CREATES when the pop-up would
+    show no warning; anything needing an override or a reason still opens the pop-up (R-384). The
+    decision is the pop-up's own: it auto-presses its Create with exactly the arguments a click sends,
+    once, only when every box it would render is absent.
   measure:
     app_tests: 2835
     mutations: "19 of 19 caught (M14 by screenshot)"
@@ -9781,6 +9786,39 @@ requirements:
     No screen sent a run target for a NEW block before this: the pop-up's submit gains the
     `AssignmentTarget` the API already has, and the server's run branch is read by the reviewer before
     this is called done.
+- id: R-384
+  title: A typed sentence creates the block on Enter when the pop-up would show no warning
+  source:
+  - 'session 140 conversation (the maintainer, 11 Sept, after trying the bar: "Go with the first option, Enter creates when the pop-up is clean, otherwise it defeats the purpose of voiceover option")'
+  stated_by: maintainer
+  claim: >-
+    When a typed sentence resolves and the New block pop-up it opens would show NO warning --- the
+    person is trained for the cell, belongs to its area, is not on leave, and a part or job is
+    selected --- the block is created on Enter without a second press, with exactly the arguments the
+    pop-up's Create button would have sent (the same submit, the same capacity probe, the same split
+    pop-up if it does not fit, the same server gate). Any case that would render a warning box, an
+    override tick or a reason field opens the pop-up and waits for the person, as before. A pop-up
+    opened by a drag or a keyboard create never auto-creates. The auto-press happens exactly once,
+    also under React StrictMode (F-128 is the lesson).
+  verified_by:
+  - kind: vitest
+    file: src/test/createPopover.test.tsx
+    cases: "AC1-AC7 --- a clean pop-up opened by the bar presses its own Create exactly once under StrictMode with the twelve arguments a click sends; an untrained person (warn or block), a person outside the area, a person on leave each open the pop-up and send nothing; a clean join sends the run target; a clean pop-up NOT opened by the bar never auto-creates"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "openCreateFromCommand sets autoCreate; a panel drop does not"
+  - kind: mutation
+    file: src/features/board/components/CreatePopover.tsx
+    cases: "X1 (drop the once-guard) caught by AC1 under StrictMode; X2/X3/X4 (drop area, leave, training from clean) caught by AC3/AC4/AC2+AC5; X5 (a drag sets autoCreate) caught by the dragGesture case; X6 (the button building its own argument list) NOT caught --- the fixture's values equal the defaults, so the proof that both paths share submitDirect() is by reading the button's onClick, which the reviewer did"
+  - kind: manual
+    steps: "As Dana, board on a future day: 'Assign Operator A3 to Housing A on Cell 3 in Line 2 from 10 to 2' creates the block with no pop-up; 'Assign Operator A1 to Housing A on Cell 1 in Line 1 from 10 to 2' opens the pop-up with the Never trained box and creates nothing"
+  status: covered
+  note: >-
+    DECIDED 11 Sept (session 140). The clean-or-not decision is NOT a second copy of the rules: it is
+    the pop-up's own already-computed verdicts (training gaps, outside-area set, absence hit, the
+    Create-disabled predicate) read once on mount, so the bar cannot disagree with the pop-up about
+    what "clean" means.
+
 findings:
 - id: F-131
   title: The server never checks that a run-attached block lies inside its run
@@ -13286,6 +13324,61 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 140
+  date: 2026-09-11
+  title: "Enter creates when the pop-up is clean (R-384) --- the maintainer tried the bar and wanted the click gone"
+  commits: [1620fc9]
+  numbers:
+    app_tests: 2844
+    app_test_files: 137
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lane and the reviewer: `Test Files 137 passed (137)`, `Tests 2844 passed
+    (2844)` --- ALL green this time, the two live pins included: Dana's grant on the dev database is
+    back to site admin at Plant A (the maintainer restored it between sessions; the forty-odd
+    empty-named viewer grants at the plant root remain). Up 9 from 2835: createPopover AC1-AC7, two
+    dragGesture cases. `tsc -b --force` clean (no migration). `eslint .` clean. Prettier clean over
+    src and e2e with `--end-of-line auto`. e2e carried.
+  summary: >-
+    The maintainer, after typing a sentence: *"hitting enter on the dialog box after telling the app
+    what to do opened up the pop up window to assign, it did not actually create the assignment, is
+    that what is expected as of now?"* It was --- by design, the bar only fills the form. Offered two
+    ways to remove the click, they chose: *"Go with the first option, Enter creates when the pop-up is
+    clean, otherwise it defeats the purpose of voiceover option. Remember all coding work is to be
+    delegated to sonnet with detailed instructions."* Written into `requirements` as R-384 before
+    any code, added to S40's deliveries, and handed to a Sonnet build lane with a full brief and a
+    second Sonnet to break it.
+    ⭐ THE DECISION IS THE POP-UP'S OWN VERDICT, NOT A COPY. `CreatePopover` already computed the
+    training gaps (never-trained AND lapsed), the outside-area set, the absence hit and its
+    Create-disabled predicate; `clean` is those six variables and nothing new, read once on mount,
+    and the auto-press calls the same `submitDirect()` the Create button's onClick now calls and
+    nothing else --- so the bar cannot disagree with the pop-up about what "clean" means, and the
+    auto-press cannot send different arguments than a click. The reviewer walked every conditional
+    render in direct mode and found `clean` false for each; it is stricter than Create-disabled in
+    one place (nobody homed here), in the safe direction.
+    ⭐ ONCE, UNDER STRICTMODE, PROVED. The call sits in a mount-only effect behind a ref, never in a
+    state updater (F-128's shape); AC1 renders under StrictMode and asserts one call whose twelve
+    arguments equal a click's; removing the ref turns it red with "expected 1 times, but got 2".
+    ⚠️ ONE MUTATION NOT CAUGHT, AND WHY IT IS ACCEPTED. X6 --- the button building its own argument
+    list instead of calling `submitDirect()` --- passes AC1 because an auto-press always sends the
+    defaults (efficiency 100, blank target), so the two lists coincide by construction. The proof is
+    structural: the button's onClick is `submitDirect();` and nothing else, read by the reviewer at
+    the line. Recorded in R-384's proof rather than papered over with a test that could only
+    fail on a fixture nobody types.
+    ⭐ LIVE, AS DANA, WITH ONE REAL BLOCK. The builder had no browser tool and said so rather than
+    inventing a walkthrough; the reviewer drove it with Playwright's chromium: a clean sentence
+    (Operator A3, homed at Cell 3 on Line 2, which requires no training; Housing A offered
+    plant-wide) created the block with no pop-up, the database showed exactly one new row, and the
+    row was deleted through the app's own Delete button and confirmed gone; Operator A1 on Cell 1
+    (no Welding) opened the pop-up with the training box and wrote nothing; Operator A1 on Cell 3
+    (outside the area) opened it with the area box and wrote nothing. Nothing else was written.
+    The builder's brief said a panel-drop case already existed in `dragGesture.test.ts`; it did not,
+    and the lane wrote both cases from scratch --- noted so the next brief does not repeat the claim.
 - id: 139
   date: 2026-09-11
   title: "Tell the board what to do --- the typed command bar shipped through three Sonnet lanes (S40, R-378 to R-383)"
