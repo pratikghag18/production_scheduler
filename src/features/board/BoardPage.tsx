@@ -857,6 +857,7 @@ export default function BoardPage() {
           presetOperatorId={popover.presetOperatorId}
           presetProductId={popover.presetProductId}
           presetRun={popover.presetRun}
+          autoCreate={popover.autoCreate}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
           onSubmitRun={dragApi.submitCreateRun}

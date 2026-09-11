@@ -10,10 +10,12 @@
  * handed down as props, so the popover itself holds no rule and needs no
  * mocking to mount.
  */
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { CreatePopover } from "@/features/board/components/CreatePopover";
-import type { Product, BoardOperator } from "@/lib/api";
+import type { Product, BoardOperator, Skill } from "@/lib/api";
+import type { AbsenceRow } from "@/lib/absence";
 
 const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
 
@@ -39,11 +41,33 @@ const operator: BoardOperator = {
   skillExpiries: [],
 };
 
-function renderPopover(over: { defaultCreateMode?: "run" | "direct" } = {}) {
+/** R-384 fixtures: one skill, an operator who holds it and one who does not. */
+const CNC: Skill = { id: "sk-cnc", name: "CNC" };
+const trainedOperator: BoardOperator = { ...operator, skillIds: ["sk-cnc"] };
+const untrainedOperator: BoardOperator = { ...operator, skillIds: [] };
+
+function renderPopover(
+  over: {
+    defaultCreateMode?: "run" | "direct";
+    operators?: BoardOperator[];
+    requiredSkills?: Skill[];
+    outsideAreaOperatorIds?: ReadonlySet<string>;
+    eligibilityPolicy?: "warn" | "block";
+    absences?: AbsenceRow[];
+    presetOperatorId?: string;
+    presetProductId?: string;
+    presetRun?: { id: string; label: string };
+    autoCreate?: boolean;
+    /** R-384: renders under `<StrictMode>`, the way `src/main.tsx` mounts the
+     *  app — needed to prove the auto-press fires exactly once (F-128). */
+    strict?: boolean;
+  } = {},
+) {
   const onSubmitRun = vi.fn();
   const onSubmitDirect = vi.fn();
   const onCancel = vi.fn();
-  render(
+  const ops = over.operators ?? [operator];
+  const element = (
     <CreatePopover
       nodeId="cell-1"
       anchor={{ x: 0, y: 0 }}
@@ -51,17 +75,23 @@ function renderPopover(over: { defaultCreateMode?: "run" | "direct" } = {}) {
       shiftChips={[]}
       defaultCreateMode={over.defaultCreateMode ?? "run"}
       products={[product]}
-      operators={[operator]}
-      hereOperatorIds={new Set(["op-1"])}
+      operators={ops}
+      hereOperatorIds={new Set(ops.map((o) => o.id))}
       windowStart={WINDOW_START}
-      requiredSkills={[]}
-      outsideAreaOperatorIds={new Set()}
-      eligibilityPolicy="warn"
+      requiredSkills={over.requiredSkills ?? []}
+      outsideAreaOperatorIds={over.outsideAreaOperatorIds ?? new Set()}
+      eligibilityPolicy={over.eligibilityPolicy ?? "warn"}
+      absences={over.absences ?? []}
+      presetOperatorId={over.presetOperatorId}
+      presetProductId={over.presetProductId}
+      presetRun={over.presetRun}
+      autoCreate={over.autoCreate}
       onCancel={onCancel}
       onSubmitRun={onSubmitRun}
       onSubmitDirect={onSubmitDirect}
-    />,
+    />
   );
+  render(over.strict ? <StrictMode>{element}</StrictMode> : element);
   return { onSubmitRun, onSubmitDirect, onCancel };
 }
 
@@ -117,6 +147,120 @@ describe("CreatePopover — the type selector (R-026)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSubmitRun).not.toHaveBeenCalled();
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * R-384 — the maintainer, 11 Sept, after trying the typed command bar: "Enter
+ * creates when the pop-up is clean, otherwise it defeats the purpose of the
+ * voice option." `autoCreate` is set only by `openCreateFromCommand`
+ * (dragGesture.test.ts pins that a drag's popover never carries it); these
+ * cases are about what THIS component does with it once set — press Create
+ * itself, exactly once, only when its OWN already-computed verdicts (the
+ * training gap, the area mark, the leave line) would show nothing.
+ *
+ * F-128 is why AC1 renders under `<StrictMode>`: a side effect that fires
+ * from a state updater runs twice there, and the fix for that (a ref, not a
+ * second state flag) has to be proven under the mount the app actually uses.
+ */
+describe("CreatePopover — R-384: Enter auto-creates when the pop-up is clean", () => {
+  it("AC1: a fully clean fixture auto-creates exactly once under StrictMode, with the same arguments a click would send", () => {
+    const clickCase = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(clickCase.onSubmitDirect).toHaveBeenCalledTimes(1);
+
+    const autoCase = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      strict: true,
+    });
+    expect(autoCase.onSubmitDirect).toHaveBeenCalledTimes(1);
+    expect(autoCase.onSubmitDirect.mock.calls[0]).toEqual(clickCase.onSubmitDirect.mock.calls[0]);
+  });
+
+  it("AC2: an operator missing a required training under 'warn' does not auto-create; the Never trained box renders", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Never trained");
+  });
+
+  it("AC3: an operator outside this area does not auto-create; the area box renders", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      outsideAreaOperatorIds: new Set(["op-1"]),
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("doesn’t belong to this part of the structure");
+  });
+
+  it("AC4: an operator on leave under 'warn' does not auto-create; the leave line renders", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      absences: [{ operatorId: "op-1", from: "2026-08-24", to: "2026-08-24", reason: "sick" }],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Placing them anyway records the assignment");
+  });
+
+  it("AC5: an untrained operator under 'block' does not auto-create; Create is disabled", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "block",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("AC6: a clean presetRun auto-creates once with { kind: 'run', runId } as the 4th argument", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetRun: { id: "run-9", label: "Widget A 06:00-08:00" },
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+    expect(onSubmitDirect.mock.calls[0][3]).toEqual({ kind: "run", runId: "run-9" });
+  });
+
+  it("AC7: the same clean fixture WITHOUT autoCreate never auto-creates (a drag's pop-up never does)", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+    });
     expect(onSubmitDirect).not.toHaveBeenCalled();
   });
 });

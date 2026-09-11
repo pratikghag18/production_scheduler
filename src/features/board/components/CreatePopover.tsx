@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Product, BoardOperator, Skill, AssignmentTarget } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
@@ -107,6 +107,7 @@ export function CreatePopover({
   presetOperatorId,
   presetProductId,
   presetRun,
+  autoCreate,
   onCancel,
   onSubmitRun,
   onSubmitDirect,
@@ -237,6 +238,13 @@ export function CreatePopover({
    * run as the target instead of `productId`.
    */
   presetRun?: { id: string; label: string };
+  /**
+   * R-384: set only by `openCreateFromCommand` — the typed command bar's
+   * Enter path — never by a drag or a keyboard create. When true and the
+   * pop-up's own verdicts read clean (see `clean` below), Create is pressed
+   * once, on mount, with exactly the arguments a real click would send.
+   */
+  autoCreate?: boolean;
   onCancel: () => void;
   onSubmitRun: (
     nodeId: string,
@@ -431,6 +439,90 @@ export function CreatePopover({
         // D113: the server refuses an override with no reason, so the button
         // must not offer to send one. Same shape as the line above it.
         (selectedOutsideArea && (!areaChecked || areaReason.trim() === ""))));
+
+  // R-384: THE ONE PLACE that builds `onSubmitDirect`'s 12 arguments, so
+  // the Create button's click and an R-384 auto-press below can never send
+  // two different shapes. Extracted verbatim from what the button used to
+  // build inline; nothing about the arguments themselves changed.
+  function submitDirect() {
+    const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
+    // Shared with the edit popover so the two cannot drift again: no
+    // quantity means no unit (never the literal "units").
+    const target = normalizeTarget(targetQty, targetUnit);
+    // P1-7a / R-383: joining an existing run sends its id; every other
+    // Create sends the product select's own choice, exactly as before
+    // this stage.
+    const assignmentTarget: AssignmentTarget = presetRun
+      ? { kind: "run", runId: presetRun.id }
+      : { kind: "direct", productId };
+    // D64: "never send an override the user did not tick" —
+    // `needsOverride && overrideChecked` is the only path that sends
+    // `eligibilityOverride: true`; every other case (fully eligible, or
+    // blocked-and-disabled so unreachable) sends `false`/`undefined`.
+    onSubmitDirect(
+      nodeId,
+      range,
+      operatorId,
+      assignmentTarget,
+      eff,
+      target.qty ?? undefined,
+      target.unit ?? undefined,
+      needsOverride && overrideChecked,
+      needsOverride && overrideChecked ? overrideReason.trim() : undefined,
+      // D113: sent only when it actually overrode something. The server
+      // normalises the flag off anyway, so this is belt and braces — but
+      // a client that always sent `true` would make every screen reading
+      // the flag say "overridden" about rows nobody decided anything
+      // about.
+      selectedOutsideArea && areaChecked,
+      selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
+      anchor,
+    );
+  }
+
+  // R-384: NOT a new copy of "is it clean" — the pop-up's OWN
+  // already-computed verdicts above, read once. Direct mode (a preset
+  // operator forces it), a part or job actually selected, trained, in
+  // area, and not on leave under EITHER policy (a `warn` absence is a
+  // warning box, so it is not clean; a `block` absence disables Create,
+  // also not clean).
+  const clean =
+    mode === "direct" &&
+    productId !== "" &&
+    operatorId !== "" &&
+    !ineligible &&
+    !selectedOutsideArea &&
+    selectedAbsence === null;
+
+  const autoFiredRef = useRef(false);
+
+  /**
+   * R-384: Enter on a typed sentence creates the block without a second
+   * press when this pop-up would show no warning. `autoCreate` is set only
+   * by `openCreateFromCommand` (a drag or a keyboard create never sets it),
+   * so this effect is a no-op for every other opener.
+   *
+   * F-128: the write is a side effect, so it runs in an EFFECT, never
+   * inside a `setState` updater — that shape is exactly how one Continue
+   * became two writes under StrictMode, which invokes an updater twice on
+   * purpose to catch a side effect hidden there. `autoFiredRef` is a ref,
+   * not state, so it survives StrictMode's simulated mount/unmount/remount
+   * of this effect: the second run sees the ref already true and does
+   * nothing, while a genuinely new mount of this component gets a fresh
+   * ref and may fire once more.
+   */
+  useEffect(() => {
+    if (autoCreate && clean && !autoFiredRef.current) {
+      autoFiredRef.current = true;
+      submitDirect();
+    }
+    // Mount-only, on purpose: `clean` is derived from the presets this
+    // popover opened with, which do not change before first paint, and
+    // `autoFiredRef` is what limits this effect to the one press it may
+    // ever make (see the F-128 note above) — re-running it on every
+    // dependency change would defeat that guard, not strengthen it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <BoardPopover anchor={anchor} onClose={onCancel} title="New">
@@ -697,40 +789,7 @@ export function CreatePopover({
                 const hc = Math.max(1, Math.round(Number(plannedHeadcount)) || 1);
                 onSubmitRun(nodeId, range, productId, hc);
               } else {
-                const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
-                // Shared with the edit popover so the two cannot drift again: no
-                // quantity means no unit (never the literal "units").
-                const target = normalizeTarget(targetQty, targetUnit);
-                // P1-7a / R-383: joining an existing run sends its id; every
-                // other Create sends the product select's own choice, exactly
-                // as before this stage.
-                const assignmentTarget: AssignmentTarget = presetRun
-                  ? { kind: "run", runId: presetRun.id }
-                  : { kind: "direct", productId };
-                // D64: "never send an override the user did not tick" —
-                // `needsOverride && overrideChecked` is the only path that
-                // sends `eligibilityOverride: true`; every other case
-                // (fully eligible, or blocked-and-disabled so unreachable)
-                // sends `false`/`undefined`.
-                onSubmitDirect(
-                  nodeId,
-                  range,
-                  operatorId,
-                  assignmentTarget,
-                  eff,
-                  target.qty ?? undefined,
-                  target.unit ?? undefined,
-                  needsOverride && overrideChecked,
-                  needsOverride && overrideChecked ? overrideReason.trim() : undefined,
-                  // D113: sent only when it actually overrode something. The
-                  // server normalises the flag off anyway, so this is belt and
-                  // braces — but a client that always sent `true` would make
-                  // every screen reading the flag say "overridden" about rows
-                  // nobody decided anything about.
-                  selectedOutsideArea && areaChecked,
-                  selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
-                  anchor,
-                );
+                submitDirect();
               }
             }}
           >

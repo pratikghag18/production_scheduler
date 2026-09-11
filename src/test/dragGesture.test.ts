@@ -8,7 +8,7 @@ import {
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Run, AbsenceRecord, Skill, BoardOperator } from "@/lib/api";
+import type { Run, AbsenceRecord, Skill, BoardOperator, BoardNode } from "@/lib/api";
 import { useDragGesture, type UseDragGestureArgs } from "@/features/board/hooks/useDragGesture";
 import { useToastStore } from "@/features/board/hooks/useSchedulerToast";
 import { absenceKeys } from "@/features/board/hooks/useAbsences";
@@ -1446,6 +1446,82 @@ describe("useDragGesture", () => {
       expect(result.current.popover).toBe(null);
       expect(api.updateAssignmentFields).not.toHaveBeenCalled();
       expect(useToastStore.getState().toasts).toEqual([]);
+    });
+  });
+
+  describe("R-384: which openers may set autoCreate", () => {
+    function panelOperator(): BoardOperator {
+      return {
+        id: "op-1",
+        homeNodeId: null,
+        displayName: "Ana Ortiz",
+        employeeRef: null,
+        active: true,
+        siteNodeId: "plant-1",
+        sitePath: "plant_1",
+        skillIds: [],
+        skillExpiries: [],
+      };
+    }
+
+    /** `endPanelDrag` refuses to open unless the resolved drop hit is a
+     *  track row the index actually knows about — the shared `buildIndex`
+     *  fixture's `nodeById` is empty (no case above needed it), so this
+     *  case adds the one node it drops onto. */
+    function indexWithNode(): BoardIndex {
+      const node: BoardNode = {
+        id: "cell-1",
+        parentId: null,
+        levelId: "cell",
+        name: "Cell 1",
+        path: "plant_1.line_1.cell_1",
+        sortOrder: 0,
+        active: true,
+      };
+      return { ...buildIndex([]), nodeById: new Map([["cell-1", node]]) };
+    }
+
+    it("openCreateFromCommand's popover carries autoCreate: true (the typed command bar's Enter path)", () => {
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+
+      act(() => {
+        result.current.openCreateFromCommand({
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          operatorId: "op-1",
+          target: { kind: "direct", productId: "prod-1" },
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      const p = result.current.popover;
+      if (p?.kind !== "create") throw new Error("expected a create popover");
+      expect(p.autoCreate).toBe(true);
+      expect(p.presetOperatorId).toBe("op-1");
+      expect(p.presetProductId).toBe("prod-1");
+    });
+
+    it("endPanelDrag's popover carries no autoCreate (a panel drop never auto-creates)", () => {
+      const { result } = renderHook(() => useDragGesture(baseArgs(indexWithNode())), { wrapper });
+
+      act(() => {
+        result.current.setDropRowResolver(() => ({
+          nodeId: "cell-1",
+          isTrack: true,
+          minute: 360,
+        }));
+      });
+      act(() => {
+        result.current.beginPanelDrag(panelOperator(), fakePointerEvent(100, 100));
+      });
+      act(() => {
+        result.current.endPanelDrag(fakePointerEvent(100, 100));
+      });
+
+      const p = result.current.popover;
+      if (p?.kind !== "create") throw new Error("expected a create popover");
+      expect(p.autoCreate).toBeUndefined();
+      expect(p.presetOperatorId).toBe("op-1");
     });
   });
 });

@@ -147,6 +147,14 @@ export type PopoverState =
        *  its place and sends this run as the target. `label` is `runLabelById`'s
        *  own D66 format, so this and a drag's confirm prompt never disagree. */
       presetRun?: { id: string; label: string };
+      /**
+       * R-384: set ONLY by `openCreateFromCommand` — the typed command bar is
+       * the sole opener that may auto-press Create when the pop-up would show
+       * no warning. A drag or a keyboard create (`endTrackCreateDrag`,
+       * `endPanelDrag`, `handleTrackKeyDown`) never sets this, so their
+       * pop-ups always wait for a real press, as before.
+       */
+      autoCreate?: boolean;
     }
   | {
       kind: "run";
@@ -1527,6 +1535,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
         anchor: r.anchor,
         shiftChips: chips,
         presetOperatorId: r.operatorId,
+        // R-384: the only opener that may auto-press Create.
+        autoCreate: true,
         ...(r.target.kind === "direct"
           ? { presetProductId: r.target.productId }
           : { presetRun: { id: r.target.runId, label: runLabelById(r.target.runId) } }),
