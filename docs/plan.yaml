@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 9f615c0
+  tip: 2ba43f3
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -1953,6 +1953,49 @@ stages:
     were reworked with their claims intact. Note for R-339: the copy plan's "only prior where a
     displaced row cannot be edited" branch is unreachable inside one plant, since the copier is the
     plant's admin; CW26 measures why.
+- id: S40
+  track: core
+  num: 40
+  title: Tell the board what to do — the typed command bar
+  status: done
+  owner: agent
+  refs:
+  - §19.88
+  - D117
+  - docs/voice-commands-plan.md
+  - docs/agent-briefs/p1-7a-typed-command-bar-brief.md
+  - session 139 conversation
+  delivers:
+  - R-378
+  - R-379
+  - R-380
+  - R-381
+  - R-382
+  - R-383
+  what: >-
+    **The typed half of "talking to the board".** A scheduler types one line — *Assign Operator 1 to
+    Housing A on Cell 1 in Line 1 from 10 to 2* — and the board works out which person, which part and
+    which cell it means, then opens the SAME "New block" pop-up a drag opens, already filled in, for the
+    person to check and press Create. Nothing new writes to the database: the pop-up, its warnings, the
+    capacity probe and the server's refusals are the ones that exist today. When the sentence is not
+    clear the bar asks one question with the choices as buttons ("Two people match 'Sam'"); when it
+    cannot read the sentence it shows the shape it can read. And when the span lands inside a job
+    already booked for that part on that cell, it asks whether to join the job or make a separate block
+    (the maintainer's call, 11 Sept). Speech and the small local model that will read free-form
+    sentences are later stages of the same plan; both hand their text to this bar.
+  state: >-
+    **Done in session 139 (11 Sept).** Two pure modules under `src/lib/command/` (a parser for one fixed
+    sentence shape, a resolver that matches words to the board's records and never guesses), a bar
+    on the board that opens the existing create pop-up pre-filled, two preset props on that pop-up
+    (the part, or the job to join), and the pop-up's submit learning the run target the API already
+    had. Built by two Sonnet lanes against pre-seated skeletons, reviewed by a third that tried to
+    break it live as Ana and Viva and could not. Suite 2835 tests in 137 files; tsc and eslint clean;
+    every mutation in the brief's table caught by its named case. One thing it uncovered rather
+    than caused: the server's run branch never checks that a joined block lies inside its job
+    (F-131, queued).
+  measure:
+    app_tests: 2835
+    mutations: "19 of 19 caught (M14 by screenshot)"
 - id: M1
   track: matrix
   num: 1
@@ -9596,7 +9639,167 @@ requirements:
     panel's `runSetLevel` composes the writes. `admin` stays the site-admin GRANT value (server
     contract unchanged); it is only RELABELLED "Site admin". The separate control and the tag are
     removed.
+- id: R-378
+  title: A typed sentence places a person through the same pop-up and the same server gate as a drag
+  source:
+  - the maintainer, 3 Sept (in session, "Assign operator 1 to work on Product A/Housing A on Cell 1 in Line 1 from 10AM to 2PM")
+  - docs/voice-commands-plan.md
+  - docs/agent-briefs/p1-7a-typed-command-bar-brief.md §1–§2
+  stated_by: maintainer
+  claim: >-
+    A person who may place people on the board can type one sentence naming a person, a part, a cell
+    (optionally with its line), an optional day and a start and end time, and the board opens the
+    existing "New block" pop-up pre-filled with those records. Pressing Create is the same click as
+    today: the same `submitCreateDirect`, the same `create_assignment`, the same training, area, leave
+    and capacity checks. Nothing under `src/lib/command/` or in the bar calls the API or the database.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "C2, C4 --- a resolvable sentence calls the popover opener once with the resolved cell, person and direct target, and the readout shows; a chosen candidate rewrites the sentence and opens with that person"
+  - kind: vitest
+    file: src/test/pickerPool.test.ts
+    cases: "the bar's context is handed the SAME operatorPool variable the create pop-up receives (source-text check, the way the other pickers are pinned)"
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: "Dana (admin) sees the Tell the board bar; Viva (viewer) gets none --- the same server can_place flag that gates the panel"
+  - kind: manual
+    steps: "Sign in as Dana or Ana; type 'Assign Operator A1 to Housing A on Cell 1 in Line 1 from 10 to 2'; the New block pop-up opens with Operator A1, Housing A and 10:00-14:00 filled in; the training box is the same one a drag shows"
+  status: covered
+  note: >-
+    QUEUED 11 Sept (session 139), build in progress. The bar is rendered only under the server's
+    `can_place`, the same flag that gates the left panel and the pop-up, so a viewer never sees it.
+- id: R-379
+  title: The bar never guesses between candidates; it asks, with the choices as buttons
+  source:
+  - docs/agent-briefs/p1-7a-typed-command-bar-brief.md §5
+  stated_by: maintainer
+  claim: >-
+    When a word matches more than one person, part or cell, the bar asks which one, listing every match
+    as a button, and opens nothing. Two people whose names both start with "Sam" is a question, not the
+    better of two guesses. Pressing a button puts the exact name into the sentence and re-runs it.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "R3, R7, R12 --- two 'Cell 1's, two 'Sam's, two 'Housing's each come back as an ambiguous question listing every hit in source order; R7 also proves an inactive 'Sam Gone' is never a candidate"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "C3, C4 --- the question and both buttons render and nothing opens; clicking one rewrites the input to the canonical sentence and resolves"
+  - kind: mutation
+    file: src/lib/command/resolve.ts
+    cases: "M7 (first hit only) caught by R7 with R3/R4/R5/R12 collateral; M16 (match inactive people) caught by R7"
+  status: covered
+- id: R-380
+  title: What will be created is spelled out in words before anything is written
+  source:
+  - docs/agent-briefs/p1-7a-typed-command-bar-brief.md §3, §6
+  stated_by: maintainer
+  claim: >-
+    Before the pop-up opens, the bar states in one line the person, the part, the cell with its line, the
+    calendar day (in the plant's own zone and date format) and the 24-hour start and end, so a mishearing
+    or a misreading is visible before Create. "From 10 to 2" reads back as 10:00–14:00.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "R1 (the readout string byte for byte: person, part, root-first ancestors and cell, ISO day, 24h times), R25 (a DST stub proves minutes come from wallToOffset, never day x 1440), R26 (today comes from the plant-calendar todayIndex, never a clock)"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "C2 --- the ISO token is replaced through formatDayLabel with the board's zone and date format"
+  - kind: mutation
+    file: src/lib/command/resolve.ts
+    cases: "M11 (day null always index 0) caught by R1; M12 (day x 1440 arithmetic) caught by R25"
+  status: covered
+- id: R-381
+  title: A refusal, an override or a split reached by typing is the one reached by dragging
+  source:
+  - docs/agent-briefs/p1-7a-typed-command-bar-brief.md §2
+  - CLAUDE.md §4
+  stated_by: maintainer
+  claim: >-
+    The bar adds no rule and no write. The "not trained" and "not from this area" boxes, the leave line,
+    the capacity probe and the split pop-up, and the server's refusal toast are reached through the same
+    code a panel drop reaches them by, because the bar only opens that pop-up. A build-time audit fails
+    if `src/lib/command/` gains a runtime import or the bar imports the API client.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandPurity.test.ts
+    cases: "the audit itself fails on a runtime import, a require, a new Date or Intl under src/lib/command, and on createAssignment / useCreateAssignment / supabase / @/lib/api/mutations in CommandBar.tsx; comments are stripped first; both real files pass"
+  - kind: vitest
+    file: src/test/createPopover.test.tsx
+    cases: "C5 --- Create in direct mode sends the AssignmentTarget (contract change from a product id, recorded in session 139)"
+  - kind: mutation
+    file: src/features/board/components/CommandBar.tsx
+    cases: "M15 (call onOpen even on a question) turns C3, C4, C9, C10 red; M14 (omit presetProductId) is proved by the screenshot only"
+  - kind: manual
+    steps: "Type a sentence naming a person homed outside Line 1 onto Cell 1: the pop-up opens with the same 'not from this area' box and reason field a panel drop shows; type an untrained person: the same 'Never trained' box"
+  status: covered
+- id: R-382
+  title: A sentence the bar cannot read is answered with the shape it can read, never with a guess
+  source:
+  - docs/agent-briefs/p1-7a-typed-command-bar-brief.md §4, §6
+  stated_by: maintainer
+  claim: >-
+    One fixed shape is read in this stage. A sentence missing its time, its part or its place, or with a
+    time or date that is not one, is answered with the shape and an example ("Say it like: assign
+    <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time>"), naming the piece it
+    could not read, and nothing opens.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "P13-P16 --- no time, no part, no place and an empty line each come back as the named failure; P12/P19 name the unreadable time or date"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "C5, C6 --- an empty Enter shows the expected shape and calls nothing; a bad time shows 'I could not read \"10:75\".' before the shape"
+  status: covered
+- id: R-383
+  title: A sentence that lands inside a booked job asks whether to join it or make a separate block
+  source:
+  - session 139 conversation (the maintainer, 11 Sept, asked "always a direct block, or ask when a run exists?", chose "ask")
+  stated_by: maintainer
+  claim: >-
+    When the resolved span sits inside a job (a run) already booked for that same part on that same
+    cell — containment, the same rule a drag uses to decide a chip fits a run — the bar asks "join the
+    job, or make a separate block?" with each such job as a button and a "Separate block" button.
+    Joining opens the same pop-up with the job named in place of the part select, and Create sends the
+    run target the API already defines; a separate block is what the sentence would have made anyway.
+    The bar never joins silently and never falls back silently when the job it was told to join is gone.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "R27-R33 --- a contained span asks (verbatim sentence, the run as a candidate); attach run among the hits gives the run target and a 'joining' readout; attach direct gives direct; a span not contained, or a different part, asks nothing; two runs list both in order; an attach naming a run no longer among the hits asks again rather than falling back"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "C9, C10 --- the question and its two buttons; the run button sends the run target with the input unchanged, Separate block sends direct"
+  - kind: mutation
+    file: src/lib/command/resolve.ts
+    cases: "M17 (skip the run check) caught by R27 with R28/R32/R33 collateral; M18 (fall back to direct on a stale attach) caught by R33; M19 (overlap instead of the passed-in containment) caught by R30"
+  - kind: manual
+    steps: "Board window over 7 Sept 2026; type 'Assign Operator A1 to Housing A on Cell 1 in Line 1 on 2026-09-07 from 8 to 12'; the question names the 06:00-14:00 Housing A job; press it: the pop-up says 'Joining Housing A 06:00-14:00' with no product select; press Separate block instead: the pop-up shows the product select on Housing A"
+  status: covered
+  note: >-
+    DECIDED 11 Sept (session 139). The 3 Sept plan had the chip "offer to book the job and staff it in
+    one go"; the 4 Sept brief simplified to "always a direct block". The maintainer chose the question.
+    No screen sent a run target for a NEW block before this: the pop-up's submit gains the
+    `AssignmentTarget` the API already has, and the server's run branch is read by the reviewer before
+    this is called done.
 findings:
+- id: F-131
+  title: The server never checks that a run-attached block lies inside its run
+  tag: A join the server does not measure
+  status: open
+  found_by: agent
+  refs:
+  - R-383
+  story: >-
+    Found 11 Sept (session 139) by the reviewer lane reading `create_assignment`'s last definition
+    (migration 0066) for the command bar's "join the job" path. For a row with `p_run_id` set, the
+    server runs the training check and the absence check exactly as for a direct block, and the
+    area guard's operator half; but nothing checks that `p_timerange` falls inside the run's own
+    range. Until this session no screen could send a run target for a NEW block (a chip only joined
+    a run by being moved into one, D66), so the gap was unreachable; the command bar offers "join"
+    only when the drag's containment rule (`assignmentFitsRun`) already holds, so reaching it needs
+    the board to refetch a shortened or moved run between the question and Create. A narrow race,
+    not a regression, and the server is the right place to close it --- a containment check in the
+    run branch, or a trigger, with a SQL case. Outside this stage's fences, so queued in `next`.
 - id: F-129
   title: The Activity row accent bled into the column headers when the log was scrolled
   tag: Colour in the header
@@ -13083,6 +13286,119 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 139
+  date: 2026-09-11
+  title: "Tell the board what to do --- the typed command bar shipped through three Sonnet lanes (S40, R-378 to R-383)"
+  shipped: [S40]
+  commits: [2ba43f3]
+  numbers:
+    app_tests: 2835
+    app_test_files: 137
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` at session start: `Test Files 2 failed | 131 passed (133)`, `Tests 2 failed | 2748
+    passed (2750)` --- the COUNT matches session 138, which is what the baseline check asks. The two
+    reds are the live pins `DEF-0020` and `DEF-0022`, both signing in as Dana, and both fail for a
+    reason on this machine and not in the code: the dev database's Dana is no longer Plant A's site
+    admin (her one grant reads `supervisor` at `Area 1`, and forty-odd empty-named viewer grants sit at
+    the plant root --- the load fixture plus somebody trying the new access-level dropdown on the dev
+    stack, session 137/138). DEF-0020 also needed the edge-runtime container, which had exited an hour
+    earlier; it was started (`docker start supabase_edge_runtime_production_scheduler`) and DEF-0020
+    then failed on the grant instead ("Plant A should be readable by Dana"). The one-row restore was
+    NOT applied: the session's permission gate refused a write to the dev database, correctly --- it
+    is the maintainer's stack. The tester's cold run of the same tree (session 138) passes both. tsc,
+    eslint, db_checks, migrations, e2e carried from 138; nothing that changes them has been committed
+    yet at that point. FINAL RUN, this session, after the three lanes: `Test Files 2 failed | 135
+    passed (137)`, `Tests 2 failed | 2833 passed (2835)` --- the same two live pins, same cause; so
+    2835 in 137 is the count, copied from the runner. Up 85 from 2750: commandParse 25, commandResolve
+    36, commandPurity 13, commandBar 10, pickerPool +1 (the brief predicted 2820; the extra fifteen
+    are twins and audit self-tests the lanes added, each read, none a file failing to load). `tsc -b
+    --force` clean, no migration this session so the word is honest. `eslint .` clean. Prettier: ten
+    changed files flagged locally, six of them CRLF only (the standing Windows artifact); the four with
+    real style issues were formatted. Playwright `roleWalk.spec.ts --workers=1` (the reviewer): the
+    Viva/Dana case that carries the new bar fact passed; the "admin rail tabs" case failed on the Admin
+    nav for Dana --- her drifted dev-database grant (supervisor at Area 1) is the likely cause and no
+    file in this diff touches the Admin page; not re-run cold, so `e2e` above is carried from 138.
+  summary: >-
+    The maintainer: *"We have to work on voice commands plan, could you study the document and let me
+    know your thoughts?"* Then, on the assessment, four decisions (below), and: *"Make sure you spin
+    up sonnet agents with detailed instructions to set them up for success"* and *"update the scheduler
+    buildout so that I can follow the progress as we have been doing all along."*
+    ⭐ THE PLAN IS RIGHT, AND IT IS THIS REPO'S OWN RULE. One door (`create_assignment` behind
+    `submitCreateDirect` behind `CreatePopover`), the bar only pre-fills the pop-up, the server keeps
+    the last word, the model writes WORDS and the app resolves them --- CLAUDE.md §4 applied to a new
+    input. Typing before any AI is the right order; it is most of the value and makes the later model a
+    drop-in for `parse.ts` alone.
+    ⚠️ TWO COPIES OF THE DOCUMENT. `docs/voice-commands-plan.md` was the 3 Sept original; the REVISED
+    9 Sept text (chatbot, Stage 6b packaging, parse/resolve under `src/lib/command/`) sat uncommitted in
+    `Claude outputs/` --- session 118 had already flagged it. The maintainer chose to adopt it: the
+    revised text now IS `docs/voice-commands-plan.md`, `requirement-coverage.csv` moved beside it under
+    `docs/`, and the stray folder is gone. The tester branch had nothing new (`git log
+    Development..tester` empty), so the skipped merge cost nothing.
+    ⛔ THE STAGE-2 BRIEF WAS SEVEN DAYS AND FORTY SESSIONS STALE, and building from it as written would
+    have gone wrong in six places, each found by reading the tree rather than the brief: every id it
+    named was re-taken (S26, R-321–R-325, D116, §19.88 all belong to other work now --- it is S40,
+    R-378–R-383, D117 and §19.88 was free only by luck); products are scoped by NODE
+    (`productsOfferedAtNode`, server-resolved) not by path; the pop-up's operator list is
+    `operatorPool` split into "here" and "the rest of the plant" (R-342/R-346), so the finding the brief
+    told its agent to file about "the pop-up receives every operator" is DEAD and was struck; the board
+    runs in the plant's zone with DST (D88a/D88b), so "day × 1440 + minutes" is wrong on a changeover
+    day and the resolver now takes `days`, `todayIndex` and `dayAxis.wallToOffset` from `BoardPage`
+    and never touches a clock; refusals are a toast, not pop-up text; and the bar must sit behind the
+    same `can_place` flag as the panel and the pop-up, with a role-walk fact for it. Nothing in ESLint
+    forbids a cross-feature import, so the "no second door" fence becomes a file-content audit
+    (`commandPurity.test.ts`) in the shape of the four that exist.
+    ⭐ FOUR DECISIONS, RECORDED BEFORE THE CODE. (1) Stage 2 now, ahead of the queued F-130 sweep.
+    (2) When the span lands inside a job already booked for that part on that cell, ASK --- join it, or
+    a separate block (R-383). This costs about a day, because NO screen creates a run-attached block
+    today: the API has the run target and `create_assignment` takes `p_run_id`, but the pop-up only ever
+    sends direct, and joining happens only by MOVING a chip into a run (D66). So the pop-up's submit
+    learns the `AssignmentTarget` the API already defines --- the one deliberate breach of the old
+    brief's "do not change `submitCreateDirect`" fence, and the smallest that keeps one door. Three
+    test files read that argument positionally and will go red; the lane is told to say in writing that
+    the contract changed. The reviewer reads the server's run branch, since the UI has never exercised
+    it. (3) The revised voice plan adopted, the CSV committed under docs. (4) Commands after assign:
+    book a job, unassign, move; "who is free" is read-only and goes to the chatbot's lookup menu.
+    ⭐ THE LANES. The two pure modules were pre-seated as type-only skeletons (every export, bodies that
+    throw) so lanes A and B compile against one interface in parallel; the brief was rewritten in place
+    with the new tables (R25–R33 for DST, today-from-the-axis and the run question; C9–C10; M16–M19;
+    predicted 2820 in 137, arithmetic not a runner). Lane A: parser, resolver, purity audit. Lane B:
+    the bar, the pop-up presets, the wiring, the role-walk fact, the three contract-change edits. Lane
+    C: break it. This session commits nothing until C has reported.
+    On the later stages, opinion only: the LoRA/GGUF/llama.cpp pipeline is the right shape but no base
+    model should be locked yet; Stage 6b's "two to three days" is optimistic if it means self-hosting
+    the full Supabase stack; the chatbot's fixed lookup menu is safe by construction and the 7B
+    free-SQL tier is where the risk lives.
+    ⭐ THE LANES CAME BACK, AND THE REVIEWER COULD NOT BREAK IT. Lane A: 74 cases, every mutation
+    M1--M13 and M16--M19 caught by its primary case, and the brief's collateral predictions corrected
+    where the cases assert less than the author assumed (M11 is caught by the run rows, not the
+    one-id rows). Lane B: the bar, the presets, the wiring, ten component cases run UNMOCKED against
+    Lane A's real modules, one positional assertion updated because the contract changed (a product
+    id became a target --- said in writing, CLAUDE.md §4), the run label rebuilt in `BoardPage` from
+    the same two calls `runLabelById` makes (the reviewer compared them character for character).
+    Lane C, live as Ana and Viva: no bar for the viewer; the sentence opens the pop-up with the same
+    "Never trained" box a drag shows; a person homed outside the cell opens it with the same D113
+    box; the run question, its join and its separate-block paths all as specified; an edit after a
+    question re-asks it; Escape twice. Both builders flagged the same hole in the skeleton I had
+    pre-seated --- the too-short question carried the span's minutes but not the minimum, so the
+    sentence hardcoded 15 --- fixed in the developer session by adding `min` to the question, and
+    the brief corrected.
+    ⚠️ ONE THING UNCOVERED, NOT CAUSED (F-131, queued). `create_assignment`'s run branch (last
+    definition, 0066) runs the training and absence checks for a run-attached row exactly as for a
+    direct one, and the area guard's operator half too; but nothing on the server checks that the
+    row's span lies INSIDE the run it joins. Before today no screen could send a run target for a
+    new block, so it was unreachable; the resolver offers "join" only when the drag's containment
+    rule already holds, so reaching it needs the board to refetch a shortened run between the
+    question and Create. A narrow race, and the server is the right place to close it; outside
+    this stage's fences (`supabase/`, `src/lib/api/`), so queued rather than done.
+    Two small errata for the brief's §15, from the reviewer's own reads: the seeded world has exactly
+    one "Cell 1" anywhere, so the place-ambiguity case lives only in R3; and 8 Sept's Line 1 runs are
+    "Line 1 Subassembly A", not Housing A (my note to Lane B said otherwise; the 7 Sept ones are).
 - id: 138
   date: 2026-09-11
   title: "Tester run: sessions 132-137 (R-371 through R-377, F-129) verified cold, none reopened"
@@ -19484,6 +19800,17 @@ next:
     module CSS but never defined (tokens.css has only `--ink`/`--ink-2`), so those colours fall back
     to inherited. Pre-existing, cosmetic, low-risk: either define `--ink-1` or replace each use with
     the intended `--ink`/`--ink-2`, then eyeball the four surfaces in the running app.
+- kind: task
+  requirement: R-383
+  text: The server refuses a run-attached block whose span is not inside its run (F-131)
+  why: >-
+    `create_assignment`'s run branch (0066) checks training, absence and the operator's area for a
+    `p_run_id` row but never that the span lies inside the run. The command bar is the first screen
+    that can send a run target for a new block (R-383); it only offers "join" when containment
+    holds, so the gap is a refetch race today, but the server should hold the rule itself: a
+    containment check in the run branch or a trigger, refusing with a named reason, plus a SQL case
+    and a client toast branch if the refusal needs words. Extract the function's last definition
+    with the case-insensitive grep, never retype it (CLAUDE.md §4).
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   decided: true
