@@ -4,9 +4,9 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-10'
-  tip: 8e0c2d0
+  tip: 9f615c0
   baseline:
-    app_tests: 2742
+    app_tests: 2750
     app_test_files: 133
     tsc: 0
     eslint: 0
@@ -9561,7 +9561,41 @@ requirements:
     are org-wide 'viewer' with access via grants. Migration 0078 adds the system-admin-only DEFINER
     `set_system_admin(p_profile_id, p_is_admin)`. NO last-admin guard, same reasoning as R-374: the
     caller is always an active system admin and cannot change their own row, so zero admins is
-    unreachable.
+    unreachable. UI SUPERSEDED 10 Sept (session 137, R-377): the separate "Make system admin" control
+    was folded into the one access-level dropdown; the `set_system_admin` RPC this requirement added
+    is unchanged and is what that dropdown calls.
+- id: R-377
+  title: One access-level dropdown -- System admin, Site admin, Supervisor, Viewer
+  source:
+  - session 137 conversation
+  stated_by: maintainer
+  claim: >-
+    A person's access level is set from ONE dropdown reading "System admin, Site admin, Supervisor,
+    Viewer" --- not a role dropdown plus a separate promote control. The dropdown blends the org-wide
+    system-admin flag (`user_profiles.role`) with the node grant (`profile_grants.role`, where
+    'admin' is a SITE admin of the node), shows the level the person currently holds, and offers only
+    the levels the viewer may set (System admin only from a system admin; 'admin'/Site admin only at
+    a plant root; the self-rule still forbids demoting your own admin or system). Choosing a level
+    performs the right write(s): System admin via `set_system_admin`, a node role via
+    `set_site_member`, and system-admin-down-to-a-node-role as both, in the safe order.
+  verified_by:
+  - kind: vitest
+    file: src/test/siteAccess.test.ts
+    cases: "LV1-LV8 --- levelLabel reads the four words; currentLevel is system for a company admin else the grant role; levelOptions lists System admin/Site admin/Supervisor/Viewer in order for a system admin at a root, omits System admin for a non-system viewer, omits Site admin below a root, and locks your own system/admin row to the level it holds"
+  - kind: vitest
+    file: src/test/siteAccessNodePicker.test.tsx
+    cases: "a system admin viewing a line supervisor is offered system/supervisor/viewer, and re-roling still writes her own node"
+  status: covered
+  note: >-
+    BUILT 10 Sept (session 137). DECIDED 10 Sept: *"Why would we not make the option to make system
+    admin a part of the existing access level option? ... The drop down options should be system
+    admin, site admin, supervisor, viewer."* The earlier build (R-376) put promotion in a separate
+    control because system admin is different data (an org-wide flag, not a node grant) set by a
+    different RPC --- technically tidy but it split one idea across two controls. This unifies them:
+    `AccessLevel`/`levelLabel`/`currentLevel`/`levelOptions` in `siteAccess.ts` are the menu, and the
+    panel's `runSetLevel` composes the writes. `admin` stays the site-admin GRANT value (server
+    contract unchanged); it is only RELABELLED "Site admin". The separate control and the tag are
+    removed.
 findings:
 - id: F-129
   title: The Activity row accent bled into the column headers when the log was scrolled
@@ -13049,6 +13083,36 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 137
+  date: 2026-09-10
+  title: "One access-level dropdown -- System admin, Site admin, Supervisor, Viewer (R-377): the separate promote control folded into the existing menu"
+  commits: [9f615c0]
+  numbers:
+    app_tests: 2750
+    app_test_files: 133
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` (vitest run) this session: `Test Files 133 passed (133)`, `Tests 2750 passed
+    (2750)` --- up from 2742 by the LV1-LV8 level-dropdown cases. `eslint` clean. `tsc` is back to 0:
+    the maintainer applied migrations 0077/0078 and regenerated `database.types.ts` (committed this
+    session), so `set_system_admin` and the rest resolve. No new migration this session --- the
+    dropdown reuses `set_system_admin` (0078) and `set_site_member`.
+  summary: >-
+    The maintainer, rightly: promoting to system admin should be part of the EXISTING access-level
+    dropdown, not a separate control --- the dropdown should read System admin, Site admin,
+    Supervisor, Viewer. The previous session split one idea (a person's level) across a role dropdown
+    and a promote button because system admin is different data (an org-wide flag, not a node grant);
+    that optimised for a clean data mapping over one clear control, which was the wrong call. This
+    unifies them: one dropdown whose options blend the org-wide flag and the node grant, showing the
+    current level and offering only what the viewer may set, and whose change handler composes the
+    right write(s) --- `set_system_admin` for System admin, `set_site_member` for a node role, both
+    (in the safe order) for a demotion from system admin to a node role. 'admin' stays the site-admin
+    grant value and is only relabelled "Site admin"; the separate control and the tag are removed.
 - id: 136
   date: 2026-09-10
   title: "Template contents name the line/cell each run is on and 'All plants' lists everything (R-375); a system admin can promote another (R-376)"
