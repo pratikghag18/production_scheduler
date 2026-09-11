@@ -3,7 +3,7 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-10'
+  updated: '2026-09-11'
   tip: 9f615c0
   baseline:
     app_tests: 2750
@@ -13083,6 +13083,74 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 138
+  date: 2026-09-11
+  title: "Tester run: sessions 132-137 (R-371 through R-377, F-129) verified cold, none reopened"
+  commits: []
+  numbers:
+    app_tests: 2750
+    app_test_files: 133
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `git merge --ff-only Development` brought the tester branch from 4b17746 (session 131) to
+    9f615c0 (session 137, 18 commits); `package-lock.json` had changed so `npm ci` ran before
+    anything else. Fresh `node scripts/tester-stack.mjs up` (full reset, all 77 migrations apply
+    clean) then a single cold `node scripts/tester-run.mjs --sql --e2e`. `ok vitest`, `ok count
+    matches the plan: 2750 in 133`, copied from the runner's own line. All 74 SQL files pass,
+    including the two new ones (`91_deactivate_a_user_test.sql`, `92_make_a_system_admin_test.sql`).
+    `db_checks` (823) carried unrecomputed, same as sessions 134-137 did through the same SQL
+    growth -- I did not re-tally it either. `db:types` regenerated against the tester's own stack
+    came back byte-different from the committed `src/lib/database.types.ts`, but `git diff
+    --ignore-all-space` on it is empty: CRLF noise from this Windows worktree's `core.autocrlf`,
+    not a real staleness, so `tsc: 0` stands rather than "inconclusive". `format:check` flags the
+    same 389-ish files every session this week has carried (session 131's note names the same
+    standing line-ending artifact); confirmed again, not investigated as new. `playwright e2e`:
+    46 run, 41 passed, 3 failed, 2 skipped (the load fixture, absent by design, R-366) on the
+    default 6-worker run -- `absenceOnBoard.spec.ts`'s and `absences.spec.ts`'s Ana cases timed
+    out waiting for the Absences button, and `weekTemplates.spec.ts`'s `afterAll` hit a
+    `page.close` protocol error. Re-ran `absences.spec.ts` and `absenceOnBoard.spec.ts` alone with
+    `--workers=1`: all 4 cases passed in 15.4s. Worker contention on this machine, the same
+    category sessions 109/128/131 already named, not a regression -- confirmed by reproducing the
+    fix (serial run), not assumed.
+  summary: >-
+    Merged Development's sessions 132-137 (R-371 the Activity legend, R-372 the frozen-header
+    standard rolled out to all nine long-row surfaces, R-373 template contents, R-374 reversible
+    deactivate, R-375 the contents view's node path, R-376 a second system admin, R-377 the one
+    access-level dropdown, and F-129's accent-bleed fix) and re-verified every one from outside the
+    code rather than trusting `covered`.
+    ⭐ THE TWO NEW DEFINER RPCs, READ ADVERSARIALLY. `set_profile_active` (0076) and
+    `set_system_admin` (0078): both scope the target lookup to `app_current_org()` (a foreign-org
+    id answers identically to a bogus one, no existence leak), both refuse acting on your own row,
+    and both skip a "last admin" guard for the same provably-unreachable reason -- traced the logic
+    by hand rather than taking the migration header's word for it, and it holds: the caller is
+    always an active admin because `app_is_admin()`/`app_current_profile_id()` already gate on it,
+    so a second active admin always survives any OTHER target's demotion.
+    ⭐ R-377'S DROPDOWN, TRACED THEN DRIVEN LIVE. Read `levelOptions`/`currentLevel`/`canSetRole` in
+    `siteAccess.ts` by hand for the self-lock and protected-row edge cases, then signed in as
+    `admin@example.test` (system admin) and `dana@example.test` (site admin, not system) against
+    the tester's own stack and read the actual `<select>` options off the rendered Access tab for
+    Ana (supervisor on Line 1), Dana (admin at the Plant A root) and Viva (viewer at the Plant A
+    root): every row offered exactly the levels the code predicts -- Site admin appears only for a
+    grant AT a plant root (present for Dana/Viva, absent for Ana), System admin appears only when
+    the viewer is a system admin, and the company admin's own row rendered fully read-only
+    ("Company admin -- reaches every plant" / "Nothing to take away here.") with no dead control
+    for the site-admin viewer. Nothing shown that the server would refuse, nothing refused that it
+    would allow.
+    ⭐ R-373/R-375'S SQL TEST ISN'T A test-cannot-fail CASE. `TP-ITEMS-1` asserts two DIFFERENT
+    `node_path` values (`Dept T › Sub T › Line T1` vs `...Line T2`) for two different
+    runs in the same template, so the case can actually distinguish the ltree ancestor-walk from a
+    hardcoded or leaf-only answer.
+    NOTHING FILED. All 33 defects stay `verified`; F-130 (the `--ink-1` sweep) stays `open`,
+    unchanged, still queued in `next`. One thing NOTED, not filed: the plan's session-135 note
+    says the sticky-header audit "guards EIGHT surfaces", but `stickyHeaderStandard.test.ts`
+    currently registers nine (Activity, Access, Operators, Products, Trainings, Shifts, Absences,
+    Matrix, Cycle times) -- a miscount in the session's prose, not a behavioural gap, left for the
+    maintainer to correct if the history should read exactly.
 - id: 137
   date: 2026-09-10
   title: "One access-level dropdown -- System admin, Site admin, Supervisor, Viewer (R-377): the separate promote control folded into the existing menu"
