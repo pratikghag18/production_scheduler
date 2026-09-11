@@ -13324,6 +13324,85 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 141
+  date: 2026-09-11
+  title: "Tester run: S40 the typed command bar (R-378 through R-384, F-131) verified cold; nothing filed"
+  commits: []
+  numbers:
+    app_tests: 2844
+    app_test_files: 137
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `git merge --ff-only Development` brought the tester branch from af2b9ae (session 138) to
+    cad7dcd (session 140, 4 commits: S40 the command bar, then R-384's Enter-creates);
+    `package-lock.json` unchanged, so no `npm ci`. Fresh `node scripts/tester-stack.mjs up` (full
+    reset, all 77 migrations apply clean). VITEST: the runner's own line reads `Test Files 1
+    failed | 136 passed (137)`, `Tests 1 failed | 2843 passed (2844)` -- the total 2844 in 137
+    matches the plan's newest confirmed session (140) EXACTLY, copied from the line. The one red is
+    the `DEF-0020` live pin, which needs the edge-runtime container; it had exited 3 hours before
+    the run (the quiet-death the report itself warns about). Started
+    `supabase_edge_runtime_production_scheduler_tester` and re-ran `DEF-0020` alone: `1 passed` --
+    so the suite is fully green at 2844 and the red was the container, not the code, exactly as
+    session 139's own note predicted. SQL: `tester-run.mjs` reported every SQL file red with
+    `set: pipefail: invalid option name` and `syntax error near `$'{\r''` -- it invokes
+    `run-sql-test.sh` through `sh`, but the script needs bash (`set -uo pipefail`, `BASH_SOURCE`);
+    a tester-harness bug on this Windows machine, NOT the developer's code. Re-ran the whole SQL
+    suite by hand with real bash (`SUPABASE_DB_CONTAINER=..._tester bash scripts/run-sql-test.sh`):
+    59 files, 58 pass; the one failure is `dev_demo_test.sql` D9 ("3 of 9 accounts have a
+    password"), a tester-stack demo-auth condition, and the diff touches no SQL/migration/seed, so
+    it is environmental. `db_checks` (823) carried unrecomputed, as sessions 134-138 did. `db:types`
+    regenerated against the tester stack came back byte-different from the committed
+    `database.types.ts`, but `git diff --ignore-cr-at-eol` is empty -- CRLF/BOM noise from this
+    worktree, not staleness, so `tsc: 0` stands rather than "inconclusive". `format:check` flags the
+    same standing line-ending files (`.claude/*`, `e2e/*`, docs), none of them this session's changed
+    source. `playwright e2e`: 46 tests, 40 passed, 5 skipped (the load fixture, absent by design,
+    R-366), 1 failed -- `weekTemplates.spec.ts`'s `afterAll` hook hit a `Target.disposeBrowserContext`
+    protocol error, a browser-teardown flake (the same category sessions 128/131/138 named), not the
+    command bar; the roleWalk cases that carry the new bar's `can_place` fact passed (viewers show
+    `panel=false canPlace=false`).
+  summary: >-
+    Merged Development's sessions 139-140 -- S40, the typed command bar: a scheduler types one
+    sentence ("Assign Operator A1 to Housing A on Cell 1 in Line 1 from 10 to 2") and the board
+    resolves the words to records and opens the SAME create pop-up a drag opens, pre-filled
+    (R-378), asking rather than guessing between two matches (R-379), spelling out what it will
+    create (R-380), reaching every refusal and override through that one pop-up (R-381), answering
+    an unreadable line with the shape it can read (R-382), asking join-or-separate when the span
+    lands in a booked job (R-383), and -- session 140 -- pressing Create itself on Enter when the
+    pop-up would show no warning (R-384). Judged every one from outside the code, not by trusting
+    `covered`.
+    ⭐ R-384 IS STRICTER THAN Create-disabled, IN THE SAFE DIRECTION, AND THE TESTS PROVE IT. Read
+    `clean` against `createDisabled` in `CreatePopover.tsx` by hand: `clean` demands NO training
+    gap, NOT outside-area and NO absence at all, a strict subset of "Create enabled", so an
+    auto-press can never fire on a case the pop-up (or the server) would refuse. Broke it to be
+    sure: dropped `!selectedOutsideArea && selectedAbsence === null` from `clean` on a scratch
+    copy and `createPopover.test.tsx` went red at AC3 (area) and AC4 (leave) by name. The
+    once-under-StrictMode guard (a mount-effect behind a ref, F-128's lesson) is real.
+    ⭐ "NEVER GUESSES" IS COVERED, NOT ASSERTED. Forced `matchName` in `resolve.ts` to return only
+    its first hit (mutation M7) on a scratch copy: `commandResolve.test.ts` R7/R12 and
+    `commandBar.test.tsx` C3/C4 all went red -- two Sams and two Housings each become a question,
+    never a coin toss. The bar is gated behind the server's `can_place` (same flag as the panel),
+    so a viewer never sees it; the readout's ISO day is reformatted through `formatDayLabel` in the
+    bar (R-380); the span comes from `wallToOffset`, not day x 1440 (R-380 DST); the run question
+    re-asks rather than falling back on a stale attach (R-383).
+    ⭐ F-131 CONFIRMED INDEPENDENTLY, AND IT IS HONESTLY QUEUED. The developer filed F-131 -- the
+    server's `create_assignment` run branch never checks that the span lies inside the run it
+    joins. Read all THREE definitions of the function (migrations 0009, 0030, 0066) by hand: none
+    reads the run's own `timerange` or compares it to `p_timerange` (the `SELECT * INTO v_run FROM
+    runs` hits all belong to `move_run`). So it is a longstanding server gap, newly REACHABLE now
+    that the command bar is the first screen to send a run target for a NEW block -- an absence of
+    a guard, not a regression. One refinement to the finding's "narrow refetch race" wording: it is
+    also reachable without a race, by joining a run whose pop-up stays open on a warning and then
+    moving the span outside the run with a shift chip before Create. Still narrow; the fix belongs
+    on the server, and it is already queued in `next` under R-383 with a SQL case. Did NOT file a
+    duplicate defect that would jump the queue for something already tracked accurately.
+    NOTHING FILED. All 33 defects stay `verified`; F-130 (the `--ink-1` sweep) and F-131 stay
+    `open`, unchanged, queued. No pin written: the shipped requirements are covered by tests that
+    bite (proven above), and F-131's fix will carry its own SQL case per the queued task.
 - id: 140
   date: 2026-09-11
   title: "Enter creates when the pop-up is clean (R-384) --- the maintainer tried the bar and wanted the click gone"
