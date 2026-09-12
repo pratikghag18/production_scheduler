@@ -13796,10 +13796,10 @@ findings:
 sessions:
 - id: 152
   date: 2026-09-12
-  title: "Tester run: sessions 142-150 (F-130 through F-134, S41 R-386 to R-389, S42 R-390) verified cold; nothing filed"
+  title: "Tester run: sessions 142-151 (F-130 through F-134, S41 R-386 to R-389, S42 R-390, R-391) verified cold; nothing filed"
   commits: []
   numbers:
-    app_tests: 2994
+    app_tests: 3018
     app_test_files: 140
     tsc: 0
     eslint: 0
@@ -13829,11 +13829,26 @@ sessions:
     category session 141 named), and `weekTemplates` is untouched by sessions 142-150. Every roleWalk
     case passed, viewers `panel=false canPlace=false`. `npm run voice:score` run by hand: clean
     200/200 (100.0%), perturbed 7/200, PASS/exit 0; with `--bar 1.01` exit 1.
+    ⭐ A TENTH SESSION (151, R-391) ARRIVED MID-RUN and was merged and verified in the same run. The
+    merge was not a fast-forward (my session-151 tester entry and the developer's session-151 R-391
+    entry both sat at the top of `sessions`): resolved by keeping both, renumbering the tester entry to
+    152, newest first, and regenerating the page --- `npm run plan` validates. `npm run test` at the new
+    tip (ff2e3b0) reads `Test Files 140 passed (140)`, `Tests 3018 passed (3018)`, copied from the
+    runner --- up 24 from 2994, exactly session 151's count. R-391 is pure parser and generator (no
+    migration, no SQL, no screen), so the SQL and e2e evidence above carries unchanged. `voice:score`
+    re-run clean 200/200 PASS; `git diff data/voice/heldout.jsonl` empty, the set untouched.
   summary: >-
-    Merged nine sessions of committed developer work (142-150) and judged every requirement they
-    touched from outside the code. Nothing filed: the build is green at 2994 in 140, and all three
+    Merged ten sessions of committed developer work (142-151) and judged every requirement they
+    touched from outside the code. Nothing filed: the build is green at 3018 in 140, and all three
     red/warn lines the runner printed are this Windows worktree's own environment, each proven so
     rather than assumed.
+    ⭐ R-391 (THE VERBS EACH SENTENCE ACCEPTS) VERIFIED, AND ITS ONE-COPY CLAIM HELD. The four verb
+    lists are exported from `parse.ts` once, the intent regexes are built from them, and the training
+    generator IMPORTS them (`from "../../../src/lib/command/parse.ts"`) rather than copying --- grep for
+    the distinctive verbs (allocate, relocate, reschedule) finds no second literal anywhere. The 29
+    verbs are pairwise disjoint, "schedule" is in assign only, and neither "shift" nor "change" is a
+    verb. Proven non-vacuous: dropping "staff" from the assign list turns PV1 red (the operator parses
+    as "staff Sam"); adding "plan" to the assign list as well as book turns PV2 (disjointness) red.
     ⭐ THE THREE ANOMALIES ARE ENVIRONMENT, NOT DEFECTS, PROVEN. (1) `db:types` "stale" WARN: a fresh
     regen is byte-identical to the committed file (`cmp`), so it is a CRLF pipe artifact. (2)
     `format:check` FAIL: `--end-of-line auto` passes every file and `git ls-files --eol` shows the
