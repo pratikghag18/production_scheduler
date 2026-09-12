@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-12'
-  tip: 8ad566e
+  tip: 3090059
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2024,6 +2024,7 @@ stages:
   - R-387
   - R-388
   - R-389
+  - R-391
   what: >-
     **The next three sentences.** After *assign* (S40), the three commands the maintainer ordered on 11
     Sept: *book a job* ("Book Housing A on Cell 1 in Line 1 from 6 to 2", a run on a cell, with an
@@ -2050,6 +2051,9 @@ stages:
     which changes the row in place, asks every placement question about the target, and detaches
     the block from its run. Three sentences in three pieces, each built by a Sonnet lane and broken-at
     by a second.
+    **Session 151 (12 Sept), the maintainer's verbs (R-391):** each sentence reads a small fixed list of
+    verbs, exported from the parser once and drawn on by the training-set generator; no verb sits in
+    two lists.
 - id: S42
   track: core
   num: 42
@@ -10139,6 +10143,33 @@ requirements:
   note: >-
     STATED session 147 (11 Sept), BUILT session 148. Parked out of it, for the maintainer: saving
     what people type into the bar to grow both sets.
+- id: R-391
+  title: Each typed sentence accepts a small fixed set of verbs, and every verb belongs to exactly one sentence
+  source:
+  - 'session 151 conversation (the maintainer, 12 Sept: "The optional verb should include staff as well in addition to assign, put, schedule, add, etc." and, shown the list per intent, "Go with that list")'
+  stated_by: maintainer
+  claim: >-
+    Assign reads assign, put, schedule, add, staff, place, allocate, give, set (or no verb at all).
+    Book a job reads book, run, plan, open, start, launch, create. Unassign reads unassign, remove,
+    clear, drop, cancel, delete, pull, free. Move reads move, reschedule, transfer, relocate, switch.
+    No verb appears in two lists, so the first word never needs a guess; "schedule" stays with assign,
+    "shift" and "change" are not verbs here. The lists live in the parser once and are exported, so
+    the generator and the tests read them rather than copy them; every verb has a parser case and
+    the generator draws verbs from the lists so the model learns them.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "PV1 (one case per new verb: staff, place, allocate, give, set; plan, open, start, launch, create; drop, cancel, delete, pull, free; reschedule, transfer, relocate, switch), PV2 (the four lists are disjoint and hold neither shift nor change), PV3 (schedule still means assign), PV4 (the canonical verb is printed for any synonym), PV5 (case rule unchanged)"
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V9 --- every verb in every list opens at least one clean row of a generated training set"
+  - kind: mutation
+    file: src/lib/command/parse.ts
+    cases: "M70-M73 (brief §4): staff dropped from the assign list --- PV1 staff red (the operator parsed as "staff Sam"); plan added to assign as well as book --- PV2 red; schedule moved to book --- PV3 and the existing B10 red; the generator drawing only each list's first verb --- V9 red naming schedule as never drawn"
+  status: covered
+  note: >-
+    STATED 12 Sept (session 151), BUILT the same session. Left out on purpose, for the model stage: word
+    orders that put the verb after the person ("Sam works on …") or split it ("take Sam off …").
 findings:
 - id: F-134
   title: A start stated in 24-hour form still lets the afternoon rule bump the end by twelve hours
@@ -13763,6 +13794,26 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 151
+  date: 2026-09-12
+  title: "The verbs each sentence accepts (R-391) --- the maintainer's list, one copy, exported"
+  commits: [3090059]
+  numbers:
+    app_tests: 3018
+    app_test_files: 140
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lane and the developer session's own verb-by-verb probe: `Test Files 140 passed (140)`, `Tests 3018 passed (3018)`, copied from the runner --- up 24 from 2994 (PV1 x19, PV2-PV5, V9). `tsc -b --force` clean. `eslint .` clean. Prettier clean over the four touched files. `npm run voice:score`: clean 200/200, PASS; `git diff --stat data/voice/heldout.jsonl` empty, the set untouched. No screen changed; role walk carried from 149.
+  summary: >-
+    The maintainer, reading the list of sentences the bar accepts: *"The optional verb should include staff as well in addition to assign, put, schedule, add, etc. Will this require you to code again?"* --- yes, one word --- then *"What other verbs can you think of?"* and, shown a list per sentence with the ones to leave out and why, *"Go with that list, make sure you hand it off to a sonnet agent."* Written as R-391 before the code, briefed, built by a Sonnet lane, checked verb by verb in the developer session.
+    ⭐ ONE COPY, EXPORTED. The four lists live in `parse.ts` as exported constants and the intent regexes are built from them; the training-set generator imports the same lists and draws its verbs from them (six templates whose ids name a verb keep it on purpose; the no-verb template stays verbless), so the model sees every verb and no file copies the list. Nineteen new verbs, each with its own named case; PV2 pins that the lists are disjoint and hold neither "shift" (a noun everywhere in this app) nor "change" (too broad); PV3 pins that "schedule" still means assign so nobody moves it to book without a decision.
+    ⭐ WIDENING ONLY. No existing case changed meaning, the shape sentence is unchanged, and the held-out set is untouched --- asserted by an empty diff, not assumed. Left for the model stage on purpose: verbs after the person ("Sam works on …") and split verbs ("take Sam off …").
+    ⭐ THE QUEUE IS UNCHANGED: every remaining item still needs the maintainer's decision (the model stages, the recogniser, the question catalog, the parked saving of typed sentences).
 - id: 150
   date: 2026-09-12
   title: "The scripts are linted --- and the session stops at the model stages, which need the maintainer"
