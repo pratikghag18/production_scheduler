@@ -29,7 +29,8 @@
     "db:push": "supabase db push",
     "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
     "voice:generate": "node scripts/voice/generate.mjs --out data/voice/train.jsonl --n 4000 --seed 1",
-    "voice:score": "node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --rule-parser --bar 0.95"
+    "voice:score": "node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --rule-parser --bar 0.95",
+    "voice:prepare": "node scripts/voice/train/prepare.mjs --train data/voice/train.jsonl --heldout data/voice/heldout.jsonl --out data/voice/colab"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
