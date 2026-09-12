@@ -803,6 +803,10 @@ export default function BoardPage() {
                   anchor,
                 });
               }}
+              // S41-b: no second door -- the SAME removal the assignment
+              // pop-up's own Delete button calls (`onDelete=
+              // {dragApi.removeAssignment}` below).
+              onUnassign={(resolved) => dragApi.removeAssignment(resolved.assignmentId)}
             />
           )}
           {boardQuery.data.nodes.length === 0 ? (

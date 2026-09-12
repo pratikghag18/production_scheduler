@@ -15,7 +15,13 @@ import type {
   BoardDay,
   Candidate,
 } from "@/lib/command/resolve";
-import type { AssignCommand, BookCommand, Attach, Existing } from "@/lib/command/parse";
+import type {
+  AssignCommand,
+  BookCommand,
+  UnassignCommand,
+  Attach,
+  Existing,
+} from "@/lib/command/parse";
 
 // ---------------------------------------------------------------------------
 // §5 fixture, verbatim.
@@ -190,17 +196,35 @@ function bookCmd(overrides: Partial<BookCommand> = {}): BookCommand {
   };
 }
 
+/** S41-b: "Unassign Operator 1 from Cell 1 in Line 1 from 10 to 14" -- the §9
+ *  unassign fixture, same cell/day/hours as `blk1`. */
+function unassignCmd(overrides: Partial<UnassignCommand> = {}): UnassignCommand {
+  return {
+    intent: "unassign",
+    operator: "Operator 1",
+    place: ["Cell 1", "Line 1"],
+    day: null,
+    span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+    existing: null,
+    ...overrides,
+  };
+}
+
 const R1_READOUT =
   "Operator 1 → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00";
 
 const RB1_READOUT = "Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 06:00–14:00";
 
-// R-385 §9 fixture blocks, verbatim.
+// R-385 §9 fixture blocks, verbatim. `productName` added for S41-b (brief
+// §3): the effective part's NAME, the same as its id -- contract changed,
+// CLAUDE.md §4 (`ContextAssignment` gained the field; nothing here reads it
+// except the new unassign cases below).
 const blk1: ContextAssignment = {
   id: "blk1",
   nodeId: "c1a",
   operatorId: "op1",
   productId: "ha",
+  productName: "Housing A",
   startMin: 3 * 1440 + 600,
   endMin: 3 * 1440 + 840,
   label: "10:00–14:00",
@@ -212,7 +236,13 @@ const blk2: ContextAssignment = {
   endMin: 3 * 1440 + 960,
   label: "14:00–16:00",
 };
-const blkHb: ContextAssignment = { ...blk1, id: "blkHb", productId: "hb", label: "10:00–14:00" };
+const blkHb: ContextAssignment = {
+  ...blk1,
+  id: "blkHb",
+  productId: "hb",
+  productName: "Housing B",
+  label: "10:00–14:00",
+};
 const blkSp: ContextAssignment = { ...blk1, id: "blkSp", operatorId: "sp" };
 const blkGone: ContextAssignment = { ...blk1, id: "blkGone", operatorId: null };
 const blkC2: ContextAssignment = { ...blk1, id: "blkC2", nodeId: "c2" };
@@ -938,5 +968,216 @@ describe("commandResolve: brief §5 worked examples", () => {
         same: false,
       },
     });
+  });
+});
+
+// -----------------------------------------------------------------------
+// S41-b: "unassign" (RU1-RU9), brief s41-b-unassign-brief.md §5.
+// -----------------------------------------------------------------------
+
+describe("commandResolve: S41-b unassign worked examples", () => {
+  it("RU1: the maintainer's sentence -- remove_which, verbatim, one candidate", () => {
+    const res = resolveCommand(unassignCmd(), withBlocks([blk1]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "10:00–14:00",
+        blocks: [{ id: "blk1", label: "Housing A 10:00–14:00", word: "", part: "Housing A" }],
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?",
+      );
+    }
+  });
+
+  it("RU2: answering remove blk1 -- ok, assignmentId blk1, readout verbatim", () => {
+    const existing = { kind: "remove" as const, assignmentId: "blk1" };
+    const res = resolveCommand(unassignCmd({ existing }), withBlocks([blk1]));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "unassign",
+        assignmentId: "blk1",
+        readout:
+          "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00",
+      },
+    });
+  });
+
+  it("RU3: no hours with two blocks -- remove_which, both candidates in board order", () => {
+    const res = resolveCommand(unassignCmd({ span: null }), withBlocks([blk1, blk2]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "2026-09-03",
+        blocks: [
+          { id: "blk1", label: "Housing A 10:00–14:00", word: "", part: "Housing A" },
+          { id: "blk2", label: "Housing A 14:00–16:00", word: "", part: "Housing A" },
+        ],
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 has 2 blocks on Cell 1 2026-09-03. Remove which?",
+      );
+    }
+  });
+
+  it("RU4: no_block, verbatim, whole-day and with hours", () => {
+    const wholeDay = resolveCommand(unassignCmd({ span: null }), withBlocks([]));
+    expect(wholeDay).toEqual({
+      ok: false,
+      question: {
+        kind: "no_block",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "2026-09-03",
+      },
+    });
+    if (!wholeDay.ok) {
+      expect(describeQuestion(wholeDay.question)).toBe(
+        "Operator 1 has no block on Cell 1 2026-09-03.",
+      );
+    }
+
+    const withHours = resolveCommand(unassignCmd(), withBlocks([]));
+    expect(withHours).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
+    });
+    if (!withHours.ok) {
+      expect(describeQuestion(withHours.question)).toBe(
+        "Operator 1 has no block on Cell 1 10:00–14:00.",
+      );
+    }
+  });
+
+  it("RU5: touching (not overlapping) at 14:00 -- no_block, half-open", () => {
+    const res = resolveCommand(
+      unassignCmd({ span: { start: { hour: 14, minute: 0 }, end: { hour: 16, minute: 0 } } }),
+      withBlocks([blk1]),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "14:00–16:00" },
+    });
+  });
+
+  it("RU6: another person's or another cell's block asks nothing but no_block", () => {
+    const bySp = resolveCommand(unassignCmd(), withBlocks([blkSp]));
+    expect(bySp).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
+    });
+    const byC2 = resolveCommand(unassignCmd(), withBlocks([blkC2]));
+    expect(byC2).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
+    });
+  });
+
+  it("RU7: a stale answer re-asks, never falls back, and reports block_gone_remove when the block vanished", () => {
+    const existing = { kind: "remove" as const, assignmentId: "blk9" };
+    const stillThere = resolveCommand(unassignCmd({ existing }), withBlocks([blk1]));
+    expect(stillThere.ok).toBe(false);
+    if (!stillThere.ok) expect(stillThere.question.kind).toBe("remove_which");
+
+    const gone = resolveCommand(unassignCmd({ existing }), withBlocks([]));
+    expect(gone).toEqual({
+      ok: false,
+      question: { kind: "block_gone_remove", person: "Operator 1", cell: "Cell 1" },
+    });
+    if (!gone.ok) {
+      expect(describeQuestion(gone.question)).toBe(
+        "That block of Operator 1's on Cell 1 is already gone.",
+      );
+    }
+  });
+
+  it("RU8: the assign path (R1, R34) and the book path (RB1, RB3) are byte-identical after the person-step extraction", () => {
+    const r1 = resolveCommand(cmd(), baseCtx({ runs: [] }));
+    expect(r1).toEqual({
+      ok: true,
+      resolved: {
+        intent: "assign",
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        target: { kind: "direct", productId: "ha" },
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
+        readout: R1_READOUT,
+      },
+    });
+
+    const r34 = resolveCommand(cmd({ end: { hour: 15, minute: 0 } }), withBlocks([blk1]));
+    expect(r34.ok).toBe(false);
+    if (!r34.ok) expect(r34.question.kind).toBe("block_exists");
+
+    const rb1 = resolveCommand(bookCmd(), baseCtx());
+    expect(rb1).toEqual({
+      ok: true,
+      resolved: {
+        intent: "book",
+        nodeId: "c1a",
+        productId: "ha",
+        target: { kind: "run_create", productId: "ha", headcount: null },
+        range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
+        readout: RB1_READOUT,
+      },
+    });
+
+    const rb3 = resolveCommand(bookCmd(), withRuns([run1]));
+    expect(rb3.ok).toBe(false);
+    if (!rb3.ok) expect(rb3.question.kind).toBe("job_exists");
+  });
+
+  it("RU9: whole-day span uses ctx.wallToOffset, never dayIndex * 1440 (DST stub)", () => {
+    // Under `wallToOffsetDst` (an hour lost overnight into day 1, R25's
+    // stub), tomorrow's (day 4) whole-day window is real minutes
+    // [4*1440-60, 4*1440+1440-60) = [5700, 7140). A block sitting exactly in
+    // the 60-minute gap that only the CORRECT (shifted) window covers --
+    // never `dayIndex * 1440`'s [5760, 7200) -- proves which arithmetic ran:
+    // `dayIndex * 1440` would miss it and report `no_block` (M46).
+    const blkDst: ContextAssignment = {
+      ...blk1,
+      id: "blkDst",
+      startMin: 5700,
+      endMin: 5760,
+      label: "in the DST gap",
+    };
+    const res = resolveCommand(
+      unassignCmd({ span: null, day: { kind: "tomorrow" } }),
+      withBlocks([blkDst], { wallToOffset: wallToOffsetDst }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.question.kind).toBe("remove_which");
+  });
+
+  it("RU10: a block with an unknown product reads 'block', never a doubled word", () => {
+    const blkUnknown: ContextAssignment = { ...blk1, id: "blkUnknown", productName: null };
+    const res = resolveCommand(unassignCmd(), withBlocks([blkUnknown]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "10:00–14:00",
+        blocks: [{ id: "blkUnknown", label: "block 10:00–14:00", word: "", part: null }],
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Remove Operator 1's block on Cell 1, 10:00–14:00?",
+      );
+    }
   });
 });

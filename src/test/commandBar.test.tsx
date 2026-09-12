@@ -24,6 +24,7 @@ import type {
   ResolveContext,
   ResolvedCommand,
   ResolvedBook,
+  ResolvedUnassign,
   ContextRun,
   ContextAssignment,
 } from "@/lib/command/resolve";
@@ -127,6 +128,7 @@ const BLK1: ContextAssignment = {
   nodeId: "c1a",
   operatorId: "op1",
   productId: "ha",
+  productName: "Housing A",
   startMin: 3 * 1440 + 600,
   endMin: 3 * 1440 + 840,
   label: "10:00–14:00",
@@ -134,18 +136,31 @@ const BLK1: ContextAssignment = {
 
 const P1_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
 const P1_RETIME_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 3";
-/** S41-a, brief §3: the two shapes in one sentence -- this changes a string
- *  C5/C6 test verbatim (contract changed, CLAUDE.md §4). */
+/** S41-a/S41-b, brief §3: the three shapes in one sentence -- this changes a
+ *  string C5/C6 test verbatim (contract changed, CLAUDE.md §4). */
 const SHAPE =
-  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time>";
+  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]";
 /** S41-a: RB1's sentence -- book, no run in the way, on/in/from 6 to 2. */
 const BOOK_SENTENCE = "book Housing A on Cell 1 in Line 1 from 6 to 2";
+/** S41-b: RU1's sentence -- names BLK1 exactly. */
+const UNASSIGN_SENTENCE = "Unassign Operator 1 from Cell 1 in Line 1 from 10 to 2";
+/** S41-b: no hours -- the whole day, RU3's shape with two blocks present. */
+const UNASSIGN_WHOLE_DAY_SENTENCE = "Unassign Operator 1 from Cell 1 in Line 1";
+/** S41-b: RU3's second block, right after BLK1. */
+const BLK2: ContextAssignment = {
+  ...BLK1,
+  id: "blk2",
+  startMin: 3 * 1440 + 840,
+  endMin: 3 * 1440 + 960,
+  label: "14:00–16:00",
+};
 
 function renderBar(over: Partial<ResolveContext> = {}) {
   const onOpen = vi.fn();
   const onRetime = vi.fn();
   const onBook = vi.fn();
   const onRetimeRun = vi.fn();
+  const onUnassign = vi.fn();
   render(
     <CommandBar
       ctx={buildCtx(over)}
@@ -155,10 +170,11 @@ function renderBar(over: Partial<ResolveContext> = {}) {
       onRetime={onRetime}
       onBook={onBook}
       onRetimeRun={onRetimeRun}
+      onUnassign={onUnassign}
     />,
   );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
-  return { onOpen, onRetime, onBook, onRetimeRun, input };
+  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, input };
 }
 
 /** The one `aria-live="polite"` status element (brief §6). */
@@ -475,5 +491,70 @@ describe("CommandBar (P1-7a, brief §9)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Book it" }));
     expect(onBook).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // S41-b: "unassign" (CU1-CU4), brief s41-b-unassign-brief.md §5.
+  // -------------------------------------------------------------------------
+
+  it("CU1: naming BLK1 exactly shows RU1's text and one 'Remove it' button, calls nothing", () => {
+    const { onOpen, onRetime, onBook, onRetimeRun, onUnassign, input } = renderBar({
+      assignments: [BLK1],
+    });
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?");
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    expect(screen.queryAllByRole("button")).toHaveLength(1);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).not.toHaveBeenCalled();
+    expect(onBook).not.toHaveBeenCalled();
+    expect(onRetimeRun).not.toHaveBeenCalled();
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CU2: pressing Remove it calls onUnassign once with blk1, input unchanged, readout shown", () => {
+    const { onUnassign, input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    expect(input.value).toBe(UNASSIGN_SENTENCE);
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+    expect(statusText()).toBe(
+      "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · " +
+        formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC") +
+        " · 10:00–14:00",
+    );
+  });
+
+  it("CU3: a no-hours sentence with two blocks shows two buttons labelled with part and hours", () => {
+    const { onUnassign, input } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: UNASSIGN_WHOLE_DAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.getByRole("button", { name: "Remove Housing A 10:00–14:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Housing A 14:00–16:00" })).toBeTruthy();
+    expect(onUnassign).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Housing A 14:00–16:00" }));
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk2");
+  });
+
+  it("CU4: the ISO day in a question is rendered through formatDayLabel, never raw", () => {
+    const { input } = renderBar({ assignments: [] });
+    fireEvent.change(input, { target: { value: UNASSIGN_WHOLE_DAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    const status = statusText();
+    expect(status).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(status).toBe(`Operator 1 has no block on Cell 1 ${dayLabel}.`);
   });
 });

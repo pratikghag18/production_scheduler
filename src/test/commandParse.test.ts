@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
-import type { AssignCommand, BookCommand, Command } from "@/lib/command/parse";
+import type { AssignCommand, BookCommand, UnassignCommand, Command } from "@/lib/command/parse";
 
 function ok(command: Command) {
   return { ok: true as const, command };
@@ -449,8 +449,124 @@ describe("commandParse: S41-a book-a-job worked examples", () => {
   });
 
   it("B11: expectedShape() is the exact two-shape sentence", () => {
+    // S41-b adds a third clause (contract changed, CLAUDE.md §4) -- see
+    // U8 in the unassign describe block below for the full three-shape text.
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time>",
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]",
     );
+  });
+});
+
+/**
+ * S41-b — the "unassign" grammar, brief docs/agent-briefs/
+ * s41-b-unassign-brief.md §5's worked examples (U1-U9), run verbatim, the
+ * same one-`it()`-per-case shape as the P- and B-cases above.
+ */
+describe("commandParse: S41-b unassign worked examples", () => {
+  function unassignOk(overrides: Partial<UnassignCommand> = {}): {
+    ok: true;
+    command: UnassignCommand;
+  } {
+    return {
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        ...overrides,
+      },
+    };
+  }
+
+  it("U1: Unassign Sam from Cell 1 in Line 1 from 10 to 2 -- operator, place, span", () => {
+    expect(parseCommand("Unassign Sam from Cell 1 in Line 1 from 10 to 2")).toEqual(
+      unassignOk({
+        place: ["Cell 1", "Line 1"],
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+      }),
+    );
+  });
+
+  it("U2: remove Sam from Cell 1 -- span null (no hours)", () => {
+    expect(parseCommand("remove Sam from Cell 1")).toEqual(unassignOk());
+  });
+
+  it("U3: clear Sam off Cell 1 on tomorrow -- day tomorrow, span null", () => {
+    expect(parseCommand("clear Sam off Cell 1 on tomorrow")).toEqual(
+      unassignOk({ day: { kind: "tomorrow" } }),
+    );
+  });
+
+  it("U4: unassign Sam from Cell 1 from 10 to 10:75 -- bad_time '10:75'", () => {
+    expect(parseCommand("unassign Sam from Cell 1 from 10 to 10:75")).toEqual({
+      ok: false,
+      failure: { kind: "bad_time", text: "10:75" },
+    });
+  });
+
+  it("U5: unassign from Cell 1 from 10 to 2 -- empty (no operator)", () => {
+    expect(parseCommand("unassign from Cell 1 from 10 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "empty" },
+    });
+  });
+
+  it("U6: unassign Sam from 10 to 2 -- no_place (the only 'from' is consumed by the time clause)", () => {
+    expect(parseCommand("unassign Sam from 10 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "no_place" },
+    });
+  });
+
+  it("U7: formatCommand round-trips U1 and U2", () => {
+    const u1 = parseCommand("Unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    if (!u1.ok) throw new Error("U1 must parse");
+    expect(parseCommand(formatCommand(u1.command))).toEqual(u1);
+
+    const u2 = parseCommand("remove Sam from Cell 1");
+    if (!u2.ok) throw new Error("U2 must parse");
+    expect(parseCommand(formatCommand(u2.command))).toEqual(u2);
+  });
+
+  it("U8: expectedShape() is the exact three-clause sentence", () => {
+    expect(expectedShape()).toBe(
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]",
+    );
+  });
+
+  it("U9: assign/book sentences still parse as before -- the first-word rule is unaffected", () => {
+    const assignResult = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(assignResult).toEqual({
+      ok: true,
+      command: {
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+      },
+    });
+
+    const bookResult = parseCommand("book Housing A on Cell 1 from 6 to 2");
+    expect(bookResult).toEqual({
+      ok: true,
+      command: {
+        intent: "book",
+        product: "Housing A",
+        place: ["Cell 1"],
+        headcount: null,
+        day: null,
+        start: { hour: 6, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        existing: null,
+      },
+    });
   });
 });

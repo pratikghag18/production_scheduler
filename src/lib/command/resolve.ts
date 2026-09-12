@@ -21,7 +21,7 @@
  * step, and the day-and-span step are shared by both intents through private
  * helpers (`resolveCellStep`, `resolvePartStep`, `resolveDaySpanStep`).
  */
-import type { AssignCommand, BookCommand, Command } from "./parse.ts";
+import type { AssignCommand, BookCommand, Command, UnassignCommand } from "./parse.ts";
 
 /** One day of the board's window, as the plant's calendar sees it. Built by
  *  `BoardPage` from `index.dayAxis.dayStarts` + `partsInZone(_, index.zone)`. */
@@ -49,6 +49,11 @@ export interface ContextAssignment {
   /** "10:00–14:00" in the plant's zone — the same `formatClock` pair the run label
    *  uses, without the name (the question sentence supplies person, part and cell). */
   label: string;
+  /** S41-b: the effective part's NAME (its own product for a direct block,
+   *  its run's product for a run-attached one — the same lookup that builds
+   *  `productId` above, one step further, in `commandAssignments`). null
+   *  when the id itself is null or the product is unknown. */
+  productName: string | null;
 }
 
 /** A run the board is showing, in the pop-up's own minute coordinates. */
@@ -166,12 +171,32 @@ export interface ResolvedBook {
   readout: string;
 }
 
+/**
+ * S41-b (docs/agent-briefs/s41-b-unassign-brief.md §3): "Unassign Sam from
+ * Cell 1 in Line 1 from 10 to 2" resolves to the ONE existing block it names
+ * -- never a create, never written by this module. The pressed button's
+ * answer is `assignmentId`; the caller removes it through the SAME
+ * `dragApi.removeAssignment` the block's own Delete button calls.
+ */
+export interface ResolvedUnassign {
+  intent: "unassign";
+  assignmentId: string;
+  /** "Removing Sam Patel's Housing A block · Plant 1 › Assembly › Line 1 ›
+   *  Cell 1 · 2026-09-03 · 10:00–14:00" */
+  readout: string;
+}
+
 export type Candidate = {
   id: string;
   label: string;
   /** What to put in the sentence when this button is pressed ("" for a run: the
    *  answer goes into `attach`, not the sentence). */
   word: string;
+  /** S41-b: the block's effective part NAME, `null` when unknown -- ONLY set
+   *  by the unassign path's `remove_which` candidates, so the one-block
+   *  message doesn't have to recover it by parsing `label` back apart.
+   *  Every other question leaves this undefined. */
+  part?: string | null;
 };
 
 export type Question =
@@ -222,10 +247,21 @@ export type Question =
   | { kind: "job_in_the_way"; product: string; cell: string; other: string }
   /** S41-a: `command.existing` names a job that is no longer on this cell and
    *  no other job overlaps — the board changed under the question. */
-  | { kind: "job_gone"; product: string; cell: string };
+  | { kind: "job_gone"; product: string; cell: string }
+  /** S41-b / R-388: the blocks the sentence names, each a button; `same` is
+   *  irrelevant here (a removal, never a re-time). */
+  | { kind: "remove_which"; person: string; cell: string; when: string; blocks: Candidate[] }
+  /** S41-b: no block of this person's on this cell (for the sentence's
+   *  hours, or the whole day when it gave none) — nothing to remove. */
+  | { kind: "no_block"; person: string; cell: string; when: string }
+  /** S41-b: `command.existing` names a block that is no longer among the
+   *  hits and no other block overlaps — the board changed under the
+   *  question. */
+  | { kind: "block_gone_remove"; person: string; cell: string };
 
 export type Resolution =
-  { ok: true; resolved: ResolvedCommand | ResolvedBook } | { ok: false; question: Question };
+  | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign }
+  | { ok: false; question: Question };
 
 // ---------------------------------------------------------------------------
 // Private helpers. None of these are exported; nothing here is a copy of a
@@ -486,9 +522,47 @@ function resolveDaySpanStep(
   return { ok: true, dayIndex, startMin, endMin, timeText };
 }
 
-/** The assign path (unchanged in meaning from before S41-a): cell, part,
- *  person, day and span, the own-block question (R-385), the run question
- *  (R-383), then the readout. */
+type OperatorLike = ResolveContext["operators"][number];
+
+/** Step (assign AND unassign, S41-b brief §2: extracted rather than
+ *  duplicated so the assign path's own meaning is untouched): match the
+ *  person word against active operators, name first then employeeRef —
+ *  exactly brief §5's tiers, unchanged from the pre-S41-b inline step 3 of
+ *  `resolveAssignCommand`. */
+function resolvePersonStep(
+  operatorWord: string,
+  ctx: ResolveContext,
+): { ok: true; operator: OperatorLike } | { ok: false; question: Question } {
+  const activeOperators = ctx.operators.filter((o) => o.active);
+  let operatorHits = matchName(operatorWord, activeOperators, (o) => o.displayName);
+  if (operatorHits.length === 0) {
+    const withRef = activeOperators.filter((o) => o.employeeRef !== null);
+    operatorHits = matchName(operatorWord, withRef, (o) => o.employeeRef as string);
+  }
+  if (operatorHits.length === 0) {
+    return { ok: false, question: { kind: "unknown", field: "operator", text: operatorWord } };
+  }
+  if (operatorHits.length > 1) {
+    return {
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "operator",
+        text: operatorWord,
+        candidates: operatorHits.map((o) => ({
+          id: o.id,
+          label: o.displayName,
+          word: o.displayName,
+        })),
+      },
+    };
+  }
+  return { ok: true, operator: operatorHits[0] };
+}
+
+/** The assign path (unchanged in meaning from before S41-a/S41-b): cell,
+ *  part, person (shared, `resolvePersonStep`), day and span, the own-block
+ *  question (R-385), the run question (R-383), then the readout. */
 function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Resolution {
   const byPath = buildPathIndex(ctx.nodeById);
 
@@ -502,32 +576,10 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
   if (!partResult.ok) return { ok: false, question: partResult.question };
   const product = partResult.product;
 
-  // 3. Person.
-  const activeOperators = ctx.operators.filter((o) => o.active);
-  let operatorHits = matchName(command.operator, activeOperators, (o) => o.displayName);
-  if (operatorHits.length === 0) {
-    const withRef = activeOperators.filter((o) => o.employeeRef !== null);
-    operatorHits = matchName(command.operator, withRef, (o) => o.employeeRef as string);
-  }
-  if (operatorHits.length === 0) {
-    return { ok: false, question: { kind: "unknown", field: "operator", text: command.operator } };
-  }
-  if (operatorHits.length > 1) {
-    return {
-      ok: false,
-      question: {
-        kind: "ambiguous",
-        field: "operator",
-        text: command.operator,
-        candidates: operatorHits.map((o) => ({
-          id: o.id,
-          label: o.displayName,
-          word: o.displayName,
-        })),
-      },
-    };
-  }
-  const operator = operatorHits[0];
+  // 3. Person (shared with unassign, S41-b: resolvePersonStep).
+  const personResult = resolvePersonStep(command.operator, ctx);
+  if (!personResult.ok) return { ok: false, question: personResult.question };
+  const operator = personResult.operator;
 
   // 4. Day and span.
   const spanResult = resolveDaySpanStep(command.day, command.start, command.end, ctx);
@@ -757,15 +809,118 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
   };
 }
 
+/**
+ * S41-b — the unassign path: cell, person (shared, `resolvePersonStep`), day
+ * and span, then the block(s) to remove (brief §3/§6). `command.span ===
+ * null` means "the whole day": `ctx.wallToOffset(dayIndex, 0)` through
+ * `ctx.wallToOffset(dayIndex, 24 * 60)` — `wallToOffset` accepts a
+ * minute-of-day past 1440 directly (`src/features/board/lib/time.ts`'s own
+ * doc comment: "the excess carries into the following day"), so no special
+ * case is needed even on the window's last day; the minimum-duration check
+ * (part of `resolveDaySpanStep`) does not apply to the whole-day case since
+ * it never calls that step.
+ */
+function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): Resolution {
+  const byPath = buildPathIndex(ctx.nodeById);
+
+  // 1. Cell.
+  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  if (!cellResult.ok) return { ok: false, question: cellResult.question };
+  const cell = cellResult.cell;
+
+  // 2. Person (shared with assign).
+  const personResult = resolvePersonStep(command.operator, ctx);
+  if (!personResult.ok) return { ok: false, question: personResult.question };
+  const operator = personResult.operator;
+
+  // 3. Day and span.
+  let dayIndex: number;
+  let startMin: number;
+  let endMin: number;
+  let whenText: string;
+  if (command.span !== null) {
+    const spanResult = resolveDaySpanStep(command.day, command.span.start, command.span.end, ctx);
+    if (!spanResult.ok) return { ok: false, question: spanResult.question };
+    dayIndex = spanResult.dayIndex;
+    startMin = spanResult.startMin;
+    endMin = spanResult.endMin;
+    whenText = spanResult.timeText;
+  } else {
+    const dayResolution = resolveDay(command.day, ctx);
+    if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
+    dayIndex = dayResolution.dayIndex;
+    startMin = ctx.wallToOffset(dayIndex, 0);
+    endMin = ctx.wallToOffset(dayIndex, 24 * 60);
+    whenText = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+  }
+
+  // 4. The block(s) -- brief §3: NO product filter (the sentence never names
+  // a part), just person, cell and overlap.
+  const hits = ctx.assignments.filter(
+    (x) =>
+      x.nodeId === cell.id && x.operatorId === operator.id && ctx.overlaps({ startMin, endMin }, x),
+  );
+  const blockCandidates = (): Candidate[] =>
+    hits.map((x) => ({
+      id: x.id,
+      label: `${x.productName ?? "block"} ${x.label}`,
+      word: "",
+      part: x.productName,
+    }));
+  const askRemoveWhich = (): Resolution => ({
+    ok: false,
+    question: {
+      kind: "remove_which",
+      person: operator.displayName,
+      cell: cell.name,
+      when: whenText,
+      blocks: blockCandidates(),
+    },
+  });
+
+  if (command.existing === null) {
+    if (hits.length === 0) {
+      return {
+        ok: false,
+        question: {
+          kind: "no_block",
+          person: operator.displayName,
+          cell: cell.name,
+          when: whenText,
+        },
+      };
+    }
+    return askRemoveWhich();
+  }
+  const hit = hits.find((x) => x.id === command.existing!.assignmentId) ?? null;
+  if (!hit) {
+    if (hits.length > 0) return askRemoveWhich(); // the board changed: re-ask, never guess
+    return {
+      ok: false,
+      question: { kind: "block_gone_remove", person: operator.displayName, cell: cell.name },
+    };
+  }
+
+  // Readout.
+  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
+  const chain = [...ancestorNames, cell.name].join(" › ");
+  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+  const readout = `Removing ${operator.displayName}'s ${hit.productName ?? "block"} block · ${chain} · ${iso} · ${hit.label}`;
+
+  return { ok: true, resolved: { intent: "unassign", assignmentId: hit.id, readout } };
+}
+
 /** Order of resolution: cell, then part, then (assign only) person, then day
  *  and span, then the job/run/own-block question(s) (brief §5, extended by
- *  §3 for `book`). One question at a time. Dispatches on `command.intent`;
- *  the assign path's own meaning is untouched by this dispatch.
+ *  §3 for `book`, and S41-b for `unassign`). One question at a time.
+ *  Dispatches on `command.intent`; the assign and book paths' own meaning
+ *  are untouched by this dispatch.
  *
  * Overloaded (not just typed as `Command -> Resolution`) so a caller holding
- * a concrete `AssignCommand` or `BookCommand` — every existing test's `cmd()`
- * fixture, for one — gets back the narrower result type without a cast; only
- * `CommandBar`, which holds the `Command` union, sees the full `Resolution`.
+ * a concrete `AssignCommand`, `BookCommand` or `UnassignCommand` — every
+ * existing test's `cmd()`/`bookCmd()` fixture, for one — gets back the
+ * narrower result type without a cast; only `CommandBar`, which holds the
+ * `Command` union, sees the full `Resolution`.
  */
 export function resolveCommand(
   command: AssignCommand,
@@ -775,9 +930,14 @@ export function resolveCommand(
   command: BookCommand,
   ctx: ResolveContext,
 ): { ok: true; resolved: ResolvedBook } | { ok: false; question: Question };
+export function resolveCommand(
+  command: UnassignCommand,
+  ctx: ResolveContext,
+): { ok: true; resolved: ResolvedUnassign } | { ok: false; question: Question };
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution;
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution {
   if (command.intent === "book") return resolveBookCommand(command, ctx);
+  if (command.intent === "unassign") return resolveUnassignCommand(command, ctx);
   return resolveAssignCommand(command, ctx);
 }
 
@@ -828,5 +988,27 @@ export function describeQuestion(q: Question): string {
       return `${q.cell} already runs ${q.other}; a cell runs one job at a time. Pick other hours, or change that job on the board.`;
     case "job_gone":
       return `That ${q.product} job on ${q.cell} is no longer on the board. Book it again?`;
+    case "remove_which": {
+      if (q.blocks.length === 1) {
+        const candidate = q.blocks[0];
+        // The candidate's own `part` (S41-b), never recovered by parsing
+        // `label` back apart -- `label` stays the combined "<part> <time>"
+        // string the many-block buttons read, so only the KNOWN prefix
+        // (`part` plus one space, or the "block" fallback) is stripped to
+        // get the bare time back out.
+        const prefix = `${candidate.part ?? "block"} `;
+        const when = candidate.label.startsWith(prefix)
+          ? candidate.label.slice(prefix.length)
+          : candidate.label;
+        return candidate.part
+          ? `Remove ${q.person}'s ${candidate.part} block on ${q.cell}, ${when}?`
+          : `Remove ${q.person}'s block on ${q.cell}, ${when}?`;
+      }
+      return `${q.person} has ${q.blocks.length} blocks on ${q.cell} ${q.when}. Remove which?`;
+    }
+    case "no_block":
+      return `${q.person} has no block on ${q.cell} ${q.when}.`;
+    case "block_gone_remove":
+      return `That block of ${q.person}'s on ${q.cell} is already gone.`;
   }
 }

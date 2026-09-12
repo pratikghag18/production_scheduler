@@ -69,6 +69,25 @@ export interface AssignCommand {
 }
 
 /**
+ * S41-b (docs/agent-briefs/s41-b-unassign-brief.md §3): "Unassign Sam from
+ * Cell 1 in Line 1 from 10 to 2" -- removes an existing block, the same
+ * removal the block's own Delete button does. `span: null` means the whole
+ * day: every block of that person's on that cell that day.
+ */
+export interface UnassignCommand {
+  intent: "unassign";
+  /** The words the person used, trimmed, original case. NEVER an id. */
+  operator: string;
+  /** Place words, most specific first — same shape as `AssignCommand.place`. At least one. */
+  place: string[];
+  day: DayWord | null;
+  /** null when the sentence gave no hours: the whole day. */
+  span: { start: ClockTime; end: ClockTime } | null;
+  /** The pressed button's answer; null until asked. */
+  existing: { kind: "remove"; assignmentId: string } | null;
+}
+
+/**
  * S41-a — "book a job": the sentence names a PART, a CELL and a SPAN, never a
  * person (brief docs/agent-briefs/s41-a-book-a-job-brief.md §3).
  */
@@ -87,7 +106,7 @@ export interface BookCommand {
   existing: { kind: "retime"; runId: string } | null;
 }
 
-export type Command = AssignCommand | BookCommand;
+export type Command = AssignCommand | BookCommand | UnassignCommand;
 
 export type ParseFailure =
   | { kind: "empty" }
@@ -116,6 +135,9 @@ const VERBS = ["assign", "put", "schedule", "add"];
 
 /** S41-a: the first word decides book vs assign. */
 const BOOK_VERB_RE = /^(book|run)\b\s*/i;
+
+/** S41-b: the first word decides unassign vs everything else. */
+const UNASSIGN_VERB_RE = /^(unassign|remove|clear)\b\s*/i;
 
 const WEEKDAY_ALTS =
   "mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?";
@@ -205,6 +227,43 @@ function totalMinutes(t: { hour: number; minute: number }): number {
   return t.hour * 60 + t.minute;
 }
 
+/**
+ * S41-b: the day word, extracted from the END of `text` — moved out of
+ * `parseTimeAndDay`'s step 3 unchanged (brief §3: "the day word as today")
+ * so `parseUnassignRest`, which has no mandatory time clause to anchor day
+ * detection on, shares it instead of retyping the ISO/weekday logic.
+ */
+function extractDayWord(
+  text: string,
+): { ok: true; rest: string; day: DayWord | null } | { ok: false; failure: ParseFailure } {
+  let rest = text;
+  let day: DayWord | null = null;
+  const dayMatch = rest.match(DAY_TAIL_RE);
+  if (dayMatch) {
+    const word = dayMatch[3];
+    const lowerWord = word.toLowerCase();
+    const isoMatch = word.match(ISO_DATE_RE);
+    if (isoMatch) {
+      const year = Number(isoMatch[1]);
+      const month = Number(isoMatch[2]);
+      const dayOfMonth = Number(isoMatch[3]);
+      if (!isRealDate(year, month, dayOfMonth)) {
+        return { ok: false, failure: { kind: "bad_day", text: word } };
+      }
+      day = { kind: "date", iso: word };
+    } else if (lowerWord === "today") {
+      day = { kind: "today" };
+    } else if (lowerWord === "tomorrow") {
+      day = { kind: "tomorrow" };
+    } else {
+      const weekday = WEEKDAY_MAP[lowerWord];
+      day = { kind: "weekday", day: weekday };
+    }
+    rest = rest.slice(0, dayMatch.index).trim();
+  }
+  return { ok: true, rest, day };
+}
+
 function isRealDate(year: number, month: number, day: number): boolean {
   if (month < 1 || month > 12) return false;
   if (day < 1) return false;
@@ -257,37 +316,14 @@ function parseTimeAndDay(
     return { ok: false, failure: { kind: "time_order" } };
   }
 
-  // 3. Day word, immediately before the time clause.
-  let rest = beforeFrom;
-  let day: DayWord | null = null;
-  const dayMatch = rest.match(DAY_TAIL_RE);
-  if (dayMatch) {
-    const word = dayMatch[3];
-    const lowerWord = word.toLowerCase();
-    const isoMatch = word.match(ISO_DATE_RE);
-    if (isoMatch) {
-      const year = Number(isoMatch[1]);
-      const month = Number(isoMatch[2]);
-      const dayOfMonth = Number(isoMatch[3]);
-      if (!isRealDate(year, month, dayOfMonth)) {
-        return { ok: false, failure: { kind: "bad_day", text: word } };
-      }
-      day = { kind: "date", iso: word };
-    } else if (lowerWord === "today") {
-      day = { kind: "today" };
-    } else if (lowerWord === "tomorrow") {
-      day = { kind: "tomorrow" };
-    } else {
-      const weekday = WEEKDAY_MAP[lowerWord];
-      day = { kind: "weekday", day: weekday };
-    }
-    rest = rest.slice(0, dayMatch.index).trim();
-  }
+  // 3. Day word, immediately before the time clause (shared, S41-b: extractDayWord).
+  const dayResult = extractDayWord(beforeFrom);
+  if (!dayResult.ok) return dayResult;
 
   return {
     ok: true,
-    rest,
-    day,
+    rest: dayResult.rest,
+    day: dayResult.day,
     start: { hour: start.hour, minute: start.minute },
     end: { hour: end.hour, minute: end.minute },
   };
@@ -406,15 +442,122 @@ function parseBookRest(
   };
 }
 
-/** `assign <op> to <product> on <place1>...` or `book <product> on <place1>...`
- *  (brief §3/§4). Case-insensitive, whitespace collapsed, a trailing `.`
- *  ignored, double-quoted segments atomic. The FIRST WORD decides the intent:
- *  `book`/`run` -> book; anything else (including no verb at all) -> assign. */
+/**
+ * S41-b: the unassign grammar's time clause is OPTIONAL and `from` doubles
+ * as the operator/place preposition (brief §3), so this is its own
+ * extraction rather than `parseTimeAndDay`'s (mandatory-time-clause) one:
+ * take the LAST "from" in `text`; if what follows it parses as
+ * `<time> <sep> <time>`, that is the time clause; otherwise there is no time
+ * clause at all and `text` is returned unchanged (never `no_time`).
+ */
+function extractOptionalTimeClause(
+  text: string,
+):
+  | { ok: true; rest: string; span: { start: ClockTime; end: ClockTime } | null }
+  | { ok: false; failure: ParseFailure } {
+  const fromRe = /\bfrom\b/gi;
+  let lastFrom = -1;
+  let fm: RegExpExecArray | null;
+  while ((fm = fromRe.exec(text)) !== null) {
+    lastFrom = fm.index;
+  }
+  if (lastFrom === -1) return { ok: true, rest: text, span: null };
+
+  const beforeFrom = text.slice(0, lastFrom).trim();
+  const timeClauseText = text.slice(lastFrom + "from".length).trim();
+  const timeMatch = timeClauseText.match(/^(.+?)\s+(to|-|–|until|till)\s+(.+)$/i);
+  if (!timeMatch) return { ok: true, rest: text, span: null };
+  const [, startRaw, , endRaw] = timeMatch;
+
+  const start = parseTimeToken(startRaw);
+  if (!start) return { ok: false, failure: { kind: "bad_time", text: startRaw.trim() } };
+  let end = parseTimeToken(endRaw);
+  if (!end) return { ok: false, failure: { kind: "bad_time", text: endRaw.trim() } };
+
+  if (!end.hasMeridiem && !(totalMinutes(end) > totalMinutes(start))) {
+    end = { ...end, hour: (end.hour + 12) % 24 };
+  }
+  if (!(totalMinutes(end) > totalMinutes(start))) {
+    return { ok: false, failure: { kind: "time_order" } };
+  }
+
+  return {
+    ok: true,
+    rest: beforeFrom,
+    span: {
+      start: { hour: start.hour, minute: start.minute },
+      end: { hour: end.hour, minute: end.minute },
+    },
+  };
+}
+
+/** S41-b: splits "<operator> (from|off|on|at) <place>..." on the FIRST of
+ *  those four words (brief §3) -- the unassign grammar's own operator/place
+ *  separator set (wider than assign's, which has no "off"). */
+function splitOperatorPlaces(text: string): { operator: string; placesText: string } {
+  const sepMatch = text.match(/\bfrom\b|\boff\b|\bon\b|\bat\b/i);
+  if (!sepMatch || sepMatch.index === undefined) {
+    return { operator: text.trim(), placesText: "" };
+  }
+  return {
+    operator: text.slice(0, sepMatch.index).trim(),
+    placesText: text.slice(sepMatch.index + sepMatch[0].length).trim(),
+  };
+}
+
+/**
+ * S41-b: "unassign <op> from <cell> [in <line>] [on <day>] [from <time> to
+ * <time>]" (brief §3). `rest` is the text after the verb has been stripped.
+ */
+function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
+  const tc = extractOptionalTimeClause(rest);
+  if (!tc.ok) return tc;
+
+  const dayResult = extractDayWord(tc.rest);
+  if (!dayResult.ok) return dayResult;
+
+  const { operator: operatorPart, placesText } = splitOperatorPlaces(dayResult.rest);
+  if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
+  if (placesText === "") return { ok: false, failure: { kind: "no_place" } };
+
+  const pieces = splitProductPlaces(placesText);
+  if (pieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+
+  const operator = restoreQuotes(operatorPart, quotes);
+  const place = pieces.map((p) => restoreQuotes(p, quotes));
+
+  return {
+    ok: true,
+    command: {
+      intent: "unassign",
+      operator,
+      place,
+      day: dayResult.day,
+      span: tc.span,
+      existing: null,
+    },
+  };
+}
+
+/** `assign <op> to <product> on <place1>...`, `book <product> on <place1>...`
+ *  or `unassign <op> from <place1>...` (brief §3/§4). Case-insensitive,
+ *  whitespace collapsed, a trailing `.` ignored, double-quoted segments
+ *  atomic. The FIRST WORD decides the intent: `unassign`/`remove`/`clear` ->
+ *  unassign; `book`/`run` -> book; anything else (including no verb at all)
+ *  -> assign. */
 export function parseCommand(text: string): ParseResult {
   const { text: quoted, quotes } = extractQuotes(text);
   let norm = quoted.replace(/\s+/g, " ").trim();
   if (norm.endsWith(".")) norm = norm.slice(0, -1).trim();
   if (norm === "") return { ok: false, failure: { kind: "empty" } };
+
+  // S41-b: decided before the mandatory-time-clause path runs -- the
+  // unassign grammar's time clause is OPTIONAL, so it cannot share
+  // `parseTimeAndDay`'s "no_time" requirement.
+  const unassignVerbMatch = norm.match(UNASSIGN_VERB_RE);
+  if (unassignVerbMatch) {
+    return parseUnassignRest(norm.slice(unassignVerbMatch[0].length), quotes);
+  }
 
   const td = parseTimeAndDay(norm);
   if (!td.ok) return td;
@@ -497,6 +640,31 @@ function formatBookCommand(command: BookCommand): string {
 }
 
 /**
+ * S41-b: the canonical sentence for an `UnassignCommand` — `unassign <person>
+ * from <cell> [in <line>] [on <day>] [from HH:MM to HH:MM]`. Does NOT print
+ * `existing`; the time clause is printed only when `span` is not null.
+ */
+function formatUnassignCommand(command: UnassignCommand): string {
+  const parts: string[] = ["unassign", quoteIfNeeded(command.operator)];
+  parts.push("from", quoteIfNeeded(command.place[0]));
+  for (let i = 1; i < command.place.length; i++) {
+    parts.push("in", quoteIfNeeded(command.place[i]));
+  }
+  if (command.day) {
+    parts.push("on", dayToCanonicalText(command.day));
+  }
+  if (command.span) {
+    parts.push(
+      "from",
+      `${pad2(command.span.start.hour)}:${pad2(command.span.start.minute)}`,
+      "to",
+      `${pad2(command.span.end.hour)}:${pad2(command.span.end.minute)}`,
+    );
+  }
+  return parts.join(" ");
+}
+
+/**
  * The canonical sentence for a `Command` — the inverse of `parseCommand` for
  * whichever shape the command's `intent` names. The bar rebuilds the input
  * from this after a candidate button is pressed. Never prints `attach` or
@@ -504,11 +672,12 @@ function formatBookCommand(command: BookCommand): string {
  */
 export function formatCommand(command: Command): string {
   if (command.intent === "book") return formatBookCommand(command);
+  if (command.intent === "unassign") return formatUnassignCommand(command);
   return formatAssignCommand(command);
 }
 
-/** The one sentence the bar shows when parsing fails (brief §3: the two
- *  shapes in one sentence). */
+/** The one sentence the bar shows when parsing fails (brief §3: the three
+ *  shapes in one sentence, S41-b adds the third). */
 export function expectedShape(): string {
-  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time>";
+  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]";
 }

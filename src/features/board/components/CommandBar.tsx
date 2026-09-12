@@ -7,6 +7,7 @@ import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse"
 import type {
   AssignCommand,
   BookCommand,
+  UnassignCommand,
   Command,
   Attach,
   Existing,
@@ -17,6 +18,7 @@ import type {
   ResolveContext,
   ResolvedCommand,
   ResolvedBook,
+  ResolvedUnassign,
   Question,
   Candidate,
 } from "@/lib/command/resolve";
@@ -41,6 +43,11 @@ import type {
  * `onRetimeRun(resolved, anchor)` for R-387's "change that job's hours?"
  * answer (the caller re-times the job through the drag's own re-time
  * function). Same rule, same audit: nothing here writes anything.
+ *
+ * S41-b (docs/agent-briefs/s41-b-unassign-brief.md) adds the "unassign"
+ * intent and one more callback, `onUnassign(resolved, anchor)`: the caller
+ * removes the named block through the SAME `dragApi.removeAssignment` the
+ * block's own Delete button calls. No second door here either.
  *
  * The bar holds no rule of its own: parsing is `parseCommand`/`formatCommand`
  * (`src/lib/command/parse.ts`), resolving is `resolveCommand`/`describeQuestion`
@@ -83,6 +90,10 @@ export interface CommandBarProps {
    *  re-times the job through the drag's own re-time path; nothing is
    *  created. */
   onRetimeRun: (resolved: ResolvedBook, anchor: { x: number; y: number }) => void;
+  /** S41-b / R-388: an "unassign" sentence resolved to the one block it
+   *  names — the caller removes it through the SAME `dragApi.removeAssignment`
+   *  the block's own Delete button calls. Nothing is created or re-timed. */
+  onUnassign: (resolved: ResolvedUnassign, anchor: { x: number; y: number }) => void;
 }
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -113,6 +124,7 @@ export function CommandBar({
   onRetime,
   onBook,
   onRetimeRun,
+  onUnassign,
 }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
@@ -146,6 +158,8 @@ export function CommandBar({
         } else {
           onBook(resolved, anchorOfInput());
         }
+      } else if (resolved.intent === "unassign") {
+        onUnassign(resolved, anchorOfInput());
       } else {
         if (resolved.target.kind === "retime") {
           onRetime(resolved, anchorOfInput());
@@ -164,14 +178,20 @@ export function CommandBar({
     field: "operator" | "product" | "place",
     candidate: Candidate,
   ): void {
-    // "operator" only ever comes from an AssignCommand's own ambiguous
-    // question (a `BookCommand` has no operator field) — the cast mirrors
-    // that invariant rather than re-deriving it from `command.intent`.
+    // "operator" only ever comes from an AssignCommand's ambiguous question
+    // (a `BookCommand` has no operator field, and an `UnassignCommand`'s
+    // ambiguous-operator question re-resolves through its own `operator`
+    // field below rather than this cast). "product" only ever comes from
+    // AssignCommand or BookCommand (S41-b: unassign names no part at all).
+    // Both casts mirror those invariants rather than re-deriving them from
+    // `command.intent`.
     const next: Command =
       field === "operator"
-        ? { ...(command as AssignCommand), operator: candidate.word }
+        ? command.intent === "unassign"
+          ? { ...command, operator: candidate.word }
+          : { ...(command as AssignCommand), operator: candidate.word }
         : field === "product"
-          ? { ...command, product: candidate.word }
+          ? { ...(command as AssignCommand | BookCommand), product: candidate.word }
           : { ...command, place: [candidate.word] };
     const rendered = formatCommand(next);
     setText(rendered);
@@ -203,12 +223,19 @@ export function CommandBar({
    */
   function pickExisting(command: AssignCommand, existing: Existing): void;
   function pickExisting(command: BookCommand, existing: BookCommand["existing"]): void;
-  function pickExisting(command: Command, existing: Existing | BookCommand["existing"]): void {
+  function pickExisting(command: UnassignCommand, existing: UnassignCommand["existing"]): void;
+  function pickExisting(
+    command: Command,
+    existing: Existing | BookCommand["existing"] | UnassignCommand["existing"],
+  ): void {
     runCommand({ ...command, existing } as Command);
   }
 
   function questionToStatus(question: Question, command: Command): Status {
-    const message = describeQuestion(question);
+    // CU4 (S41-b brief §5): a question's message can carry an ISO day too
+    // (`remove_which`/`no_block`'s whole-day `when`) -- the same
+    // `renderReadout` substitution the successful-open readout gets.
+    const message = renderReadout(describeQuestion(question));
     if (question.kind === "ambiguous") {
       const field = question.field;
       return {
@@ -313,6 +340,37 @@ export function CommandBar({
           },
         ],
       };
+    }
+    if (question.kind === "remove_which") {
+      // Only ever asked from the unassign path (S41-b).
+      const unassignCommand = command as UnassignCommand;
+      if (question.blocks.length === 1) {
+        const only = question.blocks[0];
+        return {
+          kind: "question",
+          message,
+          candidates: [
+            {
+              key: only.id,
+              label: "Remove it",
+              onClick: () =>
+                pickExisting(unassignCommand, { kind: "remove", assignmentId: only.id }),
+            },
+          ],
+        };
+      }
+      return {
+        kind: "question",
+        message,
+        candidates: question.blocks.map((b) => ({
+          key: b.id,
+          label: `Remove ${b.label}`,
+          onClick: () => pickExisting(unassignCommand, { kind: "remove", assignmentId: b.id }),
+        })),
+      };
+    }
+    if (question.kind === "no_block" || question.kind === "block_gone_remove") {
+      return { kind: "question", message, candidates: [] };
     }
     return { kind: "question", message, candidates: [] };
   }

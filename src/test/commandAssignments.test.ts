@@ -10,6 +10,7 @@
  */
 import { describe, it, expect } from "vitest";
 import type { BoardIndex, IndexedAssignment, IndexedRun } from "@/features/board/lib/boardIndex";
+import type { Product } from "@/lib/api";
 import { commandAssignments } from "@/features/board/lib/commandAssignments";
 
 const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
@@ -67,13 +68,28 @@ function baseRun(overrides: Partial<IndexedRun> = {}): IndexedRun {
   };
 }
 
+function baseProduct(overrides: Partial<Product> = {}): Product {
+  return {
+    id: "prod-1",
+    sku: "SKU-1",
+    name: "Housing A",
+    active: true,
+    siteNodeIds: [],
+    offeredNodeIds: [],
+    colorToken: "",
+    ...overrides,
+  };
+}
+
 function indexOf(
   assignments: IndexedAssignment[],
   runs: IndexedRun[] = [],
-): Pick<BoardIndex, "assignmentById" | "runById" | "windowStart" | "zone"> {
+  products: Product[] = [],
+): Pick<BoardIndex, "assignmentById" | "runById" | "productById" | "windowStart" | "zone"> {
   return {
     assignmentById: new Map(assignments.map((a) => [a.id, a] as const)),
     runById: new Map(runs.map((r) => [r.id, r] as const)),
+    productById: new Map(products.map((p) => [p.id, p] as const)),
     windowStart: WINDOW_START,
     zone: "UTC",
   };
@@ -82,7 +98,7 @@ function indexOf(
 describe("commandAssignments (R-385, brief §7)", () => {
   it("A1: a direct block carries its own product and a '06:00-10:00' label", () => {
     const a = baseAssignment({ productId: "prod-1", runId: null, startMin: 360, endMin: 600 });
-    const out = commandAssignments(indexOf([a]));
+    const out = commandAssignments(indexOf([a], [], [baseProduct({ id: "prod-1" })]));
     expect(out).toEqual([
       {
         id: "asg-1",
@@ -92,6 +108,7 @@ describe("commandAssignments (R-385, brief §7)", () => {
         startMin: 360,
         endMin: 600,
         label: "06:00–10:00",
+        productName: "Housing A",
       },
     ]);
   });
@@ -113,5 +130,32 @@ describe("commandAssignments (R-385, brief §7)", () => {
     const a = baseAssignment({ productId: null, runId: "run-missing" });
     const out = commandAssignments(indexOf([a], []));
     expect(out[0].productId).toBe(null);
+  });
+
+  // -------------------------------------------------------------------------
+  // S41-b: `productName`, brief s41-b-unassign-brief.md §3/§5 (A5-A7).
+  // -------------------------------------------------------------------------
+
+  it("A5: the direct block carries its product's name", () => {
+    const a = baseAssignment({ productId: "prod-1", runId: null });
+    const out = commandAssignments(
+      indexOf([a], [], [baseProduct({ id: "prod-1", name: "Housing A" })]),
+    );
+    expect(out[0].productName).toBe("Housing A");
+  });
+
+  it("A6: the run-attached block carries its run's product's name", () => {
+    const a = baseAssignment({ productId: null, runId: "run-1" });
+    const run = baseRun({ id: "run-1", productId: "prod-run" });
+    const out = commandAssignments(
+      indexOf([a], [run], [baseProduct({ id: "prod-run", name: "Cover" })]),
+    );
+    expect(out[0].productName).toBe("Cover");
+  });
+
+  it("A7: an unknown product carries productName null", () => {
+    const a = baseAssignment({ productId: "prod-missing", runId: null });
+    const out = commandAssignments(indexOf([a], [], []));
+    expect(out[0].productName).toBe(null);
   });
 });
