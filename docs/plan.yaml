@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 1489c12
+  tip: 55907d5
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2022,6 +2022,7 @@ stages:
   delivers:
   - R-386
   - R-387
+  - R-388
   what: >-
     **The next three sentences.** After *assign* (S40), the three commands the maintainer ordered on 11
     Sept: *book a job* ("Book Housing A on Cell 1 in Line 1 from 6 to 2", a run on a cell, with an
@@ -2035,6 +2036,10 @@ stages:
     **Started session 144 (11 Sept).** Book a job first, handed to a Sonnet build lane with a brief and a
     second lane to break it; unassign and move follow in their own pieces. R-386 and R-387 written
     before the code.
+    **Book a job shipped in session 145 (55907d5):** the first word decides the intent, the run-mode
+    pop-up opens forced and preset and Enter books the job, an overlapping job of the same part is
+    asked about and re-timed through the drag's own run-resize branch, another part is named in the
+    way. Unassign (R-388) is briefed and next.
 - id: M1
   track: matrix
   num: 1
@@ -9926,10 +9931,27 @@ requirements:
     exactly the arguments the Create button sends. The readout states the part, the cell with its
     line, the day and the 24-hour hours (and the headcount when said) before anything is written; a
     sentence the bar cannot read is answered with both shapes it can read.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "B1-B11 --- the book sentence with places, headcount, day; bad headcount; for-as-place; no_place/no_product; quoted names; formatCommand round trip; the assign sentence undisturbed; the two-shape sentence verbatim"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RB1, RB2, RB10, RB11 --- run_create with the readout, the headcount in the readout, not_offered and too_short unchanged, the assign path byte-identical"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB1 (onBook with the run_create target), CB5 (the shape sentence)"
+  - kind: vitest
+    file: src/test/createPopover.test.tsx
+    cases: "AC8-AC11 --- presetMode run auto-presses onSubmitRun once under StrictMode with a click's arguments; presetHeadcount rides along; no product offered presses nothing; the mode segment is disabled"
+  - kind: mutation
+    file: src/lib/command/parse.ts
+    cases: "M30-M39 (brief §6) applied by the build lane, M32/M35/M38/M39 re-applied by the reviewer --- every one caught by its named case: M30 (any verb books) B1/B2/B3/B4/B5/B6/B8/B9; M31 (for-n as a place) B2; M32 (job question skipped) RB3/RB6; M33 (same part treated as in the way) RB3/CB2; M34 (stale retime creates) RB8; M35 (retime ignores another job) RB9; M36 (onBook through onOpen) CB1; M37 (run clean ignores the part) AC10; M38 (a second updateRunFields call) D7/D8; M39 (the button builds its own arguments) AC8, which the lane had to strengthen to compare a click's arguments with the auto-press's before it caught this"
+  - kind: manual
+    steps: "As Dana, on a day and cell with no jobs, type 'Book Housing A on Cell 3 in Line 2 from 6 to 2' --- Enter books the job with no pop-up left open; one runs row for that cell that day"
+  status: covered
   note: >-
-    STATED session 144 (11 Sept), the first of S41's three commands. The intent is decided by the first
+    STATED session 144 (11 Sept), BUILT session 145, the first of S41's three commands. The intent is decided by the first
     word ("book" or "run"); "assign", "put", "schedule", "add" or no verb stay the S40 sentence.
 - id: R-387
   title: A job sentence over an existing job asks to change that job's hours when it is the same part, and names the job in the way when it is not
@@ -9946,8 +9968,40 @@ requirements:
     nothing to change. If the job is ANOTHER part, the bar says which job is in the way, in the words
     a drag's refusal uses, and offers nothing else. A stale answer (the job is gone, or another job
     now collides with the new hours) re-asks rather than guessing.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RB3-RB9 --- the same-part question verbatim; the identical hours have nothing to change; retime gives the retime_run target and a 'changing' readout; another part is named in the way verbatim; another cell or touching hours ask nothing; a stale answer says the job is gone; a retime colliding with another job is refused in words"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB2-CB4 --- the Change button calls onRetimeRun with the job and the input unchanged; in-the-way shows no buttons and calls nothing; 'Book it' re-runs as a fresh sentence"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "D6-D9 --- retimeRunFromCommand writes the one updateRunFields PATCH; crew falling outside asks the confirm first and writes after Continue; another run in the way toasts and writes nothing; an unknown job writes nothing"
+  - kind: manual
+    steps: "After booking Housing A 06:00-14:00 on Cell 3, type the same with 'from 6 to 3': the question names the job with a 'Change 06:00–14:00' button; press it: the band reads 06:00-15:00 and there is still one row; then 'Book Bracket A on Cell 3 in Line 2 from 10 to 12': the in-the-way sentence, no buttons, nothing written"
+  status: covered
+- id: R-388
+  title: A typed sentence removes a person's block only after naming the block it found and being told to
+  source:
+  - 'session 139 conversation (the maintainer, 11 Sept, ordering the commands after assign: "book a job, unassign, move")'
+  - docs/agent-briefs/s41-b-unassign-brief.md
+  stated_by: maintainer
+  claim: >-
+    A person who may place work on the board can type "unassign <person> from <cell> [in <line>] [on
+    <day>] [from <time> to <time>]" and the board finds that person's block on that cell overlapping
+    those hours (or every block of theirs there that day, when no hours are said), names it in words
+    --- "Remove Sam Patel's Housing A block on Cell 1, 10:00–14:00?" --- and removes it only when that
+    button is pressed, through the same removal the block's own Delete button uses. Several matching
+    blocks are several buttons, one press each; none is a sentence saying so; a stale answer re-asks.
+    Enter never deletes: the button is the thing to decide.
   verified_by: []
   status: uncovered
+  note: >-
+    STATED session 145 (11 Sept), the second of S41's three commands. The "ask before removing"
+    shape is the developer session's call, flagged to the maintainer: R-384's Enter-does-it is for
+    creating, where the pop-up's own verdicts say nothing is left to decide; a removal cannot be
+    undone and a misheard sentence must not be one keypress from deleting the wrong block.
 findings:
 - id: F-132
   title: Typing the same assignment again with different hours was treated as a second block on top of the first
@@ -13511,6 +13565,28 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 145
+  date: 2026-09-11
+  title: "Book a job by sentence (S41-a, R-386 and R-387 covered); unassign briefed and R-388 written"
+  commits: [55907d5]
+  numbers:
+    app_tests: 2905
+    app_test_files: 138
+    tsc: 0
+    eslint: 0
+    db_checks: 832
+    migrations: 78
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after both lanes: `Test Files 138 passed (138)`, `Tests 2905 passed (2905)`, copied from the runner --- up 33 from 2872 (commandParse +10, commandResolve +11, commandBar +4, createPopover +4, dragGesture +4), matching the lane's per-file table exactly. `tsc -b --force` clean, no migration this piece. `eslint .` clean. Prettier clean over the eleven touched files. `playwright test e2e/roleWalk.spec.ts --workers=1`: 5 passed. db_checks, migrations and the e2e total carried from 144.
+  summary: >-
+    Book a job, the first of S41's three sentences, built by a Sonnet lane from `s41-a-book-a-job-brief.md` and broken-at by a second, under the maintainer's standing word not to stop.
+    ⭐ THE INTENT IS THE FIRST WORD. "book" or "run" is a job; "assign", "put", "schedule", "add" or no verb is the S40 sentence; the assign grammar has no verb requirement and cannot be told apart by its middle. The parser's time clause, afternoon rule and day word moved into one shared helper and the resolver's cell, part and day-span steps into three, with P1-P24 and R1-R44 unchanged in meaning --- the reviewer read every removed line of the assign path and ran them by name. Whole-object assertions gained `intent: "assign"` (contract changed, said in writing).
+    ⭐ ENTER BOOKS THE JOB. R-384 extended to jobs: the run-mode pop-up opens forced (the segment disabled) and preset with the part, hours and headcount; when a part is selected on a cell that offers it, one shared `submitRun()` is pressed once on mount under StrictMode with exactly a click's arguments. AC8 first tested only the auto-press and did not catch M39 (the button building its own arguments); the lane strengthened it to compare the two, as AC1 does, and then it did.
+    ⭐ ONE JOB AT A TIME, SO THE ANSWER COMES BEFORE THE POP-UP. Same part overlapping is F-132's lesson: ask, then change through the drag's own run-resize branch --- extracted into `retimeRun` so its overlap check, its crew-outside confirmation and its one write are shared; the reviewer confirmed one `.mutate(` moved and none added. Another part is named in the way in the words a drag's refusal uses, with no button. Live as Dana on a clean day: Enter created the job with no pop-up left open; the 6-to-3 sentence asked verbatim and Change UPDATED the one row to 06:00-15:00 (the id unchanged); Bracket A was refused in words with nothing written; the app's own cascade delete left zero rows. Eight screenshots in the job folder.
+    ⚠️ THE LANE'S OWN SCARE, RECORDED. It rewrote `parse.ts` rather than editing it and lost the two private-use quote sentinels in transcription, which made the quote-restoring regex delete every digit in an unquoted name ("Cell 1" became "Cell"); its own B3/B10 went red before it finished and it restored them. The developer session compared the bytes against HEAD (U+E000/U+E001 both present) and the reviewer re-ran P1-P24 by name. Nothing shipped wrong, but a lane that rewrites a file instead of editing it is a risk the next brief names.
+    ⭐ UNASSIGN IS NEXT AND ITS RULE IS WRITTEN. R-388 states it before the code, with one call of the developer session's flagged for the maintainer: a removal is never made on Enter --- the bar names the block it found and removes it on one press of that button, since a misheard sentence must not sit one keypress from deleting the wrong block. §19.90/D119 records why the sentences come before the model and both decisions.
 - id: 144
   date: 2026-09-11
   title: "Two findings closed in parallel lanes (F-131 on the server, F-130 in the sheets) and S41 opened"
@@ -20166,16 +20242,6 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  stage: S41
-  text: "Voice plan, next command: BOOK A JOB --- 'Book Housing A on Cell 1 in Line 1 from 6 to 2' makes a run"
-  why: >-
-    First of the three commands the maintainer ordered after assign (session 139: book a job,
-    unassign, move). Same shape as S40: the parser learns a second fixed sentence, the resolver
-    matches part and cell with the same never-guess rule, and the bar opens the EXISTING run-create
-    path pre-filled (the one door rule, D117); the server's run overlap constraint keeps the last
-    word. Every sentence typed is kept (with the site's permission) to seed Stage 3's training set.
-    New stage card when the work starts, with its requirements written before the code.
 - kind: task
   stage: S41
   text: "Voice plan, next command: UNASSIGN --- 'Unassign Operator A1 from Cell 1 in Line 1 from 10 to 2' removes the block"
