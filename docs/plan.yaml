@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-12'
-  tip: '3090059'
+  tip: '5b09a61'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2081,6 +2081,35 @@ stages:
     **Shipped session 148 (b204a96).** The generator, the perturbation catalogue, the committed
     held-out set and the scorer; the rule parser's baseline on the held-out set is recorded below and
     is what any model must beat: clean 200/200 (100%), perturbed 8/200 (4%); by intent, perturbed: assign 0/50, book 3/50, unassign 1/50, move 4/50.
+- id: S43
+  track: core
+  num: 43
+  title: The first model — fine-tune Qwen3 1.7B and score it against the held-out set
+  status: now
+  owner: maintainer
+  refs:
+  - docs/voice-commands-plan.md (Stage 4)
+  - docs/agent-briefs/s43-a-first-model-brief.md
+  - session 152 conversation (the base model chosen)
+  delivers:
+  - R-392
+  what: >-
+    **Teach a small model to read any phrasing.** The board reads four fixed sentences; the model sits in
+    front of the bar as a translator, turning however a person says it into the strict form the board
+    already reads. The base is Qwen3 1.7B (Apache 2.0; the maintainer's pick from a shortlist of three).
+    A Colab notebook the repo carries loads the generated training set, fine-tunes with LoRA, scores the
+    result on the 400 held-out rows with the repo's own scorer, and exports the compressed file the
+    local runtime (Stage 5) will serve. The training runs on Google Colab's free GPU because this
+    machine has none; the maintainer presses run and hands back the files.
+  state: >-
+    **Briefed session 152 (12 Sept).** The notebook, its data step, the predictions format and the
+    scoring path are the developer's; the Colab run and the resulting score are the maintainer's. The
+    bar: the model must beat the rule parser's baseline on perturbed rows (4%) by a wide margin while
+    staying at the bar on clean rows; the number is recorded on this card when the run has happened.
+    **The notebook shipped in session 152 (5b09a61).** The data step, the predictions round trip, the
+    Python port of the scorer and every code cell's syntax are verified here; the training cells are
+    unverified until the maintainer's first Colab run. The README under scripts/voice/train is the
+    maintainer's step-by-step. **Waiting on the maintainer:** the run, and the score.
 - id: M1
   track: matrix
   num: 1
@@ -10170,6 +10199,35 @@ requirements:
   note: >-
     STATED 12 Sept (session 151), BUILT the same session. Left out on purpose, for the model stage: word
     orders that put the verb after the person ("Sam works on …") or split it ("take Sam off …").
+- id: R-392
+  title: A fine-tuned Qwen3 1.7B reads free phrasings into the parser's form and is scored on the held-out set before anything serves it
+  source:
+  - 'session 152 conversation (the maintainer, 12 Sept: "Go with Qwen, write the Colab script and tell me step by step what and how it needs to happen.")'
+  - docs/voice-commands-plan.md (Stage 4)
+  - docs/agent-briefs/s43-a-first-model-brief.md
+  stated_by: maintainer
+  claim: >-
+    The repo carries a Colab notebook that, given the generated training set and the committed held-out
+    set, fine-tunes Qwen/Qwen3-1.7B with LoRA to answer a sentence with the parser's form as JSON and
+    nothing else (thinking off), writes a predictions file the repo's scorer reads by row id, prints the
+    same per-intent and per-field table, merges the adapter and exports a quantised GGUF for the local
+    runtime. The model is scored ONLY against held-out rows it never trained on; the training set and
+    the held-out set share no sentence. The first run's score is recorded on S43's card, and no model is
+    served (Stage 5) until its clean rate meets the bar and its perturbed rate clearly beats the rule
+    parser's baseline.
+  verified_by:
+  - kind: vitest
+    file: src/test/voiceTrain.test.ts
+    cases: "VT1-VT3 --- the chat row for a sample is the system prompt, the sentence and canonical(form); a predictions file scores through the repo's scorer exactly as the rule parser's own answers do; the manifest's sample canonical matches form.mjs"
+  - kind: manual
+    steps: "npm run voice:generate; npm run voice:prepare; upload data/voice/colab/* to Drive; open scripts/voice/train/train_qwen3.ipynb in Colab on a T4; Run all; download predictions.jsonl and model-q4_k_m.gguf; node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions <file> --bar 0.95 --- the table goes on S43's card"
+  status: covered
+  note: >-
+    STATED 12 Sept (session 152); the repo-provable half BUILT the same session, the score still owed
+    by the Colab run. What the repo can prove without a GPU: the data step
+    (a chat-format file built from train.jsonl), the predictions format against the scorer, and the
+    notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
+    when they exist.
 findings:
 - id: F-134
   title: A start stated in 24-hour form still lets the afternoon rule bump the end by twelve hours
@@ -13794,6 +13852,27 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 152
+  date: 2026-09-12
+  title: "The first model: Qwen3 1.7B chosen, the Colab notebook and its data step shipped (S43, R-392 half-proved)"
+  commits: ['5b09a61']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lane and the developer session's own checks: `Test Files 141 passed (141)`, `Tests 3021 passed (3021)`, copied from the runner --- up 3 from 3018 (voiceTrain VT1-VT3, a new file, hence 141). `tsc -b --force` clean. `eslint .` clean. Prettier clean on the touched files. `npm run voice:prepare` ran here and printed the manifest (4000 train rows, 400 held-out, the rule parser's baseline 1.0 clean / 0.035 perturbed, the git sha, one sample's canonical form); `python scripts/voice/train/check_notebook.py` compiled every code cell (467 lines); `score_port.py` matched `npm run voice:score` count for count. The training cells are unverified: no GPU here.
+  summary: >-
+    The maintainer, on the next step explained plainly and a shortlist of three: *"Go with Qwen, write the Colab script and tell me step by step what and how it needs to happen."* Stage S43 and R-392 written first, then a Sonnet lane built everything the repo can carry for a run this machine cannot make.
+    ⭐ THE FORM IS THE PARSER'S, BYTE FOR BYTE. The data step turns the generated training set into chat rows whose answer is `canonical(form)`, writes a manifest with the counts, the seeds, the git sha and one sample's serialisation, and refuses to write anything if a training sentence appears in the held-out set --- which it did on the first run, because the gitignored train.jsonl on disk was stale from before F-134's regeneration; regenerating fixed it, and that is the check earning its keep. The one system prompt travels inside the manifest so the notebook reads it rather than retypes it.
+    ⭐ THE NOTEBOOK, ELEVEN CELLS. Settings in one cell (Qwen/Qwen3-1.7B, LoRA r=16 on the attention and MLP projections, three epochs, effective batch 32, seed 20260912); pinned libraries the lane checked against PyPI on the day rather than from memory (transformers 5.17, peft 0.20, trl 1.13 with assistant-only loss, datasets 5.0.1, accelerate 1.15; llama.cpp cloned at HEAD and said so); a plain-sentence refusal without a GPU; thinking OFF; generation stopped at the first complete JSON object; predictions keyed by held-out id; the score printed beside the rule parser's baseline; merge and export to Q4_K_M GGUF; everything saved to Drive so a dropped session loses nothing.
+    ⭐ WHAT IS PROVED HERE AND WHAT IS NOT. VT2 feeds the rule parser's own answers through the real `score.mjs --predictions` and through the direct path and gets the same table; the Python port matches the JS scorer count for count (one display rounding differs on a .5 tie, 71.3 vs 71.2, both 285/400); every code cell compiles. The training cells cannot be verified without a GPU, and the README and this entry say so. R-392 stays uncovered until the maintainer's first Colab run puts a score on S43's card.
+    ⭐ THE MAINTAINER'S STEPS are in scripts/voice/train/README.md and in the session's closing message: generate, prepare, upload three files, Run all on a T4, bring back predictions.jsonl and the GGUF, score locally, paste the table.
 - id: 151
   date: 2026-09-12
   title: "The verbs each sentence accepts (R-391) --- the maintainer's list, one copy, exported"
@@ -20600,6 +20679,7 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
+  stage: S43
   text: "Voice plan Stage 4 --- fine-tune the first small model and score it against the rule parser"
   why: >-
     LoRA on a small open base (no base locked yet; the plan's table is the shortlist), scored on the
