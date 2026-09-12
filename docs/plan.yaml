@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 1620fc9
+  tip: 65c4934
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -1998,6 +1998,10 @@ stages:
     show no warning; anything needing an override or a reason still opens the pop-up (R-384). The
     decision is the pop-up's own: it auto-presses its Create with exactly the arguments a click sends,
     once, only when every box it would render is absent.
+    **Session 142 (11 Sept), the maintainer after using it twice:** the same sentence typed again
+    with wider hours was treated as a second block on top of the first, because the resolver is
+    handed the window's jobs but not its blocks (F-132). Written as R-385 and queued first; not yet
+    built.
   measure:
     app_tests: 2835
     mutations: "19 of 19 caught (M14 by screenshot)"
@@ -9819,7 +9823,65 @@ requirements:
     Create-disabled predicate) read once on mount, so the bar cannot disagree with the pop-up about
     what "clean" means.
 
+- id: R-385
+  title: A sentence that overlaps a block the same person already has on that part and cell changes that block's hours, it does not stack a second one
+  source:
+  - 'session 142 conversation (the maintainer, 11 Sept, after using the bar twice: "I asked the app to assign someone on a product on a level from 10 to 2 which it did, but when I put the same info again ... 10 to 3, it did not recognize that it is the same group with different timing ... and gave me the option to adjust the efficiency. I would say this is a bug which is not safeguarded by a requirement.")'
+  stated_by: maintainer
+  claim: >-
+    When a typed sentence resolves to the same person, the same part and the same cell as a block
+    that person already has on the board, and the two spans overlap on that day, the bar treats the
+    sentence as a change to THAT block's hours, never as a second block laid on top of it. It asks
+    one question in R-383's shape --- "<person> is already on <part> at <cell> 10:00--14:00. Change
+    it to 10:00--15:00, or add a separate block?" --- with the existing block as a button and a
+    "Separate block" button. Choosing the block re-times it through the same door a drag-resize
+    uses, so the server re-asks training, area, absence and capacity for the new span exactly as
+    R-361 and R-031 require; choosing "Separate block" is what the sentence would have made anyway,
+    and only then may the pop-up's efficiency box appear. The bar never stacks silently. Asking
+    versus changing silently is the maintainer's call; written as "ask" to match R-383 pending
+    their word.
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED 11 Sept (session 142), not built. The cause is in the resolver's context: it carries the
+    window's runs (for the join question) but not its assignments, so a person's own block is
+    invisible to it and the sentence resolves as a new direct block; the pop-up's capacity probe
+    then finds the person already at 100% and offers the efficiency box, which is what the
+    maintainer saw. The fix is an assignments list in the resolver's context, the overlap test in
+    the same step as the run question, and a bar button that routes to the existing move/resize
+    path rather than create. This is also the first appearance of the "move" command the maintainer
+    ordered after assign (session 139): a re-timed block IS a move, so the two should share one
+    path when move is built.
 findings:
+- id: F-132
+  title: Typing the same assignment again with different hours was treated as a second block on top of the first
+  tag: The bar cannot see the person's own blocks
+  status: open
+  found_by: maintainer
+  stage: S40
+  refs:
+  - R-385
+  - R-383
+  violates:
+  - R-385
+  story: >-
+    Reported 11 Sept (session 142) from the running app. The maintainer typed a sentence assigning a
+    person to a part on a cell from 10 to 2 and the board created the block. They typed the same
+    sentence again with 10 to 3, expecting the board to see it as the same placement with different
+    hours; instead the bar opened the New block pop-up as if for a brand-new block and, because the
+    person was already at 100% for those hours, offered the efficiency box --- the pop-up's way of
+    saying "this person is already working then; lower one of the two". Nothing was written, but the
+    board had misread the intent, and a second Enter on a "clean" pop-up would have stacked the two.
+    No requirement guarded this: R-383 covers the span landing inside a JOB already booked on the
+    cell, not a BLOCK the same person already has. Written as R-385 and queued first, ahead of the
+    two smaller items already in the queue.
+  lead: >-
+    The resolver's context (`ResolveContext` in `src/lib/command/resolve.ts`) carries the
+    window's runs for the join question but no assignments at all, so the person's existing block
+    is invisible to it and every sentence resolves as a new direct block. The pop-up then does its
+    own job correctly --- the capacity probe sees the overlap --- which is why the symptom looks like
+    an efficiency question rather than a wrong block. A suspicion from reading the context type, not
+    yet reproduced in a test.
 - id: F-131
   title: The server never checks that a run-attached block lies inside its run
   tag: A join the server does not measure
@@ -13324,6 +13386,48 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 142
+  date: 2026-09-11
+  title: "The bar could not see a person's own block (F-132, R-385) --- and the queue rebuilt so the next stages show"
+  commits: []
+  numbers:
+    app_tests: 2844
+    app_test_files: 137
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` at session start on the merged tree (65c4934): `Test Files 137 passed (137)`, `Tests 2844 passed (2844)`, copied from the runner --- the count matches session 141 exactly, both live pins green (the edge-runtime container was up). No code changed this session, so tsc, eslint, db_checks, migrations and e2e are carried from 141; `tip` is the merge commit the count was taken at.
+  summary: >-
+    Merged tester (session 141, nothing filed). The maintainer, after a `/clear`: they had typed the
+    same assign sentence twice, 10 to 2 and then 10 to 3, and the bar treated the second as a new
+    block on top of the first and offered the efficiency box. *"I would say this is a bug which is
+    not safeguarded by a requirement. We should plan for this scenario."* And: *"The scheduler buildout
+    needs to be rearranged and cleaned, I cannot see what the next tasks are."*
+    ⛔ THE CAUSE, READ NOT GUESSED. `ResolveContext` carries `runs` (for R-383's join question)
+    and no assignments, so a person's existing block is invisible to the resolver; the sentence
+    resolves as a direct block, and the pop-up's capacity probe --- doing its own job correctly ---
+    finds the person already at 100% and offers efficiency. R-383 guards a span inside a JOB on the
+    cell, not a BLOCK the same person already has; no requirement covered the second. Written as
+    R-385 (uncovered, the maintainer's words as source) and F-132 (open, the maintainer as finder),
+    queued FIRST under the standing rule that a defect outranks the next feature. Not built this
+    session: the maintainer asked to plan for it, and coding work goes to a Sonnet lane with a brief.
+    ⭐ THE QUEUE REBUILT. The `next` block had grown a 90-line comment of removed items, the log of
+    every entry retired since 4 Sept, above two small tasks; the plan's later stages (the voice plan's
+    3 to 11 and 6b, in `docs/voice-commands-plan.md`) appeared nowhere in it, which is why the next
+    tasks could not be seen. The removal log is gone --- every removal is already recorded in the
+    session that made it --- and the queue now reads, in order: the three open findings (F-132,
+    F-131, F-130), then the next three typed commands in the maintainer's order from session 139
+    (book a job, unassign, move), then the model stages (training set, fine-tune, serve, microphone),
+    then the chatbot stages (question catalog, the model learns the menu, the chat panel), then
+    packaging, with the 7B free-question model parked as optional. The order after the three findings
+    is a proposal, not a decision: it puts the typed commands BEFORE the model because the rule parser
+    can take them without training, they are most of the value, and the training set should be
+    generated once for all four commands rather than re-made per command. No stage cards were
+    created for future work; a card is made when its work starts, as every stage so far has been.
 - id: 141
   date: 2026-09-11
   title: "Tester run: S40 the typed command bar (R-378 through R-384, F-131) verified cold; nothing filed"
@@ -19882,88 +19986,44 @@ sessions:
   shipped: []
 next:
 # ---------------------------------------------------------------------------
-# TASKS, most likely first. Everything below the PARKED marker is deliberately
-# not next: tabled by the maintainer, already decided, or a standing note
-# rather than a piece of work.
+# TASKS, in order. Everything below the PARKED marker is deliberately not next:
+# tabled by the maintainer, already decided, or a standing note rather than work.
 #
-# Removed on 4 Sept as done or overtaken, each checked against the code rather
-# than assumed: the four "small/known" items (session 57); "assignments.status
-# has no CHECK" (0043 dropped the column -- `information_schema` reports zero);
-# S22's "a training's plant cannot be moved after creation" (`UpdateSkillInput`
-# takes `siteNodeId` and its own doc says supplying it MOVES the training); and
-# S22's "no permission preview on the Trainings tab" (`useEditRights` +
-# `canEdit`, asked with the owner's PATH).
+# The removal log that used to sit here (every entry retired since 4 Sept, with
+# its reason) was cut on 11 Sept (session 142): each removal is recorded in the
+# session that made it, and the log had grown taller than the queue it introduced.
+# Rule unchanged: an entry is removed only when checked against the code, never
+# assumed done; say so in that session's summary.
 #
-# Removed on 5 Sept, same rule -- checked against the code, not assumed:
-# "A way to CHOOSE warn or block for eligibility". Its own note said what was
-# missing was the SWITCH, "a Settings control plus one write RPC, in the shape
-# 0037 already established". That is exactly what S32 shipped: migration 0050
-# added `node_settings` and `set_node_setting`, and `SettingsPanel` renders the
-# policy as a `<select>` writing `eligibility_policy` -- per plant, which is
-# more than the item asked for. Verified by reading the panel, not the plan.
-#
-# And "A DEAD END ON THE BOARD: an expired certificate is invisible until the
-# server refuses the save", removed 5 Sept for the same reason and found the same
-# way. `60bfdeb` shipped it on 4 Sept: `certificateGaps` mirrors the server's
-# `expires_at < upper(p_timerange)` as `dated.expiresAt < endDay`, `CreatePopover`
-# splits "Never trained" from "Certificate expired" with its date, and
-# `src/test/certificateExpiry.test.tsx` pins both sides of the boundary. The
-# finding it came from (F-087) had never been flipped off `open` and the work had
-# no requirement; both are fixed, and the requirement is R-338.
-#
-# Removed on 8 Sept, same rule -- checked against the code, not assumed: "A resize
-# is the fifth writer, and it has never asked whether the person may be there."
-# Shipped in session 94 as R-361 (covered): a BEFORE UPDATE trigger on `assignments`
-# re-asks `check_eligibility` and `absence_overlap` on any timerange/operator_id
-# change, `dragGesture.test.ts` covers the client toast, and
-# `supabase/tests/88_absences_test.sql` cases AB26-AB34 cover the trigger. This
-# entry sat in the queue for a session after the work landed; caught by the
-# requirement audit re-reading `next` against `docs/plan.yaml`, not assumed current.
-#
-# Added and removed on 9 Sept in the same session, which is why it never appears
-# above: "the plan page drops what it is not expecting". Filed as F-123, queued
-# because tightening the validator looked like it would go red on keys already in
-# the file, then done in the same session once a key census showed exactly what it
-# would flag -- three invisible keys to render and two false alarms. The queue is
-# for decisions, and there was no decision left in it.
-#
-# Removed on 9 Sept, DONE rather than overtaken: "two small holes wave four left
-# open on purpose" --- the absence CSV import could not record part of a day, and
-# a block refusal named no hours. Both were R-359's last missing surfaces and both
-# are now covered (see session 102 and R-359's own verified_by). The refusal half
-# turned out to be two surfaces rather than one: the pop-up sentence the entry
-# named, and the drag TOAST, which had no Absent branch at all and printed a uuid.
-# The import half turned out to need a MIGRATION (0073), which the entry did not
-# say and 0069's own header had already found and deferred.
-#
-# Removed on 9 Sept, DONE and CHECKED AGAINST A RUN rather than against the entry:
-# "Phase 1 --- E2E test pass (Playwright) + load sanity". Its own last update said
-# job B was finished locally and "the remaining work is exactly the CI database",
-# pointing at S34. S34 had been BUILT in session 83 and left at `now` pending one
-# thing: a push whose e2e step reports the cases as RUN, not skipped, and green.
-# GitHub run 34366609685 does exactly that --- a real stack stood up, the demo
-# world loaded, 43 of 43 browser cases passed against http://127.0.0.1:54321. So
-# the entry had been describing finished work for a session, and S34 is now `done`.
-#
-# ⚠️ ONE PIECE OF THE ORIGINAL LINE IS GENUINELY NOT DONE AND IS NOT SILENTLY
-# CARRIED HERE: the LOAD SANITY the roadmap asked for (hundreds of rows, thousands
-# of assignments). Nothing in e2e/ generates that volume. It is a separate,
-# smaller question --- does the board stay usable at scale --- and it belongs in
-# its own entry when the maintainer wants it, not hidden inside a line whose
-# other half is finished.
-#
-# Removed on 9 Sept, DONE: "wave three's last loose end --- the emailed reset link
-# lands where the dev server does not answer". It was configuration exactly as the
-# entry said. The running auth container answered with a one-entry allow-list, the
-# maintainer restarted the stack, and it now carries `http://localhost:5173/**`;
-# the real emailed link was then walked end to end and keeps its path.
-#
-# ⚠️ AND IT LEFT SOMETHING BEHIND THAT IS NOW COVERED RATHER THAN LOST: the suite
-# could not have seen this. The existing reset case calls `verifyOtp` through the
-# API and builds the URL hash itself, so it never travels through the redirect the
-# bug lives in. A case that follows the RAW emailed link is now in
-# `e2e/passwordReset.spec.ts` and is named in R-347.
+# ORDER: the open findings first (the maintainer's standing rule), then the
+# voice plan's remaining stages in the order proposed in session 142 --- the
+# typed commands before the model. That order is a proposal awaiting the
+# maintainer's word; the findings' order is not.
 # ---------------------------------------------------------------------------
+- kind: task
+  requirement: R-385
+  text: The bar recognises a person's own block and offers to change its hours, not stack a second one (F-132)
+  why: >-
+    The maintainer typed the same sentence twice with wider hours and got a second block offered on
+    top of the first. Add the window's assignments to `ResolveContext` (built in `BoardPage` from
+    the same index the runs come from), test same person + same part + same cell + overlapping span
+    in the step beside the run question, ask in R-383's shape, and route the "change it" button to
+    the existing move/resize path so the server re-checks the new span (R-361, R-031). Cases in
+    `commandResolve.test.ts` and `commandBar.test.tsx` alongside R27--R33 and C9--C10; a mutation
+    that skips the assignment check must go red. Sonnet lane with a brief; a second lane to break it,
+    live as Dana, typing the maintainer's two sentences in order.
+- kind: task
+  requirement: R-383
+  text: The server refuses a run-attached block whose span is not inside its run (F-131)
+  why: >-
+    `create_assignment`'s run branch (0066) checks training, absence and the operator's area for a
+    `p_run_id` row but never that the span lies inside the run. The command bar is the first screen
+    that can send a run target for a new block (R-383); it only offers "join" when containment
+    holds, so the gap is a refetch race today (or, as the tester found, a shift chip moving the span
+    after the join question), but the server should hold the rule itself: a containment check in the
+    run branch or a trigger, refusing with a named reason, plus a SQL case and a client toast branch
+    if the refusal needs words. Extract the function's last definition with the case-insensitive
+    grep, never retype it (CLAUDE.md §4).
 - kind: task
   requirement: R-373
   text: Sweep the undefined --ink-1 token from the four CSS modules that use it (F-130)
@@ -19973,17 +20033,88 @@ next:
     to inherited. Pre-existing, cosmetic, low-risk: either define `--ink-1` or replace each use with
     the intended `--ink`/`--ink-2`, then eyeball the four surfaces in the running app.
 - kind: task
-  requirement: R-383
-  text: The server refuses a run-attached block whose span is not inside its run (F-131)
+  text: "Voice plan, next command: BOOK A JOB --- 'Book Housing A on Cell 1 in Line 1 from 6 to 2' makes a run"
   why: >-
-    `create_assignment`'s run branch (0066) checks training, absence and the operator's area for a
-    `p_run_id` row but never that the span lies inside the run. The command bar is the first screen
-    that can send a run target for a new block (R-383); it only offers "join" when containment
-    holds, so the gap is a refetch race today, but the server should hold the rule itself: a
-    containment check in the run branch or a trigger, refusing with a named reason, plus a SQL case
-    and a client toast branch if the refusal needs words. Extract the function's last definition
-    with the case-insensitive grep, never retype it (CLAUDE.md §4).
+    First of the three commands the maintainer ordered after assign (session 139: book a job,
+    unassign, move). Same shape as S40: the parser learns a second fixed sentence, the resolver
+    matches part and cell with the same never-guess rule, and the bar opens the EXISTING run-create
+    path pre-filled (the one door rule, D117); the server's run overlap constraint keeps the last
+    word. Every sentence typed is kept (with the site's permission) to seed Stage 3's training set.
+    New stage card when the work starts, with its requirements written before the code.
+- kind: task
+  text: "Voice plan, next command: UNASSIGN --- 'Unassign Operator A1 from Cell 1 in Line 1 from 10 to 2' removes the block"
+  why: >-
+    Second of the three. Resolves to the person's block(s) on that cell in that span and opens the
+    existing delete path with its confirmation; two matching blocks become a question with buttons,
+    as two Sams do today (R-379). Never deletes silently.
+- kind: task
+  text: "Voice plan, next command: MOVE --- 'Move Operator A1 to Cell 2 in Line 1' or '... to 10 to 3' re-places a block"
+  why: >-
+    Third of the three, and R-385's "change it" button is its first half: a re-timed block on the
+    same cell is a move in time, a new cell is a move in place. One resolver step finds the block,
+    one bar action routes to the existing move/resize path, so the server re-asks training, area,
+    absence and capacity for the new placement (R-361). Build R-385 first and let this widen it.
+- kind: task
+  text: "Voice plan Stage 3 --- the training set and the held-out test set for all four commands"
+  why: >-
+    A generator script under `scripts/` that turns the demo world's names and the four sentence
+    shapes into thousands of varied sentences with their filled forms, plus a few hundred held-out
+    sentences no model ever trains on. The held-out set is the instrument: every model is scored
+    against it and a score below the bar fails the build, like a lost test file fails `npm run
+    test`. Generated once for all four commands, which is why it sits after them.
+- kind: task
+  text: "Voice plan Stage 4 --- fine-tune the first small model and score it against the rule parser"
+  why: >-
+    LoRA on a small open base (no base locked yet; the plan's table is the shortlist), scored on the
+    Stage 3 held-out set beside the rule parser on the same sentences, exported to the local
+    runtime's format, output constrained to the form's exact shape at generation time. Training on
+    Colab; the laptop does everything else.
+- kind: task
+  text: "Voice plan Stage 5 --- serve the model beside the database; the bar falls back to the rule parser and says so"
+  why: >-
+    A small container (Ollama or llama.cpp) next to the local stack. The bar sends the sentence and
+    gets the form back; when the service is down the rule parser answers and the bar says which one
+    did. The form still goes through the same resolver and the same pop-up: the model writes words,
+    the app resolves them (D117).
+- kind: task
+  text: "Voice plan Stage 6 --- the microphone: browser recogniser first, local Whisper second"
+  why: >-
+    A button beside the bar. First the browser's own recogniser (zero setup, audio leaves the
+    building, some sites will refuse); then Whisper through the Stage 5 service so audio stays on
+    site. Both hand their text to the bar and nothing else changes.
+- kind: task
+  text: "Voice plan Stage 8 --- the question catalog: twenty to thirty questions schedulers ask, one tested lookup each"
+  why: >-
+    Useful before any AI as a "quick answers" panel. Each lookup runs AS THE SIGNED-IN PERSON so the
+    rows come back already filtered by the same rules every screen uses; no new door. The catalog
+    itself is the maintainer's to write --- the most valuable hour in the chatbot half.
+- kind: task
+  text: "Voice plan Stage 9 --- the same small model learns to pick a question from the menu"
+  why: >-
+    Same generator, same held-out set, same serving box as the command bar; one model for both jobs.
+    Safe by construction because the model only chooses from the tested catalog.
+- kind: task
+  text: "Voice plan Stage 10 --- the chat panel: the sentence beside the rows it came from"
+  why: >-
+    App-wide (which is why parse/resolve already live under `src/lib/command/`). The rows are always
+    shown next to the model's sentence so an invented name is obvious.
+- kind: task
+  text: "Voice plan Stage 6b --- package the app, the database and the model service so a site can install it with one command"
+  why: >-
+    Not an AI stage, but Stages 5 and 10 assume it. Each piece becomes a container started together;
+    one install serves several plants, the permission rules already keep each plant's data to its own
+    people. The plan's "two to three days" is optimistic if it means self-hosting the full Supabase
+    stack; size it when it is next.
+
 # ------------------------------- PARKED ------------------------------------
+- kind: parked
+  decided: true
+  text: "Voice plan Stage 11 --- the optional 7B free-question model that writes its own lookups"
+  why: >-
+    Optional in the plan itself and where the risk lives (session 139's read): read-only, run as
+    the person, capped and time-limited, and still the one tier that composes a query nobody
+    tested. Parked until the fixed-menu chatbot (Stages 8--10) is in use and someone asks a
+    question it cannot answer.
 - kind: parked
   decided: true
   text: Give the load fixture's runs more room than their assignments, so an in-run nudge can be timed (F-126)
