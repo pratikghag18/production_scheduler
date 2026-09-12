@@ -9,7 +9,13 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { parseCommand } from "@/lib/command/parse";
+import {
+  parseCommand,
+  ASSIGN_VERBS,
+  BOOK_VERBS,
+  UNASSIGN_VERBS,
+  MOVE_VERBS,
+} from "@/lib/command/parse";
 import type { Command } from "@/lib/command/parse";
 import { mulberry32 } from "../../scripts/voice/lib/rng.mjs";
 import { TEMPLATES } from "../../scripts/voice/lib/templates.mjs";
@@ -227,5 +233,23 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     expect(canonical(a)).toBe(canonical(b));
     const c = { ...a, operator: "Someone Else" };
     expect(canonical(a)).not.toBe(canonical(c));
+  });
+
+  it("V9 (R-391): every verb in every exported list appears as the first word of at least one clean row (n=2000, seed 1)", () => {
+    const rows = generateTrainingRows(1, 2000);
+    const firstWords = new Set(
+      rows.filter((r) => r.clean).map((r) => r.sentence.trim().split(/\s+/)[0].toLowerCase()),
+    );
+    const lists: readonly (readonly string[])[] = [
+      ASSIGN_VERBS,
+      BOOK_VERBS,
+      UNASSIGN_VERBS,
+      MOVE_VERBS,
+    ];
+    for (const list of lists) {
+      for (const verb of list) {
+        expect(firstWords.has(verb), verb).toBe(true);
+      }
+    }
   });
 });

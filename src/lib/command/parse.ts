@@ -159,18 +159,54 @@ export type ParseResult = { ok: true; command: Command } | { ok: false; failure:
 const QUOTE_OPEN = "";
 const QUOTE_CLOSE = "";
 
-const VERBS = ["assign", "put", "schedule", "add"];
+/**
+ * R-391 (the maintainer, 12 Sept): the optional verb each sentence accepts,
+ * one list per sentence, every verb in exactly one list so the first word
+ * never needs a guess. `scripts/voice/lib/templates.mjs` draws its templates'
+ * verbs from these same exports rather than hard-coding them (this file is
+ * the one door). "shift" (a noun everywhere else in this app -- a shift
+ * chip, a shift pattern) and "change" (too broad) are never verbs here, on
+ * purpose, in any list.
+ */
+export const ASSIGN_VERBS = [
+  "assign",
+  "put",
+  "schedule",
+  "add",
+  "staff",
+  "place",
+  "allocate",
+  "give",
+  "set",
+] as const;
 
-/** S41-a: the first word decides book vs assign. */
-const BOOK_VERB_RE = /^(book|run)\b\s*/i;
+/** S41-a, widened by R-391. "schedule" stays with assign (above), on
+ *  purpose -- it is never a book verb. */
+export const BOOK_VERBS = ["book", "run", "plan", "open", "start", "launch", "create"] as const;
 
-/** S41-b: the first word decides unassign vs everything else. */
-const UNASSIGN_VERB_RE = /^(unassign|remove|clear)\b\s*/i;
+/** S41-b, widened by R-391. */
+export const UNASSIGN_VERBS = [
+  "unassign",
+  "remove",
+  "clear",
+  "drop",
+  "cancel",
+  "delete",
+  "pull",
+  "free",
+] as const;
 
-/** S41-c: the first word decides move vs everything else. "shift" is a noun
- *  everywhere else in this app (a shift chip, a shift pattern), never a verb
- *  here -- only "move" starts this grammar. */
-const MOVE_VERB_RE = /^move\b\s*/i;
+/** S41-c, widened by R-391. */
+export const MOVE_VERBS = ["move", "reschedule", "transfer", "relocate", "switch"] as const;
+
+/** The first word decides book vs assign. Built from `BOOK_VERBS`. */
+const BOOK_VERB_RE = new RegExp(`^(${BOOK_VERBS.join("|")})\\b\\s*`, "i");
+
+/** The first word decides unassign vs everything else. Built from `UNASSIGN_VERBS`. */
+const UNASSIGN_VERB_RE = new RegExp(`^(${UNASSIGN_VERBS.join("|")})\\b\\s*`, "i");
+
+/** The first word decides move vs everything else. Built from `MOVE_VERBS`. */
+const MOVE_VERB_RE = new RegExp(`^(${MOVE_VERBS.join("|")})\\b\\s*`, "i");
 
 const WEEKDAY_ALTS =
   "mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?";
@@ -505,8 +541,8 @@ function parseAssignRest(
   end: ClockTime,
   quotes: string[],
 ): ParseResult {
-  // 4. Verb — optional leading assign/put/schedule/add.
-  const verbMatch = rest.match(new RegExp(`^(${VERBS.join("|")})\\s+`, "i"));
+  // 4. Verb — optional leading verb, one of ASSIGN_VERBS.
+  const verbMatch = rest.match(new RegExp(`^(${ASSIGN_VERBS.join("|")})\\s+`, "i"));
   if (verbMatch) rest = rest.slice(verbMatch[0].length);
 
   // 5. The middle — operator, then product-and-places.
