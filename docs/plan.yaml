@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-12'
-  tip: 3090059
+  tip: '3090059'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -10165,7 +10165,7 @@ requirements:
     cases: "V9 --- every verb in every list opens at least one clean row of a generated training set"
   - kind: mutation
     file: src/lib/command/parse.ts
-    cases: "M70-M73 (brief §4): staff dropped from the assign list --- PV1 staff red (the operator parsed as "staff Sam"); plan added to assign as well as book --- PV2 red; schedule moved to book --- PV3 and the existing B10 red; the generator drawing only each list's first verb --- V9 red naming schedule as never drawn"
+    cases: "M70-M73 (brief §4): staff dropped from the assign list --- PV1 staff red (the operator parsed as 'staff Sam'); plan added to assign as well as book --- PV2 red; schedule moved to book --- PV3 and the existing B10 red; the generator drawing only each list's first verb --- V9 red naming schedule as never drawn"
   status: covered
   note: >-
     STATED 12 Sept (session 151), BUILT the same session. Left out on purpose, for the model stage: word
@@ -13797,7 +13797,7 @@ sessions:
 - id: 151
   date: 2026-09-12
   title: "The verbs each sentence accepts (R-391) --- the maintainer's list, one copy, exported"
-  commits: [3090059]
+  commits: ['3090059']
   numbers:
     app_tests: 3018
     app_test_files: 140
