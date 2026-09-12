@@ -8,7 +8,7 @@
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: var(--ink-1);
+  color: var(--ink);
 }
 
 /* "All plants" (R-358: "For all plants, show all templates."): one section
@@ -76,7 +76,7 @@
 .name {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--ink-1);
+  color: var(--ink);
 }
 
 .nameInput {

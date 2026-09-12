@@ -2,7 +2,7 @@
 // See the note in scaleAudit.ts: node types are referenced per-file rather
 // than added to the app tsconfig, because this is a browser app.
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   CHROME_FILES,
   countUiScaleUses,
@@ -21,6 +21,7 @@ import {
   unsharedDragRules,
   rawDragColours,
   undefinedDragTokens,
+  undefinedTokens,
   ADMIN_PAGE,
   parseSectionIds,
   sectionsWithoutPanels,
@@ -456,6 +457,149 @@ describe("scaleAudit.ts: the drag audit (D100)", () => {
     expect(
       undefinedDragTokens(`:root { --drag-grip: red; }`, [`.x { color: var(--drag-invented); }`]),
     ).toEqual(["--drag-invented"]);
+  });
+});
+
+/**
+ * F-130 — the general undefined-token sweep, widened past `--drag-*`/`--drop-*`
+ * to every module stylesheet and every token.
+ *
+ * Six `var(--ink-1)` reads sat unnoticed in four module stylesheets: `--ink-1`
+ * is defined nowhere (`tokens.css` has `--ink` and `--ink-2`, not `--ink-1`),
+ * so `color` silently fell back to the inherited value. G10 only ever walked
+ * the two drag surfaces plus their shared file; G13 walks every
+ * `*.module.css` under `src/`, the same recursive `fs`/`path` walk
+ * `missingRemSurfaces` uses (not a hand-kept list), so a new module is
+ * audited the day it appears.
+ *
+ * A first pass at G13 (built to the letter of the original brief — a
+ * definition is `--name:` in `tokens.css` or the SAME sheet, nothing else)
+ * came up red for five tokens that are not bugs: `--row-pad-y` is declared in
+ * `dragSurface.module.css` and reached by `NodeTreeEditor.module.css` only
+ * through `composes:`, and `--pc` / `--tick-rails` / `--caret-rails` /
+ * `--hour-px` are set from an inline `style` prop in `.tsx`, never in any
+ * stylesheet at all. Both are real, working, already-documented patterns —
+ * so the DEFINITION side of the rule was widened (scaleAudit.ts) rather than
+ * carrying an allowlist of "expected" false positives here.
+ */
+describe("F-130: every var(--token) read by a module stylesheet is defined (G13/G14)", () => {
+  const root = repoRoot;
+
+  /** Every `*.module.css` under `dir`, walked recursively — no hand-kept list. */
+  function walkModuleCssFiles(dir: string): string[] {
+    const found: string[] = [];
+    const walk = (rel: string): void => {
+      for (const entry of readdirSync(`${root}/${rel}`, { withFileTypes: true })) {
+        const child = `${rel}/${entry.name}`;
+        if (entry.isDirectory()) walk(child);
+        else if (entry.name.endsWith(".module.css")) found.push(child);
+      }
+    };
+    walk(dir);
+    return found.sort();
+  }
+
+  /**
+   * Every `.ts`/`.tsx` under `dir`, walked recursively, EXCLUDING `src/test/`
+   * — the test suite itself quotes token names in synthetic fixtures (this
+   * very file, for one) and is not a source of real definitions.
+   */
+  function walkScriptFiles(dir: string): string[] {
+    const found: string[] = [];
+    const walk = (rel: string): void => {
+      if (rel === "src/test" || rel.startsWith("src/test/")) return;
+      for (const entry of readdirSync(`${root}/${rel}`, { withFileTypes: true })) {
+        const child = `${rel}/${entry.name}`;
+        if (entry.isDirectory()) walk(child);
+        else if (/\.tsx?$/.test(entry.name)) found.push(child);
+      }
+    };
+    walk(dir);
+    return found.sort();
+  }
+
+  it("G13: every var(--token) read without a fallback by any module stylesheet is defined in tokens.css, any module sheet, or a script", () => {
+    const cssFiles = walkModuleCssFiles("src");
+    const sheets = cssFiles.map((path) => ({
+      path,
+      css: readFileSync(`${root}/${path}`, "utf8"),
+    }));
+    const tokensCss = readFileSync(`${root}/src/styles/tokens.css`, "utf8");
+    const scriptFiles = walkScriptFiles("src");
+    const scripts = scriptFiles.map((path) => readFileSync(`${root}/${path}`, "utf8"));
+    expect(undefinedTokens(tokensCss, sheets, scripts)).toEqual([]);
+  });
+
+  it("G14: the matcher's self-tests — undefined, fallback, local definition, comment-only, de-duplication", () => {
+    // a read of an undefined token is reported with its path
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "a.module.css", css: ".x { color: var(--ink-1); }" },
+      ]),
+    ).toEqual(["a.module.css: --ink-1"]);
+
+    // a read WITH a fallback is never an offence
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "a.module.css", css: ".x { color: var(--ink-1, #000); }" },
+      ]),
+    ).toEqual([]);
+
+    // a token defined locally in the same sheet is not reported
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "a.module.css", css: ".x { --local: red; } .y { color: var(--local); }" },
+      ]),
+    ).toEqual([]);
+
+    // a token that appears only inside a comment is not a read
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        {
+          path: "a.module.css",
+          css: "/* still uses var(--ink-1) in prose only */\n.x { color: var(--ink); }",
+        },
+      ]),
+    ).toEqual([]);
+
+    // the same undefined token read twice in one sheet is reported once
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        {
+          path: "a.module.css",
+          css: ".x { color: var(--ink-1); }\n.y { color: var(--ink-1); }",
+        },
+      ]),
+    ).toEqual(["a.module.css: --ink-1"]);
+
+    // a token defined only in a DIFFERENT module sheet (a `composes:` chain,
+    // e.g. --row-pad-y from dragSurface.module.css) is not reported
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "shared.module.css", css: ".row { --row-pad-y: 0.25rem; }" },
+        { path: "reader.module.css", css: ".x { top: calc(-1 * var(--row-pad-y)); }" },
+      ]),
+    ).toEqual([]);
+
+    // a token whose only definition is a "--name" string in a script is not
+    // reported (an inline style={{ "--pc": … }} prop)
+    expect(
+      undefinedTokens(
+        ":root { --ink: #000; }",
+        [{ path: "a.module.css", css: ".x { border-left: 3px solid var(--pc); }" }],
+        [`style={{ "--pc": productColorVar }}`],
+      ),
+    ).toEqual([]);
+
+    // a "--name" that appears only inside a comment in the script does NOT
+    // count as a definition, and is still reported
+    expect(
+      undefinedTokens(
+        ":root { --ink: #000; }",
+        [{ path: "a.module.css", css: ".x { border-left: 3px solid var(--pc); }" }],
+        [`// style={{ "--pc": productColorVar }}\nconst x = 1;`],
+      ),
+    ).toEqual(["a.module.css: --pc"]);
   });
 });
 

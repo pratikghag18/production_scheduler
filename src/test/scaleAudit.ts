@@ -461,6 +461,107 @@ export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]
   return [...used].filter((t) => !defined.has(t)).sort();
 }
 
+/**
+ * F-130 — the general undefined-token sweep.
+ *
+ * `undefinedDragTokens` above only ever looked at `--drag-*`/`--drop-*`, which
+ * is why six `var(--ink-1)` reads sat unnoticed in four module stylesheets:
+ * `--ink-1` was never defined anywhere (`tokens.css` has `--ink` and `--ink-2`,
+ * not `--ink-1`), so `color` silently fell back to the inherited value —
+ * invisible on a light page, wrong everywhere else. This is the same shape of
+ * bug as `undefinedDragTokens` catches, widened to every module stylesheet and
+ * every token, not just the drag vocabulary.
+ *
+ * A READ is `var(--name)` with NO fallback — `var(--name, <fallback>)` is
+ * never an offence, that is what the fallback is for (`--chrome-scale` is read
+ * that way throughout `BoardToolbar.module.css` on purpose, and must stay
+ * clean).
+ *
+ * A DEFINITION is any of:
+ *   1. `--name:` at the start of a declaration in `tokens.css`;
+ *   2. `--name:` at the start of a declaration in ANY module stylesheet
+ *      passed in, not only the one doing the reading — this is what makes
+ *      `--row-pad-y` (declared once in `dragSurface.module.css` and reached
+ *      by `NodeTreeEditor.module.css` only through `composes:`) a real
+ *      definition rather than a false positive;
+ *   3. the quoted string `"--name"` / `'--name'` in a `.ts`/`.tsx` source
+ *      outside `src/test/` — an inline `style={{ "--pc": … } as
+ *      React.CSSProperties}` prop sets a custom property with no CSS
+ *      declaration anywhere, and three tokens in this repo (`--pc`,
+ *      `--tick-rails`, `--caret-rails`, `--hour-px`) are set exactly that
+ *      way, on purpose, already.
+ *
+ * Comments are stripped from both CSS and scripts before either reads or
+ * definitions are looked for, for the usual reason: `CommandBar.module.css`
+ * names `--ink-1` in a comment explaining that it is never used, and a script
+ * comment can just as easily quote a token's name without setting it — a
+ * matcher that reads comments would call either a definition and go quiet
+ * over the very case it exists to catch.
+ */
+
+/**
+ * Every `--name:` declared at the start of a declaration in `css` (comments
+ * already assumed stripped by the caller). Split on `;{}` only, never on a
+ * newline — the same reason `unscaledPxLengths` does: a declaration's value
+ * may wrap across lines and a newline-oriented split would cut a definition
+ * in half and report it as absent.
+ */
+function declaredTokens(css: string): Set<string> {
+  const defined = new Set<string>();
+  for (const raw of css.split(/[;{}]/)) {
+    const line = raw.trim();
+    const m = /^(--[a-z0-9-]+)\s*:/i.exec(line);
+    if (m !== null) defined.add(m[1]);
+  }
+  return defined;
+}
+
+/**
+ * Every `--name` quoted as a string literal in `source` — a script's way of
+ * definining a custom property through an inline `style` prop
+ * (`style={{ "--pc": value }}`). Comments are stripped first (reusing
+ * `stripTsComments`, the same stripper `sectionsWithoutPanels` uses on
+ * `AdminPage.tsx`) so a token name that only appears in a comment is NOT
+ * counted as a definition.
+ */
+function quotedTokens(source: string): Set<string> {
+  const clean = stripTsComments(source);
+  const found = new Set<string>();
+  for (const m of clean.matchAll(/(["'])(--[a-z0-9-]+)\1/gi)) found.add(m[2]);
+  return found;
+}
+
+/**
+ * Every `var(--token)` read with no fallback, across `sheets`, that no
+ * definition covers — see the rule above. `scripts` are raw `.ts`/`.tsx`
+ * source strings (outside `src/test/`); passing none is a no-op, so callers
+ * that only care about the CSS-only rule still work. Returns
+ * `"<path>: --name"` per offence, sorted and de-duplicated (the same token
+ * read twice in one sheet is reported once).
+ */
+export function undefinedTokens(
+  tokensCss: string,
+  sheets: ReadonlyArray<{ path: string; css: string }>,
+  scripts: ReadonlyArray<string> = [],
+): string[] {
+  const defined = declaredTokens(withoutComments(tokensCss));
+  for (const { css } of sheets) {
+    for (const t of declaredTokens(withoutComments(css))) defined.add(t);
+  }
+  for (const source of scripts) {
+    for (const t of quotedTokens(source)) defined.add(t);
+  }
+  const out = new Set<string>();
+  for (const { path, css } of sheets) {
+    const clean = withoutComments(css);
+    for (const m of clean.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
+      const token = m[1];
+      if (!defined.has(token)) out.add(`${path}: ${token}`);
+    }
+  }
+  return [...out].sort();
+}
+
 /* ===========================================================================
  * D105 — CREATE/EDIT PARITY. A FIELD YOU CAN SET ONCE AND NEVER CHANGE.
  *
