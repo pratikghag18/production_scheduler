@@ -331,6 +331,16 @@ export function assignmentFitsRun(
   return assignment.startMin >= run.startMin && assignment.endMin <= run.endMin;
 }
 
+/** R-385: two half-open minute ranges share at least one minute. Passed into
+ *  the command resolver as `ResolveContext.overlaps` so it holds no copy of
+ *  the rule (`resolve.ts`'s own no-import fence). */
+export function rangesOverlap(
+  a: { startMin: number; endMin: number },
+  b: { startMin: number; endMin: number },
+): boolean {
+  return a.startMin < b.endMin && b.startMin < a.endMin;
+}
+
 /**
  * R-365: the sentence the confirm prompt shows when a drop would change
  * which run a chip belongs to, or `null` when it would not — the signal

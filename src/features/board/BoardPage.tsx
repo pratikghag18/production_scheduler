@@ -19,7 +19,13 @@ import { useDragGesture } from "./hooks/useDragGesture";
 import { buildBoardIndex, policyForNode, type BoardIndex } from "./lib/boardIndex";
 import { outsideAreaOperatorIds as outsideAreaFor, splitPeopleFor } from "./lib/outsideArea";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
-import { splitFits, assignmentFitsRun, MIN_DURATION_MINUTES } from "./lib/interaction";
+import {
+  splitFits,
+  assignmentFitsRun,
+  rangesOverlap,
+  MIN_DURATION_MINUTES,
+} from "./lib/interaction";
+import { commandAssignments } from "./lib/commandAssignments";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
 import {
   addMinutes,
@@ -520,6 +526,9 @@ export default function BoardPage() {
       runs,
       fitsRun: assignmentFitsRun,
       minDurationMinutes: MIN_DURATION_MINUTES,
+      // R-385: the own-block question's view of the window and its overlap test.
+      assignments: commandAssignments(index),
+      overlaps: rangesOverlap,
     };
   }, [boardQuery.data, index, operatorPool]);
 
@@ -745,15 +754,26 @@ export default function BoardPage() {
               ctx={commandCtx}
               dateFormat={dateFormat}
               zone={index.zone}
-              onOpen={(resolved, anchor) =>
+              onOpen={(resolved, anchor) => {
+                // R-385: a `retime` target is never a create; `onRetime`
+                // below is the caller for that branch of the union.
+                if (resolved.target.kind === "retime") return;
                 dragApi.openCreateFromCommand({
                   nodeId: resolved.nodeId,
                   range: resolved.range,
                   operatorId: resolved.operatorId,
                   target: resolved.target,
                   anchor,
-                })
-              }
+                });
+              }}
+              onRetime={(resolved, anchor) => {
+                if (resolved.target.kind !== "retime") return;
+                dragApi.retimeAssignmentFromCommand({
+                  assignmentId: resolved.target.assignmentId,
+                  range: resolved.range,
+                  anchor,
+                });
+              }}
             />
           )}
           {boardQuery.data.nodes.length === 0 ? (

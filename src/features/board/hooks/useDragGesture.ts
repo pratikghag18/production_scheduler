@@ -676,6 +676,249 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [],
   );
 
+  /**
+   * R-385: `commitBlockDrag`'s assignment branch, EXTRACTED so an edge-resize
+   * drag and the typed command bar's re-time path (`retimeAssignmentFromCommand`
+   * below) commit through the SAME function — attachment by containment
+   * (D66), the R-365 attachment prompt, the R-031 keep-or-scale prompt, the
+   * R-361 warn mirrors and the one `updateAssignmentFields` PATCH are all the
+   * drag's own code, never a second copy. Moved verbatim from the old
+   * `else if (d.subject.kind === "assignment")` branch; the only
+   * substitutions are `d.nodeId` -> `nodeId`, `d.homeRun` -> `homeRun`,
+   * `d.subject.assignment` -> `a`, `revertLabel(d.subject)` -> `revert`
+   * (each now a parameter instead of read off the drag descriptor).
+   */
+  const retimeAssignment = useCallback(
+    (
+      a: IndexedAssignment,
+      nodeId: string,
+      homeRun: IndexedRun | null,
+      candidate: Range,
+      anchor: { x: number; y: number },
+      revert: string,
+    ) => {
+      // D66: does the candidate still fit its current run? A different
+      // run on the SAME node? No run at all (detach, or stay direct)?
+      // Picking the target by CONTAINMENT (assignmentFitsRun) is what
+      // makes D66's "dropping onto a run whose time range does not
+      // contain the assignment is refused before sending" hold BY
+      // CONSTRUCTION here — we only ever select a run that already
+      // contains the candidate, so there is no separate rejection branch
+      // to write (see the agent report's assumptions section for the
+      // fuller reasoning, including the direct-assignment-onto-a-run
+      // direction this generalizes to, which the mockup's `startDirectDrag`
+      // does not attempt but which reuses the identical mechanism).
+      const stillFitsHome = homeRun !== null && assignmentFitsRun(candidate, homeRun);
+      const runsHere = index.runsByNode.get(nodeId) ?? [];
+      const otherFit = stillFitsHome
+        ? null
+        : (runsHere.find(
+            (r) => (homeRun === null || r.id !== homeRun.id) && assignmentFitsRun(candidate, r),
+          ) ?? null);
+
+      const edit: AssignmentFieldEdit = {
+        timerange: {
+          start: minuteDate(index.windowStart, candidate.startMin),
+          end: minuteDate(index.windowStart, candidate.endMin),
+        },
+      };
+      if (!stillFitsHome) {
+        if (otherFit) {
+          edit.runId = otherFit.id;
+          edit.productId = null;
+        } else if (homeRun !== null) {
+          // Detach: mirrors `delete_run`'s own detach-mode UPDATE
+          // (docs/api.md §3) — `run_id = NULL, product_id = <run's
+          // product>`, both in the same patch.
+          edit.runId = null;
+          edit.productId = homeRun.productId;
+        }
+        // else: was already direct and still fits no run — no
+        // runId/productId change, just the time move.
+      }
+
+      // R-365 / D66: the RUN the candidate ends up attached to — the same
+      // choice `edit` above already made (`stillFitsHome` keeps `homeRun`,
+      // otherwise `otherFit`, which is `null` for a detach or an
+      // already-direct chip that still fits nothing). Reusing the value
+      // rather than recomputing it is what keeps the confirm prompt and
+      // the write it guards from ever disagreeing about what is about to
+      // happen.
+      const targetRun = stillFitsHome ? homeRun : otherFit;
+      const runLabel = (run: IndexedRun | null): string | null => {
+        if (run === null) return null;
+        const p = productViewFor(run, index.productById);
+        return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`.trim();
+      };
+      // D110: a departed person's row has `operatorId === null` — nobody
+      // to name in the prompt, so it falls back the same way the mirror
+      // toasts below already do.
+      const person =
+        a.operatorId !== null
+          ? (index.operatorById.get(a.operatorId)?.displayName ?? "This person")
+          : "This person";
+      // Decided on run IDS here, not on the labels the message shows: two
+      // runs on one track cannot overlap (`findRunOverlap`), so equal labels
+      // do imply the same run today -- but that is a rule living in another
+      // function, and "is it the same run?" is a fact this branch already
+      // holds. `attachmentChangeMessage`'s own label compare is a guard, not
+      // the decision.
+      const attachmentMessage =
+        (homeRun?.id ?? null) === (targetRun?.id ?? null)
+          ? null
+          : attachmentChangeMessage({
+              person,
+              from: runLabel(homeRun),
+              to: runLabel(targetRun),
+            });
+
+      // R-365: everything from the R-361 mirror toasts through the write
+      // itself is deferred into this closure so a prompted drop toasts and
+      // writes NOTHING until Continue — the mirrors must not run ahead of
+      // the confirm, because a toast (unlike the mutation) cannot be
+      // un-sent on Cancel.
+      const commitAssignmentMove = () => {
+        // P1-4e considered, and rejected, running a `capacity_probe` +
+        // split-coverage popover ahead of an EXISTING chip's own time
+        // move (brief §5 step 1 lists "chip move" as a split-coverage
+        // trigger). `apply_split_coverage`'s `p_adjustments` shape
+        // (docs/api.md §3) only ever carries `{assignment_id, efficiency}`
+        // — no `timerange` — so an existing assignment that is both
+        // MOVING and needing its efficiency dialled down cannot be
+        // expressed as that call's `p_new_assignment` (reserved for a
+        // brand-new INSERT) either. Making this case go through the split
+        // flow would need a second write after `apply_split_coverage`,
+        // which hazard #4 forbids ("never several calls"). Left as the
+        // ordinary `updateAssignmentFields` PATCH below; the
+        // `assignments_capacity` trigger still guards it exactly as
+        // before P1-4e, and a rejection surfaces through the existing
+        // `CapacityExceeded` toast path (`failWith`), unchanged.
+        //
+        // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge,
+        // or a same-cell nudge) — migration 0070's `assignments_resize_guard`
+        // now asks `check_eligibility`/`absence_overlap` on it exactly as the
+        // four scheduler RPCs do. Under `block` a refusal comes back as
+        // `NotEligible`/`Absent` and `failWith` below shows it, unchanged. A
+        // trigger cannot return a warning, so under `warn` the client runs
+        // the SAME two mirrors the create/reassign pop-ups already run
+        // (`certificateGaps`, `absenceGaps`) against the window it is about
+        // to write, and on a hit toasts the SAME wording the crew-drag
+        // success toast already uses above (`commitBlockDrag`'s `run`/`move`
+        // branch) — count 1, not invented copy. A departed person's row
+        // (`a.operatorId === null`, D110) has nobody to ask about and is
+        // skipped, matching the trigger's own guard.
+        if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
+          const operatorId = a.operatorId;
+          const windowEnd = minuteDate(index.windowStart, candidate.endMin);
+          const operatorRecord = index.operatorById.get(operatorId);
+          const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
+          const operatorName = operatorRecord?.displayName ?? operatorId;
+
+          if (operatorRecord) {
+            const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
+            const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
+            if (gaps.length > 0) {
+              toast.info(
+                `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
+              );
+            }
+          }
+
+          const absenceHit = absenceGaps(resizeAbsences, operatorId, {
+            start: minuteDate(index.windowStart, candidate.startMin),
+            end: windowEnd,
+          });
+          if (absenceHit !== null) {
+            const when = leaveLine(absenceHit, dateFormat, index.zone);
+            toast.info(
+              `1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`,
+            );
+          }
+        }
+
+        updateAssignmentFields.mutate(
+          { assignmentId: a.id, edit },
+          { onError: (err) => failWith(err, revert) },
+        );
+      };
+
+      const proceed = () => {
+        if (attachmentMessage === null) {
+          // No attachment change (same run both sides, or an already-direct
+          // chip staying direct) — R-365 only asks when the run a chip
+          // belongs to would change, so this is the unchanged, un-prompted
+          // path.
+          commitAssignmentMove();
+        } else {
+          // R-365: Cancel needs no extra code here. `endBlockDrag` (above)
+          // already cleared `activeDrag` before calling `commitBlockDrag`
+          // (T11), and `commitAssignmentMove` has not run yet, so nothing
+          // has been written or optimistically patched — the chip is
+          // already back where the (untouched) index has it. `confirmNo`
+          // just closes the popover.
+          askConfirm(attachmentMessage, anchor, commitAssignmentMove);
+        }
+      };
+
+      // R-031: a TYPED target is a total for the block's window, so a
+      // resize that changes the window's length changes what the number
+      // means. Ask which the person meant — keep the total, or scale it to
+      // the new length — before anything is written. Only an edge drag
+      // can get here with a different length (a move keeps it), only a
+      // typed target asks (a derived one already follows the resize, R-316),
+      // and a scaled figure that rounds back to the typed one has nothing
+      // to ask about. `edit` is the same object `commitAssignmentMove`
+      // reads, so choosing Scale sets the quantity on the very write the
+      // prompt guards, and the unit stays as typed. Cancel writes nothing,
+      // exactly as R-365's own prompt.
+      const oldMinutes = a.endMin - a.startMin;
+      const newMinutes = candidate.endMin - candidate.startMin;
+      const scaled =
+        a.targetQty !== null && newMinutes !== oldMinutes
+          ? scaledTarget(a.targetQty, oldMinutes, newMinutes)
+          : null;
+      if (a.targetQty !== null && scaled !== null && scaled !== a.targetQty) {
+        const typed = a.targetQty;
+        const unitSuffix = a.targetUnit ? ` ${a.targetUnit}` : "";
+        askChoice(
+          "Keep or scale?",
+          targetResizeMessage({
+            person,
+            qty: typed,
+            unit: a.targetUnit,
+            oldMinutes,
+            newMinutes,
+            scaled,
+          }),
+          anchor,
+          [
+            { label: `Keep ${typed}${unitSuffix}`, onChoose: proceed },
+            {
+              label: `Scale to ${scaled}${unitSuffix}`,
+              onChoose: () => {
+                edit.targetQty = scaled;
+                proceed();
+              },
+            },
+          ],
+        );
+        return;
+      }
+      proceed();
+    },
+    [
+      index,
+      ctx,
+      toast,
+      updateAssignmentFields,
+      failWith,
+      askConfirm,
+      askChoice,
+      dateFormat,
+      resizeAbsences,
+    ],
+  );
+
   const commitBlockDrag = useCallback(
     (d: InternalDragState, anchor: { x: number; y: number }) => {
       // DEF-0015: a viewer never commits a move/resize. In practice `moved`
@@ -851,218 +1094,14 @@ export function useDragGesture(args: UseDragGestureArgs) {
         }
         commitResize();
       } else if (d.subject.kind === "assignment") {
-        const a = d.subject.assignment;
-        const nodeId = d.nodeId; // D66 is same-row only — a chip never crosses cells.
-        const homeRun = d.homeRun;
-
-        // D66: does the candidate still fit its current run? A different
-        // run on the SAME node? No run at all (detach, or stay direct)?
-        // Picking the target by CONTAINMENT (assignmentFitsRun) is what
-        // makes D66's "dropping onto a run whose time range does not
-        // contain the assignment is refused before sending" hold BY
-        // CONSTRUCTION here — we only ever select a run that already
-        // contains the candidate, so there is no separate rejection branch
-        // to write (see the agent report's assumptions section for the
-        // fuller reasoning, including the direct-assignment-onto-a-run
-        // direction this generalizes to, which the mockup's `startDirectDrag`
-        // does not attempt but which reuses the identical mechanism).
-        const stillFitsHome = homeRun !== null && assignmentFitsRun(candidate, homeRun);
-        const runsHere = index.runsByNode.get(nodeId) ?? [];
-        const otherFit = stillFitsHome
-          ? null
-          : (runsHere.find(
-              (r) => (homeRun === null || r.id !== homeRun.id) && assignmentFitsRun(candidate, r),
-            ) ?? null);
-
-        const edit: AssignmentFieldEdit = {
-          timerange: {
-            start: minuteDate(index.windowStart, candidate.startMin),
-            end: minuteDate(index.windowStart, candidate.endMin),
-          },
-        };
-        if (!stillFitsHome) {
-          if (otherFit) {
-            edit.runId = otherFit.id;
-            edit.productId = null;
-          } else if (homeRun !== null) {
-            // Detach: mirrors `delete_run`'s own detach-mode UPDATE
-            // (docs/api.md §3) — `run_id = NULL, product_id = <run's
-            // product>`, both in the same patch.
-            edit.runId = null;
-            edit.productId = homeRun.productId;
-          }
-          // else: was already direct and still fits no run — no
-          // runId/productId change, just the time move.
-        }
-
-        // R-365 / D66: the RUN the candidate ends up attached to — the same
-        // choice `edit` above already made (`stillFitsHome` keeps `homeRun`,
-        // otherwise `otherFit`, which is `null` for a detach or an
-        // already-direct chip that still fits nothing). Reusing the value
-        // rather than recomputing it is what keeps the confirm prompt and
-        // the write it guards from ever disagreeing about what is about to
-        // happen.
-        const targetRun = stillFitsHome ? homeRun : otherFit;
-        const runLabel = (run: IndexedRun | null): string | null => {
-          if (run === null) return null;
-          const p = productViewFor(run, index.productById);
-          return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`.trim();
-        };
-        // D110: a departed person's row has `operatorId === null` — nobody
-        // to name in the prompt, so it falls back the same way the mirror
-        // toasts below already do.
-        const person =
-          a.operatorId !== null
-            ? (index.operatorById.get(a.operatorId)?.displayName ?? "This person")
-            : "This person";
-        // Decided on run IDS here, not on the labels the message shows: two
-        // runs on one track cannot overlap (`findRunOverlap`), so equal labels
-        // do imply the same run today -- but that is a rule living in another
-        // function, and "is it the same run?" is a fact this branch already
-        // holds. `attachmentChangeMessage`'s own label compare is a guard, not
-        // the decision.
-        const attachmentMessage =
-          (homeRun?.id ?? null) === (targetRun?.id ?? null)
-            ? null
-            : attachmentChangeMessage({
-                person,
-                from: runLabel(homeRun),
-                to: runLabel(targetRun),
-              });
-
-        // R-365: everything from the R-361 mirror toasts through the write
-        // itself is deferred into this closure so a prompted drop toasts and
-        // writes NOTHING until Continue — the mirrors must not run ahead of
-        // the confirm, because a toast (unlike the mutation) cannot be
-        // un-sent on Cancel.
-        const commitAssignmentMove = () => {
-          // P1-4e considered, and rejected, running a `capacity_probe` +
-          // split-coverage popover ahead of an EXISTING chip's own time
-          // move (brief §5 step 1 lists "chip move" as a split-coverage
-          // trigger). `apply_split_coverage`'s `p_adjustments` shape
-          // (docs/api.md §3) only ever carries `{assignment_id, efficiency}`
-          // — no `timerange` — so an existing assignment that is both
-          // MOVING and needing its efficiency dialled down cannot be
-          // expressed as that call's `p_new_assignment` (reserved for a
-          // brand-new INSERT) either. Making this case go through the split
-          // flow would need a second write after `apply_split_coverage`,
-          // which hazard #4 forbids ("never several calls"). Left as the
-          // ordinary `updateAssignmentFields` PATCH below; the
-          // `assignments_capacity` trigger still guards it exactly as
-          // before P1-4e, and a rejection surfaces through the existing
-          // `CapacityExceeded` toast path (`failWith`), unchanged.
-          //
-          // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge,
-          // or a same-cell nudge) — migration 0070's `assignments_resize_guard`
-          // now asks `check_eligibility`/`absence_overlap` on it exactly as the
-          // four scheduler RPCs do. Under `block` a refusal comes back as
-          // `NotEligible`/`Absent` and `failWith` below shows it, unchanged. A
-          // trigger cannot return a warning, so under `warn` the client runs
-          // the SAME two mirrors the create/reassign pop-ups already run
-          // (`certificateGaps`, `absenceGaps`) against the window it is about
-          // to write, and on a hit toasts the SAME wording the crew-drag
-          // success toast already uses above (`commitBlockDrag`'s `run`/`move`
-          // branch) — count 1, not invented copy. A departed person's row
-          // (`a.operatorId === null`, D110) has nobody to ask about and is
-          // skipped, matching the trigger's own guard.
-          if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
-            const operatorId = a.operatorId;
-            const windowEnd = minuteDate(index.windowStart, candidate.endMin);
-            const operatorRecord = index.operatorById.get(operatorId);
-            const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
-            const operatorName = operatorRecord?.displayName ?? operatorId;
-
-            if (operatorRecord) {
-              const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
-              const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
-              if (gaps.length > 0) {
-                toast.info(
-                  `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
-                );
-              }
-            }
-
-            const absenceHit = absenceGaps(resizeAbsences, operatorId, {
-              start: minuteDate(index.windowStart, candidate.startMin),
-              end: windowEnd,
-            });
-            if (absenceHit !== null) {
-              const when = leaveLine(absenceHit, dateFormat, index.zone);
-              toast.info(
-                `1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`,
-              );
-            }
-          }
-
-          updateAssignmentFields.mutate(
-            { assignmentId: a.id, edit },
-            { onError: (err) => failWith(err, revertLabel(d.subject)) },
-          );
-        };
-
-        const proceed = () => {
-          if (attachmentMessage === null) {
-            // No attachment change (same run both sides, or an already-direct
-            // chip staying direct) — R-365 only asks when the run a chip
-            // belongs to would change, so this is the unchanged, un-prompted
-            // path.
-            commitAssignmentMove();
-          } else {
-            // R-365: Cancel needs no extra code here. `endBlockDrag` (above)
-            // already cleared `activeDrag` before calling `commitBlockDrag`
-            // (T11), and `commitAssignmentMove` has not run yet, so nothing
-            // has been written or optimistically patched — the chip is
-            // already back where the (untouched) index has it. `confirmNo`
-            // just closes the popover.
-            askConfirm(attachmentMessage, anchor, commitAssignmentMove);
-          }
-        };
-
-        // R-031: a TYPED target is a total for the block's window, so a
-        // resize that changes the window's length changes what the number
-        // means. Ask which the person meant — keep the total, or scale it to
-        // the new length — before anything is written. Only an edge drag
-        // can get here with a different length (a move keeps it), only a
-        // typed target asks (a derived one already follows the resize, R-316),
-        // and a scaled figure that rounds back to the typed one has nothing
-        // to ask about. `edit` is the same object `commitAssignmentMove`
-        // reads, so choosing Scale sets the quantity on the very write the
-        // prompt guards, and the unit stays as typed. Cancel writes nothing,
-        // exactly as R-365's own prompt.
-        const oldMinutes = a.endMin - a.startMin;
-        const newMinutes = candidate.endMin - candidate.startMin;
-        const scaled =
-          a.targetQty !== null && newMinutes !== oldMinutes
-            ? scaledTarget(a.targetQty, oldMinutes, newMinutes)
-            : null;
-        if (a.targetQty !== null && scaled !== null && scaled !== a.targetQty) {
-          const typed = a.targetQty;
-          const unitSuffix = a.targetUnit ? ` ${a.targetUnit}` : "";
-          askChoice(
-            "Keep or scale?",
-            targetResizeMessage({
-              person,
-              qty: typed,
-              unit: a.targetUnit,
-              oldMinutes,
-              newMinutes,
-              scaled,
-            }),
-            anchor,
-            [
-              { label: `Keep ${typed}${unitSuffix}`, onChoose: proceed },
-              {
-                label: `Scale to ${scaled}${unitSuffix}`,
-                onChoose: () => {
-                  edit.targetQty = scaled;
-                  proceed();
-                },
-              },
-            ],
-          );
-          return;
-        }
-        proceed();
+        retimeAssignment(
+          d.subject.assignment,
+          d.nodeId,
+          d.homeRun,
+          candidate,
+          anchor,
+          revertLabel(d.subject),
+        );
       }
     },
     [
@@ -1071,13 +1110,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       toast,
       moveRun,
       updateRunFields,
-      updateAssignmentFields,
       failWith,
       revertLabel,
       askConfirm,
-      askChoice,
       dateFormat,
-      resizeAbsences,
+      retimeAssignment,
     ],
   );
 
@@ -1509,6 +1546,26 @@ export function useDragGesture(args: UseDragGestureArgs) {
   );
 
   /**
+   * R-385: the typed command bar's re-time path — the SAME function an edge-resize
+   * drag commits through (`retimeAssignment`), so attachment, the R-365 prompt, the
+   * R-031 keep-or-scale prompt, the R-361 warn mirrors and the one PATCH are all the
+   * drag's own.
+   */
+  const retimeAssignmentFromCommand = useCallback(
+    (r: { assignmentId: string; range: Range; anchor: { x: number; y: number } }) => {
+      if (!canPlaceRef.current) return; // DEF-0015, as commitBlockDrag
+      const a = index.assignmentById.get(r.assignmentId);
+      if (!a) {
+        toast.reverted("That block is no longer on the board.");
+        return;
+      }
+      const homeRun = a.runId !== null ? (index.runById.get(a.runId) ?? null) : null;
+      retimeAssignment(a, a.nodeId, homeRun, r.range, r.anchor, assignmentLabelById(a.id));
+    },
+    [index, toast, retimeAssignment, assignmentLabelById],
+  );
+
+  /**
    * P1-7a: `CommandBar`'s whole write path — opens the SAME create popover a
    * drag opens, direct mode forced (`presetOperatorId`, exactly as D65's panel
    * drop already forces it), with the resolved product or run as a preset.
@@ -1927,6 +1984,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     submitCreateRun,
     submitCreateDirect,
     openCreateFromCommand,
+    retimeAssignmentFromCommand,
     saveRunFields,
     deleteRunWithMode,
     saveAssignmentFields,

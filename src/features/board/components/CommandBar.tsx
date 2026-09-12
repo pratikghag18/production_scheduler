@@ -4,7 +4,7 @@ import { formatDayLabel } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
-import type { AssignCommand, Attach, ParseFailure } from "@/lib/command/parse";
+import type { AssignCommand, Attach, Existing, ParseFailure } from "@/lib/command/parse";
 import { resolveCommand, describeQuestion } from "@/lib/command/resolve";
 import type { ResolveContext, ResolvedCommand, Question, Candidate } from "@/lib/command/resolve";
 
@@ -14,11 +14,13 @@ import type { ResolveContext, ResolvedCommand, Question, Candidate } from "@/lib
  *
  * ⛔ NO SECOND DOOR (brief §2). This component imports NOTHING from
  * `src/lib/api/` — not `createAssignment`, not `useCreateAssignment`, not
- * `supabase`. Its whole job ends at `onOpen(resolved, anchor)`: from that
- * instant the caller opens the SAME `CreatePopover` a drag opens, pre-filled,
- * and everything after Create — the probe, the split, the overrides, the
- * server — is that one existing path. `src/test/commandPurity.test.ts` fails
- * the build on a runtime import of any of those here.
+ * `supabase`. Its whole job ends at one of two callbacks: `onOpen(resolved,
+ * anchor)`, from which instant the caller opens the SAME `CreatePopover` a
+ * drag opens, pre-filled, and everything after Create — the probe, the split,
+ * the overrides, the server — is that one existing path; or, for R-385,
+ * `onRetime(resolved, anchor)`, from which the caller re-times the person's
+ * own block through the drag's own commit function. `src/test/commandPurity.test.ts`
+ * fails the build on a runtime import of any of those here.
  *
  * The bar holds no rule of its own: parsing is `parseCommand`/`formatCommand`
  * (`src/lib/command/parse.ts`), resolving is `resolveCommand`/`describeQuestion`
@@ -51,6 +53,9 @@ export interface CommandBarProps {
   /** `index.zone` — D88a: the plant's own zone, never optional in spirit. */
   zone: string;
   onOpen: (resolved: ResolvedCommand, anchor: { x: number; y: number }) => void;
+  /** R-385: the resolved target is `retime` — the caller re-times the block
+   *  through the drag's own path; nothing is created. */
+  onRetime: (resolved: ResolvedCommand, anchor: { x: number; y: number }) => void;
 }
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -69,7 +74,7 @@ function failureToStatus(failure: ParseFailure): Status {
   return { kind: "shape", message: shape };
 }
 
-export function CommandBar({ ctx, dateFormat, zone, onOpen }: CommandBarProps) {
+export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -93,7 +98,11 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen }: CommandBarProps) {
     heldRef.current = command;
     const resolution = resolveCommand(command, ctx);
     if (resolution.ok) {
-      onOpen(resolution.resolved, anchorOfInput());
+      if (resolution.resolved.target.kind === "retime") {
+        onRetime(resolution.resolved, anchorOfInput());
+      } else {
+        onOpen(resolution.resolved, anchorOfInput());
+      }
       setStatus({ kind: "readout", message: renderReadout(resolution.resolved.readout) });
       return;
     }
@@ -129,6 +138,13 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen }: CommandBarProps) {
     runCommand({ ...command, attach });
   }
 
+  function pickExisting(command: AssignCommand, existing: Existing): void {
+    // R-385: the twin of `pickAttach` -- the sentence stays as it is, only
+    // the held command's `existing` changes, re-resolved directly rather
+    // than through `parseCommand` (which always returns `existing: null`).
+    runCommand({ ...command, existing });
+  }
+
   function questionToStatus(question: Question, command: AssignCommand): Status {
     const message = describeQuestion(question);
     if (question.kind === "ambiguous") {
@@ -161,13 +177,49 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen }: CommandBarProps) {
         ],
       };
     }
+    if (question.kind === "block_exists") {
+      const separate = {
+        key: "__separate_block__",
+        label: "Separate block",
+        onClick: () => pickExisting(command, { kind: "separate" }),
+      };
+      if (question.same) {
+        return { kind: "question", message, candidates: [separate] };
+      }
+      return {
+        kind: "question",
+        message,
+        candidates: [
+          ...question.blocks.map((b) => ({
+            key: b.id,
+            label: `Change ${b.label}`,
+            onClick: () => pickExisting(command, { kind: "retime", assignmentId: b.id }),
+          })),
+          separate,
+        ],
+      };
+    }
+    if (question.kind === "block_gone") {
+      return {
+        kind: "question",
+        message,
+        candidates: [
+          {
+            key: "__new_block__",
+            label: "New block",
+            onClick: () => pickExisting(command, { kind: "separate" }),
+          },
+        ],
+      };
+    }
     return { kind: "question", message, candidates: [] };
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>): void {
     setText(e.target.value);
     // Brief §6: "Any edit to the input clears the held command and its
-    // attach (a new sentence is a new question)."
+    // attach (a new sentence is a new question)." Clearing the held command
+    // clears its `existing` (R-385) the same way it clears `attach`.
     heldRef.current = null;
   }
 

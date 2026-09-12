@@ -20,7 +20,12 @@ import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { formatDayLabel } from "@/features/board/lib/time";
 import { formatCommand, type AssignCommand } from "@/lib/command/parse";
-import type { ResolveContext, ResolvedCommand, ContextRun } from "@/lib/command/resolve";
+import type {
+  ResolveContext,
+  ResolvedCommand,
+  ContextRun,
+  ContextAssignment,
+} from "@/lib/command/resolve";
 import { CommandBar } from "@/features/board/components/CommandBar";
 
 /** Brief §5's fixture, verbatim: a 7-day window from Monday 2026-08-31,
@@ -66,6 +71,8 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     runs: [],
     fitsRun: (a, r) => a.startMin >= r.startMin && a.endMin <= r.endMin,
     minDurationMinutes: 15,
+    assignments: [],
+    overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
     ...over,
   };
 }
@@ -80,15 +87,37 @@ const RUN1: ContextRun = {
   label: "Housing A 08:00–16:00",
 };
 
+/** R-385: the sentence's own hours (10:00-14:00), already on the board for
+ *  Operator 1 / Housing A / Cell 1 (c1a), Thursday (day index 3). */
+const BLK1: ContextAssignment = {
+  id: "blk1",
+  nodeId: "c1a",
+  operatorId: "op1",
+  productId: "ha",
+  startMin: 3 * 1440 + 600,
+  endMin: 3 * 1440 + 840,
+  label: "10:00–14:00",
+};
+
 const P1_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
+const P1_RETIME_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 3";
 const SHAPE =
   "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time>";
 
 function renderBar(over: Partial<ResolveContext> = {}) {
   const onOpen = vi.fn();
-  render(<CommandBar ctx={buildCtx(over)} dateFormat="d_mon_yyyy" zone="UTC" onOpen={onOpen} />);
+  const onRetime = vi.fn();
+  render(
+    <CommandBar
+      ctx={buildCtx(over)}
+      dateFormat="d_mon_yyyy"
+      zone="UTC"
+      onOpen={onOpen}
+      onRetime={onRetime}
+    />,
+  );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
-  return { onOpen, input };
+  return { onOpen, onRetime, input };
 }
 
 /** The one `aria-live="polite"` status element (brief §6). */
@@ -155,6 +184,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      existing: null,
     };
     expect(input.value).toBe(formatCommand(expectedCommand));
     expect(onOpen).toHaveBeenCalledTimes(1);
@@ -249,5 +279,78 @@ describe("CommandBar (P1-7a, brief §9)", () => {
       { x: number; y: number },
     ];
     expect(resolvedDirect.target).toEqual({ kind: "direct", productId: "ha" });
+  });
+
+  it("C11: a sentence re-timing the person's own block shows the question and both buttons", () => {
+    const { onOpen, onRetime, input } = renderBar({ assignments: [BLK1] });
+
+    fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Operator 1 is already on Housing A at Cell 1 10:00–14:00. Change it to 10:00–15:00, or add a separate block?",
+    );
+    expect(screen.getByRole("button", { name: "Change 10:00–14:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).not.toHaveBeenCalled();
+  });
+
+  it("C12: pressing Change re-times the block through onRetime, input unchanged, readout says changing", () => {
+    const { onOpen, onRetime, input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Change 10:00–14:00" }));
+
+    expect(input.value).toBe(P1_RETIME_SENTENCE);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).toHaveBeenCalledTimes(1);
+    const [resolved] = onRetime.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "retime", assignmentId: "blk1" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
+    expect(statusText()).toContain("· changing 10:00–14:00");
+  });
+
+  it("C13: Separate block sends direct; with a run also present it asks the run question instead", () => {
+    const { onOpen, onRetime, input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Separate block" }));
+
+    expect(onRetime).not.toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "direct", productId: "ha" });
+
+    cleanup();
+    const second = renderBar({ assignments: [BLK1], runs: [RUN1] });
+    fireEvent.change(second.input, { target: { value: P1_RETIME_SENTENCE } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Separate block" }));
+
+    expect(statusText()).toBe(
+      "A Housing A job is already booked on Cell 1, Housing A 08:00–16:00. Join it, or make a separate block?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Housing A 08:00–16:00" }));
+    expect(second.onOpen).toHaveBeenCalledTimes(1);
+    const [resolvedRun] = second.onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+    ];
+    expect(resolvedRun.target).toEqual({ kind: "run", runId: "run1" });
+  });
+
+  it("C14: the same-span sentence shows R35's text and ONLY the Separate block button", () => {
+    const { onOpen, onRetime, input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?",
+    );
+    expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Change /i })).toBeNull();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).not.toHaveBeenCalled();
   });
 });

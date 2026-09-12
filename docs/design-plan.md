@@ -8996,3 +8996,48 @@ done, since the client has never exercised it.
 
 Brief: `docs/agent-briefs/p1-7a-typed-command-bar-brief.md` (4 Sept draft, refreshed 11 Sept
 against the tree; its §15 says what the refresh re-verified and what it did not run).
+
+## §19.89 — D118: the bar sees a person's own block, and asks before it changes it (F-132, R-385)
+
+> *"I asked the app to assign someone on a product on a level from 10 to 2 which it did, but when
+> I put the same info again but instead of 10 to 2, it was 10 to 3, it did not recognize that it
+> is the same group with different timing ... and gave me the option to adjust the efficiency. I
+> would say this is a bug which is not safeguarded by a requirement."* — the maintainer, 11 Sept,
+> after using the bar twice.
+
+### What went wrong, and why it looked like an efficiency question
+
+The resolver (D117) was handed the window's runs, so it could ask R-383's join question, and
+nothing else about what was already on the board. A person's own block was invisible to it, so
+every sentence resolved as a new direct block. The pop-up then did its own job correctly: the
+capacity probe saw the person already at 100% for those hours and offered the efficiency box,
+which is the right answer to "put a second person-hour on top of this one" and the wrong answer
+to "make this one longer". The symptom was in the pop-up; the cause was in what the resolver
+could see. R-383 guarded a span inside a JOB on the cell; no requirement guarded a BLOCK the same
+person already had.
+
+### D118 — same person, same part, same cell, overlapping hours: it is that block
+
+The rule is the maintainer's "same group with different timing". The resolver now receives the
+window's blocks as it receives its runs (a list built in `BoardPage` from the same index, with a
+run-attached block carrying its run's product as its effective part), and one more passed-in
+predicate, half-open overlap. When the sentence's person, part and cell match a block and the
+hours overlap on that day, the bar asks in R-383's shape — the block as a button, "Separate
+block" beside it — rather than deciding. Asking rather than changing silently is the choice made
+here, for the same reason as R-383: the sentence is ambiguous between "extend it" and "add
+another", and two candidates are a question, never the better guess. The identical sentence
+typed again has nothing to change and offers only the separate block.
+
+### The change goes through the drag's door, not a third one
+
+"Change it" is a re-time of an existing block, and the board already has exactly one path that
+does that: the assignment branch of the drag's commit, which decides attachment by containment
+(stay in the run, move to another, or detach with the run's product), asks R-365's attachment
+prompt and R-031's keep-or-scale prompt, runs R-361's warn mirrors, and writes one PATCH that
+migration 0070's resize guard re-checks on the server. That branch becomes a named function the
+drag and the bar both call. The bar's new callback carries an assignment id and a range and
+nothing else; `CommandBar.tsx` still imports nothing from the API, and the purity audit still
+enforces it. The MOVE command the maintainer ordered after assign (session 139) will widen this
+same function with a cell, not add a path beside it.
+
+Brief: `docs/agent-briefs/f-132-the-bar-sees-your-own-block-brief.md`.

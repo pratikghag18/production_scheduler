@@ -8,8 +8,14 @@
  */
 import { describe, it, expect } from "vitest";
 import { resolveCommand, describeQuestion } from "@/lib/command/resolve";
-import type { ResolveContext, ContextRun, BoardDay, Candidate } from "@/lib/command/resolve";
-import type { AssignCommand, Attach } from "@/lib/command/parse";
+import type {
+  ResolveContext,
+  ContextRun,
+  ContextAssignment,
+  BoardDay,
+  Candidate,
+} from "@/lib/command/resolve";
+import type { AssignCommand, Attach, Existing } from "@/lib/command/parse";
 
 // ---------------------------------------------------------------------------
 // §5 fixture, verbatim.
@@ -84,6 +90,14 @@ const run2: ContextRun = {
   label: "Housing A 09:00–15:00",
 };
 
+/** R-385: half-open overlap, the same stub shape the bar passes in. */
+function overlaps(
+  a: { startMin: number; endMin: number },
+  b: { startMin: number; endMin: number },
+): boolean {
+  return a.startMin < b.endMin && b.startMin < a.endMin;
+}
+
 function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
   return {
     cells,
@@ -97,12 +111,22 @@ function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
     runs: [],
     fitsRun,
     minDurationMinutes: 15,
+    assignments: [],
+    overlaps,
     ...overrides,
   };
 }
 
 function withRuns(runs: ContextRun[], overrides: Partial<ResolveContext> = {}): ResolveContext {
   return baseCtx({ runs, ...overrides });
+}
+
+/** R-385: the fixture blocks, brief §9, all on day index 3, op1, c1a. */
+function withBlocks(
+  blocks: ContextAssignment[],
+  overrides: Partial<ResolveContext> = {},
+): ResolveContext {
+  return baseCtx({ assignments: blocks, ...overrides });
 }
 
 function cmd(overrides: Partial<AssignCommand> = {}): AssignCommand {
@@ -115,12 +139,35 @@ function cmd(overrides: Partial<AssignCommand> = {}): AssignCommand {
     start: { hour: 10, minute: 0 },
     end: { hour: 14, minute: 0 },
     attach: null,
+    existing: null,
     ...overrides,
   };
 }
 
 const R1_READOUT =
   "Operator 1 → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00";
+
+// R-385 §9 fixture blocks, verbatim.
+const blk1: ContextAssignment = {
+  id: "blk1",
+  nodeId: "c1a",
+  operatorId: "op1",
+  productId: "ha",
+  startMin: 3 * 1440 + 600,
+  endMin: 3 * 1440 + 840,
+  label: "10:00–14:00",
+}; // the maintainer's first sentence
+const blk2: ContextAssignment = {
+  ...blk1,
+  id: "blk2",
+  startMin: 3 * 1440 + 840,
+  endMin: 3 * 1440 + 960,
+  label: "14:00–16:00",
+};
+const blkHb: ContextAssignment = { ...blk1, id: "blkHb", productId: "hb", label: "10:00–14:00" };
+const blkSp: ContextAssignment = { ...blk1, id: "blkSp", operatorId: "sp" };
+const blkGone: ContextAssignment = { ...blk1, id: "blkGone", operatorId: null };
+const blkC2: ContextAssignment = { ...blk1, id: "blkC2", nodeId: "c2" };
 
 describe("commandResolve: brief §5 worked examples", () => {
   it("R1: ok, direct, today's index, the readout byte-for-byte", () => {
@@ -482,5 +529,166 @@ describe("commandResolve: brief §5 worked examples", () => {
         runs: [{ id: "run1", label: "Housing A 08:00–16:00", word: "" }],
       },
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // R-385: the own-block question (R34-R44), brief §9.
+  // -------------------------------------------------------------------------
+
+  it("R34: the maintainer's case -- block_exists, same false, verbatim describeQuestion", () => {
+    const res = resolveCommand(cmd({ end: { hour: 15, minute: 0 } }), withBlocks([blk1]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "block_exists",
+        person: "Operator 1",
+        product: "Housing A",
+        cell: "Cell 1",
+        span: "10:00–15:00",
+        blocks: [{ id: "blk1", label: "10:00–14:00", word: "" }],
+        same: false,
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 is already on Housing A at Cell 1 10:00–14:00. Change it to 10:00–15:00, or add a separate block?",
+      );
+    }
+  });
+
+  it("R35: the identical sentence -- same true, 'nothing to change'", () => {
+    const res = resolveCommand(cmd(), withBlocks([blk1]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "block_exists",
+        person: "Operator 1",
+        product: "Housing A",
+        cell: "Cell 1",
+        span: "10:00–14:00",
+        blocks: [{ id: "blk1", label: "10:00–14:00", word: "" }],
+        same: true,
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?",
+      );
+    }
+  });
+
+  it("R36: answer retime -- ok, target retime, range extended, readout gains changing", () => {
+    const existing: Existing = { kind: "retime", assignmentId: "blk1" };
+    const res = resolveCommand(cmd({ end: { hour: 15, minute: 0 }, existing }), withBlocks([blk1]));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        target: { kind: "retime", assignmentId: "blk1" },
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
+        readout: `${R1_READOUT.replace("10:00–14:00", "10:00–15:00")} · changing 10:00–14:00`,
+      },
+    });
+  });
+
+  it("R37: answer separate, no run -- ok, direct, no question", () => {
+    const existing: Existing = { kind: "separate" };
+    const res = resolveCommand(cmd({ existing }), withBlocks([blk1]));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.target).toEqual({ kind: "direct", productId: "ha" });
+  });
+
+  it("R38: answer separate, inside a run -- the two questions chain, run question not skipped", () => {
+    const existing: Existing = { kind: "separate" };
+    const res = resolveCommand(cmd({ existing }), withRuns([run1], { assignments: [blk1] }));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "run_exists",
+        product: "Housing A",
+        cell: "Cell 1",
+        runs: [{ id: "run1", label: "Housing A 08:00–16:00", word: "" }],
+      },
+    });
+  });
+
+  it("R39: a different part asks nothing -- ok, direct", () => {
+    const res = resolveCommand(cmd(), withBlocks([blkHb]));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.target).toEqual({ kind: "direct", productId: "ha" });
+  });
+
+  it("R40: a different person, a departed person, and another cell each ask nothing", () => {
+    const bySp = resolveCommand(cmd(), withBlocks([blkSp]));
+    expect(bySp.ok).toBe(true);
+    const gone = resolveCommand(cmd(), withBlocks([blkGone]));
+    expect(gone.ok).toBe(true);
+    const c2 = resolveCommand(cmd(), withBlocks([blkC2]));
+    expect(c2.ok).toBe(true);
+  });
+
+  it("R41: no overlap asks nothing -- half-open, touching at 14:00 is not overlapping", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 14, minute: 0 }, end: { hour: 16, minute: 0 } }),
+      withBlocks([blk1]),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.resolved.target).toEqual({ kind: "direct", productId: "ha" });
+  });
+
+  it("R42: two overlapping blocks list both in board order", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 10, minute: 0 }, end: { hour: 16, minute: 0 } }),
+      withBlocks([blk1, blk2]),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "block_exists",
+        person: "Operator 1",
+        product: "Housing A",
+        cell: "Cell 1",
+        span: "10:00–16:00",
+        blocks: [
+          { id: "blk1", label: "10:00–14:00", word: "" },
+          { id: "blk2", label: "14:00–16:00", word: "" },
+        ],
+        same: false,
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 already has 2 Housing A blocks at Cell 1 (10:00–14:00, 14:00–16:00). Change one to 10:00–16:00, or add a separate block?",
+      );
+    }
+  });
+
+  it("R43: a stale retime re-asks, never falls back, and reports block_gone when the block vanished", () => {
+    const existing: Existing = { kind: "retime", assignmentId: "blk9" };
+    const stillThere = resolveCommand(cmd({ existing }), withBlocks([blk1]));
+    expect(stillThere.ok).toBe(false);
+    if (!stillThere.ok) expect(stillThere.question.kind).toBe("block_exists");
+
+    const gone = resolveCommand(cmd({ existing }), withBlocks([]));
+    expect(gone).toEqual({
+      ok: false,
+      question: { kind: "block_gone", person: "Operator 1", product: "Housing A", cell: "Cell 1" },
+    });
+    if (!gone.ok) {
+      expect(describeQuestion(gone.question)).toBe(
+        "That Housing A block of Operator 1's at Cell 1 is no longer on the board. Add it as a new block?",
+      );
+    }
+  });
+
+  it("R44: the own-block question comes BEFORE the run question", () => {
+    const res = resolveCommand(
+      cmd({ end: { hour: 15, minute: 0 } }),
+      withRuns([run1], { assignments: [blk1] }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.question.kind).toBe("block_exists");
   });
 });

@@ -29,6 +29,23 @@ export interface BoardDay {
   weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }
 
+/** A block the board is showing, in the pop-up's own minute coordinates (R-385). */
+export interface ContextAssignment {
+  id: string;
+  nodeId: string;
+  /** null for a departed person (D110) — such a block never matches. */
+  operatorId: string | null;
+  /** The block's EFFECTIVE part: its own `productId` for a direct block, its run's
+   *  product for a run-attached block; null when neither is known (deleted product,
+   *  D110) — such a block never matches. */
+  productId: string | null;
+  startMin: number;
+  endMin: number;
+  /** "10:00–14:00" in the plant's zone — the same `formatClock` pair the run label
+   *  uses, without the name (the question sentence supplies person, part and cell). */
+  label: string;
+}
+
 /** A run the board is showing, in the pop-up's own minute coordinates. */
 export interface ContextRun {
   id: string;
@@ -78,15 +95,26 @@ export interface ResolveContext {
   ) => boolean;
   /** `MIN_DURATION_MINUTES` (D31), passed in, never retyped. */
   minDurationMinutes: number;
+  /** R-385: every block in the window (`commandAssignments(index)`), board order. */
+  assignments: ReadonlyArray<ContextAssignment>;
+  /** R-385: half-open overlap, passed in (`rangesOverlap` from `lib/interaction.ts`). */
+  overlaps: (
+    a: { startMin: number; endMin: number },
+    b: { startMin: number; endMin: number },
+  ) => boolean;
 }
 
 /**
- * Structurally identical to `AssignmentTarget` in `src/lib/api/mutations.ts`
- * (declared again here so this module keeps its no-import rule; `tsc` in the
- * board proves the two assign to each other at the one place they meet,
- * `openCreateFromCommand`).
+ * The first two members are structurally identical to `AssignmentTarget` in
+ * `src/lib/api/mutations.ts` (declared again here so this module keeps its
+ * no-import rule; `tsc` in `BoardPage` proves the narrowing before
+ * `openCreateFromCommand`, which only ever receives an `AssignmentTarget`).
  */
-export type CommandTarget = { kind: "run"; runId: string } | { kind: "direct"; productId: string };
+export type CommandTarget =
+  | { kind: "run"; runId: string }
+  | { kind: "direct"; productId: string }
+  /** R-385: not a create at all — re-time this existing block to `range`. */
+  | { kind: "retime"; assignmentId: string };
 
 export interface ResolvedCommand {
   nodeId: string;
@@ -123,7 +151,23 @@ export type Question =
   | { kind: "too_short"; minutes: number; min: number }
   /** R-383: the span sits inside one or more jobs for this part on this cell,
    *  and `command.attach` is still null. `runs` are the candidates, board order. */
-  | { kind: "run_exists"; product: string; cell: string; runs: Candidate[] };
+  | { kind: "run_exists"; product: string; cell: string; runs: Candidate[] }
+  /** R-385: the person already has one or more blocks for this part on this cell whose
+   *  hours overlap the sentence's, and `command.existing` is still null. `blocks` are
+   *  the candidates, board order; `span` is the sentence's "HH:MM–HH:MM"; `same` is
+   *  true when there is exactly one block and its hours equal the sentence's. */
+  | {
+      kind: "block_exists";
+      person: string;
+      product: string;
+      cell: string;
+      span: string;
+      blocks: Candidate[];
+      same: boolean;
+    }
+  /** R-385: `command.existing` names a block that is no longer among the hits and no
+   *  other block of this person's overlaps — the board changed under the question. */
+  | { kind: "block_gone"; person: string; product: string; cell: string };
 
 export type Resolution =
   { ok: true; resolved: ResolvedCommand } | { ok: false; question: Question };
@@ -381,33 +425,73 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
       question: { kind: "too_short", minutes: endMin - startMin, min: ctx.minDurationMinutes },
     };
   }
+  // Built here (rather than in the readout section below) because the
+  // own-block question (step 5) needs it too.
+  const timeText = `${pad2(command.start.hour)}:${pad2(command.start.minute)}–${pad2(command.end.hour)}:${pad2(command.end.minute)}`;
 
-  // 5. The run question (R-383).
-  const hits = ctx.runs.filter(
-    (r) =>
-      r.nodeId === cell.id && r.productId === product.id && ctx.fitsRun({ startMin, endMin }, r),
+  // 5. The own-block question (R-385).
+  const own = ctx.assignments.filter(
+    (x) =>
+      x.nodeId === cell.id &&
+      x.operatorId === operator.id &&
+      x.productId === product.id &&
+      ctx.overlaps({ startMin, endMin }, x),
   );
-  const runCandidates = (): Candidate[] =>
-    hits.map((r) => ({ id: r.id, label: r.label, word: "" }));
-  let target: CommandTarget;
-  if (hits.length === 0) {
-    target = { kind: "direct", productId: product.id };
-  } else if (command.attach === null) {
-    return {
-      ok: false,
-      question: {
-        kind: "run_exists",
-        product: product.name,
-        cell: cell.name,
-        runs: runCandidates(),
-      },
-    };
-  } else if (command.attach.kind === "run") {
-    const runId = command.attach.runId;
-    const matchedRun = hits.find((r) => r.id === runId);
-    if (matchedRun) {
-      target = { kind: "run", runId: matchedRun.id };
+  const blockCandidates = (): Candidate[] =>
+    own.map((x) => ({ id: x.id, label: x.label, word: "" }));
+  const askBlock = (): Resolution => ({
+    ok: false,
+    question: {
+      kind: "block_exists",
+      person: operator.displayName,
+      product: product.name,
+      cell: cell.name,
+      span: timeText,
+      blocks: blockCandidates(),
+      same: own.length === 1 && own[0].startMin === startMin && own[0].endMin === endMin,
+    },
+  });
+  let retime: ContextAssignment | null = null;
+  if (own.length > 0 && command.existing === null) {
+    return askBlock();
+  } else if (command.existing !== null && command.existing.kind === "retime") {
+    const wantedId = command.existing.assignmentId;
+    const hit = own.find((x) => x.id === wantedId) ?? null;
+    if (hit) {
+      retime = hit;
+    } else if (own.length > 0) {
+      return askBlock(); // the board changed: re-ask, never guess
     } else {
+      return {
+        ok: false,
+        question: {
+          kind: "block_gone",
+          person: operator.displayName,
+          product: product.name,
+          cell: cell.name,
+        },
+      };
+    }
+  }
+  // `existing.kind === "separate"`, or no own block at all: fall through to the run question.
+
+  // 6. The run question (R-383) — skipped entirely when re-timing a block: a
+  // re-timed block's attachment is decided by the drag's own containment
+  // logic on the way to the write (§6), not by the resolver.
+  let target: CommandTarget;
+  let hits: ContextRun[] = [];
+  if (retime !== null) {
+    target = { kind: "retime", assignmentId: retime.id };
+  } else {
+    hits = ctx.runs.filter(
+      (r) =>
+        r.nodeId === cell.id && r.productId === product.id && ctx.fitsRun({ startMin, endMin }, r),
+    );
+    const runCandidates = (): Candidate[] =>
+      hits.map((r) => ({ id: r.id, label: r.label, word: "" }));
+    if (hits.length === 0) {
+      target = { kind: "direct", productId: product.id };
+    } else if (command.attach === null) {
       return {
         ok: false,
         question: {
@@ -417,20 +501,37 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
           runs: runCandidates(),
         },
       };
+    } else if (command.attach.kind === "run") {
+      const runId = command.attach.runId;
+      const matchedRun = hits.find((r) => r.id === runId);
+      if (matchedRun) {
+        target = { kind: "run", runId: matchedRun.id };
+      } else {
+        return {
+          ok: false,
+          question: {
+            kind: "run_exists",
+            product: product.name,
+            cell: cell.name,
+            runs: runCandidates(),
+          },
+        };
+      }
+    } else {
+      target = { kind: "direct", productId: product.id };
     }
-  } else {
-    target = { kind: "direct", productId: product.id };
   }
 
   // Readout.
   const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
   const chain = [...ancestorNames, cell.name].join(" › ");
   const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
-  const timeText = `${pad2(command.start.hour)}:${pad2(command.start.minute)}–${pad2(command.end.hour)}:${pad2(command.end.minute)}`;
   let readout = `${operator.displayName} → ${product.name} · ${chain} · ${iso} · ${timeText}`;
   if (target.kind === "run") {
     const runLabel = hits.find((r) => r.id === target.runId)?.label ?? "";
     readout += ` · joining ${runLabel}`;
+  } else if (target.kind === "retime" && retime !== null) {
+    readout += ` · changing ${retime.label}`;
   }
 
   return {
@@ -474,5 +575,15 @@ export function describeQuestion(q: Question): string {
         return `A ${q.product} job is already booked on ${q.cell}, ${q.runs[0].label}. Join it, or make a separate block?`;
       }
       return `${q.runs.length} ${q.product} jobs are already booked on ${q.cell}. Join one, or make a separate block?`;
+    case "block_exists":
+      if (q.blocks.length === 1) {
+        if (q.same) {
+          return `${q.person} is already on ${q.product} at ${q.cell} ${q.blocks[0].label} — nothing to change. Add a separate block?`;
+        }
+        return `${q.person} is already on ${q.product} at ${q.cell} ${q.blocks[0].label}. Change it to ${q.span}, or add a separate block?`;
+      }
+      return `${q.person} already has ${q.blocks.length} ${q.product} blocks at ${q.cell} (${q.blocks.map((b) => b.label).join(", ")}). Change one to ${q.span}, or add a separate block?`;
+    case "block_gone":
+      return `That ${q.product} block of ${q.person}'s at ${q.cell} is no longer on the board. Add it as a new block?`;
   }
 }

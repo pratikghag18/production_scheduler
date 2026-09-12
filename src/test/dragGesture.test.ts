@@ -1524,4 +1524,162 @@ describe("useDragGesture", () => {
       expect(p.presetOperatorId).toBe("op-1");
     });
   });
+
+  describe("R-385: retimeAssignmentFromCommand -- the command bar's re-time path", () => {
+    /** A direct (unattached) block, 06:00-10:00, no target typed. */
+    function directFixture(overrides: Partial<IndexedAssignment> = {}): IndexedAssignment {
+      return {
+        ...crewFixture(),
+        id: "asg-direct",
+        runId: null,
+        productId: "prod-1",
+        startMin: 360,
+        endMin: 480,
+        ...overrides,
+      };
+    }
+
+    function prompt(result: { current: { popover: unknown } }) {
+      const p = result.current.popover as {
+        kind: string;
+        title?: string;
+        message?: string;
+        choices?: { label: string }[];
+      } | null;
+      return p && p.kind === "confirm" ? p : null;
+    }
+
+    it("D1: a direct block with no run writes ONE updateAssignmentFields call, timerange only", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = directFixture();
+      const index = buildIndex([a]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeAssignmentFromCommand({
+          assignmentId: "asg-direct",
+          range: { startMin: 360, endMin: 720 },
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const call = vi.mocked(api.updateAssignmentFields).mock.calls[0];
+      expect(call?.[0]).toBe("asg-direct");
+      expect(call?.[1]).toEqual({
+        timerange: {
+          start: new Date("2026-08-24T06:00:00.000Z"),
+          end: new Date("2026-08-24T12:00:00.000Z"),
+        },
+      });
+    });
+
+    it("D2: leaving the home run asks (R-365); Continue writes the detach beside the timerange", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = crewFixture(); // 360-600, attached to run-1 (also 360-600)
+      const index = buildIndex([a]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeAssignmentFromCommand({
+          assignmentId: a.id,
+          range: { startMin: 360, endMin: 720 }, // past run-1's own end (600) -- no longer contained
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      expect(prompt(result)).not.toBeNull();
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.confirmYes();
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent?.runId).toBe(null);
+      expect(sent?.productId).toBe(runFixture.productId);
+      expect(sent?.timerange).toEqual({
+        start: new Date("2026-08-24T06:00:00.000Z"),
+        end: new Date("2026-08-24T12:00:00.000Z"),
+      });
+    });
+
+    it("D3: a typed target asks keep-or-scale; Scale writes the scaled figure in the same PATCH", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a = directFixture({
+        id: "asg-target",
+        startMin: 360,
+        endMin: 600, // 4h
+        targetQty: 100,
+        targetUnit: null,
+      });
+      const index = buildIndex([a]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeAssignmentFromCommand({
+          assignmentId: "asg-target",
+          range: { startMin: 360, endMin: 720 }, // 6h -- scales 100 -> 150
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      const p = prompt(result);
+      expect(p).not.toBeNull();
+      expect(p?.title).toBe("Keep or scale?");
+      expect(p?.choices?.map((c) => c.label)).toEqual(["Keep 100", "Scale to 150"]);
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.confirmChoose(1); // Scale
+      });
+
+      await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.updateAssignmentFields).mock.calls[0]?.[1];
+      expect(sent?.targetQty).toBe(150);
+    });
+
+    it("D4: canPlace false writes nothing and opens no popover", async () => {
+      const api = await import("@/lib/api");
+      const a = directFixture();
+      const index = buildIndex([a]);
+      const { result } = renderHook(
+        () => useDragGesture(baseArgs(index, "user-1", "plant_1", /* canPlace */ false)),
+        { wrapper },
+      );
+
+      act(() => {
+        result.current.retimeAssignmentFromCommand({
+          assignmentId: "asg-direct",
+          range: { startMin: 360, endMin: 720 },
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+      expect(result.current.popover).toBe(null);
+    });
+
+    it("D5: an unknown assignmentId writes nothing and toasts that the block is gone", async () => {
+      const api = await import("@/lib/api");
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeAssignmentFromCommand({
+          assignmentId: "does-not-exist",
+          range: { startMin: 360, endMin: 720 },
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+      const messages = useToastStore.getState().toasts.map((t) => t.message);
+      expect(messages).toContain("That block is no longer on the board. — reverted.");
+    });
+  });
 });

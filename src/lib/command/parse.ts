@@ -41,6 +41,14 @@ export type DayWord =
  */
 export type Attach = { kind: "run"; runId: string } | { kind: "direct" };
 
+/**
+ * R-385 (the maintainer, 11 Sept, session 142): when the sentence names a person, part
+ * and cell the person is already on, with overlapping hours, the bar ASKS — change that
+ * block's hours, or add a separate block. The answer travels here. `null` = not asked
+ * yet (every fresh parse). `formatCommand` never prints it.
+ */
+export type Existing = { kind: "retime"; assignmentId: string } | { kind: "separate" };
+
 export interface AssignCommand {
   intent: "assign";
   /** The words the person used, trimmed, original case. NEVER an id. */
@@ -52,6 +60,7 @@ export interface AssignCommand {
   start: ClockTime;
   end: ClockTime;
   attach: Attach | null;
+  existing: Existing | null;
 }
 
 export type ParseFailure =
@@ -276,6 +285,7 @@ export function parseCommand(text: string): ParseResult {
       start: { hour: start.hour, minute: start.minute },
       end: { hour: end.hour, minute: end.minute },
       attach: null,
+      existing: null,
     },
   };
 }

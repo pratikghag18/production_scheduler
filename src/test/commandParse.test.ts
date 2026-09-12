@@ -31,6 +31,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -46,6 +47,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -63,6 +65,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 6, minute: 30 },
         end: { hour: 14, minute: 30 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -78,6 +81,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -93,6 +97,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -108,6 +113,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -123,6 +129,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -145,6 +152,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 22, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -160,6 +168,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 12, minute: 0 },
         end: { hour: 15, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -175,6 +184,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 0, minute: 0 },
         end: { hour: 4, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -224,6 +234,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -239,6 +250,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -261,6 +273,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -276,6 +289,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 8, minute: 0 },
         end: { hour: 16, minute: 0 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -291,6 +305,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 9, minute: 0 },
         end: { hour: 9, minute: 15 },
         attach: null,
+        existing: null,
       }),
     );
   });
@@ -315,6 +330,7 @@ describe("commandParse: brief §4 worked examples", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      existing: null,
     };
     const sentence = formatCommand(command);
     expect(sentence).toContain('"Lin On"');
