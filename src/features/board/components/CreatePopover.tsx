@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Product, BoardOperator, Skill, AssignmentTarget } from "@/lib/api";
+import type { Product, BoardOperator, Skill, AssignmentTarget, SchedulerError } from "@/lib/api";
+import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import { certificateGaps, type CertificateGap } from "../lib/boardIndex";
@@ -109,10 +110,12 @@ export function CreatePopover({
   presetRun,
   presetMode,
   presetHeadcount,
+  presetMove,
   autoCreate,
   onCancel,
   onSubmitRun,
   onSubmitDirect,
+  onSubmitMove,
   defaultTargetFor,
 }: {
   nodeId: string;
@@ -259,6 +262,24 @@ export function CreatePopover({
    */
   presetHeadcount?: number;
   /**
+   * S41-c: set when this popover was opened by the typed "move" sentence
+   * resolving to a `move_cell` target (`openMoveFromCommand`) — carries the
+   * block being moved. Direct mode is already forced by `presetOperatorId`
+   * (`openMoveFromCommand` sets both together); this preset additionally
+   * replaces the operator select with a read-only "Moving <person>'s block"
+   * line (there is nobody else the sentence could have meant) and routes
+   * `submitDirect()` to `onSubmitMove` instead of `onSubmitDirect`. Every
+   * box the pop-up otherwise shows (training, area, leave) is the SAME box,
+   * resolved for the TARGET node exactly as a create's is.
+   *
+   * D120: the run/direct segment is disabled under this preset too (the
+   * same `disabled` expression `presetMode: "run"` uses) — flipping to
+   * Product run mid-move would press Create and book a NEW run while the
+   * old block stayed exactly where it was, a two-writes state a move must
+   * never reach.
+   */
+  presetMove?: { assignmentId: string };
+  /**
    * R-384: set only by `openCreateFromCommand`/`openCreateRunFromCommand` —
    * the typed command bar's Enter path — never by a drag or a keyboard
    * create. When true and the pop-up's own verdicts read clean (see `clean`
@@ -290,6 +311,23 @@ export function CreatePopover({
     areaOverrideReason: string | undefined,
     anchor: { x: number; y: number },
   ) => void;
+  /**
+   * S41-c: called instead of `onSubmitDirect` when `presetMove` is set --
+   * `move_assignment`'s own argument shape (no operator, no target, no
+   * efficiency/target-quantity: the server carries those forward from the
+   * row itself). Returns a promise so the pop-up can await it and print a
+   * genuine server refusal in place (`reassignAssignment`'s own shape in
+   * `useDragGesture.ts` — no toast; the pop-up prints refusals).
+   */
+  onSubmitMove?: (
+    nodeId: string,
+    range: { startMin: number; endMin: number },
+    assignmentId: string,
+    eligibilityOverride: boolean,
+    overrideReason: string | undefined,
+    areaOverride: boolean,
+    areaOverrideReason: string | undefined,
+  ) => Promise<void>;
   /**
    * R-316: the TARGET a candidate part, time span and efficiency work out to
    * from this cell's standard cycle time — or null when the cell has no cycle
@@ -377,6 +415,12 @@ export function CreatePopover({
   // are not cleared for. Two decisions, two reasons, two records.
   const [areaChecked, setAreaChecked] = useState(false);
   const [areaReason, setAreaReason] = useState("");
+  // S41-c: a move sends NO capacity probe (unlike submitCreateDirect) -- the
+  // trigger refuses over capacity and this is where that refusal, or any
+  // other the training/area/leave boxes below did not already predict,
+  // lands and is printed, exactly as a reassign's own refusal is (brief §4).
+  const [moveSending, setMoveSending] = useState(false);
+  const [moveRefusal, setMoveRefusal] = useState<SchedulerError | null>(null);
 
   const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin), dateFormat, zone)} – ${formatClock(addMinutes(windowStart, range.endMin), zone)}`;
 
@@ -453,6 +497,7 @@ export function CreatePopover({
   // to refuse. `presetRun` itself changes WHICH target `onSubmitDirect` is sent
   // (P1-7a), not this gate.
   const createDisabled =
+    moveSending ||
     productId === "" ||
     (mode === "direct" &&
       (blocked ||
@@ -467,7 +512,38 @@ export function CreatePopover({
   // the Create button's click and an R-384 auto-press below can never send
   // two different shapes. Extracted verbatim from what the button used to
   // build inline; nothing about the arguments themselves changed.
-  function submitDirect() {
+  //
+  // S41-c: under `presetMove` this sends `moveAssignment` instead (brief
+  // §4) -- the SAME six verdicts above (`ineligible`/`blocked`/`needsOverride`/
+  // `selectedOutsideArea`/`selectedAbsence`/`clean`) are now about the TARGET
+  // cell, so the training/area/leave boxes are the create pop-up's own,
+  // unchanged; only the door out at the bottom differs. Async because a move
+  // sends no capacity probe (brief §4: "the trigger refuses over capacity
+  // and the pop-up prints it, as a reassign does") and awaits the server's
+  // own answer to print it, mirroring `reassignAssignment`'s own shape in
+  // `useDragGesture.ts`.
+  async function submitDirect() {
+    if (presetMove) {
+      if (!onSubmitMove) return; // never true in practice: BoardPage always wires both together
+      setMoveRefusal(null);
+      setMoveSending(true);
+      try {
+        await onSubmitMove(
+          nodeId,
+          range,
+          presetMove.assignmentId,
+          needsOverride && overrideChecked,
+          needsOverride && overrideChecked ? overrideReason.trim() : undefined,
+          selectedOutsideArea && areaChecked,
+          selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
+        );
+      } catch (err) {
+        setMoveRefusal(isSchedulerError(err) ? err : toSchedulerError(err));
+      } finally {
+        setMoveSending(false);
+      }
+      return;
+    }
     const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
     // Shared with the edit popover so the two cannot drift again: no
     // quantity means no unit (never the literal "units").
@@ -552,7 +628,7 @@ export function CreatePopover({
       if (mode === "run") {
         submitRun();
       } else {
-        submitDirect();
+        void submitDirect();
       }
     }
     // Mount-only, on purpose: `clean` is derived from the presets this
@@ -570,7 +646,7 @@ export function CreatePopover({
           <button
             type="button"
             className={mode === "run" ? styles.segOn : ""}
-            disabled={presetMode === "run"}
+            disabled={presetMode === "run" || presetMove !== undefined}
             onClick={() => setMode("run")}
           >
             Product run
@@ -578,7 +654,7 @@ export function CreatePopover({
           <button
             type="button"
             className={mode === "direct" ? styles.segOn : ""}
-            disabled={presetMode === "run"}
+            disabled={presetMode === "run" || presetMove !== undefined}
             onClick={() => setMode("direct")}
           >
             Direct assignment
@@ -633,38 +709,55 @@ export function CreatePopover({
           </>
         ) : (
           <>
-            <label htmlFor="cp-op">Operator</label>
-            <select id="cp-op" value={operatorId} onChange={(e) => setOperatorId(e.target.value)}>
-              {offeredPeople.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.displayName}
-                  {/* F-087: the list used to say "— not certified (override)"
-                      for a missing training and NOTHING AT ALL for a lapsed
-                      one. Two problems, two labels, so the difference is
-                      visible before anybody is selected. */}
-                  {operatorLabelSuffix(gapsByOperator.get(o.id) ?? [])}
-                  {/* R-357: the leave mark travels in the list too, so it is
-                      visible before anybody is picked — like the certificate
-                      suffix beside it. */}
-                  {absenceByOperator.has(o.id) ? " — on leave" : ""}
-                  {outsideAreaOperatorIds.has(o.id) ? " — not from this area (override)" : ""}
-                </option>
-              ))}
-            </select>
-            {/* ⚠️ ABSENT WHEN THERE IS NOBODY BEHIND IT -- on a board whose place
-                covers every home in the plant (a plant admin's) the whole plant
-                is already on offer, and a control reading "(0)" would be a door
-                onto an empty room. The skin is the app's shared field button
-                (R-318), not a copy. */}
-            {elsewhere.length > 0 && (
-              <button
-                type="button"
-                className={`${fieldStyles.btn} ${styles.othersBtn}`}
-                aria-expanded={showOthers}
-                onClick={() => setShowOthers((v) => !v)}
-              >
-                {showOthers ? "Hide" : "Show"} other people in this plant ({elsewhere.length})
-              </button>
+            {presetMove ? (
+              // S41-c: the sentence already named this person -- there is
+              // nobody else it could have meant, so this is a read-only
+              // line rather than a select (the operator select's whole job
+              // is picking one of several; there is nothing to pick here).
+              <p className={styles.time}>
+                Moving {operators.find((o) => o.id === operatorId)?.displayName ?? "this person"}
+                &rsquo;s block
+              </p>
+            ) : (
+              <>
+                <label htmlFor="cp-op">Operator</label>
+                <select
+                  id="cp-op"
+                  value={operatorId}
+                  onChange={(e) => setOperatorId(e.target.value)}
+                >
+                  {offeredPeople.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.displayName}
+                      {/* F-087: the list used to say "— not certified (override)"
+                          for a missing training and NOTHING AT ALL for a lapsed
+                          one. Two problems, two labels, so the difference is
+                          visible before anybody is selected. */}
+                      {operatorLabelSuffix(gapsByOperator.get(o.id) ?? [])}
+                      {/* R-357: the leave mark travels in the list too, so it is
+                          visible before anybody is picked — like the certificate
+                          suffix beside it. */}
+                      {absenceByOperator.has(o.id) ? " — on leave" : ""}
+                      {outsideAreaOperatorIds.has(o.id) ? " — not from this area (override)" : ""}
+                    </option>
+                  ))}
+                </select>
+                {/* ⚠️ ABSENT WHEN THERE IS NOBODY BEHIND IT -- on a board whose place
+                    covers every home in the plant (a plant admin's) the whole plant
+                    is already on offer, and a control reading "(0)" would be a door
+                    onto an empty room. The skin is the app's shared field button
+                    (R-318), not a copy. */}
+                {elsewhere.length > 0 && (
+                  <button
+                    type="button"
+                    className={`${fieldStyles.btn} ${styles.othersBtn}`}
+                    aria-expanded={showOthers}
+                    onClick={() => setShowOthers((v) => !v)}
+                  >
+                    {showOthers ? "Hide" : "Show"} other people in this plant ({elsewhere.length})
+                  </button>
+                )}
+              </>
             )}
             {presetRun ? (
               // P1-7a / R-383: the part is the run's -- nothing to choose.
@@ -687,24 +780,34 @@ export function CreatePopover({
                 </select>
               </>
             )}
-            <label htmlFor="cp-eff">Efficiency %</label>
-            <input
-              id="cp-eff"
-              type="number"
-              min={10}
-              max={150}
-              step={5}
-              value={efficiencyPercent}
-              onChange={(e) => setEfficiencyPercent(e.target.value)}
-            />
-            <TargetField
-              idPrefix="cp"
-              qty={targetQty}
-              unit={targetUnit}
-              onQtyChange={setTargetQty}
-              onUnitChange={setTargetUnit}
-              derivedQty={derivedQty}
-            />
+            {/* S41-c: `move_assignment` takes no efficiency or target
+                quantity at all -- the row keeps whichever it already had.
+                Showing editable controls the server would silently ignore
+                is exactly the trap CLAUDE.md §4 warns about ("a screen that
+                shows what the server will refuse"), so under `presetMove`
+                these are hidden rather than offered-and-ignored. */}
+            {!presetMove && (
+              <>
+                <label htmlFor="cp-eff">Efficiency %</label>
+                <input
+                  id="cp-eff"
+                  type="number"
+                  min={10}
+                  max={150}
+                  step={5}
+                  value={efficiencyPercent}
+                  onChange={(e) => setEfficiencyPercent(e.target.value)}
+                />
+                <TargetField
+                  idPrefix="cp"
+                  qty={targetQty}
+                  unit={targetUnit}
+                  onQtyChange={setTargetQty}
+                  onUnitChange={setTargetUnit}
+                  derivedQty={derivedQty}
+                />
+              </>
+            )}
 
             {selectedOutsideArea && (
               <div className={styles.eligWarn}>
@@ -812,6 +915,16 @@ export function CreatePopover({
                 )}
               </div>
             )}
+
+            {/* S41-c: a genuine SERVER refusal the boxes above did not
+                already predict (chiefly capacity_exceeded -- a move sends
+                no probe, brief §4). No toast: this pop-up is where it is
+                printed, exactly as a reassign's own refusal is. */}
+            {moveRefusal && (
+              <div className={styles.eligWarn}>
+                <p>{describeSchedulerError(moveRefusal)}</p>
+              </div>
+            )}
           </>
         )}
 
@@ -829,7 +942,7 @@ export function CreatePopover({
               if (mode === "run") {
                 submitRun();
               } else {
-                submitDirect();
+                void submitDirect();
               }
             }}
           >

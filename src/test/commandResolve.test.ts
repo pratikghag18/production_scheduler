@@ -19,6 +19,7 @@ import type {
   AssignCommand,
   BookCommand,
   UnassignCommand,
+  MoveCommand,
   Attach,
   Existing,
 } from "@/lib/command/parse";
@@ -191,6 +192,22 @@ function bookCmd(overrides: Partial<BookCommand> = {}): BookCommand {
     day: null,
     start: { hour: 6, minute: 0 },
     end: { hour: 14, minute: 0 },
+    existing: null,
+    ...overrides,
+  };
+}
+
+/** S41-c: "Move Operator 1 on Cell 1 in Line 1 to Cell 2" -- the move
+ *  fixture, same source cell/day as `blk1`. Defaults to a cell-only move
+ *  (span null); individual cases override `toPlace`/`span` as needed. */
+function moveCmd(overrides: Partial<MoveCommand> = {}): MoveCommand {
+  return {
+    intent: "move",
+    operator: "Operator 1",
+    place: ["Cell 1", "Line 1"],
+    toPlace: ["Cell 2"],
+    day: null,
+    span: null,
     existing: null,
     ...overrides,
   };
@@ -1179,5 +1196,212 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         "Remove Operator 1's block on Cell 1, 10:00–14:00?",
       );
     }
+  });
+});
+
+/**
+ * S41-c — the "move" resolver path, brief docs/agent-briefs/
+ * s41-c-move-brief.md §5's worked examples (RM1-RM10).
+ */
+describe("commandResolve: S41-c move worked examples", () => {
+  const MOVE_READOUT_PREFIX =
+    "Moving Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00";
+
+  it("RM1: the move in time -- retime, readout with the arrow naming the hours", () => {
+    const res = resolveCommand(
+      moveCmd({
+        toPlace: null,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+      }),
+      withBlocks([blk1]),
+    );
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "move",
+        assignmentId: "blk1",
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
+        target: { kind: "retime" },
+        readout: `${MOVE_READOUT_PREFIX} → 10:00–15:00`,
+      },
+    });
+  });
+
+  it("RM2: the move in place, keeping the block's own hours", () => {
+    const res = resolveCommand(moveCmd({ toPlace: ["Cell 2"], span: null }), withBlocks([blk1]));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "move",
+        assignmentId: "blk1",
+        nodeId: "c2",
+        operatorId: "op1",
+        productId: "ha",
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
+        target: { kind: "move_cell" },
+        readout: `${MOVE_READOUT_PREFIX} → Cell 2 · 10:00–14:00`,
+      },
+    });
+  });
+
+  it("RM3: both a new cell and new hours", () => {
+    const res = resolveCommand(
+      moveCmd({
+        toPlace: ["Cell 2"],
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+      }),
+      withBlocks([blk1]),
+    );
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "move",
+        assignmentId: "blk1",
+        nodeId: "c2",
+        operatorId: "op1",
+        productId: "ha",
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
+        target: { kind: "move_cell" },
+        readout: `${MOVE_READOUT_PREFIX} → Cell 2 · 10:00–15:00`,
+      },
+    });
+  });
+
+  it("RM4: the part not offered at the NEW cell -- not_offered naming the new cell", () => {
+    const res = resolveCommand(
+      moveCmd({ toPlace: ["Cell 1", "Line 3"], span: null }),
+      withBlocks([blk1]),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "not_offered", product: "Housing A", cell: "Cell 1" },
+    });
+  });
+
+  it("RM5: no block at all -- no_block", () => {
+    const res = resolveCommand(moveCmd(), withBlocks([]));
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "2026-09-03" },
+    });
+  });
+
+  it("RM6: two blocks -- move_which, and the answer picks one", () => {
+    const asked = resolveCommand(moveCmd(), withBlocks([blk1, blk2]));
+    expect(asked).toEqual({
+      ok: false,
+      question: {
+        kind: "move_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "2026-09-03",
+        blocks: [
+          { id: "blk1", label: "Housing A 10:00–14:00", word: "", part: "Housing A" },
+          { id: "blk2", label: "Housing A 14:00–16:00", word: "", part: "Housing A" },
+        ],
+      },
+    });
+    if (!asked.ok) {
+      expect(describeQuestion(asked.question)).toBe(
+        "Operator 1 has 2 blocks on Cell 1 2026-09-03. Move which?",
+      );
+    }
+
+    const existing = { kind: "move" as const, assignmentId: "blk2" };
+    const picked = resolveCommand(moveCmd({ existing }), withBlocks([blk1, blk2]));
+    expect(picked.ok).toBe(true);
+    if (picked.ok) expect(picked.resolved.assignmentId).toBe("blk2");
+  });
+
+  it("RM7: the new cell ambiguous (two 'Cell 1's) -- ambiguous place for the DESTINATION", () => {
+    const res = resolveCommand(moveCmd({ toPlace: ["Cell 1"] }), withBlocks([blk1]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "place",
+        text: "Cell 1",
+        candidates: [
+          { id: "c1a", label: "Cell 1 — Plant 1 › Assembly › Line 1", word: "Cell 1" },
+          { id: "c1b", label: "Cell 1 — Plant 1 › Assembly › Line 3", word: "Cell 1" },
+        ],
+      },
+    });
+  });
+
+  it("RM8: a stale answer re-asks, never falls back", () => {
+    const existing = { kind: "move" as const, assignmentId: "blk9" };
+    const res = resolveCommand(moveCmd({ existing }), withBlocks([blk1, blk2]));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.question.kind).toBe("move_which");
+  });
+
+  it("RM9: the sentence's hours are the DESTINATION -- the block is found by the DAY even though the new hours do not overlap it", () => {
+    const res = resolveCommand(
+      moveCmd({
+        toPlace: null,
+        span: { start: { hour: 16, minute: 0 }, end: { hour: 18, minute: 0 } },
+      }),
+      withBlocks([blk1]),
+    );
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "move",
+        assignmentId: "blk1",
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        range: { startMin: 3 * 1440 + 960, endMin: 3 * 1440 + 1080 },
+        target: { kind: "retime" },
+        readout: `${MOVE_READOUT_PREFIX} → 16:00–18:00`,
+      },
+    });
+  });
+
+  it("RM10: the three regression pins -- assign (R1), book (RB1) and unassign (RU2) unchanged", () => {
+    const r1 = resolveCommand(cmd(), baseCtx({ runs: [] }));
+    expect(r1).toEqual({
+      ok: true,
+      resolved: {
+        intent: "assign",
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        target: { kind: "direct", productId: "ha" },
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
+        readout: R1_READOUT,
+      },
+    });
+
+    const rb1 = resolveCommand(bookCmd(), baseCtx());
+    expect(rb1).toEqual({
+      ok: true,
+      resolved: {
+        intent: "book",
+        nodeId: "c1a",
+        productId: "ha",
+        target: { kind: "run_create", productId: "ha", headcount: null },
+        range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
+        readout: RB1_READOUT,
+      },
+    });
+
+    const ru2 = resolveCommand(
+      unassignCmd({ existing: { kind: "remove", assignmentId: "blk1" } }),
+      withBlocks([blk1]),
+    );
+    expect(ru2).toEqual({
+      ok: true,
+      resolved: {
+        intent: "unassign",
+        assignmentId: "blk1",
+        readout:
+          "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00",
+      },
+    });
   });
 });

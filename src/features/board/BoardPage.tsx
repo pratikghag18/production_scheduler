@@ -807,6 +807,28 @@ export default function BoardPage() {
               // pop-up's own Delete button calls (`onDelete=
               // {dragApi.removeAssignment}` below).
               onUnassign={(resolved) => dragApi.removeAssignment(resolved.assignmentId)}
+              // S41-c: called for BOTH targets -- a `retime` re-times through
+              // the drag's own path (R-385's, no second path for the
+              // move-in-time half); a `move_cell` opens the create pop-up
+              // preset under `presetMove` (no second door).
+              onMove={(resolved, anchor) => {
+                if (resolved.target.kind === "retime") {
+                  dragApi.retimeAssignmentFromCommand({
+                    assignmentId: resolved.assignmentId,
+                    range: resolved.range,
+                    anchor,
+                  });
+                } else {
+                  dragApi.openMoveFromCommand({
+                    assignmentId: resolved.assignmentId,
+                    nodeId: resolved.nodeId,
+                    range: resolved.range,
+                    operatorId: resolved.operatorId,
+                    productId: resolved.productId,
+                    anchor,
+                  });
+                }
+              }}
             />
           )}
           {boardQuery.data.nodes.length === 0 ? (
@@ -887,6 +909,12 @@ export default function BoardPage() {
           render boundary and the single answer the whole board reads. */}
       {canPlace && popover?.kind === "create" && (
         <CreatePopover
+          // The review lane's finding: keyed on `seq` so a second typed
+          // command opening this popover while an earlier one is still in
+          // flight is always a fresh mount -- an unkeyed re-render would
+          // update this component's props in place and the mount-only
+          // R-384 auto-press effect would never re-arm for it.
+          key={popover.seq}
           nodeId={popover.nodeId}
           anchor={popover.anchor}
           initialRange={popover.range}
@@ -912,11 +940,13 @@ export default function BoardPage() {
           presetRun={popover.presetRun}
           presetMode={popover.presetMode}
           presetHeadcount={popover.presetHeadcount}
+          presetMove={popover.presetMove}
           autoCreate={popover.autoCreate}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
           onSubmitRun={dragApi.submitCreateRun}
           onSubmitDirect={dragApi.submitCreateDirect}
+          onSubmitMove={dragApi.submitMove}
           defaultTargetFor={(productId, range, efficiencyPercent) =>
             standardFor(popover.nodeId, productId, range, efficiencyPercent)
           }

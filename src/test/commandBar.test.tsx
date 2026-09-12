@@ -25,6 +25,7 @@ import type {
   ResolvedCommand,
   ResolvedBook,
   ResolvedUnassign,
+  ResolvedMove,
   ContextRun,
   ContextAssignment,
 } from "@/lib/command/resolve";
@@ -136,16 +137,20 @@ const BLK1: ContextAssignment = {
 
 const P1_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
 const P1_RETIME_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 3";
-/** S41-a/S41-b, brief §3: the three shapes in one sentence -- this changes a
- *  string C5/C6 test verbatim (contract changed, CLAUDE.md §4). */
+/** S41-a/S41-b/S41-c: the four shapes in one sentence -- this changes a
+ *  string C5/C6/C7 test verbatim (contract changed again, CLAUDE.md §4). */
 const SHAPE =
-  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]";
+  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]";
 /** S41-a: RB1's sentence -- book, no run in the way, on/in/from 6 to 2. */
 const BOOK_SENTENCE = "book Housing A on Cell 1 in Line 1 from 6 to 2";
 /** S41-b: RU1's sentence -- names BLK1 exactly. */
 const UNASSIGN_SENTENCE = "Unassign Operator 1 from Cell 1 in Line 1 from 10 to 2";
 /** S41-b: no hours -- the whole day, RU3's shape with two blocks present. */
 const UNASSIGN_WHOLE_DAY_SENTENCE = "Unassign Operator 1 from Cell 1 in Line 1";
+/** S41-c: RM2's sentence -- names BLK1, moves it to Cell 2 with its own hours. */
+const MOVE_SENTENCE = "Move Operator 1 on Cell 1 in Line 1 to Cell 2";
+/** S41-c: RM1's shape -- a move in time only (no destination cell). */
+const MOVE_RETIME_SENTENCE = "Move Operator 1 on Cell 1 in Line 1 to 10 to 3";
 /** S41-b: RU3's second block, right after BLK1. */
 const BLK2: ContextAssignment = {
   ...BLK1,
@@ -161,6 +166,7 @@ function renderBar(over: Partial<ResolveContext> = {}) {
   const onBook = vi.fn();
   const onRetimeRun = vi.fn();
   const onUnassign = vi.fn();
+  const onMove = vi.fn();
   render(
     <CommandBar
       ctx={buildCtx(over)}
@@ -171,10 +177,11 @@ function renderBar(over: Partial<ResolveContext> = {}) {
       onBook={onBook}
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
+      onMove={onMove}
     />,
   );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
-  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, input };
+  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, input };
 }
 
 /** The one `aria-live="polite"` status element (brief §6). */
@@ -556,5 +563,64 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     const status = statusText();
     expect(status).not.toMatch(/\d{4}-\d{2}-\d{2}/);
     expect(status).toBe(`Operator 1 has no block on Cell 1 ${dayLabel}.`);
+  });
+
+  // -------------------------------------------------------------------------
+  // S41-c: "move" (CM1-CM3), brief s41-c-move-brief.md §5.
+  // -------------------------------------------------------------------------
+
+  it("CM1: naming BLK1 with a destination cell calls onMove once (move_cell), input unchanged, readout shown; nothing else called", () => {
+    const { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, input } = renderBar({
+      assignments: [BLK1],
+    });
+
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.value).toBe(MOVE_SENTENCE);
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+    expect(resolved.target).toEqual({ kind: "move_cell" });
+    expect(statusText()).toBe(
+      "Moving Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · " +
+        formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC") +
+        " · 10:00–14:00 → Cell 2 · 10:00–14:00",
+    );
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).not.toHaveBeenCalled();
+    expect(onBook).not.toHaveBeenCalled();
+    expect(onRetimeRun).not.toHaveBeenCalled();
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CM2: a move-in-time-only sentence calls onMove once with a retime target -- never onRetime (that callback is the assign path's own)", () => {
+    const { onOpen, onRetime, onMove, input } = renderBar({ assignments: [BLK1] });
+
+    fireEvent.change(input, { target: { value: MOVE_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+    expect(resolved.target).toEqual({ kind: "retime" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).not.toHaveBeenCalled();
+  });
+
+  it("CM3: two blocks show 'Move <part> <hours>' buttons; pressing one calls onMove once with the picked block", () => {
+    const { onMove, input } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.getByRole("button", { name: "Move Housing A 10:00–14:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" })).toBeTruthy();
+    expect(onMove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" }));
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk2");
   });
 });

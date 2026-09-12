@@ -21,7 +21,7 @@
  * step, and the day-and-span step are shared by both intents through private
  * helpers (`resolveCellStep`, `resolvePartStep`, `resolveDaySpanStep`).
  */
-import type { AssignCommand, BookCommand, Command, UnassignCommand } from "./parse.ts";
+import type { AssignCommand, BookCommand, Command, MoveCommand, UnassignCommand } from "./parse.ts";
 
 /** One day of the board's window, as the plant's calendar sees it. Built by
  *  `BoardPage` from `index.dayAxis.dayStarts` + `partsInZone(_, index.zone)`. */
@@ -186,6 +186,31 @@ export interface ResolvedUnassign {
   readout: string;
 }
 
+/**
+ * S41-c (docs/agent-briefs/s41-c-move-brief.md §4): "Move Sam on Cell 1 to
+ * Cell 2 in Line 1" resolves to the ONE existing block it names, moved to
+ * `nodeId` (the TARGET -- the source cell for a `retime`, the new cell for a
+ * `move_cell`) over `range`. Never written by this module: the caller sends
+ * `moveAssignment` (a `move_cell` target) or re-times through the SAME path
+ * R-385's own retime uses (a `retime` target -- no second door for the
+ * move-in-time half).
+ */
+export interface ResolvedMove {
+  intent: "move";
+  assignmentId: string;
+  /** The TARGET node: unchanged for a `retime`, the new cell for `move_cell`. */
+  nodeId: string;
+  operatorId: string;
+  /** The block's EFFECTIVE part today (its own, or its run's). */
+  productId: string;
+  range: { startMin: number; endMin: number };
+  target: { kind: "retime" } | { kind: "move_cell" };
+  /** "Moving Sam Patel's Housing A block · Plant 1 › Assembly › Line 1 ›
+   *  Cell 1 · 2026-09-03 · 10:00–14:00 → Cell 2 · 10:00–14:00" (the arrow
+   *  names what changes: the cell, the hours, or both). */
+  readout: string;
+}
+
 export type Candidate = {
   id: string;
   label: string;
@@ -257,10 +282,15 @@ export type Question =
   /** S41-b: `command.existing` names a block that is no longer among the
    *  hits and no other block overlaps — the board changed under the
    *  question. */
-  | { kind: "block_gone_remove"; person: string; cell: string };
+  | { kind: "block_gone_remove"; person: string; cell: string }
+  /** S41-c / R-389: more than one block matches the move sentence's person,
+   *  cell and day, and `command.existing` is still null -- each a button,
+   *  in `remove_which`'s shape (a removal asks even for one; a move never
+   *  does -- exactly one hit is taken without asking). */
+  | { kind: "move_which"; person: string; cell: string; when: string; blocks: Candidate[] };
 
 export type Resolution =
-  | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign }
+  | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove }
   | { ok: false; question: Question };
 
 // ---------------------------------------------------------------------------
@@ -910,6 +940,141 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
   return { ok: true, resolved: { intent: "unassign", assignmentId: hit.id, readout } };
 }
 
+/**
+ * S41-c — the move path: the current cell, the person (both shared), then
+ * the day and the block -- found across the WHOLE DAY regardless of whether
+ * the sentence gave hours (brief §4: "not the new hours — the new hours are
+ * the destination"; RM9 pins a block found by the day even though the new
+ * hours it is moved TO do not overlap it). Then the destination: `toPlace`
+ * null resolves to R-385's own `retime` target; `toPlace` given resolves the
+ * new cell by the shared cell step, checks the part is offered there, and
+ * uses the sentence's new hours if given, else the block's own.
+ */
+function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resolution {
+  const byPath = buildPathIndex(ctx.nodeById);
+
+  // 1. The current cell.
+  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  if (!cellResult.ok) return { ok: false, question: cellResult.question };
+  const cell = cellResult.cell;
+
+  // 2. The person (shared with assign/unassign).
+  const personResult = resolvePersonStep(command.operator, ctx);
+  if (!personResult.ok) return { ok: false, question: personResult.question };
+  const operator = personResult.operator;
+
+  // 3. The day, and the block(s) -- searched over the WHOLE DAY.
+  const dayResolution = resolveDay(command.day, ctx);
+  if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
+  const dayIndex = dayResolution.dayIndex;
+  const dayStart = ctx.wallToOffset(dayIndex, 0);
+  const dayEnd = ctx.wallToOffset(dayIndex, 24 * 60);
+  const whenText = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+
+  const hits = ctx.assignments.filter(
+    (x) =>
+      x.nodeId === cell.id &&
+      x.operatorId === operator.id &&
+      ctx.overlaps({ startMin: dayStart, endMin: dayEnd }, x),
+  );
+  const blockCandidates = (): Candidate[] =>
+    hits.map((x) => ({
+      id: x.id,
+      label: `${x.productName ?? "block"} ${x.label}`,
+      word: "",
+      part: x.productName,
+    }));
+  const askMoveWhich = (): Resolution => ({
+    ok: false,
+    question: {
+      kind: "move_which",
+      person: operator.displayName,
+      cell: cell.name,
+      when: whenText,
+      blocks: blockCandidates(),
+    },
+  });
+
+  let blk: ContextAssignment;
+  if (hits.length === 0) {
+    return {
+      ok: false,
+      question: { kind: "no_block", person: operator.displayName, cell: cell.name, when: whenText },
+    };
+  } else if (hits.length === 1) {
+    blk = hits[0];
+  } else if (command.existing === null) {
+    return askMoveWhich();
+  } else {
+    const hit = hits.find((x) => x.id === command.existing!.assignmentId) ?? null;
+    if (!hit) return askMoveWhich(); // the board changed: re-ask, never guess
+    blk = hit;
+  }
+
+  // 4. The destination.
+  let target: { kind: "retime" } | { kind: "move_cell" };
+  let targetNodeId: string;
+  let startMin: number;
+  let endMin: number;
+  let arrow: string;
+
+  if (command.toPlace === null) {
+    // Move in time only -- R-385's own retime target (command.span is
+    // guaranteed non-null here: parseMoveRest never returns toPlace null
+    // and span null together).
+    const spanResult = resolveDaySpanStep(command.day, command.span!.start, command.span!.end, ctx);
+    if (!spanResult.ok) return { ok: false, question: spanResult.question };
+    startMin = spanResult.startMin;
+    endMin = spanResult.endMin;
+    target = { kind: "retime" };
+    targetNodeId = cell.id;
+    arrow = spanResult.timeText;
+  } else {
+    const newCellResult = resolveCellStep(command.toPlace, ctx, byPath);
+    if (!newCellResult.ok) return { ok: false, question: newCellResult.question };
+    const newCell = newCellResult.cell;
+    const offered = ctx.offeredAt(newCell.id);
+    if (blk.productId === null || !offered.some((o) => o.id === blk.productId)) {
+      return {
+        ok: false,
+        question: { kind: "not_offered", product: blk.productName ?? "", cell: newCell.name },
+      };
+    }
+    if (command.span !== null) {
+      const spanResult = resolveDaySpanStep(command.day, command.span.start, command.span.end, ctx);
+      if (!spanResult.ok) return { ok: false, question: spanResult.question };
+      startMin = spanResult.startMin;
+      endMin = spanResult.endMin;
+      arrow = `${newCell.name} · ${spanResult.timeText}`;
+    } else {
+      startMin = blk.startMin;
+      endMin = blk.endMin;
+      arrow = `${newCell.name} · ${blk.label}`;
+    }
+    target = { kind: "move_cell" };
+    targetNodeId = newCell.id;
+  }
+
+  // Readout.
+  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
+  const chain = [...ancestorNames, cell.name].join(" › ");
+  const readout = `Moving ${operator.displayName}'s ${blk.productName ?? "block"} block · ${chain} · ${whenText} · ${blk.label} → ${arrow}`;
+
+  return {
+    ok: true,
+    resolved: {
+      intent: "move",
+      assignmentId: blk.id,
+      nodeId: targetNodeId,
+      operatorId: operator.id,
+      productId: blk.productId ?? "",
+      range: { startMin, endMin },
+      target,
+      readout,
+    },
+  };
+}
+
 /** Order of resolution: cell, then part, then (assign only) person, then day
  *  and span, then the job/run/own-block question(s) (brief §5, extended by
  *  §3 for `book`, and S41-b for `unassign`). One question at a time.
@@ -934,10 +1099,15 @@ export function resolveCommand(
   command: UnassignCommand,
   ctx: ResolveContext,
 ): { ok: true; resolved: ResolvedUnassign } | { ok: false; question: Question };
+export function resolveCommand(
+  command: MoveCommand,
+  ctx: ResolveContext,
+): { ok: true; resolved: ResolvedMove } | { ok: false; question: Question };
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution;
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution {
   if (command.intent === "book") return resolveBookCommand(command, ctx);
   if (command.intent === "unassign") return resolveUnassignCommand(command, ctx);
+  if (command.intent === "move") return resolveMoveCommand(command, ctx);
   return resolveAssignCommand(command, ctx);
 }
 
@@ -1010,5 +1180,7 @@ export function describeQuestion(q: Question): string {
       return `${q.person} has no block on ${q.cell} ${q.when}.`;
     case "block_gone_remove":
       return `That block of ${q.person}'s on ${q.cell} is already gone.`;
+    case "move_which":
+      return `${q.person} has ${q.blocks.length} blocks on ${q.cell} ${q.when}. Move which?`;
   }
 }

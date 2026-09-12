@@ -1,7 +1,7 @@
 # Database API surface (brief P1-3a)
 
-The client contract for the production-scheduler database: eight RPCs
-(three read, five write), one shared error contract, and the rule for which
+The client contract for the production-scheduler database: nine RPCs
+(three read, six write), one shared error contract, and the rule for which
 mutations go through an RPC versus a plain PostgREST table write. This is
 the **database half only** — see the caveat in §0 below before building
 anything on top of it.
@@ -221,6 +221,62 @@ before `not_eligible`), `not_eligible`, `capacity_exceeded` (via the trigger).
 `true` when it actually overrode a genuine ineligibility. Passing
 `p_eligibility_override = true` while the operator is already eligible is a
 no-op flag with no effect on the stored row.
+
+### `move_assignment(p_assignment_id uuid, p_node_id uuid, p_timerange tstzrange, p_eligibility_override boolean DEFAULT false, p_override_reason text DEFAULT NULL, p_area_override boolean DEFAULT false, p_area_override_reason text DEFAULT NULL) RETURNS jsonb`
+
+S41-c / R-389: moves ONE block to a new cell and/or new hours in one write,
+against the TARGET (`p_node_id`, `p_timerange`). Assembled from
+`reassign_assignment` (migration 0057, last redefined 0066) the way that
+function was itself assembled from `create_assignment` — same envelope, same
+override pair, same "extract, never retype" discipline (CLAUDE.md §4). Note:
+this document has never carried a `reassign_assignment` section of its own
+(a pre-existing gap, not introduced here); this entry is written in
+`move_run`'s shape instead, the closest write function that already changes
+a node/timerange pair on an existing row.
+
+1. Edit rights on **both** the source and target node (else `not_permitted`,
+   `move_run`'s own wording: "edit rights required on both source and target
+   node").
+2. A departed person's row (`operator_id` NULL, D110) cannot be moved —
+   `invalid_argument` naming the reason (`operator is null`).
+3. `check_eligibility` and `absence_overlap` run against the TARGET
+   (`p_node_id`, `p_timerange`), under the target's own resolved policy —
+   exactly `create_assignment`'s eligibility gate and R-357's absence
+   question, never the source's.
+4. The row's effective product carries forward into the move: its own for a
+   direct block, its run's for a run-attached one. A run-attached row whose
+   run's product has since been deleted is refused (`invalid_argument`)
+   rather than moved with no product at all (D110).
+5. `run_id` is set to NULL unconditionally — a run lives on one cell, so
+   leaving it always detaches, exactly as a detach drag does (D66).
+   `assignments_scope_guard` (the area rule, D113) and `assignments_capacity`
+   fire on this UPDATE as on any other; `assignments_resize_guard` (0070)
+   re-asks eligibility and absence a second time, which agrees (0070's own
+   header explains why, for the other writers whose internal UPDATE it also
+   sees); `assignments_run_consistency` is satisfied because `run_id`
+   becomes NULL in the very same statement that changes `node_id`.
+
+```json
+{
+  "assignment": {"id": "...", "node_id": "...target...", "run_id": null,
+                  "product_id": "...", "timerange": "[...target hours...)", "..."},
+  "eligibility": {"eligible": true, "policy": "warn", "missing_skills": [], "expiring_skills": []},
+  "absence": {"absent": false}
+}
+```
+
+**Raises:** `invalid_argument` (null/empty `p_assignment_id` / `p_node_id` /
+`p_timerange`; unknown assignment id; a departed person's row; a
+run-attached row whose run's product is gone; an eligibility or area
+override sent with no reason), `not_permitted` (edit rights required on both
+nodes; an RLS-filtered write), `not_eligible`, `absent`, `not_offered_here`
+(via `assignments_scope_guard`), `capacity_exceeded` (via
+`assignments_capacity`).
+
+**No capacity probe is sent before this call** (unlike `createAssignment`'s
+`submitCreateDirect`, which probes proactively before opening the split
+popover) — the trigger refuses over capacity and the client prints the
+refusal in place, exactly as a reassign does.
 
 ### `move_run(p_run_id uuid, p_node_id uuid, p_timerange tstzrange) RETURNS jsonb`
 

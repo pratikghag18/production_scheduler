@@ -9,7 +9,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
-import type { AssignCommand, BookCommand, UnassignCommand, Command } from "@/lib/command/parse";
+import type {
+  AssignCommand,
+  BookCommand,
+  UnassignCommand,
+  MoveCommand,
+  Command,
+} from "@/lib/command/parse";
 
 function ok(command: Command) {
   return { ok: true as const, command };
@@ -449,10 +455,11 @@ describe("commandParse: S41-a book-a-job worked examples", () => {
   });
 
   it("B11: expectedShape() is the exact two-shape sentence", () => {
-    // S41-b adds a third clause (contract changed, CLAUDE.md §4) -- see
-    // U8 in the unassign describe block below for the full three-shape text.
+    // S41-b adds a third clause and S41-c a fourth (contract changed twice
+    // now, CLAUDE.md §4) -- see MV10 in the move describe block below for
+    // the full four-shape text.
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]",
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]",
     );
   });
 });
@@ -532,8 +539,9 @@ describe("commandParse: S41-b unassign worked examples", () => {
   });
 
   it("U8: expectedShape() is the exact three-clause sentence", () => {
+    // S41-c adds a fourth clause (contract changed again) -- see MV10 below.
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]",
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]",
     );
   });
 
@@ -565,6 +573,150 @@ describe("commandParse: S41-b unassign worked examples", () => {
         day: null,
         start: { hour: 6, minute: 0 },
         end: { hour: 14, minute: 0 },
+        existing: null,
+      },
+    });
+  });
+});
+
+/**
+ * S41-c — the "move" grammar, brief docs/agent-briefs/s41-c-move-brief.md
+ * §5's worked examples (MV1-MV10), the same one-`it()`-per-case shape as
+ * the describe blocks above.
+ */
+describe("commandParse: S41-c move worked examples", () => {
+  function moveOk(overrides: Partial<MoveCommand> = {}): { ok: true; command: MoveCommand } {
+    return {
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1"],
+        toPlace: null,
+        day: null,
+        span: null,
+        existing: null,
+        ...overrides,
+      },
+    };
+  }
+
+  it("MV1: Move Sam on Cell 1 to Cell 2 in Line 1 -- toPlace given, span null", () => {
+    expect(parseCommand("Move Sam on Cell 1 to Cell 2 in Line 1")).toEqual(
+      moveOk({ toPlace: ["Cell 2", "Line 1"] }),
+    );
+  });
+
+  it("MV2: move Sam on Cell 1 in Line 1 to 10 to 3 -- toPlace null, span 10:00-15:00", () => {
+    expect(parseCommand("move Sam on Cell 1 in Line 1 to 10 to 3")).toEqual(
+      moveOk({
+        place: ["Cell 1", "Line 1"],
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+      }),
+    );
+  });
+
+  it("MV3: move Sam on Cell 1 to Cell 2 from 10 to 3 -- both toPlace and span", () => {
+    expect(parseCommand("move Sam on Cell 1 to Cell 2 from 10 to 3")).toEqual(
+      moveOk({
+        toPlace: ["Cell 2"],
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+      }),
+    );
+  });
+
+  it("MV4: move Sam on Cell 1 -- no_move (neither a new cell nor new hours)", () => {
+    expect(parseCommand("move Sam on Cell 1")).toEqual({ ok: false, failure: { kind: "no_move" } });
+  });
+
+  it("MV5: move Sam to Cell 2 -- no_place (no on/at/from before a place at all)", () => {
+    expect(parseCommand("move Sam to Cell 2")).toEqual({
+      ok: false,
+      failure: { kind: "no_place" },
+    });
+  });
+
+  it("MV6: move on Cell 1 to Cell 2 -- empty (no operator)", () => {
+    expect(parseCommand("move on Cell 1 to Cell 2")).toEqual({
+      ok: false,
+      failure: { kind: "empty" },
+    });
+  });
+
+  it("MV7: move Sam at Cell 1 on tomorrow to Cell 2 -- day tomorrow, read from the CURRENT place segment", () => {
+    expect(parseCommand("move Sam at Cell 1 on tomorrow to Cell 2")).toEqual(
+      moveOk({ day: { kind: "tomorrow" }, toPlace: ["Cell 2"] }),
+    );
+  });
+
+  it("MV8: quoted names are atomic", () => {
+    expect(parseCommand('Move "Sam, the new guy" on "Cell, One" to "Cell, Two" in Line 1')).toEqual(
+      moveOk({
+        operator: "Sam, the new guy",
+        place: ["Cell, One"],
+        toPlace: ["Cell, Two", "Line 1"],
+      }),
+    );
+  });
+
+  it("MV9: formatCommand round-trips MV1-MV3", () => {
+    const mv1 = parseCommand("Move Sam on Cell 1 to Cell 2 in Line 1");
+    if (!mv1.ok) throw new Error("MV1 must parse");
+    const sentence = formatCommand(mv1.command);
+    expect(sentence).toBe("move Sam on Cell 1 to Cell 2 in Line 1");
+    expect(parseCommand(sentence)).toEqual(mv1);
+
+    const mv2 = parseCommand("move Sam on Cell 1 in Line 1 to 10 to 3");
+    if (!mv2.ok) throw new Error("MV2 must parse");
+    expect(parseCommand(formatCommand(mv2.command))).toEqual(mv2);
+
+    const mv3 = parseCommand("move Sam on Cell 1 to Cell 2 from 10 to 3");
+    if (!mv3.ok) throw new Error("MV3 must parse");
+    expect(parseCommand(formatCommand(mv3.command))).toEqual(mv3);
+  });
+
+  it("MV10: expectedShape() is the exact four-clause sentence", () => {
+    expect(expectedShape()).toBe(
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]",
+    );
+  });
+
+  it("MV11 (brief's three regression pins): assign, book and unassign sentences still parse exactly as before", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+      },
+    });
+    expect(parseCommand("book Housing A on Cell 1 from 6 to 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "book",
+        product: "Housing A",
+        place: ["Cell 1"],
+        headcount: null,
+        day: null,
+        start: { hour: 6, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        existing: null,
+      },
+    });
+    expect(parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1", "Line 1"],
+        day: null,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
         existing: null,
       },
     });

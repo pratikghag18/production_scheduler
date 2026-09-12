@@ -1501,6 +1501,62 @@ describe("useDragGesture", () => {
       expect(p.presetProductId).toBe("prod-1");
     });
 
+    it("D10 (S41-c): openMoveFromCommand's popover carries presetMove, presetOperatorId, presetProductId and autoCreate: true", () => {
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+
+      act(() => {
+        result.current.openMoveFromCommand({
+          assignmentId: "asg-1",
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          operatorId: "op-1",
+          productId: "prod-1",
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      const p = result.current.popover;
+      if (p?.kind !== "create") throw new Error("expected a create popover");
+      expect(p.presetMove).toEqual({ assignmentId: "asg-1" });
+      expect(p.presetOperatorId).toBe("op-1");
+      expect(p.presetProductId).toBe("prod-1");
+      expect(p.autoCreate).toBe(true);
+      expect(p.nodeId).toBe("cell-1");
+      expect(p.range).toEqual({ startMin: 360, endMin: 480 });
+    });
+
+    it("D11: two consecutive openMoveFromCommand calls produce popovers with different seq (the race fix)", () => {
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+
+      act(() => {
+        result.current.openMoveFromCommand({
+          assignmentId: "asg-1",
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          operatorId: "op-1",
+          productId: "prod-1",
+          anchor: { x: 10, y: 10 },
+        });
+      });
+      const first = result.current.popover;
+      if (first?.kind !== "create") throw new Error("expected a create popover");
+
+      act(() => {
+        result.current.openMoveFromCommand({
+          assignmentId: "asg-2",
+          nodeId: "cell-2",
+          range: { startMin: 480, endMin: 600 },
+          operatorId: "op-2",
+          productId: "prod-2",
+          anchor: { x: 20, y: 20 },
+        });
+      });
+      const second = result.current.popover;
+      if (second?.kind !== "create") throw new Error("expected a create popover");
+
+      expect(second.seq).not.toBe(first.seq);
+    });
+
     it("endPanelDrag's popover carries no autoCreate (a panel drop never auto-creates)", () => {
       const { result } = renderHook(() => useDragGesture(baseArgs(indexWithNode())), { wrapper });
 

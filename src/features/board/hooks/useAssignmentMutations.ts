@@ -3,6 +3,7 @@ import {
   applySplitCoverage,
   createAssignment,
   reassignAssignment,
+  moveAssignment,
   toEfficiency,
   toTstzRange,
   deleteAssignment,
@@ -12,6 +13,7 @@ import {
   type BoardWindow,
   type CreateAssignmentInput,
   type ReassignAssignmentInput,
+  type MoveAssignmentInput,
   type SplitCoverageInput,
 } from "@/lib/api";
 import { boardKeys } from "./useBoardWindow";
@@ -218,6 +220,62 @@ export function useReassignAssignment(rootPath: string, from: Date, to: Date) {
                   ...a,
                   operatorId: input.operatorId,
                   operatorDisplayName: null,
+                  eligibilityOverride: input.eligibilityOverride ?? false,
+                  overrideReason: input.overrideReason ?? null,
+                  areaOverride: input.areaOverride ?? false,
+                  areaOverrideReason: input.areaOverrideReason ?? null,
+                }
+              : a,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/**
+ * S41-c: move a block to another cell and/or other hours (`move_assignment`,
+ * migration 0080). Mirrors `useReassignAssignment` above exactly: the same
+ * four-step optimistic pattern, the same onSettled invalidation, and the
+ * same reason for clearing both override pairs unless THIS call is the one
+ * setting them (a stale override belongs to the placement that has just
+ * moved away).
+ *
+ * ⚠️ `productId` IS LEFT UNTOUCHED, DELIBERATELY. The server may carry a
+ * run-attached row's PRODUCT forward as a direct `product_id` (`v_product :=
+ * COALESCE(v_row.product_id, the run's product)`), but the effective product
+ * for a run-attached row is not known on the client optimistically — only
+ * the server has the run row to resolve it from. Leaving `productId` as it
+ * was (`null` for a run-attached row) and setting only `runId: null` is
+ * honest about what the client actually knows; the refetch on settle
+ * supplies the real value.
+ */
+export function useMoveAssignment(rootPath: string, from: Date, to: Date) {
+  const queryClient = useQueryClient();
+  const key = boardKeys.window(rootPath, from, to);
+
+  return useMutation({
+    mutationFn: (input: MoveAssignmentInput) => moveAssignment(input),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = snapshotBoard(queryClient, key);
+      if (previous) {
+        queryClient.setQueryData<BoardWindow>(key, {
+          ...previous,
+          assignments: previous.assignments.map((a) =>
+            a.id === input.assignmentId
+              ? {
+                  ...a,
+                  nodeId: input.nodeId,
+                  timerange: toTstzRange(input.start, input.end),
+                  runId: null,
                   eligibilityOverride: input.eligibilityOverride ?? false,
                   overrideReason: input.overrideReason ?? null,
                   areaOverride: input.areaOverride ?? false,

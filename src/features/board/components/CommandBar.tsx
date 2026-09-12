@@ -8,6 +8,7 @@ import type {
   AssignCommand,
   BookCommand,
   UnassignCommand,
+  MoveCommand,
   Command,
   Attach,
   Existing,
@@ -19,6 +20,7 @@ import type {
   ResolvedCommand,
   ResolvedBook,
   ResolvedUnassign,
+  ResolvedMove,
   Question,
   Candidate,
 } from "@/lib/command/resolve";
@@ -94,6 +96,12 @@ export interface CommandBarProps {
    *  names — the caller removes it through the SAME `dragApi.removeAssignment`
    *  the block's own Delete button calls. Nothing is created or re-timed. */
   onUnassign: (resolved: ResolvedUnassign, anchor: { x: number; y: number }) => void;
+  /** S41-c / R-389: a "move" sentence resolved to the one block it names --
+   *  called for BOTH targets (`retime` and `move_cell`); the caller
+   *  dispatches on `resolved.target.kind`. Nothing is created here either:
+   *  a `retime` re-times through the drag's own path, a `move_cell` opens
+   *  the create pop-up preset under `presetMove`. */
+  onMove: (resolved: ResolvedMove, anchor: { x: number; y: number }) => void;
 }
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -125,6 +133,7 @@ export function CommandBar({
   onBook,
   onRetimeRun,
   onUnassign,
+  onMove,
 }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
@@ -160,6 +169,11 @@ export function CommandBar({
         }
       } else if (resolved.intent === "unassign") {
         onUnassign(resolved, anchorOfInput());
+      } else if (resolved.intent === "move") {
+        // S41-c: BOTH targets go through onMove -- the caller narrows on
+        // `resolved.target.kind` (keep the types honest: never build a
+        // ResolvedCommand-shaped call to reach onRetime from here).
+        onMove(resolved, anchorOfInput());
       } else {
         if (resolved.target.kind === "retime") {
           onRetime(resolved, anchorOfInput());
@@ -224,9 +238,11 @@ export function CommandBar({
   function pickExisting(command: AssignCommand, existing: Existing): void;
   function pickExisting(command: BookCommand, existing: BookCommand["existing"]): void;
   function pickExisting(command: UnassignCommand, existing: UnassignCommand["existing"]): void;
+  function pickExisting(command: MoveCommand, existing: MoveCommand["existing"]): void;
   function pickExisting(
     command: Command,
-    existing: Existing | BookCommand["existing"] | UnassignCommand["existing"],
+    existing:
+      Existing | BookCommand["existing"] | UnassignCommand["existing"] | MoveCommand["existing"],
   ): void {
     runCommand({ ...command, existing } as Command);
   }
@@ -366,6 +382,21 @@ export function CommandBar({
           key: b.id,
           label: `Remove ${b.label}`,
           onClick: () => pickExisting(unassignCommand, { kind: "remove", assignmentId: b.id }),
+        })),
+      };
+    }
+    if (question.kind === "move_which") {
+      // Only ever asked from the move path (S41-c). Unlike remove_which,
+      // this is never asked for exactly one block (a move takes it without
+      // asking), so there is no one-block branch here.
+      const moveCommand = command as MoveCommand;
+      return {
+        kind: "question",
+        message,
+        candidates: question.blocks.map((b) => ({
+          key: b.id,
+          label: `Move ${b.label}`,
+          onClick: () => pickExisting(moveCommand, { kind: "move", assignmentId: b.id }),
         })),
       };
     }

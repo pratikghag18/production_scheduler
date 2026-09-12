@@ -224,6 +224,58 @@ export async function reassignAssignment(
   return parsed;
 }
 
+export interface MoveAssignmentInput {
+  assignmentId: string;
+  /** The TARGET cell — may equal the row's current node (an hours-only move). */
+  nodeId: string;
+  start: Date;
+  end: Date;
+  /** D64, as `createAssignment`/`reassignAssignment` above. */
+  eligibilityOverride?: boolean;
+  overrideReason?: string;
+  /** D113 — a DIFFERENT decision from the one above; see `CreateAssignmentInput`. */
+  areaOverride?: boolean;
+  areaOverrideReason?: string;
+}
+
+/**
+ * `move_assignment(p_assignment_id uuid, p_node_id uuid, p_timerange
+ * tstzrange, p_eligibility_override boolean DEFAULT false, p_override_reason
+ * text DEFAULT NULL, p_area_override boolean DEFAULT false,
+ * p_area_override_reason text DEFAULT NULL)` (migration 0080, S41-c / R-389).
+ * Moves ONE block to a new cell and/or new hours, against the TARGET
+ * (`p_node_id`, `p_timerange`) — never the row's current placement. Returns
+ * the same `{assignment, eligibility, absence}` envelope `reassign_assignment`
+ * returns, so it goes through the same parser. `run_id` always becomes NULL
+ * on the server (a run lives on one cell; leaving it always detaches, as a
+ * detach drag does) — the caller never sends a run target. Raises:
+ * invalid_argument (unknown row, a departed person's row, a run-attached row
+ * whose run's product is gone, an override with no reason), not_permitted
+ * (edit rights required on both source and target node), not_eligible,
+ * absent, not_offered_here (via the trigger), capacity_exceeded (via the
+ * trigger).
+ */
+export async function moveAssignment(input: MoveAssignmentInput): Promise<CreateAssignmentResult> {
+  const { data, error } = await supabase.rpc("move_assignment", {
+    p_assignment_id: input.assignmentId,
+    p_node_id: input.nodeId,
+    p_timerange: toTstzRange(input.start, input.end),
+    p_eligibility_override: input.eligibilityOverride,
+    p_override_reason: input.overrideReason,
+    p_area_override: input.areaOverride,
+    p_area_override_reason: input.areaOverrideReason,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseCreateAssignmentResult(data);
+  if (parsed === null) {
+    throw shapeMismatch(
+      "move_assignment",
+      "expected a CreateAssignmentResult object (see shapes.ts)",
+    );
+  }
+  return parsed;
+}
+
 export interface MoveRunInput {
   runId: string;
   nodeId: string;

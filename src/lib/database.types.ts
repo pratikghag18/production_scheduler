@@ -1535,6 +1535,18 @@ export type Database = {
         Returns: Json
       }
       list_week_templates: { Args: { p_plant_id: string }; Returns: Json }
+      move_assignment: {
+        Args: {
+          p_area_override?: boolean
+          p_area_override_reason?: string
+          p_assignment_id: string
+          p_eligibility_override?: boolean
+          p_node_id: string
+          p_override_reason?: string
+          p_timerange: unknown
+        }
+        Returns: Json
+      }
       move_node: {
         Args: {
           p_new_parent_id: string

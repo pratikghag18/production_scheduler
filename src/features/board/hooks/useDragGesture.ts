@@ -26,6 +26,7 @@ import type {
   CreateAssignmentInput,
   AssignmentFieldEdit,
   ReassignAssignmentInput,
+  MoveAssignmentInput,
   CapacityProbe,
   AssignmentTarget,
 } from "@/lib/api";
@@ -68,6 +69,7 @@ import {
   useCreateAssignment,
   useDeleteAssignment,
   useReassignAssignment,
+  useMoveAssignment,
   useUpdateAssignmentFields,
   useApplySplitCoverage,
 } from "./useAssignmentMutations";
@@ -132,6 +134,13 @@ export interface SplitParticipant {
 export type PopoverState =
   | {
       kind: "create";
+      /** A fresh number from every opener (`createSeqRef`), never reused --
+       *  `BoardPage` keys `<CreatePopover>` on it so a second typed command
+       *  opening this popover while an earlier one is still in flight is
+       *  always a new mount, never a prop update on the same component
+       *  instance (the review lane's finding: an unkeyed re-render would
+       *  never re-arm the mount-only R-384 auto-press effect). */
+      seq: number;
       nodeId: string;
       range: Range;
       anchor: { x: number; y: number };
@@ -159,6 +168,16 @@ export type PopoverState =
       /** S41-a: "for 3 people" -- preselects `CreatePopover`'s planned
        *  headcount field when the sentence said a number. */
       presetHeadcount?: number;
+      /**
+       * S41-c: set when this popover was opened by the typed "move" sentence
+       * resolving to a `move_cell` target (`openMoveFromCommand`) -- carries
+       * the block being moved. `CreatePopover` forces direct mode (already
+       * happens via `presetOperatorId`, which `openMoveFromCommand` also
+       * sets), shows a read-only "Moving <person>'s block" line instead of
+       * the operator select, and sends `moveAssignment` on submit instead of
+       * `createAssignment` -- no second door, the SAME pop-up.
+       */
+      presetMove?: { assignmentId: string };
       /**
        * R-384: set ONLY by `openCreateFromCommand` — the typed command bar is
        * the sole opener that may auto-press Create when the pop-up would show
@@ -375,6 +394,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const createAssignment = useCreateAssignment(rootPath, from, to);
   const updateAssignmentFields = useUpdateAssignmentFields(rootPath, from, to);
   const reassign = useReassignAssignment(rootPath, from, to); // R-343, first caller
+  const move = useMoveAssignment(rootPath, from, to); // S41-c, first caller
   const deleteAssignment = useDeleteAssignment(rootPath, from, to);
   const applySplitCoverage = useApplySplitCoverage(rootPath, from, to); // D61/D62 — first caller
 
@@ -395,6 +415,17 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const [activeDrag, setActiveDrag] = useState<InternalDragState | null>(null);
   const [popover, setPopover] = useState<PopoverState | null>(null);
+  // The race the review lane found: `<CreatePopover>` renders unkeyed at a
+  // stable position in `BoardPage.tsx`, so a second typed command opening a
+  // create popover while an earlier one is still in flight (its own write
+  // not yet settled) would previously just UPDATE that component's props in
+  // place -- the mount-only R-384 auto-press effect never re-arms, and the
+  // second command's popover silently never presses Create. Every opener
+  // that sets a `kind: "create"` popover stamps a fresh `seq` from this
+  // ref; `BoardPage` keys `<CreatePopover>` on it, so each open is a new
+  // mount with its own `autoFiredRef`, however similar its props are to the
+  // last one's.
+  const createSeqRef = useRef(0);
   // Mirrors `activeDrag` for handlers that must read the latest value
   // without depending on it (keeps the pointer handlers' identity stable
   // across renders, per §13 item 4 — one add, one matching cleanup).
@@ -1298,6 +1329,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const chips = shiftChipsFor(template, range.startMin, windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId,
         range,
         anchor: { x: e.clientX, y: e.clientY },
@@ -1424,6 +1456,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const chips = shiftChipsFor(d.template, defaultRange.startMin, d.windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId: d.nodeId,
         range: defaultRange,
         anchor: { x: rect.left + 8, y: rect.top + 8 },
@@ -1548,6 +1581,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const chips = shiftChipsFor(template, startMin, windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId: hit.nodeId,
         range: { startMin, endMin },
         anchor: { x: e.clientX, y: e.clientY },
@@ -1631,6 +1665,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId: r.nodeId,
         range: r.range,
         anchor: r.anchor,
@@ -1644,6 +1679,43 @@ export function useDragGesture(args: UseDragGestureArgs) {
       });
     },
     [index, runLabelById],
+  );
+
+  /**
+   * S41-c: the typed command bar's "move to another cell" write path --
+   * opens the SAME create popover a drag/command-bar assign opens, direct
+   * mode forced by `presetOperatorId` (exactly as `openCreateFromCommand`
+   * already forces it), with `presetMove: { assignmentId }` marking this as
+   * a MOVE rather than a create: `CreatePopover`'s `submitDirect()` then
+   * sends `moveAssignment` instead of `createAssignment` (brief §2 -- no
+   * second door, the SAME pop-up, a different door out of it).
+   */
+  const openMoveFromCommand = useCallback(
+    (r: {
+      assignmentId: string;
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      productId: string;
+      anchor: { x: number; y: number };
+    }) => {
+      const template = index.templateForNode.get(r.nodeId) ?? null;
+      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
+      setPopover({
+        kind: "create",
+        seq: (createSeqRef.current += 1),
+        nodeId: r.nodeId,
+        range: r.range,
+        anchor: r.anchor,
+        shiftChips: chips,
+        presetOperatorId: r.operatorId,
+        presetProductId: r.productId,
+        presetMove: { assignmentId: r.assignmentId },
+        // R-384: the only opener that may auto-press Create.
+        autoCreate: true,
+      });
+    },
+    [index],
   );
 
   /**
@@ -1666,6 +1738,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId: r.nodeId,
         range: r.range,
         anchor: r.anchor,
@@ -2041,6 +2114,48 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [reassign],
   );
 
+  /**
+   * S41-c: the create pop-up's move door -- shaped exactly like
+   * `reassignAssignment` above (`mutateAsync`, re-thrown `SchedulerError`, no
+   * toast: the pop-up prints every refusal itself through the SAME
+   * training/area/leave boxes a create shows, resolved for the TARGET node).
+   * Positional arguments, not an object: this is the literal shape
+   * `CreatePopover`'s `onSubmitMove` prop calls, built here from `index.
+   * windowStart` (which the pop-up does not have) rather than pushed onto
+   * every caller.
+   */
+  const submitMove = useCallback(
+    async (
+      nodeId: string,
+      range: Range,
+      assignmentId: string,
+      eligibilityOverride: boolean,
+      overrideReason: string | undefined,
+      areaOverride: boolean,
+      areaOverrideReason: string | undefined,
+    ): Promise<void> => {
+      const input: MoveAssignmentInput = {
+        assignmentId,
+        nodeId,
+        start: minuteDate(index.windowStart, range.startMin),
+        end: minuteDate(index.windowStart, range.endMin),
+        eligibilityOverride,
+        overrideReason,
+        areaOverride,
+        areaOverrideReason,
+      };
+      try {
+        await move.mutateAsync(input);
+        setPopover(null);
+      } catch (err) {
+        // No toast, on the same reasoning as reassignAssignment above: the
+        // pop-up is open and prints every refusal itself.
+        throw isSchedulerError(err) ? err : toSchedulerError(err);
+      }
+    },
+    [index, move],
+  );
+
   /** ⭐ R-323: THIS DELETES THE ROW. The comment that stood here said there was
    *  "no delete_assignment RPC and no `useDeleteAssignment` hook", and that
    *  `status = "cancelled"` was "the one existing, D36-compliant path" — a gap
@@ -2084,6 +2199,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
     retimeAssignmentFromCommand,
     openCreateRunFromCommand,
     retimeRunFromCommand,
+    openMoveFromCommand,
+    submitMove,
     saveRunFields,
     deleteRunWithMode,
     saveAssignmentFields,

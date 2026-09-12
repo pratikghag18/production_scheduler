@@ -106,7 +106,30 @@ export interface BookCommand {
   existing: { kind: "retime"; runId: string } | null;
 }
 
-export type Command = AssignCommand | BookCommand | UnassignCommand;
+/**
+ * S41-c (docs/agent-briefs/s41-c-move-brief.md §3): "Move Sam on Cell 1 to
+ * Cell 2 in Line 1" moves an EXISTING block to another cell and/or other
+ * hours -- never a create. `toPlace: null` means a move in time only (R-385's
+ * `retime` target); `span: null` means the block keeps its own hours. At
+ * least one of the two must be present (parseCommand's own check) -- a
+ * sentence naming neither is `no_move`.
+ */
+export interface MoveCommand {
+  intent: "move";
+  /** The words the person used, trimmed, original case. NEVER an id. */
+  operator: string;
+  /** WHERE the block is now. Most specific first, at least one. */
+  place: string[];
+  /** The new cell, most specific first -- or null for a move in time only. */
+  toPlace: string[] | null;
+  day: DayWord | null;
+  /** The new hours, or null to keep the block's own. */
+  span: { start: ClockTime; end: ClockTime } | null;
+  /** Which block, when several match; null until asked. */
+  existing: { kind: "move"; assignmentId: string } | null;
+}
+
+export type Command = AssignCommand | BookCommand | UnassignCommand | MoveCommand;
 
 export type ParseFailure =
   | { kind: "empty" }
@@ -117,7 +140,9 @@ export type ParseFailure =
   | { kind: "no_place" } // operator and product given, no place
   | { kind: "bad_day"; text: string }
   /** S41-a: a `for` clause whose number is not a whole number 1–99. */
-  | { kind: "bad_headcount"; text: string };
+  | { kind: "bad_headcount"; text: string }
+  /** S41-c: neither a new cell nor new hours were said -- nothing to move. */
+  | { kind: "no_move" };
 
 export type ParseResult = { ok: true; command: Command } | { ok: false; failure: ParseFailure };
 
@@ -138,6 +163,11 @@ const BOOK_VERB_RE = /^(book|run)\b\s*/i;
 
 /** S41-b: the first word decides unassign vs everything else. */
 const UNASSIGN_VERB_RE = /^(unassign|remove|clear)\b\s*/i;
+
+/** S41-c: the first word decides move vs everything else. "shift" is a noun
+ *  everywhere else in this app (a shift chip, a shift pattern), never a verb
+ *  here -- only "move" starts this grammar. */
+const MOVE_VERB_RE = /^move\b\s*/i;
 
 const WEEKDAY_ALTS =
   "mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?";
@@ -539,6 +569,158 @@ function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
   };
 }
 
+/**
+ * S41-c: like `extractOptionalTimeClause` but anchored on "to" instead of
+ * "from" -- the move grammar's time clause when the sentence gave no
+ * "from"-led hours ("move Sam on Cell 1 in Line 1 to 10 to 3"). Tries the
+ * LAST standalone "to" whose suffix parses as `<time> <sep> <time>`, scanning
+ * from the end of the string backwards: the pair's own separator word in "to
+ * 10 to 3" (the inner "to" between 10 and 3) has only "3" after it, which
+ * never matches the pair pattern, so the search naturally continues one "to"
+ * further back to the clause's real leading word.
+ */
+function extractToTimeClause(
+  text: string,
+):
+  | { ok: true; rest: string; span: { start: ClockTime; end: ClockTime } | null }
+  | { ok: false; failure: ParseFailure } {
+  const toRe = /\bto\b/gi;
+  const positions: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = toRe.exec(text)) !== null) positions.push(m.index);
+
+  for (let i = positions.length - 1; i >= 0; i--) {
+    const idx = positions[i];
+    const before = text.slice(0, idx).trim();
+    const suffix = text.slice(idx + 2).trim(); // "to" is always 2 chars
+    const timeMatch = suffix.match(/^(.+?)\s+(to|-|–|until|till)\s+(.+)$/i);
+    if (!timeMatch) continue;
+    const [, startRaw, , endRaw] = timeMatch;
+
+    const start = parseTimeToken(startRaw);
+    if (!start) return { ok: false, failure: { kind: "bad_time", text: startRaw.trim() } };
+    let end = parseTimeToken(endRaw);
+    if (!end) return { ok: false, failure: { kind: "bad_time", text: endRaw.trim() } };
+
+    if (!end.hasMeridiem && !(totalMinutes(end) > totalMinutes(start))) {
+      end = { ...end, hour: (end.hour + 12) % 24 };
+    }
+    if (!(totalMinutes(end) > totalMinutes(start))) {
+      return { ok: false, failure: { kind: "time_order" } };
+    }
+
+    return {
+      ok: true,
+      rest: before,
+      span: {
+        start: { hour: start.hour, minute: start.minute },
+        end: { hour: end.hour, minute: end.minute },
+      },
+    };
+  }
+  return { ok: true, rest: text, span: null };
+}
+
+/** S41-c: splits "<operator> (on|at|from) <place>..." on the FIRST of those
+ *  three words (brief §3) -- the move grammar's own operator/place
+ *  separator set (no "off": that word belongs to the unassign grammar only). */
+function splitMoveOperatorPlaces(text: string): { operator: string; placesText: string } {
+  const sepMatch = text.match(/\bon\b|\bat\b|\bfrom\b/i);
+  if (!sepMatch || sepMatch.index === undefined) {
+    return { operator: text.trim(), placesText: "" };
+  }
+  return {
+    operator: text.slice(0, sepMatch.index).trim(),
+    placesText: text.slice(sepMatch.index + sepMatch[0].length).trim(),
+  };
+}
+
+/**
+ * S41-c: "move <op> (on|at|from) <place> [to <place>] [on <day>] [<hours>]"
+ * (brief §3). `rest` is the text after the verb has been stripped.
+ *
+ * Read back to front for the TIME clause (try a trailing "from <time> to
+ * <time>" first, then a trailing "to <time> to <time>") -- that always sits
+ * at the very end, whichever order the day word and the destination came in.
+ * The day word does NOT: the brief's own worked example ("move Sam at Cell 1
+ * on tomorrow to Cell 2") puts it BEFORE the destination clause, so day
+ * extraction happens per PLACE SEGMENT rather than off the string's tail --
+ * split operator from place text first (first on/at/from), split the place
+ * text on the FIRST " to " into current/new, then try the day word at the
+ * end of the CURRENT segment, falling back to the end of the NEW segment
+ * (the order the grammar's own brackets list it in) when the current one
+ * carries none.
+ */
+function parseMoveRest(rest: string, quotes: string[]): ParseResult {
+  const fromClause = extractOptionalTimeClause(rest);
+  if (!fromClause.ok) return fromClause;
+  let afterTime = fromClause.rest;
+  let span = fromClause.span;
+  if (span === null) {
+    const toClause = extractToTimeClause(afterTime);
+    if (!toClause.ok) return toClause;
+    afterTime = toClause.rest;
+    span = toClause.span;
+  }
+
+  const { operator: operatorPart, placesText } = splitMoveOperatorPlaces(afterTime);
+  if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
+  if (placesText === "") return { ok: false, failure: { kind: "no_place" } };
+
+  // The FIRST " to " splits the current place(s) from the new place(s) --
+  // never the last, since a qualifier never uses "to" (on/at/in/comma only).
+  const toMatch = placesText.match(/\s+to\s+/i);
+  let placeText = placesText;
+  let toPlaceText: string | null = null;
+  if (toMatch && toMatch.index !== undefined) {
+    placeText = placesText.slice(0, toMatch.index).trim();
+    toPlaceText = placesText.slice(toMatch.index + toMatch[0].length).trim();
+  }
+
+  let day: DayWord | null = null;
+  const dayInCurrent = extractDayWord(placeText);
+  if (!dayInCurrent.ok) return dayInCurrent;
+  if (dayInCurrent.day !== null) {
+    day = dayInCurrent.day;
+    placeText = dayInCurrent.rest;
+  } else if (toPlaceText !== null) {
+    const dayInNew = extractDayWord(toPlaceText);
+    if (!dayInNew.ok) return dayInNew;
+    day = dayInNew.day;
+    toPlaceText = dayInNew.rest;
+  }
+
+  const pieces = splitProductPlaces(placeText);
+  if (pieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+
+  const toPieces = toPlaceText !== null ? splitProductPlaces(toPlaceText) : [];
+  const toPlace =
+    toPlaceText !== null && toPieces.length > 0
+      ? toPieces.map((p) => restoreQuotes(p, quotes))
+      : null;
+
+  // R-389: at least one of "a new cell" / "new hours" must be said.
+  if (toPlace === null && span === null) {
+    return { ok: false, failure: { kind: "no_move" } };
+  }
+
+  const operator = restoreQuotes(operatorPart, quotes);
+  const place = pieces.map((p) => restoreQuotes(p, quotes));
+
+  return {
+    ok: true,
+    command: {
+      intent: "move",
+      operator,
+      place,
+      toPlace,
+      day,
+      span,
+      existing: null,
+    },
+  };
+}
+
 /** `assign <op> to <product> on <place1>...`, `book <product> on <place1>...`
  *  or `unassign <op> from <place1>...` (brief §3/§4). Case-insensitive,
  *  whitespace collapsed, a trailing `.` ignored, double-quoted segments
@@ -557,6 +739,13 @@ export function parseCommand(text: string): ParseResult {
   const unassignVerbMatch = norm.match(UNASSIGN_VERB_RE);
   if (unassignVerbMatch) {
     return parseUnassignRest(norm.slice(unassignVerbMatch[0].length), quotes);
+  }
+
+  // S41-c: decided before the mandatory-time-clause path runs too -- the
+  // move grammar's time clause is OPTIONAL, exactly like unassign's.
+  const moveVerbMatch = norm.match(MOVE_VERB_RE);
+  if (moveVerbMatch) {
+    return parseMoveRest(norm.slice(moveVerbMatch[0].length), quotes);
   }
 
   const td = parseTimeAndDay(norm);
@@ -665,6 +854,38 @@ function formatUnassignCommand(command: UnassignCommand): string {
 }
 
 /**
+ * S41-c: the canonical sentence for a `MoveCommand` — `move <person> on
+ * <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from HH:MM to
+ * HH:MM]` (always `from` for the hours when printing, whichever word the
+ * sentence used). Does NOT print `existing`.
+ */
+function formatMoveCommand(command: MoveCommand): string {
+  const parts: string[] = ["move", quoteIfNeeded(command.operator)];
+  parts.push("on", quoteIfNeeded(command.place[0]));
+  for (let i = 1; i < command.place.length; i++) {
+    parts.push("in", quoteIfNeeded(command.place[i]));
+  }
+  if (command.toPlace) {
+    parts.push("to", quoteIfNeeded(command.toPlace[0]));
+    for (let i = 1; i < command.toPlace.length; i++) {
+      parts.push("in", quoteIfNeeded(command.toPlace[i]));
+    }
+  }
+  if (command.day) {
+    parts.push("on", dayToCanonicalText(command.day));
+  }
+  if (command.span) {
+    parts.push(
+      "from",
+      `${pad2(command.span.start.hour)}:${pad2(command.span.start.minute)}`,
+      "to",
+      `${pad2(command.span.end.hour)}:${pad2(command.span.end.minute)}`,
+    );
+  }
+  return parts.join(" ");
+}
+
+/**
  * The canonical sentence for a `Command` — the inverse of `parseCommand` for
  * whichever shape the command's `intent` names. The bar rebuilds the input
  * from this after a candidate button is pressed. Never prints `attach` or
@@ -673,11 +894,12 @@ function formatUnassignCommand(command: UnassignCommand): string {
 export function formatCommand(command: Command): string {
   if (command.intent === "book") return formatBookCommand(command);
   if (command.intent === "unassign") return formatUnassignCommand(command);
+  if (command.intent === "move") return formatMoveCommand(command);
   return formatAssignCommand(command);
 }
 
 /** The one sentence the bar shows when parsing fails (brief §3: the three
- *  shapes in one sentence, S41-b adds the third). */
+ *  shapes in one sentence, S41-b adds the third, S41-c a fourth). */
 export function expectedShape(): string {
-  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>]";
+  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]";
 }
