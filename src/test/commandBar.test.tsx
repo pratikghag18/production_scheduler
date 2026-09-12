@@ -139,8 +139,11 @@ const P1_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 
 const P1_RETIME_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 3";
 /** S41-a/S41-b/S41-c: the four shapes in one sentence -- this changes a
  *  string C5/C6/C7 test verbatim (contract changed again, CLAUDE.md §4). */
+/** F-133 (contract changed again, CLAUDE.md §4): every clause gains
+ *  `[on <day>]` after its time clause too, now that the day word may come
+ *  after the hours. */
 const SHAPE =
-  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]";
+  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]";
 /** S41-a: RB1's sentence -- book, no run in the way, on/in/from 6 to 2. */
 const BOOK_SENTENCE = "book Housing A on Cell 1 in Line 1 from 6 to 2";
 /** S41-b: RU1's sentence -- names BLK1 exactly. */
@@ -622,5 +625,29 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onMove).toHaveBeenCalledTimes(1);
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk2");
+  });
+
+  // -------------------------------------------------------------------------
+  // F-133: the day word after the hours (C15), brief
+  // f-133-day-word-after-the-hours-brief.md §4.
+  // -------------------------------------------------------------------------
+
+  it("C15: a two-days sentence renders 'I read two days...' verbatim and calls nothing", () => {
+    const { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, input } = renderBar();
+
+    fireEvent.change(input, {
+      target: {
+        value: "assign Sam to Housing A on Cell 1 on Monday from 10 to 2 on Saturday",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe('I read two days, "Monday" and "Saturday". Say one.');
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).not.toHaveBeenCalled();
+    expect(onBook).not.toHaveBeenCalled();
+    expect(onRetimeRun).not.toHaveBeenCalled();
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onMove).not.toHaveBeenCalled();
   });
 });

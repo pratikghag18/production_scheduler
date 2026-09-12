@@ -114,6 +114,15 @@ const ISO_DAY = /\d{4}-\d{2}-\d{2}/;
  *  `bad_time`/`bad_day` get the offending text named first. */
 function failureToStatus(failure: ParseFailure): Status {
   const shape = expectedShape();
+  // F-133: two day words that disagree (one before the hours, one after) --
+  // never a pick (CLAUDE.md §4). This is the one line outside `parse.ts`
+  // this piece touches (brief §3).
+  if (failure.kind === "two_days") {
+    return {
+      kind: "shape",
+      message: `I read two days, "${failure.first}" and "${failure.second}". Say one.`,
+    };
+  }
   if (
     failure.kind === "bad_time" ||
     failure.kind === "bad_day" ||

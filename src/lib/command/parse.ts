@@ -139,6 +139,9 @@ export type ParseFailure =
   | { kind: "no_product" } // operator given, nothing after it
   | { kind: "no_place" } // operator and product given, no place
   | { kind: "bad_day"; text: string }
+  /** F-133: a day word BEFORE the hours and one AFTER them that disagree --
+   *  never a pick (CLAUDE.md §4), `first` is the one said first. */
+  | { kind: "two_days"; first: string; second: string }
   /** S41-a: a `for` clause whose number is not a whole number 1–99. */
   | { kind: "bad_headcount"; text: string }
   /** S41-c: neither a new cell nor new hours were said -- nothing to move. */
@@ -229,14 +232,20 @@ function restoreQuotes(text: string, quotes: string[]): string {
 }
 
 /** One time token: `10`, `10am`, `10 am`, `10:30`, `10.30`, `14:00`, `noon`,
- *  `midnight`. `hasMeridiem` is what the afternoon rule (brief §4.2) keys on. */
+ *  `midnight`. `hasMeridiem` is what the afternoon rule (brief §4.2) keys on
+ *  for the END of a pair. `explicitMeridiem` is narrower — true only for a
+ *  literal `am`/`pm` suffix, never for the synthetic `noon`/`midnight`
+ *  words — because F-134's START-side gate (`applyAfternoonRule`) must NOT
+ *  fire on "noon" (P10 stays "noon to 3" -> 12:00-15:00) but must fire on an
+ *  explicit "1pm" or "12am" (P33, P11). */
 function parseTimeToken(
   raw: string,
-): { hour: number; minute: number; hasMeridiem: boolean } | null {
+): { hour: number; minute: number; hasMeridiem: boolean; explicitMeridiem: boolean } | null {
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
-  if (lower === "noon") return { hour: 12, minute: 0, hasMeridiem: true };
-  if (lower === "midnight") return { hour: 0, minute: 0, hasMeridiem: true };
+  if (lower === "noon") return { hour: 12, minute: 0, hasMeridiem: true, explicitMeridiem: false };
+  if (lower === "midnight")
+    return { hour: 0, minute: 0, hasMeridiem: true, explicitMeridiem: false };
   const m = trimmed.match(TIME_TOKEN_RE);
   if (!m) return null;
   const hourRaw = Number(m[1]);
@@ -247,14 +256,38 @@ function parseTimeToken(
     if (hourRaw < 1 || hourRaw > 12) return null;
     let hour = hourRaw % 12; // 12 -> 0
     if (meridiem === "pm") hour += 12;
-    return { hour, minute, hasMeridiem: true };
+    return { hour, minute, hasMeridiem: true, explicitMeridiem: true };
   }
   if (hourRaw < 0 || hourRaw > 23) return null;
-  return { hour: hourRaw, minute, hasMeridiem: false };
+  return { hour: hourRaw, minute, hasMeridiem: false, explicitMeridiem: false };
 }
 
 function totalMinutes(t: { hour: number; minute: number }): number {
   return t.hour * 60 + t.minute;
+}
+
+/**
+ * F-134 (brief §3b): the afternoon rule adds 12h to an END with no meridiem
+ * when it is not already after the START -- but only when the START itself
+ * is still ambiguous about which half of the day it names (a bare hour
+ * under 13, no explicit am/pm). A START that is already unambiguous (13:00
+ * or later in 24h form, or an explicit "1pm"/"12am") fully pins the day
+ * down; guessing at the END on top of that is exactly the bug this exists
+ * to fix ("17:15 till 10:30" silently read as 17:15-22:30). Returns the
+ * (possibly adjusted) end, or `null` when the end is still not after the
+ * start -- the caller turns that into `time_order`.
+ */
+function applyAfternoonRule(
+  start: { hour: number; minute: number; explicitMeridiem: boolean },
+  end: { hour: number; minute: number; hasMeridiem: boolean },
+): ClockTime | null {
+  const startPinned = start.hour >= 13 || start.explicitMeridiem;
+  let adjusted = { hour: end.hour, minute: end.minute };
+  if (!startPinned && !end.hasMeridiem && !(totalMinutes(end) > totalMinutes(start))) {
+    adjusted = { hour: (end.hour + 12) % 24, minute: end.minute };
+  }
+  if (!(totalMinutes(adjusted) > totalMinutes(start))) return null;
+  return adjusted;
 }
 
 /**
@@ -265,12 +298,15 @@ function totalMinutes(t: { hour: number; minute: number }): number {
  */
 function extractDayWord(
   text: string,
-): { ok: true; rest: string; day: DayWord | null } | { ok: false; failure: ParseFailure } {
+):
+  | { ok: true; rest: string; day: DayWord | null; word: string | null }
+  | { ok: false; failure: ParseFailure } {
   let rest = text;
   let day: DayWord | null = null;
+  let word: string | null = null;
   const dayMatch = rest.match(DAY_TAIL_RE);
   if (dayMatch) {
-    const word = dayMatch[3];
+    word = dayMatch[3];
     const lowerWord = word.toLowerCase();
     const isoMatch = word.match(ISO_DATE_RE);
     if (isoMatch) {
@@ -291,7 +327,92 @@ function extractDayWord(
     }
     rest = rest.slice(0, dayMatch.index).trim();
   }
-  return { ok: true, rest, day };
+  return { ok: true, rest, day, word };
+}
+
+/** F-133: true when a leading day word and a trailing one name different
+ *  days -- the same day said twice (P27) is never a conflict. */
+function sameDay(a: DayWord, b: DayWord): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "weekday" && b.kind === "weekday") return a.day === b.day;
+  if (a.kind === "date" && b.kind === "date") return a.iso === b.iso;
+  return true; // today/tomorrow: same kind already means the same day
+}
+
+/** F-133: merges a day word found BEFORE the hours with one found AFTER
+ *  them. Never guesses (CLAUDE.md §4): two that disagree is `two_days`,
+ *  named with the leading one first (the order they were said in). */
+function mergeDay(
+  leading: { day: DayWord | null; word: string | null },
+  trailing: { day: DayWord | null; word: string | null },
+): { ok: true; day: DayWord | null } | { ok: false; failure: ParseFailure } {
+  if (leading.day !== null && trailing.day !== null && !sameDay(leading.day, trailing.day)) {
+    return {
+      ok: false,
+      failure: {
+        kind: "two_days",
+        first: leading.word ?? "",
+        second: trailing.word ?? "",
+      },
+    };
+  }
+  return { ok: true, day: leading.day ?? trailing.day };
+}
+
+/** F-133: true when `text` ends with a "from <x> <sep> <y>" shape (the
+ *  LAST "from" in the string, everything after it matching the pair
+ *  pattern to the very end). Purely syntactic -- never checks the tokens'
+ *  VALIDITY, which the normal path still does -- so it can gate whether a
+ *  trailing day word is really sitting after an hours clause without
+ *  duplicating `parseTimeAndDay`'s own time-token parsing. */
+function endsWithFromClauseShape(text: string): boolean {
+  const fromRe = /\bfrom\b/gi;
+  let lastFrom = -1;
+  let fm: RegExpExecArray | null;
+  while ((fm = fromRe.exec(text)) !== null) lastFrom = fm.index;
+  if (lastFrom === -1) return false;
+  const timeClauseText = text.slice(lastFrom + "from".length).trim();
+  return /^.+?\s+(?:to|-|–|until|till)\s+.+$/i.test(timeClauseText);
+}
+
+/** F-133's same gate for `extractToTimeClause`'s "to <time> to <time>"
+ *  shape -- tried from the string's LAST "to" backwards exactly like that
+ *  function itself, so the two never disagree about which "to" starts the
+ *  clause. */
+function endsWithToClauseShape(text: string): boolean {
+  const toRe = /\bto\b/gi;
+  const positions: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = toRe.exec(text)) !== null) positions.push(m.index);
+  for (let i = positions.length - 1; i >= 0; i--) {
+    const suffix = text.slice(positions[i] + 2).trim();
+    if (/^.+?\s+(?:to|-|–|until|till)\s+.+$/i.test(suffix)) return true;
+  }
+  return false;
+}
+
+/**
+ * F-133: the day word may also come AFTER the hours, in every grammar.
+ * Tries to read a day off the very END of `text`; only commits to it when
+ * what is left still ends in a time clause per `hasTimeClauseTail` --
+ * otherwise a trailing word that merely LOOKS like a day (P18/P28's "on
+ * funday", never matched by `DAY_TAIL_RE` at all) or a real day word with
+ * no hours clause behind it (an ordinary leading-day sentence) is left
+ * alone for the normal path to read as before. Delegates the actual
+ * extraction (and the `bad_day` check on an invalid trailing ISO date) to
+ * `extractDayWord` once committed, so the two never disagree.
+ */
+function extractTrailingDay(
+  text: string,
+  hasTimeClauseTail: (candidate: string) => boolean,
+):
+  | { ok: true; rest: string; day: DayWord | null; word: string | null }
+  | { ok: false; failure: ParseFailure } {
+  const tailMatch = text.match(DAY_TAIL_RE);
+  if (!tailMatch) return { ok: true, rest: text, day: null, word: null };
+  const candidate = text.slice(0, tailMatch.index).trim();
+  if (!hasTimeClauseTail(candidate)) return { ok: true, rest: text, day: null, word: null };
+  return extractDayWord(text);
 }
 
 function isRealDate(year: number, month: number, day: number): boolean {
@@ -318,44 +439,53 @@ function parseTimeAndDay(
 ):
   | { ok: true; rest: string; day: DayWord | null; start: ClockTime; end: ClockTime }
   | { ok: false; failure: ParseFailure } {
+  // 0. F-133: a day word AFTER the hours, read off the end of the WHOLE
+  // line before anything else -- only committed when what remains still
+  // ends in a time clause (extractTrailingDay's own gate).
+  const trailingDay = extractTrailingDay(norm, endsWithFromClauseShape);
+  if (!trailingDay.ok) return trailingDay;
+  const text = trailingDay.rest;
+
   // 1. Time clause — the LAST "from <time> <sep> <time>" at the end.
   const fromRe = /\bfrom\b/gi;
   let lastFrom = -1;
   let fm: RegExpExecArray | null;
-  while ((fm = fromRe.exec(norm)) !== null) {
+  while ((fm = fromRe.exec(text)) !== null) {
     lastFrom = fm.index;
   }
   if (lastFrom === -1) return { ok: false, failure: { kind: "no_time" } };
 
-  const beforeFrom = norm.slice(0, lastFrom).trim();
-  const timeClauseText = norm.slice(lastFrom + "from".length).trim();
+  const beforeFrom = text.slice(0, lastFrom).trim();
+  const timeClauseText = text.slice(lastFrom + "from".length).trim();
   const timeMatch = timeClauseText.match(/^(.+?)\s+(to|-|–|until|till)\s+(.+)$/i);
   if (!timeMatch) return { ok: false, failure: { kind: "no_time" } };
   const [, startRaw, , endRaw] = timeMatch;
 
   const start = parseTimeToken(startRaw);
   if (!start) return { ok: false, failure: { kind: "bad_time", text: startRaw.trim() } };
-  let end = parseTimeToken(endRaw);
+  const end = parseTimeToken(endRaw);
   if (!end) return { ok: false, failure: { kind: "bad_time", text: endRaw.trim() } };
 
-  // 2. The afternoon rule.
-  if (!end.hasMeridiem && !(totalMinutes(end) > totalMinutes(start))) {
-    end = { ...end, hour: (end.hour + 12) % 24 };
-  }
-  if (!(totalMinutes(end) > totalMinutes(start))) {
-    return { ok: false, failure: { kind: "time_order" } };
-  }
+  // 2. The afternoon rule (F-134: gated on the START, applyAfternoonRule).
+  const adjustedEnd = applyAfternoonRule(start, end);
+  if (!adjustedEnd) return { ok: false, failure: { kind: "time_order" } };
 
-  // 3. Day word, immediately before the time clause (shared, S41-b: extractDayWord).
+  // 3. Day word, immediately before the time clause (shared, S41-b: extractDayWord),
+  // merged with the trailing one found in step 0 (F-133: never guess).
   const dayResult = extractDayWord(beforeFrom);
   if (!dayResult.ok) return dayResult;
+  const merged = mergeDay(
+    { day: dayResult.day, word: dayResult.word },
+    { day: trailingDay.day, word: trailingDay.word },
+  );
+  if (!merged.ok) return merged;
 
   return {
     ok: true,
     rest: dayResult.rest,
-    day: dayResult.day,
+    day: merged.day,
     start: { hour: start.hour, minute: start.minute },
-    end: { hour: end.hour, minute: end.minute },
+    end: adjustedEnd,
   };
 }
 
@@ -480,44 +610,58 @@ function parseBookRest(
  * `<time> <sep> <time>`, that is the time clause; otherwise there is no time
  * clause at all and `text` is returned unchanged (never `no_time`).
  */
-function extractOptionalTimeClause(
-  text: string,
-):
-  | { ok: true; rest: string; span: { start: ClockTime; end: ClockTime } | null }
+function extractOptionalTimeClause(text: string):
+  | {
+      ok: true;
+      rest: string;
+      span: { start: ClockTime; end: ClockTime } | null;
+      /** F-133: a day word read off the end of `text`, AFTER this clause's
+       *  own hours -- `null` when none was found (or none committed; see
+       *  `extractTrailingDay`). The caller merges it with whatever day it
+       *  finds on its own, leading side. */
+      trailingDay: DayWord | null;
+      trailingWord: string | null;
+    }
   | { ok: false; failure: ParseFailure } {
+  // F-133: try a trailing day word first, gated on the SAME shape check
+  // this function's own time-clause search below uses.
+  const trailing = extractTrailingDay(text, endsWithFromClauseShape);
+  if (!trailing.ok) return trailing;
+  const workText = trailing.rest;
+
   const fromRe = /\bfrom\b/gi;
   let lastFrom = -1;
   let fm: RegExpExecArray | null;
-  while ((fm = fromRe.exec(text)) !== null) {
+  while ((fm = fromRe.exec(workText)) !== null) {
     lastFrom = fm.index;
   }
-  if (lastFrom === -1) return { ok: true, rest: text, span: null };
+  if (lastFrom === -1)
+    return { ok: true, rest: text, span: null, trailingDay: null, trailingWord: null };
 
-  const beforeFrom = text.slice(0, lastFrom).trim();
-  const timeClauseText = text.slice(lastFrom + "from".length).trim();
+  const beforeFrom = workText.slice(0, lastFrom).trim();
+  const timeClauseText = workText.slice(lastFrom + "from".length).trim();
   const timeMatch = timeClauseText.match(/^(.+?)\s+(to|-|–|until|till)\s+(.+)$/i);
-  if (!timeMatch) return { ok: true, rest: text, span: null };
+  if (!timeMatch)
+    return { ok: true, rest: text, span: null, trailingDay: null, trailingWord: null };
   const [, startRaw, , endRaw] = timeMatch;
 
   const start = parseTimeToken(startRaw);
   if (!start) return { ok: false, failure: { kind: "bad_time", text: startRaw.trim() } };
-  let end = parseTimeToken(endRaw);
+  const end = parseTimeToken(endRaw);
   if (!end) return { ok: false, failure: { kind: "bad_time", text: endRaw.trim() } };
 
-  if (!end.hasMeridiem && !(totalMinutes(end) > totalMinutes(start))) {
-    end = { ...end, hour: (end.hour + 12) % 24 };
-  }
-  if (!(totalMinutes(end) > totalMinutes(start))) {
-    return { ok: false, failure: { kind: "time_order" } };
-  }
+  const adjustedEnd = applyAfternoonRule(start, end);
+  if (!adjustedEnd) return { ok: false, failure: { kind: "time_order" } };
 
   return {
     ok: true,
     rest: beforeFrom,
     span: {
       start: { hour: start.hour, minute: start.minute },
-      end: { hour: end.hour, minute: end.minute },
+      end: adjustedEnd,
     },
+    trailingDay: trailing.day,
+    trailingWord: trailing.word,
   };
 }
 
@@ -546,6 +690,14 @@ function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
   const dayResult = extractDayWord(tc.rest);
   if (!dayResult.ok) return dayResult;
 
+  // F-133: merge the leading day (dayResult) with the trailing one
+  // `extractOptionalTimeClause` may have read off the end of the hours.
+  const merged = mergeDay(
+    { day: dayResult.day, word: dayResult.word },
+    { day: tc.trailingDay, word: tc.trailingWord },
+  );
+  if (!merged.ok) return merged;
+
   const { operator: operatorPart, placesText } = splitOperatorPlaces(dayResult.rest);
   if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
   if (placesText === "") return { ok: false, failure: { kind: "no_place" } };
@@ -562,7 +714,7 @@ function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
       intent: "unassign",
       operator,
       place,
-      day: dayResult.day,
+      day: merged.day,
       span: tc.span,
       existing: null,
     },
@@ -579,46 +731,55 @@ function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
  * never matches the pair pattern, so the search naturally continues one "to"
  * further back to the clause's real leading word.
  */
-function extractToTimeClause(
-  text: string,
-):
-  | { ok: true; rest: string; span: { start: ClockTime; end: ClockTime } | null }
+function extractToTimeClause(text: string):
+  | {
+      ok: true;
+      rest: string;
+      span: { start: ClockTime; end: ClockTime } | null;
+      /** F-133, same as `extractOptionalTimeClause`'s own field. */
+      trailingDay: DayWord | null;
+      trailingWord: string | null;
+    }
   | { ok: false; failure: ParseFailure } {
+  // F-133: try a trailing day word first, gated on THIS function's own
+  // "to <time> to <time>" shape.
+  const trailing = extractTrailingDay(text, endsWithToClauseShape);
+  if (!trailing.ok) return trailing;
+  const workText = trailing.rest;
+
   const toRe = /\bto\b/gi;
   const positions: number[] = [];
   let m: RegExpExecArray | null;
-  while ((m = toRe.exec(text)) !== null) positions.push(m.index);
+  while ((m = toRe.exec(workText)) !== null) positions.push(m.index);
 
   for (let i = positions.length - 1; i >= 0; i--) {
     const idx = positions[i];
-    const before = text.slice(0, idx).trim();
-    const suffix = text.slice(idx + 2).trim(); // "to" is always 2 chars
+    const before = workText.slice(0, idx).trim();
+    const suffix = workText.slice(idx + 2).trim(); // "to" is always 2 chars
     const timeMatch = suffix.match(/^(.+?)\s+(to|-|–|until|till)\s+(.+)$/i);
     if (!timeMatch) continue;
     const [, startRaw, , endRaw] = timeMatch;
 
     const start = parseTimeToken(startRaw);
     if (!start) return { ok: false, failure: { kind: "bad_time", text: startRaw.trim() } };
-    let end = parseTimeToken(endRaw);
+    const end = parseTimeToken(endRaw);
     if (!end) return { ok: false, failure: { kind: "bad_time", text: endRaw.trim() } };
 
-    if (!end.hasMeridiem && !(totalMinutes(end) > totalMinutes(start))) {
-      end = { ...end, hour: (end.hour + 12) % 24 };
-    }
-    if (!(totalMinutes(end) > totalMinutes(start))) {
-      return { ok: false, failure: { kind: "time_order" } };
-    }
+    const adjustedEnd = applyAfternoonRule(start, end);
+    if (!adjustedEnd) return { ok: false, failure: { kind: "time_order" } };
 
     return {
       ok: true,
       rest: before,
       span: {
         start: { hour: start.hour, minute: start.minute },
-        end: { hour: end.hour, minute: end.minute },
+        end: adjustedEnd,
       },
+      trailingDay: trailing.day,
+      trailingWord: trailing.word,
     };
   }
-  return { ok: true, rest: text, span: null };
+  return { ok: true, rest: text, span: null, trailingDay: null, trailingWord: null };
 }
 
 /** S41-c: splits "<operator> (on|at|from) <place>..." on the FIRST of those
@@ -656,11 +817,15 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
   if (!fromClause.ok) return fromClause;
   let afterTime = fromClause.rest;
   let span = fromClause.span;
+  let trailingDay = fromClause.trailingDay;
+  let trailingWord = fromClause.trailingWord;
   if (span === null) {
     const toClause = extractToTimeClause(afterTime);
     if (!toClause.ok) return toClause;
     afterTime = toClause.rest;
     span = toClause.span;
+    trailingDay = toClause.trailingDay;
+    trailingWord = toClause.trailingWord;
   }
 
   const { operator: operatorPart, placesText } = splitMoveOperatorPlaces(afterTime);
@@ -678,17 +843,26 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
   }
 
   let day: DayWord | null = null;
+  let dayWord: string | null = null;
   const dayInCurrent = extractDayWord(placeText);
   if (!dayInCurrent.ok) return dayInCurrent;
   if (dayInCurrent.day !== null) {
     day = dayInCurrent.day;
+    dayWord = dayInCurrent.word;
     placeText = dayInCurrent.rest;
   } else if (toPlaceText !== null) {
     const dayInNew = extractDayWord(toPlaceText);
     if (!dayInNew.ok) return dayInNew;
     day = dayInNew.day;
+    dayWord = dayInNew.word;
     toPlaceText = dayInNew.rest;
   }
+
+  // F-133: merge with the trailing day either time-clause helper may have
+  // read off the end of the hours.
+  const merged = mergeDay({ day, word: dayWord }, { day: trailingDay, word: trailingWord });
+  if (!merged.ok) return merged;
+  day = merged.day;
 
   const pieces = splitProductPlaces(placeText);
   if (pieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
@@ -901,5 +1075,5 @@ export function formatCommand(command: Command): string {
 /** The one sentence the bar shows when parsing fails (brief §3: the three
  *  shapes in one sentence, S41-b adds the third, S41-c a fourth). */
 export function expectedShape(): string {
-  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]";
+  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]";
 }

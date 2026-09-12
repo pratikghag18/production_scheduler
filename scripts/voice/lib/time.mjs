@@ -44,11 +44,22 @@ function totalMinutes(t) {
  * afternoon rule ("from 10 to 2" -> 10:00-14:00). Returns null when even
  * after the rule the end does not follow the start (an invalid pair --
  * callers must not emit it as a clean row).
+ *
+ * F-134 (independently written, per the brief -- this file must never
+ * import parse.ts): the +12h guess only fires when the START itself is
+ * still ambiguous about which half of the day it names -- a bare "24h"
+ * spec whose hour is under 13. A START given as "ampm" (explicit am/pm) or
+ * as a "24h" spec of 13 or more already pins the day down; guessing at the
+ * END on top of that is the bug this rule exists to fix ("17:15 till
+ * 10:30" must not silently become 17:15-22:30). "noon"/"midnight" starts
+ * are NOT pinned by this rule (parse.ts's own `explicitMeridiem` excludes
+ * them too, so "noon to 3" -> 12:00-15:00 keeps working on both sides).
  */
 export function buildTimePair(startSpec, endSpec, sep) {
   const start = resolveTimeSpec(startSpec);
   let end = resolveTimeSpec(endSpec);
-  if (!end.hasMeridiem && totalMinutes(end) <= totalMinutes(start)) {
+  const startPinned = start.hour >= 13 || startSpec.kind === "ampm";
+  if (!startPinned && !end.hasMeridiem && totalMinutes(end) <= totalMinutes(start)) {
     end = { ...end, hour: (end.hour + 12) % 24 };
   }
   if (totalMinutes(end) <= totalMinutes(start)) return null;

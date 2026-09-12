@@ -366,6 +366,241 @@ describe("commandParse: brief §4 worked examples", () => {
 });
 
 /**
+ * F-133 (docs/agent-briefs/f-133-day-word-after-the-hours-brief.md §3/§4) —
+ * the day word may come AFTER the hours too, in every grammar, so long as a
+ * leading and a trailing day word never disagree (P27's `two_days`). F-134
+ * (brief §3b, same file) — the afternoon rule now reads the START: an
+ * unambiguous start (24h hour 13+, or an explicit am/pm) blocks the +12h
+ * guess on the end (P32/P33), while a bare small-hour start keeps it
+ * (P34-P36).
+ */
+describe("commandParse: F-133 the day word after the hours / F-134 the afternoon rule reads the start", () => {
+  it("P25: the maintainer's own sentence verbatim, day trailing the hours", () => {
+    expect(
+      parseCommand(
+        "put operator 1 to work on product A on Cell 1 in Line 1 from 10 to 2 on Saturday",
+      ),
+    ).toEqual(
+      ok({
+        intent: "assign",
+        operator: "operator 1",
+        product: "product A",
+        place: ["Cell 1", "Line 1"],
+        day: { kind: "weekday", day: 6 },
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+  });
+
+  it("P26: a trailing iso date, tomorrow, today, and a short weekday", () => {
+    const base = (day: AssignCommand["day"]) =>
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day,
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+      });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2 on 2026-09-12")).toEqual(
+      base({ kind: "date", iso: "2026-09-12" }),
+    );
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2 tomorrow")).toEqual(
+      base({ kind: "tomorrow" }),
+    );
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2 today")).toEqual(
+      base({ kind: "today" }),
+    );
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2 sat")).toEqual(
+      base({ kind: "weekday", day: 6 }),
+    );
+  });
+
+  it("P27: the same day said twice is not a conflict; two different days is two_days", () => {
+    expect(
+      parseCommand("assign Sam to Housing A on Cell 1 on Saturday from 10 to 2 on Saturday"),
+    ).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: { kind: "weekday", day: 6 },
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+    expect(
+      parseCommand("assign Sam to Housing A on Cell 1 on Monday from 10 to 2 on Saturday"),
+    ).toEqual({
+      ok: false,
+      failure: { kind: "two_days", first: "Monday", second: "Saturday" },
+    });
+  });
+
+  it("P28: 'on funday' at the end is still swallowed into the time clause, exactly as before (not a day)", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2 on funday")).toEqual({
+      ok: false,
+      failure: { kind: "bad_time", text: "2 on funday" },
+    });
+  });
+
+  it("P29: a trailing ISO-looking date that is not a real one is still bad_day", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2 on 2026-13-40")).toEqual({
+      ok: false,
+      failure: { kind: "bad_day", text: "2026-13-40" },
+    });
+  });
+
+  it("P30: round trip — formatCommand keeps printing the day BEFORE the hours", () => {
+    const first = parseCommand(
+      "put operator 1 to work on product A on Cell 1 in Line 1 from 10 to 2 on Saturday",
+    );
+    if (!first.ok) throw new Error("P25's sentence must parse");
+    const sentence = formatCommand(first.command);
+    // quoteIfNeeded's real output for these words: none of "operator 1",
+    // "product A", "Cell 1" or "Line 1" contain a whole-word to/on/at/in or
+    // a comma, so none of them are quoted here (unlike the brief's own
+    // illustrative example, which showed quotes — checked against the real
+    // `quoteIfNeeded`, not assumed).
+    expect(sentence).toBe(
+      "assign operator 1 to product A on Cell 1 in Line 1 on sat from 10:00 to 14:00",
+    );
+    expect(parseCommand(sentence)).toEqual(first);
+  });
+
+  it("B12: book, a trailing day after the hours", () => {
+    expect(parseCommand("Book Housing A on Cell 1 in Line 1 from 6 to 2 on Saturday")).toEqual(
+      bookOk({ place: ["Cell 1", "Line 1"], day: { kind: "weekday", day: 6 } }),
+    );
+  });
+
+  it("B13: book, headcount before the hours, day after", () => {
+    expect(parseCommand("book Housing A on Cell 1 for 3 from 6 to 2 tomorrow")).toEqual(
+      bookOk({ headcount: 3, day: { kind: "tomorrow" } }),
+    );
+  });
+
+  it("U10: unassign, a trailing day after the hours", () => {
+    expect(parseCommand("Unassign Sam from Cell 1 in Line 1 from 10 to 2 on Saturday")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1", "Line 1"],
+        day: { kind: "weekday", day: 6 },
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        existing: null,
+      },
+    });
+  });
+
+  it("MV12: move, a trailing day after the hours", () => {
+    expect(parseCommand("Move Sam on Cell 1 to Cell 2 from 10 to 3 on Saturday")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1"],
+        toPlace: ["Cell 2"],
+        day: { kind: "weekday", day: 6 },
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+        existing: null,
+      },
+    });
+  });
+
+  it("P31: expectedShape() gains [on <day>] after the time clause in every clause", () => {
+    expect(expectedShape()).toBe(
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
+    );
+  });
+
+  it("P32 (F-134): from 17:15 till 10:30 — an unambiguous 24h start blocks the afternoon guess, time_order", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 17:15 till 10:30")).toEqual({
+      ok: false,
+      failure: { kind: "time_order" },
+    });
+  });
+
+  it("P33 (F-134): from 1pm to 10 — an explicit meridiem start blocks the guess too, time_order", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 1pm to 10")).toEqual({
+      ok: false,
+      failure: { kind: "time_order" },
+    });
+  });
+
+  it("P34 (F-134): from 13:00 to 22:00 — already after the start, unaffected", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 13:00 to 22:00")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 13, minute: 0 },
+        end: { hour: 22, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+  });
+
+  it("P35 (F-134): P9 and P11 keep their meaning under the new rule", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 10")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 10, minute: 0 },
+        end: { hour: 22, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 12am to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 0, minute: 0 },
+        end: { hour: 4, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+  });
+
+  it("P36 (F-134, M64's pin): from 12 to 3 — a bare hour-12 start is NOT pinned, P9's twin still gets the afternoon rule", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 12 to 3")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 12, minute: 0 },
+        end: { hour: 15, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+  });
+});
+
+/**
  * S41-a — the "book a job" grammar, brief docs/agent-briefs/
  * s41-a-book-a-job-brief.md §5's worked examples (B1-B11), run verbatim, the
  * same one-`it()`-per-case shape as the P-cases above.
@@ -459,7 +694,7 @@ describe("commandParse: S41-a book-a-job worked examples", () => {
     // now, CLAUDE.md §4) -- see MV10 in the move describe block below for
     // the full four-shape text.
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]",
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
     );
   });
 });
@@ -541,7 +776,7 @@ describe("commandParse: S41-b unassign worked examples", () => {
   it("U8: expectedShape() is the exact three-clause sentence", () => {
     // S41-c adds a fourth clause (contract changed again) -- see MV10 below.
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]",
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
     );
   });
 
@@ -677,7 +912,7 @@ describe("commandParse: S41-c move worked examples", () => {
 
   it("MV10: expectedShape() is the exact four-clause sentence", () => {
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time>] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]",
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
     );
   });
 
