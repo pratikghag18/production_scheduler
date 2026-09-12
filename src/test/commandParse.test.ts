@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
+import { ASSIGN_VERBS, BOOK_VERBS, UNASSIGN_VERBS, MOVE_VERBS } from "@/lib/command/parse";
 import type {
   AssignCommand,
   BookCommand,
@@ -955,5 +956,87 @@ describe("commandParse: S41-c move worked examples", () => {
         existing: null,
       },
     });
+  });
+});
+
+describe("commandParse: R-391 the optional verb widens, one list per sentence", () => {
+  // Hard-coded, never derived from the exported lists themselves -- a
+  // mutation that drops a verb from its list must still be tried here to be
+  // caught (brief §4, M70).
+  const NEW_ASSIGN_VERBS = ["staff", "place", "allocate", "give", "set"];
+  const NEW_BOOK_VERBS = ["plan", "open", "start", "launch", "create"];
+  const NEW_UNASSIGN_VERBS = ["drop", "cancel", "delete", "pull", "free"];
+  const NEW_MOVE_VERBS = ["reschedule", "transfer", "relocate", "switch"];
+
+  const ASSIGN_TAIL = "Sam to Housing A on Cell 1 from 10 to 2";
+  const BOOK_TAIL = "Housing A on Cell 1 in Line 1 from 6 to 2";
+  const UNASSIGN_TAIL = "Sam from Cell 1 in Line 1 from 10 to 2";
+  const MOVE_TAIL = "Sam on Cell 1 to Cell 2 in Line 1";
+
+  for (const verb of NEW_ASSIGN_VERBS) {
+    it(`PV1 ${verb}: parses like the P1-shaped assign example, same command as 'assign'`, () => {
+      expect(parseCommand(`${verb} ${ASSIGN_TAIL}`)).toEqual(parseCommand(`assign ${ASSIGN_TAIL}`));
+    });
+  }
+
+  for (const verb of NEW_BOOK_VERBS) {
+    it(`PV1 ${verb}: parses like the B1-shaped book example, same command as 'book'`, () => {
+      expect(parseCommand(`${verb} ${BOOK_TAIL}`)).toEqual(parseCommand(`book ${BOOK_TAIL}`));
+    });
+  }
+
+  for (const verb of NEW_UNASSIGN_VERBS) {
+    it(`PV1 ${verb}: parses like the U1-shaped unassign example, same command as 'unassign'`, () => {
+      expect(parseCommand(`${verb} ${UNASSIGN_TAIL}`)).toEqual(
+        parseCommand(`unassign ${UNASSIGN_TAIL}`),
+      );
+    });
+  }
+
+  for (const verb of NEW_MOVE_VERBS) {
+    it(`PV1 ${verb}: parses like the MV1-shaped move example, same command as 'move'`, () => {
+      expect(parseCommand(`${verb} ${MOVE_TAIL}`)).toEqual(parseCommand(`move ${MOVE_TAIL}`));
+    });
+  }
+
+  it("PV2: the four exported verb lists are pairwise disjoint and contain neither 'shift' nor 'change'", () => {
+    const lists: readonly (readonly string[])[] = [
+      ASSIGN_VERBS,
+      BOOK_VERBS,
+      UNASSIGN_VERBS,
+      MOVE_VERBS,
+    ];
+    const all = lists.flatMap((list) => list);
+    expect(new Set(all).size).toBe(all.length);
+    expect(all).not.toContain("shift");
+    expect(all).not.toContain("change");
+  });
+
+  it("PV3: 'schedule Housing A on Cell 1 from 6 to 2' is still read as an assign sentence and fails no_place", () => {
+    expect(parseCommand("schedule Housing A on Cell 1 from 6 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "no_place" },
+    });
+  });
+
+  it("PV4: formatCommand still prints the canonical verb for a command parsed from any synonym (round trip)", () => {
+    const cases: Array<{ sentence: string; canonicalVerb: string }> = [
+      { sentence: `staff ${ASSIGN_TAIL}`, canonicalVerb: "assign" },
+      { sentence: `plan ${BOOK_TAIL}`, canonicalVerb: "book" },
+      { sentence: `drop ${UNASSIGN_TAIL}`, canonicalVerb: "unassign" },
+      { sentence: `reschedule ${MOVE_TAIL}`, canonicalVerb: "move" },
+    ];
+    for (const { sentence, canonicalVerb } of cases) {
+      const result = parseCommand(sentence);
+      if (!result.ok) throw new Error(`${sentence} must parse`);
+      const printed = formatCommand(result.command);
+      expect(printed.startsWith(`${canonicalVerb} `)).toBe(true);
+      expect(parseCommand(printed)).toEqual(result);
+    }
+  });
+
+  it("PV5: a capitalised or all-caps new verb works like the old ones (case rule unchanged)", () => {
+    expect(parseCommand(`STAFF ${ASSIGN_TAIL}`)).toEqual(parseCommand(`assign ${ASSIGN_TAIL}`));
+    expect(parseCommand(`Reschedule ${MOVE_TAIL}`)).toEqual(parseCommand(`move ${MOVE_TAIL}`));
   });
 });

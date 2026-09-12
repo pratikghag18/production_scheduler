@@ -21,6 +21,22 @@ import {
   WEEKDAY_ABBR,
   ISO_DATES,
 } from "./pools.mjs";
+// R-391: the four verb lists are the one export from parse.ts (this is the
+// oracle's own import path, `rows.mjs`'s), so a template's verb is drawn from
+// the SAME list the parser reads its intent from -- never retyped here. A
+// template whose id names a verb on purpose (say which in the report) keeps
+// that verb hard-coded instead, so its own mechanic (a dash separator, an
+// "off" separator, a comma list) stays pinned to a known word.
+import {
+  ASSIGN_VERBS,
+  BOOK_VERBS,
+  UNASSIGN_VERBS,
+  MOVE_VERBS,
+} from "../../../src/lib/command/parse.ts";
+
+function capitalize(word) {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers -- mirror parse.ts's own quoting rule (needsQuoting /
@@ -119,6 +135,7 @@ const assignTemplates = [
     id: "A1-maintainer",
     intent: "assign",
     genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
@@ -126,7 +143,7 @@ const assignTemplates = [
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `Assign ${qw(s.op)} to work on ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
+      `${capitalize(s.verb)} ${qw(s.op)} to work on ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -199,13 +216,14 @@ const assignTemplates = [
     id: "A4-day-today",
     intent: "assign",
     genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `assign ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} today from ${s.span.text}`,
+      `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} today from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -222,13 +240,14 @@ const assignTemplates = [
     id: "A5-day-tomorrow-on",
     intent: "assign",
     genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `assign ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} on tomorrow from ${s.span.text}`,
+      `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} on tomorrow from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -248,6 +267,7 @@ const assignTemplates = [
       const idx = randInt(rng, 0, 6);
       const word = chance(rng, 0.5) ? WEEKDAY_FULL[idx] : WEEKDAY_ABBR[idx];
       return {
+        verb: pick(rng, ASSIGN_VERBS),
         op: pick(rng, PEOPLE_ALL),
         part: pick(rng, PARTS_ALL),
         cell: pick(rng, CELLS_ALL),
@@ -258,7 +278,7 @@ const assignTemplates = [
       };
     },
     sentence: (s) =>
-      `assign ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} ${s.dayWord} from ${s.span.text}`,
+      `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} ${s.dayWord} from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -275,6 +295,7 @@ const assignTemplates = [
     id: "A7-day-iso",
     intent: "assign",
     genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
@@ -282,7 +303,7 @@ const assignTemplates = [
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `assign ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} on ${s.iso} from ${s.span.text}`,
+      `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} on ${s.iso} from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -307,13 +328,14 @@ const assignTemplates = [
         "until",
       );
       return {
+        verb: pick(rng, ASSIGN_VERBS),
         op: pick(rng, TRICKY_OPERATORS),
         part: pick(rng, PARTS_ALL),
         cell: pick(rng, TRICKY_CELLS),
         span,
       };
     },
-    sentence: (s) => `assign "${s.op}" to ${qw(s.part)} on "${s.cell}" from ${s.span.text}`,
+    sentence: (s) => `${s.verb} "${s.op}" to ${qw(s.part)} on "${s.cell}" from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -337,13 +359,14 @@ const assignTemplates = [
         "to",
       );
       return {
+        verb: pick(rng, ASSIGN_VERBS),
         op: pick(rng, PEOPLE_ALL),
         part: pick(rng, PARTS_ALL),
         cell: pick(rng, CELLS_ALL),
         span,
       };
     },
-    sentence: (s) => `assign ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} from ${s.span.text}`,
+    sentence: (s) => `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -368,6 +391,7 @@ const assignTemplates = [
         "-",
       );
       return {
+        verb: pick(rng, ASSIGN_VERBS),
         op: pick(rng, PEOPLE_ALL),
         part: pick(rng, PARTS_ALL),
         cell: pick(rng, CELLS_ALL),
@@ -376,7 +400,7 @@ const assignTemplates = [
       };
     },
     sentence: (s) =>
-      `add ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
+      `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("assign", {
         operator: s.op,
@@ -400,12 +424,14 @@ const bookTemplates = [
     id: "B1-plain",
     intent: "book",
     genSlots: (rng) => ({
+      verb: pick(rng, BOOK_VERBS),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
       line: pick(rng, LINES_ALL),
       span: randomSpan(rng),
     }),
-    sentence: (s) => `Book ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("book", {
         product: s.part,
@@ -442,13 +468,14 @@ const bookTemplates = [
     id: "B3-headcount-tomorrow",
     intent: "book",
     genSlots: (rng) => ({
+      verb: pick(rng, BOOK_VERBS),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
       hc: randomHeadcount(rng),
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `book ${qw(s.part)} on ${qw(s.cell)} ${s.hc.text} tomorrow from ${s.span.text}`,
+      `${s.verb} ${qw(s.part)} on ${qw(s.cell)} ${s.hc.text} tomorrow from ${s.span.text}`,
     form: (s) =>
       baseCommand("book", {
         product: s.part,
@@ -464,12 +491,13 @@ const bookTemplates = [
     id: "B4-day-only",
     intent: "book",
     genSlots: (rng) => ({
+      verb: pick(rng, BOOK_VERBS),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
       day: randomDay(rng),
       span: randomSpan(rng),
     }),
-    sentence: (s) => `book ${qw(s.part)} on ${qw(s.cell)} ${s.day.text} from ${s.span.text}`,
+    sentence: (s) => `${s.verb} ${qw(s.part)} on ${qw(s.cell)} ${s.day.text} from ${s.span.text}`,
     form: (s) =>
       baseCommand("book", {
         product: s.part,
@@ -485,6 +513,7 @@ const bookTemplates = [
     id: "B5-commas",
     intent: "book",
     genSlots: (rng) => ({
+      verb: pick(rng, BOOK_VERBS),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
       line: pick(rng, LINES_ALL),
@@ -492,7 +521,7 @@ const bookTemplates = [
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `book ${qw(s.part)} on ${qw(s.cell)}, ${qw(s.line)}, ${qw(s.area)} from ${s.span.text}`,
+      `${s.verb} ${qw(s.part)} on ${qw(s.cell)}, ${qw(s.line)}, ${qw(s.area)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("book", {
         product: s.part,
@@ -508,12 +537,14 @@ const bookTemplates = [
     id: "B6-headcount-operators-word",
     intent: "book",
     genSlots: (rng) => ({
+      verb: pick(rng, BOOK_VERBS),
       part: pick(rng, PARTS_ALL),
       cell: pick(rng, CELLS_ALL),
       n: randInt(rng, 1, 12),
       span: randomSpan(rng),
     }),
-    sentence: (s) => `run ${qw(s.part)} on ${qw(s.cell)} for ${s.n} operators from ${s.span.text}`,
+    sentence: (s) =>
+      `${s.verb} ${qw(s.part)} on ${qw(s.cell)} for ${s.n} operators from ${s.span.text}`,
     form: (s) =>
       baseCommand("book", {
         product: s.part,
@@ -536,12 +567,14 @@ const unassignTemplates = [
     id: "U1-with-hours-two-places",
     intent: "unassign",
     genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       line: pick(rng, LINES_ALL),
       span: randomSpan(rng),
     }),
-    sentence: (s) => `unassign ${qw(s.op)} from ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
+    sentence: (s) =>
+      `${s.verb} ${qw(s.op)} from ${qw(s.cell)} in ${qw(s.line)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("unassign", {
         operator: s.op,
@@ -591,11 +624,12 @@ const unassignTemplates = [
     id: "U4-no-hours-two-places",
     intent: "unassign",
     genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       line: pick(rng, LINES_ALL),
     }),
-    sentence: (s) => `unassign ${qw(s.op)} from ${qw(s.cell)} in ${qw(s.line)}`,
+    sentence: (s) => `${s.verb} ${qw(s.op)} from ${qw(s.cell)} in ${qw(s.line)}`,
     form: (s) =>
       baseCommand("unassign", {
         operator: s.op,
@@ -646,12 +680,13 @@ const unassignTemplates = [
     id: "U7-on-separator-day-and-hours",
     intent: "unassign",
     genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       day: randomDay(rng),
       span: randomSpan(rng),
     }),
-    sentence: (s) => `unassign ${qw(s.op)} on ${qw(s.cell)} ${s.day.text} from ${s.span.text}`,
+    sentence: (s) => `${s.verb} ${qw(s.op)} on ${qw(s.cell)} ${s.day.text} from ${s.span.text}`,
     form: (s) =>
       baseCommand("unassign", {
         operator: s.op,
@@ -672,11 +707,12 @@ const moveTemplates = [
     id: "M1-cell-only",
     intent: "move",
     genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       cell2: pick(rng, CELLS_ALL),
     }),
-    sentence: (s) => `move ${qw(s.op)} on ${qw(s.cell)} to ${qw(s.cell2)}`,
+    sentence: (s) => `${s.verb} ${qw(s.op)} on ${qw(s.cell)} to ${qw(s.cell2)}`,
     form: (s) =>
       baseCommand("move", {
         operator: s.op,
@@ -691,12 +727,13 @@ const moveTemplates = [
     id: "M2-cell-and-line",
     intent: "move",
     genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       cell2: pick(rng, CELLS_ALL),
       line2: pick(rng, LINES_ALL),
     }),
-    sentence: (s) => `move ${qw(s.op)} on ${qw(s.cell)} to ${qw(s.cell2)} in ${qw(s.line2)}`,
+    sentence: (s) => `${s.verb} ${qw(s.op)} on ${qw(s.cell)} to ${qw(s.cell2)} in ${qw(s.line2)}`,
     form: (s) =>
       baseCommand("move", {
         operator: s.op,
@@ -711,11 +748,12 @@ const moveTemplates = [
     id: "M3-hours-only",
     intent: "move",
     genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       span: randomSpan(rng),
     }),
-    sentence: (s) => `move ${qw(s.op)} on ${qw(s.cell)} from ${s.span.text}`,
+    sentence: (s) => `${s.verb} ${qw(s.op)} on ${qw(s.cell)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("move", {
         operator: s.op,
@@ -730,6 +768,7 @@ const moveTemplates = [
     id: "M4-cell-and-hours",
     intent: "move",
     genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       cell2: pick(rng, CELLS_ALL),
@@ -737,7 +776,7 @@ const moveTemplates = [
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `move ${qw(s.op)} on ${qw(s.cell)} to ${qw(s.cell2)} in ${qw(s.line2)} from ${s.span.text}`,
+      `${s.verb} ${qw(s.op)} on ${qw(s.cell)} to ${qw(s.cell2)} in ${qw(s.line2)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("move", {
         operator: s.op,
@@ -752,12 +791,13 @@ const moveTemplates = [
     id: "M5-day-before-destination",
     intent: "move",
     genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       cell2: pick(rng, CELLS_ALL),
       day: randomDay(rng),
     }),
-    sentence: (s) => `move ${qw(s.op)} at ${qw(s.cell)} ${s.day.text} to ${qw(s.cell2)}`,
+    sentence: (s) => `${s.verb} ${qw(s.op)} at ${qw(s.cell)} ${s.day.text} to ${qw(s.cell2)}`,
     form: (s) =>
       baseCommand("move", {
         operator: s.op,
@@ -772,6 +812,7 @@ const moveTemplates = [
     id: "M6-from-separator-comma-destination",
     intent: "move",
     genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
       op: pick(rng, PEOPLE_ALL),
       cell: pick(rng, CELLS_ALL),
       cell2: pick(rng, CELLS_ALL),
@@ -779,7 +820,7 @@ const moveTemplates = [
       span: randomSpan(rng),
     }),
     sentence: (s) =>
-      `move ${qw(s.op)} from ${qw(s.cell)} to ${qw(s.cell2)}, ${qw(s.line2)} from ${s.span.text}`,
+      `${s.verb} ${qw(s.op)} from ${qw(s.cell)} to ${qw(s.cell2)}, ${qw(s.line2)} from ${s.span.text}`,
     form: (s) =>
       baseCommand("move", {
         operator: s.op,
