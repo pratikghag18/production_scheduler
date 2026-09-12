@@ -280,7 +280,6 @@ for (const t of plan.tracks) {
 }
 const stageIds = new Set(plan.stages.map((s) => s.id));
 const reqIds = new Set(plan.requirements.map((r) => r.id));
-const findIds = new Set(plan.findings.map((f) => f.id));
 
 for (const s of plan.stages) {
   const w = `stage ${s.id}`;
@@ -511,13 +510,6 @@ const STAGE_CHIP = {
   parked: ["q", "Parked"],
 };
 const REQ_CHIP = { covered: "done", uncovered: "q", contradicted: "bad", superseded: "mine" };
-const DEF_CHIP = {
-  open: "bad",
-  reopened: "bad",
-  "fix-claimed": "now",
-  verified: "done",
-  wontfix: "mine",
-};
 
 function stageCard(s) {
   const [cls, label] = STAGE_CHIP[s.status];

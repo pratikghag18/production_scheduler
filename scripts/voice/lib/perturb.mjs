@@ -342,7 +342,14 @@ export const PERTURBATION_IDS = Object.keys(CATALOG);
  * `src/test/voiceData.test.ts`'s V3 is the test that turns red the day it
  * does.
  */
-export function perturbedRowForm(cleanForm, _appliedIds) {
+// The second parameter is part of the documented signature above: callers
+// pass the real ids, but the contract is that they never change the form,
+// so the body never reads this argument.
+export function perturbedRowForm(
+  cleanForm,
+  // eslint-disable-next-line no-unused-vars -- see the note above
+  _appliedIds,
+) {
   return cleanForm;
 }
 
