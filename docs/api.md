@@ -59,6 +59,7 @@ one helper (`api_raise`) so this shape cannot drift:
 | `schedulable_level_locked` *(brief P1-5a)* | `PT409` | `save_hierarchy_levels` would move the schedulable flag off a level that still has runs **or** direct assignments on it | `blocking_rows`, `level_id` |
 | `not_offered_here` *(migration 0028, D109)* | `PT409` | a run, assignment, training requirement, shift-pattern attachment, operator home cell or held training names a row whose owning node does not contain the node in question | `kind`, `id`, `owner_node_id`, `node_id` |
 | `owner_change_blocked` *(migration 0028 §5)* | `PT409` | re-homing a product, operator, training or shift pattern that is already used outside the site it is being moved to | `kind`, `id`, `new_owner_node_id`, `stranded` |
+| `outside_run` *(migration 0079 / F-131)* | `PT409` | `create_assignment`'s run branch (`p_run_id` set): the block's `timerange` does not lie inside the run's own `timerange` (`@>`, inclusive of equality) | `run_id`, `node_id`, `run_timerange`, `timerange` |
 
 **The `23P01` exception:** the `runs_no_overlap_on_node` exclusion
 constraint (a database-level invariant, migration `0003`) raises a bare
@@ -211,8 +212,10 @@ rejection.
 ```
 
 **Raises:** `invalid_argument` (null/empty `p_timerange`; exactly one of
-`p_run_id`/`p_product_id` must be set), `not_permitted`, `not_eligible`,
-`capacity_exceeded` (via the trigger).
+`p_run_id`/`p_product_id` must be set; migration 0079: an unknown `p_run_id`),
+`not_permitted`, `outside_run` (migration 0079: `p_run_id` set and the block's
+`timerange` is not inside the run's own — checked after `not_permitted` and
+before `not_eligible`), `not_eligible`, `capacity_exceeded` (via the trigger).
 
 **ASSUMPTION** (brief silent): `eligibility_override` is only ever stored
 `true` when it actually overrode a genuine ineligibility. Passing

@@ -72,13 +72,19 @@ export type SchedulerErrorCode =
   | "level_in_use"
   | "node_in_use"
   | "schedulable_level_locked"
-  // Migration 0028 / D109. The closed set is fourteen now, not twelve.
+  // Migration 0028 / D109. The closed set is sixteen now, not twelve (0066/R-357
+  // added `absent` and 0079/F-131 added `outside_run` after this comment was
+  // last updated at fourteen — both are counted here now).
   | "not_offered_here"
   | "owner_change_blocked"
   // Migration 0066 / R-357. A person placed onto a window they are on leave for,
   // under a plant whose policy is `block`. The warn-path carries the same absence
   // as a payload key, not this code — see `AbsenceInfo` in shapes.ts.
-  | "absent";
+  | "absent"
+  // Migration 0079 / F-131. A run-attached create_assignment (p_run_id set) whose
+  // timerange does not lie inside the run's own timerange (`@>`, inclusive of
+  // equality). A direct (p_product_id) block is never checked against this.
+  | "outside_run";
 
 export type SchedulerError =
   | {
@@ -260,6 +266,23 @@ export type SchedulerError =
       policy: "warn" | "block";
       operators: AbsentOperator[];
     }
+  /**
+   * Migration 0079 / F-131: a run-attached create_assignment (`p_run_id` set)
+   * whose `timerange` does not lie inside the run's own timerange. The client
+   * already decides "join" by the same containment (`assignmentFitsRun`); this
+   * is the server holding the identical test, so a refetch race or a shift
+   * chip moved after the join question cannot land a block outside the job it
+   * names. `jsonb_build_object('run_id', ..., 'node_id', ..., 'run_timerange',
+   * ..., 'timerange', ...)` — both timeranges are the server's raw `tstzrange`
+   * text, same shape as `RunOverlap.timerange`.
+   */
+  | {
+      kind: "OutsideRun";
+      runId: string;
+      nodeId: string;
+      runTimerange: string;
+      timerange: string;
+    }
   /*
    * ⭐ §19.63 — THE FIVE BELOW EXIST BECAUSE NOT EVERY WRITE IS AN RPC.
    *
@@ -325,6 +348,7 @@ const SCHEDULER_ERROR_KINDS: ReadonlySet<SchedulerError["kind"]> = new Set([
   "NotOfferedHere",
   "OwnerChangeBlocked",
   "Absent",
+  "OutsideRun",
   "RaceLost",
   "WriteRefused",
   "DuplicateValue",
@@ -615,6 +639,25 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
           }
         }
         return { kind: "Absent", nodeId: detail.node_id, policy, operators };
+      }
+      return undefined;
+    }
+    case "outside_run": {
+      // F-131. All four keys are on every raise site (create_assignment's own
+      // guard, migration 0079) — no optional shape here, unlike `absent`.
+      if (
+        hasStringProp(detail, "run_id") &&
+        hasStringProp(detail, "node_id") &&
+        hasStringProp(detail, "run_timerange") &&
+        hasStringProp(detail, "timerange")
+      ) {
+        return {
+          kind: "OutsideRun",
+          runId: detail.run_id,
+          nodeId: detail.node_id,
+          runTimerange: detail.run_timerange,
+          timerange: detail.timerange,
+        };
       }
       return undefined;
     }
@@ -947,6 +990,8 @@ export function describeSchedulerError(e: SchedulerError): string {
       const n = e.operators.length;
       return `${n} crew members are on leave for this window.`;
     }
+    case "OutsideRun":
+      return "That block would fall outside the job it is joining.";
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";
     case "WriteRefused":

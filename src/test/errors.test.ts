@@ -51,6 +51,44 @@ describe("toSchedulerError", () => {
     expect(err.conflictingRunId).toBe("80000000-0000-0000-0000-000000000001");
   });
 
+  it("parses outside_run with every field", () => {
+    // F-131 / migration 0079. Inlined rather than added to
+    // fixtures/postgrest-errors.ts: that file is outside this brief's file
+    // list (docs/agent-briefs/f-131-a-join-stays-inside-its-run-brief.md §6).
+    const outsideRunFixture = {
+      message: "a block that joins a run must lie inside the run's window",
+      details: JSON.stringify({
+        error: "outside_run",
+        run_id: "80000000-0000-0000-0000-000000000001",
+        node_id: "30000000-0000-0000-0000-000000000007",
+        run_timerange: '["2026-08-18 08:00:00+00","2026-08-18 16:00:00+00")',
+        timerange: '["2026-08-18 07:00:00+00","2026-08-18 12:00:00+00")',
+      }),
+      hint: null,
+      code: "PT409",
+    };
+    const err = toSchedulerError(outsideRunFixture);
+    expect(err.kind).toBe("OutsideRun");
+    if (err.kind !== "OutsideRun") throw new Error("unreachable");
+    expect(err.runId).toBe("80000000-0000-0000-0000-000000000001");
+    expect(err.nodeId).toBe("30000000-0000-0000-0000-000000000007");
+    expect(err.runTimerange).toBe('["2026-08-18 08:00:00+00","2026-08-18 16:00:00+00")');
+    expect(err.timerange).toBe('["2026-08-18 07:00:00+00","2026-08-18 12:00:00+00")');
+  });
+
+  it("describeSchedulerError on an OutsideRun returns the exact sentence (F-131)", () => {
+    const err: SchedulerError = {
+      kind: "OutsideRun",
+      runId: "80000000-0000-0000-0000-000000000001",
+      nodeId: "30000000-0000-0000-0000-000000000007",
+      runTimerange: '["2026-08-18 08:00:00+00","2026-08-18 16:00:00+00")',
+      timerange: '["2026-08-18 07:00:00+00","2026-08-18 12:00:00+00")',
+    };
+    expect(describeSchedulerError(err)).toBe(
+      "That block would fall outside the job it is joining.",
+    );
+  });
+
   it("parses run_node_mismatch with every field", () => {
     const err = toSchedulerError(fixtures.runNodeMismatch);
     expect(err.kind).toBe("RunNodeMismatch");
