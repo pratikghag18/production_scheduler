@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 9ba8415
+  tip: 8f16f1f
   baseline:
     app_tests: 2750
     app_test_files: 133
     tsc: 0
     eslint: 0
-    db_checks: 832
-    migrations: 78
+    db_checks: 845
+    migrations: 79
     mutations: 509 of 536
 tracks:
 - id: core
@@ -2013,7 +2013,7 @@ stages:
   track: core
   num: 41
   title: Tell the board what to do — book a job, unassign, move
-  status: now
+  status: done
   owner: agent
   refs:
   - docs/voice-commands-plan.md (Stage 7)
@@ -2044,6 +2044,36 @@ stages:
     **Unassign shipped in session 146 (9ba8415):** the bar names the block it found and removes it on
     one press, never on Enter; several blocks are several buttons; no block is a sentence. Move
     (R-389) is briefed with its one new server writer and next.
+    **Move shipped in session 147 (8f16f1f) and the stage is done:** a move in time is R-385's
+    path reached by a sentence that says so; a move to another cell opens the create pop-up on the
+    target cell preset and its one door sends the new server writer move_assignment (migration 0080),
+    which changes the row in place, asks every placement question about the target, and detaches
+    the block from its run. Three sentences in three pieces, each built by a Sonnet lane and broken-at
+    by a second.
+- id: S42
+  track: core
+  num: 42
+  title: The training set and the held-out test set
+  status: now
+  owner: agent
+  refs:
+  - docs/voice-commands-plan.md (Stage 3)
+  - docs/agent-briefs/s42-a-training-set-brief.md
+  delivers:
+  - R-390
+  what: >-
+    **The instrument before the model.** A script combines sentence templates for the four commands
+    with realistic names, days and times, adds the misspellings and speech-recognition slips people
+    actually produce, and writes each sentence beside the form it means; the rule parser is the oracle
+    for every clean sentence. A few hundred of them are held out, committed and never trained on:
+    every reader — the rule parser today, each model later — is scored against that set, and a score
+    below the bar fails the build the way a lost test file does. The rule parser's own score is the
+    baseline a model must beat.
+  state: >-
+    **Briefed session 147 (11 Sept).** Starts once the move sentence is committed, because the oracle
+    must know all four sentences. One half of the plan's Stage 3 is deliberately NOT in it: saving
+    every sentence a person types, with the site's permission, is a product decision (a table, a
+    setting, a privacy question) parked for the maintainer.
 - id: M1
   track: matrix
   num: 1
@@ -10041,15 +10071,63 @@ requirements:
     block carries the run's part as a direct block). The old block is the same row, so nothing is
     duplicated and nothing is left behind. Two matching blocks are a question; a part not offered at
     the new cell is refused in words before anything opens.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: sql
+    file: supabase/tests/97_move_assignment_test.sql
+    cases: "MA0-MA12 --- the function exists and NULLs run_id; a direct block moves cell and hours with every other column unchanged; a run-attached block detaches and carries the run's part; cell only; hours only; a training the person lacks refuses under block and under warn without an override, moves with one and a reason, invalid_argument with one and no reason; absence under block refuses; another area refuses without an area override and moves with one; a viewer and an editor of the source cell only are both not_permitted; over capacity refuses; an unknown row and a departed person's row are invalid_argument; the same call twice is a no-op"
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "MV1-MV10 --- the move sentence in place, in time and both; no_move; no_place; empty; the day word; quoted names; round trips; the four-clause shape sentence; the other three sentences undisturbed"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RM1-RM10 --- retime for a move in time; move_cell with the block's own hours or new ones; a part not offered at the new cell; no block; two blocks ask; an ambiguous destination asks; a stale answer re-asks; the block is found by the day, not by the new hours; the other paths byte-identical"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CM1-CM3 --- onMove called with the retime target and with the move_cell target; the question's buttons"
+  - kind: vitest
+    file: src/test/createPopover.test.tsx
+    cases: "AC12-AC14 --- presetMove forces direct mode with the person fixed; Enter calls onSubmitMove once under StrictMode with a click's arguments; an ineligible target opens the training box and calls nothing"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "D10 --- openMoveFromCommand sets the popover with presetMove and autoCreate on the target node"
+  - kind: vitest
+    file: src/test/moveAssignment.test.ts
+    cases: "the API function's argument mapping and result parsing"
+  - kind: mutation
+    file: supabase/migrations/20260911000080_move_assignment.sql
+    cases: "X1-X3 on the migration (both lanes): dropping the target-cell permission --- MA9's source-only editor still refused, by the row policy rather than the function's own check; keeping run_id --- MA2 red and assignments_run_consistency raised as predicted; eligibility asked against the source cell --- MA5 and MA6 red. M53-M58 on the client: the wrong field for p_node_id (moveAssignment M2/M53); the block found by the new hours instead of the day (RM9); a null destination resolving to move_cell (RM1); presetMove falling through to onSubmitDirect (AC13); openMoveFromCommand without presetMove (D10); 'to 10 to 3' read as a place (MV2)"
+  - kind: manual
+    steps: "As Dana, after 'Assign Operator A3 to Housing A on Cell 3 in Line 2 from 10 to 2', type 'Move Operator A3 on Cell 3 to Cell 4 in Line 2': the pop-up opens on Cell 4 preset and Enter moves it when there is nothing to decide; one row for that person that day, now on Cell 4; then 'Move Operator A3 on Cell 4 to 10 to 3' changes the hours on the same row"
+  status: covered
   note: >-
-    STATED session 146 (11 Sept), the third of S41's three commands. The developer session's call,
+    STATED session 146 (11 Sept), BUILT session 147, the third of S41's three commands. The developer session's call,
     flagged: no screen can move a block to another cell today (a chip drag is same-row only, D66; the
     only cross-cell writer is move_run), so the second half of this sentence needs ONE new server
     function in the family of reassign_assignment (the person changes) and move_run (the job changes
     cell). Assembled from reassign_assignment's last definition by a script that asserts its guards
     survived, in the shape F-131's migration used.
+- id: R-390
+  title: A generated training set whose clean sentences the rule parser confirms, and a committed held-out set that scores any reader and fails the build below the bar
+  source:
+  - 'docs/voice-commands-plan.md, Stage 3 (adopted by the maintainer, session 139: "The revised voice plan adopted")'
+  - docs/agent-briefs/s42-a-training-set-brief.md
+  stated_by: maintainer
+  claim: >-
+    A seeded, dependency-free generator under scripts/ turns sentence templates for assign, book a job,
+    unassign and move, with realistic names, days and times, into sentences beside their forms (the
+    parser's own Command shape). Every clean sentence must parse with the rule parser to exactly its
+    recorded form, or the generator fails; perturbed sentences (spelling, speech, spacing, filler)
+    carry the clean sentence's form and are not expected to parse. A held-out set of a few hundred
+    rows, half clean, is committed once and never regenerated; the training set is generated on demand
+    and never committed; the two share no sentence. A scorer compares any reader's forms to the
+    held-out forms per field and per intent and exits non-zero below the bar on clean rows; the rule
+    parser scores 1.0 on clean rows and its rate on perturbed rows is the recorded baseline. A grammar
+    drift turns the held-out check red.
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED session 147 (11 Sept). Parked out of it, for the maintainer: saving what people type into
+    the bar to grow both sets.
 findings:
 - id: F-132
   title: Typing the same assignment again with different hours was treated as a second block on top of the first
@@ -13613,6 +13691,29 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 147
+  date: 2026-09-11
+  title: "Move by sentence with its own server writer (S41-c, R-389 covered) --- S41 done"
+  shipped: [S41]
+  commits: [8f16f1f]
+  numbers:
+    app_tests: 2968
+    app_test_files: 139
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the build lane, its two follow-ups and the review: `Test Files 139 passed (139)`, `Tests 2968 passed (2968)`, copied from the runner --- up 37 from 2931 (commandParse +11, commandResolve +11, commandBar +3, createPopover +5 incl. AC15/AC16, dragGesture +2 incl. D11, moveAssignment 6 in a new file), 139 files because moveAssignment.test.ts is new. `tsc -b --force` clean AFTER `npm run db:types`, which gained exactly the twelve lines of the new function's Args/Returns, so the word is honest. `eslint .` clean. Prettier clean over the fourteen touched TS files. SQL: 97 reports 13 passed 0 failed; 79 (14), 88 (40), 57 (17) unchanged; db_checks moves from 832 to 845 by adding the thirteen. migrations 79 (0080). `playwright test e2e/roleWalk.spec.ts --workers=1`: 5 passed. e2e total carried.
+  summary: >-
+    Move, the third of S41's three sentences, and the stage is done. Built by a Sonnet lane from `s41-c-move-brief.md`, broken-at by a second, with two follow-ups before the commit; the maintainer asked twice while it ran why it was taking so long and what the piece was, and both answers are in the transcript --- the short one: it is the largest piece of the three because it needed a server writer.
+    ⭐ ONE WRITER, NOT TWO WRITES (D120). A chip drag is same-row only and only a job crossed cells, so a move to another cell had no path; two client writes would leave a duplicate or nothing depending on which refusal came first. Migration 0080's `move_assignment` is `reassign_assignment`'s body assembled by a script with every guard asserted, the placement questions asked about the TARGET, edit rights on both cells (`move_run`'s rule), and `run_id` NULLed on the way with the run's part carried. The reviewer diffed it hunk by hunk against 0066, re-ran the script to the same bytes, and named the one hunk the brief had not called for --- the dropped foreign-key wrapper, which only ever translated an unknown person --- so the header now says why. Applied to the running stack by psql; `db:types` gained the function; `tsc` conclusive.
+    ⭐ THE POP-UP'S ONE DOOR, POINTED AT A DIFFERENT WRITER. `presetMove` fixes the person, presets the part and hours, disables the mode segment (the lane's own flagged gap, fixed on the first follow-up so a mid-move flip could not book a run beside the old block), and `submitDirect()` sends `move_assignment` with the same overrides the boxes collect; Enter moves when clean (AC13 pins a click's arguments against the auto-press's). The resolver finds the block by the sentence's DAY, not the new hours (RM9), since the new hours are the destination.
+    ⚠️ THE REVIEWER'S REAL FINDING, FIXED ON THE SECOND FOLLOW-UP. `<CreatePopover>` sat unkeyed at a stable position, so a second typed sentence while a move was in flight updated its props in place; the mount-only R-384 effect never re-armed and the second command vanished when the first's close landed. Every opener now stamps a `seq` and the board keys the pop-up on it, so each opening is a new mount --- D11 on the hook, AC16 on the component. The reviewer also read suite 97 for vacuous cases: MA9's source-only editor really does hold admin on the source cell and viewer on the target; MA5-MA10 check only the node after a refusal rather than the whole row, which is honest since every refusal is raised before the single UPDATE, and is recorded here rather than tightened.
+    ⭐ LIVE AS DANA ON 15 SEPT, PREDICTED FIRST: Operator A3 is homed at the plant root and Cell 4 requires no training, so the reviewer predicted Enter would move silently --- it did, one row now on Cell 4 with `run_id` NULL; the re-time changed the hours on the same id; the app's own Delete left zero rows.
+    ⭐ S42 BRIEFED AND STARTED. The training-set generator and the held-out instrument (voice plan Stage 3) are R-390 and stage S42, written before the code; the saving of what people type is parked as the maintainer's decision. Its lane is running as this entry is written.
 - id: 146
   date: 2026-09-11
   title: "Unassign by sentence (S41-b, R-388 covered); move briefed with its server writer and R-389 written"
@@ -20313,14 +20414,7 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  stage: S41
-  text: "Voice plan, next command: MOVE --- 'Move Operator A1 to Cell 2 in Line 1' or '... to 10 to 3' re-places a block"
-  why: >-
-    Third of the three, and R-385's "change it" button is its first half: a re-timed block on the
-    same cell is a move in time, a new cell is a move in place. One resolver step finds the block,
-    one bar action routes to the existing move/resize path, so the server re-asks training, area,
-    absence and capacity for the new placement (R-361). Build R-385 first and let this widen it.
-- kind: task
+  stage: S42
   text: "Voice plan Stage 3 --- the training set and the held-out test set for all four commands"
   why: >-
     A generator script under `scripts/` that turns the demo world's names and the four sentence
@@ -20373,6 +20467,13 @@ next:
     stack; size it when it is next.
 
 # ------------------------------- PARKED ------------------------------------
+- kind: parked
+  text: "Save every sentence a person types into the command bar, with the site's permission, to grow the training and held-out sets"
+  why: >-
+    Split out of Stage 3 by the developer session (11 Sept, session 147) as the maintainer's decision,
+    not the lane's: it is a table of what people typed, a per-site setting saying whether to keep it,
+    and a privacy question a plant will ask. The generator and the held-out instrument (S42) do not
+    need it. Unpark with a word.
 - kind: parked
   decided: true
   text: "Voice plan Stage 11 --- the optional 7B free-question model that writes its own lookups"
