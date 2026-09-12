@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: b204a96
+  tip: 015416a
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -9821,7 +9821,7 @@ requirements:
   claim: >-
     One fixed shape is read in this stage. A sentence missing its time, its part or its place, or with a
     time or date that is not one, is answered with the shape and an example ("Say it like: assign
-    <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time>"), naming the piece it
+    <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>]"), naming the piece it
     could not read, and nothing opens.
   verified_by:
   - kind: vitest
@@ -10143,7 +10143,7 @@ findings:
 - id: F-134
   title: A start stated in 24-hour form still lets the afternoon rule bump the end by twelve hours
   tag: The afternoon rule does not read the start
-  status: open
+  status: fixed
   found_by: reviewer
   stage: S42
   refs:
@@ -10162,10 +10162,15 @@ findings:
     the start carries a meridiem), skip the afternoon rule for the end; an end not after the start is
     then `time_order`, refused with the shape sentence. "from 10 to 2" keeps its meaning. Same file and
     same helper as F-133, so one lane takes both.
+  fix: >-
+    Session 149 (015416a). A start of 13:00 or later, or one with am/pm, turns the afternoon rule
+    off for the end, so "from 17:15 till 10:30" and "from 1pm to 10" are refused as time_order; "from
+    10 to 2", "from 10 to 10", "from 12 to 3" and "from 12am to 4" keep their meaning (P9, P11, P36).
+    The generator's independent afternoon rule changed the same way; that exposed 34 of the 200 clean held-out rows (assign 9, book 12, unassign 4, move 9) as recorded under the old rule, so the set was regenerated once with its original seed 20260911 --- the one documented exception --- with the counts per intent unchanged and the score clean again.
 - id: F-133
   title: A day word after the hours is refused as a bad time, in every typed sentence
   tag: The shape reads the day in one place only
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S40
   refs:
@@ -10189,6 +10194,13 @@ findings:
     trailing day word off the end first (the same `DAY_TAIL_RE`), then the time clause, then the
     day word before it; a day in both places is a question, not a guess. A suspicion from the run
     above, not yet pinned by a test.
+  fix: >-
+    Session 149 (015416a). The shared time-and-day helper reads a real day word off the END of the
+    line first, then the time clause, then the day before it; the same day in both places is fine,
+    two different days is a new parse failure the bar renders as "I read two days ... Say one."; a
+    trailing word that is not a day is still swallowed into the time, as the shape says. All four
+    sentences; the canonical form still prints the day before the hours; the shape sentence shows
+    "[on <day>]" at both ends. The maintainer's sentence is P25, verbatim.
 - id: F-132
   title: Typing the same assignment again with different hours was treated as a second block on top of the first
   tag: The bar cannot see the person's own blocks
@@ -13751,6 +13763,27 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 149
+  date: 2026-09-11
+  title: "The day may come after the hours, and the afternoon rule reads the start (F-133, F-134 fixed)"
+  commits: [015416a]
+  numbers:
+    app_tests: 2994
+    app_test_files: 140
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lane and the developer session's own checks: `Test Files 140 passed (140)`, `Tests 2994 passed (2994)`, copied from the runner --- up 17 from 2977 (commandParse P25-P36 and B12/U10/MV12/B13, commandBar C15 and the shape-sentence updates). `tsc -b --force` clean, no migration. `eslint .` clean. Prettier clean over the six touched files. `npm run voice:score`: clean 200/200, perturbed 7/200, PASS. `playwright test e2e/roleWalk.spec.ts --workers=1`: 5 passed. db_checks, migrations and the e2e total carried from 148.
+  summary: >-
+    Two parser findings closed in one lane, one the maintainer's and one the reviewer's, both in the shared time-and-day helper so all four sentences get them; the developer session reviewed the result itself rather than through a second lane --- the maintainer had asked why things take so long --- by running the maintainer's sentence and the edge cases through the fixed parser and reading the diff.
+    ⭐ F-133: "… from 10 to 2 on Saturday" NOW READS. A real day word at the END of the line is read first (only when what precedes it still ends in a time clause), then the time clause, then the day before it; the same day twice is fine, two different days is a new failure the bar renders as *I read two days, "Monday" and "Saturday". Say one.*; "on funday" at the end is still not a day. The canonical form still prints the day before the hours (P30 asserts the exact string the formatter really produces, which the brief had guessed wrong --- no quotes were needed). The maintainer's own sentence is P25 verbatim.
+    ⭐ F-134: THE AFTERNOON RULE READS THE START. A start of 13:00 or later, or with an explicit am/pm, turns the twelve-hour guess off for the end: "from 17:15 till 10:30" and "from 1pm to 10" are time_order; "from 10 to 2", "from 10 to 10", "from 12 to 3" (P36, the case that catches a `>= 12` slip) and "from 12am to 4" keep their meaning. ⚠️ THE BRIEF WAS WRONG ABOUT NOON: it said "a start that carries a meridiem" turns the rule off, and `noon`/`midnight` set that flag internally, which would have broken P10 ("noon to 3" = 12:00-15:00). The lane distinguished an explicit am/pm from the synthetic flag and P10 stayed green --- the right call, recorded so the next brief does not repeat the phrasing.
+    ⚠️ THE HELD-OUT SET WAS REGENERATED ONCE, AND THAT IS THE POINT OF F-134. The generator's independent afternoon rule changed the same way, and its oracle then found 34 of the 200 committed clean rows recorded under the old rule ("3:15 pm – 9:15" as 21:15). The brief had allowed exactly one regeneration with the same seed for this case; counts per intent are unchanged, every sentence differs because the generator's one RNG stream shifted, and the set scores clean again. The reviewer's ten-row read in session 148 is what caught this before any model was trained on it.
+    ⭐ THE QUEUE NOW REACHES THE MODEL STAGES, and each needs the maintainer: a base model and a Colab run (Stage 4), a model service on a machine (Stage 5), which recogniser first (Stage 6), the question catalog (Stage 8), and the parked saving of what people type. The session stops here with those questions in the closing report; the branch is ahead of origin by seventeen commits for the maintainer to push.
 - id: 148
   date: 2026-09-11
   title: "The training set and the held-out instrument (S42, R-390 covered) --- the queue reaches the model stages"
@@ -20496,16 +20529,6 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  text: The day word may come after the hours, and the afternoon rule reads the start (F-133, F-134)
-  why: >-
-    The maintainer typed "… from 10 to 2 on Saturday" and was refused; only "… on Saturday from 10
-    to 2" reads today. Small and in one file (`parse.ts`, the shared time-and-day helper), for all
-    four intents, with P/B/U/MV cases in both orders and a "day in both places" question; the shape
-    sentence gains "[on <day>]" at the end too. Waits for S42's lane, which reads the same file as
-    its oracle, then goes first. The model does not lift this on its own (F-133). F-134 rides in
-    the same helper: a start of 13:00 or later, or one with am/pm, turns the afternoon rule off for
-    the end, so "from 17:15 till 10:30" is refused rather than read as 22:30.
 - kind: task
   text: "Voice plan Stage 4 --- fine-tune the first small model and score it against the rule parser"
   why: >-
