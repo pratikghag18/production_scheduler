@@ -27,7 +27,9 @@
     "db:reset": "supabase db reset",
     "db:diff": "supabase db diff",
     "db:push": "supabase db push",
-    "db:types": "supabase gen types typescript --local > src/lib/database.types.ts"
+    "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
+    "voice:generate": "node scripts/voice/generate.mjs --out data/voice/train.jsonl --n 4000 --seed 1",
+    "voice:score": "node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --rule-parser --bar 0.95"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",

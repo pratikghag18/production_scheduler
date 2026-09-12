@@ -38,6 +38,11 @@ checks.txt
 # script drifting apart, and the copy is the one nobody edits.
 supabase/snippets/
 
+# S42-a: the voice-command training set is generated on demand
+# (`npm run voice:generate`), never committed -- only the held-out test set
+# (`data/voice/heldout.jsonl`) is, and it is generated exactly once.
+data/voice/train.jsonl
+
 # The per-machine Claude Code resume file. It says "personal -- gitignored, not
 # shared" in its own first line, and it is written for whoever is sitting at
 # this checkout: it names local paths, what is running on the machine, and how
