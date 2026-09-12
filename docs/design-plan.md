@@ -9083,3 +9083,34 @@ blocks are several buttons, one press each. The developer session's call, record
 for the maintainer to overrule.
 
 Briefs: `docs/agent-briefs/s41-a-book-a-job-brief.md`, `docs/agent-briefs/s41-b-unassign-brief.md`.
+
+## §19.91 — D120: moving a block to another cell needs one server writer, not two client writes
+
+> The maintainer's third command after assign (session 139): *move*.
+
+### The gap
+
+A chip drag on the board is same-row only (D66); the only thing that crosses cells is a whole
+job, through `move_run`. "Move Sam on Cell 1 to Cell 2" therefore has no path today. The two
+ways to give it one: two client writes (create on the new cell, then delete the old), or one
+server function. Two writes is exactly hazard #4 ("never several calls"): a refusal on the
+second leaves a duplicate, a refusal on the first leaves nothing changed but a toast, and
+neither state is one the person asked for.
+
+### D120 — `move_assignment`, in the family of `reassign_assignment` and `move_run`
+
+One writer takes the row, the target cell and the target hours and changes the row in place.
+It is `reassign_assignment`'s body with the placement questions asked about the TARGET —
+edit rights on both cells (`move_run`'s rule), training, absence and the area rule under the
+target's policy, the capacity trigger refusing over-booking — and one thing a reassign never
+does: it detaches the block from its run, because a run lives on one cell, and carries the
+run's part as the block's own, exactly as a detach drag does. The same row moves, so nothing
+is duplicated and nothing is left behind, and the audit trigger logs one update.
+
+On the screen the move is the create pop-up's one door pointed at a different writer: the
+pop-up opens on the target cell preset with the person, the part and the hours, shows the same
+training, area and leave boxes about that cell, and its Create — or Enter when the pop-up
+would show nothing to decide (R-384) — sends `move_assignment` instead of `create_assignment`.
+The move in time on the same cell is R-385's path, reached by a sentence that says so.
+
+Brief: `docs/agent-briefs/s41-c-move-brief.md`.

@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 55907d5
+  tip: 9ba8415
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2023,6 +2023,7 @@ stages:
   - R-386
   - R-387
   - R-388
+  - R-389
   what: >-
     **The next three sentences.** After *assign* (S40), the three commands the maintainer ordered on 11
     Sept: *book a job* ("Book Housing A on Cell 1 in Line 1 from 6 to 2", a run on a cell, with an
@@ -2040,6 +2041,9 @@ stages:
     pop-up opens forced and preset and Enter books the job, an overlapping job of the same part is
     asked about and re-timed through the drag's own run-resize branch, another part is named in the
     way. Unassign (R-388) is briefed and next.
+    **Unassign shipped in session 146 (9ba8415):** the bar names the block it found and removes it on
+    one press, never on Enter; several blocks are several buttons; no block is a sentence. Move
+    (R-389) is briefed with its one new server writer and next.
 - id: M1
   track: matrix
   num: 1
@@ -9995,13 +9999,57 @@ requirements:
     button is pressed, through the same removal the block's own Delete button uses. Several matching
     blocks are several buttons, one press each; none is a sentence saying so; a stale answer re-asks.
     Enter never deletes: the button is the thing to decide.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "U1-U9 --- the unassign sentence with and without hours, the day word, bad time, empty person, no place, round trips, the three-clause shape sentence, the assign and book sentences undisturbed"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RU1-RU8 --- one block asks with its name verbatim; the answer resolves to that block with a 'Removing' readout; several blocks list all in board order; no block is said, with hours or with the day; touching hours are no block; another person or cell is no block; a stale answer re-asks or says the block is gone; the assign and book paths byte-identical"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CU1-CU4 --- the question and its one button call nothing; pressing it calls onUnassign once with the block and the input unchanged; several blocks show a button each; the ISO day in a question is rendered through formatDayLabel"
+  - kind: vitest
+    file: src/test/commandAssignments.test.ts
+    cases: "A5-A7 --- the effective part's name for a direct block, a run-attached block, an unknown part"
+  - kind: mutation
+    file: src/lib/command/resolve.ts
+    cases: "M40-M46 (brief §6) applied by the build lane, M43/M44/M45 re-applied by the reviewer --- every one caught by its named case: M40 (any verb removes) U2 with U3/U7 collateral; M41 (a missing time clause is no_time) U2; M42 (person filter dropped) RU6; M43 (one hit resolves without asking) RU1/CU1; M44 (stale answer removes the first hit) RU7; M45 (onUnassign through onOpen) CU2; M46 (whole day as dayIndex x 1440) RU9, a DST-boundary block the lane built because the brief's row named no concrete case"
+  - kind: manual
+    steps: "As Dana, after 'Assign Operator A3 to Housing A on Cell 3 in Line 2 from 10 to 2' creates a block, type 'Unassign Operator A3 from Cell 3 in Line 2 from 10 to 2': the question names the block with one 'Remove it' button and the row is still there; press it: the chip and the row are gone; the same sentence again says there is no block"
+  status: covered
   note: >-
-    STATED session 145 (11 Sept), the second of S41's three commands. The "ask before removing"
+    STATED session 145 (11 Sept), BUILT session 146, the second of S41's three commands. The "ask before removing"
     shape is the developer session's call, flagged to the maintainer: R-384's Enter-does-it is for
     creating, where the pop-up's own verdicts say nothing is left to decide; a removal cannot be
     undone and a misheard sentence must not be one keypress from deleting the wrong block.
+- id: R-389
+  title: A typed sentence moves a person's block in time or to another cell, through the pop-up's one door and one server writer that asks every question a new placement is asked
+  source:
+  - 'session 139 conversation (the maintainer, 11 Sept, ordering the commands after assign: "book a job, unassign, move")'
+  - docs/agent-briefs/s41-c-move-brief.md
+  stated_by: maintainer
+  claim: >-
+    "move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time>]"
+    finds that person's block on that cell that day and moves it. New hours on the same cell is R-385's
+    change-it path, reached by a sentence that says so. A new cell opens the same "New" pop-up on the
+    target cell, preset with the person, the part and the hours, and its Create --- or Enter when the
+    pop-up would show nothing to decide --- sends a new server writer, move_assignment, that changes the
+    row's cell and hours in place: it requires edit rights on both cells, asks training, absence and the
+    area rule under the target's policy exactly as a new placement is asked, lets the capacity trigger
+    refuse over-booking, and detaches the block from its run on the way (a run lives on one cell; the
+    block carries the run's part as a direct block). The old block is the same row, so nothing is
+    duplicated and nothing is left behind. Two matching blocks are a question; a part not offered at
+    the new cell is refused in words before anything opens.
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED session 146 (11 Sept), the third of S41's three commands. The developer session's call,
+    flagged: no screen can move a block to another cell today (a chip drag is same-row only, D66; the
+    only cross-cell writer is move_run), so the second half of this sentence needs ONE new server
+    function in the family of reassign_assignment (the person changes) and move_run (the job changes
+    cell). Assembled from reassign_assignment's last definition by a script that asserts its guards
+    survived, in the shape F-131's migration used.
 findings:
 - id: F-132
   title: Typing the same assignment again with different hours was treated as a second block on top of the first
@@ -13565,6 +13613,28 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 146
+  date: 2026-09-11
+  title: "Unassign by sentence (S41-b, R-388 covered); move briefed with its server writer and R-389 written"
+  commits: [9ba8415]
+  numbers:
+    app_tests: 2931
+    app_test_files: 138
+    tsc: 0
+    eslint: 0
+    db_checks: 832
+    migrations: 78
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lanes and the one follow-up fix: `Test Files 138 passed (138)`, `Tests 2931 passed (2931)`, copied from the runner --- up 26 from 2905 (commandParse +9, commandResolve +10 including RU10, commandBar +4, commandAssignments +3). `tsc -b --force` clean, no migration this piece. `eslint .` clean. Prettier clean over the nine touched files. `playwright test e2e/roleWalk.spec.ts --workers=1`: 5 passed. db_checks, migrations and the e2e total carried from 145.
+  summary: >-
+    Unassign, the second of S41's three sentences, built by a Sonnet lane from `s41-b-unassign-brief.md` and broken-at by a second; the maintainer's standing word not to stop still in force.
+    ⭐ A REMOVAL IS ONE PRESS, NEVER ENTER. The block's own Delete removes immediately, and the sentence reaches that same action and nothing else (`dragApi.removeAssignment`, the reviewer confirmed no new write); but the bar names what it found --- "Remove Operator A3's Housing A block on Cell 3, 10:00–14:00?" --- and removes it on the one button. Several blocks are several buttons; none is a sentence; a stale answer re-asks or says the block is already gone. The developer session's call, recorded in R-388 for the maintainer to overrule.
+    ⭐ "FROM" IS BOTH THE PLACE WORD AND THE TIME WORD, so the parser takes the last one and treats what follows as hours only when it reads as hours; a structural match with a bad token is still `bad_time`. The day word moved into a helper the assign and book paths share and the resolver's person step was extracted like the cell, part and day steps --- P1-P24, B1-B11, R1-R44 and RB1-RB11 re-run by name by the reviewer, unchanged. The whole-day span goes through the plant's day axis, which the lane READ before trusting: it carries a minute past 1440 into the next day on its own, so the brief's tentative last-day special case was unnecessary and was not built; a DST-boundary case pins the difference against naive arithmetic (RU9).
+    ⚠️ THE REVIEWER'S ONE FINDING, FIXED BEFORE THE COMMIT. The lane recovered the part's name from the candidate label string with a private splitter; with an unknown part the label falls back to "block" and the sentence would have read "block block". Fixed at the source in the same session: the candidate carries its part, the splitter is gone, RU10 pins the null-part sentence. Cosmetic, never a data-safety issue --- the removal was always the right row.
+    ⭐ LIVE AS DANA ON A CLEAN DAY (14 Sept): create by sentence, the question with one button and the row still present, the press and the row gone, the same sentence again answered "Operator A3 has no block on Cell 3 10:00–14:00." with no button. Nine screenshots in the job folder.
+    ⭐ MOVE IS BRIEFED AND ITS SERVER WRITER DECIDED. No screen can move a block to another cell (a chip drag is same-row only, D66; only a whole job crosses cells), and two client writes would be hazard #4. So R-389 and §19.91/D120 record one new writer, `move_assignment`, in the family of `reassign_assignment` and `move_run`: the row changes cell and hours in place, asks every placement question about the target, and detaches from its run. On the screen it is the create pop-up's one door pointed at a different writer, with Enter when clean. Its lane is running as this entry is written.
 - id: 145
   date: 2026-09-11
   title: "Book a job by sentence (S41-a, R-386 and R-387 covered); unassign briefed and R-388 written"
@@ -20242,13 +20312,6 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  stage: S41
-  text: "Voice plan, next command: UNASSIGN --- 'Unassign Operator A1 from Cell 1 in Line 1 from 10 to 2' removes the block"
-  why: >-
-    Second of the three. Resolves to the person's block(s) on that cell in that span and opens the
-    existing delete path with its confirmation; two matching blocks become a question with buttons,
-    as two Sams do today (R-379). Never deletes silently.
 - kind: task
   stage: S41
   text: "Voice plan, next command: MOVE --- 'Move Operator A1 to Cell 2 in Line 1' or '... to 10 to 3' re-places a block"
