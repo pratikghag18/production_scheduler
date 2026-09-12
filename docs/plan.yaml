@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 65c4934
+  tip: 9ade4d2
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -1973,6 +1973,7 @@ stages:
   - R-382
   - R-383
   - R-384
+  - R-385
   what: >-
     **The typed half of "talking to the board".** A scheduler types one line — *Assign Operator 1 to
     Housing A on Cell 1 in Line 1 from 10 to 2* — and the board works out which person, which part and
@@ -2000,8 +2001,11 @@ stages:
     once, only when every box it would render is absent.
     **Session 142 (11 Sept), the maintainer after using it twice:** the same sentence typed again
     with wider hours was treated as a second block on top of the first, because the resolver is
-    handed the window's jobs but not its blocks (F-132). Written as R-385 and queued first; not yet
-    built.
+    handed the window's jobs but not its blocks (F-132). Written as R-385 and queued first.
+    **Session 143 (11 Sept), built by a Sonnet lane and reviewed by a second:** the resolver now
+    receives the window's blocks beside its runs and asks, in the join question's shape, whether to
+    change the person's own block or add a separate one; "change it" goes through the drag's own
+    re-time function, extracted so the bar and an edge resize share one path (R-385, §19.89/D118).
   measure:
     app_tests: 2835
     mutations: "19 of 19 caught (M14 by screenshot)"
@@ -9840,10 +9844,27 @@ requirements:
     and only then may the pop-up's efficiency box appear. The bar never stacks silently. Asking
     versus changing silently is the maintainer's call; written as "ask" to match R-383 pending
     their word.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "R34-R44 --- the maintainer's two sentences ask (verbatim); the identical sentence has nothing to change; retime gives the retime target and a 'changing' readout; separate falls through to the run question; a different part, person, cell or a departed person's block asks nothing; touching ranges do not overlap; two blocks list both; a stale retime re-asks or reports the block gone; the own-block question comes before the run question"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "C11-C14 --- the question and its buttons; Change calls onRetime with the block and the new range, input unchanged; Separate block opens the create pop-up (or the run question when a job exists); the same-span sentence offers only Separate block"
+  - kind: vitest
+    file: src/test/commandAssignments.test.ts
+    cases: "A1-A4 --- a direct block's own part, a run-attached block's run part, a departed person carried as null, a missing run carried as null"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "D1-D5 --- retimeAssignmentFromCommand writes the one PATCH an edge resize writes; leaving the run asks R-365 and detaches; a typed target asks R-031 keep-or-scale; a viewer writes nothing; an unknown block writes nothing"
+  - kind: mutation
+    file: src/lib/command/resolve.ts
+    cases: "M20-M29 (brief §10) applied by the build lane, M20/M21/M24/M26/M28 re-applied by the reviewer on scratch copies --- every one caught by its named case: M20 (no own-block step) R34 with R35/R36/R42/R43/R44 collateral; M21 (containment for overlap) R34; M22 (any part) R39; M23 (any person) R40; M24 (stale retime falls back) R43; M25 (run question first) R44; M26 (bar routes retime through onOpen) C12; M27 (own productId only) A2; M28 (a second PATCH builder) D2 and D3; M29 (same by containment) R34"
+  - kind: manual
+    steps: "As Dana, type 'Assign Operator A3 to Housing A on Cell 3 in Line 2 from 10 to 2' (Enter creates), then the same with 'from 10 to 3': the bar asks 'Operator A3 is already on Housing A at Cell 3 10:00-14:00. Change it to 10:00-15:00, or add a separate block?'; press Change: the block reads 10:00-15:00 and the database has one row; type it a third time: 'nothing to change' with only Separate block"
+  status: covered
   note: >-
-    STATED 11 Sept (session 142), not built. The cause is in the resolver's context: it carries the
+    STATED 11 Sept (session 142), BUILT session 143. The cause is in the resolver's context: it carries the
     window's runs (for the join question) but not its assignments, so a person's own block is
     invisible to it and the sentence resolves as a new direct block; the pop-up's capacity probe
     then finds the person already at 100% and offers the efficiency box, which is what the
@@ -9856,7 +9877,7 @@ findings:
 - id: F-132
   title: Typing the same assignment again with different hours was treated as a second block on top of the first
   tag: The bar cannot see the person's own blocks
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S40
   refs:
@@ -9882,6 +9903,15 @@ findings:
     own job correctly --- the capacity probe sees the overlap --- which is why the symptom looks like
     an efficiency question rather than a wrong block. A suspicion from reading the context type, not
     yet reproduced in a test.
+  fix: >-
+    Session 143 (9ade4d2). The suspicion held. `ResolveContext` now carries the window's blocks
+    (`commandAssignments(index)`, a run-attached block carrying its run's product) and a passed-in
+    half-open overlap; a new step before the run question asks "change it, or add a separate block?"
+    with the block as a button; "change it" resolves to a retime target and the bar's new callback
+    hands it to `retimeAssignmentFromCommand`, which calls the function the drag's assignment
+    commit branch was extracted into --- attachment by containment, the R-365 and R-031 prompts, the
+    R-361 mirrors and the one PATCH are the drag's own. Reproduced first in R34 (the maintainer's
+    two sentences), then fixed.
 - id: F-131
   title: The server never checks that a run-attached block lies inside its run
   tag: A join the server does not measure
@@ -13386,6 +13416,28 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 143
+  date: 2026-09-11
+  title: "The bar sees a person's own block and asks before changing it (F-132 fixed, R-385 covered)"
+  shipped: []
+  commits: [9ade4d2]
+  numbers:
+    app_tests: 2868
+    app_test_files: 138
+    tsc: 0
+    eslint: 0
+    db_checks: 823
+    migrations: 77
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after both lanes: `Test Files 138 passed (138)`, `Tests 2868 passed (2868)`, copied from the runner --- up 24 from 2844 (commandResolve +11, commandBar +4, commandAssignments +4 new file, dragGesture +5), both live pins green. `tsc -b --force` clean, no migration this session so the word is honest. `eslint .` clean. Prettier clean over every touched file with `--end-of-line auto`. `playwright test e2e/roleWalk.spec.ts --workers=1`: 5 passed, every demo person walked, viewers still `panel=false canPlace=false`. db_checks, migrations and the e2e total carried from 141 (no SQL changed; roleWalk is 5 of the 46).
+  summary: >-
+    The maintainer, on session 142's assessment: *"Keep that order, spin up sonnet for F-132 with detailed instructions and do not stop unless you need to me make a decision or do something which you cannot."* The queue's order is now a decision, not a proposal.
+    ⛔ THE CAUSE HELD. `ResolveContext` had `runs` and no assignments. The brief (`docs/agent-briefs/f-132-the-bar-sees-your-own-block-brief.md`, written from the tree at c351757 with every type spelled out) gives the resolver the window's blocks the way it has its runs --- `commandAssignments(index)`, a new pure file, with a run-attached block carrying its run's product as its effective part --- and one more passed-in predicate, half-open `rangesOverlap` beside `assignmentFitsRun`. A new step 5, before the run question, asks in R-383's shape: the block as a button ("Change 10:00–14:00"), "Separate block" beside it; the identical sentence has nothing to change and offers only the separate block; a stale answer re-asks or reports the block gone, never guesses; "Separate block" falls through to the run question exactly as before (R44 pins the order).
+    ⭐ THE CHANGE GOES THROUGH THE DRAG'S DOOR, NOT A THIRD ONE. The assignment branch of `commitBlockDrag` --- attachment by containment, the R-365 attachment prompt, the R-031 keep-or-scale prompt, the R-361 warn mirrors and the one PATCH migration 0070's resize guard re-checks --- was EXTRACTED into `retimeAssignment`, and the bar's new `onRetime` callback reaches it through `retimeAssignmentFromCommand`. The reviewer diffed the moved code against the removed branch line by line: identical apart from the four named substitutions. `CommandBar.tsx` still imports nothing from the API; the purity audit is untouched and green. §19.89/D118 records why it asks rather than changes silently.
+    ⭐ BUILT BY ONE SONNET LANE, BROKEN-AT BY A SECOND. The build lane: every §10 mutation caught by its named case, and two cases the brief did not predict (M20 and M25 also turn R36 red, since a retime target cannot exist without step 5). The review lane re-applied five of them on scratch copies, then drove the maintainer's own two sentences live as Dana with Playwright: Enter created the 10:00–14:00 block; the 10-to-3 sentence asked the question verbatim; Change made the board and the database read 10:00–15:00 with exactly ONE row for that person that day; the identical third sentence offered only Separate block; the app's own Delete left zero rows. Ten screenshots in the job folder.
+    ⚠️ THREE THINGS THE BRIEF HAD WRONG, found by the lane reading the tree: `assignmentFitsRun` lives in `src/features/board/lib/interaction.ts`, not `src/lib/interaction.ts` (the repo has both; `rangesOverlap` went beside the real one); the drag branch opens with three lines, not one, so all three became parameters; and `dragGesture.test.ts`'s fixture already carried `assignmentById`/`runById`. None changed the design. One doc comment in `CommandBar.tsx` the lane left stale was tightened in the developer session before the commit.
 - id: 142
   date: 2026-09-11
   title: "The bar could not see a person's own block (F-132, R-385) --- and the queue rebuilt so the next stages show"
@@ -19996,22 +20048,9 @@ next:
 # assumed done; say so in that session's summary.
 #
 # ORDER: the open findings first (the maintainer's standing rule), then the
-# voice plan's remaining stages in the order proposed in session 142 --- the
-# typed commands before the model. That order is a proposal awaiting the
-# maintainer's word; the findings' order is not.
+# voice plan's remaining stages --- the typed commands before the model. The
+# maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  requirement: R-385
-  text: The bar recognises a person's own block and offers to change its hours, not stack a second one (F-132)
-  why: >-
-    The maintainer typed the same sentence twice with wider hours and got a second block offered on
-    top of the first. Add the window's assignments to `ResolveContext` (built in `BoardPage` from
-    the same index the runs come from), test same person + same part + same cell + overlapping span
-    in the step beside the run question, ask in R-383's shape, and route the "change it" button to
-    the existing move/resize path so the server re-checks the new span (R-361, R-031). Cases in
-    `commandResolve.test.ts` and `commandBar.test.tsx` alongside R27--R33 and C9--C10; a mutation
-    that skips the assignment check must go red. Sonnet lane with a brief; a second lane to break it,
-    live as Dana, typing the maintainer's two sentences in order.
 - kind: task
   requirement: R-383
   text: The server refuses a run-attached block whose span is not inside its run (F-131)
