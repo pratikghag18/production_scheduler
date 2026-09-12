@@ -13763,6 +13763,72 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 151
+  date: 2026-09-12
+  title: "Tester run: sessions 142-150 (F-130 through F-134, S41 R-386 to R-389, S42 R-390) verified cold; nothing filed"
+  commits: []
+  numbers:
+    app_tests: 2994
+    app_test_files: 140
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `git merge --ff-only Development` brought the tester branch from 1620fc9 (session 140) to
+    ea93d45 (session 150), nine sessions and their commits; `package-lock.json` unchanged in the
+    range, so no `npm ci`. Fresh `node scripts/tester-stack.mjs up`. VITEST: the runner's own line
+    reads `Test Files 140 passed (140)`, `Tests 2994 passed (2994)`, copied verbatim -- the total
+    2994 in 140 matches the plan's newest confirmed session (150) EXACTLY. `tsc -b` clean, and
+    `db:types` regenerated against the tester stack is BYTE-IDENTICAL to the committed
+    `database.types.ts` (`cmp` reports identical; `git ls-files --eol` reads i/lf w/crlf, so the
+    runner's own "types are stale" WARN is a Windows pipe-comparison artifact, not developer drift --
+    the word `tsc: 0` is honest, not "inconclusive"). `eslint .` clean, now covering `scripts/` too.
+    SQL: every file green through the runner, including the two new suites `96_a_join_stays_inside_
+    its_run_test.sql` and `97_move_assignment_test.sql`; db_checks (845) carried as session 147
+    recorded it (96 adds 9, 97 adds 13). `format:check` FAILs on ~all files including `.prettierrc`,
+    `package.json` and `CLAUDE.md` -- pure line endings: `git ls-files --eol` shows the committed
+    content is LF and prettier-clean, the tester worktree checks out CRLF under `core.autocrlf=true`,
+    and `prettier --check --end-of-line auto` passes every file; not the developer's code. `playwright
+    e2e`: 46 tests, 43 passed, 2 skipped (the load-volume fixture, absent by design, R-366), 1 failed
+    -- `weekTemplates.spec.ts`'s `afterAll` teardown hit the 30s hook timeout while signing in fresh as
+    admin under the 6-worker load; re-run alone it is `3 passed (13.9s)`, so a teardown flake (the same
+    category session 141 named), and `weekTemplates` is untouched by sessions 142-150. Every roleWalk
+    case passed, viewers `panel=false canPlace=false`. `npm run voice:score` run by hand: clean
+    200/200 (100.0%), perturbed 7/200, PASS/exit 0; with `--bar 1.01` exit 1.
+  summary: >-
+    Merged nine sessions of committed developer work (142-150) and judged every requirement they
+    touched from outside the code. Nothing filed: the build is green at 2994 in 140, and all three
+    red/warn lines the runner printed are this Windows worktree's own environment, each proven so
+    rather than assumed.
+    ⭐ THE THREE ANOMALIES ARE ENVIRONMENT, NOT DEFECTS, PROVEN. (1) `db:types` "stale" WARN: a fresh
+    regen is byte-identical to the committed file (`cmp`), so it is a CRLF pipe artifact. (2)
+    `format:check` FAIL: `--end-of-line auto` passes every file and `git ls-files --eol` shows the
+    index is LF; the CRLF is the tester checkout under `autocrlf=true`. (3) `e2e` FAIL: a single
+    `afterAll` teardown timeout under parallel load; the spec is `3 passed` in isolation and is
+    unrelated to the diff. Session 141 hit the same three; this run confirms the pattern.
+    ⭐ THE TWO NON-VACUOUS PROOFS. I broke two of the session's headline fixes on scratch copies and a
+    named case went red each time. F-134 (the afternoon rule reads the START): removing the
+    `startPinned` gate turned P32 ("17:15 till 10:30") and P33 ("1pm to 10") red -- the pin catches a
+    24h/meridiem start that the old rule would have bumped by twelve hours. R-385/F-132 (the bar sees
+    a person's OWN block): neutering the own-block step turned R34 (the maintainer's own two
+    sentences), R35, R42 and R44 red -- so the resolver test would catch a regression to the exact
+    bug the maintainer reported.
+    ⭐ THE RISKIEST CHANGE READ CLEAN. `move_assignment` (migration 0080, R-389) is the one new server
+    writer: it guards permission on BOTH the source and target node, compares ROW_COUNT so an
+    RLS-filtered UPDATE cannot report a false success, NULLs `run_id` and carries the run's product
+    forward, and refuses a departed person's row and a run whose product is gone. SQL suite 97
+    (MA0-MA12) runs as `authenticated` (never the superuser) and reads the row back on every refusal
+    to prove nothing moved; it is not vacuous. The resolver's move step finds the block over the WHOLE
+    DAY, not the new hours (RM9), and a run-attached block carries its run's effective product into the
+    context (`commandAssignments`), so a move to another cell is not falsely refused as `not_offered`.
+    ⭐ R-390 (the training set and the held-out scorer) confirmed by hand end to end: the committed
+    scorer exits 0 at 100% clean and exits 1 below an impossible bar, the property the build rests on.
+    The sweeps turned up nothing new: no column went nullable, no dark column, and the "company-wide"/
+    "no longer"/"the server will" comment hits are the standing pre-existing set, with the new command
+    modules' own comments read against their code and found true.
 - id: 150
   date: 2026-09-12
   title: "The scripts are linted --- and the session stops at the model stages, which need the maintainer"
