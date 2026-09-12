@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-11'
-  tip: 8f16f1f
+  tip: b204a96
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2054,7 +2054,7 @@ stages:
   track: core
   num: 42
   title: The training set and the held-out test set
-  status: now
+  status: done
   owner: agent
   refs:
   - docs/voice-commands-plan.md (Stage 3)
@@ -2074,6 +2074,9 @@ stages:
     must know all four sentences. One half of the plan's Stage 3 is deliberately NOT in it: saving
     every sentence a person types, with the site's permission, is a product decision (a table, a
     setting, a privacy question) parked for the maintainer.
+    **Shipped session 148 (b204a96).** The generator, the perturbation catalogue, the committed
+    held-out set and the scorer; the rule parser's baseline on the held-out set is recorded below and
+    is what any model must beat: clean 200/200 (100%), perturbed 8/200 (4%); by intent, perturbed: assign 0/50, book 3/50, unassign 1/50, move 4/50.
 - id: M1
   track: matrix
   num: 1
@@ -10123,12 +10126,69 @@ requirements:
     held-out forms per field and per intent and exits non-zero below the bar on clean rows; the rule
     parser scores 1.0 on clean rows and its rate on perturbed rows is the recorded baseline. A grammar
     drift turns the held-out check red.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V1-V8 --- the seeded generator is deterministic; every template's clean sentence parses to its own form; every perturbation leaves the recorded form unchanged and changes the sentence; the committed held-out set is 400 rows, 100 per intent, half clean, and every clean row parses to its form with the current parser; the scorer's arithmetic and per-field table; the rule parser's baseline is 1.0 on clean rows and low on perturbed; a generated training set shares no sentence with held-out; canonical forms are stable under key order"
+  - kind: mutation
+    file: scripts/voice/lib/templates.mjs
+    cases: "X1-X4 (brief §7): a template recording the wrong end hour --- V2 red naming the template and its sentence; a perturbation that also edits the form --- V3 red naming template and perturbation; the scorer comparing only intent --- V5b red (V6 collateral); the held-out set regenerated with another seed --- V4 still green, correctly, since it checks the property that every clean row parses under the current parser, and only a grammar drift turns it red. The reviewer re-applied X1 and X3 and got the same reds."
+  - kind: manual
+    steps: "npm run voice:score prints the table and exits 0; with --bar 1.01 it exits 1"
+  status: covered
   note: >-
-    STATED session 147 (11 Sept). Parked out of it, for the maintainer: saving what people type into
-    the bar to grow both sets.
+    STATED session 147 (11 Sept), BUILT session 148. Parked out of it, for the maintainer: saving
+    what people type into the bar to grow both sets.
 findings:
+- id: F-134
+  title: A start stated in 24-hour form still lets the afternoon rule bump the end by twelve hours
+  tag: The afternoon rule does not read the start
+  status: open
+  found_by: reviewer
+  stage: S42
+  refs:
+  - R-382
+  - R-390
+  story: >-
+    Found 11 Sept (session 148) by S42's review lane reading ten held-out rows as a person would:
+    "Book Motor Mount on Assembly Bench 1 in Electrical Line from 17:15 till 10:30" is recorded, and
+    parsed, as 17:15–22:30. The afternoon rule (P1-7a §4.2) adds twelve hours to an end with no am/pm
+    that is not after the start; it never looks at the start. A start of 17:15 is unambiguously
+    24-hour, so a person means either an overnight span or a slip, never 22:30. The generator was
+    right to record what the parser says --- the oracle held --- and the disagreement is between the
+    rule and what a person means. Nine of the ten rows read as meant.
+  lead: >-
+    In the shared time helper of `src/lib/command/parse.ts`: when the start's hour is 13 or more (or
+    the start carries a meridiem), skip the afternoon rule for the end; an end not after the start is
+    then `time_order`, refused with the shape sentence. "from 10 to 2" keeps its meaning. Same file and
+    same helper as F-133, so one lane takes both.
+- id: F-133
+  title: A day word after the hours is refused as a bad time, in every typed sentence
+  tag: The shape reads the day in one place only
+  status: open
+  found_by: maintainer
+  stage: S40
+  refs:
+  - R-382
+  - R-378
+  story: >-
+    Reported 11 Sept (session 148) from the running app: *"when I asked it put operator 1 to work on
+    product A in a certain hierarchy level from 10 to 2 on Saturday/Date did not work."* Run through
+    the parser: "… from 10 to 2 on Saturday" and "… from 10 to 2 on 2026-09-12" are both refused with
+    *I could not read "2 on Saturday"*, while "… on Saturday from 10 to 2" and "… sat from 10 to 2"
+    parse. The fixed shape (R-382) reads the day word only immediately BEFORE the time clause, and the
+    time clause is anchored to the END of the line, so a trailing day is swallowed into the end time.
+    The maintainer took it for a design limit the model would lift; it is a limit, but the model will
+    NOT lift it on its own: the rule parser stays the fallback (Stage 5) and is the oracle for every
+    clean training sentence (S42), so a word order the parser refuses is a word order the model never
+    sees clean. The fix is in the parser, for all four sentences: accept the day word at the end of
+    the line as well as before the hours.
+  lead: >-
+    `parseTimeAndDay` in `src/lib/command/parse.ts`: the time clause regex requires the line to end
+    after the second time; `extractDayWord` runs only on the text before the last "from". Read a
+    trailing day word off the end first (the same `DAY_TAIL_RE`), then the time clause, then the
+    day word before it; a day in both places is a question, not a guess. A suspicion from the run
+    above, not yet pinned by a test.
 - id: F-132
   title: Typing the same assignment again with different hours was treated as a second block on top of the first
   tag: The bar cannot see the person's own blocks
@@ -13691,6 +13751,29 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 148
+  date: 2026-09-11
+  title: "The training set and the held-out instrument (S42, R-390 covered) --- the queue reaches the model stages"
+  shipped: [S42]
+  commits: [b204a96]
+  numbers:
+    app_tests: 2977
+    app_test_files: 140
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lane and the review: the first run reported `Test Files 1 failed | 139 passed (140)`, `Tests 1 failed | 2976 passed (2977)` --- the one red in `sessionProvider.test.tsx`, a file this piece does not touch; that file alone passed twice and a second full run reported `Test Files 140 passed (140)`, `Tests 2977 passed (2977)`, which is the count copied here. A flake under the parallel run, recorded rather than hidden; not investigated further this session. Up 9 from 2968 (voiceData 9, a new file, hence 140). `tsc -b --force` clean. `eslint .` clean --- and hollow for the new scripts, since the config lints only .ts/.tsx (queued). Prettier clean over scripts/voice, the test, the README and package.json. `npm run voice:score`: clean 200/200, perturbed 8/200, PASS, exit 0; with --bar 1.01 exit 1. No screen changed, so the role walk was not re-run; carried from 147.
+  summary: >-
+    The training set and the held-out instrument (voice plan Stage 3, stage S42), built by a Sonnet lane from `s42-a-training-set-brief.md` and reviewed by a second; then two parser findings, one from the maintainer and one from the reviewer, recorded and handed to one lane.
+    ⭐ THE ORACLE IS THE RULE PARSER, AND IT IS NOT CIRCULAR. Twenty-nine templates across the four sentences, pools of realistic people, parts and places beside the demo world's shapes, and every clean sentence asserted to parse to exactly its recorded form. The afternoon rule is re-derived in `scripts/voice/lib/time.mjs` with no import from the parser, so a template recording the wrong hour goes red rather than agreeing with itself (X1). Twenty-two perturbations --- spelling slips in names and keywords, speech mishearings ("sell one", "housing eh", "two" for "to"), case, spacing, filler --- carry the clean form untouched. The held-out set: 400 rows, 100 per intent, half clean, seed 20260911, committed once; the training set generated on demand and gitignored; no sentence in both. The rule parser's baseline is recorded on the stage card: 100% clean, 4% perturbed --- the number a model must beat.
+    ⭐ THE REVIEWER READ TEN ROWS AS A PERSON WOULD and agreed with nine. The tenth is F-134: "from 17:15 till 10:30" parses as 17:15-22:30 because the afternoon rule never looks at the start. A grammar finding, not a generator bug; the generator was right to record what the parser says. Fixed in the same lane as F-133.
+    ⭐ F-133, THE MAINTAINER'S OWN. Asked mid-session: *"put operator 1 to work on product A in a certain hierarchy level from 10 to 2 on Saturday/Date did not work ... I assumed it was a design limitation ... will be resolved once we talked a model to this. Am I correct?"* Run through the parser: the day AFTER the hours is refused as a bad time, the day before works. Half right: it is the fixed shape's limit, but the model will not lift it on its own, because the rule parser stays the fallback and is the oracle for every clean training sentence --- a word order the parser refuses is one the model never sees clean. Recorded, queued first, briefed, and its lane is running as this entry is written, with F-134 riding in the same helper.
+    ⚠️ TWO SMALL THINGS FOUND ON THE WAY. Nothing under `scripts/` is linted --- eslint's one block matches only .ts and .tsx --- queued as a task. And one flake in `sessionProvider.test.tsx` under the parallel run, green alone and green on the re-run; recorded in the numbers note.
+    ⭐ WHAT THE QUEUE LOOKS LIKE NOW. After F-133/F-134 the next items are the model stages, and each needs the maintainer: Stage 4 a base model and a Colab run, Stage 5 a model service on a machine, Stage 6 which recogniser first. The session's closing report asks those questions.
 - id: 147
   date: 2026-09-11
   title: "Move by sentence with its own server writer (S41-c, R-389 covered) --- S41 done"
@@ -20414,14 +20497,15 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  stage: S42
-  text: "Voice plan Stage 3 --- the training set and the held-out test set for all four commands"
+  text: The day word may come after the hours, and the afternoon rule reads the start (F-133, F-134)
   why: >-
-    A generator script under `scripts/` that turns the demo world's names and the four sentence
-    shapes into thousands of varied sentences with their filled forms, plus a few hundred held-out
-    sentences no model ever trains on. The held-out set is the instrument: every model is scored
-    against it and a score below the bar fails the build, like a lost test file fails `npm run
-    test`. Generated once for all four commands, which is why it sits after them.
+    The maintainer typed "… from 10 to 2 on Saturday" and was refused; only "… on Saturday from 10
+    to 2" reads today. Small and in one file (`parse.ts`, the shared time-and-day helper), for all
+    four intents, with P/B/U/MV cases in both orders and a "day in both places" question; the shape
+    sentence gains "[on <day>]" at the end too. Waits for S42's lane, which reads the same file as
+    its oracle, then goes first. The model does not lift this on its own (F-133). F-134 rides in
+    the same helper: a start of 13:00 or later, or one with am/pm, turns the afternoon rule off for
+    the end, so "from 17:15 till 10:30" is refused rather than read as 22:30.
 - kind: task
   text: "Voice plan Stage 4 --- fine-tune the first small model and score it against the rule parser"
   why: >-
@@ -20466,6 +20550,13 @@ next:
     people. The plan's "two to three days" is optimistic if it means self-hosting the full Supabase
     stack; size it when it is next.
 
+- kind: task
+  text: Lint the scripts too --- eslint's one rule block matches only .ts and .tsx (found by S42's lane)
+  why: >-
+    `eslint.config.js` has a single `files: ["**/*.{ts,tsx}"]` block, so every `.mjs` under
+    `scripts/` --- the plan renderer, the tester harness, the voice generator --- lints clean whatever
+    it contains. Add a block for `scripts/**/*.mjs` with the node globals and the recommended rules,
+    fix what it finds, and say what it found. Small; a lane's hour.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   text: "Save every sentence a person types into the command bar, with the site's permission, to grow the training and held-out sets"
