@@ -9,10 +9,27 @@
  */
 import { describe, it, expect } from "vitest";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
-import type { AssignCommand } from "@/lib/command/parse";
+import type { AssignCommand, BookCommand, Command } from "@/lib/command/parse";
 
-function ok(command: AssignCommand) {
+function ok(command: Command) {
   return { ok: true as const, command };
+}
+
+function bookOk(overrides: Partial<BookCommand> = {}): { ok: true; command: BookCommand } {
+  return {
+    ok: true,
+    command: {
+      intent: "book",
+      product: "Housing A",
+      place: ["Cell 1"],
+      headcount: null,
+      day: null,
+      start: { hour: 6, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      existing: null,
+      ...overrides,
+    },
+  };
 }
 
 describe("commandParse: brief §4 worked examples", () => {
@@ -342,10 +359,98 @@ describe("commandParse: brief §4 worked examples", () => {
   });
 });
 
-describe("commandParse: expectedShape()", () => {
-  it("is the one sentence the bar shows on a parse failure", () => {
+/**
+ * S41-a — the "book a job" grammar, brief docs/agent-briefs/
+ * s41-a-book-a-job-brief.md §5's worked examples (B1-B11), run verbatim, the
+ * same one-`it()`-per-case shape as the P-cases above.
+ */
+describe("commandParse: S41-a book-a-job worked examples", () => {
+  it("B1: Book Housing A on Cell 1 in Line 1 from 6 to 2 -- book, no headcount", () => {
+    expect(parseCommand("Book Housing A on Cell 1 in Line 1 from 6 to 2")).toEqual(
+      bookOk({ place: ["Cell 1", "Line 1"] }),
+    );
+  });
+
+  it("B2: run Housing A on Cell 1 for 3 people from 6 to 2 -- headcount 3", () => {
+    expect(parseCommand("run Housing A on Cell 1 for 3 people from 6 to 2")).toEqual(
+      bookOk({ headcount: 3 }),
+    );
+  });
+
+  it("B3: book ... for 3 on tomorrow ... -- headcount 3, day tomorrow", () => {
+    expect(parseCommand("book Housing A on Cell 1 for 3 on tomorrow from 6 to 2")).toEqual(
+      bookOk({ headcount: 3, day: { kind: "tomorrow" } }),
+    );
+  });
+
+  it("B4: for 0 and for 3.5 are both bad_headcount, with the offending text", () => {
+    expect(parseCommand("book Housing A on Cell 1 for 0 from 6 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "bad_headcount", text: "0" },
+    });
+    expect(parseCommand("book Housing A on Cell 1 for 3.5 from 6 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "bad_headcount", text: "3.5" },
+    });
+  });
+
+  it("B5: 'for lunch' is ordinary place text, not a headcount clause", () => {
+    expect(parseCommand("book Housing A on Cell 1 for lunch from 6 to 2")).toEqual(
+      bookOk({ place: ["Cell 1 for lunch"] }),
+    );
+  });
+
+  it("B6: book Housing A from 6 to 2 -- no_place", () => {
+    expect(parseCommand("book Housing A from 6 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "no_place" },
+    });
+  });
+
+  it("B7: book from 6 to 2 -- no_product", () => {
+    expect(parseCommand("book from 6 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "no_product" },
+    });
+  });
+
+  it("B8: quoted names are atomic", () => {
+    expect(parseCommand('Book "Cell in 2 Part" on "Cell in 2" from 6 to 2')).toEqual(
+      bookOk({ product: "Cell in 2 Part", place: ["Cell in 2"] }),
+    );
+  });
+
+  it("B9: formatCommand round-trips B2 and B3", () => {
+    const b2 = parseCommand("run Housing A on Cell 1 for 3 people from 6 to 2");
+    if (!b2.ok) throw new Error("B2 must parse");
+    const sentence = formatCommand(b2.command);
+    expect(sentence).toBe("book Housing A on Cell 1 for 3 people from 06:00 to 14:00");
+    expect(parseCommand(sentence)).toEqual(b2);
+
+    const b3 = parseCommand("book Housing A on Cell 1 for 3 on tomorrow from 6 to 2");
+    if (!b3.ok) throw new Error("B3 must parse");
+    expect(parseCommand(formatCommand(b3.command))).toEqual(b3);
+  });
+
+  it("B10: the first-word rule does not disturb assign -- 'assign'/'schedule' both parse as assign", () => {
+    const expected: AssignCommand = {
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      attach: null,
+      existing: null,
+    };
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2")).toEqual(ok(expected));
+    expect(parseCommand("schedule Sam to Housing A on Cell 1 from 10 to 2")).toEqual(ok(expected));
+  });
+
+  it("B11: expectedShape() is the exact two-shape sentence", () => {
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time>",
+      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time>",
     );
   });
 });

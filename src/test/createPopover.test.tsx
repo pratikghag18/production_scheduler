@@ -50,6 +50,7 @@ function renderPopover(
   over: {
     defaultCreateMode?: "run" | "direct";
     operators?: BoardOperator[];
+    products?: Product[];
     requiredSkills?: Skill[];
     outsideAreaOperatorIds?: ReadonlySet<string>;
     eligibilityPolicy?: "warn" | "block";
@@ -57,6 +58,8 @@ function renderPopover(
     presetOperatorId?: string;
     presetProductId?: string;
     presetRun?: { id: string; label: string };
+    presetMode?: "run";
+    presetHeadcount?: number;
     autoCreate?: boolean;
     /** R-384: renders under `<StrictMode>`, the way `src/main.tsx` mounts the
      *  app — needed to prove the auto-press fires exactly once (F-128). */
@@ -74,7 +77,7 @@ function renderPopover(
       initialRange={{ startMin: 360, endMin: 480 }}
       shiftChips={[]}
       defaultCreateMode={over.defaultCreateMode ?? "run"}
-      products={[product]}
+      products={over.products ?? [product]}
       operators={ops}
       hereOperatorIds={new Set(ops.map((o) => o.id))}
       windowStart={WINDOW_START}
@@ -85,6 +88,8 @@ function renderPopover(
       presetOperatorId={over.presetOperatorId}
       presetProductId={over.presetProductId}
       presetRun={over.presetRun}
+      presetMode={over.presetMode}
+      presetHeadcount={over.presetHeadcount}
       autoCreate={over.autoCreate}
       onCancel={onCancel}
       onSubmitRun={onSubmitRun}
@@ -262,5 +267,76 @@ describe("CreatePopover — R-384: Enter auto-creates when the pop-up is clean",
       presetProductId: "prod-1",
     });
     expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * S41-a — `presetMode`/`presetHeadcount`, brief s41-a-book-a-job-brief.md
+ * §3/§5 (AC8-AC11): the typed "book a job" sentence opens this SAME popover
+ * forced into Product run mode, with the run/direct segment disabled (there
+ * is no operator to protect a flip back to direct from), and Create/auto-
+ * press go through `submitRun()` — the SAME arguments a click sends.
+ */
+describe("CreatePopover — S41-a: presetMode 'run' (book a job)", () => {
+  it("AC8: presetMode 'run' + presetProductId + autoCreate -- onSubmitRun once, with the same arguments a click sends", () => {
+    // As AC1 does: a plain click's arguments are the reference, so the
+    // Create button and the auto-press cannot silently diverge (M39).
+    const clickCase = renderPopover({ presetMode: "run", presetProductId: "prod-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(clickCase.onSubmitRun).toHaveBeenCalledTimes(1);
+    expect(clickCase.onSubmitRun.mock.calls[0]).toEqual([
+      "cell-1",
+      { startMin: 360, endMin: 480 },
+      "prod-1",
+      2,
+    ]);
+    expect(clickCase.onSubmitDirect).not.toHaveBeenCalled();
+
+    const autoCase = renderPopover({
+      presetMode: "run",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      strict: true,
+    });
+    expect(autoCase.onSubmitRun).toHaveBeenCalledTimes(1);
+    expect(autoCase.onSubmitRun.mock.calls[0]).toEqual(clickCase.onSubmitRun.mock.calls[0]);
+    expect(autoCase.onSubmitDirect).not.toHaveBeenCalled();
+  });
+
+  it("AC9: presetHeadcount 3 -- the fourth argument is 3", () => {
+    const { onSubmitRun } = renderPopover({
+      presetMode: "run",
+      presetProductId: "prod-1",
+      presetHeadcount: 3,
+      autoCreate: true,
+    });
+    expect(onSubmitRun).toHaveBeenCalledTimes(1);
+    expect(onSubmitRun.mock.calls[0][3]).toBe(3);
+  });
+
+  it("AC10: presetMode 'run' with no product offered here -- nothing called", () => {
+    const { onSubmitRun, onSubmitDirect } = renderPopover({
+      presetMode: "run",
+      products: [],
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitRun).not.toHaveBeenCalled();
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+
+  it("AC11: the segment's two buttons are disabled under presetMode, and a click does not flip the mode", () => {
+    renderPopover({ presetMode: "run", presetProductId: "prod-1" });
+    const runBtn = screen.getByRole("button", { name: "Product run" }) as HTMLButtonElement;
+    const directBtn = screen.getByRole("button", {
+      name: "Direct assignment",
+    }) as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(true);
+    expect(directBtn.disabled).toBe(true);
+
+    fireEvent.click(directBtn);
+    // Still in run mode: the headcount field is present, the operator picker is not.
+    expect(screen.getByLabelText("Planned headcount")).toBeTruthy();
+    expect(screen.queryByLabelText("Operator")).toBeNull();
   });
 });

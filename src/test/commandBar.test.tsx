@@ -23,10 +23,25 @@ import { formatCommand, type AssignCommand } from "@/lib/command/parse";
 import type {
   ResolveContext,
   ResolvedCommand,
+  ResolvedBook,
   ContextRun,
   ContextAssignment,
 } from "@/lib/command/resolve";
 import { CommandBar } from "@/features/board/components/CommandBar";
+
+/** S41-a: `findRunOverlap`, the same stub shape `interaction.ts`'s own
+ *  function has (half-open, `excludeRunId` skipped). */
+function findRunOverlap(
+  range: { startMin: number; endMin: number },
+  runs: ContextRun[],
+  excludeRunId: string | null,
+): ContextRun | null {
+  for (const r of runs) {
+    if (excludeRunId !== null && r.id === excludeRunId) continue;
+    if (range.startMin < r.endMin && r.startMin < range.endMin) return r;
+  }
+  return null;
+}
 
 /** Brief §5's fixture, verbatim: a 7-day window from Monday 2026-08-31,
  *  today = index 3 (Thursday 2026-09-03), the plain (no-changeover) stub. */
@@ -73,6 +88,7 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     minDurationMinutes: 15,
     assignments: [],
     overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
+    findRunOverlap,
     ...over,
   };
 }
@@ -85,6 +101,23 @@ const RUN1: ContextRun = {
   startMin: 3 * 1440 + 480,
   endMin: 3 * 1440 + 960,
   label: "Housing A 08:00–16:00",
+  span: "08:00–16:00",
+};
+
+/** S41-a: the same job as RUN1, standing in for "the job of this part
+ *  already booked" (CB2's fixture -- `id`/`label`/`span` mirror it). */
+const JOB1 = RUN1;
+
+/** S41-a: a Cover job on Cell 1 (a DIFFERENT part than the book sentence's
+ *  Housing A) -- CB3's "job in the way" fixture. */
+const JOB_COV: ContextRun = {
+  id: "jobCov",
+  nodeId: "c1a",
+  productId: "cov",
+  startMin: 3 * 1440 + 480,
+  endMin: 3 * 1440 + 960,
+  label: "Cover 08:00–16:00",
+  span: "08:00–16:00",
 };
 
 /** R-385: the sentence's own hours (10:00-14:00), already on the board for
@@ -101,12 +134,18 @@ const BLK1: ContextAssignment = {
 
 const P1_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
 const P1_RETIME_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 3";
+/** S41-a, brief §3: the two shapes in one sentence -- this changes a string
+ *  C5/C6 test verbatim (contract changed, CLAUDE.md §4). */
 const SHAPE =
-  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time>";
+  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time>";
+/** S41-a: RB1's sentence -- book, no run in the way, on/in/from 6 to 2. */
+const BOOK_SENTENCE = "book Housing A on Cell 1 in Line 1 from 6 to 2";
 
 function renderBar(over: Partial<ResolveContext> = {}) {
   const onOpen = vi.fn();
   const onRetime = vi.fn();
+  const onBook = vi.fn();
+  const onRetimeRun = vi.fn();
   render(
     <CommandBar
       ctx={buildCtx(over)}
@@ -114,10 +153,12 @@ function renderBar(over: Partial<ResolveContext> = {}) {
       zone="UTC"
       onOpen={onOpen}
       onRetime={onRetime}
+      onBook={onBook}
+      onRetimeRun={onRetimeRun}
     />,
   );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
-  return { onOpen, onRetime, input };
+  return { onOpen, onRetime, onBook, onRetimeRun, input };
 }
 
 /** The one `aria-live="polite"` status element (brief §6). */
@@ -352,5 +393,87 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(screen.queryByRole("button", { name: /^Change /i })).toBeNull();
     expect(onOpen).not.toHaveBeenCalled();
     expect(onRetime).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // S41-a: "book a job" (CB1-CB4), brief s41-a-book-a-job-brief.md §5.
+  // -------------------------------------------------------------------------
+
+  it("CB1: a book sentence with nothing in the way calls onBook once, readout shown", () => {
+    const { onBook, onRetimeRun, input } = renderBar({ runs: [] });
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onBook).toHaveBeenCalledTimes(1);
+    const [resolved, anchor] = onBook.mock.calls[0] as [ResolvedBook, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("c1a");
+    expect(resolved.productId).toBe("ha");
+    expect(resolved.target).toEqual({ kind: "run_create", productId: "ha", headcount: null });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 });
+    expect(anchor).toBeTruthy();
+    expect(onRetimeRun).not.toHaveBeenCalled();
+
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    expect(statusText()).toBe(
+      `Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · ${dayLabel} · 06:00–14:00`,
+    );
+  });
+
+  it("CB2: a job of the same part in the way asks to change it; Change calls onRetimeRun", () => {
+    const { onBook, onRetimeRun, input } = renderBar({ runs: [JOB1] });
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "A Housing A job is already booked on Cell 1 08:00–16:00. Change it to 06:00–14:00, or pick other hours?",
+    );
+    expect(screen.getByRole("button", { name: "Change 08:00–16:00" })).toBeTruthy();
+    expect(onBook).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Change 08:00–16:00" }));
+
+    expect(input.value).toBe(BOOK_SENTENCE);
+    expect(onRetimeRun).toHaveBeenCalledTimes(1);
+    const [resolved] = onRetimeRun.mock.calls[0] as [ResolvedBook, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "retime_run", runId: "run1" });
+  });
+
+  it("CB3: a job of another part in the way shows no buttons and calls nothing", () => {
+    const { onBook, onRetimeRun, input } = renderBar({ runs: [JOB_COV] });
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Cell 1 already runs Cover 08:00–16:00; a cell runs one job at a time. Pick other hours, or change that job on the board.",
+    );
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(onBook).not.toHaveBeenCalled();
+    expect(onRetimeRun).not.toHaveBeenCalled();
+  });
+
+  it("CB4: job_gone shows 'Book it', which re-runs as a fresh sentence (calls onBook)", () => {
+    // A mutable array so the SAME `ctx` object can be made to reflect the
+    // job vanishing between the question and the click (a background
+    // refetch), without re-rendering `CommandBar` with a new `ctx` prop.
+    const runsRef: ContextRun[] = [JOB1];
+    const { onBook, onRetimeRun, input } = renderBar({ runs: runsRef });
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Change 08:00–16:00" })).toBeTruthy();
+
+    runsRef.length = 0;
+
+    fireEvent.click(screen.getByRole("button", { name: "Change 08:00–16:00" }));
+    expect(statusText()).toBe(
+      "That Housing A job on Cell 1 is no longer on the board. Book it again?",
+    );
+    expect(onRetimeRun).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Book it" }));
+    expect(onBook).toHaveBeenCalledTimes(1);
   });
 });

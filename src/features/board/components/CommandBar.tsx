@@ -4,9 +4,22 @@ import { formatDayLabel } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
-import type { AssignCommand, Attach, Existing, ParseFailure } from "@/lib/command/parse";
+import type {
+  AssignCommand,
+  BookCommand,
+  Command,
+  Attach,
+  Existing,
+  ParseFailure,
+} from "@/lib/command/parse";
 import { resolveCommand, describeQuestion } from "@/lib/command/resolve";
-import type { ResolveContext, ResolvedCommand, Question, Candidate } from "@/lib/command/resolve";
+import type {
+  ResolveContext,
+  ResolvedCommand,
+  ResolvedBook,
+  Question,
+  Candidate,
+} from "@/lib/command/resolve";
 
 /**
  * P1-7a — "Tell the board": the typed command bar (brief
@@ -21,6 +34,13 @@ import type { ResolveContext, ResolvedCommand, Question, Candidate } from "@/lib
  * `onRetime(resolved, anchor)`, from which the caller re-times the person's
  * own block through the drag's own commit function. `src/test/commandPurity.test.ts`
  * fails the build on a runtime import of any of those here.
+ *
+ * S41-a (docs/agent-briefs/s41-a-book-a-job-brief.md) adds the "book a job"
+ * intent, and two more callbacks: `onBook(resolved, anchor)` for a brand-new
+ * job (the caller opens `CreatePopover` in run mode, preset), and
+ * `onRetimeRun(resolved, anchor)` for R-387's "change that job's hours?"
+ * answer (the caller re-times the job through the drag's own re-time
+ * function). Same rule, same audit: nothing here writes anything.
  *
  * The bar holds no rule of its own: parsing is `parseCommand`/`formatCommand`
  * (`src/lib/command/parse.ts`), resolving is `resolveCommand`/`describeQuestion`
@@ -56,6 +76,13 @@ export interface CommandBarProps {
   /** R-385: the resolved target is `retime` — the caller re-times the block
    *  through the drag's own path; nothing is created. */
   onRetime: (resolved: ResolvedCommand, anchor: { x: number; y: number }) => void;
+  /** S41-a: a "book a job" sentence resolved to a brand-new job — the caller
+   *  opens `CreatePopover` in run mode, preset, through `submitCreateRun`. */
+  onBook: (resolved: ResolvedBook, anchor: { x: number; y: number }) => void;
+  /** S41-a / R-387: the resolved target is `retime_run` — the caller
+   *  re-times the job through the drag's own re-time path; nothing is
+   *  created. */
+  onRetimeRun: (resolved: ResolvedBook, anchor: { x: number; y: number }) => void;
 }
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -68,20 +95,34 @@ const ISO_DAY = /\d{4}-\d{2}-\d{2}/;
  *  `bad_time`/`bad_day` get the offending text named first. */
 function failureToStatus(failure: ParseFailure): Status {
   const shape = expectedShape();
-  if (failure.kind === "bad_time" || failure.kind === "bad_day") {
+  if (
+    failure.kind === "bad_time" ||
+    failure.kind === "bad_day" ||
+    failure.kind === "bad_headcount"
+  ) {
     return { kind: "shape", message: `I could not read "${failure.text}". ${shape}` };
   }
   return { kind: "shape", message: shape };
 }
 
-export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandBarProps) {
+export function CommandBar({
+  ctx,
+  dateFormat,
+  zone,
+  onOpen,
+  onRetime,
+  onBook,
+  onRetimeRun,
+}: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   // The last parsed command, kept so a candidate button can substitute one
-  // field and so a run-question button can set `attach` without retyping the
-  // sentence (brief §6). Any edit to the input invalidates it.
-  const heldRef = useRef<AssignCommand | null>(null);
+  // field and so a run/job-question button can set `attach`/`existing`
+  // without retyping the sentence (brief §6). Any edit to the input
+  // invalidates it. S41-a widens this from `AssignCommand` to `Command`
+  // (the union also holding `BookCommand`) since the bar now parses both.
+  const heldRef = useRef<Command | null>(null);
 
   function renderReadout(readout: string): string {
     return readout.replace(ISO_DAY, (iso) =>
@@ -94,29 +135,41 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandB
     return { x: rect?.left ?? 0, y: rect?.bottom ?? 0 };
   }
 
-  function runCommand(command: AssignCommand): void {
+  function runCommand(command: Command): void {
     heldRef.current = command;
     const resolution = resolveCommand(command, ctx);
     if (resolution.ok) {
-      if (resolution.resolved.target.kind === "retime") {
-        onRetime(resolution.resolved, anchorOfInput());
+      const resolved = resolution.resolved;
+      if (resolved.intent === "book") {
+        if (resolved.target.kind === "retime_run") {
+          onRetimeRun(resolved, anchorOfInput());
+        } else {
+          onBook(resolved, anchorOfInput());
+        }
       } else {
-        onOpen(resolution.resolved, anchorOfInput());
+        if (resolved.target.kind === "retime") {
+          onRetime(resolved, anchorOfInput());
+        } else {
+          onOpen(resolved, anchorOfInput());
+        }
       }
-      setStatus({ kind: "readout", message: renderReadout(resolution.resolved.readout) });
+      setStatus({ kind: "readout", message: renderReadout(resolved.readout) });
       return;
     }
     setStatus(questionToStatus(resolution.question, command));
   }
 
   function pickCandidate(
-    command: AssignCommand,
+    command: Command,
     field: "operator" | "product" | "place",
     candidate: Candidate,
   ): void {
-    const next: AssignCommand =
+    // "operator" only ever comes from an AssignCommand's own ambiguous
+    // question (a `BookCommand` has no operator field) — the cast mirrors
+    // that invariant rather than re-deriving it from `command.intent`.
+    const next: Command =
       field === "operator"
-        ? { ...command, operator: candidate.word }
+        ? { ...(command as AssignCommand), operator: candidate.word }
         : field === "product"
           ? { ...command, product: candidate.word }
           : { ...command, place: [candidate.word] };
@@ -138,14 +191,23 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandB
     runCommand({ ...command, attach });
   }
 
-  function pickExisting(command: AssignCommand, existing: Existing): void {
-    // R-385: the twin of `pickAttach` -- the sentence stays as it is, only
-    // the held command's `existing` changes, re-resolved directly rather
-    // than through `parseCommand` (which always returns `existing: null`).
-    runCommand({ ...command, existing });
+  /**
+   * R-385's setter, WIDENED for S41-a rather than duplicated (brief §3:
+   * "`pickExisting` is reused for the run answer"): the assign path's
+   * `Existing` (`retime`/`separate`, keyed by `assignmentId`) and the book
+   * path's own inline shape (`retime`/`null`, keyed by `runId`) are
+   * different types, so this is declared as two overloads over one body —
+   * the sentence stays as it is; only the held command's `existing` changes,
+   * re-resolved directly rather than through `parseCommand` (which always
+   * returns `existing: null`).
+   */
+  function pickExisting(command: AssignCommand, existing: Existing): void;
+  function pickExisting(command: BookCommand, existing: BookCommand["existing"]): void;
+  function pickExisting(command: Command, existing: Existing | BookCommand["existing"]): void {
+    runCommand({ ...command, existing } as Command);
   }
 
-  function questionToStatus(question: Question, command: AssignCommand): Status {
+  function questionToStatus(question: Question, command: Command): Status {
     const message = describeQuestion(question);
     if (question.kind === "ambiguous") {
       const field = question.field;
@@ -160,6 +222,8 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandB
       };
     }
     if (question.kind === "run_exists") {
+      // Only ever asked from the assign path (brief §5/§9).
+      const assignCommand = command as AssignCommand;
       return {
         kind: "question",
         message,
@@ -167,21 +231,22 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandB
           ...question.runs.map((r) => ({
             key: r.id,
             label: r.label,
-            onClick: () => pickAttach(command, { kind: "run", runId: r.id }),
+            onClick: () => pickAttach(assignCommand, { kind: "run", runId: r.id }),
           })),
           {
             key: "__separate_block__",
             label: "Separate block",
-            onClick: () => pickAttach(command, { kind: "direct" }),
+            onClick: () => pickAttach(assignCommand, { kind: "direct" }),
           },
         ],
       };
     }
     if (question.kind === "block_exists") {
+      const assignCommand = command as AssignCommand;
       const separate = {
         key: "__separate_block__",
         label: "Separate block",
-        onClick: () => pickExisting(command, { kind: "separate" }),
+        onClick: () => pickExisting(assignCommand, { kind: "separate" }),
       };
       if (question.same) {
         return { kind: "question", message, candidates: [separate] };
@@ -193,13 +258,14 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandB
           ...question.blocks.map((b) => ({
             key: b.id,
             label: `Change ${b.label}`,
-            onClick: () => pickExisting(command, { kind: "retime", assignmentId: b.id }),
+            onClick: () => pickExisting(assignCommand, { kind: "retime", assignmentId: b.id }),
           })),
           separate,
         ],
       };
     }
     if (question.kind === "block_gone") {
+      const assignCommand = command as AssignCommand;
       return {
         kind: "question",
         message,
@@ -207,7 +273,43 @@ export function CommandBar({ ctx, dateFormat, zone, onOpen, onRetime }: CommandB
           {
             key: "__new_block__",
             label: "New block",
-            onClick: () => pickExisting(command, { kind: "separate" }),
+            onClick: () => pickExisting(assignCommand, { kind: "separate" }),
+          },
+        ],
+      };
+    }
+    if (question.kind === "job_exists") {
+      // Only ever asked from the book path (S41-a).
+      const bookCommand = command as BookCommand;
+      if (question.same) {
+        return { kind: "question", message, candidates: [] };
+      }
+      const run = question.run;
+      return {
+        kind: "question",
+        message,
+        candidates: [
+          {
+            key: run.id,
+            label: `Change ${run.label}`,
+            onClick: () => pickExisting(bookCommand, { kind: "retime", runId: run.id }),
+          },
+        ],
+      };
+    }
+    if (question.kind === "job_in_the_way") {
+      return { kind: "question", message, candidates: [] };
+    }
+    if (question.kind === "job_gone") {
+      const bookCommand = command as BookCommand;
+      return {
+        kind: "question",
+        message,
+        candidates: [
+          {
+            key: "__book_it__",
+            label: "Book it",
+            onClick: () => pickExisting(bookCommand, null),
           },
         ],
       };

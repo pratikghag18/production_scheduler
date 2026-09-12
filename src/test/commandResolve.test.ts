@@ -15,7 +15,7 @@ import type {
   BoardDay,
   Candidate,
 } from "@/lib/command/resolve";
-import type { AssignCommand, Attach, Existing } from "@/lib/command/parse";
+import type { AssignCommand, BookCommand, Attach, Existing } from "@/lib/command/parse";
 
 // ---------------------------------------------------------------------------
 // §5 fixture, verbatim.
@@ -79,6 +79,7 @@ const run1: ContextRun = {
   startMin: 3 * 1440 + 480,
   endMin: 3 * 1440 + 960,
   label: "Housing A 08:00–16:00",
+  span: "08:00–16:00",
 };
 
 const run2: ContextRun = {
@@ -88,6 +89,20 @@ const run2: ContextRun = {
   startMin: 3 * 1440 + 540,
   endMin: 3 * 1440 + 900,
   label: "Housing A 09:00–15:00",
+  span: "09:00–15:00",
+};
+
+/** S41-a RB6: a Cover run on c1a (a different part than Housing A, which is
+ *  all c1a is offered per the fixture's `offeredAt` -- fine, per the brief:
+ *  "the OTHER job's part need not be offered, only the sentence's"). */
+const runCov: ContextRun = {
+  id: "runCov",
+  nodeId: "c1a",
+  productId: "cov",
+  startMin: 3 * 1440 + 480,
+  endMin: 3 * 1440 + 960,
+  label: "Cover 08:00–16:00",
+  span: "08:00–16:00",
 };
 
 /** R-385: half-open overlap, the same stub shape the bar passes in. */
@@ -96,6 +111,20 @@ function overlaps(
   b: { startMin: number; endMin: number },
 ): boolean {
   return a.startMin < b.endMin && b.startMin < a.endMin;
+}
+
+/** S41-a: `findRunOverlap`, the same stub shape `interaction.ts`'s own
+ *  function has (half-open, `excludeRunId` skipped). */
+function findRunOverlap(
+  range: { startMin: number; endMin: number },
+  runs: ContextRun[],
+  excludeRunId: string | null,
+): ContextRun | null {
+  for (const r of runs) {
+    if (excludeRunId !== null && r.id === excludeRunId) continue;
+    if (range.startMin < r.endMin && r.startMin < range.endMin) return r;
+  }
+  return null;
 }
 
 function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
@@ -113,6 +142,7 @@ function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
     minDurationMinutes: 15,
     assignments: [],
     overlaps,
+    findRunOverlap,
     ...overrides,
   };
 }
@@ -144,8 +174,26 @@ function cmd(overrides: Partial<AssignCommand> = {}): AssignCommand {
   };
 }
 
+/** S41-a: "Book Housing A on Cell 1 in Line 1 from 6 to 2" -- the §9 book
+ *  fixture, same cell/product/day as `cmd()` above. */
+function bookCmd(overrides: Partial<BookCommand> = {}): BookCommand {
+  return {
+    intent: "book",
+    product: "Housing A",
+    place: ["Cell 1", "Line 1"],
+    headcount: null,
+    day: null,
+    start: { hour: 6, minute: 0 },
+    end: { hour: 14, minute: 0 },
+    existing: null,
+    ...overrides,
+  };
+}
+
 const R1_READOUT =
   "Operator 1 → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00";
+
+const RB1_READOUT = "Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 06:00–14:00";
 
 // R-385 §9 fixture blocks, verbatim.
 const blk1: ContextAssignment = {
@@ -175,6 +223,7 @@ describe("commandResolve: brief §5 worked examples", () => {
     expect(res).toEqual({
       ok: true,
       resolved: {
+        intent: "assign",
         nodeId: "c1a",
         operatorId: "op1",
         productId: "ha",
@@ -455,6 +504,7 @@ describe("commandResolve: brief §5 worked examples", () => {
     expect(res).toEqual({
       ok: true,
       resolved: {
+        intent: "assign",
         nodeId: "c1a",
         operatorId: "op1",
         productId: "ha",
@@ -471,6 +521,7 @@ describe("commandResolve: brief §5 worked examples", () => {
     expect(res).toEqual({
       ok: true,
       resolved: {
+        intent: "assign",
         nodeId: "c1a",
         operatorId: "op1",
         productId: "ha",
@@ -583,6 +634,7 @@ describe("commandResolve: brief §5 worked examples", () => {
     expect(res).toEqual({
       ok: true,
       resolved: {
+        intent: "assign",
         nodeId: "c1a",
         operatorId: "op1",
         productId: "ha",
@@ -690,5 +742,201 @@ describe("commandResolve: brief §5 worked examples", () => {
     );
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.question.kind).toBe("block_exists");
+  });
+
+  // -------------------------------------------------------------------------
+  // S41-a: "book a job" (RB1-RB11), brief s41-a-book-a-job-brief.md §5.
+  // -------------------------------------------------------------------------
+
+  it("RB1: book Housing A on Cell 1 in Line 1 from 6 to 2, no runs -- ok, run_create, RB1_READOUT", () => {
+    const res = resolveCommand(bookCmd(), baseCtx());
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "book",
+        nodeId: "c1a",
+        productId: "ha",
+        target: { kind: "run_create", productId: "ha", headcount: null },
+        range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
+        readout: RB1_READOUT,
+      },
+    });
+  });
+
+  it("RB2: with for 3 -- headcount 3, readout ends ' · 3 people'", () => {
+    const res = resolveCommand(bookCmd({ headcount: 3 }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.target).toEqual({ kind: "run_create", productId: "ha", headcount: 3 });
+      expect(res.resolved.readout).toBe(`${RB1_READOUT} · 3 people`);
+    }
+  });
+
+  it("RB3: run1 (same part) overlaps -- job_exists, verbatim, same false", () => {
+    const res = resolveCommand(bookCmd(), withRuns([run1]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "job_exists",
+        product: "Housing A",
+        cell: "Cell 1",
+        span: "06:00–14:00",
+        run: { id: "run1", label: "08:00–16:00", word: "" },
+        same: false,
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "A Housing A job is already booked on Cell 1 08:00–16:00. Change it to 06:00–14:00, or pick other hours?",
+      );
+    }
+  });
+
+  it("RB4: span exactly 08:00-16:00 -- same true, 'nothing to change' verbatim", () => {
+    const res = resolveCommand(
+      bookCmd({ start: { hour: 8, minute: 0 }, end: { hour: 16, minute: 0 } }),
+      withRuns([run1]),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.question).toEqual({
+        kind: "job_exists",
+        product: "Housing A",
+        cell: "Cell 1",
+        span: "08:00–16:00",
+        run: { id: "run1", label: "08:00–16:00", word: "" },
+        same: true,
+      });
+      expect(describeQuestion(res.question)).toBe(
+        "A Housing A job is already booked on Cell 1 08:00–16:00 — nothing to change.",
+      );
+    }
+  });
+
+  it("RB5: existing retime run1 -- ok, retime_run, readout gains changing", () => {
+    const existing: BookCommand["existing"] = { kind: "retime", runId: "run1" };
+    const res = resolveCommand(bookCmd({ existing }), withRuns([run1]));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "book",
+        nodeId: "c1a",
+        productId: "ha",
+        target: { kind: "retime_run", runId: "run1" },
+        range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
+        readout: `${RB1_READOUT} · changing Housing A 08:00–16:00`,
+      },
+    });
+  });
+
+  it("RB6: a Cover run in the way -- job_in_the_way verbatim (Cover need not be offered at c1a)", () => {
+    const res = resolveCommand(bookCmd(), withRuns([runCov]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "job_in_the_way",
+        product: "Housing A",
+        cell: "Cell 1",
+        other: "Cover 08:00–16:00",
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Cell 1 already runs Cover 08:00–16:00; a cell runs one job at a time. Pick other hours, or change that job on the board.",
+      );
+    }
+  });
+
+  it("RB7: a run on another cell, or touching (not overlapping) this cell's span, asks nothing", () => {
+    const runOtherCell: ContextRun = { ...run1, id: "runOtherCell", nodeId: "c2" };
+    const otherCellRes = resolveCommand(bookCmd(), withRuns([runOtherCell]));
+    expect(otherCellRes.ok).toBe(true);
+
+    const runTouch: ContextRun = {
+      id: "runTouch",
+      nodeId: "c1a",
+      productId: "ha",
+      startMin: 3 * 1440 + 840, // 14:00 -- exactly where bookCmd()'s span ends
+      endMin: 3 * 1440 + 960,
+      label: "Housing A 14:00–16:00",
+      span: "14:00–16:00",
+    };
+    const touchRes = resolveCommand(bookCmd(), withRuns([runTouch]));
+    expect(touchRes.ok).toBe(true);
+  });
+
+  it("RB8: existing retime 'run9' (gone) -- job_gone verbatim", () => {
+    const existing: BookCommand["existing"] = { kind: "retime", runId: "run9" };
+    const res = resolveCommand(bookCmd({ existing }), withRuns([run1]));
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "job_gone", product: "Housing A", cell: "Cell 1" },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "That Housing A job on Cell 1 is no longer on the board. Book it again?",
+      );
+    }
+  });
+
+  it("RB9: retime run1, but run2 also overlaps the new span -- job_in_the_way naming run2", () => {
+    const existing: BookCommand["existing"] = { kind: "retime", runId: "run1" };
+    const res = resolveCommand(bookCmd({ existing }), withRuns([run1, run2]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "job_in_the_way",
+        product: "Housing A",
+        cell: "Cell 1",
+        other: "Housing A 09:00–15:00",
+      },
+    });
+  });
+
+  it("RB10: part not offered -- not_offered; too short -- too_short", () => {
+    const notOffered = resolveCommand(bookCmd({ product: "Cover" }), baseCtx());
+    expect(notOffered).toEqual({
+      ok: false,
+      question: { kind: "not_offered", product: "Cover", cell: "Cell 1" },
+    });
+
+    const tooShort = resolveCommand(
+      bookCmd({ start: { hour: 6, minute: 0 }, end: { hour: 6, minute: 10 } }),
+      baseCtx(),
+    );
+    expect(tooShort).toEqual({
+      ok: false,
+      question: { kind: "too_short", minutes: 10, min: 15 },
+    });
+  });
+
+  it("RB11: the assign path (R1, R34) is byte-identical after the sharing refactor", () => {
+    const r1 = resolveCommand(cmd(), baseCtx({ runs: [] }));
+    expect(r1).toEqual({
+      ok: true,
+      resolved: {
+        intent: "assign",
+        nodeId: "c1a",
+        operatorId: "op1",
+        productId: "ha",
+        target: { kind: "direct", productId: "ha" },
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
+        readout: R1_READOUT,
+      },
+    });
+
+    const r34 = resolveCommand(cmd({ end: { hour: 15, minute: 0 } }), withBlocks([blk1]));
+    expect(r34).toEqual({
+      ok: false,
+      question: {
+        kind: "block_exists",
+        person: "Operator 1",
+        product: "Housing A",
+        cell: "Cell 1",
+        span: "10:00–15:00",
+        blocks: [{ id: "blk1", label: "10:00–14:00", word: "" }],
+        same: false,
+      },
+    });
   });
 });

@@ -14,8 +14,13 @@
  * (brief §2, "no second door"; `src/test/commandPurity.test.ts` fails the build
  * on a runtime import here).
  *
- * Pre-seated as a type-only skeleton by the developer session (11 Sept) so the
- * two build lanes compile against one interface. Lane A fills the bodies.
+ * S41-a (docs/agent-briefs/s41-a-book-a-job-brief.md) adds a second intent,
+ * `book`: "Book Housing A on Cell 1 in Line 1 from 6 to 2" — a JOB, never a
+ * person. The intent is decided by the FIRST WORD (`book`/`run` -> book;
+ * anything else, or no verb at all, -> assign, exactly as before this
+ * stage). The time-clause and day-word steps are shared by both intents
+ * through private helpers (`parseTimeAndDay`) so the assign grammar's own
+ * P1–P24 keep their meaning unchanged.
  */
 
 /** A clock time on the board's own clock, 24h. The plant's zone is the
@@ -63,6 +68,27 @@ export interface AssignCommand {
   existing: Existing | null;
 }
 
+/**
+ * S41-a — "book a job": the sentence names a PART, a CELL and a SPAN, never a
+ * person (brief docs/agent-briefs/s41-a-book-a-job-brief.md §3).
+ */
+export interface BookCommand {
+  intent: "book";
+  /** The words the person used, trimmed, original case. NEVER an id. */
+  product: string;
+  /** Place words, most specific first — same shape as `AssignCommand.place`. At least one. */
+  place: string[];
+  /** "for 3" / "for 3 people" — null when the sentence did not say. */
+  headcount: number | null;
+  day: DayWord | null;
+  start: ClockTime;
+  end: ClockTime;
+  /** R-387: the answer to "change that job's hours?" — null until asked. */
+  existing: { kind: "retime"; runId: string } | null;
+}
+
+export type Command = AssignCommand | BookCommand;
+
 export type ParseFailure =
   | { kind: "empty" }
   | { kind: "no_time" } // no "from <time> to <time>" clause at the end
@@ -70,10 +96,11 @@ export type ParseFailure =
   | { kind: "time_order" } // end not after start even after the afternoon rule
   | { kind: "no_product" } // operator given, nothing after it
   | { kind: "no_place" } // operator and product given, no place
-  | { kind: "bad_day"; text: string };
+  | { kind: "bad_day"; text: string }
+  /** S41-a: a `for` clause whose number is not a whole number 1–99. */
+  | { kind: "bad_headcount"; text: string };
 
-export type ParseResult =
-  { ok: true; command: AssignCommand } | { ok: false; failure: ParseFailure };
+export type ParseResult = { ok: true; command: Command } | { ok: false; failure: ParseFailure };
 
 // ---------------------------------------------------------------------------
 // Private helpers. None of these are exported; the model that later replaces
@@ -86,6 +113,9 @@ const QUOTE_OPEN = "";
 const QUOTE_CLOSE = "";
 
 const VERBS = ["assign", "put", "schedule", "add"];
+
+/** S41-a: the first word decides book vs assign. */
+const BOOK_VERB_RE = /^(book|run)\b\s*/i;
 
 const WEEKDAY_ALTS =
   "mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?";
@@ -117,6 +147,10 @@ const DAY_TAIL_RE = new RegExp(
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const TIME_TOKEN_RE = /^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$/i;
+
+/** S41-a: only `for <digits>` is a headcount clause (brief §3, B5) — a `for`
+ *  not followed by a whole number is ordinary place text ("for lunch"). */
+const HEADCOUNT_CLAUSE_RE = /\s+for\s+(\S+)(?:\s+(?:people|persons|operators|heads))?\s*$/i;
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -182,14 +216,19 @@ function isLeap(year: number): boolean {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
-/** `assign <op> to <product> on <place1>...` (brief §4). Case-insensitive,
- *  whitespace collapsed, a trailing `.` ignored, double-quoted segments atomic. */
-export function parseCommand(text: string): ParseResult {
-  const { text: quoted, quotes } = extractQuotes(text);
-  let norm = quoted.replace(/\s+/g, " ").trim();
-  if (norm.endsWith(".")) norm = norm.slice(0, -1).trim();
-  if (norm === "") return { ok: false, failure: { kind: "empty" } };
-
+/**
+ * Shared by both intents (brief §3: "pull the time clause and day-word steps
+ * into private helpers used by both"). Operates on the whole normalised,
+ * quote-extracted text; returns everything before the day word (the verb,
+ * the operator-or-nothing, the product, the places, and for a book sentence
+ * the headcount clause, all still inside `rest`), the day, and the parsed
+ * clock times. Unchanged from the pre-S41-a `parseCommand` steps 1–3.
+ */
+function parseTimeAndDay(
+  norm: string,
+):
+  | { ok: true; rest: string; day: DayWord | null; start: ClockTime; end: ClockTime }
+  | { ok: false; failure: ParseFailure } {
   // 1. Time clause — the LAST "from <time> <sep> <time>" at the end.
   const fromRe = /\bfrom\b/gi;
   let lastFrom = -1;
@@ -245,6 +284,31 @@ export function parseCommand(text: string): ParseResult {
     rest = rest.slice(0, dayMatch.index).trim();
   }
 
+  return {
+    ok: true,
+    rest,
+    day,
+    start: { hour: start.hour, minute: start.minute },
+    end: { hour: end.hour, minute: end.minute },
+  };
+}
+
+/** Splits a product-and-places string on the shared delimiter set — never
+ *  `for` (brief §3, B5: "the split words are on/at/in/comma, never for"). */
+function splitProductPlaces(text: string): string[] {
+  return text
+    .split(/\s+on\s+|\s+at\s+|\s+in\s+|\s*,\s*/gi)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function parseAssignRest(
+  rest: string,
+  day: DayWord | null,
+  start: ClockTime,
+  end: ClockTime,
+  quotes: string[],
+): ParseResult {
   // 4. Verb — optional leading assign/put/schedule/add.
   const verbMatch = rest.match(new RegExp(`^(${VERBS.join("|")})\\s+`, "i"));
   if (verbMatch) rest = rest.slice(verbMatch[0].length);
@@ -263,10 +327,7 @@ export function parseCommand(text: string): ParseResult {
   if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
   if (productPlaces === "") return { ok: false, failure: { kind: "no_product" } };
 
-  const pieces = productPlaces
-    .split(/\s+on\s+|\s+at\s+|\s+in\s+|\s*,\s*/gi)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const pieces = splitProductPlaces(productPlaces);
   if (pieces.length === 0) return { ok: false, failure: { kind: "no_product" } };
   if (pieces.length === 1) return { ok: false, failure: { kind: "no_place" } };
 
@@ -282,12 +343,87 @@ export function parseCommand(text: string): ParseResult {
       product,
       place,
       day,
-      start: { hour: start.hour, minute: start.minute },
-      end: { hour: end.hour, minute: end.minute },
+      start,
+      end,
       attach: null,
       existing: null,
     },
   };
+}
+
+/** S41-a: strips an optional "for <n> [people|persons|operators|heads]"
+ *  clause from the END of `text`. Only `for <digits>` (optionally decimal)
+ *  counts — anything else is left untouched, as ordinary place text. */
+function extractHeadcount(
+  text: string,
+): { ok: true; rest: string; headcount: number | null } | { ok: false; failure: ParseFailure } {
+  const m = text.match(HEADCOUNT_CLAUSE_RE);
+  if (!m) return { ok: true, rest: text, headcount: null };
+  const token = m[1];
+  if (!/^\d+(?:\.\d+)?$/.test(token)) {
+    // "for lunch" and the like: not a headcount clause, leave it in place.
+    return { ok: true, rest: text, headcount: null };
+  }
+  const n = Number(token);
+  if (!Number.isInteger(n) || n < 1 || n > 99) {
+    return { ok: false, failure: { kind: "bad_headcount", text: token } };
+  }
+  return { ok: true, rest: text.slice(0, m.index).trim(), headcount: n };
+}
+
+function parseBookRest(
+  rest: string,
+  day: DayWord | null,
+  start: ClockTime,
+  end: ClockTime,
+  quotes: string[],
+): ParseResult {
+  const hc = extractHeadcount(rest);
+  if (!hc.ok) return { ok: false, failure: hc.failure };
+  const middle = hc.rest;
+
+  if (middle.trim() === "") return { ok: false, failure: { kind: "no_product" } };
+
+  const pieces = splitProductPlaces(middle);
+  if (pieces.length === 0) return { ok: false, failure: { kind: "no_product" } };
+  if (pieces.length === 1) return { ok: false, failure: { kind: "no_place" } };
+
+  const product = restoreQuotes(pieces[0], quotes);
+  const place = pieces.slice(1).map((p) => restoreQuotes(p, quotes));
+
+  return {
+    ok: true,
+    command: {
+      intent: "book",
+      product,
+      place,
+      headcount: hc.headcount,
+      day,
+      start,
+      end,
+      existing: null,
+    },
+  };
+}
+
+/** `assign <op> to <product> on <place1>...` or `book <product> on <place1>...`
+ *  (brief §3/§4). Case-insensitive, whitespace collapsed, a trailing `.`
+ *  ignored, double-quoted segments atomic. The FIRST WORD decides the intent:
+ *  `book`/`run` -> book; anything else (including no verb at all) -> assign. */
+export function parseCommand(text: string): ParseResult {
+  const { text: quoted, quotes } = extractQuotes(text);
+  let norm = quoted.replace(/\s+/g, " ").trim();
+  if (norm.endsWith(".")) norm = norm.slice(0, -1).trim();
+  if (norm === "") return { ok: false, failure: { kind: "empty" } };
+
+  const td = parseTimeAndDay(norm);
+  if (!td.ok) return td;
+
+  const bookVerbMatch = td.rest.match(BOOK_VERB_RE);
+  if (bookVerbMatch) {
+    return parseBookRest(td.rest.slice(bookVerbMatch[0].length), td.day, td.start, td.end, quotes);
+  }
+  return parseAssignRest(td.rest, td.day, td.start, td.end, quotes);
 }
 
 function needsQuoting(word: string): boolean {
@@ -306,12 +442,12 @@ function dayToCanonicalText(day: DayWord): string {
 }
 
 /**
- * The canonical sentence for a command — the inverse of `parseCommand` for the
- * §4 shape (24h times, `on … in …` places, names quoted when they contain a
- * separator word). The bar rebuilds the input from this after a candidate
- * button is pressed. Does NOT print `attach`.
+ * The canonical sentence for an `AssignCommand` — the inverse of
+ * `parseAssignRest` for the §4 shape (24h times, `on … in …` places, names
+ * quoted when they contain a separator word). Does NOT print `attach` or
+ * `existing`.
  */
-export function formatCommand(command: AssignCommand): string {
+function formatAssignCommand(command: AssignCommand): string {
   const parts: string[] = [
     "assign",
     quoteIfNeeded(command.operator),
@@ -334,7 +470,45 @@ export function formatCommand(command: AssignCommand): string {
   return parts.join(" ");
 }
 
-/** The one sentence the bar shows when parsing fails (brief §6). */
+/**
+ * S41-a: the canonical sentence for a `BookCommand` — `book <part> on <cell>
+ * [in <line>] [for <n> people] [on <day>] from HH:MM to HH:MM`. Does NOT
+ * print `existing`.
+ */
+function formatBookCommand(command: BookCommand): string {
+  const parts: string[] = ["book", quoteIfNeeded(command.product)];
+  parts.push("on", quoteIfNeeded(command.place[0]));
+  for (let i = 1; i < command.place.length; i++) {
+    parts.push("in", quoteIfNeeded(command.place[i]));
+  }
+  if (command.headcount !== null) {
+    parts.push("for", String(command.headcount), "people");
+  }
+  if (command.day) {
+    parts.push("on", dayToCanonicalText(command.day));
+  }
+  parts.push(
+    "from",
+    `${pad2(command.start.hour)}:${pad2(command.start.minute)}`,
+    "to",
+    `${pad2(command.end.hour)}:${pad2(command.end.minute)}`,
+  );
+  return parts.join(" ");
+}
+
+/**
+ * The canonical sentence for a `Command` — the inverse of `parseCommand` for
+ * whichever shape the command's `intent` names. The bar rebuilds the input
+ * from this after a candidate button is pressed. Never prints `attach` or
+ * `existing`.
+ */
+export function formatCommand(command: Command): string {
+  if (command.intent === "book") return formatBookCommand(command);
+  return formatAssignCommand(command);
+}
+
+/** The one sentence the bar shows when parsing fails (brief §3: the two
+ *  shapes in one sentence). */
 export function expectedShape(): string {
-  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time>";
+  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time>";
 }

@@ -148,6 +148,18 @@ export type PopoverState =
        *  own D66 format, so this and a drag's confirm prompt never disagree. */
       presetRun?: { id: string; label: string };
       /**
+       * S41-a: set when the typed "book a job" sentence resolved to a
+       * BRAND-NEW job — forces `CreatePopover` into Product run mode with the
+       * run/direct segment disabled, mirroring how `presetOperatorId` forces
+       * direct mode (but, unlike that preset, this one also disables the
+       * segment: there is no operator to pick for a job, so nothing on this
+       * screen may flip back to direct).
+       */
+      presetMode?: "run";
+      /** S41-a: "for 3 people" -- preselects `CreatePopover`'s planned
+       *  headcount field when the sentence said a number. */
+      presetHeadcount?: number;
+      /**
        * R-384: set ONLY by `openCreateFromCommand` — the typed command bar is
        * the sole opener that may auto-press Create when the pop-up would show
        * no warning. A drag or a keyboard create (`endTrackCreateDrag`,
@@ -919,6 +931,71 @@ export function useDragGesture(args: UseDragGestureArgs) {
     ],
   );
 
+  /**
+   * S41-a: `commitBlockDrag`'s run-RESIZE branch, EXTRACTED so an edge-resize
+   * drag and the typed command bar's re-time-a-job path
+   * (`retimeRunFromCommand` below) commit through the SAME function — the
+   * overlap refusal, the "N crew assignments fall outside the new run
+   * window. Continue?" prompt and the one `updateRunFields` PATCH are all the
+   * drag's own code, never a second copy. Moved verbatim from the old
+   * "// Resize: unchanged from P1-4b except the confirm step" section; the
+   * only substitutions are `d.nodeId` -> `nodeId`, `d.subject` in
+   * `revertLabel(d.subject)` -> `revert` (a parameter instead of read off the
+   * drag descriptor), and `currentRunsOnNode`/`currentCrew` recomputed here
+   * from `index` (the move branch above still keeps its own copies of those
+   * two lines — this function does not share the caller's locals).
+   */
+  const retimeRun = useCallback(
+    (
+      run: IndexedRun,
+      nodeId: string,
+      candidate: Range,
+      anchor: { x: number; y: number },
+      revert: string,
+    ) => {
+      const currentRunsOnNode = index.runsByNode.get(nodeId) ?? [];
+      const currentCrew = index.assignmentsByRun.get(run.id) ?? [];
+
+      // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
+      const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
+      if (overlap) {
+        const p = productViewFor(overlap, index.productById);
+        toast.reverted(
+          `${index.nodeById.get(nodeId)?.name ?? nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
+        );
+        return;
+      }
+      const commitResize = () => {
+        updateRunFields.mutate(
+          {
+            runId: run.id,
+            edit: {
+              timerange: {
+                start: minuteDate(index.windowStart, candidate.startMin),
+                end: minuteDate(index.windowStart, candidate.endMin),
+              },
+            },
+          },
+          { onError: (err) => failWith(err, revert) },
+        );
+      };
+      if (currentCrew.length > 0) {
+        const { clipped, stranded } = classifyCrewAgainstRun(candidate, currentCrew);
+        const affected = clipped.length + stranded.length;
+        if (affected > 0) {
+          askConfirm(
+            `${affected} crew assignment${affected === 1 ? "" : "s"} fall outside the new run window. Continue?`,
+            anchor,
+            commitResize,
+          );
+          return;
+        }
+      }
+      commitResize();
+    },
+    [index, ctx, toast, updateRunFields, failWith, askConfirm],
+  );
+
   const commitBlockDrag = useCallback(
     (d: InternalDragState, anchor: { x: number; y: number }) => {
       // DEF-0015: a viewer never commits a move/resize. In practice `moved`
@@ -1057,42 +1134,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
           return;
         }
 
-        // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
-        const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
-        if (overlap) {
-          const p = productViewFor(overlap, index.productById);
-          toast.reverted(
-            `${index.nodeById.get(d.nodeId)?.name ?? d.nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
-          );
-          return;
-        }
-        const commitResize = () => {
-          updateRunFields.mutate(
-            {
-              runId: run.id,
-              edit: {
-                timerange: {
-                  start: minuteDate(index.windowStart, candidate.startMin),
-                  end: minuteDate(index.windowStart, candidate.endMin),
-                },
-              },
-            },
-            { onError: (err) => failWith(err, revertLabel(d.subject)) },
-          );
-        };
-        if (currentCrew.length > 0) {
-          const { clipped, stranded } = classifyCrewAgainstRun(candidate, currentCrew);
-          const affected = clipped.length + stranded.length;
-          if (affected > 0) {
-            askConfirm(
-              `${affected} crew assignment${affected === 1 ? "" : "s"} fall outside the new run window. Continue?`,
-              anchor,
-              commitResize,
-            );
-            return;
-          }
-        }
-        commitResize();
+        // S41-a: the resize path itself is `retimeRun` (extracted above) —
+        // the drag's run branch calls it for every mode but "move".
+        retimeRun(run, d.nodeId, candidate, anchor, revertLabel(d.subject));
       } else if (d.subject.kind === "assignment") {
         retimeAssignment(
           d.subject.assignment,
@@ -1112,8 +1156,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
       updateRunFields,
       failWith,
       revertLabel,
-      askConfirm,
       dateFormat,
+      retimeRun,
       retimeAssignment,
     ],
   );
@@ -1602,6 +1646,59 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [index, runLabelById],
   );
 
+  /**
+   * S41-a: the typed command bar's "book a job" write path for a BRAND-NEW
+   * job — opens the SAME create popover a track drag opens, forced into
+   * Product run mode (`presetMode: "run"`) with the resolved product and
+   * headcount preset, exactly as `openCreateFromCommand` forces direct mode
+   * for an assignment. Create still goes through `submitCreateRun` ->
+   * `createRun` -> `create_run`, the one door.
+   */
+  const openCreateRunFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      productId: string;
+      headcount: number | null;
+      anchor: { x: number; y: number };
+    }) => {
+      const template = index.templateForNode.get(r.nodeId) ?? null;
+      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
+      setPopover({
+        kind: "create",
+        nodeId: r.nodeId,
+        range: r.range,
+        anchor: r.anchor,
+        shiftChips: chips,
+        presetMode: "run",
+        presetProductId: r.productId,
+        ...(r.headcount !== null ? { presetHeadcount: r.headcount } : {}),
+        // R-384: the only opener that may auto-press Create.
+        autoCreate: true,
+      });
+    },
+    [index],
+  );
+
+  /**
+   * S41-a: R-387's "change that job's hours?" answer -- the SAME function an
+   * edge-resize drag commits through (`retimeRun`), so the overlap refusal,
+   * the "N crew assignments fall outside..." prompt and the one
+   * `updateRunFields` PATCH are all the drag's own.
+   */
+  const retimeRunFromCommand = useCallback(
+    (r: { runId: string; range: Range; anchor: { x: number; y: number } }) => {
+      if (!canPlaceRef.current) return; // DEF-0015, as commitBlockDrag
+      const run = index.runById.get(r.runId);
+      if (!run) {
+        toast.reverted("That job is no longer on the board.");
+        return;
+      }
+      retimeRun(run, run.nodeId, r.range, r.anchor, runLabelById(run.id));
+    },
+    [index, toast, retimeRun, runLabelById],
+  );
+
   const submitCreateRun = useCallback(
     (nodeId: string, range: Range, productId: string, plannedHeadcount: number | undefined) => {
       const overlap = findRunOverlap(range, index.runsByNode.get(nodeId) ?? [], null);
@@ -1985,6 +2082,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
     submitCreateDirect,
     openCreateFromCommand,
     retimeAssignmentFromCommand,
+    openCreateRunFromCommand,
+    retimeRunFromCommand,
     saveRunFields,
     deleteRunWithMode,
     saveAssignmentFields,

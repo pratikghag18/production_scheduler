@@ -9041,3 +9041,45 @@ enforces it. The MOVE command the maintainer ordered after assign (session 139) 
 same function with a cell, not add a path beside it.
 
 Brief: `docs/agent-briefs/f-132-the-bar-sees-your-own-block-brief.md`.
+
+## §19.90 — D119: the next three sentences — book a job, unassign, move (stage S41)
+
+> *"Commands after assign: book a job, unassign, move; 'who is free' is read-only and goes to the
+> chatbot's lookup menu."* — the maintainer's order, 11 Sept (session 139). And on the queue's
+> order, 11 Sept (session 143): *"Keep that order."*
+
+### Why the sentences come before the model
+
+The voice plan's Stage 7 ("widen") sits after the model stages, but the rule parser can read a
+second and third fixed sentence with no training at all, each new sentence is most of its own
+value, and the training set (Stage 3) should be generated once for every command rather than
+re-made per command. So the three sentences are built first, each the same shape as S40: the
+parser learns one more form, the resolver matches words to records and never guesses, and the
+bar opens or drives the EXISTING path. The first word decides the intent — `book`/`run` is a
+job, `unassign`/`remove`/`clear` is a removal, anything else is the assign sentence — because
+the assign grammar has no verb requirement and cannot be told apart by its middle.
+
+### D119a — a job goes through the run-mode pop-up, and Enter books it
+
+A track drag books a job by opening the "New" pop-up in Product run mode; the sentence opens
+the same pop-up with the part, hours and headcount preset and the mode forced, and R-384's
+rule extends to it: when the pop-up would show nothing to decide (a part is selected on a cell
+that offers it), Enter creates the job with exactly the arguments the Create button sends,
+through one shared `submitRun()`. A cell runs one job at a time, so an overlapping job is
+answered before anything opens: the SAME part is F-132's lesson again — same group, different
+timing is a change of hours, asked and then done through the drag's own run-resize branch
+(its overlap check, its "crew fall outside" confirmation, its one write) extracted into a
+function both call; ANOTHER part is named in the words a drag's refusal uses, with nothing
+offered, because there is nothing the sentence could do that the server would accept.
+
+### D119b — a removal is one press, never Enter
+
+The block's own Delete button removes immediately, and the unassign sentence reaches that same
+action and nothing else. But R-384's "Enter does it when there is nothing to decide" belongs
+to creating, where the pop-up's own verdicts say what is left to decide; a removal cannot be
+undone, and a misheard sentence must not sit one keypress from deleting the wrong block. So
+the bar names the block it found and removes it on one press of that button; several matching
+blocks are several buttons, one press each. The developer session's call, recorded in R-388
+for the maintainer to overrule.
+
+Briefs: `docs/agent-briefs/s41-a-book-a-job-brief.md`, `docs/agent-briefs/s41-b-unassign-brief.md`.

@@ -1682,4 +1682,133 @@ describe("useDragGesture", () => {
       expect(messages).toContain("That block is no longer on the board. — reverted.");
     });
   });
+
+  /**
+   * S41-a — `retimeRunFromCommand`: the typed command bar's "change that
+   * job's hours?" path (R-387), the SAME `retimeRun` an edge-resize drag
+   * commits through (extracted from `commitBlockDrag`'s run-resize branch).
+   */
+  describe("S41-a: retimeRunFromCommand -- the command bar's re-time-a-job path", () => {
+    /** A second run on cell-1, 12:00-15:00, so a candidate range can be made
+     *  to collide with SOMETHING OTHER than run-1 itself (D8). */
+    const run2Fixture: IndexedRun = {
+      ...runFixture,
+      id: "run-2",
+      timerange: "[2026-08-24 12:00:00+00,2026-08-24 15:00:00+00)",
+      startMin: 720,
+      endMin: 900,
+    };
+
+    function buildIndexWithTwoRuns(): BoardIndex {
+      return {
+        ...buildIndex([]),
+        runsByNode: new Map([["cell-1", [runFixture, run2Fixture]]]),
+        runById: new Map([
+          ["run-1", runFixture],
+          ["run-2", run2Fixture],
+        ]),
+      };
+    }
+
+    function confirmPrompt(result: { current: { popover: unknown } }) {
+      const p = result.current.popover as { kind: string; message?: string } | null;
+      return p && p.kind === "confirm" ? p : null;
+    }
+
+    it("D6: retimeRunFromCommand on an unstaffed run writes ONE updateRunFields call", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateRunFields).mockResolvedValue({} as never);
+      const index = buildIndex([]); // run-1, no crew
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeRunFromCommand({
+          runId: "run-1",
+          range: { startMin: 360, endMin: 720 },
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      await waitFor(() => expect(api.updateRunFields).toHaveBeenCalledTimes(1));
+      const call = vi.mocked(api.updateRunFields).mock.calls[0];
+      expect(call?.[0]).toBe("run-1");
+      expect(call?.[1]).toEqual({
+        timerange: {
+          start: new Date("2026-08-24T06:00:00.000Z"),
+          end: new Date("2026-08-24T12:00:00.000Z"),
+        },
+      });
+    });
+
+    it("D7: a staffed run whose crew would fall outside asks first; Continue then writes", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateRunFields).mockResolvedValue({} as never);
+      const crew = crewFixture(); // 360-600, attached to run-1 (also 360-600)
+      const index = buildIndex([crew]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeRunFromCommand({
+          runId: "run-1",
+          range: { startMin: 480, endMin: 600 }, // shrinks the run; crew (360-600) is clipped
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      const p = confirmPrompt(result);
+      expect(p).not.toBeNull();
+      expect(p?.message).toContain("1 crew assignment");
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.confirmYes();
+      });
+
+      await waitFor(() => expect(api.updateRunFields).toHaveBeenCalledTimes(1));
+      const call = vi.mocked(api.updateRunFields).mock.calls[0];
+      expect(call?.[0]).toBe("run-1");
+      expect(call?.[1]).toEqual({
+        timerange: {
+          start: new Date("2026-08-24T08:00:00.000Z"),
+          end: new Date("2026-08-24T10:00:00.000Z"),
+        },
+      });
+    });
+
+    it("D8: a candidate overlapping another run on the cell toasts and writes nothing", async () => {
+      const api = await import("@/lib/api");
+      const index = buildIndexWithTwoRuns();
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeRunFromCommand({
+          runId: "run-1",
+          range: { startMin: 600, endMin: 800 }, // overlaps run-2 (720-900)
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+      const messages = useToastStore.getState().toasts.map((t) => t.message);
+      expect(messages.some((m) => m.includes("already runs"))).toBe(true);
+    });
+
+    it("D9: an unknown run id writes nothing and toasts that the job is gone", async () => {
+      const api = await import("@/lib/api");
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.retimeRunFromCommand({
+          runId: "does-not-exist",
+          range: { startMin: 360, endMin: 720 },
+          anchor: { x: 10, y: 10 },
+        });
+      });
+
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+      const messages = useToastStore.getState().toasts.map((t) => t.message);
+      expect(messages).toContain("That job is no longer on the board. — reverted.");
+    });
+  });
 });

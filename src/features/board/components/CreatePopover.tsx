@@ -107,6 +107,8 @@ export function CreatePopover({
   presetOperatorId,
   presetProductId,
   presetRun,
+  presetMode,
+  presetHeadcount,
   autoCreate,
   onCancel,
   onSubmitRun,
@@ -239,10 +241,29 @@ export function CreatePopover({
    */
   presetRun?: { id: string; label: string };
   /**
-   * R-384: set only by `openCreateFromCommand` — the typed command bar's
-   * Enter path — never by a drag or a keyboard create. When true and the
-   * pop-up's own verdicts read clean (see `clean` below), Create is pressed
-   * once, on mount, with exactly the arguments a real click would send.
+   * S41-a: set when this popover was opened by the typed "book a job"
+   * sentence resolving to a brand-new job (`openCreateRunFromCommand`) — the
+   * initial mode is "run" regardless of `defaultCreateMode`, and the
+   * run/direct segment below is rendered DISABLED (both buttons), mirroring
+   * the FORCING half of the `presetOperatorId` comment above it. Unlike
+   * that preset, this one also disables the segment: `presetOperatorId`
+   * does not (today's segment buttons carry no `disabled` at all), but a
+   * "book a job" sentence names no operator, so there is nothing behind a
+   * flip to direct mode for this popover to protect — see the brief's own
+   * instruction to check this before adding the attribute.
+   */
+  presetMode?: "run";
+  /**
+   * S41-a: "for 3 people" — preselects `plannedHeadcount` the same way
+   * `presetProductId` preselects the product choice.
+   */
+  presetHeadcount?: number;
+  /**
+   * R-384: set only by `openCreateFromCommand`/`openCreateRunFromCommand` —
+   * the typed command bar's Enter path — never by a drag or a keyboard
+   * create. When true and the pop-up's own verdicts read clean (see `clean`
+   * below), Create is pressed once, on mount, with exactly the arguments a
+   * real click would send.
    */
   autoCreate?: boolean;
   onCancel: () => void;
@@ -286,7 +307,7 @@ export function CreatePopover({
   ) => number | null;
 }) {
   const [mode, setMode] = useState<"run" | "direct">(
-    presetOperatorId ? "direct" : defaultCreateMode,
+    presetMode === "run" ? "run" : presetOperatorId ? "direct" : defaultCreateMode,
   );
   const [range, setRange] = useState(initialRange);
   // D108/0028: `products` is what is offered AT THIS CELL, so the selection
@@ -305,7 +326,9 @@ export function CreatePopover({
   const [productChoice, setProductChoice] = useState(presetProductId ?? "");
   const firstOffered = products[0]?.id ?? "";
   const productId = products.some((p) => p.id === productChoice) ? productChoice : firstOffered;
-  const [plannedHeadcount, setPlannedHeadcount] = useState("2");
+  const [plannedHeadcount, setPlannedHeadcount] = useState(
+    presetHeadcount !== undefined ? String(presetHeadcount) : "2",
+  );
 
   /**
    * ⭐⭐ R-346: THE SELECT OPENS ON `here` AND NOTHING ELSE. The rest of the
@@ -480,27 +503,39 @@ export function CreatePopover({
     );
   }
 
+  // S41-a: the run-mode Create branch, extracted the same way `submitDirect`
+  // was (R-384) — so the button's click and the auto-press below can never
+  // send different arguments for a booked job either.
+  function submitRun() {
+    const hc = Math.max(1, Math.round(Number(plannedHeadcount)) || 1);
+    onSubmitRun(nodeId, range, productId, hc);
+  }
+
   // R-384: NOT a new copy of "is it clean" — the pop-up's OWN
   // already-computed verdicts above, read once. Direct mode (a preset
   // operator forces it), a part or job actually selected, trained, in
   // area, and not on leave under EITHER policy (a `warn` absence is a
   // warning box, so it is not clean; a `block` absence disables Create,
-  // also not clean).
+  // also not clean). S41-a adds run mode's own arm: a "book a job" pop-up
+  // has no operator/eligibility/area/leave verdicts at all — a part
+  // actually selected is the only thing clean asks of it.
   const clean =
-    mode === "direct" &&
-    productId !== "" &&
-    operatorId !== "" &&
-    !ineligible &&
-    !selectedOutsideArea &&
-    selectedAbsence === null;
+    (mode === "direct" &&
+      productId !== "" &&
+      operatorId !== "" &&
+      !ineligible &&
+      !selectedOutsideArea &&
+      selectedAbsence === null) ||
+    (mode === "run" && productId !== "");
 
   const autoFiredRef = useRef(false);
 
   /**
    * R-384: Enter on a typed sentence creates the block without a second
    * press when this pop-up would show no warning. `autoCreate` is set only
-   * by `openCreateFromCommand` (a drag or a keyboard create never sets it),
-   * so this effect is a no-op for every other opener.
+   * by `openCreateFromCommand`/`openCreateRunFromCommand` (a drag or a
+   * keyboard create never sets it), so this effect is a no-op for every
+   * other opener.
    *
    * F-128: the write is a side effect, so it runs in an EFFECT, never
    * inside a `setState` updater — that shape is exactly how one Continue
@@ -514,7 +549,11 @@ export function CreatePopover({
   useEffect(() => {
     if (autoCreate && clean && !autoFiredRef.current) {
       autoFiredRef.current = true;
-      submitDirect();
+      if (mode === "run") {
+        submitRun();
+      } else {
+        submitDirect();
+      }
     }
     // Mount-only, on purpose: `clean` is derived from the presets this
     // popover opened with, which do not change before first paint, and
@@ -531,6 +570,7 @@ export function CreatePopover({
           <button
             type="button"
             className={mode === "run" ? styles.segOn : ""}
+            disabled={presetMode === "run"}
             onClick={() => setMode("run")}
           >
             Product run
@@ -538,6 +578,7 @@ export function CreatePopover({
           <button
             type="button"
             className={mode === "direct" ? styles.segOn : ""}
+            disabled={presetMode === "run"}
             onClick={() => setMode("direct")}
           >
             Direct assignment
@@ -786,8 +827,7 @@ export function CreatePopover({
             disabled={createDisabled}
             onClick={() => {
               if (mode === "run") {
-                const hc = Math.max(1, Math.round(Number(plannedHeadcount)) || 1);
-                onSubmitRun(nodeId, range, productId, hc);
+                submitRun();
               } else {
                 submitDirect();
               }

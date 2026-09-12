@@ -23,6 +23,7 @@ import {
   splitFits,
   assignmentFitsRun,
   rangesOverlap,
+  findRunOverlap,
   MIN_DURATION_MINUTES,
 } from "./lib/interaction";
 import { commandAssignments } from "./lib/commandAssignments";
@@ -495,6 +496,7 @@ export default function BoardPage() {
     for (const [nodeId, list] of index.runsByNode) {
       for (const r of list) {
         const p = productViewFor(r, index.productById);
+        const span = `${formatClock(addMinutes(index.windowStart, r.startMin), index.zone)}–${formatClock(addMinutes(index.windowStart, r.endMin), index.zone)}`;
         runs.push({
           id: r.id,
           nodeId,
@@ -510,7 +512,13 @@ export default function BoardPage() {
           // file this lane does not otherwise touch. `productViewFor` and
           // `formatClock` are the same two calls that label is built from, so
           // the two cannot drift into different words for the same run.
-          label: `${p?.name ?? "Run"} ${formatClock(addMinutes(index.windowStart, r.startMin), index.zone)}–${formatClock(addMinutes(index.windowStart, r.endMin), index.zone)}`,
+          label: `${p?.name ?? "Run"} ${span}`,
+          // S41-a: the same two `formatClock` calls, without the product
+          // name — the `job_exists` sentence already names the product, so
+          // this is what keeps it from repeating ("A Housing A job ...
+          // Housing A 08:00-16:00" would be worse than naming the hours
+          // once).
+          span,
         });
       }
     }
@@ -529,6 +537,9 @@ export default function BoardPage() {
       // R-385: the own-block question's view of the window and its overlap test.
       assignments: commandAssignments(index),
       overlaps: rangesOverlap,
+      // S41-a: a cell runs one job at a time — the same rule a run drag/
+      // resize refuses a drop with, passed in rather than re-decided here.
+      findRunOverlap,
     };
   }, [boardQuery.data, index, operatorPool]);
 
@@ -774,6 +785,24 @@ export default function BoardPage() {
                   anchor,
                 });
               }}
+              onBook={(resolved, anchor) => {
+                if (resolved.target.kind !== "run_create") return;
+                dragApi.openCreateRunFromCommand({
+                  nodeId: resolved.nodeId,
+                  range: resolved.range,
+                  productId: resolved.target.productId,
+                  headcount: resolved.target.headcount,
+                  anchor,
+                });
+              }}
+              onRetimeRun={(resolved, anchor) => {
+                if (resolved.target.kind !== "retime_run") return;
+                dragApi.retimeRunFromCommand({
+                  runId: resolved.target.runId,
+                  range: resolved.range,
+                  anchor,
+                });
+              }}
             />
           )}
           {boardQuery.data.nodes.length === 0 ? (
@@ -877,6 +906,8 @@ export default function BoardPage() {
           presetOperatorId={popover.presetOperatorId}
           presetProductId={popover.presetProductId}
           presetRun={popover.presetRun}
+          presetMode={popover.presetMode}
+          presetHeadcount={popover.presetHeadcount}
           autoCreate={popover.autoCreate}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}

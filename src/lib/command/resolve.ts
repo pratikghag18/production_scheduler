@@ -5,18 +5,23 @@
  * from the board is PASSED IN through `ResolveContext` by `BoardPage` — the
  * product scope (`offeredAt`, the same `productsOfferedAtNode` the pop-up's
  * list is built with), the run-containment rule (`fitsRun`, the same
- * `assignmentFitsRun` a drag uses), the plant-local day axis (`days`,
- * `todayIndex`, `wallToOffset`, all from `index.dayAxis`) and the minimum
- * duration. This module holds NO copy of any of them, so the bar and the
- * pop-up cannot disagree (CLAUDE.md §4: whatever a client offers is decided by
- * the same test the server runs).
+ * `assignmentFitsRun` a drag uses), the run-overlap rule (`findRunOverlap`,
+ * the same one a drag uses when dropping a run onto a cell), the plant-local
+ * day axis (`days`, `todayIndex`, `wallToOffset`, all from `index.dayAxis`)
+ * and the minimum duration. This module holds NO copy of any of them, so the
+ * bar and the pop-up cannot disagree (CLAUDE.md §4: whatever a client offers
+ * is decided by the same test the server runs).
  *
  * Never guesses: two candidates is a question, not a coin toss (R-379).
  *
- * Pre-seated as a type-only skeleton by the developer session (11 Sept) so the
- * two build lanes compile against one interface. Lane A fills the bodies.
+ * S41-a (docs/agent-briefs/s41-a-book-a-job-brief.md) adds `resolveCommand`'s
+ * second intent, `book` — a JOB (a run of a part on a cell for a span), never
+ * a person. `resolveCommand` dispatches on `command.intent`; the assign path
+ * (`resolveAssignCommand`) is unchanged in meaning. The cell step, the part
+ * step, and the day-and-span step are shared by both intents through private
+ * helpers (`resolveCellStep`, `resolvePartStep`, `resolveDaySpanStep`).
  */
-import type { AssignCommand } from "./parse.ts";
+import type { AssignCommand, BookCommand, Command } from "./parse.ts";
 
 /** One day of the board's window, as the plant's calendar sees it. Built by
  *  `BoardPage` from `index.dayAxis.dayStarts` + `partsInZone(_, index.zone)`. */
@@ -56,6 +61,10 @@ export interface ContextRun {
   endMin: number;
   /** The D66 label a drag's confirm prompt uses: "<product name> <start>–<end>". */
   label: string;
+  /** S41-a: "08:00–16:00" — the same two `formatClock` calls `label` is built
+   *  from, without the product name (the `job_exists` sentence already names
+   *  the product, so the run's own label would repeat it). */
+  span: string;
 }
 
 /** What the resolver is allowed to know. Built by `BoardPage` beside `offeredProducts`. */
@@ -102,6 +111,14 @@ export interface ResolveContext {
     a: { startMin: number; endMin: number },
     b: { startMin: number; endMin: number },
   ) => boolean;
+  /** S41-a: a cell runs one job at a time — the SAME `findRunOverlap` a run
+   *  drag/resize refuses a drop with, passed in from `lib/interaction.ts`.
+   *  `excludeRunId` lets a re-time check against every OTHER job on the cell. */
+  findRunOverlap: (
+    range: { startMin: number; endMin: number },
+    runs: ContextRun[],
+    excludeRunId: string | null,
+  ) => ContextRun | null;
 }
 
 /**
@@ -117,6 +134,7 @@ export type CommandTarget =
   | { kind: "retime"; assignmentId: string };
 
 export interface ResolvedCommand {
+  intent: "assign";
   nodeId: string;
   operatorId: string;
   productId: string;
@@ -126,6 +144,25 @@ export interface ResolvedCommand {
   /** "Sam Patel → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00"
    *  (+ " · joining <run label>" for a run target). The ISO day is a token the bar
    *  re-renders through `formatDayLabel(_, dateFormat, zone)`. */
+  readout: string;
+}
+
+/** S41-a: a "book a job" sentence resolves to either a brand-new job (never
+ *  written by this module — `CreatePopover`'s run mode writes it) or a
+ *  re-time of an existing one (the drag's own `retimeRun`, R-387). */
+export type BookTarget =
+  | { kind: "run_create"; productId: string; headcount: number | null }
+  | { kind: "retime_run"; runId: string };
+
+export interface ResolvedBook {
+  intent: "book";
+  nodeId: string;
+  productId: string;
+  target: BookTarget;
+  range: { startMin: number; endMin: number };
+  /** "Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 06:00–14:00 · 3 people"
+   *  (+ " · changing <run label>" for a retime; the " · N people" part only
+   *  when the sentence said a number). */
   readout: string;
 }
 
@@ -167,19 +204,39 @@ export type Question =
     }
   /** R-385: `command.existing` names a block that is no longer among the hits and no
    *  other block of this person's overlaps — the board changed under the question. */
-  | { kind: "block_gone"; person: string; product: string; cell: string };
+  | { kind: "block_gone"; person: string; product: string; cell: string }
+  /** S41-a / R-387: a job of the SAME part already overlaps the sentence's
+   *  hours on that cell. `run` is that job (`word` is always "" — the answer
+   *  goes into `existing`, not the sentence); `same` is true when its hours
+   *  already equal the sentence's. */
+  | {
+      kind: "job_exists";
+      product: string;
+      cell: string;
+      span: string;
+      run: Candidate;
+      same: boolean;
+    }
+  /** S41-a: a job of ANOTHER part overlaps — a cell runs one job at a time;
+   *  nothing to offer but the sentence's own words. */
+  | { kind: "job_in_the_way"; product: string; cell: string; other: string }
+  /** S41-a: `command.existing` names a job that is no longer on this cell and
+   *  no other job overlaps — the board changed under the question. */
+  | { kind: "job_gone"; product: string; cell: string };
 
 export type Resolution =
-  { ok: true; resolved: ResolvedCommand } | { ok: false; question: Question };
+  { ok: true; resolved: ResolvedCommand | ResolvedBook } | { ok: false; question: Question };
 
 // ---------------------------------------------------------------------------
 // Private helpers. None of these are exported; nothing here is a copy of a
 // board rule — they are string/shape plumbing only (matching tiers, ancestor
-// walks, label building). The rules themselves (offeredAt, fitsRun, the day
-// axis, the minimum duration) all come from ResolveContext.
+// walks, label building). The rules themselves (offeredAt, fitsRun,
+// findRunOverlap, the day axis, the minimum duration) all come from
+// ResolveContext.
 // ---------------------------------------------------------------------------
 
 type Node = { id: string; name: string; path: string };
+type ProductLike = ResolveContext["products"][number];
 
 function normalizeForMatch(s: string): string {
   return s
@@ -300,18 +357,27 @@ function resolveDay(
   return { ok: false, question: { kind: "day_off_board", text: day.iso } };
 }
 
-/** Order of resolution: cell, then part, then person, then day and span, then
- *  the run question (brief §5). One question at a time. */
-export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Resolution {
-  const byPath = buildPathIndex(ctx.nodeById);
+// ---------------------------------------------------------------------------
+// Shared steps (brief §3: "the parser and resolver share the assign path's
+// ... cell and part steps through private helpers"). Both `AssignCommand` and
+// `BookCommand` carry `place`/`product`/`day`/`start`/`end` in the same shape,
+// so these take just those fields rather than a whole command.
+// ---------------------------------------------------------------------------
 
-  // 1. Cell.
-  const firstPlaceWord = command.place[0] ?? "";
+/** Step 1 (both intents): the first place word against `ctx.cells`, each
+ *  further word a qualifier over ancestor names, exactly as brief §5
+ *  describes. */
+function resolveCellStep(
+  place: readonly string[],
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): { ok: true; cell: Node } | { ok: false; question: Question } {
+  const firstPlaceWord = place[0] ?? "";
   let cellCandidates = matchName(firstPlaceWord, ctx.cells, (c) => c.name) as Node[];
   if (cellCandidates.length === 0) {
     return { ok: false, question: { kind: "unknown", field: "place", text: firstPlaceWord } };
   }
-  for (const qualifier of command.place.slice(1)) {
+  for (const qualifier of place.slice(1)) {
     const filtered = filterByQualifier(cellCandidates, qualifier, byPath);
     if (filtered.length === 0) {
       const elsewhere = cellCandidates.map((c) => ({
@@ -341,18 +407,25 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
       },
     };
   }
-  const cell = cellCandidates[0];
+  return { ok: true, cell: cellCandidates[0] };
+}
 
-  // 2. Part.
-  let productHits = matchName(command.product, ctx.products, (p) => p.name);
+/** Step 2 (both intents): match the product word, then check `offeredAt`
+ *  this cell — exactly brief §5's matching tiers and scope check. */
+function resolvePartStep(
+  productWord: string,
+  cell: Node,
+  ctx: ResolveContext,
+): { ok: true; product: ProductLike } | { ok: false; question: Question } {
+  let productHits = matchName(productWord, ctx.products, (p) => p.name);
   if (productHits.length === 0) {
-    productHits = matchName(command.product, ctx.products, (p) => p.sku);
+    productHits = matchName(productWord, ctx.products, (p) => p.sku);
   }
   if (productHits.length === 0) {
-    productHits = matchName(command.product, ctx.products, (p) => `${p.sku}/${p.name}`);
+    productHits = matchName(productWord, ctx.products, (p) => `${p.sku}/${p.name}`);
   }
-  if (productHits.length === 0 && command.product.includes("/")) {
-    const pieces = command.product
+  if (productHits.length === 0 && productWord.includes("/")) {
+    const pieces = productWord
       .split("/")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
@@ -367,7 +440,7 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
     }
   }
   if (productHits.length === 0) {
-    return { ok: false, question: { kind: "unknown", field: "product", text: command.product } };
+    return { ok: false, question: { kind: "unknown", field: "product", text: productWord } };
   }
   if (productHits.length > 1) {
     return {
@@ -375,7 +448,7 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
       question: {
         kind: "ambiguous",
         field: "product",
-        text: command.product,
+        text: productWord,
         candidates: productHits.map((p) => ({ id: p.id, label: p.name, word: p.name })),
       },
     };
@@ -385,6 +458,49 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
   if (!offered.some((o) => o.id === product.id)) {
     return { ok: false, question: { kind: "not_offered", product: product.name, cell: cell.name } };
   }
+  return { ok: true, product };
+}
+
+/** Step 3 (both intents): resolve the day word to an index, compute the span
+ *  in real minutes, and refuse a too-short one — exactly brief §5's rules. */
+function resolveDaySpanStep(
+  day: AssignCommand["day"],
+  start: { hour: number; minute: number },
+  end: { hour: number; minute: number },
+  ctx: ResolveContext,
+):
+  | { ok: true; dayIndex: number; startMin: number; endMin: number; timeText: string }
+  | { ok: false; question: Question } {
+  const dayResolution = resolveDay(day, ctx);
+  if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
+  const dayIndex = dayResolution.dayIndex;
+  const startMin = ctx.wallToOffset(dayIndex, start.hour * 60 + start.minute);
+  const endMin = ctx.wallToOffset(dayIndex, end.hour * 60 + end.minute);
+  if (endMin - startMin < ctx.minDurationMinutes) {
+    return {
+      ok: false,
+      question: { kind: "too_short", minutes: endMin - startMin, min: ctx.minDurationMinutes },
+    };
+  }
+  const timeText = `${pad2(start.hour)}:${pad2(start.minute)}–${pad2(end.hour)}:${pad2(end.minute)}`;
+  return { ok: true, dayIndex, startMin, endMin, timeText };
+}
+
+/** The assign path (unchanged in meaning from before S41-a): cell, part,
+ *  person, day and span, the own-block question (R-385), the run question
+ *  (R-383), then the readout. */
+function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Resolution {
+  const byPath = buildPathIndex(ctx.nodeById);
+
+  // 1. Cell.
+  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  if (!cellResult.ok) return { ok: false, question: cellResult.question };
+  const cell = cellResult.cell;
+
+  // 2. Part.
+  const partResult = resolvePartStep(command.product, cell, ctx);
+  if (!partResult.ok) return { ok: false, question: partResult.question };
+  const product = partResult.product;
 
   // 3. Person.
   const activeOperators = ctx.operators.filter((o) => o.active);
@@ -414,20 +530,9 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
   const operator = operatorHits[0];
 
   // 4. Day and span.
-  const dayResolution = resolveDay(command.day, ctx);
-  if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
-  const dayIndex = dayResolution.dayIndex;
-  const startMin = ctx.wallToOffset(dayIndex, command.start.hour * 60 + command.start.minute);
-  const endMin = ctx.wallToOffset(dayIndex, command.end.hour * 60 + command.end.minute);
-  if (endMin - startMin < ctx.minDurationMinutes) {
-    return {
-      ok: false,
-      question: { kind: "too_short", minutes: endMin - startMin, min: ctx.minDurationMinutes },
-    };
-  }
-  // Built here (rather than in the readout section below) because the
-  // own-block question (step 5) needs it too.
-  const timeText = `${pad2(command.start.hour)}:${pad2(command.start.minute)}–${pad2(command.end.hour)}:${pad2(command.end.minute)}`;
+  const spanResult = resolveDaySpanStep(command.day, command.start, command.end, ctx);
+  if (!spanResult.ok) return { ok: false, question: spanResult.question };
+  const { dayIndex, startMin, endMin, timeText } = spanResult;
 
   // 5. The own-block question (R-385).
   const own = ctx.assignments.filter(
@@ -537,6 +642,7 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
   return {
     ok: true,
     resolved: {
+      intent: "assign",
       nodeId: cell.id,
       operatorId: operator.id,
       productId: product.id,
@@ -545,6 +651,134 @@ export function resolveCommand(command: AssignCommand, ctx: ResolveContext): Res
       readout,
     },
   };
+}
+
+/**
+ * S41-a — the book path: cell, part (shared with assign), day and span
+ * (shared), then the job question (brief §3): a cell runs one job at a
+ * time, so an overlap of the SAME part asks whether to change its hours
+ * (R-387); an overlap of ANOTHER part just says which job is in the way.
+ */
+function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resolution {
+  const byPath = buildPathIndex(ctx.nodeById);
+
+  // 1. Cell.
+  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  if (!cellResult.ok) return { ok: false, question: cellResult.question };
+  const cell = cellResult.cell;
+
+  // 2. Part.
+  const partResult = resolvePartStep(command.product, cell, ctx);
+  if (!partResult.ok) return { ok: false, question: partResult.question };
+  const product = partResult.product;
+
+  // 3. Day and span.
+  const spanResult = resolveDaySpanStep(command.day, command.start, command.end, ctx);
+  if (!spanResult.ok) return { ok: false, question: spanResult.question };
+  const { dayIndex, startMin, endMin, timeText } = spanResult;
+
+  // 4. The job question (R-387).
+  const runsOnCell = ctx.runs.filter((r) => r.nodeId === cell.id);
+  let target: BookTarget;
+  let retimeHit: ContextRun | null = null;
+  if (command.existing === null) {
+    const overlap = ctx.findRunOverlap({ startMin, endMin }, runsOnCell, null);
+    if (overlap && overlap.productId === product.id) {
+      const same = overlap.startMin === startMin && overlap.endMin === endMin;
+      return {
+        ok: false,
+        question: {
+          kind: "job_exists",
+          product: product.name,
+          cell: cell.name,
+          span: timeText,
+          run: { id: overlap.id, label: overlap.span, word: "" },
+          same,
+        },
+      };
+    }
+    if (overlap) {
+      return {
+        ok: false,
+        question: {
+          kind: "job_in_the_way",
+          product: product.name,
+          cell: cell.name,
+          other: overlap.label,
+        },
+      };
+    }
+    target = { kind: "run_create", productId: product.id, headcount: command.headcount };
+  } else {
+    // existing.kind === "retime"
+    const hit = runsOnCell.find((r) => r.id === command.existing!.runId) ?? null;
+    if (!hit) {
+      return { ok: false, question: { kind: "job_gone", product: product.name, cell: cell.name } };
+    }
+    // The retime must not collide with ANOTHER job on the cell — the same
+    // rule a drag applies before writing.
+    const other = ctx.findRunOverlap({ startMin, endMin }, runsOnCell, hit.id);
+    if (other) {
+      return {
+        ok: false,
+        question: {
+          kind: "job_in_the_way",
+          product: product.name,
+          cell: cell.name,
+          other: other.label,
+        },
+      };
+    }
+    retimeHit = hit;
+    target = { kind: "retime_run", runId: hit.id };
+  }
+
+  // Readout.
+  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
+  const chain = [...ancestorNames, cell.name].join(" › ");
+  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+  let readout = `${product.name} · ${chain} · ${iso} · ${timeText}`;
+  if (target.kind === "run_create" && command.headcount !== null) {
+    readout += ` · ${command.headcount} people`;
+  } else if (target.kind === "retime_run" && retimeHit !== null) {
+    readout += ` · changing ${retimeHit.label}`;
+  }
+
+  return {
+    ok: true,
+    resolved: {
+      intent: "book",
+      nodeId: cell.id,
+      productId: product.id,
+      target,
+      range: { startMin, endMin },
+      readout,
+    },
+  };
+}
+
+/** Order of resolution: cell, then part, then (assign only) person, then day
+ *  and span, then the job/run/own-block question(s) (brief §5, extended by
+ *  §3 for `book`). One question at a time. Dispatches on `command.intent`;
+ *  the assign path's own meaning is untouched by this dispatch.
+ *
+ * Overloaded (not just typed as `Command -> Resolution`) so a caller holding
+ * a concrete `AssignCommand` or `BookCommand` — every existing test's `cmd()`
+ * fixture, for one — gets back the narrower result type without a cast; only
+ * `CommandBar`, which holds the `Command` union, sees the full `Resolution`.
+ */
+export function resolveCommand(
+  command: AssignCommand,
+  ctx: ResolveContext,
+): { ok: true; resolved: ResolvedCommand } | { ok: false; question: Question };
+export function resolveCommand(
+  command: BookCommand,
+  ctx: ResolveContext,
+): { ok: true; resolved: ResolvedBook } | { ok: false; question: Question };
+export function resolveCommand(command: Command, ctx: ResolveContext): Resolution;
+export function resolveCommand(command: Command, ctx: ResolveContext): Resolution {
+  if (command.intent === "book") return resolveBookCommand(command, ctx);
+  return resolveAssignCommand(command, ctx);
 }
 
 function fieldWord(field: "operator" | "product" | "place"): string {
@@ -585,5 +819,14 @@ export function describeQuestion(q: Question): string {
       return `${q.person} already has ${q.blocks.length} ${q.product} blocks at ${q.cell} (${q.blocks.map((b) => b.label).join(", ")}). Change one to ${q.span}, or add a separate block?`;
     case "block_gone":
       return `That ${q.product} block of ${q.person}'s at ${q.cell} is no longer on the board. Add it as a new block?`;
+    case "job_exists":
+      if (q.same) {
+        return `A ${q.product} job is already booked on ${q.cell} ${q.run.label} — nothing to change.`;
+      }
+      return `A ${q.product} job is already booked on ${q.cell} ${q.run.label}. Change it to ${q.span}, or pick other hours?`;
+    case "job_in_the_way":
+      return `${q.cell} already runs ${q.other}; a cell runs one job at a time. Pick other hours, or change that job on the board.`;
+    case "job_gone":
+      return `That ${q.product} job on ${q.cell} is no longer on the board. Book it again?`;
   }
 }
