@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-11'
-  tip: 015416a
+  updated: '2026-09-12'
+  tip: 8ad566e
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13763,6 +13763,25 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 150
+  date: 2026-09-12
+  title: "The scripts are linted --- and the session stops at the model stages, which need the maintainer"
+  commits: [8ad566e]
+  numbers:
+    app_tests: 2994
+    app_test_files: 140
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lint lane: `Test Files 140 passed (140)`, `Tests 2994 passed (2994)`, copied from the runner --- unchanged from 149, as expected for a piece that removes dead declarations and adds a lint block. `tsc -b --force` clean. `eslint .` clean, and for the first time that sentence covers `scripts/` too. `npm run plan` still validates and renders the page byte-identically after the renderer lost its two dead declarations. db_checks, migrations and the e2e total carried from 149; no screen changed, no role walk.
+  summary: >-
+    The last queue item that needed no decision: nothing under `scripts/` had ever been linted, because `eslint.config.js` had one block and it matched only .ts and .tsx. A second block now covers `scripts/**/*.mjs` (recommended rules, prettier, node globals; no typescript-eslint or react-hooks). It found three things: two dead declarations in the plan renderer --- a set of finding ids and a defect chip map superseded by the inline lookup --- removed with the page rendering unchanged, and one parameter the perturbation module ignores by contract, disabled on its line with the reason rather than by loosening the rule.
+    ⭐ WHERE THE SESSION STOPS, AND WHY. The maintainer said in session 143 *"do not stop unless you need me to make a decision or do something which you cannot"*. Since then: F-132, F-131, F-130 closed; S41 (book a job, unassign, move) and S42 (the training set and the held-out instrument) shipped; F-133 and F-134 found and fixed; seventeen commits ahead of origin before this one. Every remaining queue item needs the maintainer: Stage 4 a base model and a Colab run with a GPU this machine does not have; Stage 5 a model service (Ollama or llama.cpp) on a machine of their choosing; Stage 6 which recogniser first, since the browser one sends audio to Google or Microsoft; Stages 8-10 begin with the question catalog that is theirs to write; and the parked saving of what people type is a privacy and settings decision. Stage 6b (packaging) could be built without a decision but the plan sizes it at two to three days and it is worth confirming they want it before the model exists. The closing report asks these five questions.
+    ⭐ A MEMORY SAVED for future sessions: under a standing "do not stop", still give the maintainer a plain status line per piece and an ETA --- they asked twice today what was taking so long and what a piece was.
 - id: 149
   date: 2026-09-11
   title: "The day may come after the hours, and the afternoon rule reads the start (F-133, F-134 fixed)"
@@ -20573,13 +20592,6 @@ next:
     people. The plan's "two to three days" is optimistic if it means self-hosting the full Supabase
     stack; size it when it is next.
 
-- kind: task
-  text: Lint the scripts too --- eslint's one rule block matches only .ts and .tsx (found by S42's lane)
-  why: >-
-    `eslint.config.js` has a single `files: ["**/*.{ts,tsx}"]` block, so every `.mjs` under
-    `scripts/` --- the plan renderer, the tester harness, the voice generator --- lints clean whatever
-    it contains. Add a block for `scripts/**/*.mjs` with the node globals and the recommended rules,
-    fix what it finds, and say what it found. Small; a lane's hour.
 # ------------------------------- PARKED ------------------------------------
 - kind: parked
   text: "Save every sentence a person types into the command bar, with the site's permission, to grow the training and held-out sets"
