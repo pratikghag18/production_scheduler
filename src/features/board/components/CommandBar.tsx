@@ -3,6 +3,7 @@ import type { DateFormat } from "@/lib/format/dates";
 import { formatDayLabel } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
+import type { Reader, Reading } from "@/lib/voice/readSentence";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
 import type {
   AssignCommand,
@@ -51,6 +52,13 @@ import type {
  * removes the named block through the SAME `dragApi.removeAssignment` the
  * block's own Delete button calls. No second door here either.
  *
+ * S44-b (docs/agent-briefs/s44-b-read-by-model-brief.md) adds the optional
+ * `reader` prop: when set, Enter reads the sentence through the model
+ * service (`src/lib/voice/readSentence.ts`) first and falls back to the same
+ * `parseCommand` rules on anything but a clean answer, saying so in the
+ * readout. `reader` null (the default) is BYTE FOR BYTE the pre-S44-b
+ * behaviour -- every earlier test in this file passes untouched.
+ *
  * The bar holds no rule of its own: parsing is `parseCommand`/`formatCommand`
  * (`src/lib/command/parse.ts`), resolving is `resolveCommand`/`describeQuestion`
  * (`src/lib/command/resolve.ts`) against the `ctx` the caller (`BoardPage`)
@@ -68,7 +76,9 @@ import type {
 type Status =
   | { kind: "shape"; message: string }
   | { kind: "question"; message: string; candidates: CandidateButton[] }
-  | { kind: "readout"; message: string };
+  | { kind: "readout"; message: string }
+  /** S44-b: shown while `reader(text, signal)` is pending. */
+  | { kind: "reading"; message: string };
 
 interface CandidateButton {
   key: string;
@@ -102,6 +112,10 @@ export interface CommandBarProps {
    *  a `retime` re-times through the drag's own path, a `move_cell` opens
    *  the create pop-up preset under `presetMove`. */
   onMove: (resolved: ResolvedMove, anchor: { x: number; y: number }) => void;
+  /** S44-b: when set, Enter reads the sentence through the model service
+   *  first and falls back to the rules on anything but a clean answer.
+   *  `null` (the default) is the pre-S44-b behaviour, unchanged. */
+  reader?: Reader | null;
 }
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -143,6 +157,7 @@ export function CommandBar({
   onRetimeRun,
   onUnassign,
   onMove,
+  reader = null,
 }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
@@ -153,6 +168,12 @@ export function CommandBar({
   // invalidates it. S41-a widens this from `AssignCommand` to `Command`
   // (the union also holding `BookCommand`) since the bar now parses both.
   const heldRef = useRef<Command | null>(null);
+  // S44-b: the in-flight reading's own abort controller (null when nothing
+  // is pending) and a sequence number bumped by every Enter, Escape and edit
+  // so a reading that settles after a newer one has started is discarded
+  // rather than clobbering whatever the bar is doing by then.
+  const readingAbortRef = useRef<AbortController | null>(null);
+  const readingSeqRef = useRef(0);
 
   function renderReadout(readout: string): string {
     return readout.replace(ISO_DAY, (iso) =>
@@ -165,7 +186,13 @@ export function CommandBar({
     return { x: rect?.left ?? 0, y: rect?.bottom ?? 0 };
   }
 
-  function runCommand(command: Command): void {
+  /**
+   * S44-b: `suffix`, when given, is appended to the readout text ONLY --
+   * never to a question's message (brief §3.3: "when that produces a
+   * readout status, append ... to the readout text"). Every existing call
+   * site omits it, which is byte-for-byte the pre-S44-b behaviour.
+   */
+  function runCommand(command: Command, suffix?: string): void {
     heldRef.current = command;
     const resolution = resolveCommand(command, ctx);
     if (resolution.ok) {
@@ -190,10 +217,77 @@ export function CommandBar({
           onOpen(resolved, anchorOfInput());
         }
       }
-      setStatus({ kind: "readout", message: renderReadout(resolved.readout) });
+      setStatus({ kind: "readout", message: renderReadout(resolved.readout) + (suffix ?? "") });
       return;
     }
     setStatus(questionToStatus(resolution.question, command));
+  }
+
+  /** S44-b: the three "why the rules read this instead" phrases, shared by
+   *  the readout suffix and the failure-message prefix below. */
+  function whyForReason(reason: "unavailable" | "timeout" | "garbled"): string {
+    if (reason === "unavailable") return "the model service is off";
+    if (reason === "timeout") return "the model took too long";
+    return "the model's answer was not a form";
+  }
+
+  /** S44-b: `"the model service is off"` -> `"The model service is off, so
+   *  the rules read this: "` -- the same phrase, capitalised, as a prefix. */
+  function failurePrefixForReason(reason: "unavailable" | "timeout" | "garbled"): string {
+    const why = whyForReason(reason);
+    return `${why.charAt(0).toUpperCase()}${why.slice(1)}, so the rules read this: `;
+  }
+
+  /**
+   * S44-b: the fallback path once the model reader has answered anything but
+   * `ok` — re-parses `sentence` through the rules exactly as a null-reader
+   * Enter would, then either runs it as-is (`reason` null, the `no-service`
+   * case) or annotates the result with why the rules read it instead.
+   */
+  function fallbackToRules(
+    sentence: string,
+    reason: "unavailable" | "timeout" | "garbled" | null,
+  ): void {
+    const parsed = parseCommand(sentence);
+    if (!parsed.ok) {
+      heldRef.current = null;
+      const base = failureToStatus(parsed.failure);
+      setStatus(
+        reason === null
+          ? base
+          : { ...base, message: `${failurePrefixForReason(reason)}${base.message}` },
+      );
+      return;
+    }
+    runCommand(
+      parsed.command,
+      reason === null ? undefined : ` · read by the rules (${whyForReason(reason)})`,
+    );
+  }
+
+  /** S44-b: settles a reading that is still current (brief §3.3). */
+  function applyReading(sentence: string, result: Reading): void {
+    if (result.ok) {
+      runCommand(result.command, " · read by the model");
+      return;
+    }
+    fallbackToRules(sentence, result.reason === "no-service" ? null : result.reason);
+  }
+
+  /** S44-b: starts (or restarts) a reading through `activeReader` -- a
+   *  second Enter aborts whatever is in flight first (brief §3.3). */
+  function startReading(sentence: string, activeReader: Reader): void {
+    readingAbortRef.current?.abort();
+    const controller = new AbortController();
+    readingAbortRef.current = controller;
+    const mySeq = ++readingSeqRef.current;
+    setStatus({ kind: "reading", message: "Reading…" });
+    activeReader(sentence, controller.signal).then((result) => {
+      // A newer Enter, Escape or edit has happened since -- discard.
+      if (readingSeqRef.current !== mySeq) return;
+      readingAbortRef.current = null;
+      applyReading(sentence, result);
+    });
   }
 
   function pickCandidate(
@@ -421,11 +515,31 @@ export function CommandBar({
     // attach (a new sentence is a new question)." Clearing the held command
     // clears its `existing` (R-385) the same way it clears `attach`.
     heldRef.current = null;
+    // S44-b: any edit aborts an in-flight reading (brief §3.3) -- the bump
+    // discards a response that settles after this point even if abort()
+    // itself has no effect on an already-settled fetch. Review finding 1:
+    // clear the "Reading…" status too, or it sits on screen (looking like a
+    // stuck spinner) until the next Enter or Escape -- a readout/question
+    // status is left exactly as it was (the pre-S44-b behaviour).
+    if (readingAbortRef.current) {
+      readingAbortRef.current.abort();
+      readingAbortRef.current = null;
+      readingSeqRef.current++;
+      setStatus((prev) => (prev?.kind === "reading" ? null : prev));
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
     if (e.key === "Enter") {
       e.preventDefault();
+      // Review finding 2: empty/whitespace-only text takes exactly the
+      // null-reader path -- no network round trip (and no 20s wait) for a
+      // sentence that can only ever fail to parse, and no misleading "not a
+      // form" prefix on top of it.
+      if (reader && text.trim() !== "") {
+        startReading(text, reader);
+        return;
+      }
       const parsed = parseCommand(text);
       if (!parsed.ok) {
         heldRef.current = null;
@@ -436,6 +550,15 @@ export function CommandBar({
       return;
     }
     if (e.key === "Escape") {
+      // S44-b: Escape while reading aborts it and clears the status, then
+      // the existing Escape rules apply from the NEXT Escape (brief §3.3).
+      if (readingAbortRef.current) {
+        readingAbortRef.current.abort();
+        readingAbortRef.current = null;
+        readingSeqRef.current++;
+        setStatus(null);
+        return;
+      }
       // First Escape clears the status line; a second clears the input.
       if (status !== null) {
         setStatus(null);
@@ -463,7 +586,12 @@ export function CommandBar({
           onKeyDown={handleKeyDown}
         />
       </div>
-      <p className={styles.statusLine} aria-live="polite">
+      <p
+        className={
+          status?.kind === "reading" ? `${styles.statusLine} ${styles.reading}` : styles.statusLine
+        }
+        aria-live="polite"
+      >
         {status?.message ?? ""}
       </p>
       {status?.kind === "question" && status.candidates.length > 0 && (

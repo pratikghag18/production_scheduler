@@ -8,6 +8,7 @@ import { productsOfferedAtNode } from "@/features/admin/lib/scope";
 import { DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
 import { DEFAULT_TIMEZONE, partsInZone } from "@/lib/format/timezones";
 import type { ResolveContext, BoardDay, ContextRun } from "@/lib/command/resolve";
+import { voiceServiceUrl, readSentence, type Reader } from "@/lib/voice/readSentence";
 import { operatorViewFor, productViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useAbsences } from "./hooks/useAbsences";
@@ -56,6 +57,12 @@ import operatorPanelStyles from "./components/OperatorPanel.module.css";
 /** P1-4c D50: the operator panel auto-collapses once when the viewport
  *  crosses this width downward — see the `useEffect` below (T20). */
 const OPERATOR_PANEL_COLLAPSE_QUERY = "(max-width: 899px)";
+
+/** S44-b: computed once at module load -- `voiceServiceUrl()` only reads
+ *  `import.meta.env`, and `readSentence` is a reference, so this makes no
+ *  request. `null` (no `VITE_VOICE_URL`) leaves the bar's `reader` prop at
+ *  its own default, unchanged from before this stage. */
+const COMMAND_BAR_READER: Reader | null = voiceServiceUrl() ? readSentence : null;
 
 /**
  * The board (brief P1-4a read-only + P1-4b interactions + P1-4c responsive
@@ -765,6 +772,7 @@ export default function BoardPage() {
               ctx={commandCtx}
               dateFormat={dateFormat}
               zone={index.zone}
+              reader={COMMAND_BAR_READER}
               onOpen={(resolved, anchor) => {
                 // R-385: a `retime` target is never a create; `onRetime`
                 // below is the caller for that branch of the union.

@@ -16,6 +16,17 @@ export default defineConfig({
     // e2e/env.ts). The CLI flag overrides this default, so it stays 5173 for
     // the developer, who exports nothing.
     port: 5173,
+    proxy: {
+      // R-393: the voice command bar talks to the local model service
+      // (`npm run voice:serve`, 127.0.0.1:8089) through this proxy rather
+      // than a direct cross-origin fetch, so the browser sees one origin
+      // and the service needs no CORS headers of its own.
+      "/voice": {
+        target: "http://127.0.0.1:8089",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/voice/, ""),
+      },
+    },
   },
   build: {
     rollupOptions: {

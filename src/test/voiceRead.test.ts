@@ -1,0 +1,205 @@
+/**
+ * S44-b (brief docs/agent-briefs/s44-b-read-by-model-brief.md §3.5) --
+ * `src/lib/voice/decode.ts` and `src/lib/voice/readSentence.ts`, unmocked
+ * except for the `fetch` seam `makeReader` takes for exactly this reason.
+ * VR1-VR7 name the cases the brief lists.
+ */
+import { describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import { parseCommand } from "@/lib/command/parse";
+import { decodeCommand } from "@/lib/voice/decode";
+import { makeReader, SYSTEM_PROMPT } from "@/lib/voice/readSentence";
+import type { Reading } from "@/lib/voice/readSentence";
+
+const SENTENCE = "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
+const SYSTEM_PROMPT_PATH = "scripts/voice/train/system_prompt.txt";
+
+function fetchReturningContent(content: string): typeof fetch {
+  return vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+      status: 200,
+    }),
+  ) as unknown as typeof fetch;
+}
+
+/** A `fetch` that never settles on its own -- only an abort (real fetch's
+ *  own behaviour) rejects it, exactly what `makeReader`'s combined
+ *  controller relies on for both the timeout and the caller's own signal. */
+function hangingFetch(): typeof fetch {
+  return vi.fn((_input: unknown, init?: RequestInit) => {
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        const err = new Error("The operation was aborted.");
+        err.name = "AbortError";
+        reject(err);
+      });
+    });
+  }) as unknown as typeof fetch;
+}
+
+describe("VR1: each of the four forms decodes", () => {
+  it("VR1: assign, book, unassign and move all round-trip through decodeCommand", () => {
+    const sentences = [
+      "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2",
+      "book Housing A on Cell 1 in Line 1 from 6 to 2",
+      "unassign Sam from Cell 1 in Line 1 from 10 to 2",
+      "move Sam on Cell 1 in Line 1 to Cell 2",
+    ];
+    for (const sentence of sentences) {
+      const parsed = parseCommand(sentence);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) continue;
+      const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+      expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+    }
+  });
+});
+
+describe("VR2: a missing field and a mistyped field are refused", () => {
+  it("VR2: refuses a missing field and a mistyped field", () => {
+    const parsed = parseCommand(SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+
+    const missingProduct = { ...valid };
+    delete missingProduct.product;
+    expect(decodeCommand(missingProduct)).toBeNull();
+
+    const mistypedHour = {
+      ...valid,
+      start: { ...(valid.start as Record<string, unknown>), hour: "7" },
+    };
+    expect(decodeCommand(mistypedHour)).toBeNull();
+  });
+});
+
+describe("VR3: an invented key is ignored; attach/existing are forced null", () => {
+  it("VR3: extra top-level and nested keys are ignored, attach/existing forced null", () => {
+    const parsed = parseCommand(SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+
+    const withExtras = {
+      ...valid,
+      unexpectedTopLevel: "surprise",
+      start: { ...(valid.start as Record<string, unknown>), unexpectedNested: "surprise" },
+      attach: { kind: "run", runId: "should-be-ignored" },
+      existing: { kind: "separate" },
+    };
+    const decoded = decodeCommand(withExtras);
+    expect(decoded).toEqual(parsed.command);
+    expect(decoded?.intent).toBe("assign");
+    if (decoded && decoded.intent === "assign") {
+      expect(decoded.attach).toBeNull();
+      expect(decoded.existing).toBeNull();
+    }
+  });
+});
+
+describe("VR4: network failures read as unavailable", () => {
+  it("VR4: fetch rejects and a 503 both read as unavailable", async () => {
+    const rejecting = vi
+      .fn()
+      .mockRejectedValue(new Error("network down")) as unknown as typeof fetch;
+    const readerA = makeReader({ baseUrl: "http://voice.local", fetch: rejecting });
+    const resultA = await readerA(SENTENCE, new AbortController().signal);
+    expect(resultA.ok).toBe(false);
+    if (!resultA.ok) expect(resultA.reason).toBe("unavailable");
+
+    const failing = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 503 })) as unknown as typeof fetch;
+    const readerB = makeReader({ baseUrl: "http://voice.local", fetch: failing });
+    const resultB = await readerB(SENTENCE, new AbortController().signal);
+    expect(resultB.ok).toBe(false);
+    if (!resultB.ok) expect(resultB.reason).toBe("unavailable");
+  });
+});
+
+describe("VR5: timeout and garbled answers", () => {
+  it("VR5: a fetch that never resolves times out at timeoutMs", async () => {
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: hangingFetch(),
+      timeoutMs: 20,
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result).toEqual({ ok: false, reason: "timeout" });
+  });
+
+  it("VR5: content with no object is garbled", async () => {
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: fetchReturningContent("no object in here at all"),
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("garbled");
+  });
+
+  it("VR5: content with bad JSON is garbled", async () => {
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: fetchReturningContent("{intent: assign}"),
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("garbled");
+  });
+
+  it("VR5: a valid object that fails decoding is garbled", async () => {
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: fetchReturningContent('{"intent":"assign"}'),
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("garbled");
+  });
+});
+
+describe("VR6: the request body matches the contract exactly", () => {
+  it("VR6: the system message is the training file's bytes, and the other fields match", async () => {
+    let capturedBody: string | undefined;
+    const fetchMock = vi.fn((_url: unknown, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return Promise.resolve(
+        new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+
+    const reader = makeReader({ baseUrl: "http://voice.local", fetch: fetchMock });
+    await reader(SENTENCE, new AbortController().signal);
+
+    expect(capturedBody).toBeDefined();
+    const body = JSON.parse(capturedBody as string) as {
+      messages: { role: string; content: string }[];
+      temperature: number;
+      max_tokens: number;
+      cache_prompt: boolean;
+      chat_template_kwargs: { enable_thinking: boolean };
+    };
+    const expectedSystemPrompt = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf8");
+    expect(SYSTEM_PROMPT).toBe(expectedSystemPrompt);
+    expect(body.messages[0]).toEqual({ role: "system", content: expectedSystemPrompt });
+    expect(body.messages[1]).toEqual({ role: "user", content: SENTENCE });
+    expect(body.temperature).toBe(0);
+    expect(body.max_tokens).toBe(256);
+    expect(body.cache_prompt).toBe(true);
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+});
+
+describe("VR7: a null baseUrl is no-service", () => {
+  it("VR7: makeReader({ baseUrl: null }) answers no-service and never calls fetch", async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch;
+    const reader = makeReader({ baseUrl: null, fetch: fetchMock });
+    const result: Reading = await reader(SENTENCE, new AbortController().signal);
+    expect(result).toEqual({ ok: false, reason: "no-service" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

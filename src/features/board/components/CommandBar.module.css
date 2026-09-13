@@ -37,6 +37,12 @@
   color: var(--ink-2);
 }
 
+/* S44-b: the pending-reading status, "Reading…" -- style only, no new
+   colour (F-130's rule stays: `--ink-1` is never used here). */
+.reading {
+  font-style: italic;
+}
+
 .candidates {
   display: flex;
   flex-wrap: wrap;

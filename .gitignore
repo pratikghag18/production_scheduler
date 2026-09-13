@@ -52,6 +52,10 @@ data/voice/runs/
 # S43-a: bytecode caches from running the new scripts/voice/train/*.py files.
 __pycache__/
 
+# S44-a: the model file served by `npm run voice:serve` -- copy the S43
+# fine-tuned GGUF here; never committed (1+ GB).
+data/voice/model/
+
 # The per-machine Claude Code resume file. It says "personal -- gitignored, not
 # shared" in its own first line, and it is written for whoever is sitting at
 # this checkout: it names local paths, what is running on the machine, and how

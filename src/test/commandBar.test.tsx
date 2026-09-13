@@ -17,9 +17,9 @@
  * Same shape as `settingsPanel.test.tsx`: `@testing-library/react` + jsdom.
  */
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { formatDayLabel } from "@/features/board/lib/time";
-import { formatCommand, type AssignCommand } from "@/lib/command/parse";
+import { formatCommand, parseCommand, type AssignCommand } from "@/lib/command/parse";
 import type {
   ResolveContext,
   ResolvedCommand,
@@ -30,6 +30,7 @@ import type {
   ContextAssignment,
 } from "@/lib/command/resolve";
 import { CommandBar } from "@/features/board/components/CommandBar";
+import type { Reader, Reading } from "@/lib/voice/readSentence";
 
 /** S41-a: `findRunOverlap`, the same stub shape `interaction.ts`'s own
  *  function has (half-open, `excludeRunId` skipped). */
@@ -163,7 +164,10 @@ const BLK2: ContextAssignment = {
   label: "14:00–16:00",
 };
 
-function renderBar(over: Partial<ResolveContext> = {}) {
+/** S44-b: `reader` defaults to `null` -- every pre-S44-b call site (one
+ *  argument only) is unaffected; the CB-model describe block below is the
+ *  only caller that passes a second argument. */
+function renderBar(over: Partial<ResolveContext> = {}, reader: Reader | null = null) {
   const onOpen = vi.fn();
   const onRetime = vi.fn();
   const onBook = vi.fn();
@@ -175,6 +179,7 @@ function renderBar(over: Partial<ResolveContext> = {}) {
       ctx={buildCtx(over)}
       dateFormat="d_mon_yyyy"
       zone="UTC"
+      reader={reader}
       onOpen={onOpen}
       onRetime={onRetime}
       onBook={onBook}
@@ -649,5 +654,169 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onRetimeRun).not.toHaveBeenCalled();
     expect(onUnassign).not.toHaveBeenCalled();
     expect(onMove).not.toHaveBeenCalled();
+  });
+});
+
+// -----------------------------------------------------------------------
+// S44-b: the bar reads through the model service, with a fake `reader`
+// (brief docs/agent-briefs/s44-b-read-by-model-brief.md §3.5). `readSentence`
+// itself (the real `fetch`-backed one) is `src/test/voiceRead.test.ts`'s
+// concern (VR1-VR7); these tests are only about `CommandBar`'s OWN wiring
+// -- the pending status, the abort-and-restart on a second Enter, Escape,
+// and the rules fallback with its readout suffix.
+// -----------------------------------------------------------------------
+
+describe("CB-model: the bar reads through a model reader (S44-b)", () => {
+  it("CB-model-1: a clean model answer opens the popover exactly as the rules would, readout says read by the model", async () => {
+    const parsed = parseCommand(P1_SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsed.command,
+      by: "model",
+    }));
+
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Reading…");
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+
+    // The same fields C2 asserts for the rules reading this exact sentence.
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("c1a");
+    expect(resolved.operatorId).toBe("op1");
+    expect(resolved.target).toEqual({ kind: "direct", productId: "ha" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 });
+    expect(statusText().endsWith(" · read by the model")).toBe(true);
+  });
+
+  it("CB-model-2: 'unavailable' falls back to the rules, readout says why", async () => {
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "unavailable",
+    }));
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+
+    expect(statusText()).toContain("· read by the rules (the model service is off)");
+  });
+
+  it("CB-model-3: a failed parse under 'timeout' is prefixed with why the rules read it", async () => {
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "timeout",
+    }));
+    const { input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(statusText()).toBe(`The model took too long, so the rules read this: ${SHAPE}`),
+    );
+  });
+
+  it("CB-model-4: 'Reading…' shows while pending; a second Enter aborts the first (its signal) and reads again", async () => {
+    const captured: { first: AbortSignal | null } = { first: null };
+    let calls = 0;
+    const fakeReader: Reader = vi.fn((_text: string, signal: AbortSignal) => {
+      calls += 1;
+      if (calls === 1) {
+        captured.first = signal;
+        return new Promise<Reading>(() => {
+          // Never settles -- superseded by the second Enter below.
+        });
+      }
+      return Promise.resolve({ ok: false, reason: "no-service" } as Reading);
+    });
+
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+    expect(calls).toBe(1);
+    expect(captured.first?.aborted ?? false).toBe(false);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(calls).toBe(2);
+    expect(captured.first?.aborted).toBe(true);
+
+    // The second reading answers "no-service" -> exactly the null-reader
+    // path -- the rules read P1_SENTENCE and open the popover, no suffix.
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+    expect(statusText().endsWith("· read by")).toBe(false);
+  });
+
+  it("CB-model-5: Escape while reading aborts it and clears the status", () => {
+    const captured: { signal: AbortSignal | null } = { signal: null };
+    const fakeReader: Reader = vi.fn((_text: string, sig: AbortSignal) => {
+      captured.signal = sig;
+      return new Promise<Reading>(() => {
+        // Never settles.
+      });
+    });
+
+    const { input } = renderBar({ runs: [] }, fakeReader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(captured.signal?.aborted).toBe(true);
+    expect(statusText()).toBe("");
+  });
+
+  it("CB-model-6: a null reader makes no call -- the bar behaves exactly as before S44-b", () => {
+    const spyReader: Reader = vi.fn();
+    const { onOpen, input } = renderBar({ runs: [] }, null);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(spyReader).not.toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(statusText().includes("read by")).toBe(false);
+  });
+
+  // Review finding 1: an edit while reading used to leave "Reading…" on
+  // screen (a stuck-looking spinner) until the next Enter or Escape.
+  it("CB-model-7: an edit while reading aborts it and clears the 'Reading…' status", () => {
+    const fakeReader: Reader = vi.fn(
+      (): Promise<Reading> =>
+        new Promise(() => {
+          // Never settles.
+        }),
+    );
+    const { input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+
+    fireEvent.change(input, { target: { value: `${P1_SENTENCE} more` } });
+    expect(statusText()).toBe("");
+  });
+
+  // Review finding 2: Enter on empty/whitespace-only text used to reach the
+  // reader (a network round trip, possibly a 20s wait) and then fall back
+  // with a misleading "not a form" prefix. It must take exactly the
+  // null-reader path instead.
+  it("CB-model-8: empty or whitespace-only text never reaches the reader", () => {
+    const fakeReader: Reader = vi.fn();
+    const { input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fakeReader).not.toHaveBeenCalled();
+    expect(statusText()).toBe(SHAPE);
+
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fakeReader).not.toHaveBeenCalled();
+    expect(statusText()).toBe(SHAPE);
   });
 });
