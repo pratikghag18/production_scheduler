@@ -16,6 +16,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SYSTEM_PROMPT_PATH = fileURLToPath(new URL("../train/system_prompt.txt", import.meta.url));
+const FORM_SCHEMA_PATH = fileURLToPath(new URL("./form.schema.json", import.meta.url));
 const DEFAULT_URL = "http://127.0.0.1:8089";
 
 function parseArgs(argv) {
@@ -26,6 +27,7 @@ function parseArgs(argv) {
     heldout: null,
     out: null,
     limit: null,
+    grammar: true,
     words: [],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -36,6 +38,7 @@ function parseArgs(argv) {
     else if (a === "--heldout") out.heldout = argv[++i];
     else if (a === "--out") out.out = argv[++i];
     else if (a === "--limit") out.limit = Number(argv[++i]);
+    else if (a === "--no-grammar") out.grammar = false;
     else out.words.push(a);
   }
   if (!out.sentence && out.words.length > 0) out.sentence = out.words.join(" ");
@@ -84,7 +87,7 @@ function parseForm(content) {
   }
 }
 
-async function callService(url, systemPrompt, sentence) {
+async function callService(url, systemPrompt, sentence, schema) {
   const body = {
     messages: [
       { role: "system", content: systemPrompt },
@@ -95,6 +98,9 @@ async function callService(url, systemPrompt, sentence) {
     cache_prompt: true,
     chat_template_kwargs: { enable_thinking: false },
   };
+  if (schema) {
+    body.response_format = { type: "json_schema", json_schema: { schema } };
+  }
   const started = performance.now();
   const res = await fetch(`${url}/v1/chat/completions`, {
     method: "POST",
@@ -112,8 +118,8 @@ async function callService(url, systemPrompt, sentence) {
   return { content, form, wallMs, timings: json?.timings ?? null };
 }
 
-async function runOnce(url, systemPrompt, sentence) {
-  const { content, form, wallMs, timings } = await callService(url, systemPrompt, sentence);
+async function runOnce(url, systemPrompt, sentence, schema) {
+  const { content, form, wallMs, timings } = await callService(url, systemPrompt, sentence, schema);
   console.log(`\nsentence: ${sentence}`);
   console.log(`content: ${content}`);
   console.log(`form: ${form === null ? "null (not a form)" : JSON.stringify(form, null, 2)}`);
@@ -121,10 +127,10 @@ async function runOnce(url, systemPrompt, sentence) {
   if (timings) console.log(`server timings: ${JSON.stringify(timings)}`);
 }
 
-async function runRepeat(url, systemPrompt, sentence, repeat) {
+async function runRepeat(url, systemPrompt, sentence, repeat, schema) {
   for (let i = 0; i < repeat; i++) {
     console.log(`\n--- call ${i + 1}/${repeat} ---`);
-    await runOnce(url, systemPrompt, sentence);
+    await runOnce(url, systemPrompt, sentence, schema);
   }
 }
 
@@ -190,7 +196,7 @@ function loadResumablePredictions(path) {
 // those and keep appending instead of starting over -- a long held-out run
 // interrupted partway through does not have to redo the rows it already
 // has.
-async function runHeldout(url, systemPrompt, heldoutPath, outPath, limit) {
+async function runHeldout(url, systemPrompt, heldoutPath, outPath, limit, schema) {
   const rows = loadJsonl(heldoutPath);
   const limited = limit ? rows.slice(0, limit) : rows;
   const total = limited.length;
@@ -216,7 +222,7 @@ async function runHeldout(url, systemPrompt, heldoutPath, outPath, limit) {
     const row = toRun[i];
     let form = null;
     try {
-      const result = await callService(url, systemPrompt, row.sentence);
+      const result = await callService(url, systemPrompt, row.sentence, schema);
       form = result.form;
     } catch (err) {
       console.error(`row ${row.id} failed: ${err.message}`);
@@ -243,10 +249,12 @@ async function runHeldout(url, systemPrompt, heldoutPath, outPath, limit) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const systemPrompt = readFileSync(SYSTEM_PROMPT_PATH, "utf8");
+  const schema = args.grammar ? JSON.parse(readFileSync(FORM_SCHEMA_PATH, "utf8")) : null;
+  console.log(args.grammar ? "mode: grammar (form.schema.json)" : "mode: no-grammar");
 
   if (args.heldout) {
     if (!args.out) throw new Error("probe.mjs: --heldout requires --out <predictions.jsonl>");
-    await runHeldout(args.url, systemPrompt, args.heldout, args.out, args.limit);
+    await runHeldout(args.url, systemPrompt, args.heldout, args.out, args.limit, schema);
     return;
   }
 
@@ -256,8 +264,8 @@ async function main() {
     );
   }
 
-  if (args.repeat > 1) await runRepeat(args.url, systemPrompt, args.sentence, args.repeat);
-  else await runOnce(args.url, systemPrompt, args.sentence);
+  if (args.repeat > 1) await runRepeat(args.url, systemPrompt, args.sentence, args.repeat, schema);
+  else await runOnce(args.url, systemPrompt, args.sentence, schema);
 }
 
 // Guarded so this file can be imported (e.g. from a scratch test script)

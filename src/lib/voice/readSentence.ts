@@ -13,6 +13,10 @@ import { decodeCommand } from "./decode.ts";
 // `?raw` is a Vite/vitest import-query for the file's bytes as a string,
 // declared by vite/client.d.ts ("declare module '*?raw'") — not a copy.
 import SYSTEM_PROMPT_RAW from "../../../scripts/voice/train/system_prompt.txt?raw";
+// S45-a: the same schema the probe sends under `response_format`, so the
+// server's grammar refuses a wrong-shaped answer here too — never a copy
+// under `src` (brief §2.3).
+import formSchema from "../../../scripts/voice/serve/form.schema.json";
 
 export const SYSTEM_PROMPT: string = SYSTEM_PROMPT_RAW;
 
@@ -129,6 +133,7 @@ export function makeReader(opts?: {
           max_tokens: 256,
           cache_prompt: true,
           chat_template_kwargs: { enable_thinking: false },
+          response_format: { type: "json_schema", json_schema: { schema: formSchema } },
         }),
         signal: controller.signal,
       });

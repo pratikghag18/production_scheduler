@@ -71,3 +71,12 @@ node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions da
 
 Drop `--limit` to run all 400. The probe skips ids already in `--out`, so an interrupted run
 picks up where it left off instead of starting over -- rerun the same command to continue it.
+
+## The grammar (S45-a)
+
+By default the probe and the app send `form.schema.json` under `response_format`, which
+llama.cpp turns into a grammar that forbids any answer but the four command shapes in the
+model's own alphabetical key order -- no wrong field name, no missing or extra key, no
+out-of-range hour or weekday. Pass `--no-grammar` to `npm run voice:probe` to send the plain
+request instead, the way S44 measured it, so the grammar's accuracy and time cost can be
+compared against a run without it.

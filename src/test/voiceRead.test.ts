@@ -10,6 +10,7 @@ import { parseCommand } from "@/lib/command/parse";
 import { decodeCommand } from "@/lib/voice/decode";
 import { makeReader, SYSTEM_PROMPT } from "@/lib/voice/readSentence";
 import type { Reading } from "@/lib/voice/readSentence";
+import formSchema from "../../scripts/voice/serve/form.schema.json";
 
 const SENTENCE = "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
 const SYSTEM_PROMPT_PATH = "scripts/voice/train/system_prompt.txt";
@@ -182,6 +183,7 @@ describe("VR6: the request body matches the contract exactly", () => {
       max_tokens: number;
       cache_prompt: boolean;
       chat_template_kwargs: { enable_thinking: boolean };
+      response_format: { type: string; json_schema: { schema: unknown } };
     };
     const expectedSystemPrompt = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf8");
     expect(SYSTEM_PROMPT).toBe(expectedSystemPrompt);
@@ -191,6 +193,15 @@ describe("VR6: the request body matches the contract exactly", () => {
     expect(body.max_tokens).toBe(256);
     expect(body.cache_prompt).toBe(true);
     expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: { schema: formSchema },
+    });
+    // Byte-equal to the file's parsed content, not just structurally similar.
+    const fileSchema = JSON.parse(
+      fs.readFileSync("scripts/voice/serve/form.schema.json", "utf8"),
+    ) as unknown;
+    expect(body.response_format.json_schema.schema).toEqual(fileSchema);
   });
 });
 
@@ -201,5 +212,71 @@ describe("VR7: a null baseUrl is no-service", () => {
     const result: Reading = await reader(SENTENCE, new AbortController().signal);
     expect(result).toEqual({ ok: false, reason: "no-service" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// S45-a VR8: the schema in `form.schema.json` must agree with the four
+// `Command` shapes field for field -- no schema-validation library, just a
+// small hand-written walk (brief §2.4).
+describe("VR8: the schema matches the four canonical forms field for field", () => {
+  type JsonSchemaNode = {
+    $ref?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+    oneOf?: JsonSchemaNode[];
+  };
+
+  const root = formSchema as { $defs: Record<string, JsonSchemaNode>; oneOf: JsonSchemaNode[] };
+
+  function branchFor(intent: string): JsonSchemaNode {
+    const branch = root.oneOf.find(
+      (b) => (b.properties?.intent as { const?: string } | undefined)?.const === intent,
+    );
+    if (!branch) throw new Error(`no schema branch for intent "${intent}"`);
+    return branch;
+  }
+
+  const cases: Array<{ sentence: string; intent: string }> = [
+    { sentence: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2", intent: "assign" },
+    { sentence: "book Housing A on Cell 1 in Line 1 from 6 to 2", intent: "book" },
+    { sentence: "unassign Sam from Cell 1 in Line 1 from 10 to 2", intent: "unassign" },
+    { sentence: "move Sam on Cell 1 in Line 1 to Cell 2", intent: "move" },
+  ];
+
+  for (const { sentence, intent } of cases) {
+    it(`VR8: ${intent}'s branch has exactly the form's keys, as its required list, alphabetical`, () => {
+      const parsed = parseCommand(sentence);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const form = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+      const formKeys = Object.keys(form);
+
+      const branch = branchFor(intent);
+      const schemaKeys = Object.keys(branch.properties ?? {});
+
+      for (const key of formKeys) {
+        expect(schemaKeys, `"${key}" is missing from the ${intent} schema branch`).toContain(key);
+      }
+      expect([...(branch.required ?? [])].sort()).toEqual([...formKeys].sort());
+      expect(schemaKeys).toEqual([...schemaKeys].sort());
+    });
+  }
+
+  it("VR8: every properties object anywhere in the schema (branches and $defs) is alphabetical", () => {
+    function walk(node: unknown): void {
+      if (Array.isArray(node)) {
+        node.forEach(walk);
+        return;
+      }
+      if (node !== null && typeof node === "object") {
+        const obj = node as Record<string, unknown>;
+        if (obj.properties && typeof obj.properties === "object") {
+          const keys = Object.keys(obj.properties as Record<string, unknown>);
+          expect(keys).toEqual([...keys].sort());
+        }
+        for (const value of Object.values(obj)) walk(value);
+      }
+    }
+    walk(root);
   });
 });
