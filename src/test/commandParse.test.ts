@@ -1040,3 +1040,64 @@ describe("commandParse: R-391 the optional verb widens, one list per sentence", 
     expect(parseCommand(`Reschedule ${MOVE_TAIL}`)).toEqual(parseCommand(`move ${MOVE_TAIL}`));
   });
 });
+
+describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
+  it("assign, dotted meridiem with a trailing sentence period: 7:00 p.m. to 8:00 p.m.", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 7:00 p.m. to 8:00 p.m.")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 19, minute: 0 },
+        end: { hour: 20, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+  });
+
+  it("unassign, mixed case dotted meridiem: 8 a.m. to 11 A.M.", () => {
+    expect(parseCommand("unassign Sam from Cell 1 from 8 a.m. to 11 A.M.")).toEqual(
+      ok({
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: { start: { hour: 8, minute: 0 }, end: { hour: 11, minute: 0 } },
+        existing: null,
+      }),
+    );
+  });
+
+  it("move, dotted meridiem with no trailing dots: 7 p.m to 9 p.m", () => {
+    expect(parseCommand("move Sam on Cell 1 to 7 p.m to 9 p.m")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1"],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 19, minute: 0 }, end: { hour: 21, minute: 0 } },
+        existing: null,
+      }),
+    );
+  });
+
+  it("existing-behaviour guard: 'from 7 to 8' with no meridiem at all is unaffected", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 7 to 8")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 7, minute: 0 },
+        end: { hour: 8, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+  });
+});
