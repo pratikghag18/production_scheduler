@@ -162,7 +162,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="num">43</span>
   <h3>The first model — fine-tune Qwen3 1.7B and score it against the held-out set</h3>
   <div class="what"><p><b>Teach a small model to read any phrasing.</b> The board reads four fixed sentences; the model sits in front of the bar as a translator, turning however a person says it into the strict form the board already reads. The base is Qwen3 1.7B (Apache 2.0; the maintainer's pick from a shortlist of three). A Colab notebook the repo carries loads the generated training set, fine-tunes with LoRA, scores the result on the 400 held-out rows with the repo's own scorer, and exports the compressed file the local runtime (Stage 5) will serve. The training runs on Google Colab's free GPU because this machine has none; the maintainer presses run and hands back the files.</p></div>
-  <div class="state"><p><b>Briefed session 152 (12 Sept).</b> The notebook, its data step, the predictions format and the scoring path are the developer's; the Colab run and the resulting score are the maintainer's. The bar: the model must beat the rule parser's baseline on perturbed rows (4%) by a wide margin while staying at the bar on clean rows; the number is recorded on this card when the run has happened. <b>The notebook shipped in session 152 (5b09a61).</b> The data step, the predictions round trip, the Python port of the scorer and every code cell's syntax are verified here; the training cells are unverified until the maintainer's first Colab run. The README under scripts/voice/train is the maintainer's step-by-step. <b>Waiting on the maintainer:</b> the run, and the score. <b>First run, session 153:</b> died in the load-data cell on Colab's TensorFlow (F-135), fixed the same hour; the run continues from that cell. Then the next cell died on a mixed transformers install (F-136, the converter's requirements file); fixed by installing only what the converter needs, and the run restarts on a fresh runtime.</p></div>
+  <div class="state"><p><b>Briefed session 152 (12 Sept).</b> The notebook, its data step, the predictions format and the scoring path are the developer's; the Colab run and the resulting score are the maintainer's. The bar: the model must beat the rule parser's baseline on perturbed rows (4%) by a wide margin while staying at the bar on clean rows; the number is recorded on this card when the run has happened. <b>The notebook shipped in session 152 (5b09a61).</b> The data step, the predictions round trip, the Python port of the scorer and every code cell's syntax are verified here; the training cells are unverified until the maintainer's first Colab run. The README under scripts/voice/train is the maintainer's step-by-step. <b>Waiting on the maintainer:</b> the run, and the score. <b>First run, session 153:</b> died in the load-data cell on Colab's TensorFlow (F-135), fixed the same hour; the run continues from that cell. Then the next cell died on a mixed transformers install (F-136, the converter's requirements file); fixed by installing only what the converter needs, and the run restarts on a fresh runtime. On that runtime the model loaded and the LoRA step met Colab's old torchao (F-137); removed, and the run continues from the LoRA cell.</p></div>
   <p class="fine">docs/voice-commands-plan.md (Stage 4) · docs/agent-briefs/s43-a-first-model-brief.md · session 152 conversation (the base model chosen)</p><p class="fine">Delivers <a href="#R-392">R-392</a></p>
   <span class="tags"><span class="chip now">In progress</span><span class="chip yours">Your run</span></span>
 </div></div>
@@ -2174,7 +2174,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>136 things that weren't in the plan</h2>
+  <h2>137 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3384,6 +3384,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <div class="aside"><span class="k">Fix</span><p>Session 153 (138a040). The requirements file is not installed at all: the converter script needs only gguf and sentencepiece beyond what training already has, and those two are installed on their own, before our pins; the clone stays for the converter script and llama-quantize. The install cell asserts every pinned version after installing and prints the torch version beside the GPU name, so a future file that fights a pin fails there, loudly. The export cell's comment says the converter runs on transformers 5.17 and that a separate venv, never a downgrade, is the answer if it ever objects. The maintainer was given the one-line change to paste before restarting.</p></div>
   <p class="fine">R-392 · F-135</p>
+</div>
+<div class="find fix" id="F-137">
+  <span class="tag">A library we never use, refused for us · fixed · you found it · <a href="#S43">S43</a></span>
+  <h3>Colab's preinstalled torchao is older than peft accepts, and peft's probe raises instead of skipping</h3>
+  <p>Reported 12 Sept (session 153) from the maintainer's first Colab run, three cells past F-136 --- the install held, Drive mounted, the base model loaded --- and <code>get_peft_model</code> raised <code>Found an incompatible version of torchao. Found version 0.10.0, but only versions above 0.16.0 are supported</code>. peft's LoRA injection tries a torchao dispatcher when torchao is importable, and its version probe raises rather than declining; Colab preinstalls torchao 0.10.0. Nothing in this pipeline quantises with torchao.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 153 (e79e846). The install cell uninstalls torchao before anything else and the version-assertion block checks it is gone; upgrading it was ruled out because it pulls its own torch and the runtime's GPU build must not move. The maintainer was given a one-cell uninstall and a session restart to continue the run without re-uploading. The README names this as the third known first-run finding.</p></div>
+  <p class="fine">R-392 · F-136</p>
 </div>
 </section>
 

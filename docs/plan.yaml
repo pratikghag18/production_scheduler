@@ -2113,7 +2113,8 @@ stages:
     **First run, session 153:** died in the load-data cell on Colab's TensorFlow (F-135), fixed the same
     hour; the run continues from that cell. Then the next cell died on a mixed transformers install
     (F-136, the converter's requirements file); fixed by installing only what the converter needs, and
-    the run restarts on a fresh runtime.
+    the run restarts on a fresh runtime. On that runtime the model loaded and the LoRA step met
+    Colab's old torchao (F-137); removed, and the run continues from the LoRA cell.
 - id: M1
   track: matrix
   num: 1
@@ -10233,6 +10234,28 @@ requirements:
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-137
+  title: Colab's preinstalled torchao is older than peft accepts, and peft's probe raises instead of skipping
+  tag: A library we never use, refused for us
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-136
+  story: >-
+    Reported 12 Sept (session 153) from the maintainer's first Colab run, three cells past F-136 --- the
+    install held, Drive mounted, the base model loaded --- and `get_peft_model` raised `Found an
+    incompatible version of torchao. Found version 0.10.0, but only versions above 0.16.0 are
+    supported`. peft's LoRA injection tries a torchao dispatcher when torchao is importable, and its
+    version probe raises rather than declining; Colab preinstalls torchao 0.10.0. Nothing in this
+    pipeline quantises with torchao.
+  fix: >-
+    Session 153 (e79e846). The install cell uninstalls torchao before anything else and the
+    version-assertion block checks it is gone; upgrading it was ruled out because it pulls its own
+    torch and the runtime's GPU build must not move. The maintainer was given a one-cell uninstall and
+    a session restart to continue the run without re-uploading. The README names this as the third
+    known first-run finding.
 - id: F-136
   title: The llama.cpp converter's requirements file downgraded transformers under our pin, and pins a CPU-only torch
   tag: A requirements file that fights the pins
