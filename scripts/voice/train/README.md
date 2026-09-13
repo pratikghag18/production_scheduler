@@ -30,15 +30,23 @@ Nothing in the app changes from running this. No model is served until its score
    `scripts/voice/train/score_port.py` into the notebook's own file browser (the folder icon on
    the left, drag the file in, or use its upload button) — the scoring cell imports it from
    `/content/score_port.py` and fails with a plain message if it is missing. Then:
-   Runtime → Change runtime type → T4 GPU, then Runtime → Run all. About an hour; the early
-   cells print progress within seconds, training is the long step. If the session disconnects,
-   run it again — the notebook writes everything to Drive, not to the Colab session, but there
-   is no mid-training checkpoint resume in this version, so a disconnect during training means
-   that pass restarts from the beginning.
+   Runtime → Change runtime type → T4 GPU, then Runtime → Run all. Should be 30 to 60 minutes on
+   a T4 with fp16; the first run trained on bf16 emulation (a T4 has no bf16 hardware, but a
+   recent torch answers "supported" anyway) and took over six hours before that was caught. If
+   the session disconnects mid-training, run it again — training resumes from its last
+   checkpoint (saved every 50 steps on Drive) instead of restarting.
+
+   To stop a training run cleanly by hand instead of waiting for a disconnect: interrupt the
+   training cell (the stop button), then run a new cell containing
+   `trainer.save_model(ADAPTER_DIR); tokenizer.save_pretrained(ADAPTER_DIR)`, then use
+   Runtime → "Run after" from the Predict cell to continue without retraining. A `Run all` on
+   any later day finds that saved adapter, prints that training is being skipped, and goes
+   straight to prediction and scoring — delete the adapter folder on Drive (under
+   `scheduler-voice/run-qwen3-1.7b/adapter`) to force a genuinely fresh run.
 
 4. **When it finishes**, download `predictions.jsonl` and `model-q4_k_m.gguf` from the run
-   folder in Drive (`scheduler-voice/run-<timestamp>/`, the exact path is printed by the
-   Settings cell and again by the last markdown cell) into `data/voice/runs/<timestamp>/`
+   folder in Drive (`scheduler-voice/run-qwen3-1.7b/`, a fixed name — the exact path is printed
+   by the Settings cell and again by the last markdown cell) into `data/voice/runs/<timestamp>/`
    locally (gitignored).
 
 5. **Score it here** — this is the number that counts, not the notebook's own printout:
