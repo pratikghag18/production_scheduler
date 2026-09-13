@@ -2241,6 +2241,31 @@ stages:
     **Briefed session 158 (13 Sept).** One lane: the recogniser wrapper, the bar's listening state and
     button, the tests with a fake recogniser, and the role walk unchanged. Owed here: the tests named
     on R-394 and a session entry.
+- id: S47
+  track: core
+  num: 47
+  title: Show what the sentence will do, then a word does it — the outline and the spoken yes
+  status: open
+  owner: agent
+  refs:
+  - session 158 conversation (the maintainer, 13 Sept)
+  - docs/agent-briefs/s47-a-outline-and-yes-brief.md
+  delivers:
+  - R-395
+  what: >-
+    **The board shows what a sentence is about to do, and yes does it.** Today a sentence that acts on
+    a block that already exists --- remove Ana from Cell 1, move her block, make it longer --- ends in a
+    button in the bar, and the click is the confirmation. This stage draws the answer on the board
+    instead: the block the sentence resolved to gets an outline (red for a removal, the board's accent
+    for a move or a re-time) while the question stands, and when there is exactly one candidate a
+    typed or spoken yes runs the same command the button runs; no, or Escape, clears the outline. With
+    two candidates both are outlined and the buttons stay, since yes would be ambiguous. Wherever a
+    sentence opens the create pop-up, a yes at the bar while the pop-up would create on Enter (R-384)
+    creates it, so a whole command can be said hands-free. Nothing writes without the word or the click;
+    the writer behind them is the one the button already calls.
+  state: >-
+    **Stated 13 Sept (session 158)**, after the maintainer used the microphone to remove someone and
+    met the button. Briefed when S45 and S46 have landed, because all three touch the bar.
 - id: M1
   track: matrix
   num: 1
@@ -10425,6 +10450,31 @@ requirements:
     absent without a recogniser; press starts and the bar says listening; interim text lands in the
     input; a final result submits through the same Enter path; press again stops and keeps the text;
     not-allowed, no-speech and a generic error each set their status line) and the role walk is unchanged.
+
+- id: R-395
+  title: A sentence that acts on existing blocks outlines them on the board, and a typed or spoken yes confirms when there is one
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: "it should highlight the assignment with a red border to show what is going to be removed and then I should be able to confirm it verbally/text and the board removes it" --- and, asked whether to apply it wherever it fits: "Yes, please add the same logic wherever applicable.")'
+  stated_by: maintainer
+  claim: >-
+    When a sentence resolves to a question whose candidates are blocks already on the board (which block
+    to remove, which to move, whether to make a person's own block longer), the board outlines those
+    blocks while the question stands --- red for a removal, the board's accent colour otherwise --- and
+    the outline clears when the question is answered, cleared, or replaced by a new sentence. When the
+    question has exactly one candidate, the status line says a yes will do it, and yes, typed or spoken
+    (yes, confirm, do it, remove it, move it), runs the same command the candidate button runs; no,
+    cancel or Escape clears the question and the outline. With several candidates the buttons remain and
+    a bare yes is refused with a sentence naming the choices. While a create pop-up opened by a sentence
+    is showing and would create on Enter (R-384), a yes at the bar creates it; a no closes it. Nothing
+    is written except through the writer the button or the pop-up already calls.
+  verified_by:
+  - kind: manual
+    steps: "say or type remove <person> from <cell> <hours>; the block gets a red outline and the line says a yes will remove it; say yes; the block is gone. Repeat with a move to another cell: the block is outlined, yes opens the pop-up preset, yes again creates. Say no after the outline appears: nothing changes, the outline clears."
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 158); to be built as S47 after S45 and S46 land. Covered when the bar's
+    tests carry the yes/no cases for one and several candidates and the pop-up yes, and the board's
+    tests show the outline follows the question.
 
 findings:
 - id: F-143
@@ -21267,6 +21317,12 @@ next:
     A button beside the bar. First the browser's own recogniser (zero setup, audio leaves the
     building, some sites will refuse); then Whisper through the Stage 5 service so audio stays on
     site. Both hand their text to the bar and nothing else changes.
+- kind: task
+  stage: S47
+  text: "The outline and the spoken yes --- a sentence shows what it will do on the board, a word does it (S47, R-395)"
+  why: >-
+    The maintainer's request after using the microphone to remove someone and meeting a button (session
+    158). Briefed the moment S45 and S46 are committed, since all three edit the bar.
 - kind: task
   text: "Voice plan Stage 8 --- the question catalog: twenty to thirty questions schedulers ask, one tested lookup each"
   why: >-
