@@ -2114,7 +2114,9 @@ stages:
     hour; the run continues from that cell. Then the next cell died on a mixed transformers install
     (F-136, the converter's requirements file); fixed by installing only what the converter needs, and
     the run restarts on a fresh runtime. On that runtime the model loaded and the LoRA step met
-    Colab's old torchao (F-137); removed, and the run continues from the LoRA cell.
+    Colab's old torchao (F-137); removed, and the run continues from the LoRA cell. Training then ran
+    on emulated bf16 at a hundred seconds a step (F-138); stopped by hand at step 110 with the loss at
+    its floor, the adapter saved, and the run continued to prediction and scoring.
 - id: M1
   track: matrix
   num: 1
@@ -10234,6 +10236,29 @@ requirements:
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-138
+  title: The notebook chose bf16 on a T4, which emulates it, and trained ten times slower than it should
+  tag: Supported is not the same as fast
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-137
+  story: >-
+    Reported 12 Sept (session 153) with a screenshot of the training cell after two hours and
+    thirty-nine minutes: 110 of 375 steps at 0.01 steps a second, an estimate of over six hours to
+    finish, while the loss column had reached its floor by step 80 (0.365 at step 20, then 0.021,
+    0.009, 0.005, 0.007). The developer session had said "well under an hour". The Settings cell
+    chose bf16 because torch answers yes to "is bf16 supported" on a T4, which has no bf16 hardware
+    and emulates it; a T4 wants fp16. The maintainer was told to stop the cell, save the adapter by
+    hand (the model had plainly learned the task) and continue to prediction, scoring and export.
+  fix: >-
+    Session 153 (a4817ff). Precision is decided by compute capability --- bf16 from Ampere up, fp16
+    below --- and printed beside the GPU name. Because a session can die before the end, the trainer
+    checkpoints to Drive every fifty steps and resumes from the newest; the run folder has a fixed name
+    and a Run all that finds a saved adapter loads it and skips training. The README's "about an hour"
+    is replaced by the honest range and the first run's time, with the stop-and-save recipe.
 - id: F-137
   title: Colab's preinstalled torchao is older than peft accepts, and peft's probe raises instead of skipping
   tag: A library we never use, refused for us
