@@ -3,7 +3,7 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-12'
+  updated: '2026-09-13'
   tip: '5b09a61'
   baseline:
     app_tests: 2750
@@ -2119,7 +2119,18 @@ stages:
     its floor, the adapter saved, and the run continued to prediction and scoring --- blind, because
     the Predict cell printed nothing until the end (F-139); now it shows progress and writes as it goes.
     The one-row probe answered correctly in every field plus an invented key (F-140); the scorer now
-    judges the known fields and reports extras. The 400-row prediction is running as this is written.
+    judges the known fields and reports extras.
+    **THE FIRST SCORE (13 Sept, session 153): FAIL.** Clean 90/200 (45%), perturbed 77/200 (38.5%);
+    by intent, unassign 100% clean and move 78%, assign 2% and book 0%. One cause, read from the
+    predictions file rather than the totals: in 397 of 400 answers the model left out the `product`
+    field entirely and put invented fields in its place (`type` 148 rows, `span` 83, `text` 73);
+    every other field it filled in was mostly right (operator 96%, start and end 97.5%, intent 98.8%).
+    The training data is not the cause --- all 2203 assign and book training answers carry the key
+    and the system prompt names it. The run that produced this was stopped by hand at step 110 of
+    375, under one pass over the data, on emulated bf16, then cast to fp16 for prediction; the
+    part's name is the hardest field (fifty realistic names with digits and slashes) and the one a
+    model that has seen each example once has not learned to emit. The second run is the fixed
+    notebook as committed: fp16 from the start, three full passes, checkpoints on Drive.
 - id: M1
   track: matrix
   num: 1
@@ -14003,6 +14014,47 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 153
+  date: 2026-09-13
+  title: "The first model's first run: five first-run findings fixed, and a score that fails on one missing field"
+  commits: ['5c13587', '138a040', 'e79e846', 'a4817ff', '2ca0d26', 'a5d6433']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: false
+  numbers_note: >-
+    Carried from session 152 except app_tests: the voice-data file gained V10-V13 (+4) in a5d6433 and
+    only that file and the training file were run (17 passed in 2), not the full suite; the next full
+    run will confirm. tsc, eslint and prettier were clean on every touched file per commit.
+  summary: >-
+    The maintainer ran the Colab notebook for the first time, over an evening, pasting each traceback
+    as it came; the developer session answered each with a paste-in fix for the open Colab and a
+    Sonnet-lane fix for the repo copy, and recorded each as a finding. Five in a row: transformers'
+    seed helper importing Colab's TensorFlow (F-135); the llama.cpp converter's requirements file
+    downgrading transformers and pinning a CPU-only torch (F-136); Colab's old torchao refused by peft
+    (F-137); bf16 emulation on a T4 at a hundred seconds a step, when the developer session had
+    promised under an hour (F-138); and a Predict cell that printed nothing and wrote nothing until
+    the end, under a two-hour session deadline (F-139). Then the first answer came back right in
+    every field with an invented key, and the scorer, which compared whole texts, would have failed it
+    (F-140); the scorer and its Python port now judge the known fields and report extras.
+    ⚠️ THE FIRST SCORE FAILS THE BAR, AND THE REASON IS ONE FIELD. Clean 45%, perturbed 38.5%. Read
+    from the predictions file: 397 of 400 answers omit `product` and carry invented keys instead;
+    unassign and move, which have no product field, scored 100% and 78% clean. The training data is
+    right (every assign and book answer carries the key; checked). The run had been stopped by hand
+    at step 110 of 375, under one pass, on emulated bf16, then cast to fp16 for prediction --- the
+    hardest field is the one a model that saw each example once has not learned to emit. The second
+    run is the committed notebook as is: fp16 natively, three passes, checkpoints; the adapter folder
+    on Drive deleted so it retrains. No notebook change was made for the score itself, on purpose:
+    one variable at a time.
+    ⭐ WHAT THE EVENING PROVED ANYWAY: the whole path runs --- data to Drive, train, save, predict
+    with progress, score with the repo's instrument, merge, convert to f16 GGUF (the q4 quantise
+    was still building when the score came back). R-392 stays covered on the repo half and the
+    score line on S43 is the honest state.
 - id: 152
   date: 2026-09-12
   title: "The first model: Qwen3 1.7B chosen, the Colab notebook and its data step shipped (S43, R-392 half-proved)"
