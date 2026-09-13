@@ -2111,7 +2111,9 @@ stages:
     unverified until the maintainer's first Colab run. The README under scripts/voice/train is the
     maintainer's step-by-step. **Waiting on the maintainer:** the run, and the score.
     **First run, session 153:** died in the load-data cell on Colab's TensorFlow (F-135), fixed the same
-    hour; the run continues from that cell.
+    hour; the run continues from that cell. Then the next cell died on a mixed transformers install
+    (F-136, the converter's requirements file); fixed by installing only what the converter needs, and
+    the run restarts on a fresh runtime.
 - id: M1
   track: matrix
   num: 1
@@ -10231,6 +10233,33 @@ requirements:
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-136
+  title: The llama.cpp converter's requirements file downgraded transformers under our pin, and pins a CPU-only torch
+  tag: A requirements file that fights the pins
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-135
+  story: >-
+    Reported 12 Sept (session 153) from the maintainer's first Colab run, the cell after F-135's:
+    `from transformers import AutoModelForCausalLM` raised `cannot import name 'GenerationMixin'`. The
+    install cell installed our five pins and THEN `requirements-convert_hf_to_gguf.txt` from the
+    llama.cpp clone; that file includes `requirements-convert_legacy_llama.txt`, which pins
+    `transformers==4.57.6` (plus numpy, sentencepiece, gguf and protobuf<5), so transformers was
+    downgraded underneath ours and two versions lay mixed on disk. Read at llama.cpp HEAD by the lane,
+    the outer file also pins `torch==2.11.0` from a CPU-only wheel index --- a hazard the run had not
+    reached, since a fresh runtime could have had Colab's GPU torch replaced by a CPU build and the GPU
+    check would have blamed the runtime type.
+  fix: >-
+    Session 153 (138a040). The requirements file is not installed at all: the converter script needs
+    only gguf and sentencepiece beyond what training already has, and those two are installed on their
+    own, before our pins; the clone stays for the converter script and llama-quantize. The install
+    cell asserts every pinned version after installing and prints the torch version beside the GPU
+    name, so a future file that fights a pin fails there, loudly. The export cell's comment says the
+    converter runs on transformers 5.17 and that a separate venv, never a downgrade, is the answer if
+    it ever objects. The maintainer was given the one-line change to paste before restarting.
 - id: F-135
   title: The notebook's seed helper imported TensorFlow and died on Colab's protobuf
   tag: A first-run finding, as the README predicted
