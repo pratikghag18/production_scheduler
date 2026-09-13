@@ -2085,7 +2085,7 @@ stages:
   track: core
   num: 43
   title: The first model — fine-tune Qwen3 1.7B and score it against the held-out set
-  status: now
+  status: done
   owner: maintainer
   refs:
   - docs/voice-commands-plan.md (Stage 4)
@@ -2142,8 +2142,16 @@ stages:
     (93.5%), against a rule parser that reads 3.5% of the perturbed rows; no invented keys in any
     row. By intent, perturbed: assign 94%, book 96%, unassign 94%, move 90%. The table's span and
     day lines read low and that was the instrument (F-143), fixed and re-scored. The model is Qwen3
-    1.7B as chosen; the Qwen3.5 comparison is now optional, not owed. What remains on this card: the
-    quantised GGUF downloaded from Drive for Stage 5.
+    1.7B as chosen; the Qwen3.5 comparison is now optional, not owed.
+    **DONE 13 Sept (session 156).** Re-scored with the fixed instrument: clean 200/200, perturbed
+    187/200 (93.5%); by field, every one at or above 96% (span 200/200, day 399/400, toPlace 96/100).
+    The 13 misses are all perturbed rows and all of one kind: a name mangled by the perturbation
+    ("rTim Station", "Sevn Horvath", "hCassis Line", "Driverain") read back as a different but
+    plausible name, or a product cut short ("Harness" for "Wire Harness"); the resolver's own
+    matching (D117) decides those at the pop-up, with the person's word last. The quantised model,
+    model-q4_k_m.gguf (1.1 GB), and the predictions file are on this machine under
+    data/voice/runs/third-run (gitignored; the GGUF is the Stage 5 artefact). Three runs, 2.5 hours
+    each on a T4; the last on the notebook as committed.
 - id: M1
   track: matrix
   num: 1
@@ -14106,6 +14114,7 @@ sessions:
 - id: 156
   date: 2026-09-13
   title: "The third run passes the bar, and the field table's last two low numbers were the instrument (F-143)"
+  shipped: [S43]
   commits: ['06c210b']
   numbers:
     app_tests: 3027
@@ -14129,7 +14138,10 @@ sessions:
     verdict sorts keys (F-143). A Sonnet lane fixed both scorers and pinned it; the re-scored table is
     on S43's card. Earlier today: the README's run time corrected to the measured two and a half
     hours on a T4, and the maintainer's question about training on this laptop answered (a Snapdragon
-    X with no CUDA: days per run on the CPU, so Colab trains and this machine serves).
+    X with no CUDA: days per run on the CPU, so Colab trains and this machine serves). The maintainer
+    handed over the predictions file and the 1.1 GB quantised model; re-scored with the fixed
+    instrument, every field is at or above 96% and the 13 misses are mangled names the resolver
+    decides. S43 done; the queue's next item is Stage 5, serving the model beside the database.
 - id: 155
   date: 2026-09-13
   title: "The second score repeats the first, and the cause is found in the notebook: a 512-token cut (F-142)"
@@ -21050,21 +21062,6 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  stage: S43
-  text: "Voice plan Stage 4 --- run three passed (clean 100%, perturbed 93.5%); download the GGUF and close S43; Qwen3.5 2B is optional now"
-  why: >-
-    The first two runs failed the bar on the same missing field (sessions 153 and 155) and the cause
-    was the notebook's 512-token cut, which removed the product key from every assign and book training
-    answer (F-142). Run three is the committed notebook with MAX_LEN 1024 and a measured-length check:
-    the run folder on Drive deleted (adapter and checkpoints), Run all, the score pasted back. That is
-    the first fair score of Qwen3 1.7B on this task. The maintainer asked why not Qwen3.5 (March 2026: 0.8B/2B/4B, Apache
-    2.0, a multimodal checkpoint with a text-only class, hybrid linear attention whose projections are
-    named in_proj_qkv, in_proj_z, in_proj_b, in_proj_a and out_proj beside q/k/v/o and gate/up/down;
-    llama.cpp converts it). Decision offered and not yet taken: run three on Qwen3.5 2B with a notebook
-    option (model name, text-only loading, the extra LoRA targets, a converter check), compared side by
-    side with run two. If 3.5 wins it becomes the base. Waiting on the maintainer's word and on Colab's
-    allowance.
 - kind: task
   text: "Voice plan Stage 5 --- serve the model beside the database; the bar falls back to the rule parser and says so"
   why: >-
