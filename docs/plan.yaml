@@ -2118,6 +2118,8 @@ stages:
     on emulated bf16 at a hundred seconds a step (F-138); stopped by hand at step 110 with the loss at
     its floor, the adapter saved, and the run continued to prediction and scoring --- blind, because
     the Predict cell printed nothing until the end (F-139); now it shows progress and writes as it goes.
+    The one-row probe answered correctly in every field plus an invented key (F-140); the scorer now
+    judges the known fields and reports extras. The 400-row prediction is running as this is written.
 - id: M1
   track: matrix
   num: 1
@@ -10237,6 +10239,32 @@ requirements:
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-140
+  title: The first model's first answer was right in every field and wrong to the scorer, because it added a key
+  tag: The instrument judged the text, not the form
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-390
+  - R-392
+  story: >-
+    Reported 12 Sept (session 153): the maintainer ran a one-row probe against the adapter saved at
+    step 110 and pasted the answer --- the correct form for "Assign Zara Meyer to work on Sleeve 22 on
+    Test Stand 2 in Line 3 from 7:15am until 13:45", every field right, plus a key the model invented,
+    `"type":"assign"`, which appears nowhere in the training data (checked: zero rows in
+    train.chat.jsonl, heldout.jsonl or the manifest). The scorer decided a row by comparing the whole
+    canonical text, so this row would have counted as wrong; the command bar's resolver only ever reads
+    the fields it knows and would ignore the extra key. Also seen in the same probe: 11.7 seconds for 71
+    tokens on the first call, fp16 with an unmerged adapter and warm-up included --- slow but inside
+    the session deadline for 400 rows.
+  fix: >-
+    Session 153 (a5d6433). The scorer and its Python port keep only the expected form's keys before
+    comparing, at the top level and inside the time objects, and count rows that carried an extra key
+    under a separate bucket printed in the table, so the diagnostic stays visible without distorting
+    the verdict; a missing key is still wrong; the rule parser's baseline is unchanged. Why the model
+    adds the key, and whether constrained decoding at serving time (Stage 5, a grammar for the local
+    runtime) should forbid it outright, is a question for the score, not for the instrument.
 - id: F-139
   title: The Predict cell was silent until it finished and wrote its file only at the end
   tag: A blind wait under a session deadline
