@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '0b30628'
+  tip: '06c210b'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2138,6 +2138,12 @@ stages:
     session 153 was wrong. **Run three** is the notebook with the cut lifted and a measured-length
     check in the data cell; same base, same data, same instrument, one variable changed. Waiting on
     the maintainer's run and its score.
+    **THE THIRD SCORE (13 Sept, session 156): PASS.** Clean 200/200 (100%), perturbed 187/200
+    (93.5%), against a rule parser that reads 3.5% of the perturbed rows; no invented keys in any
+    row. By intent, perturbed: assign 94%, book 96%, unassign 94%, move 90%. The table's span and
+    day lines read low and that was the instrument (F-143), fixed and re-scored. The model is Qwen3
+    1.7B as chosen; the Qwen3.5 comparison is now optional, not owed. What remains on this card: the
+    quantised GGUF downloaded from Drive for Stage 5.
 - id: M1
   track: matrix
   num: 1
@@ -10251,12 +10257,38 @@ requirements:
     steps: "npm run voice:generate; npm run voice:prepare; upload data/voice/colab/* to Drive; open scripts/voice/train/train_qwen3.ipynb in Colab on a T4; Run all; download predictions.jsonl and model-q4_k_m.gguf; node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions <file> --bar 0.95 --- the table goes on S43's card"
   status: covered
   note: >-
-    STATED 12 Sept (session 152); the repo-provable half BUILT the same session, the score still owed
-    by the Colab run. What the repo can prove without a GPU: the data step
+    STATED 12 Sept (session 152); the repo-provable half BUILT the same session; the score PROVED 13 Sept
+    (session 156) on the third Colab run: clean 100%, perturbed 93.5%, the table on S43's card. What the repo can prove without a GPU: the data step
     (a chat-format file built from train.jsonl), the predictions format against the scorer, and the
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-143
+  title: The scorer's field table judged key order, so two fields read as half wrong on a run that was all right
+  tag: Two comparisons in one instrument, one of them stricter than the verdict
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-390
+  - R-392
+  - F-140
+  story: >-
+    Reported 13 Sept (session 156) with the third run's table: every clean row exact (200/200), yet
+    span 94/200 (47%) and day 351/400 (87.8%). The maintainer asked whether to worry. The two numbers
+    cannot both hold, and the cause is in the instrument: the row verdict compares forms with keys
+    sorted, but the per-field tally compared raw JSON text, so a value the model writes as
+    {"end":...,"start":...} counted as wrong against the generator's {"start":...,"end":...}. Only
+    fields whose values are objects with more than one key were hit --- every non-null span and every
+    weekday or date day --- which is why span sat at exactly 94/200 (the null spans) in runs two and
+    three alike. The Python port copied the raw comparison on purpose, "to match". The by-field
+    numbers for day and span in sessions 153 and 155 were understated by the same amount; the row
+    verdicts and every overall rate were right.
+  fix: >-
+    Session 156 (06c210b). Both scorers judge a field with the same key-order-blind comparison as the
+    row, on the normalised prediction; a test pins a reordered prediction as correct in both tables
+    and a one-minute difference as still wrong. The rule parser's baseline is unchanged. The third
+    run's table, re-scored with the fixed instrument, is the one on S43's card.
 - id: F-142
   title: The notebook cut every training example at 512 tokens, and the answer's tail is what it cut
   tag: A budget set without measuring what had to fit in it
@@ -14071,6 +14103,33 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 156
+  date: 2026-09-13
+  title: "The third run passes the bar, and the field table's last two low numbers were the instrument (F-143)"
+  commits: ['06c210b']
+  numbers:
+    app_tests: 3027
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept: 3027 tests in 141 files, all passing. Up six from session 152's 3021: four
+    voice-data cases from session 153 (V10-V13) and two scorer cases from this session (V5c, V5d).
+    The other numbers are carried; no migration, SQL test or e2e spec changed today.
+  summary: >-
+    With the token cut lifted, the maintainer's third run scored clean 200/200 and perturbed 187/200
+    (93.5%) with no invented keys --- the first fair score of Qwen3 1.7B on this task, and a pass
+    against a bar of 95% clean and a rule-parser baseline of 3.5% perturbed. The maintainer asked
+    whether to worry about span at 47% and day at 88% in the field table. They cannot be true beside
+    200/200 clean rows, and they were not: the field tally compared raw JSON text while the row
+    verdict sorts keys (F-143). A Sonnet lane fixed both scorers and pinned it; the re-scored table is
+    on S43's card. Earlier today: the README's run time corrected to the measured two and a half
+    hours on a T4, and the maintainer's question about training on this laptop answered (a Snapdragon
+    X with no CUDA: days per run on the CPU, so Colab trains and this machine serves).
 - id: 155
   date: 2026-09-13
   title: "The second score repeats the first, and the cause is found in the notebook: a 512-token cut (F-142)"
@@ -20993,7 +21052,7 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S43
-  text: "Voice plan Stage 4 --- run three on Qwen3 1.7B with the token cut lifted (F-142); the Qwen3.5 2B question waits for a fair score"
+  text: "Voice plan Stage 4 --- run three passed (clean 100%, perturbed 93.5%); download the GGUF and close S43; Qwen3.5 2B is optional now"
   why: >-
     The first two runs failed the bar on the same missing field (sessions 153 and 155) and the cause
     was the notebook's 512-token cut, which removed the product key from every assign and book training
