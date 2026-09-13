@@ -17,7 +17,7 @@
  * Same shape as `settingsPanel.test.tsx`: `@testing-library/react` + jsdom.
  */
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { formatDayLabel } from "@/features/board/lib/time";
 import { formatCommand, parseCommand, type AssignCommand } from "@/lib/command/parse";
 import type {
@@ -31,6 +31,7 @@ import type {
 } from "@/lib/command/resolve";
 import { CommandBar } from "@/features/board/components/CommandBar";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
+import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 
 /** S41-a: `findRunOverlap`, the same stub shape `interaction.ts`'s own
  *  function has (half-open, `excludeRunId` skipped). */
@@ -166,8 +167,14 @@ const BLK2: ContextAssignment = {
 
 /** S44-b: `reader` defaults to `null` -- every pre-S44-b call site (one
  *  argument only) is unaffected; the CB-model describe block below is the
- *  only caller that passes a second argument. */
-function renderBar(over: Partial<ResolveContext> = {}, reader: Reader | null = null) {
+ *  only caller that passes a second argument. S46-a widens this with a
+ *  third, also defaulted, argument the same way -- every earlier call site
+ *  (one or two arguments) is unaffected. */
+function renderBar(
+  over: Partial<ResolveContext> = {},
+  reader: Reader | null = null,
+  recognizer: Recognizer | null = null,
+) {
   const onOpen = vi.fn();
   const onRetime = vi.fn();
   const onBook = vi.fn();
@@ -180,6 +187,7 @@ function renderBar(over: Partial<ResolveContext> = {}, reader: Reader | null = n
       dateFormat="d_mon_yyyy"
       zone="UTC"
       reader={reader}
+      recognizer={recognizer}
       onOpen={onOpen}
       onRetime={onRetime}
       onBook={onBook}
@@ -190,6 +198,36 @@ function renderBar(over: Partial<ResolveContext> = {}, reader: Reader | null = n
   );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
   return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, input };
+}
+
+/** S46-a: a fake recogniser (brief §2.4) -- records the `RecognizerEvents`
+ *  object the bar hands it and returns a handle with a `stop` spy. `fire`
+ *  lets a test drive the captured events without reaching into internals. */
+function makeFakeRecognizer() {
+  const stop = vi.fn();
+  let captured: RecognizerEvents | null = null;
+  const recognizer: Recognizer = (events) => {
+    captured = events;
+    return { stop };
+  };
+  return {
+    recognizer,
+    stop,
+    fire: {
+      interim(text: string): void {
+        act(() => captured?.onInterim(text));
+      },
+      final(text: string): void {
+        act(() => captured?.onFinal(text));
+      },
+      error(kind: "not-allowed" | "no-speech" | "other", detail?: string): void {
+        act(() => captured?.onError(kind, detail));
+      },
+      end(): void {
+        act(() => captured?.onEnd());
+      },
+    },
+  };
 }
 
 /** The one `aria-live="polite"` status element (brief §6). */
@@ -818,5 +856,196 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(fakeReader).not.toHaveBeenCalled();
     expect(statusText()).toBe(SHAPE);
+  });
+});
+
+// -----------------------------------------------------------------------
+// S46-a: the microphone -- the browser's recogniser types the sentence
+// (brief docs/agent-briefs/s46-a-microphone-brief.md §2, CB-mic-1..7). A
+// fake `Recognizer` (`makeFakeRecognizer` above) stands in for the browser's
+// Web Speech API; `browserRecognizer()`'s own mapping onto that API is
+// `src/lib/voice/recognizer.ts`'s concern, untested here (jsdom has no
+// `SpeechRecognition`) -- these tests are only about `CommandBar`'s own
+// wiring of whatever `Recognizer` it is given.
+// -----------------------------------------------------------------------
+
+describe("CB-mic: the microphone button (S46-a)", () => {
+  it("CB-mic-1: no recognizer renders no button; a fake one does", () => {
+    renderBar({}, null, null);
+    expect(screen.queryByRole("button", { name: "Speak a sentence" })).toBeNull();
+
+    cleanup();
+    const { recognizer } = makeFakeRecognizer();
+    renderBar({}, null, recognizer);
+    expect(screen.getByRole("button", { name: "Speak a sentence" })).toBeTruthy();
+  });
+
+  it("CB-mic-2: pressing starts a session, shows Listening… and aria-pressed, and aborts an in-flight reading", () => {
+    const { recognizer } = makeFakeRecognizer();
+    const captured: { signal: AbortSignal | null } = { signal: null };
+    const neverResolves: Reader = vi.fn((_text: string, signal: AbortSignal) => {
+      captured.signal = signal;
+      return new Promise<Reading>(() => {
+        // Never settles -- superseded by pressing the mic button below.
+      });
+    });
+    const { input } = renderBar({ runs: [] }, neverResolves, recognizer);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    expect(neverResolves).toHaveBeenCalledTimes(1);
+    expect(captured.signal?.aborted).toBe(true);
+    expect(micButton.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+  });
+
+  it("CB-mic-3: an interim result puts the heard text in the input", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fire.interim("put ana");
+
+    expect(input.value).toBe("put ana");
+  });
+
+  it("CB-mic-4: a final result submits exactly as Enter does", async () => {
+    const first = makeFakeRecognizer();
+    const { onOpen, input } = renderBar({ runs: [] }, null, first.recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    first.fire.final(P1_SENTENCE);
+
+    expect(input.value).toBe(P1_SENTENCE);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.operatorId).toBe("op1");
+
+    cleanup();
+    const second = makeFakeRecognizer();
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "no-service",
+    }));
+    const { onOpen: onOpen2 } = renderBar({ runs: [] }, fakeReader, second.recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    second.fire.final(P1_SENTENCE);
+
+    expect(fakeReader).toHaveBeenCalledWith(P1_SENTENCE, expect.anything());
+    await waitFor(() => expect(onOpen2).toHaveBeenCalledTimes(1));
+  });
+
+  it("CB-mic-5: pressing again while listening stops it, keeps the text, and returns to idle", () => {
+    const { recognizer, stop } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+    fireEvent.change(input, { target: { value: "put ana" } });
+
+    fireEvent.click(micButton);
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe("put ana");
+    expect(micButton.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("CB-mic-6: Escape while listening stops it, keeps text and status", () => {
+    const { recognizer, stop } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fireEvent.change(input, { target: { value: "put ana" } });
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe("put ana");
+    expect(statusText()).toBe("");
+  });
+
+  it("CB-mic-7: each error kind sets the status line and ends listening", () => {
+    const cases: Array<[Parameters<RecognizerEvents["onError"]>[0], string | undefined, string]> = [
+      [
+        "not-allowed",
+        undefined,
+        "The microphone was refused. Allow it in the browser's address bar and try again.",
+      ],
+      ["no-speech", undefined, "Nothing was heard."],
+      ["other", "network", "The recogniser stopped: network."],
+    ];
+    for (const [kind, detail, expected] of cases) {
+      cleanup();
+      const { recognizer, fire } = makeFakeRecognizer();
+      renderBar({}, null, recognizer);
+      const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+      fireEvent.click(micButton);
+
+      fire.error(kind, detail);
+
+      expect(statusText()).toBe(expected);
+      expect(micButton.getAttribute("aria-pressed")).toBe("false");
+    }
+  });
+
+  // Review findings 1-3 (races caught reviewing S46-a): CB-mic-8 to CB-mic-10.
+
+  it("CB-mic-8: onEnd after a final clears the session, so a later Escape runs the normal rules instead of stopping a dead handle", () => {
+    const { recognizer, fire, stop } = makeFakeRecognizer();
+    const { input, onOpen } = renderBar({ runs: [] }, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fire.final(P1_SENTENCE);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(statusText()).not.toBe("");
+
+    // The real API fires `onEnd` on its own once a final result has settled
+    // the session -- nothing here presses the mic button again.
+    fire.end();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    // Review finding 1: pre-fix, `recognitionRef` still held the dead
+    // handle, so this Escape called `stop()` on it and returned before the
+    // status line was cleared.
+    expect(stop).not.toHaveBeenCalled();
+    expect(statusText()).toBe("");
+    expect(input.value).toBe(P1_SENTENCE);
+  });
+
+  it("CB-mic-9: a synchronous onError from the recognizer factory itself leaves the button idle with the error status", () => {
+    // recognizer.ts's own `start()` try/catch can call `onError` before
+    // `browserRecognizer()`'s inner function returns a handle -- this fake
+    // reproduces exactly that shape (review finding 2).
+    const stop = vi.fn();
+    const recognizer: Recognizer = (events) => {
+      events.onError("other", "sync-boom");
+      return { stop };
+    };
+    renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+
+    fireEvent.click(micButton);
+
+    expect(micButton.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText("Listening…")).toBeNull();
+    expect(statusText()).toBe("The recogniser stopped: sync-boom.");
+  });
+
+  it("CB-mic-10: a final result arriving after stop is a no-op", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input, onOpen } = renderBar({ runs: [] }, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+    fireEvent.click(micButton); // stop -- listening ends before any result
+
+    fire.final(P1_SENTENCE);
+
+    expect(input.value).toBe("");
+    expect(onOpen).not.toHaveBeenCalled();
   });
 });

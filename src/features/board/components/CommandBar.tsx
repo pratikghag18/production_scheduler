@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DateFormat } from "@/lib/format/dates";
 import { formatDayLabel } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
+import type { Recognizer, RecognizerHandle } from "@/lib/voice/recognizer";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
 import type {
   AssignCommand,
@@ -58,6 +59,16 @@ import type {
  * `parseCommand` rules on anything but a clean answer, saying so in the
  * readout. `reader` null (the default) is BYTE FOR BYTE the pre-S44-b
  * behaviour -- every earlier test in this file passes untouched.
+ *
+ * S46-a (docs/agent-briefs/s46-a-microphone-brief.md) adds the optional
+ * `recognizer` prop: `null` (the default) renders no microphone button and
+ * is otherwise byte for byte the pre-S46-a behaviour. Set, a button appears
+ * after the input; pressing it starts a `Recognizer` session
+ * (`src/lib/voice/recognizer.ts`) that writes interim text into the input as
+ * it is heard and, on a final result, submits it exactly as Enter would
+ * (`submitText`, extracted from `handleKeyDown`'s Enter branch for this).
+ * One capability folded into the existing control, not a parallel widget
+ * (CLAUDE.md §4).
  *
  * The bar holds no rule of its own: parsing is `parseCommand`/`formatCommand`
  * (`src/lib/command/parse.ts`), resolving is `resolveCommand`/`describeQuestion`
@@ -116,6 +127,10 @@ export interface CommandBarProps {
    *  first and falls back to the rules on anything but a clean answer.
    *  `null` (the default) is the pre-S44-b behaviour, unchanged. */
   reader?: Reader | null;
+  /** S46-a: when set, a microphone button appears after the input. `null`
+   *  (the default) renders no button -- byte for byte the pre-S46-a
+   *  behaviour. */
+  recognizer?: Recognizer | null;
 }
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -158,9 +173,11 @@ export function CommandBar({
   onUnassign,
   onMove,
   reader = null,
+  recognizer = null,
 }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
+  const [listening, setListening] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   // The last parsed command, kept so a candidate button can substitute one
   // field and so a run/job-question button can set `attach`/`existing`
@@ -174,6 +191,34 @@ export function CommandBar({
   // rather than clobbering whatever the bar is doing by then.
   const readingAbortRef = useRef<AbortController | null>(null);
   const readingSeqRef = useRef(0);
+  // S46-a: the in-flight recognition session's handle (null when idle) and a
+  // sequence number bumped every time a session ends -- by `stopListening`,
+  // by unmount, or by the session's own `onError`/`onEnd` -- so a callback
+  // from a session that is no longer the current one (a late `onFinal` after
+  // Escape/stop, or a synchronous `onError` fired from inside the
+  // `Recognizer` call itself, before this file has assigned the ref) is a
+  // no-op rather than clobbering whatever the bar is doing by then (review
+  // findings 1-3).
+  const recognitionRef = useRef<RecognizerHandle | null>(null);
+  const recognitionSeqRef = useRef(0);
+
+  // S46-a: stop a listening session on unmount rather than leak it, and
+  // retire its generation so a callback that fires after teardown is a
+  // no-op.
+  useEffect(() => {
+    return () => {
+      // `recognitionRef`/`recognitionSeqRef` are plain mutable refs (a
+      // session handle and a counter), not DOM nodes -- reading their LIVE
+      // value at unmount (not a stale snapshot captured when the effect
+      // ran) is exactly what stopping whatever session is current requires,
+      // so the rule's usual "copy it to a variable first" fix does not
+      // apply here.
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      recognitionSeqRef.current++;
+    };
+  }, []);
 
   function renderReadout(readout: string): string {
     return readout.replace(ISO_DAY, (iso) =>
@@ -529,24 +574,124 @@ export function CommandBar({
     }
   }
 
+  /**
+   * S46-a: extracted from the Enter branch below (brief §2.2) so a final
+   * recognition result submits exactly as Enter does. Behaviour is
+   * unchanged from the pre-S46-a Enter path.
+   */
+  function submitText(value: string): void {
+    // Review finding 2: empty/whitespace-only text takes exactly the
+    // null-reader path -- no network round trip (and no 20s wait) for a
+    // sentence that can only ever fail to parse, and no misleading "not a
+    // form" prefix on top of it.
+    if (reader && value.trim() !== "") {
+      startReading(value, reader);
+      return;
+    }
+    const parsed = parseCommand(value);
+    if (!parsed.ok) {
+      heldRef.current = null;
+      setStatus(failureToStatus(parsed.failure));
+      return;
+    }
+    runCommand(parsed.command);
+  }
+
+  /** S46-a: ends the current session's generation -- shared by a stopped
+   *  session (`stopListening`) and by the session's own `onError`/`onEnd`
+   *  -- so any callback still to arrive from THIS session (a late
+   *  `onFinal`, or `onEnd` after `onError` already ran) is a no-op (review
+   *  findings 1 and 3): `recognitionRef`/`listening` only ever describe a
+   *  session whose generation is still current. */
+  function endSession(): void {
+    recognitionRef.current = null;
+    recognitionSeqRef.current++;
+    setListening(false);
+  }
+
+  /** S46-a: stops the in-flight recognition session, if any -- shared by a
+   *  second press of the mic button and by Escape while listening. Text is
+   *  kept and the status line is left untouched (brief §2.2). */
+  function stopListening(): void {
+    recognitionRef.current?.stop();
+    endSession();
+  }
+
+  /** S46-a: starts a recognition session through `activeRecognizer`.
+   *
+   * `mySeq` is captured BEFORE `activeRecognizer(...)` is called and every
+   * callback below checks it against `recognitionSeqRef.current` before
+   * doing anything: `recognizer.ts` can call `onError` synchronously, from
+   * inside `start()`'s own try/catch, before this function's call to
+   * `activeRecognizer` has even returned a handle (review finding 2) -- that
+   * `onError` already bumps the generation via `endSession`, so the
+   * unconditional-looking assignment after the call is guarded by the same
+   * `isCurrent()` check and never resurrects a session that ended inline. */
+  function startListening(activeRecognizer: Recognizer): void {
+    // Press when idle aborts any in-flight reading (the S44 path), same as
+    // an edit (brief §2.2).
+    if (readingAbortRef.current) {
+      readingAbortRef.current.abort();
+      readingAbortRef.current = null;
+      readingSeqRef.current++;
+    }
+    setStatus(null);
+    const mySeq = ++recognitionSeqRef.current;
+    function isCurrent(): boolean {
+      return recognitionSeqRef.current === mySeq;
+    }
+    const handle = activeRecognizer({
+      onInterim(interimText: string): void {
+        if (!isCurrent()) return;
+        heldRef.current = null;
+        setText(interimText);
+      },
+      onFinal(finalText: string): void {
+        if (!isCurrent()) return;
+        setText(finalText);
+        submitText(finalText);
+      },
+      onError(kind, detail): void {
+        if (!isCurrent()) return;
+        endSession();
+        if (kind === "not-allowed") {
+          setStatus({
+            kind: "shape",
+            message:
+              "The microphone was refused. Allow it in the browser's address bar and try again.",
+          });
+        } else if (kind === "no-speech") {
+          setStatus({ kind: "shape", message: "Nothing was heard." });
+        } else {
+          setStatus({ kind: "shape", message: `The recogniser stopped: ${detail}.` });
+        }
+      },
+      onEnd(): void {
+        if (!isCurrent()) return;
+        endSession();
+      },
+    });
+    // The session may already have ended (a synchronous `onError`) during
+    // the call above -- do not resurrect it as listening (review finding 2).
+    if (!isCurrent()) return;
+    recognitionRef.current = handle;
+    setListening(true);
+  }
+
+  function handleMicClick(): void {
+    if (listening) {
+      stopListening();
+      return;
+    }
+    if (recognizer) {
+      startListening(recognizer);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
     if (e.key === "Enter") {
       e.preventDefault();
-      // Review finding 2: empty/whitespace-only text takes exactly the
-      // null-reader path -- no network round trip (and no 20s wait) for a
-      // sentence that can only ever fail to parse, and no misleading "not a
-      // form" prefix on top of it.
-      if (reader && text.trim() !== "") {
-        startReading(text, reader);
-        return;
-      }
-      const parsed = parseCommand(text);
-      if (!parsed.ok) {
-        heldRef.current = null;
-        setStatus(failureToStatus(parsed.failure));
-        return;
-      }
-      runCommand(parsed.command);
+      submitText(text);
       return;
     }
     if (e.key === "Escape") {
@@ -557,6 +702,13 @@ export function CommandBar({
         readingAbortRef.current = null;
         readingSeqRef.current++;
         setStatus(null);
+        return;
+      }
+      // S46-a: Escape while listening stops it, text and status untouched,
+      // then the existing Escape rules apply from the NEXT Escape (brief
+      // §2.2 -- the same shape as the reading branch above).
+      if (recognitionRef.current) {
+        stopListening();
         return;
       }
       // First Escape clears the status line; a second clears the input.
@@ -585,6 +737,21 @@ export function CommandBar({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
         />
+        {recognizer && (
+          <>
+            <button
+              type="button"
+              className={`${fieldStyles.btn} ${styles.micButton}`}
+              aria-label="Speak a sentence"
+              aria-pressed={listening}
+              title="Uses the browser's speech recogniser; audio is sent to the browser maker's service"
+              onClick={handleMicClick}
+            >
+              🎤
+            </button>
+            {listening && <span className={styles.listeningLabel}>Listening…</span>}
+          </>
+        )}
       </div>
       <p
         className={

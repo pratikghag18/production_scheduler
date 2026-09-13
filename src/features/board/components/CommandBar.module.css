@@ -43,6 +43,21 @@
   font-style: italic;
 }
 
+/* S46-a: the microphone button sits in `.row` after the input, sized off
+   the same field/button module the candidate buttons use (`fieldStyles.btn`,
+   composed in `CommandBar.tsx`) -- this only sets the pressed (listening)
+   state, reusing `--ring` (already the field's own focus colour, R-318) so
+   no new colour is introduced (F-130). */
+.micButton[aria-pressed="true"] {
+  border-color: var(--ring);
+}
+
+.listeningLabel {
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
 .candidates {
   display: flex;
   flex-wrap: wrap;

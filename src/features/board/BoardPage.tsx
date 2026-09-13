@@ -9,6 +9,7 @@ import { DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
 import { DEFAULT_TIMEZONE, partsInZone } from "@/lib/format/timezones";
 import type { ResolveContext, BoardDay, ContextRun } from "@/lib/command/resolve";
 import { voiceServiceUrl, readSentence, type Reader } from "@/lib/voice/readSentence";
+import { browserRecognizer, type Recognizer } from "@/lib/voice/recognizer";
 import { operatorViewFor, productViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useAbsences } from "./hooks/useAbsences";
@@ -63,6 +64,12 @@ const OPERATOR_PANEL_COLLAPSE_QUERY = "(max-width: 899px)";
  *  request. `null` (no `VITE_VOICE_URL`) leaves the bar's `reader` prop at
  *  its own default, unchanged from before this stage. */
 const COMMAND_BAR_READER: Reader | null = voiceServiceUrl() ? readSentence : null;
+
+/** S46-a: computed once at module level, beside `COMMAND_BAR_READER` --
+ *  `browserRecognizer()` only reads `window` for the constructor, so this
+ *  makes no request and starts no session; `null` (no browser recogniser)
+ *  leaves the bar's `recognizer` prop at its own default, unchanged. */
+const BOARD_RECOGNIZER: Recognizer | null = browserRecognizer();
 
 /**
  * The board (brief P1-4a read-only + P1-4b interactions + P1-4c responsive
@@ -773,6 +780,7 @@ export default function BoardPage() {
               dateFormat={dateFormat}
               zone={index.zone}
               reader={COMMAND_BAR_READER}
+              recognizer={BOARD_RECOGNIZER}
               onOpen={(resolved, anchor) => {
                 // R-385: a `retime` target is never a create; `onRetime`
                 // below is the caller for that branch of the union.
