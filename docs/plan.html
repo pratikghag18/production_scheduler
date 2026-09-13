@@ -162,7 +162,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <span class="num">43</span>
   <h3>The first model — fine-tune Qwen3 1.7B and score it against the held-out set</h3>
   <div class="what"><p><b>Teach a small model to read any phrasing.</b> The board reads four fixed sentences; the model sits in front of the bar as a translator, turning however a person says it into the strict form the board already reads. The base is Qwen3 1.7B (Apache 2.0; the maintainer's pick from a shortlist of three). A Colab notebook the repo carries loads the generated training set, fine-tunes with LoRA, scores the result on the 400 held-out rows with the repo's own scorer, and exports the compressed file the local runtime (Stage 5) will serve. The training runs on Google Colab's free GPU because this machine has none; the maintainer presses run and hands back the files.</p></div>
-  <div class="state"><p><b>Briefed session 152 (12 Sept).</b> The notebook, its data step, the predictions format and the scoring path are the developer's; the Colab run and the resulting score are the maintainer's. The bar: the model must beat the rule parser's baseline on perturbed rows (4%) by a wide margin while staying at the bar on clean rows; the number is recorded on this card when the run has happened. <b>The notebook shipped in session 152 (5b09a61).</b> The data step, the predictions round trip, the Python port of the scorer and every code cell's syntax are verified here; the training cells are unverified until the maintainer's first Colab run. The README under scripts/voice/train is the maintainer's step-by-step. <b>Waiting on the maintainer:</b> the run, and the score.</p></div>
+  <div class="state"><p><b>Briefed session 152 (12 Sept).</b> The notebook, its data step, the predictions format and the scoring path are the developer's; the Colab run and the resulting score are the maintainer's. The bar: the model must beat the rule parser's baseline on perturbed rows (4%) by a wide margin while staying at the bar on clean rows; the number is recorded on this card when the run has happened. <b>The notebook shipped in session 152 (5b09a61).</b> The data step, the predictions round trip, the Python port of the scorer and every code cell's syntax are verified here; the training cells are unverified until the maintainer's first Colab run. The README under scripts/voice/train is the maintainer's step-by-step. <b>Waiting on the maintainer:</b> the run, and the score. <b>First run, session 153:</b> died in the load-data cell on Colab's TensorFlow (F-135), fixed the same hour; the run continues from that cell.</p></div>
   <p class="fine">docs/voice-commands-plan.md (Stage 4) · docs/agent-briefs/s43-a-first-model-brief.md · session 152 conversation (the base model chosen)</p><p class="fine">Delivers <a href="#R-392">R-392</a></p>
   <span class="tags"><span class="chip now">In progress</span><span class="chip yours">Your run</span></span>
 </div></div>
@@ -2174,7 +2174,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>134 things that weren't in the plan</h2>
+  <h2>135 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3368,6 +3368,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <div class="aside"><span class="k">Lead — the suspicion at the time</span><p>In the shared time helper of <code>src/lib/command/parse.ts</code>: when the start's hour is 13 or more (or the start carries a meridiem), skip the afternoon rule for the end; an end not after the start is then <code>time_order</code>, refused with the shape sentence. &quot;from 10 to 2&quot; keeps its meaning. Same file and same helper as F-133, so one lane takes both.</p></div>
   <div class="aside"><span class="k">Fix</span><p>Session 149 (015416a). A start of 13:00 or later, or one with am/pm, turns the afternoon rule off for the end, so &quot;from 17:15 till 10:30&quot; and &quot;from 1pm to 10&quot; are refused as time_order; &quot;from 10 to 2&quot;, &quot;from 10 to 10&quot;, &quot;from 12 to 3&quot; and &quot;from 12am to 4&quot; keep their meaning (P9, P11, P36). The generator's independent afternoon rule changed the same way; that exposed 34 of the 200 clean held-out rows (assign 9, book 12, unassign 4, move 9) as recorded under the old rule, so the set was regenerated once with its original seed 20260911 --- the one documented exception --- with the counts per intent unchanged and the score clean again.</p></div>
   <p class="fine">R-382 · R-390</p>
+</div>
+<div class="find fix" id="F-135">
+  <span class="tag">A first-run finding, as the README predicted · fixed · you found it · <a href="#S43">S43</a></span>
+  <h3>The notebook's seed helper imported TensorFlow and died on Colab's protobuf</h3>
+  <p>Reported 12 Sept (session 153) from the maintainer's first Colab run, with the traceback: the load-data cell's <code>set_seed(SEED)</code> raised <code>ImportError: cannot import name 'runtime_version' from 'google.protobuf'</code> eight frames inside <code>import tensorflow</code>. transformers' seed helper checks whether TensorFlow is installed and, since Colab preinstalls it, imports it to seed that too; the llama.cpp converter's requirements, installed a cell earlier, had replaced protobuf with a version Colab's TensorFlow cannot load. Nothing in the pipeline uses TensorFlow. Exactly the class of failure the README named as expected first-run work: a cell no machine without a GPU could run.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 153 (5c13587). The install cell and the load-data cell set USE_TF=0, USE_TORCH=1 and TRANSFORMERS_NO_TF=1 before anything imports transformers, and the seeding of random, numpy, torch and every CUDA device is written out by hand with no TensorFlow path; that was the only seed call in the notebook. The maintainer was given the same lines to paste into the open Colab so the run could continue without a re-upload. Every cell still compiles.</p></div>
+  <p class="fine">R-392</p>
 </div>
 </section>
 
