@@ -2116,7 +2116,8 @@ stages:
     the run restarts on a fresh runtime. On that runtime the model loaded and the LoRA step met
     Colab's old torchao (F-137); removed, and the run continues from the LoRA cell. Training then ran
     on emulated bf16 at a hundred seconds a step (F-138); stopped by hand at step 110 with the loss at
-    its floor, the adapter saved, and the run continued to prediction and scoring.
+    its floor, the adapter saved, and the run continued to prediction and scoring --- blind, because
+    the Predict cell printed nothing until the end (F-139); now it shows progress and writes as it goes.
 - id: M1
   track: matrix
   num: 1
@@ -10236,6 +10237,27 @@ requirements:
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-139
+  title: The Predict cell was silent until it finished and wrote its file only at the end
+  tag: A blind wait under a session deadline
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-138
+  story: >-
+    Reported 12 Sept (session 153): after the training cell was stopped by hand and the adapter saved,
+    the Predict cell ran for minutes with a blank output, and Colab's free tier showed "this runtime
+    may last up to 2 hours". The cell printed only at the end and wrote predictions.jsonl only at the
+    end, so there was no way to tell the fast fp16 path from the emulated one (F-138), and a session
+    kill would have lost every row predicted so far. The maintainer was given a one-row timing probe to
+    run by hand to tell the two apart.
+  fix: >-
+    Session 153 (2ca0d26). The cell times its first row on its own, prints a progress line every
+    twenty-five rows with the rate and the parse failures so far, and appends each prediction to the
+    file the moment it is decided; a re-run skips the ids already written and continues. The README
+    says what the line looks like and that a re-run resumes.
 - id: F-138
   title: The notebook chose bf16 on a T4, which emulates it, and trained ten times slower than it should
   tag: Supported is not the same as fast
