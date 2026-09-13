@@ -111,3 +111,7 @@ present; (3) `peft`'s LoRA tuner refused Colab's preinstalled `torchao` 0.10.0 (
 `torchao` outright, since this pipeline never uses it. Expect more of this shape on the next
 run — Colab's preinstalled packages are not this repo's to pin, and any of them can surprise a
 pinned five.
+
+The Setup cell may be run again in the same runtime — a Colab disconnect and reconnect, say —
+without failing on the llama.cpp clone; it checks for `convert_hf_to_gguf.py` in
+`/content/llama.cpp` first and skips the clone when the folder is already there (F-141).
