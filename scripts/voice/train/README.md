@@ -30,9 +30,15 @@ Nothing in the app changes from running this. No model is served until its score
    `scripts/voice/train/score_port.py` into the notebook's own file browser (the folder icon on
    the left, drag the file in, or use its upload button) — the scoring cell imports it from
    `/content/score_port.py` and fails with a plain message if it is missing. Then:
-   Runtime → Change runtime type → T4 GPU, then Runtime → Run all. Should be 30 to 60 minutes on
-   a T4 with fp16; the first run trained on bf16 emulation (a T4 has no bf16 hardware, but a
-   recent torch answers "supported" anyway) and took over six hours before that was caught. If
+   Runtime → Change runtime type → T4 GPU, then Runtime → Run all. Measured on the second run,
+   a T4 with fp16 and batch 16 x 2: training took over an hour and the 400-row Predict cell about
+   another hour (one row at a time, six to nine seconds each), so plan on two and a half hours
+   end to end on a T4. The "30 to 60 minutes" this file said before was an estimate, not a
+   measurement. A paid L4 runs the same notebook unchanged (it picks bf16 by itself) in roughly
+   a third of the time; switch runtimes between cells, never mid-training, because a checkpoint
+   saved under fp16 resumes badly under bf16. The first run trained on bf16 emulation (a T4 has
+   no bf16 hardware, but a recent torch answers "supported" anyway) and took over six hours
+   before that was caught. If
    the session disconnects mid-training, run it again — training resumes from its last
    checkpoint (saved every 50 steps on Drive) instead of restarting.
 
