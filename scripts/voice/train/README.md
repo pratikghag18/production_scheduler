@@ -44,6 +44,14 @@ Nothing in the app changes from running this. No model is served until its score
    straight to prediction and scoring — delete the adapter folder on Drive (under
    `scheduler-voice/run-qwen3-1.7b/adapter`) to force a genuinely fresh run.
 
+   The Predict cell prints its first row's timing alone — `first row: 1.3s for 42 tokens` — so
+   an emulated-precision slow path (see above) is visible within seconds instead of a blank cell
+   for the whole 400-row pass, then one line every 25 rows: `225/400 rows, 310s, 0.73 rows/s, 2
+failed to parse`. It writes `predictions.jsonl` one row at a time as each is decided, not all
+   at once at the end, so a session killed mid-prediction (Colab's free tier has a two-hour
+   deadline) can just be re-run: it skips the ids already in the file and prints how many, and
+   continues from there instead of starting the 400 rows over.
+
 4. **When it finishes**, download `predictions.jsonl` and `model-q4_k_m.gguf` from the run
    folder in Drive (`scheduler-voice/run-qwen3-1.7b/`, a fixed name — the exact path is printed
    by the Settings cell and again by the last markdown cell) into `data/voice/runs/<timestamp>/`
