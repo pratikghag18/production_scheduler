@@ -252,4 +252,55 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       }
     }
   });
+
+  describe("V10-V12 (extra keys): a fine-tuned model's invented field does not fail a row", () => {
+    const form: Command = {
+      intent: "assign",
+      operator: "Sam Patel",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      attach: null,
+      existing: null,
+    };
+    const rows: VoiceRow[] = [
+      { id: "r1", intent: "assign", sentence: "n/a", form, clean: true, source: "x" },
+    ];
+
+    it("V10: a prediction equal to the form plus an extra top-level key scores correct and is counted once under extraKeys", () => {
+      const predicted = { ...form, type: "assign" };
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(1);
+      expect(result.extraKeys).toEqual({ n: 1, keys: { type: 1 } });
+    });
+
+    it("V11: an extra key inside `start` is ignored the same way", () => {
+      const predicted = { ...form, start: { ...form.start, explicitMeridiem: true } };
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(1);
+      expect(result.extraKeys).toEqual({ n: 1, keys: { explicitMeridiem: 1 } });
+    });
+
+    it("V12: a prediction missing `product` is still wrong (missing is not extra)", () => {
+      const predicted = { ...form } as Record<string, unknown>;
+      delete predicted.product;
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(0);
+      expect(result.extraKeys).toEqual({ n: 0, keys: {} });
+    });
+  });
+
+  it("V13: the rule parser's held-out baseline is unchanged by the extra-key normalisation (re-pins V6)", () => {
+    const predict = (row: VoiceRow) => {
+      const result = parseCommand(row.sentence);
+      return result.ok ? result.command : null;
+    };
+    const result = score(HELDOUT, predict);
+    expect(rate(result.clean)).toBe(1);
+    expect(rate(result.perturbed)).toBeGreaterThan(0);
+    expect(rate(result.perturbed)).toBeLessThan(0.5);
+    expect(rate(result.perturbed)).toBeCloseTo(0.04, 1);
+  });
 });

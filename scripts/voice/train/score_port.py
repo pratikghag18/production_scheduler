@@ -59,25 +59,79 @@ def _empty_bucket() -> Dict[str, int]:
     return {"n": 0, "correct": 0}
 
 
+def _is_plain_object(value: Any) -> bool:
+    return isinstance(value, dict)
+
+
+def _normalize_to_known_keys(predicted: Any, expected: Any) -> Any:
+    """Mirrors `score.mjs`'s `normalizeToKnownKeys`: keeps only the keys
+    `expected` has, recursively wherever both sides are plain objects at the
+    same spot (covers `start`/`end`/`span` and any other nested field
+    without naming them). A key missing on `predicted` is simply not
+    copied -- "missing" stays missing, never "extra"."""
+    if not _is_plain_object(predicted) or not _is_plain_object(expected):
+        return predicted
+    out: Dict[str, Any] = {}
+    for key in expected.keys():
+        if key in predicted:
+            out[key] = _normalize_to_known_keys(predicted[key], expected[key])
+    return out
+
+
+def _collect_extra_keys(predicted: Any, expected: Any, into: List[str]) -> None:
+    """Mirrors `score.mjs`'s `collectExtraKeys`: every key `predicted` carries
+    that `expected` does not, at any depth where both sides are plain
+    objects, appended once per occurrence."""
+    if not _is_plain_object(predicted) or not _is_plain_object(expected):
+        return
+    for key in predicted.keys():
+        if key not in expected:
+            into.append(key)
+        else:
+            _collect_extra_keys(predicted[key], expected[key], into)
+
+
 def score(
     rows: List[Dict[str, Any]], predict: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
 ) -> Dict[str, Any]:
     """Mirrors `lib/score.mjs`'s `score(rows, predict)` field for field,
     including the one asymmetry in the original: the overall/per-intent
-    correctness check compares `canonical()` (sorted keys), but the
-    per-field check compares plain `JSON.stringify` (insertion order) --
-    ported here as plain `json.dumps` with no key sorting, to match."""
+    correctness check compares `canonical()` (sorted keys) of the
+    prediction NORMALISED down to the keys `row["form"]` has (recursively,
+    so an extra key nested inside `start`/`end`/`span` is ignored the same
+    way a top-level one is), but the per-field check compares plain
+    `json.dumps` of the raw prediction (insertion order, no normalisation)
+    -- ported here as plain `json.dumps` with no key sorting, to match. A
+    key `row["form"]` has that the prediction lacks stays missing, never
+    "extra", so an incomplete prediction is still wrong. `extraKeys` counts,
+    as a diagnostic only, every row whose prediction carried a key the
+    expected form did not, and how many times each such key name occurred."""
     clean = _empty_bucket()
     perturbed = _empty_bucket()
     by_intent: Dict[str, Dict[str, Dict[str, int]]] = {}
     by_field: Dict[str, Dict[str, int]] = {}
+    extra_keys: Dict[str, Any] = {"n": 0, "keys": {}}
 
     for row in rows:
         overall = clean if row["clean"] else perturbed
         overall["n"] += 1
 
         predicted = predict(row)
-        is_correct = predicted is not None and canonical(predicted) == canonical(row["form"])
+
+        if predicted is not None:
+            extra: List[str] = []
+            _collect_extra_keys(predicted, row["form"], extra)
+            if extra:
+                extra_keys["n"] += 1
+                for key in extra:
+                    extra_keys["keys"][key] = extra_keys["keys"].get(key, 0) + 1
+
+        normalized_predicted = (
+            predicted if predicted is None else _normalize_to_known_keys(predicted, row["form"])
+        )
+        is_correct = normalized_predicted is not None and canonical(normalized_predicted) == canonical(
+            row["form"]
+        )
         if is_correct:
             overall["correct"] += 1
 
@@ -96,11 +150,25 @@ def score(
             if same_intent and json.dumps(predicted.get(field)) == json.dumps(row["form"][field]):
                 field_bucket["correct"] += 1
 
-    return {"clean": clean, "perturbed": perturbed, "byIntent": by_intent, "byField": by_field}
+    return {
+        "clean": clean,
+        "perturbed": perturbed,
+        "byIntent": by_intent,
+        "byField": by_field,
+        "extraKeys": extra_keys,
+    }
 
 
 def rate(bucket: Dict[str, int]) -> float:
     return 1.0 if bucket["n"] == 0 else bucket["correct"] / bucket["n"]
+
+
+def format_extra_keys_line(extra_keys: Dict[str, Any]) -> str:
+    """Mirrors `score.mjs`'s `formatExtraKeysLine` -- the one line both
+    printers use so the diagnostic is visible without moving the verdict."""
+    parts = [f"{key}: {count}" for key, count in extra_keys["keys"].items()]
+    suffix = f" ({', '.join(parts)})" if parts else ""
+    return f"extra keys ignored: {extra_keys['n']} rows{suffix}"
 
 
 def pct(n: float) -> str:
@@ -126,6 +194,8 @@ def print_table(result: Dict[str, Any]) -> None:
     print("\nBy field:")
     for field, bucket in result["byField"].items():
         print(f"  {field.ljust(12)} {bucket['correct']}/{bucket['n']}  ({pct(rate(bucket))})")
+
+    print(f"\n{format_extra_keys_line(result['extraKeys'])}")
     print("")
 
 

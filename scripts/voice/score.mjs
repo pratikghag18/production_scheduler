@@ -9,7 +9,7 @@
 // gated -- brief §2: "that gap is the whole reason for a model."
 import { readFileSync } from "node:fs";
 import { parseCommand } from "../../src/lib/command/parse.ts";
-import { score, rate } from "./lib/score.mjs";
+import { score, rate, formatExtraKeysLine } from "./lib/score.mjs";
 
 function parseArgs(argv) {
   const out = { heldout: null, predictions: null, ruleParser: false, bar: 0.95 };
@@ -73,6 +73,7 @@ function printTable(result) {
   for (const [field, bucket] of Object.entries(result.byField)) {
     console.log(`  ${field.padEnd(12)} ${bucket.correct}/${bucket.n}  (${pct(rate(bucket))})`);
   }
+  console.log(`\n${formatExtraKeysLine(result.extraKeys)}`);
   console.log("");
 }
 

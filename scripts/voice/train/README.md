@@ -67,8 +67,11 @@ failed to parse`. It writes `predictions.jsonl` one row at a time as each is dec
 
 6. **What "good" looks like:** clean at or above 95%; perturbed far above the rule parser's
    baseline (`ruleParserBaseline.perturbed` in the manifest — currently 3.5%; the plan expects
-   90% or better on sentences shaped like the training ones). Below that, the developer session
-   changes the settings cell or the data, not the board.
+   90% or better on sentences shaped like the training ones). A field the model invents that
+   the training data never had (`"type":"assign"`, say) does not fail a row by itself — the
+   scorer ignores any key the expected form does not have and reports it on the "extra keys
+   ignored" line instead, since the resolver only ever reads the fields it knows. Below the
+   bar, the developer session changes the settings cell or the data, not the board.
 
 ## What you can check without Colab, on this machine
 
