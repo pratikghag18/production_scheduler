@@ -14074,7 +14074,7 @@ sessions:
 - id: 155
   date: 2026-09-13
   title: "The second score repeats the first, and the cause is found in the notebook: a 512-token cut (F-142)"
-  commits: ['0b30628']
+  commits: ['0b30628', '65b63b5']
   numbers:
     app_tests: 3021
     app_test_files: 141
@@ -14098,7 +14098,9 @@ sessions:
     developer's own: the brief chose 512 without measuring the prompt. A Sonnet lane lifted the cut
     to 1024 and made the data cell measure and refuse; the README says the checkpoints folder goes
     with the adapter before a retrain. Run three is the same base, same data, same instrument, one
-    change; the Qwen3.5 question waits for a fair score.
+    change; the Qwen3.5 question waits for a fair score. The maintainer also corrected the README's
+    run time: the second run measured over an hour of training and about an hour of prediction on a
+    T4, not the thirty to sixty minutes the file estimated; the file now says so.
 - id: 154
   date: 2026-09-13
   title: "Run two begins: the Setup cell learns to run twice (F-141)"
