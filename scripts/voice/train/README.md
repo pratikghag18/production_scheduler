@@ -79,3 +79,16 @@ versions as of 12 Sept 2026 (see the install cell's comments and the S43-a repor
 version was chosen), but "believed current" is not "run and passed". If a cell errors on first
 run, that is expected findings work, not a sign the notebook was never tried — say what failed
 and paste it back to the developer session.
+
+Three things the first real Colab run already found and the notebook now works around: (1)
+`transformers.set_seed` imports TensorFlow to check `is_tf_available()`, and Colab's TensorFlow
+broke under a protobuf version installed later in the same cell, so the install and load-data
+cells now force `transformers` off the TensorFlow path outright; (2) llama.cpp's own
+`requirements-convert_hf_to_gguf.txt` silently downgraded `transformers` to 4.57.6 (and would
+have swapped `torch` for a CPU-only 2.11.0 build), so the install cell no longer installs that
+file at all, only the two packages the converter script itself needs beyond what is already
+present; (3) `peft`'s LoRA tuner refused Colab's preinstalled `torchao` 0.10.0 (it wants
+`>=0.16.0`) the moment `get_peft_model()` probed for it, so the install cell now uninstalls
+`torchao` outright, since this pipeline never uses it. Expect more of this shape on the next
+run — Colab's preinstalled packages are not this repo's to pin, and any of them can surprise a
+pinned five.
