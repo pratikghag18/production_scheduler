@@ -42,7 +42,11 @@ Nothing in the app changes from running this. No model is served until its score
    Runtime → "Run after" from the Predict cell to continue without retraining. A `Run all` on
    any later day finds that saved adapter, prints that training is being skipped, and goes
    straight to prediction and scoring — delete the adapter folder on Drive (under
-   `scheduler-voice/run-qwen3-1.7b/adapter`) to force a genuinely fresh run.
+   `scheduler-voice/run-qwen3-1.7b/adapter`) to force a genuinely fresh run. Before a retrain,
+   also delete the `checkpoints` folder under the same run folder — the resume logic in the
+   training cell finds the newest `checkpoint-<step>` there and picks up mid-run from it
+   regardless of what changed in the Settings cell, so a checkpoint saved under an old `MAX_LEN`
+   (F-142, say) would otherwise resume as if nothing had changed.
 
    The Predict cell prints its first row's timing alone — `first row: 1.3s for 42 tokens` — so
    an emulated-precision slow path (see above) is visible within seconds instead of a blank cell
@@ -115,3 +119,10 @@ pinned five.
 The Setup cell may be run again in the same runtime — a Colab disconnect and reconnect, say —
 without failing on the llama.cpp clone; it checks for `convert_hf_to_gguf.py` in
 `/content/llama.cpp` first and skips the clone when the folder is already there (F-141).
+
+Two real runs scored `product` at 2.5% before the cause was found: `MAX_LEN = 512` was shorter
+than a full training conversation, so `SFTConfig(max_length=MAX_LEN)` silently cut every row off
+before the answer — the system prompt alone runs 450 tokens, and the answer comes last. `MAX_LEN`
+is now 1024, and the cell after the chat-template round trip tokenises every training
+conversation the same way the trainer will, prints the median and longest length seen, and
+asserts the longest is under `MAX_LEN` before training is allowed to start (F-142).
