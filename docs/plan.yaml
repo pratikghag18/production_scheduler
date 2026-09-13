@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '07ace87'
+  tip: '0b30628'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2131,6 +2131,13 @@ stages:
     part's name is the hardest field (fifty realistic names with digits and slashes) and the one a
     model that has seen each example once has not learned to emit. The second run is the fixed
     notebook as committed: fp16 from the start, three full passes, checkpoints on Drive.
+    **THE SECOND SCORE (13 Sept, session 155): FAIL, and the same shape.** Clean 94/200 (47%),
+    perturbed 85/200 (42.5%); product 5/200; unassign 98% clean, move 82%, assign 8%, book 0%. That
+    ruled out under-training and the cause was found in the notebook, not the model: the 512-token
+    cut removed the product key from every assign and book training answer (F-142). The reading in
+    session 153 was wrong. **Run three** is the notebook with the cut lifted and a measured-length
+    check in the data cell; same base, same data, same instrument, one variable changed. Waiting on
+    the maintainer's run and its score.
 - id: M1
   track: matrix
   num: 1
@@ -10250,6 +10257,35 @@ requirements:
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-142
+  title: The notebook cut every training example at 512 tokens, and the answer's tail is what it cut
+  tag: A budget set without measuring what had to fit in it
+  status: fixed
+  found_by: agent
+  stage: S43
+  refs:
+  - R-392
+  - F-140
+  story: >-
+    Found 13 Sept (session 155) after the second run scored the same as the first: clean 94/200
+    (47%), perturbed 85/200 (42.5%), product 5/200. Three full passes at native fp16 had moved the
+    field from 3 to 5 of 200, so "under-trained" (session 153's reading) was wrong. The wrong answers
+    had one shape: keys in alphabetical order, everything through place right, product skipped, then
+    start and invented keys that also sort after start. The developer session measured the training
+    rows with Qwen3's own tokenizer: the system turn is 450 tokens, a full prompt 470 to 526, the
+    answers 50 to 80 and last in the sequence; the Settings cell set MAX_LEN 512 and the trainer cuts
+    from the right. The product key survived the cut in 0 of 1,361 assign rows and 0 of 842 book
+    rows; start in 0; toPlace in 197 of 771 move rows. Every field's score follows its survival
+    count. The assistant-only loss was fine (TRL patches Qwen3's template itself); the loss of
+    0.005 was real, over the twenty-odd easy tokens a row that made it in. The brief that chose 512
+    (S43-a) never measured the prompt; two Colab runs and an evening were spent on it.
+  fix: >-
+    Session 155 (0b30628). MAX_LEN is 1024, with the measured maximum in its comment; the data cell
+    tokenises every training conversation exactly as the trainer sees it, prints the median and the
+    longest, and refuses to continue when the longest would not fit. The README carries the finding
+    and says the checkpoints folder must go with the adapter before a retrain, since the resume logic
+    would pick up a checkpoint trained under the cut. Run three is the fixed notebook, same base,
+    same data, same instrument; the Qwen3.5 question waits until a run has been scored fairly.
 - id: F-141
   title: The notebook's Setup cell failed when run a second time in the same runtime
   tag: A step that cannot be repeated in a cell that will be
@@ -14035,6 +14071,34 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 155
+  date: 2026-09-13
+  title: "The second score repeats the first, and the cause is found in the notebook: a 512-token cut (F-142)"
+  commits: ['0b30628']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: false
+  numbers_note: >-
+    Carried from session 153 unchanged: the notebook and its README are the only files touched and no
+    runner covers them; check_notebook.py passed. The next full run confirms.
+  summary: >-
+    The maintainer's second run scored clean 47%, perturbed 42.5%, product 5 of 200: three full passes
+    at native fp16 had not moved the missing field, so session 153's "under-trained" was wrong. The
+    developer session read the wrong answers' shape (alphabetical keys, right through place, product
+    skipped, invented keys after start), then measured every training row with Qwen3's own tokenizer:
+    a 450-token system turn, prompts of 470 to 526 tokens, answers of 50 to 80 tokens at the end, and
+    a MAX_LEN of 512 that the trainer cuts from the right. The product key survived in none of the
+    2,203 assign and book rows; each field's score tracks how often it survived. F-142 is the
+    developer's own: the brief chose 512 without measuring the prompt. A Sonnet lane lifted the cut
+    to 1024 and made the data cell measure and refuse; the README says the checkpoints folder goes
+    with the adapter before a retrain. Run three is the same base, same data, same instrument, one
+    change; the Qwen3.5 question waits for a fair score.
 - id: 154
   date: 2026-09-13
   title: "Run two begins: the Setup cell learns to run twice (F-141)"
@@ -20927,12 +20991,13 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S43
-  text: "Voice plan Stage 4 --- run two on Qwen3 1.7B (fp16, three passes), then run three on Qwen3.5 2B with the same data and instrument"
+  text: "Voice plan Stage 4 --- run three on Qwen3 1.7B with the token cut lifted (F-142); the Qwen3.5 2B question waits for a fair score"
   why: >-
-    The first run failed the bar on one missing field after being stopped under one pass on emulated
-    bf16 (session 153). Run two is the committed notebook unchanged except BATCH 16 x GRAD_ACCUM 2 (the
-    same effective 32), the adapter folder on Drive deleted so it retrains; it answers whether the
-    field was under-training. The maintainer asked why not Qwen3.5 (March 2026: 0.8B/2B/4B, Apache
+    The first two runs failed the bar on the same missing field (sessions 153 and 155) and the cause
+    was the notebook's 512-token cut, which removed the product key from every assign and book training
+    answer (F-142). Run three is the committed notebook with MAX_LEN 1024 and a measured-length check:
+    the run folder on Drive deleted (adapter and checkpoints), Run all, the score pasted back. That is
+    the first fair score of Qwen3 1.7B on this task. The maintainer asked why not Qwen3.5 (March 2026: 0.8B/2B/4B, Apache
     2.0, a multimodal checkpoint with a text-only class, hybrid linear attention whose projections are
     named in_proj_qkv, in_proj_z, in_proj_b, in_proj_a and out_proj beside q/k/v/o and gate/up/down;
     llama.cpp converts it). Decision offered and not yet taken: run three on Qwen3.5 2B with a notebook
