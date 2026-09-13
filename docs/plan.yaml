@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '06c210b'
+  tip: 'e41a17e'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2156,7 +2156,7 @@ stages:
   track: core
   num: 44
   title: Serve the model beside the database — the bar reads by the model and falls back to the rules
-  status: now
+  status: done
   owner: agent
   refs:
   - docs/voice-commands-plan.md (Stage 5)
@@ -2181,6 +2181,18 @@ stages:
     its "read by" line, the tests). The contract between them is fixed in both briefs. Proof: the
     lanes' tests, the probe run on this machine against the S43 file, and a free phrasing typed into
     the running app.
+    **DONE 13 Sept (session 157).** Both lanes landed (ba4d928), a reviewer's four findings folded in
+    (an edit clears a stuck reading status, an empty Enter never reaches the model, the serve script
+    takes --model, a held-out run killed mid-line resumes). On this machine the service answers a
+    sentence in 7 s cold and 2.6 s with the prompt cached. **The served file's own score,** all 400
+    held-out rows through the container (the 4-bit file, not Colab's full-precision one): clean 196/200
+    (98%), perturbed 185/200 (92.5%), pass. The two-point loss on clean rows is the compression: one
+    afternoon bump wrong ("11 - 1:30pm" read as 23:30) and three unassign answers that wrote the
+    invented key type instead of intent --- which the decoder refuses, so in the app those three
+    fixed sentences fall to the rules and are read correctly; the fallback is doing its job. The
+    browser proof (e41a17e): a free phrasing typed into the running app with the service on opens
+    the pop-up preset, gated on VOICE_E2E so the tester and CI skip it. Six seconds a row on this
+    processor for the held-out run; one sentence at the bar is two to four seconds after the first.
 - id: M1
   track: matrix
   num: 1
@@ -10317,11 +10329,22 @@ requirements:
     which reader answered and why. When no service address is configured the bar behaves exactly as
     before and makes no request. The system prompt the app sends is the training file itself, not a copy.
   verified_by:
+  - kind: vitest
+    file: src/test/voiceRead.test.ts
+    cases: "VR1-VR7 --- each of the four forms decodes; a missing or mistyped field is refused; an invented key is ignored and attach/existing forced null; off (a rejected fetch, a 503) is unavailable; slow is timeout; no object, bad JSON and a refused shape are garbled; the system message equals scripts/voice/train/system_prompt.txt byte for byte and the body carries the contract's fields; no address means no request"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-model-1 to CB-model-8 --- the model's form opens the pop-up as the typed fixed sentence would, with the read-by-the-model suffix; unavailable falls back to the rules and says so; the failure prefix wording; a second Enter aborts the first reading and reads again; Escape aborts and clears; a null reader is never called; an edit clears a stuck reading status; an empty Enter never reaches the model"
+  - kind: e2e
+    file: e2e/voiceBar.spec.ts
+    cases: "gated on VOICE_E2E, three serial cases --- a free phrasing the rules cannot read opens the create pop-up preset and the readout says read by the model; a fixed sentence is still read by the model; behind VOICE_E2E_STOP_CONTAINER the service is stopped, the fixed sentence reads by the rules with the status saying the service is off, and the service is started again"
   - kind: manual
     steps: "copy the S43 file to data/voice/model/scheduler-voice.gguf; npm run voice:serve; npm run voice:probe -- \"put Ana on Housing A at Cell 1 tomorrow 8 till noon\" prints the form and the time; set VITE_VOICE_URL=/voice in .env.local, npm run dev, type a free phrasing, the pop-up opens preset; stop the container, type again, the rules answer and the line says so"
-  status: uncovered
+  status: covered
   note: >-
-    STATED 13 Sept (session 156). The lanes are writing it. Covered when src/test/voiceRead.test.ts
+    STATED 13 Sept (session 156), COVERED 13 Sept (session 157): the two test files carry the cases,
+    the gated browser spec ran here with the service on, and the probe scored the served file on all
+    400 rows (S44's card). Written when the lanes were briefed: covered when src/test/voiceRead.test.ts
     carries VR1-VR7 (each of the four forms decodes; a missing or mistyped field is refused; an
     invented key is ignored; off, slow and garbled each yield their reason; the prompt equals the
     training file byte for byte; no address means no request) and src/test/commandBar.test.tsx
@@ -14169,6 +14192,38 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 157
+  date: 2026-09-13
+  title: "Stage 5 shipped: the bar reads through the local model service and falls back to the rules (S44, R-393 covered)"
+  shipped: [S44]
+  commits: ['f73186e', 'ba4d928', 'e41a17e']
+  numbers:
+    app_tests: 3045
+    app_test_files: 142
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept: 3045 tests in 142 files, all passing (the reader's VR1-VR7 and the bar's
+    CB-model cases are the additions since session 156). tsc, eslint and prettier clean over the repo
+    (prettier's two warnings are line endings on untouched files, no diff). e2e gains the gated
+    voiceBar spec (49 tests listed by the runner; the new ones skip without VOICE_E2E); the role walk passed before the commit. No
+    migration or SQL test changed.
+  summary: >-
+    The maintainer left the runtime to the developer's recommendation and llama.cpp's server won over
+    Ollama (D121). Two Sonnet lanes built it against one fixed contract: the service side (the container
+    script, a probe that sends a sentence or the whole held-out set, the dev proxy) and the app side (a
+    reader that sends the training prompt itself and decodes the answer field by field, and the bar's
+    reading state with its read-by line). A third agent reviewed with one job, break it, and found four
+    things worth fixing and nothing in the contract, the decoder or the race handling; a fourth wrote
+    the gated browser proof. On this machine the service answers in 7 s cold and about 3 s warm, and
+    the served 4-bit file scores clean 98%, perturbed 92.5% on all 400 rows --- a pass, two points under
+    Colab's full-precision file, with the gap named and queued as Stage 5b. The laptop ran short of
+    memory once during the 400-row run (Docker, two dev servers, a browser and the probe together); the
+    probe's resume rule meant nothing was lost.
 - id: 156
   date: 2026-09-13
   title: "The third run passes the bar, and the field table's last two low numbers were the instrument (F-143)"
@@ -21122,13 +21177,14 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S44
-  text: "Voice plan Stage 5 --- serve the model beside the database; the bar falls back to the rule parser and says so (S44, in progress)"
+  text: "Voice plan Stage 5b --- close the compression gap: a grammar at the service so an invented key cannot happen, or serve the 8-bit file; measure both"
   why: >-
-    Decided 13 Sept (session 156): llama.cpp's server in a container, the maintainer's word on the
-    developer's recommendation (D121). Two lanes are building it. The bar sends the sentence and
-    gets the form back; when the service is down the rule parser answers and the bar says which one
-    did. The form still goes through the same resolver and the same pop-up: the model writes words,
-    the app resolves them (D117).
+    The served 4-bit file scores clean 98% against the full-precision 100% (session 157): one time
+    read wrong and three answers that wrote type instead of intent. llama.cpp's server can constrain
+    decoding to a JSON schema, which makes the wrong key impossible and may fix those three outright;
+    the 8-bit file (about 1.8 GB) may fix all four at some cost in speed. Run both through the probe
+    on the held-out set and keep the better; either is an afternoon. Not blocking: the app already
+    falls back to the rules on a refused answer.
 - kind: task
   text: "Voice plan Stage 6 --- the microphone: browser recogniser first, local Whisper second"
   why: >-
