@@ -56,11 +56,15 @@ function collectExtraKeys(predicted, expected, into) {
  * `{n, correct}` shape. `byField[field]` counts, over every row that carries
  * that field (any intent), whether the predictor got exactly that field
  * right -- comparable across intents even though `AssignCommand` and
- * `BookCommand` do not share every field. `extraKeys` is `{ n, keys }`: `n`
- * is the number of rows whose prediction carried a key the expected form did
- * not, at any level; `keys` counts each such key name across every
- * occurrence (first-seen order). It is a diagnostic only -- it never changes
- * `correct`.
+ * `BookCommand` do not share every field. A field is judged the same
+ * key-order-blind way the row verdict is -- `canonical()` on both sides,
+ * against the normalised prediction (the same value the row verdict
+ * compares), so a model that writes keys in a different order, or an extra
+ * key inside a nested object the normalisation strips, does not count as
+ * wrong. `extraKeys` is `{ n, keys }`: `n` is the number of rows whose
+ * prediction carried a key the expected form did not, at any level; `keys`
+ * counts each such key name across every occurrence (first-seen order). It
+ * is a diagnostic only -- it never changes `correct`.
  */
 export function score(rows, predict) {
   const clean = emptyBucket();
@@ -98,11 +102,11 @@ export function score(rows, predict) {
     intentSide.n++;
     if (isCorrect) intentSide.correct++;
 
-    const sameIntent = predicted != null && predicted.intent === row.intent;
+    const sameIntent = normalizedPredicted != null && normalizedPredicted.intent === row.intent;
     for (const field of Object.keys(row.form)) {
       const fieldBucket = (byField[field] ??= emptyBucket());
       fieldBucket.n++;
-      if (sameIntent && JSON.stringify(predicted[field]) === JSON.stringify(row.form[field])) {
+      if (sameIntent && canonical(normalizedPredicted[field]) === canonical(row.form[field])) {
         fieldBucket.correct++;
       }
     }

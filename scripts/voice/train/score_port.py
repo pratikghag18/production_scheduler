@@ -94,18 +94,17 @@ def _collect_extra_keys(predicted: Any, expected: Any, into: List[str]) -> None:
 def score(
     rows: List[Dict[str, Any]], predict: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
 ) -> Dict[str, Any]:
-    """Mirrors `lib/score.mjs`'s `score(rows, predict)` field for field,
-    including the one asymmetry in the original: the overall/per-intent
-    correctness check compares `canonical()` (sorted keys) of the
-    prediction NORMALISED down to the keys `row["form"]` has (recursively,
-    so an extra key nested inside `start`/`end`/`span` is ignored the same
-    way a top-level one is), but the per-field check compares plain
-    `json.dumps` of the raw prediction (insertion order, no normalisation)
-    -- ported here as plain `json.dumps` with no key sorting, to match. A
-    key `row["form"]` has that the prediction lacks stays missing, never
-    "extra", so an incomplete prediction is still wrong. `extraKeys` counts,
-    as a diagnostic only, every row whose prediction carried a key the
-    expected form did not, and how many times each such key name occurred."""
+    """Mirrors `lib/score.mjs`'s `score(rows, predict)` field for field. The
+    per-field check is judged the same key-order-blind way the row verdict
+    is: `canonical()` on both sides, against the prediction NORMALISED down
+    to the keys `row["form"]` has (recursively, so an extra key nested
+    inside `start`/`end`/`span` is ignored the same way a top-level one is,
+    and a model that writes keys in a different order does not count as
+    wrong). A key `row["form"]` has that the prediction lacks stays missing,
+    never "extra", so an incomplete prediction is still wrong. `extraKeys`
+    counts, as a diagnostic only, every row whose prediction carried a key
+    the expected form did not, and how many times each such key name
+    occurred."""
     clean = _empty_bucket()
     perturbed = _empty_bucket()
     by_intent: Dict[str, Dict[str, Dict[str, int]]] = {}
@@ -143,11 +142,15 @@ def score(
         if is_correct:
             intent_side["correct"] += 1
 
-        same_intent = predicted is not None and predicted.get("intent") == row["intent"]
+        same_intent = (
+            normalized_predicted is not None and normalized_predicted.get("intent") == row["intent"]
+        )
         for field in row["form"].keys():
             field_bucket = by_field.setdefault(field, _empty_bucket())
             field_bucket["n"] += 1
-            if same_intent and json.dumps(predicted.get(field)) == json.dumps(row["form"][field]):
+            if same_intent and canonical(normalized_predicted.get(field)) == canonical(
+                row["form"][field]
+            ):
                 field_bucket["correct"] += 1
 
     return {
