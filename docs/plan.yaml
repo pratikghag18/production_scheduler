@@ -2152,6 +2152,35 @@ stages:
     model-q4_k_m.gguf (1.1 GB), and the predictions file are on this machine under
     data/voice/runs/third-run (gitignored; the GGUF is the Stage 5 artefact). Three runs, 2.5 hours
     each on a T4; the last on the notebook as committed.
+- id: S44
+  track: core
+  num: 44
+  title: Serve the model beside the database — the bar reads by the model and falls back to the rules
+  status: now
+  owner: agent
+  refs:
+  - docs/voice-commands-plan.md (Stage 5)
+  - §19.92 (D121)
+  - docs/agent-briefs/s44-a-serve-brief.md
+  - docs/agent-briefs/s44-b-read-by-model-brief.md
+  - session 156 conversation (the runtime chosen)
+  delivers:
+  - R-393
+  what: >-
+    **Type it however you like, and the board does it.** The fine-tuned model from S43 runs as a small
+    service next to the local database (llama.cpp's server in a container, reading the quantised file
+    on this machine's own processor). The command bar sends the typed sentence there and gets back the
+    same form the rule parser produces, so the resolver, the questions and the pop-up are untouched: the
+    model writes words, the app resolves them (D117). When the service is off, slow, or answers
+    something that is not a form, the rule parser answers instead and the status line says so. With no
+    service configured the bar is exactly what it was.
+  state: >-
+    **Briefed session 156 (13 Sept).** Two lanes: the serving side (the container script, a probe that
+    sends one sentence and prints the form and the time, the dev proxy, the README) and the app side
+    (the reader that calls the service and checks the answer is a form, the bar's pending state and
+    its "read by" line, the tests). The contract between them is fixed in both briefs. Proof: the
+    lanes' tests, the probe run on this machine against the S43 file, and a free phrasing typed into
+    the running app.
 - id: M1
   track: matrix
   num: 1
@@ -10270,6 +10299,35 @@ requirements:
     (a chat-format file built from train.jsonl), the predictions format against the scorer, and the
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
+- id: R-393
+  title: The bar reads a sentence through the local model service, and falls back to the rule parser and says so
+  source:
+  - 'session 156 conversation (the maintainer, 13 Sept, on the runtime: "Go ahead and do what you think is the best option" --- llama.cpp server, as recommended)'
+  - docs/voice-commands-plan.md (Stage 5)
+  - §19.92 (D121)
+  stated_by: maintainer
+  claim: >-
+    When a service address is configured, Enter in the command bar sends the typed sentence to the
+    local model service (llama.cpp's server, in a container beside the database, with the system prompt
+    the model was trained on, thinking off, temperature zero) and reads its answer as the parser's form;
+    that form goes through the same resolver and the same pop-up as a typed fixed sentence, and the bar
+    never writes (D117). While the service is answering the bar shows that it is reading, a second
+    Enter or Escape cancels, and the input stays editable. When the service is off, does not answer in
+    time, or answers something that is not a form, the rule parser answers and the status line says
+    which reader answered and why. When no service address is configured the bar behaves exactly as
+    before and makes no request. The system prompt the app sends is the training file itself, not a copy.
+  verified_by:
+  - kind: manual
+    steps: "copy the S43 file to data/voice/model/scheduler-voice.gguf; npm run voice:serve; npm run voice:probe -- \"put Ana on Housing A at Cell 1 tomorrow 8 till noon\" prints the form and the time; set VITE_VOICE_URL=/voice in .env.local, npm run dev, type a free phrasing, the pop-up opens preset; stop the container, type again, the rules answer and the line says so"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 156). The lanes are writing it. Covered when src/test/voiceRead.test.ts
+    carries VR1-VR7 (each of the four forms decodes; a missing or mistyped field is refused; an
+    invented key is ignored; off, slow and garbled each yield their reason; the prompt equals the
+    training file byte for byte; no address means no request) and src/test/commandBar.test.tsx
+    carries the model cases (the model's form opens the pop-up; off falls back and says so; Enter
+    while reading re-reads; Escape cancels; no address means no request), and the probe has run here.
+
 findings:
 - id: F-143
   title: The scorer's field table judged key order, so two fields read as half wrong on a run that was all right
@@ -21063,9 +21121,11 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  text: "Voice plan Stage 5 --- serve the model beside the database; the bar falls back to the rule parser and says so"
+  stage: S44
+  text: "Voice plan Stage 5 --- serve the model beside the database; the bar falls back to the rule parser and says so (S44, in progress)"
   why: >-
-    A small container (Ollama or llama.cpp) next to the local stack. The bar sends the sentence and
+    Decided 13 Sept (session 156): llama.cpp's server in a container, the maintainer's word on the
+    developer's recommendation (D121). Two lanes are building it. The bar sends the sentence and
     gets the form back; when the service is down the rule parser answers and the bar says which one
     did. The form still goes through the same resolver and the same pop-up: the model writes words,
     the app resolves them (D117).
