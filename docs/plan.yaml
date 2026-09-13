@@ -2193,6 +2193,54 @@ stages:
     browser proof (e41a17e): a free phrasing typed into the running app with the service on opens
     the pop-up preset, gated on VOICE_E2E so the tester and CI skip it. Six seconds a row on this
     processor for the held-out run; one sentence at the bar is two to four seconds after the first.
+- id: S45
+  track: core
+  num: 45
+  title: Close the compression gap — the service refuses a wrong key by grammar, measured against the held-out set
+  status: now
+  owner: agent
+  refs:
+  - §19.93 (D122)
+  - docs/agent-briefs/s45-a-grammar-brief.md
+  - session 157 (the four misses of the served file)
+  delivers:
+  - R-393
+  what: >-
+    **The served model cannot answer with a key the form does not have.** The four-bit file scored two
+    points under the full-precision one, and three of its four clean misses were an invented key where
+    intent should be. llama.cpp's server can constrain decoding to a JSON schema, so a wrong key becomes
+    impossible instead of merely unlikely. One schema file describes the four forms with keys in the
+    order the model writes them; the app's reader and the probe both send it; the held-out set is run
+    through the service with and without it and the two tables sit side by side on this card. The
+    eight-bit file is the second half of the question and waits on the full-precision file from Drive,
+    only if the grammar leaves a gap.
+  state: >-
+    **Briefed session 158 (13 Sept).** One lane: the schema file, the probe's flag, the reader's
+    request, the tests, and the measurement on this machine. Owed here: the two tables.
+- id: S46
+  track: core
+  num: 46
+  title: The microphone — say the sentence, the browser's own recogniser types it
+  status: now
+  owner: agent
+  refs:
+  - docs/voice-commands-plan.md (Stage 6)
+  - §19.94 (D123)
+  - docs/agent-briefs/s46-a-microphone-brief.md
+  delivers:
+  - R-394
+  what: >-
+    **Press the button, say it, and the board does it.** A microphone button inside the command bar
+    starts the browser's built-in speech recogniser; what it hears appears in the input as it goes, and
+    when the sentence is final it is read exactly as a typed one (the model when the service is on, the
+    rules otherwise) and opens the same pop-up. Nothing writes without the pop-up's Create. The button
+    exists only in browsers that have a recogniser; where the microphone is refused or nothing is heard
+    the status line says so. This version sends the audio to the browser maker's service (Chrome to
+    Google, Edge to Microsoft), as the plan says; the local Whisper version is the later one.
+  state: >-
+    **Briefed session 158 (13 Sept).** One lane: the recogniser wrapper, the bar's listening state and
+    button, the tests with a fake recogniser, and the role walk unchanged. Owed here: the tests named
+    on R-394 and a session entry.
 - id: M1
   track: matrix
   num: 1
@@ -10350,6 +10398,33 @@ requirements:
     training file byte for byte; no address means no request) and src/test/commandBar.test.tsx
     carries the model cases (the model's form opens the pop-up; off falls back and says so; Enter
     while reading re-reads; Escape cancels; no address means no request), and the probe has run here.
+
+- id: R-394
+  title: A microphone button in the bar dictates the sentence through the browser's recogniser, and the sentence is then read like a typed one
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: "Continue onto stage 6 as well as next step or in parallel if you can.")'
+  - docs/voice-commands-plan.md (Stage 6)
+  - §19.94 (D123)
+  stated_by: maintainer
+  claim: >-
+    In a browser that has a speech recogniser the command bar shows a microphone button; pressing it
+    starts listening and the button says so, what is heard so far appears in the input as it is
+    recognised, and when the recogniser reports a final sentence that sentence is submitted exactly as
+    if it had been typed and Enter pressed --- the model reader when a service is configured, the rules
+    otherwise, then the same resolver and pop-up, and nothing is written without the pop-up. Pressing
+    the button again, or Escape, stops listening and keeps whatever was heard in the input. A refused
+    microphone, no speech, or a recogniser error each put a plain sentence in the status line. In a
+    browser without a recogniser the button is absent and the bar is unchanged. The recogniser is the
+    browser's own (audio leaves the machine, as docs/voice-commands-plan.md says of this version).
+  verified_by:
+  - kind: manual
+    steps: "in Chrome or Edge on the board, press the microphone button, say a sentence, watch it appear and the pop-up open; press it again mid-sentence and see listening stop with the words kept; deny the microphone and read the status line; open the board in Firefox and see no button"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 158). Covered when src/test/commandBar.test.tsx carries the CB-mic cases (button
+    absent without a recogniser; press starts and the bar says listening; interim text lands in the
+    input; a final result submits through the same Enter path; press again stops and keeps the text;
+    not-allowed, no-speech and a generic error each set their status line) and the role walk is unchanged.
 
 findings:
 - id: F-143
@@ -21177,7 +21252,7 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S44
-  text: "Voice plan Stage 5b --- close the compression gap: a grammar at the service so an invented key cannot happen, or serve the 8-bit file; measure both"
+  text: "Voice plan Stage 5b --- close the compression gap by grammar, measured (S45, in progress)"
   why: >-
     The served 4-bit file scores clean 98% against the full-precision 100% (session 157): one time
     read wrong and three answers that wrote type instead of intent. llama.cpp's server can constrain
@@ -21186,7 +21261,8 @@ next:
     on the held-out set and keep the better; either is an afternoon. Not blocking: the app already
     falls back to the rules on a refused answer.
 - kind: task
-  text: "Voice plan Stage 6 --- the microphone: browser recogniser first, local Whisper second"
+  stage: S46
+  text: "Voice plan Stage 6 --- the microphone: browser recogniser first (S46, in progress), local Whisper second"
   why: >-
     A button beside the bar. First the browser's own recogniser (zero setup, audio leaves the
     building, some sites will refuse); then Whisper through the Stage 5 service so audio stays on
