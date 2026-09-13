@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '5b09a61'
+  tip: '07ace87'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -10250,6 +10250,27 @@ requirements:
     notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
     when they exist.
 findings:
+- id: F-141
+  title: The notebook's Setup cell failed when run a second time in the same runtime
+  tag: A step that cannot be repeated in a cell that will be
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-136
+  story: >-
+    Reported 13 Sept (session 154), starting the second run: the Setup cell raised
+    CalledProcessError, exit 128, on the llama.cpp clone. The clone writes into a fixed folder and
+    git refuses when the folder is already there, which it is the moment the cell runs twice in one
+    runtime --- after a disconnect, or after any later cell fails and the person starts again from
+    the top. Every other step in the cell (the pip installs) is safe to repeat; this one was not, and
+    because the clone's stderr was not captured the output did not say why.
+  fix: >-
+    Session 154 (07ace87). The cell checks for the converter script in the folder first and skips the
+    clone when it is present, printing one line; when the clone does fail it stops with git's own
+    message. The README says the cell may be run again after a disconnect. Paste-in fix for the open
+    Colab: delete the folder, or disconnect and delete the runtime and Run all.
 - id: F-140
   title: The first model's first answer was right in every field and wrong to the scorer, because it added a key
   tag: The instrument judged the text, not the form
@@ -14014,6 +14035,29 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 154
+  date: 2026-09-13
+  title: "Run two begins: the Setup cell learns to run twice (F-141)"
+  commits: ['07ace87']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: false
+  numbers_note: >-
+    Carried from session 153 unchanged: this session touched only the notebook and its README, which
+    no runner covers; check_notebook.py passed (every code cell compiles). The next full run confirms.
+  summary: >-
+    The maintainer started the second training run and the Setup cell fell over on the llama.cpp
+    clone, because the cell had already run once in that runtime and the clone cannot be repeated
+    (F-141). A Sonnet lane guarded the clone and made its failure readable; the developer session
+    reviewed the diff (the Setup cell only, every other cell byte for byte the same) and gave the
+    maintainer the two paste-in ways out. Run two is otherwise the committed notebook with BATCH 16
+    and GRAD_ACCUM 2; its score is still owed on S43.
 - id: 153
   date: 2026-09-13
   title: "The first model's first run: five first-run findings fixed, and a score that fails on one missing field"

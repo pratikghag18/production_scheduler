@@ -113,8 +113,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 153 · 2026-09-13 · The first model's first run: five first-run findings fixed, and a score that fails on one missing field</h2>
-  <div class="lead"><p>The maintainer ran the Colab notebook for the first time, over an evening, pasting each traceback as it came; the developer session answered each with a paste-in fix for the open Colab and a Sonnet-lane fix for the repo copy, and recorded each as a finding. Five in a row: transformers' seed helper importing Colab's TensorFlow (F-135); the llama.cpp converter's requirements file downgrading transformers and pinning a CPU-only torch (F-136); Colab's old torchao refused by peft (F-137); bf16 emulation on a T4 at a hundred seconds a step, when the developer session had promised under an hour (F-138); and a Predict cell that printed nothing and wrote nothing until the end, under a two-hour session deadline (F-139). Then the first answer came back right in every field with an invented key, and the scorer, which compared whole texts, would have failed it (F-140); the scorer and its Python port now judge the known fields and report extras. ⚠️ THE FIRST SCORE FAILS THE BAR, AND THE REASON IS ONE FIELD. Clean 45%, perturbed 38.5%. Read from the predictions file: 397 of 400 answers omit <code>product</code> and carry invented keys instead; unassign and move, which have no product field, scored 100% and 78% clean. The training data is right (every assign and book answer carries the key; checked). The run had been stopped by hand at step 110 of 375, under one pass, on emulated bf16, then cast to fp16 for prediction --- the hardest field is the one a model that saw each example once has not learned to emit. The second run is the committed notebook as is: fp16 natively, three passes, checkpoints; the adapter folder on Drive deleted so it retrains. No notebook change was made for the score itself, on purpose: one variable at a time. ⭐ WHAT THE EVENING PROVED ANYWAY: the whole path runs --- data to Drive, train, save, predict with progress, score with the repo's instrument, merge, convert to f16 GGUF (the q4 quantise was still building when the score came back). R-392 stays covered on the repo half and the score line on S43 is the honest state.</p></div>
+  <h2>Session 154 · 2026-09-13 · Run two begins: the Setup cell learns to run twice (F-141)</h2>
+  <div class="lead"><p>The maintainer started the second training run and the Setup cell fell over on the llama.cpp clone, because the cell had already run once in that runtime and the clone cannot be repeated (F-141). A Sonnet lane guarded the clone and made its failure readable; the developer session reviewed the diff (the Setup cell only, every other cell byte for byte the same) and gave the maintainer the two paste-in ways out. Run two is otherwise the committed notebook with BATCH 16 and GRAD_ACCUM 2; its score is still owed on S43.</p></div>
   <div class="band">
   <div class="stat ok"><span class="n">3021</span><span class="l">app tests in 141 files — session 152, 2026-09-12</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
@@ -123,7 +123,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
   <div class="stat "><span class="n">287 / 335</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>5b09a61</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>07ace87</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2174,7 +2174,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>140 things that weren't in the plan</h2>
+  <h2>141 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3416,6 +3416,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <div class="aside"><span class="k">Fix</span><p>Session 153 (a5d6433). The scorer and its Python port keep only the expected form's keys before comparing, at the top level and inside the time objects, and count rows that carried an extra key under a separate bucket printed in the table, so the diagnostic stays visible without distorting the verdict; a missing key is still wrong; the rule parser's baseline is unchanged. Why the model adds the key, and whether constrained decoding at serving time (Stage 5, a grammar for the local runtime) should forbid it outright, is a question for the score, not for the instrument.</p></div>
   <p class="fine">R-390 · R-392</p>
+</div>
+<div class="find fix" id="F-141">
+  <span class="tag">A step that cannot be repeated in a cell that will be · fixed · you found it · <a href="#S43">S43</a></span>
+  <h3>The notebook's Setup cell failed when run a second time in the same runtime</h3>
+  <p>Reported 13 Sept (session 154), starting the second run: the Setup cell raised CalledProcessError, exit 128, on the llama.cpp clone. The clone writes into a fixed folder and git refuses when the folder is already there, which it is the moment the cell runs twice in one runtime --- after a disconnect, or after any later cell fails and the person starts again from the top. Every other step in the cell (the pip installs) is safe to repeat; this one was not, and because the clone's stderr was not captured the output did not say why.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 154 (07ace87). The cell checks for the converter script in the folder first and skips the clone when it is present, printing one line; when the clone does fail it stops with git's own message. The README says the cell may be run again after a disconnect. Paste-in fix for the open Colab: delete the folder, or disconnect and delete the runtime and Run all.</p></div>
+  <p class="fine">R-392 · F-136</p>
 </div>
 </section>
 
@@ -5778,6 +5786,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 154</b> · 2026-09-13 · Run two begins: the Setup cell learns to run twice (F-141) <span class="chip q">counts not confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer started the second training run and the Setup cell fell over on the llama.cpp clone, because the cell had already run once in that runtime and the clone cannot be repeated (F-141). A Sonnet lane guarded the clone and made its failure readable; the developer session reviewed the diff (the Setup cell only, every other cell byte for byte the same) and gave the maintainer the two paste-in ways out. Run two is otherwise the committed notebook with BATCH 16 and GRAD_ACCUM 2; its score is still owed on S43.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>Carried from session 153 unchanged: this session touched only the notebook and its README, which no runner covers; check_notebook.py passed (every code cell compiles). The next full run confirms.</p></div>
+    <p class="fine">3021 app tests in 141 files · 845 database checks · 79 migrations · tsc 0 · eslint 0 · commits 07ace87</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 153</b> · 2026-09-13 · The first model's first run: five first-run findings fixed, and a score that fails on one missing field <span class="chip q">counts not confirmed</span></summary>
   <div class="inner">
     <p>The maintainer ran the Colab notebook for the first time, over an evening, pasting each traceback as it came; the developer session answered each with a paste-in fix for the open Colab and a Sonnet-lane fix for the repo copy, and recorded each as a finding. Five in a row: transformers' seed helper importing Colab's TensorFlow (F-135); the llama.cpp converter's requirements file downgrading transformers and pinning a CPU-only torch (F-136); Colab's old torchao refused by peft (F-137); bf16 emulation on a T4 at a hundred seconds a step, when the developer session had promised under an hour (F-138); and a Predict cell that printed nothing and wrote nothing until the end, under a two-hour session deadline (F-139). Then the first answer came back right in every field with an invented key, and the scorer, which compared whole texts, would have failed it (F-140); the scorer and its Python port now judge the known fields and report extras. ⚠️ THE FIRST SCORE FAILS THE BAR, AND THE REASON IS ONE FIELD. Clean 45%, perturbed 38.5%. Read from the predictions file: 397 of 400 answers omit <code>product</code> and carry invented keys instead; unassign and move, which have no product field, scored 100% and 78% clean. The training data is right (every assign and book answer carries the key; checked). The run had been stopped by hand at step 110 of 375, under one pass, on emulated bf16, then cast to fp16 for prediction --- the hardest field is the one a model that saw each example once has not learned to emit. The second run is the committed notebook as is: fp16 natively, three passes, checkpoints; the adapter folder on Drive deleted so it retrains. No notebook change was made for the score itself, on purpose: one variable at a time. ⭐ WHAT THE EVENING PROVED ANYWAY: the whole path runs --- data to Drive, train, save, predict with progress, score with the repo's instrument, merge, convert to f16 GGUF (the q4 quantise was still building when the score came back). R-392 stays covered on the repo half and the score line on S43 is the honest state.</p>
