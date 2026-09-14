@@ -9453,6 +9453,16 @@ midnight exactly as the board's blocks do. A name the cell does not have is a qu
 lists the ones it has; a cell with no pattern says so and asks for the hours; two matches ask
 which (R-379). The model never invents hours for a shift it has only heard the name of.
 
+**A shift with no place.** "Remove Sam for shift 2" names no cell, and a band is a cell's,
+not the plant's. The resolver finds Sam's blocks that day wherever they are (S49) and tries
+each block's cell in board order until the name resolves to exactly one band; a cell with no
+pattern or no such band is skipped, a cell that answers with two bands is the question. Only
+when no cell resolves is the answer the refusal, naming the first cell that has a pattern and
+its bands. The first build took the first block's cell alone, and the reviewer showed the same
+sentence succeeding or failing on the order the blocks happened to arrive in; a rule that
+depends on that order is a guess (R-379). A place-less move takes the band from the cell the
+block ends up on, as a placed move does.
+
 **Why now.** A Colab run is the maintainer's afternoon. The data for R-399 is generated but not
 yet trained on; adding both shapes first means one run, not two. The order is D126's: grammar
 first, because the generator refuses any sentence its oracle cannot parse; then the resolver and

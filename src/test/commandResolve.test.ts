@@ -150,6 +150,7 @@ function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
     assignments: [],
     overlaps,
     findRunOverlap,
+    shiftsAt: () => [],
     ...overrides,
   };
 }
@@ -1848,32 +1849,311 @@ describe("commandResolve: S50 a several is read but not yet run", () => {
 });
 
 /**
- * S52-a (docs/agent-briefs/s52-a-shift-grammar-brief.md, R-402): a shift's
- * name is read by the parser but not yet turned into a band by this lane --
- * the resolver asks for now (the next lane replaces this).
+ * S52-b (docs/agent-briefs/s52-b-shift-resolver-brief.md §2 item 4, R-402,
+ * design §19.99/D128): a shift's name resolves to the NAMED cell's own band
+ * for the day, from `ctx.shiftsAt` -- the pop-up's own shift-chip source,
+ * no copy. SR1-SR10; SR11-SR13 -- R-402 / D128 (docs/design-plan.md
+ * §19.99): a place-less sentence with a shift never ignores it silently,
+ * and never depends on the order of the person's blocks either.
  */
-describe("commandResolve: S52-a a shift by name is read but not yet resolved", () => {
-  it("RS2: an assign with a shift resolves to shift_unsupported with the message verbatim", () => {
-    const res = resolveCommand(cmd({ start: null, end: null, shift: "2" }), baseCtx({ runs: [] }));
+describe("commandResolve: S52 a shift by name", () => {
+  /** The demo pattern, c1a only: Shift 1 06:00-14:00, Shift 2 14:00-22:00,
+   *  Shift 3 22:00-06:00 (overnight, `endMin` past 1440). */
+  const demoShiftsAt = (nodeId: string): { name: string; startMin: number; endMin: number }[] =>
+    nodeId === "c1a"
+      ? [
+          { name: "Shift 1", startMin: 360, endMin: 840 },
+          { name: "Shift 2", startMin: 840, endMin: 1320 },
+          { name: "Shift 3", startMin: 1320, endMin: 1800 },
+        ]
+      : [];
+
+  it("SR1: 'for shift 2' on an assign resolves exactly as 14:00-22:00 typed, readout included", () => {
+    const ctx = baseCtx({ shiftsAt: demoShiftsAt });
+    const shiftRes = resolveCommand(cmd({ start: null, end: null, shift: "2" }), ctx);
+    const hoursRes = resolveCommand(
+      cmd({ start: { hour: 14, minute: 0 }, end: { hour: 22, minute: 0 } }),
+      ctx,
+    );
+    expect(shiftRes).toEqual(hoursRes);
+    expect(shiftRes.ok).toBe(true);
+    if (shiftRes.ok) {
+      expect(shiftRes.resolved.range).toEqual({
+        startMin: 3 * 1440 + 840,
+        endMin: 3 * 1440 + 1320,
+      });
+    }
+  });
+
+  it("SR2: 'shift 2', 'Shift 2' and '2' all match Shift 2", () => {
+    const ctx = baseCtx({ shiftsAt: demoShiftsAt });
+    for (const text of ["shift 2", "Shift 2", "2"]) {
+      const res = resolveCommand(cmd({ start: null, end: null, shift: text }), ctx);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 840, endMin: 3 * 1440 + 1320 });
+      }
+    }
+  });
+
+  it("SR3: 'night' matches a band named 'Night Shift' by its last significant token", () => {
+    const shiftsAt = (nodeId: string) =>
+      nodeId === "c2" ? [{ name: "Night Shift", startMin: 0, endMin: 480 }] : [];
+    const res = resolveCommand(
+      cmd({ place: ["Cell 2"], start: null, end: null, shift: "night" }),
+      baseCtx({ shiftsAt }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 3 * 1440, endMin: 3 * 1440 + 480 });
+    }
+  });
+
+  it("SR4: 'shift 9' -- no_shift, message verbatim listing the three", () => {
+    const res = resolveCommand(
+      cmd({ start: null, end: null, shift: "9" }),
+      baseCtx({ shiftsAt: demoShiftsAt }),
+    );
     expect(res).toEqual({
       ok: false,
-      question: { kind: "shift_unsupported", text: "2" },
+      question: {
+        kind: "no_shift",
+        text: "9",
+        cell: "Cell 1",
+        shifts: ["Shift 1", "Shift 2", "Shift 3"],
+      },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Shifts by name are read but not yet resolved; say the hours for now.",
+        'No shift called "9" on Cell 1; it has Shift 1, Shift 2, Shift 3.',
       );
     }
   });
 
-  it("RS3 (reviewer, blocker 3): a move with a new cell AND a shift also resolves to shift_unsupported, never the block's own hours", () => {
-    const res = resolveCommand(
-      moveCmd({ toPlace: ["Cell 2"], span: null, shift: "3" }),
-      withBlocks([blk1]),
-    );
+  it("SR5: a cell with no pattern -- no_shift_pattern, verbatim", () => {
+    const res = resolveCommand(cmd({ start: null, end: null, shift: "2" }), baseCtx());
     expect(res).toEqual({
       ok: false,
-      question: { kind: "shift_unsupported", text: "3" },
+      question: { kind: "no_shift_pattern", cell: "Cell 1" },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe("Cell 1 has no shift pattern, so say the hours.");
+    }
+  });
+
+  it("SR6: two bands sharing a word -- ambiguous field shift, both candidates, and the answer resolves", () => {
+    const dayBands = [
+      { name: "Day A", startMin: 360, endMin: 840 },
+      { name: "Day B", startMin: 840, endMin: 1320 },
+    ];
+    const ctx = baseCtx({ shiftsAt: () => dayBands });
+    const res = resolveCommand(cmd({ start: null, end: null, shift: "day" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "shift",
+        text: "day",
+        candidates: [
+          { id: "Day A", label: "Day A 06:00–14:00", word: "Day A" },
+          { id: "Day B", label: "Day B 14:00–22:00", word: "Day B" },
+        ],
+      },
+    });
+    if (!res.ok && res.question.kind === "ambiguous") {
+      const picked = resolveCommand(
+        cmd({ start: null, end: null, shift: res.question.candidates[0].word }),
+        ctx,
+      );
+      expect(picked.ok).toBe(true);
+      if (picked.ok) {
+        expect(picked.resolved.range).toEqual({ startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 });
+      }
+    }
+  });
+
+  it("SR7: Shift 3 (overnight) -- endMin lands on the next day, timeText as the board prints it", () => {
+    const res = resolveCommand(
+      cmd({ start: null, end: null, shift: "3" }),
+      baseCtx({ shiftsAt: demoShiftsAt }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 1320, endMin: 4 * 1440 + 360 });
+      expect(res.resolved.readout).toContain("22:00–06:00");
+    }
+  });
+
+  it("SR8: a removal 'for shift 1' finds the block overlapping 06:00-14:00", () => {
+    const res = resolveCommand(
+      unassignCmd({ span: null, shift: "1" }),
+      withBlocks([blk1], { shiftsAt: demoShiftsAt }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.question.kind).toBe("remove_which");
+      if (res.question.kind === "remove_which") {
+        expect(res.question.blocks.map((b) => b.id)).toEqual(["blk1"]);
+      }
+    }
+  });
+
+  it("SR9: a move 'during shift 3' re-times to the overnight band", () => {
+    const res = resolveCommand(
+      moveCmd({ toPlace: null, span: null, shift: "3" }),
+      withBlocks([blk1], { shiftsAt: demoShiftsAt }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 1320, endMin: 4 * 1440 + 360 });
+      expect(res.resolved.readout).toContain("22:00–06:00");
+    }
+  });
+
+  it("SR10: a book 'for shift 1' resolves the same as the hours form", () => {
+    const ctx = baseCtx({ shiftsAt: demoShiftsAt });
+    const shiftRes = resolveCommand(bookCmd({ start: null, end: null, shift: "1" }), ctx);
+    const hoursRes = resolveCommand(bookCmd(), ctx);
+    expect(shiftRes).toEqual(hoursRes);
+    expect(shiftRes.ok).toBe(true);
+  });
+
+  it("SR11: a place-less removal with a shift resolves the window from the FIRST block's own cell's band; a block elsewhere overlapping it is also a candidate; an unmatched name names that cell; no blocks at all is no_block, cell null", () => {
+    const ctx = withBlocks([blk1, blkC2], { shiftsAt: demoShiftsAt });
+
+    const res = resolveCommand(unassignCmd({ place: [], span: null, shift: "1" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: null,
+        when: "06:00–14:00",
+        blocks: [
+          {
+            id: "blk1",
+            label: "Cell 1 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 1",
+            when: "10:00–14:00",
+          },
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+        ],
+      },
+    });
+
+    const noShift = resolveCommand(unassignCmd({ place: [], span: null, shift: "9" }), ctx);
+    expect(noShift).toEqual({
+      ok: false,
+      question: {
+        kind: "no_shift",
+        text: "9",
+        cell: "Cell 1",
+        shifts: ["Shift 1", "Shift 2", "Shift 3"],
+      },
+    });
+
+    const none = resolveCommand(
+      unassignCmd({ place: [], span: null, shift: "1" }),
+      withBlocks([], { shiftsAt: demoShiftsAt }),
+    );
+    expect(none).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: null, when: "2026-09-03" },
+    });
+  });
+
+  it("SR12: a place-less move 'during shift 3' retimes to the overnight band on the block's own cell; no block is no_block", () => {
+    const res = resolveCommand(
+      moveCmd({ place: [], toPlace: null, span: null, shift: "3" }),
+      withBlocks([blk1], { shiftsAt: demoShiftsAt }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.assignmentId).toBe("blk1");
+      expect(res.resolved.nodeId).toBe("c1a");
+      expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 1320, endMin: 4 * 1440 + 360 });
+      expect(res.resolved.readout).toContain("22:00–06:00");
+    }
+
+    const none = resolveCommand(
+      moveCmd({ place: [], toPlace: null, span: null, shift: "3" }),
+      withBlocks([], { shiftsAt: demoShiftsAt }),
+    );
+    expect(none).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: null, when: "2026-09-03" },
+    });
+  });
+
+  it("SR13: a place-less removal never depends on block order -- [blkC2, blk1] still resolves via Cell 1 (the reviewer's exact case); when no cell resolves, no_shift names the first cell WITH a pattern, no_shift_pattern only when none has one", () => {
+    const ctx = withBlocks([blkC2, blk1], { shiftsAt: demoShiftsAt });
+
+    // The reviewer's exact case: blkC2 (Cell 2, no pattern) sorts FIRST,
+    // blk1 (Cell 1, has Shift 1) second -- the old "first block only" rule
+    // refused with no_shift_pattern naming Cell 2; trying every cell in
+    // order, it now resolves via Cell 1, exactly as SR11's [blk1, blkC2]
+    // order does.
+    const res = resolveCommand(unassignCmd({ place: [], span: null, shift: "1" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: null,
+        when: "06:00–14:00",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+          {
+            id: "blk1",
+            label: "Cell 1 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 1",
+            when: "10:00–14:00",
+          },
+        ],
+      },
+    });
+
+    // Neither cell's pattern (only Cell 1 has one) has a band called "9" --
+    // no_shift names the first cell WITH a pattern (Cell 1), never the
+    // first block's cell (Cell 2, which has none).
+    const noMatch = resolveCommand(unassignCmd({ place: [], span: null, shift: "9" }), ctx);
+    expect(noMatch).toEqual({
+      ok: false,
+      question: {
+        kind: "no_shift",
+        text: "9",
+        cell: "Cell 1",
+        shifts: ["Shift 1", "Shift 2", "Shift 3"],
+      },
+    });
+
+    // The all-fail case: NEITHER cell has a pattern at all -- no_shift_
+    // pattern, naming the very first block's cell (Cell 2).
+    const noPatternAnywhere = resolveCommand(
+      unassignCmd({ place: [], span: null, shift: "1" }),
+      withBlocks([blkC2], { shiftsAt: () => [] }),
+    );
+    expect(noPatternAnywhere).toEqual({
+      ok: false,
+      question: { kind: "no_shift_pattern", cell: "Cell 2" },
     });
   });
 });

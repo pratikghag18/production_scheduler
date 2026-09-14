@@ -124,6 +124,14 @@ export interface ResolveContext {
     runs: ContextRun[],
     excludeRunId: string | null,
   ) => ContextRun | null;
+  /** S52-b (R-402): the bands of the shift pattern that applies to `nodeId`,
+   *  in the pattern's own order, empty when the node resolves no pattern --
+   *  `BoardPage` builds this from `index.templateForNode`, the SAME
+   *  nearest-ancestor map `shiftChipsFor` reads for the pop-up's own shift
+   *  chips (no ancestry walk of this module's own, CLAUDE.md §4). Minutes
+   *  are the pattern's own (a day's 0..1440, an overnight band's end past
+   *  1440) -- never window-relative. */
+  shiftsAt: (nodeId: string) => { name: string; startMin: number; endMin: number }[];
 }
 
 /**
@@ -235,7 +243,7 @@ export type Candidate = {
 export type Question =
   | {
       kind: "ambiguous";
-      field: "operator" | "product" | "place";
+      field: "operator" | "product" | "place" | "shift";
       text: string;
       candidates: Candidate[];
     }
@@ -325,10 +333,14 @@ export type Question =
    *  confirming each inner command is its own later stage; for now the bar
    *  only says so. `count` is `command.commands.length`. */
   | { kind: "several_unsupported"; count: number }
-  /** R-402 (S52-a): the sentence named a shift instead of hours -- read by
-   *  the parser but not yet turned into that cell's own band for the day
-   *  (the next lane). `text` is the shift's name as said. */
-  | { kind: "shift_unsupported"; text: string };
+  /** S52-b (R-402): the named cell resolves no shift pattern at all -- there
+   *  is nothing for the shift's name to mean, so the sentence must give
+   *  hours instead. */
+  | { kind: "no_shift_pattern"; cell: string }
+  /** S52-b (R-402): the sentence's shift name matched none of the cell's own
+   *  pattern's bands. `shifts` is every band's name, pattern order, for the
+   *  message to list. */
+  | { kind: "no_shift"; text: string; cell: string; shifts: string[] };
 
 export type Resolution =
   | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove }
@@ -635,6 +647,173 @@ function resolveDaySpanStep(
   return { ok: true, dayIndex, startMin, endMin, timeText };
 }
 
+type ShiftBand = { name: string; startMin: number; endMin: number };
+
+/** A minute-of-day, wrapped into 0..1439 -- an overnight band's `endMin`
+ *  (past 1440, the pattern's own convention, brief §19.99/D128) reads back
+ *  as its real wall-clock hour, exactly as `formatClock` on the real `Date`
+ *  the board's own blocks are built from would (S52-b brief §2 item 2). */
+function shiftClockOf(min: number): { hour: number; minute: number } {
+  const m = ((min % 1440) + 1440) % 1440;
+  return { hour: Math.floor(m / 60), minute: m % 60 };
+}
+
+/** "HH:MM–HH:MM" for a band, the same `formatSpan` the hours form uses --
+ *  so a shift's resolved text and a typed one are the same string for the
+ *  same hours (S52-b brief §2 item 4, SR1). */
+function shiftBandTimeText(band: ShiftBand): string {
+  return formatSpan(shiftClockOf(band.startMin), shiftClockOf(band.endMin));
+}
+
+/** The band name's last SIGNIFICANT word -- the generic trailing word
+ *  "shift" itself is dropped first when there is another word before it, so
+ *  "Night Shift" and "Night" both offer their last token as "night", and
+ *  "Shift 2" (the word "shift" leads, not trails) offers "2" unchanged. */
+function significantLastToken(name: string): string {
+  const tokens = normalizeForMatch(name)
+    .split(" ")
+    .filter((t) => t.length > 0);
+  if (tokens.length > 1 && tokens[tokens.length - 1] === "shift") tokens.pop();
+  return tokens[tokens.length - 1] ?? "";
+}
+
+/** S52-b (brief §2 item 2): exact name first (case-blind, whitespace-
+ *  collapsed), else a bare number/word matching the name's last significant
+ *  token, else the one band whose name contains the words -- the first tier
+ *  with ANY hit wins, never the "best" of several (the same discipline as
+ *  `matchName`, but shift bands have no separate "starts-with" tier). */
+function matchShiftBand(text: string, bands: readonly ShiftBand[]): ShiftBand[] {
+  const w = normalizeForMatch(text);
+  if (w === "") return [];
+  const exact = bands.filter((b) => normalizeForMatch(b.name) === w);
+  if (exact.length > 0) return exact;
+  const byToken = bands.filter((b) => significantLastToken(b.name) === w);
+  if (byToken.length > 0) return byToken;
+  return bands.filter((b) => normalizeForMatch(b.name).includes(w));
+}
+
+/**
+ * S52-b (R-402, design §19.99/D128): a shift's name resolves to `cell`'s
+ * own band for the resolved day, from `ctx.shiftsAt` -- the SAME map
+ * `BoardPage` builds from `index.templateForNode`, the pop-up's own shift
+ * chips' source (no copy, CLAUDE.md §4). Returns the same shape
+ * `resolveDaySpanStep` does, so every caller after this step is unchanged.
+ */
+function resolveShiftSpanStep(
+  day: AssignCommand["day"],
+  shiftText: string,
+  cell: { id: string; name: string },
+  ctx: ResolveContext,
+):
+  | { ok: true; dayIndex: number; startMin: number; endMin: number; timeText: string }
+  | { ok: false; question: Question } {
+  const dayResolution = resolveDay(day, ctx);
+  if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
+  const dayIndex = dayResolution.dayIndex;
+
+  const bands = ctx.shiftsAt(cell.id);
+  if (bands.length === 0) {
+    return { ok: false, question: { kind: "no_shift_pattern", cell: cell.name } };
+  }
+  const hits = matchShiftBand(shiftText, bands);
+  if (hits.length === 0) {
+    return {
+      ok: false,
+      question: {
+        kind: "no_shift",
+        text: shiftText,
+        cell: cell.name,
+        shifts: bands.map((b) => b.name),
+      },
+    };
+  }
+  if (hits.length > 1) {
+    return {
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "shift",
+        text: shiftText,
+        candidates: hits.map((b) => ({
+          id: b.name,
+          label: `${b.name} ${shiftBandTimeText(b)}`,
+          word: b.name,
+        })),
+      },
+    };
+  }
+  const band = hits[0];
+  const startMin = ctx.wallToOffset(dayIndex, band.startMin);
+  const endMin = ctx.wallToOffset(dayIndex, band.endMin);
+  // A pattern's own band shorter than the minimum is refused the same way
+  // typed hours are -- reachable (a misconfigured pattern), just unlikely.
+  if (endMin - startMin < ctx.minDurationMinutes) {
+    return {
+      ok: false,
+      question: { kind: "too_short", minutes: endMin - startMin, min: ctx.minDurationMinutes },
+    };
+  }
+  const timeText = shiftBandTimeText(band);
+  return { ok: true, dayIndex, startMin, endMin, timeText };
+}
+
+/**
+ * R-402 / D128 (docs/design-plan.md §19.99): a place-less sentence's shift
+ * name is resolved against each of `blocks`' cells, in BOARD ORDER --
+ * skipping a cell with no pattern or no matching band -- and the first cell
+ * that resolves to exactly one band (or answers ambiguous) is the answer.
+ *
+ * Reviewer fix (14 Sept follow-up): taking only the FIRST block's cell was
+ * order-dependent -- `[blkC2 (no pattern), blk1 (has Shift 1)]` refused with
+ * `no_shift_pattern` naming Cell 2, while the reverse order succeeded on
+ * Cell 1. This tries every cell in order instead, so the sentence's meaning
+ * does not depend on which of the person's blocks happens to sort first.
+ *
+ * When no cell resolves: `no_shift` naming the first cell (board order)
+ * that HAS a pattern, with that cell's own bands; `no_shift_pattern` (naming
+ * the very first block's cell) only when NONE of them has a pattern at all.
+ */
+function resolveShiftAgainstBlocks(
+  day: AssignCommand["day"],
+  shiftText: string,
+  blocks: readonly ContextAssignment[],
+  ctx: ResolveContext,
+):
+  | { ok: true; dayIndex: number; startMin: number; endMin: number; timeText: string }
+  | { ok: false; question: Question } {
+  const cellOf = (b: ContextAssignment): { id: string; name: string } =>
+    ctx.nodeById.get(b.nodeId) ?? { id: b.nodeId, name: b.nodeId };
+  let firstCellWithPattern: { id: string; name: string } | null = null;
+  for (const b of blocks) {
+    const cell = cellOf(b);
+    const bands = ctx.shiftsAt(cell.id);
+    if (bands.length === 0) continue; // no pattern on this cell -- skip
+    const hits = matchShiftBand(shiftText, bands);
+    if (hits.length === 0) {
+      // A pattern, but no matching band -- skip, remembering the first such
+      // cell for the "no cell resolves" fallback message below.
+      if (firstCellWithPattern === null) firstCellWithPattern = cell;
+      continue;
+    }
+    // Exactly one band, or an ambiguity between several -- this cell is THE
+    // answer either way (an ambiguous cell is never skipped in favor of a
+    // later, unambiguous one).
+    return resolveShiftSpanStep(day, shiftText, cell, ctx);
+  }
+  if (firstCellWithPattern !== null) {
+    return {
+      ok: false,
+      question: {
+        kind: "no_shift",
+        text: shiftText,
+        cell: firstCellWithPattern.name,
+        shifts: ctx.shiftsAt(firstCellWithPattern.id).map((b) => b.name),
+      },
+    };
+  }
+  return { ok: false, question: { kind: "no_shift_pattern", cell: cellOf(blocks[0]).name } };
+}
+
 type OperatorLike = ResolveContext["operators"][number];
 
 /** Step (assign AND unassign, S41-b brief §2: extracted rather than
@@ -694,13 +873,13 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
   if (!personResult.ok) return { ok: false, question: personResult.question };
   const operator = personResult.operator;
 
-  // 4. Day and span. R-402 (S52-a): a shift name is read but not yet
-  // resolved into a band -- ask for now (the type's own invariant means
-  // `start`/`end` are null exactly when `shift` is not).
-  if (command.shift !== null) {
-    return { ok: false, question: { kind: "shift_unsupported", text: command.shift } };
-  }
-  const spanResult = resolveDaySpanStep(command.day, command.start!, command.end!, ctx);
+  // 4. Day and span. S52-b (R-402): a shift name resolves to CELL's own
+  // band for the day (the type's own invariant means `start`/`end` are null
+  // exactly when `shift` is not).
+  const spanResult =
+    command.shift !== null
+      ? resolveShiftSpanStep(command.day, command.shift, cell, ctx)
+      : resolveDaySpanStep(command.day, command.start!, command.end!, ctx);
   if (!spanResult.ok) return { ok: false, question: spanResult.question };
   const { dayIndex, startMin, endMin, timeText } = spanResult;
 
@@ -842,12 +1021,12 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
   if (!partResult.ok) return { ok: false, question: partResult.question };
   const product = partResult.product;
 
-  // 3. Day and span. R-402 (S52-a): a shift name is read but not yet
-  // resolved -- ask for now.
-  if (command.shift !== null) {
-    return { ok: false, question: { kind: "shift_unsupported", text: command.shift } };
-  }
-  const spanResult = resolveDaySpanStep(command.day, command.start!, command.end!, ctx);
+  // 3. Day and span. S52-b (R-402): a shift name resolves to CELL's own
+  // band for the day.
+  const spanResult =
+    command.shift !== null
+      ? resolveShiftSpanStep(command.day, command.shift, cell, ctx)
+      : resolveDaySpanStep(command.day, command.start!, command.end!, ctx);
   if (!spanResult.ok) return { ok: false, question: spanResult.question };
   const { dayIndex, startMin, endMin, timeText } = spanResult;
 
@@ -958,12 +1137,57 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
   if (!personResult.ok) return { ok: false, question: personResult.question };
   const operator = personResult.operator;
 
-  // 3. Day and span.
+  // 3. Day and span. R-402 / D128 (docs/design-plan.md §19.99): a shift name
+  // resolves to the NAMED cell's own band for the day. An EMPTY place
+  // ("wherever they are") has no single cell to resolve a pattern against
+  // up front, so it is never silently ignored -- it gathers the person's
+  // WHOLE-DAY blocks first (the same S49 elsewhere lookup), resolves the
+  // shift against those blocks' cells in board order (`resolveShiftAgainst
+  // Blocks`, order-independent -- reviewer fix, 14 Sept follow-up), and
+  // narrows to that band; step 4 below then re-gathers the person's blocks
+  // overlapping THAT window on any cell, exactly as it already does for the
+  // no-shift empty-place case, so no candidate list is built twice. No
+  // blocks at all that day -- no_block, cell null, the shift never
+  // consulted (there is no cell to resolve it against either).
   let dayIndex: number;
   let startMin: number;
   let endMin: number;
   let whenText: string;
-  if (command.span !== null) {
+  if (command.shift !== null && cell !== null) {
+    const spanResult = resolveShiftSpanStep(command.day, command.shift, cell, ctx);
+    if (!spanResult.ok) return { ok: false, question: spanResult.question };
+    dayIndex = spanResult.dayIndex;
+    startMin = spanResult.startMin;
+    endMin = spanResult.endMin;
+    whenText = spanResult.timeText;
+  } else if (command.shift !== null) {
+    const wholeDay = resolveDay(command.day, ctx);
+    if (!wholeDay.ok) return { ok: false, question: wholeDay.question };
+    const wholeDayStart = ctx.wallToOffset(wholeDay.dayIndex, 0);
+    const wholeDayEnd = ctx.wallToOffset(wholeDay.dayIndex, 24 * 60);
+    const wholeDayBlocks = gatherElsewhereBlocks(
+      operator.id,
+      { startMin: wholeDayStart, endMin: wholeDayEnd },
+      ctx,
+    );
+    if (wholeDayBlocks.length === 0) {
+      return {
+        ok: false,
+        question: {
+          kind: "no_block",
+          person: operator.displayName,
+          cell: null,
+          when: ctx.days.find((d) => d.index === wholeDay.dayIndex)?.iso ?? "",
+        },
+      };
+    }
+    const spanResult = resolveShiftAgainstBlocks(command.day, command.shift, wholeDayBlocks, ctx);
+    if (!spanResult.ok) return { ok: false, question: spanResult.question };
+    dayIndex = spanResult.dayIndex;
+    startMin = spanResult.startMin;
+    endMin = spanResult.endMin;
+    whenText = spanResult.timeText;
+  } else if (command.span !== null) {
     const spanResult = resolveDaySpanStep(command.day, command.span.start, command.span.end, ctx);
     if (!spanResult.ok) return { ok: false, question: spanResult.question };
     dayIndex = spanResult.dayIndex;
@@ -1196,14 +1420,11 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
     blk = hit;
   }
 
-  // 4. The destination. R-402/S52-a (reviewer, blocker 3): a shift name is
-  // read but not yet resolved into a band -- ask, regardless of whether a
-  // new cell was ALSO said. A `toPlace` set does not excuse this: the
-  // pre-fix code fell into the "keep the block's own hours" branch below
-  // and dropped the shift silently.
-  if (command.shift !== null) {
-    return { ok: false, question: { kind: "shift_unsupported", text: command.shift } };
-  }
+  // 4. The destination. S52-b (R-402): a shift name resolves to a band on
+  // whichever cell the block ends up on -- the block's OWN cell for a move
+  // in time, the NEW cell when one was also said (reviewer, blocker 3: a
+  // `toPlace` set must not fall into the "keep the block's own hours"
+  // branch and drop the shift silently -- it now resolves there too).
 
   let target: { kind: "retime" } | { kind: "move_cell" };
   let targetNodeId: string;
@@ -1213,11 +1434,16 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
 
   if (command.toPlace === null) {
     // Move in time only -- R-385's own retime target (`command.span` is
-    // guaranteed non-null here: `shift` is null by the guard above, and
-    // parseMoveRest's own R-389/R-402 check never returns toPlace, span AND
-    // shift all null together). S49: the target is the BLOCK's own cell,
-    // never the sentence's (the block may have come from elsewhere).
-    const spanResult = resolveDaySpanStep(command.day, command.span!.start, command.span!.end, ctx);
+    // guaranteed non-null here whenever `shift` is null too: parseMoveRest's
+    // own R-389/R-402 check never returns toPlace, span AND shift all null
+    // together). S49: the target is the BLOCK's own cell, never the
+    // sentence's (the block may have come from elsewhere) -- so the shift
+    // pattern resolved is that cell's, not the named cell's.
+    const blkCell = ctx.nodeById.get(blk.nodeId) ?? { id: blk.nodeId, name: blk.nodeId, path: "" };
+    const spanResult =
+      command.shift !== null
+        ? resolveShiftSpanStep(command.day, command.shift, blkCell, ctx)
+        : resolveDaySpanStep(command.day, command.span!.start, command.span!.end, ctx);
     if (!spanResult.ok) return { ok: false, question: spanResult.question };
     startMin = spanResult.startMin;
     endMin = spanResult.endMin;
@@ -1235,7 +1461,13 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
         question: { kind: "not_offered", product: blk.productName ?? "", cell: newCell.name },
       };
     }
-    if (command.span !== null) {
+    if (command.shift !== null) {
+      const spanResult = resolveShiftSpanStep(command.day, command.shift, newCell, ctx);
+      if (!spanResult.ok) return { ok: false, question: spanResult.question };
+      startMin = spanResult.startMin;
+      endMin = spanResult.endMin;
+      arrow = `${newCell.name} · ${spanResult.timeText}`;
+    } else if (command.span !== null) {
       const spanResult = resolveDaySpanStep(command.day, command.span.start, command.span.end, ctx);
       if (!spanResult.ok) return { ok: false, question: spanResult.question };
       startMin = spanResult.startMin;
@@ -1313,9 +1545,10 @@ export function resolveCommand(command: Command, ctx: ResolveContext): Resolutio
   return resolveAssignCommand(command, ctx);
 }
 
-function fieldWord(field: "operator" | "product" | "place"): string {
+function fieldWord(field: "operator" | "product" | "place" | "shift"): string {
   if (field === "operator") return "person";
   if (field === "product") return "part";
+  if (field === "shift") return "shift";
   return "cell";
 }
 
@@ -1426,7 +1659,9 @@ export function describeQuestion(q: Question): string {
     }
     case "several_unsupported":
       return "Several commands in one sentence are read but not yet run; say them one at a time for now.";
-    case "shift_unsupported":
-      return "Shifts by name are read but not yet resolved; say the hours for now.";
+    case "no_shift_pattern":
+      return `${q.cell} has no shift pattern, so say the hours.`;
+    case "no_shift":
+      return `No shift called "${q.text}" on ${q.cell}; it has ${q.shifts.join(", ")}.`;
   }
 }

@@ -775,7 +775,7 @@ export function CommandBar({
 
   function pickCandidate(
     command: Command,
-    field: "operator" | "product" | "place",
+    field: "operator" | "product" | "place" | "shift",
     candidate: Candidate,
   ): void {
     // "operator" only ever comes from an AssignCommand's ambiguous question
@@ -787,7 +787,9 @@ export function CommandBar({
     // (S50: a several never reaches an ambiguous/place question; its only
     // answer is `several_unsupported`, with no candidates at all) -- so the
     // cast here mirrors that invariant the same way the other two branches
-    // already do, rather than widening `SingleCommand` to prove it.
+    // already do, rather than widening `SingleCommand` to prove it. "shift"
+    // (S52-b, R-402) comes from any of the four too -- every single command
+    // carries `shift`.
     const next: Command =
       field === "operator"
         ? command.intent === "unassign"
@@ -795,10 +797,15 @@ export function CommandBar({
           : { ...(command as AssignCommand), operator: candidate.word }
         : field === "product"
           ? { ...(command as AssignCommand | BookCommand), product: candidate.word }
-          : {
-              ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
-              place: [candidate.word],
-            };
+          : field === "shift"
+            ? {
+                ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
+                shift: candidate.word,
+              }
+            : {
+                ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
+                place: [candidate.word],
+              };
     // S51 (brief §2 item 1): while a lot stands, a candidate substitutes
     // into THAT command (`lotRef.current.commands[index]`), never into the
     // input text or the lone `heldRef` -- the input keeps showing the whole

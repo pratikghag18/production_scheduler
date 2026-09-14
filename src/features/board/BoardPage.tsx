@@ -568,6 +568,15 @@ export default function BoardPage() {
       // S41-a: a cell runs one job at a time — the same rule a run drag/
       // resize refuses a drop with, passed in rather than re-decided here.
       findRunOverlap,
+      // S52-b (R-402): the SAME map `shiftChipsFor` reads for the pop-up's
+      // own shift chips (`index.templateForNode`, the nearest-ancestor
+      // pattern) -- no ancestry walk of the resolver's own, CLAUDE.md §4.
+      shiftsAt: (nodeId: string) =>
+        (index.templateForNode.get(nodeId)?.shifts ?? []).map((s) => ({
+          name: s.name,
+          startMin: s.startMin,
+          endMin: s.endMin,
+        })),
     };
   }, [boardQuery.data, index, operatorPool]);
 

@@ -104,6 +104,7 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     assignments: [],
     overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
     findRunOverlap,
+    shiftsAt: () => [],
     ...over,
   };
 }
@@ -1879,6 +1880,58 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     fire.final(P1_SENTENCE);
 
     expect(input.value).toBe("");
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * S52-b (docs/agent-briefs/s52-b-shift-resolver-brief.md §2 item 4, R-402):
+ * a shift's name resolves through the bar the same way it does through the
+ * resolver directly -- `commandResolve.test.ts`'s SR cases own the matching
+ * tiers and the questions' exact shape; this file only proves the wiring
+ * (a real sentence, through `ctx.shiftsAt`, reaches `onOpen`/the status
+ * line the same as `commandResolve.test.ts` already pins).
+ */
+describe("CB-shift: a shift's name reaches onOpen (S52-b, R-402)", () => {
+  /** The demo pattern brief §2 item 4 names: Shift 1 06:00-14:00, Shift 2
+   *  14:00-22:00, Shift 3 22:00-06:00 (overnight), on Cell 1 (c1a) only. */
+  const demoShiftsAt = (nodeId: string) =>
+    nodeId === "c1a"
+      ? [
+          { name: "Shift 1", startMin: 360, endMin: 840 },
+          { name: "Shift 2", startMin: 840, endMin: 1320 },
+          { name: "Shift 3", startMin: 1320, endMin: 1800 },
+        ]
+      : [];
+
+  it("CB-shift-1: the maintainer's sentence reaches onOpen with range 14:00-22:00", () => {
+    const { onOpen, input } = renderBar({
+      runs: [],
+      shiftsAt: demoShiftsAt,
+      operators: [{ id: "a2", displayName: "Operator A2", employeeRef: null, active: true }],
+    });
+
+    fireEvent.change(input, {
+      target: { value: "assign Operator A2 to work for shift 2 on Cell 1 in Line 1 for Housing A" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("c1a");
+    expect(resolved.operatorId).toBe("a2");
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 840, endMin: 3 * 1440 + 1320 });
+  });
+
+  it("CB-shift-2: 'shift 9' shows the no_shift message, verbatim, and opens nothing", () => {
+    const { onOpen, input } = renderBar({ runs: [], shiftsAt: demoShiftsAt });
+
+    fireEvent.change(input, {
+      target: { value: "assign Operator 1 to Housing A on Cell 1 in Line 1 for shift 9" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe('No shift called "9" on Cell 1; it has Shift 1, Shift 2, Shift 3.');
     expect(onOpen).not.toHaveBeenCalled();
   });
 });

@@ -97,9 +97,7 @@ export interface AssignCommand {
   existing: Existing | null;
   /** R-402 (the maintainer, 13 Sept, session 163): the shift's name as said
    *  ("2", "B", "night", "Late Turn"), or `null` when the sentence gave hours
-   *  instead. Read but not yet resolved -- `resolve.ts` asks
-   *  `shift_unsupported` for now; the next lane turns it into that cell's own
-   *  band for the day. */
+   *  instead. `resolve.ts` turns it into that cell's own band for the day. */
   shift: string | null;
 }
 

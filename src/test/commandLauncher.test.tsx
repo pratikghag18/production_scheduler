@@ -74,6 +74,7 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     assignments: [],
     overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
     findRunOverlap,
+    shiftsAt: () => [],
     ...over,
   };
 }
