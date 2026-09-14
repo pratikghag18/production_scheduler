@@ -2516,8 +2516,9 @@ stages:
     pick, then the board-answers group as its own stage, because "clear Cell 1" and "cover Sam" are
     what a supervisor says when someone calls in sick. Unpark a group with a word.
     **Groups 1 and 3 unparked 14 Sept (session 168)** together, one retrain: S55 (the sentences and the
-    board's lot) and S56 (the data and the fifth run), R-404 to R-410. Still parked here: group 2 (the
-    form grows: extend, split, add to a job, every weekday) and "undo that" (its own parked entry).
+    board's lot) and S56 (the data and the fifth run), R-404 to R-410. **Group 2 unparked the same day**
+    as S58 (R-412 to R-416) to ride the same run. Still parked: "undo that" (its own parked entry); the
+    questions are Stage 8.
 - id: S54
   track: core
   num: 54
@@ -2625,8 +2626,66 @@ stages:
     kinds of sentence are read through the served model before this closes.
   state: >-
     **Waits on S55.** One lane after S55's grammar and decoder land. While the maintainer's Colab run
+    **14 Sept, later (session 168): the maintainer chose group 2 too (S58), so this run teaches S55 and
+    S58 together; the data lane's first pass over S55 is done and reviewed, its second pass follows S58.**
     trains, the queue's next model-free piece (Whisper, Stage 6's second half) proceeds — the
     maintainer's "in parallel" answered.
+- id: S57
+  track: core
+  num: 57
+  title: The microphone's second half — Whisper beside the model, chosen by configuration, the browser's recogniser as the fallback
+  status: now
+  owner: agent
+  refs:
+  - 'session 168 conversation (the maintainer, 14 Sept: "also can something else be done in parallel?")'
+  - §19.102 (D131)
+  - docs/agent-briefs/s57-a-whisper-brief.md
+  delivers:
+  - R-411
+  what: >-
+    **A second recogniser with the same shape.** localRecognizer(baseUrl) beside browserRecognizer:
+    record, end on silence or a click or twelve seconds, encode 16 kHz WAV in the browser, post to
+    whisper.cpp's server, hand the text to the bar through the S46 contract. Chosen by VITE_WHISPER_URL
+    the way the model is by VITE_VOICE_URL, proxied by the dev server the same way; the browser's
+    recogniser when unset, and once as a fallback when the service does not answer. voice:serve starts
+    the second container and --stop stops both; the base.en model fetched once into a gitignored folder.
+    The bar, the S54 setting and the model's reading are untouched.
+  state: >-
+    **Briefed 14 Sept (session 168)** as the parallel piece while S56's data lane and the maintainer's
+    Colab run proceed. One lane: the recogniser module and its pure encoder, the serve script's second
+    container and the fetch script, the proxy, the BoardPage choice, the tests. The lane verifies the
+    container image runs on this machine (linux/arm64) before building on it and reports if it cannot.
+- id: S58
+  track: core
+  num: 58
+  title: The form grows a little — group 2 of the catalogue (adjust an edge, split, the job's hours, a job's headcount, every weekday), before the same run
+  status: now
+  owner: agent
+  refs:
+  - 'session 168 conversation (the maintainer, 14 Sept: "group 2 too")'
+  - §19.103 (D132)
+  - docs/agent-briefs/s58-a-grammar-brief.md
+  - docs/agent-briefs/s58-b-resolver-brief.md
+  - docs/agent-briefs/s58-c-decoder-brief.md
+  - docs/agent-briefs/s58-d-bar-brief.md
+  delivers:
+  - R-412
+  - R-413
+  - R-414
+  - R-415
+  - R-416
+  what: >-
+    **The last command group of the catalogue, chosen so the fifth run teaches everything at once.**
+    A move gains an adjust (one edge, a distance or a time); a split is a new four-field intent the
+    board expands into a shorten and an assign; "the job" is one more reserved shift name that gives an
+    assign the run's hours and attachment; a headcount intent resolves to a run and writes its planned
+    headcount through the existing field edit; two day words (weekdays, every day, this or next week)
+    on an assign or a booking expand into one command per day. The decoder and the schema fence each
+    exactly where the grammar produces it. "Make it 4 people" asks for the job's name.
+  state: >-
+    **Briefed 14 Sept (session 168).** Same shape as S55: lane A the grammar, then B the resolver and C
+    the decoder in parallel, then D the bar; a reviewer breaks each. S56's data lane runs once more over
+    S55 and S58 together, then the maintainer's one Colab run.
 - id: M1
   track: matrix
   num: 1
@@ -11307,6 +11366,99 @@ requirements:
   status: uncovered
   note: >-
     STATED 14 Sept (session 168): "one retrain"; design §19.101 (D130 items 5 and the closing paragraph).
+- id: R-411
+  title: A local recogniser (Whisper) hears the microphone when one is configured, so audio stays in the building, and the browser's is the fallback
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "also can something else be done in parallel?"); the voice plan, Stage 6 second half (docs/voice-commands-plan.md)'
+  - §19.102 (D131)
+  stated_by: maintainer
+  claim: >-
+    When VITE_WHISPER_URL is set, the bar's microphone records a clip in the browser, ends it on a stop
+    click, on a second and a half of silence after speech, or at twelve seconds, converts it to 16 kHz
+    mono WAV in the browser, posts it to the local whisper.cpp server and puts the text in the input as
+    the browser's recogniser would; the input shows "Listening…" then "Transcribing…" meanwhile. When the
+    URL is unset the browser's recogniser is used, as before. When the URL is set and the service does
+    not answer, the bar says so once and that session falls back to the browser's recogniser if the
+    window has one. npm run voice:serve starts the whisper container beside the model's and --stop
+    stops both; the model file is fetched once by npm run voice:whisper:fetch into a gitignored folder.
+    Nothing in CommandBar.tsx knows which engine is behind the button; the S54 setting is untouched.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S57's tests when the lane lands; the maintainer says a sentence through the local recogniser on this machine"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168) by taking the queue's next model-free entry while the fifth run's data
+    was built, the maintainer's "in parallel"; design §19.102 (D131).
+- id: R-412
+  title: A block is re-timed by one edge — extended or shortened by a distance, ended or started at a time
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "If we did group 2 as well, does it save colab run?" --- "group 2 too")'
+  - §19.103 (D132)
+  stated_by: maintainer
+  claim: >-
+    "Extend Sam's block by an hour", "shorten Sam by 30 minutes", "end Sam early at 3", "finish Sam an hour earlier", "move Sam's start to 9" and "shift Sam's end an hour later" are a move with an adjust naming the edge and a distance or a time, and no span, shift or destination; the block is found the way a place-less move finds it (wherever the person is, the which-block question when several); the resolver computes the new hours from the block's own and the minimum-duration and order checks still run; a result that would leave the day is refused. "Start" stays a booking verb, so the start edge is said through a move verb and the possessive tail ("Sam's start").
+  verified_by:
+  - kind: manual
+    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+- id: R-413
+  title: A block is split at a time — the first part keeps the block, the second is a new block of the same person, part, cell and job
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "If we did group 2 as well, does it save colab run?" --- "group 2 too")'
+  - §19.103 (D132)
+  stated_by: maintainer
+  claim: >-
+    "Split Sam's block at noon" and "split Sam on Cell 1 at 12 today" are a split (person, place, day, at); the board writes a move in time to the first part and an assign for the second with the same part, cell and attachment, and the lot does both with one yes; an at outside the block, or a part shorter than the minimum, is a question; a person with no block that day gets the no-block answer.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+- id: R-414
+  title: Adding a person to a job by its name gives the block the job's own hours and attaches it
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "If we did group 2 as well, does it save colab run?" --- "group 2 too")'
+  - §19.103 (D132)
+  stated_by: maintainer
+  claim: >-
+    "Add Sam to the Housing A job on Cell 1" and "put Sam on the Housing A run on Cell 1 tomorrow" are an assign whose shift is the reserved name "the job" and whose hours are null; the resolver finds that part's run on that cell that day, takes its hours and attaches the block to it; no run is a question naming the part and cell; two runs is a question naming their hours; a run whose hours are said as well is shift_and_hours.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+- id: R-415
+  title: A job's headcount is set by a sentence naming the job
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "If we did group 2 as well, does it save colab run?" --- "group 2 too")'
+  - §19.103 (D132)
+  stated_by: maintainer
+  claim: >-
+    "Make the Housing A job on Cell 1 4 people" and "set the Housing A job on Cell 1 to 4 people" resolve to that run and write its planned headcount through the same field edit the job's own panel uses, with a readout naming the job and the new number; "make it 4 people" is refused by the grammar with a sentence asking for the job's name (the bar keeps no memory of "it"); never part of a lot; a number outside 1 to 99 is refused as a headcount is today.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+- id: R-416
+  title: Every weekday this week, or every day next week, on an assign or a booking is one sentence and one command per day
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "If we did group 2 as well, does it save colab run?" --- "group 2 too")'
+  - §19.103 (D132)
+  stated_by: maintainer
+  claim: >-
+    "Assign Sam to Housing A on Cell 1 every weekday this week 8 to 4" and "book Housing A on Cell 2 every day next week 6 to 2" carry a day word of kind weekdays or every_day with this week or next week; the board writes one command per day in order and the lot does them with one yes; a day off the board names its date; the two kinds are allowed only on an assign or a booking, by the grammar, the decoder and the served model's schema alike.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
 findings:
 - id: F-146
   title: A block that ends at midnight could not be said at all
@@ -22546,12 +22698,18 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
+  stage: S58
+  text: "Group 2 of the catalogue before the same run --- adjust an edge, split, the job's hours, a job's headcount, every weekday (S58, R-412 to R-416, in progress)"
+  why: >-
+    The maintainer's word on 14 Sept (session 168): "group 2 too", so the fifth run is the only run.
+- kind: task
   stage: S56
-  text: "The fifth run --- templates and held-out for S55's shapes, one Colab run, scored at the 0.95 bar (S56, R-410)"
+  text: "The fifth run --- templates and held-out for S55's and S58's shapes, one Colab run, scored at the 0.95 bar (S56, R-410)"
   why: >-
     One retrain for both groups, the maintainer's word. While it trains on Colab the next entry proceeds.
 - kind: task
-  text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
+  stage: S57
+  text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building (S57, R-411, in progress)"
   why: >-
     The browser's recogniser (S46) sends audio to the browser maker's service; the plan's second version
     runs Whisper beside the model on the same box. Wanted before a site that will not accept the first.

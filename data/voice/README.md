@@ -5,13 +5,15 @@ S42-a (`docs/agent-briefs/s42-a-training-set-brief.md`), Stage 3 of
 
 ## `heldout.jsonl` — committed, generated ONCE, never regenerated
 
-500 rows: 100 per intent (assign, book, unassign, move, several — "several"
-joined the other four at S50), half clean and half perturbed within each
-intent. Generated with a fixed seed so it is reproducible, but the file
-itself — not the command that made it — is the source of truth from here on:
+800 rows: 100 per intent (assign, book, unassign, move, several — "several"
+joined the other four at S50 — and replace, swap, copy — the three
+board-answered intents that joined at S56), half clean and half perturbed
+within each intent. Generated with a fixed seed so it is reproducible, but
+the file itself — not the command that made it — is the source of truth
+from here on:
 
 ```
-node scripts/voice/generate.mjs --out data/voice/heldout.jsonl --n 400 --seed 20260911 --heldout
+node scripts/voice/generate.mjs --out data/voice/heldout.jsonl --n 400 --seed 20260915 --heldout
 ```
 
 (the `--n` above is ignored for `--heldout`; the row count is fixed by
@@ -27,22 +29,31 @@ out from under this file, which is its job; a red V4 means come back here and
 decide, in the open, whether to accept the drift (and regenerate, deliberately,
 with a new seed and a plan entry saying so) or fix the grammar.
 
-**Migrated 14 Sept 2026 (session 168, S55, R-409):** every unassign form in
-this file (direct, and each unassign inner command of an S5 "several" row)
-now carries `until: null` — S55 lane A added the field to `UnassignCommand`
-for "off till Friday" / "on leave until Wednesday"; every removal recorded
-here is an ordinary one, so `until` is `null` throughout. No sentence
-changed for this, and no other field changed. One row, `ho-00229`, had its
-sentence's verb changed from "clear" to "remove" ("clear Marcus Novak
-sunday" → "remove Marcus Novak sunday") — a genuine, unrelated defect found
-while doing this migration: R-407 (also S55) reads "clear `<word>`" with no
-place separator as EVERYONE clearing a place named `<word>`, so the row's
-already-correct recorded form (`operator: "Marcus Novak", place: []`) no
-longer matched what the current grammar parses from that exact sentence.
-`scripts/voice/lib/templates.mjs`'s U8/U9/U10 templates were fixed the same
-way (excluded from picking "clear") so `voice:generate` will not reproduce
-this. S56 regenerates the whole held-out set anyway, on seed `20260915`, so
-this migration is a bridge until then, not a new steady state.
+**Regenerated 14 Sept 2026 (session 168-169, S56, D130):** the whole file was
+rebuilt from scratch on the new seed `20260915`, 100 rows per intent across
+eight intents (up from five) — `replace`, `swap` and `copy` joined the
+other five, and every existing intent's own templates gained the new
+sentence shapes S55's grammar widening added (durations, the two "end of"
+boundaries, time-of-day shift words, "everyone"/absence removals, a
+place-less move of everyone). The old 14 Sept migration note (session 168,
+S55, R-409: `until: null` added to every unassign form by hand, one row's
+verb bug-fixed) is superseded by this regeneration — that migration was
+explicitly a bridge until S56, not a new steady state.
+
+**Regenerated again, same day, same seed (S56 review):** the reviewer of the
+S56-a lane found three template bugs by hand-reading sampled rows and
+checking every S55-a-brief sentence against what a template actually
+produced (`src/test/voiceData.test.ts`'s V24/V25 now pin all three): A20
+-time-of-day and U13-pull-time-of-day could draw "this night" (nobody says
+that -- "tonight" is the word), and A14-duration never produced DU6's
+"half an hour" or DU4's decimal "1.5 hours" even though the grammar has
+parsed both since S55. Fixing the templates and regenerating on the SAME
+seed (`data/voice/README.md`'s own rule: a template fix, not a grammar
+drift, still needs a fresh file, but never a new seed for the same
+regeneration) changed the row mix, which is why the perturbed baseline
+below moved. Rule-parser baseline on this file: clean 400/400 (1.0),
+perturbed 19/400 (0.0475) — see `data/voice/colab/manifest.json`'s
+`ruleParserBaseline` for the number a trained model has to beat.
 
 ## `train.jsonl` — gitignored, generated on demand
 
@@ -52,7 +63,9 @@ Not committed. Generate it with:
 npm run voice:generate
 ```
 
-(4000 rows, seed 1). Every sentence in it is checked, at generation time,
+(6000 rows, seed 1 — raised from 4000 at S56 so each of the now eight
+intents keeps roughly the rows it had before replace/swap/copy joined).
+Every sentence in it is checked, at generation time,
 against `heldout.jsonl` and dropped/retried on collision, so the two files
 never share a sentence — training on a sentence the held-out set will later
 test you on defeats the point of a held-out set.
@@ -60,7 +73,8 @@ test you on defeats the point of a held-out set.
 ## Row shape (both files), one JSON object per line
 
 ```
-{ "id": string, "intent": "assign" | "book" | "unassign" | "move",
+{ "id": string,
+  "intent": "assign" | "book" | "unassign" | "move" | "several" | "replace" | "swap" | "copy",
   "sentence": string, "form": Command, "clean": boolean,
   "source": "<template id>" | "<template id>+<perturbation id>+..." }
 ```

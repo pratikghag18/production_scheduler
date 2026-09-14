@@ -19,7 +19,12 @@ import {
 import type { Command, SingleCommand } from "@/lib/command/parse";
 import { mulberry32 } from "../../scripts/voice/lib/rng.mjs";
 import { TEMPLATES, templateById } from "../../scripts/voice/lib/templates.mjs";
-import { CATALOG, PERTURBATION_IDS, perturbedRowForm } from "../../scripts/voice/lib/perturb.mjs";
+import {
+  CATALOG,
+  PERTURBATION_IDS,
+  perturbedRowForm,
+  perturbAll,
+} from "../../scripts/voice/lib/perturb.mjs";
 import { canonical, equalForms } from "../../scripts/voice/lib/form.mjs";
 import {
   score,
@@ -116,12 +121,14 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     }
   });
 
-  it("V4: data/voice/heldout.jsonl is valid, 500 rows, 100/intent, half clean/intent, clean rows parse today", () => {
-    // S50 (R-398/R-399): "several" joins the four -- the held-out set is
-    // regenerated (a NEW reference set; the old one could not contain
-    // sentences its grammar could not yet parse, design §19.97/D126), still
-    // 100 rows per intent, now across five intents instead of four.
-    expect(HELDOUT.length).toBe(500);
+  it("V4: data/voice/heldout.jsonl is valid, 800 rows, 100/intent, half clean/intent, clean rows parse today", () => {
+    // S56 (D130/S55-a brief, R-406/R-408): re-pinned again -- three
+    // board-answered intents (replace/swap/copy) join the five, and the
+    // whole set is regenerated on a new seed (20260915) the same way S50's
+    // regeneration was: the old file could not contain sentences its
+    // grammar could not yet parse (design §19.97/D126). Still 100 rows per
+    // intent, now across eight intents instead of five.
+    expect(HELDOUT.length).toBe(800);
 
     const counts: Record<string, { total: number; clean: number }> = {};
     for (const row of HELDOUT) {
@@ -129,7 +136,16 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       bucket.total++;
       if (row.clean) bucket.clean++;
     }
-    expect(Object.keys(counts).sort()).toEqual(["assign", "book", "move", "several", "unassign"]);
+    expect(Object.keys(counts).sort()).toEqual([
+      "assign",
+      "book",
+      "copy",
+      "move",
+      "replace",
+      "several",
+      "swap",
+      "unassign",
+    ]);
     for (const [intent, bucket] of Object.entries(counts)) {
       expect(bucket.total, intent).toBe(100);
       expect(bucket.clean, intent).toBe(50);
@@ -253,29 +269,33 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
   });
 
   it("V6: the rule parser's own baseline on held-out is 1.0 clean, well below 0.5 perturbed", () => {
-    // S52-c: re-pinned on the regenerated 500-row set (read from
-    // `node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl
-    // --rule-parser --bar 0.95`, after the shift templates and M10's
-    // possessive-timing move were added): clean 250/250 (1.0), perturbed
-    // 13/250 (0.052) -- up from S50's 8/250 (0.032) because the new
-    // templates give the SAME perturbation catalogue more surface (a shift
-    // name's own spelling can now be perturbed too), not because anything
-    // stopped perturbing.
+    // S56 review: re-pinned again -- the reviewer fix that dropped the
+    // never-said "this night" phrase (A20-time-of-day/U13-pull-time-of-day)
+    // and added the two missing DU4/DU6 duration spellings ("1.5 hours",
+    // "half an hour") to A14-duration changed which sentences the
+    // generator draws, so the held-out set was regenerated again on the
+    // SAME seed 20260915 (`data/voice/README.md`'s own rule for a
+    // deliberate regeneration). Read from `node scripts/voice/score.mjs
+    // --heldout data/voice/heldout.jsonl --rule-parser --bar 0.95`: clean
+    // 400/400 (1.0), perturbed 19/400 (0.0475) -- down from the prior
+    // 25/400 (0.0625) because fewer of the templates now drawn happen to
+    // land on a perturbable word at all, not because anything stopped
+    // perturbing (V6 below still checks that directly).
     const predict = (row: VoiceRow) => {
       const result = parseCommand(row.sentence);
       return result.ok ? result.command : null;
     };
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
-    expect(result.clean).toEqual({ n: 250, correct: 250 });
-    expect(result.perturbed).toEqual({ n: 250, correct: 13 });
+    expect(result.clean).toEqual({ n: 400, correct: 400 });
+    expect(result.perturbed).toEqual({ n: 400, correct: 19 });
     // Pinned with a tolerance around the number this generator actually
-    // produces (~5.2%) -- a perturbation catalogue that stopped perturbing
+    // produces (~4.75%) -- a perturbation catalogue that stopped perturbing
     // (every function became a no-op) would push this toward 1.0, and that
     // is exactly the drift this pin exists to catch.
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.052, 2);
+    expect(rate(result.perturbed)).toBeCloseTo(0.0475, 2);
   });
 
   it("V7: a generated training set (n=200, seed 1) shares no sentence with held-out and is ~50% clean", () => {
@@ -421,17 +441,18 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
   });
 
   it("V13: the rule parser's held-out baseline is unchanged by the extra-key normalisation (re-pins V6)", () => {
+    // S56 review: re-pinned alongside V6, same regeneration, same reason.
     const predict = (row: VoiceRow) => {
       const result = parseCommand(row.sentence);
       return result.ok ? result.command : null;
     };
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
-    expect(result.clean).toEqual({ n: 250, correct: 250 });
-    expect(result.perturbed).toEqual({ n: 250, correct: 13 });
+    expect(result.clean).toEqual({ n: 400, correct: 400 });
+    expect(result.perturbed).toEqual({ n: 400, correct: 19 });
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.052, 2);
+    expect(rate(result.perturbed)).toBeCloseTo(0.0475, 2);
   });
 
   it("V15 (S52-c, R-402): a shift template's form has start/end null and a name -- the oracle holds", () => {
@@ -616,5 +637,206 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
         "sentences not checked: 1 rows (predictions from before F-145)",
       );
     });
+  });
+
+  describe("V19-V20 (S56): the scorer on the two board-answered intents with a `with`/`other` field", () => {
+    const copyForm: Command = {
+      intent: "copy",
+      place: ["Cell 1"],
+      from: { kind: "yesterday" },
+      to: { kind: "today" },
+    };
+    const replaceForm: Command = {
+      intent: "replace",
+      operator: "Sam Patel",
+      with: "Ana Silva",
+      place: ["Cell 1"],
+      day: null,
+      span: null,
+      shift: null,
+    };
+
+    it("V19: an exact copy prediction scores correct; a wrong `to` field is wrong and tallied, `from` still right", () => {
+      const rows: VoiceRow[] = [
+        { id: "c1", intent: "copy", sentence: "n/a", form: copyForm, clean: true, source: "x" },
+      ];
+      const exact = score(rows, () => copyForm);
+      expect(rate(exact.clean)).toBe(1);
+
+      const wrongTo: Command = { ...copyForm, to: { kind: "tomorrow" } };
+      const wrong = score(rows, () => wrongTo);
+      expect(rate(wrong.clean)).toBe(0);
+      expect(wrong.byField.to).toEqual({ n: 1, correct: 0 });
+      expect(wrong.byField.from).toEqual({ n: 1, correct: 1 });
+    });
+
+    it("V20: an exact replace prediction scores correct; a wrong `with` field is wrong and tallied, `operator` still right", () => {
+      const rows: VoiceRow[] = [
+        {
+          id: "r1",
+          intent: "replace",
+          sentence: "n/a",
+          form: replaceForm,
+          clean: true,
+          source: "x",
+        },
+      ];
+      const exact = score(rows, () => replaceForm);
+      expect(rate(exact.clean)).toBe(1);
+
+      const wrongWith: Command = { ...replaceForm, with: "Someone Else" };
+      const wrong = score(rows, () => wrongWith);
+      expect(rate(wrong.clean)).toBe(0);
+      expect(wrong.byField.with).toEqual({ n: 1, correct: 0 });
+      expect(wrong.byField.operator).toEqual({ n: 1, correct: 1 });
+    });
+  });
+
+  it("V21: a prediction missing `until` on an absence row is wrong -- missing is not an implicit null", () => {
+    const form: Command = {
+      intent: "unassign",
+      operator: "Sam Patel",
+      place: [],
+      day: { kind: "today" },
+      span: null,
+      existing: null,
+      shift: null,
+      until: { kind: "weekday", day: 5 },
+    };
+    const rows: VoiceRow[] = [
+      { id: "u1", intent: "unassign", sentence: "n/a", form, clean: true, source: "x" },
+    ];
+    const predicted = { ...form } as Record<string, unknown>;
+    delete predicted.until;
+    const result = score(rows, () => predicted);
+    expect(rate(result.clean)).toBe(0);
+    expect(result.byField.until).toEqual({ n: 1, correct: 0 });
+    // A field the prediction OMITS is missing, never counted as an invented
+    // extra (V12's own rule, re-exercised here for `until` specifically).
+    expect(result.extraKeys).toEqual({ n: 0, keys: {} });
+  });
+
+  it("V22 (R-409): a perturbed absence row keeps the clean sentence's own form", () => {
+    const t = templateById("U19-absence-until");
+    const rng = mulberry32(seedFrom("U19-absence-until", "V22"));
+    const slots = t.genSlots(rng);
+    const sentence = t.sentence(slots);
+    const form = t.form(slots) as Command;
+    const perturbedResult = perturbAll(
+      sentence,
+      mulberry32(seedFrom("U19-absence-until", "V22p")),
+      3,
+    );
+    expect(perturbedResult.sentence).not.toBe(sentence); // the perturbation actually did something
+    const rowForm = perturbedRowForm(form, perturbedResult.ids) as Command;
+    expect(equalForms(rowForm, form)).toBe(true);
+
+    // The same guarantee holds end to end for every perturbed absence row
+    // the committed held-out set actually carries (U18/U19's own source ids).
+    const absenceRows = HELDOUT.filter(
+      (r) =>
+        (r.source.startsWith("U18-absence-day") || r.source.startsWith("U19-absence-until")) &&
+        !r.clean,
+    );
+    expect(absenceRows.length).toBeGreaterThan(0);
+    for (const row of absenceRows) {
+      expect((row.form as { intent: string }).intent).toBe("unassign");
+      expect((row.form as { place: string[] }).place).toEqual([]);
+    }
+  });
+
+  it("V23: the system prompt mentions every new intent's word and the new vocabulary (a guard against prompt drift)", () => {
+    const prompt = readFileSync("scripts/voice/train/system_prompt.txt", "utf8").toLowerCase();
+    // The three new intents (D130 item 2).
+    for (const word of ["replace", "swap", "copy"]) {
+      expect(prompt, word).toContain(word);
+    }
+    // The four day words (R-404, D130 item 3's own "yesterday" addition).
+    for (const word of ["today", "tomorrow", "yesterday", "weekday"]) {
+      expect(prompt, word).toContain(word);
+    }
+    // The three reserved shift names, and that the two "end of" ones may
+    // carry a start.
+    expect(prompt).toContain("all day");
+    expect(prompt).toContain("end of shift");
+    expect(prompt).toContain("end of day");
+    expect(prompt).toContain("may still carry a start");
+    // "everyone" and "clear <place>".
+    expect(prompt).toContain("everyone");
+    expect(prompt).toContain("clear <place>");
+    // An absence and its own field.
+    expect(prompt).toContain("absence");
+    expect(prompt).toContain("until");
+    // "several" never holds the three new intents.
+    expect(prompt).toContain("a several never holds");
+  });
+
+  it('V24 (S56 review): A20-time-of-day and U13-pull-time-of-day never say "this night" -- nobody says that, they say "tonight"', () => {
+    // Bug: both templates picked `word` from the full `TIME_OF_DAY_WORDS`
+    // pool (morning/afternoon/evening/night) for their "this <word>"
+    // phrasing without excluding "night" -- parse.ts's own comment already
+    // calls "this night" out as the irregular case "tonight" exists for
+    // (src/lib/command/parse.ts's TIME_OF_DAY_WORDS doc comment), so the
+    // sentence is grammatically valid but not something a plant scheduler
+    // would ever type or say. Found sampling 150 held-out and 300 train
+    // rows by hand (the review brief's attack step 1) and confirmed by
+    // grepping the generated corpus for the literal phrase. Fixed by
+    // drawing from `TIME_OF_DAY_WORDS_THIS` (night excluded) for exactly
+    // the "this" branch; "tonight" itself, and "tomorrow night"/"for the
+    // night", are untouched and still cover "night" naturally.
+    const a20 = templateById("A20-time-of-day");
+    const u13 = templateById("U13-pull-time-of-day");
+    for (let i = 1; i <= 500; i++) {
+      const a20Slots = a20.genSlots(mulberry32(seedFrom("A20-time-of-day", `V24-${i}`)));
+      expect(a20.sentence(a20Slots), `A20 draw ${i}`).not.toContain("this night");
+      const u13Slots = u13.genSlots(mulberry32(seedFrom("U13-pull-time-of-day", `V24-${i}`)));
+      expect(u13.sentence(u13Slots), `U13 draw ${i}`).not.toContain("this night");
+    }
+    // The same guarantee over the committed corpus, not just fresh draws.
+    for (const row of HELDOUT) {
+      expect(row.sentence, row.id).not.toContain("this night");
+    }
+  });
+
+  it('V25 (S56 review): A14-duration covers DU6\'s "half an hour" and DU4\'s decimal "N.N hours", not just the word forms', () => {
+    // Bug: the S55-a grammar brief's own DU1-DU6 list (parseDurationMinutes)
+    // has five duration SPELLINGS -- "N hours", "an hour", "N and a half
+    // hours", "N minutes", "half an hour", and separately a decimal spelling
+    // ("1.5 hours", DU4, the SAME value as DU3's word form but a different
+    // surface) -- but A14-duration's `genSlots` only ever produced four of
+    // those six shapes; the S56-a data brief's own bullet for A14 happens to
+    // repeat only four of them too, so the gap was silent. Found doing the
+    // review brief's attack step 7 (every S55-a-brief sentence checked
+    // against what a template actually emits). Sampled over many draws
+    // (never asserted "on the first try") because `kind` is one pick among
+    // several.
+    const t = templateById("A14-duration");
+    let sawHalfAnHour = false;
+    let sawDecimal = false;
+    for (let i = 1; i <= 300; i++) {
+      const slots = t.genSlots(mulberry32(seedFrom("A14-duration", `V25-${i}`)));
+      const sentence = t.sentence(slots);
+      const form = t.form(slots) as Command;
+      const result = parseCommand(sentence);
+      expect(result.ok, `"${sentence}" did not parse`).toBe(true);
+      if (result.ok) expect(equalForms(result.command, form), sentence).toBe(true);
+      if (sentence.includes("half an hour")) sawHalfAnHour = true;
+      if (/for \d+\.\d+ h(ou)?rs?\b/.test(sentence)) sawDecimal = true;
+    }
+    expect(sawHalfAnHour, 'never drew "half an hour" in 300 tries').toBe(true);
+    expect(sawDecimal, "never drew a decimal duration in 300 tries").toBe(true);
+  });
+
+  it("V26 (S56 review): the system prompt says swap's place may be [] too, matching replace's own annotation", () => {
+    // Bug: replace's own line already said "place (or [])"; swap's did not,
+    // even though two of swap's own three templates (W1-swap-and,
+    // W3-exchange) never name a place at all -- a model reading the prompt
+    // literally could conclude swap always needs one. Found reading the
+    // prompt against `form.schema.json` (both allow `minItems: 0` for
+    // swap's `place`, D130 item 2).
+    const prompt = readFileSync("scripts/voice/train/system_prompt.txt", "utf8");
+    const swapLine = prompt.split("\n").find((l) => l.startsWith("swap:"));
+    expect(swapLine, "no swap: line in the prompt").toBeTruthy();
+    expect(swapLine).toContain("place (or [])");
   });
 });

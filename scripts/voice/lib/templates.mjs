@@ -35,7 +35,36 @@ import {
   BOOK_VERBS,
   UNASSIGN_VERBS,
   MOVE_VERBS,
+  REPLACE_VERBS,
+  SWAP_VERBS,
+  COPY_VERBS,
+  ABSENCE_WORDS,
+  TIME_OF_DAY_WORDS,
+  EVERYONE,
+  ALL_DAY,
+  END_OF_SHIFT,
+  END_OF_DAY,
+  DAY_END,
 } from "../../../src/lib/command/parse.ts";
+
+// R-407 (S55): the raw words that canonicalize to `EVERYONE` on a removal or
+// a move -- parse.ts's own `EVERYONE_ALIASES` is private (only the canonical
+// spelling `EVERYONE` is exported), so this is the same three words, spelled
+// out here the way `SHIFT_QUOTING_STOP_WORDS` above already mirrors a
+// private regex's own word set rather than importing it.
+const EVERYONE_ALIASES = ["everyone", "everybody", "all"];
+
+// Reviewer fix (S56 review): "this night" is not a sentence a scheduler
+// says -- the irregular case parse.ts's own comment already calls out
+// ("tonight" (irregular for "this night")) -- so "this <word>"/"pull ...
+// this <word>" templates draw from this NIGHT-EXCLUDED pool; "night" still
+// gets its own natural coverage through the "tonight" branch (A20) and
+// through "tomorrow night"/"for the night" (both templates already draw
+// the unfiltered TIME_OF_DAY_WORDS for those branches, where "night" reads
+// fine). Found running the sampled-row check the S56-a data-brief attack
+// step asks for (`for word of ["this X"]`), the same way U8-U10's "clear"
+// exclusion (S55) was found while doing an unrelated migration.
+const TIME_OF_DAY_WORDS_THIS = TIME_OF_DAY_WORDS.filter((w) => w !== "night");
 
 function capitalize(word) {
   return word.charAt(0).toUpperCase() + word.slice(1);
@@ -205,6 +234,42 @@ function randomSpan(rng, forcedSep) {
   const sep = forcedSep ?? pick(rng, TIME_SEPARATORS);
   const pair = buildTimePair(startSpec, endSpec, sep);
   if (!pair) return randomSpan(rng, forcedSep);
+  return pair;
+}
+
+/** S56: like `randomSpan`, but never emits a "noon"/"midnight" START -- the
+ *  bare-pair grammar (no leading "from" at all, `BARE_PAIR_TRAILING_RE`
+ *  inside `parseTimeAndDayOrBare`) only accepts numeric/am-pm time tokens,
+ *  never the synthetic noon/midnight words `parseTimeToken` otherwise reads.
+ *  Used by the word-order templates (A18/A19, B8) whose sentences carry no
+ *  "from" at all -- found by `voice:generate --heldout` throwing an ORACLE
+ *  MISMATCH on a "noon" bare-pair start (`no_time`, since the bare-pair
+ *  regex never matched it in the first place). */
+function randomBareSpan(rng, forcedSep) {
+  const startHour = randInt(rng, 6, 18);
+  let duration = pick(rng, [2, 3, 4, 6, 8]);
+  if (startHour + duration > 22) duration = Math.max(1, 22 - startHour);
+  const endHour = startHour + duration;
+  const startMinute = pick(rng, [0, 0, 0, 15, 30, 45]);
+  const endMinute = pick(rng, [0, 0, 0, 15, 30, 45]);
+
+  const startSpec = chance(rng, 0.5)
+    ? { kind: "ampm", hour: startHour, minute: startMinute, spaced: chance(rng, 0.5) }
+    : { kind: "24h", hour: startHour, minute: startMinute };
+
+  let endSpec;
+  const endStyle = pick(rng, ["24h", "ampm", "ambiguous"]);
+  if (endStyle === "ambiguous" && endHour > 12 && endHour <= 23) {
+    endSpec = { kind: "24h", hour: endHour - 12, minute: endMinute }; // relies on the afternoon rule
+  } else if (endStyle === "ampm") {
+    endSpec = { kind: "ampm", hour: endHour, minute: endMinute, spaced: chance(rng, 0.5) };
+  } else {
+    endSpec = { kind: "24h", hour: endHour, minute: endMinute };
+  }
+
+  const sep = forcedSep ?? pick(rng, TIME_SEPARATORS);
+  const pair = buildTimePair(startSpec, endSpec, sep);
+  if (!pair) return randomBareSpan(rng, forcedSep);
   return pair;
 }
 
@@ -609,6 +674,293 @@ const assignTemplates = [
         shift: s.word,
       }),
   },
+  // -------------------------------------------------------------------------
+  // S56 (D130/S55-a brief §3, DU/BD/TD series): durations, the two "end of"
+  // boundaries, and the time-of-day shift words -- every shape the S55-a
+  // brief's assign sentences cover that A1-A13 did not yet template.
+  // -------------------------------------------------------------------------
+  {
+    // DU1-DU6: "from T for N hours / an hour / N and a half hours / N
+    // minutes / half an hour / N.N hours" -- the end computed here,
+    // mirroring `parseDurationMinutes` (never `parseCommand`'s own
+    // arithmetic, brief §2: "never from `parseCommand`" -- the oracle check
+    // in `rows.mjs` is only real if this side never looks at the parser's
+    // code path).
+    //
+    // Reviewer fix (S56 review): two of DU1-DU6's own literal phrases had no
+    // `kind` here at all -- "half an hour" (DU6, `parseDurationMinutes`'s
+    // `t === "half an hour"` branch) and the DECIMAL spelling "1.5 hours"
+    // (DU4, its `\d+(?:\.\d+)?` branch, the same VALUE as DU3's "N and a
+    // half hours" word form but a different surface a typed command bar
+    // sees often). The S56-a brief's own A14 bullet lists "N hours / an
+    // hour / N and a half hours / N minutes" and never either of these --
+    // only the S55-a grammar brief's own DU-numbered list does -- so the
+    // data generator silently never produced either even though the
+    // grammar has parsed both since S55. Found doing the S56-a-brief attack
+    // step this review's own brief asks for (every DU-numbered sentence
+    // checked against what a template actually emits).
+    id: "A14-duration",
+    intent: "assign",
+    genSlots: (rng) => {
+      const startHour = randInt(rng, 6, 16); // headroom under every kind's max minutes below
+      const kind = pick(rng, ["hours", "anHour", "halfHour", "andHalf", "decimal", "minutes"]);
+      let durationText;
+      let minutes;
+      if (kind === "anHour") {
+        durationText = "an hour";
+        minutes = 60;
+      } else if (kind === "halfHour") {
+        durationText = "half an hour";
+        minutes = 30;
+      } else if (kind === "andHalf") {
+        const n = randInt(rng, 1, 4);
+        const unit = pick(rng, ["hours", "hrs"]);
+        durationText = `${n} and a half ${unit}`;
+        minutes = n * 60 + 30;
+      } else if (kind === "decimal") {
+        const n = pick(rng, [1.5, 2.5, 3.5]);
+        const unit = pick(rng, ["hours", "hrs"]);
+        durationText = `${n} ${unit}`;
+        minutes = Math.round(n * 60);
+      } else if (kind === "minutes") {
+        const n = pick(rng, [15, 30, 45, 90]);
+        const unit = pick(rng, ["minutes", "mins"]);
+        durationText = `${n} ${unit}`;
+        minutes = n;
+      } else {
+        const n = randInt(rng, 1, 6);
+        const unit = pick(rng, ["hours", "hrs"]);
+        durationText = `${n} ${unit}`;
+        minutes = n * 60;
+      }
+      const endTotal = startHour * 60 + minutes;
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op: pick(rng, PEOPLE_ALL),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        startHour,
+        durationText,
+        start: { hour: startHour, minute: 0 },
+        end: { hour: Math.floor(endTotal / 60), minute: endTotal % 60 },
+      };
+    },
+    sentence: (s) =>
+      `${s.verb} ${qw(s.op)} on ${qw(s.part)} on ${qw(s.cell)} from ${s.startHour} for ${s.durationText}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        start: s.start,
+        end: s.end,
+        attach: null,
+        existing: null,
+      }),
+  },
+  {
+    // BD1: "all day" -- shift ALL_DAY, start/end null.
+    id: "A15-all-day",
+    intent: "assign",
+    genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      dayWord: pick(rng, ["today", "tomorrow"]),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} all day ${s.dayWord}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: s.dayWord === "today" ? { kind: "today" } : { kind: "tomorrow" },
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: ALL_DAY,
+      }),
+  },
+  {
+    // BD2: "from T until end of shift" -- start set, end null, the ONE
+    // boundary shift that may carry a start (D130 item 3's amendment).
+    id: "A16-from-until-end-of-shift",
+    intent: "assign",
+    genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      startHour: randInt(rng, 6, 20),
+      phrase: pick(rng, [
+        "until end of shift",
+        "till end of shift",
+        "to the end of the shift",
+        "until the end of shift",
+        "for the rest of the shift",
+      ]),
+    }),
+    sentence: (s) =>
+      `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} from ${s.startHour} ${s.phrase}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        start: { hour: s.startHour, minute: 0 },
+        end: null,
+        attach: null,
+        existing: null,
+        shift: END_OF_SHIFT,
+      }),
+  },
+  {
+    // BD3/BD4: "for the rest of the day" (with and without a leading
+    // "from T") -- shift END_OF_DAY.
+    id: "A17-rest-of-day",
+    intent: "assign",
+    genSlots: (rng) => {
+      const withStart = chance(rng, 0.5);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op: pick(rng, PEOPLE_ALL),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        withStart,
+        startHour: withStart ? randInt(rng, 6, 20) : null,
+        phrase: pick(rng, [
+          "for the rest of the day",
+          "until end of day",
+          "till the end of the day",
+        ]),
+      };
+    },
+    sentence: (s) =>
+      s.withStart
+        ? `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} from ${s.startHour} ${s.phrase}`
+        : `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} ${s.phrase}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        start: s.withStart ? { hour: s.startHour, minute: 0 } : null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: END_OF_DAY,
+      }),
+  },
+  {
+    // WO1: "<op> works on <part> on <cell> <bare pair>" -- the word-order
+    // grammar's operator-first marker, rewritten internally to an ordinary
+    // assign.
+    id: "A18-works-on",
+    intent: "assign",
+    genSlots: (rng) => ({
+      op: pick(rng, PEOPLE_ALL),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      span: randomBareSpan(rng),
+    }),
+    sentence: (s) => `${qw(s.op)} works on ${qw(s.part)} on ${qw(s.cell)} ${s.span.text}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        start: s.span.start,
+        end: s.span.end,
+        attach: null,
+        existing: null,
+      }),
+  },
+  {
+    // WO3: "<cell> gets <op> on <part> <bare pair>" -- the word-order
+    // grammar's place-first marker.
+    id: "A19-cell-gets",
+    intent: "assign",
+    genSlots: (rng) => ({
+      op: pick(rng, PEOPLE_ALL),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      span: randomBareSpan(rng),
+    }),
+    sentence: (s) => `${qw(s.cell)} gets ${qw(s.op)} on ${qw(s.part)} ${s.span.text}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        start: s.span.start,
+        end: s.span.end,
+        attach: null,
+        existing: null,
+      }),
+  },
+  {
+    // TD1-TD4: a time-of-day word read as a shift NAME -- "this <word>"/
+    // "tonight" (day today), "tomorrow <word>" (day tomorrow), "for the
+    // <word>" (day left as whatever else was said -- null here, nothing
+    // else says one).
+    id: "A20-time-of-day",
+    intent: "assign",
+    genSlots: (rng) => {
+      const kind = pick(rng, ["this", "tonight", "tomorrow", "forThe"]);
+      // "this night" is never said (see `TIME_OF_DAY_WORDS_THIS`'s own
+      // comment) -- only the "this" branch needs the narrower pool.
+      const word = pick(rng, kind === "this" ? TIME_OF_DAY_WORDS_THIS : TIME_OF_DAY_WORDS);
+      let phrase;
+      let shift;
+      let day;
+      if (kind === "tonight") {
+        phrase = "tonight";
+        shift = "night";
+        day = { kind: "today" };
+      } else if (kind === "this") {
+        phrase = `this ${word}`;
+        shift = word;
+        day = { kind: "today" };
+      } else if (kind === "tomorrow") {
+        phrase = `tomorrow ${word}`;
+        shift = word;
+        day = { kind: "tomorrow" };
+      } else {
+        phrase = `for the ${word}`;
+        shift = word;
+        day = null;
+      }
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op: pick(rng, PEOPLE_ALL),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        phrase,
+        shift,
+        day,
+      };
+    },
+    sentence: (s) => `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} ${s.phrase}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: s.day,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: s.shift,
+      }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -779,6 +1131,96 @@ const bookTemplates = [
         end: null,
         existing: null,
         shift: s.name,
+      }),
+  },
+  {
+    // WO5/WO6: "<cell> runs <part> <bare pair> [with N people]" -- the
+    // word-order grammar's booking marker; "with" joins "for" as a
+    // headcount preposition for every book form (R-405).
+    id: "B8-cell-runs",
+    intent: "book",
+    genSlots: (rng) => {
+      const withHeadcount = chance(rng, 0.5);
+      return {
+        cell: pick(rng, CELLS_ALL),
+        part: pick(rng, PARTS_ALL),
+        span: randomBareSpan(rng),
+        withHeadcount,
+        n: withHeadcount ? randInt(rng, 1, 12) : null,
+      };
+    },
+    sentence: (s) =>
+      s.withHeadcount
+        ? `${qw(s.cell)} runs ${qw(s.part)} ${s.span.text} with ${s.n} people`
+        : `${qw(s.cell)} runs ${qw(s.part)} ${s.span.text}`,
+    form: (s) =>
+      baseCommand("book", {
+        product: s.part,
+        place: [s.cell],
+        headcount: s.n,
+        day: null,
+        start: s.span.start,
+        end: s.span.end,
+        existing: null,
+      }),
+  },
+  {
+    // DU9: a duration clause AND a headcount clause together -- the second
+    // "for" clause is a headcount, never swallowed by the duration's own
+    // "for" (the unit word disambiguates them, `DURATION_CLAUSE_RE`'s own
+    // bound).
+    id: "B9-duration-headcount",
+    intent: "book",
+    genSlots: (rng) => {
+      const startHour = randInt(rng, 6, 16);
+      const durHours = randInt(rng, 1, 6);
+      const endTotal = startHour * 60 + durHours * 60;
+      return {
+        verb: pick(rng, BOOK_VERBS),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        startHour,
+        durHours,
+        n: randInt(rng, 1, 12),
+        start: { hour: startHour, minute: 0 },
+        end: { hour: Math.floor(endTotal / 60), minute: endTotal % 60 },
+      };
+    },
+    sentence: (s) =>
+      `${s.verb} ${qw(s.part)} on ${qw(s.cell)} from ${s.startHour} for ${s.durHours} hours for ${s.n} people`,
+    form: (s) =>
+      baseCommand("book", {
+        product: s.part,
+        place: [s.cell],
+        headcount: s.n,
+        day: null,
+        start: s.start,
+        end: s.end,
+        existing: null,
+      }),
+  },
+  {
+    // BD1's own shape for a booking -- "all day" -- shift ALL_DAY, start/end
+    // null.
+    id: "B10-all-day",
+    intent: "book",
+    genSlots: (rng) => ({
+      verb: pick(rng, BOOK_VERBS),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      dayWord: pick(rng, ["today", "tomorrow"]),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.part)} on ${qw(s.cell)} all day ${s.dayWord}`,
+    form: (s) =>
+      baseCommand("book", {
+        product: s.part,
+        place: [s.cell],
+        headcount: null,
+        day: s.dayWord === "today" ? { kind: "today" } : { kind: "tomorrow" },
+        start: null,
+        end: null,
+        existing: null,
+        shift: ALL_DAY,
       }),
   },
 ];
@@ -1034,6 +1476,238 @@ const unassignTemplates = [
         existing: null,
         shift: s.name,
         until: null, // S55/R-409: an ordinary removal, no absence end-day
+      }),
+  },
+  // -------------------------------------------------------------------------
+  // S56 (D130/S55-a brief §3, RM/EV/AB series): "take" as a removal verb,
+  // the lone-edge span, EVERYONE, and the absence grammar's own day/until
+  // shape -- every removal sentence the S55-a brief covers that U1-U11 did
+  // not yet template.
+  // -------------------------------------------------------------------------
+  {
+    // RM1: "take" joined UNASSIGN_VERBS at R-405 -- "take <op> off <cell>".
+    id: "U12-take-off",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      op: pick(rng, PEOPLE_ALL),
+      cell: pick(rng, CELLS_ALL),
+    }),
+    sentence: (s) => `take ${qw(s.op)} off ${qw(s.cell)}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [s.cell],
+        day: null,
+        span: null,
+        existing: null,
+        until: null,
+      }),
+  },
+  {
+    // TD5: "pull <op> off <cell> this <word>" -- a removal's own shift NAME
+    // reading of a time-of-day word, day fixed to today.
+    id: "U13-pull-time-of-day",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      op: pick(rng, PEOPLE_ALL),
+      cell: pick(rng, CELLS_ALL),
+      // Reviewer fix (S56 review): this template only ever says "this
+      // <word>" (never "tonight"), so it draws from the NIGHT-EXCLUDED pool
+      // the same way A20's own "this" branch does -- see
+      // `TIME_OF_DAY_WORDS_THIS`'s comment.
+      word: pick(rng, TIME_OF_DAY_WORDS_THIS),
+    }),
+    sentence: (s) => `pull ${qw(s.op)} off ${qw(s.cell)} this ${s.word}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [s.cell],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: s.word,
+        until: null,
+      }),
+  },
+  {
+    // RM5: "after T" -- 14:00 to DAY_END (D130 item 3: the resolver reads
+    // DAY_END as midnight).
+    id: "U14-after-edge",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      cell: pick(rng, CELLS_ALL),
+      hour: randInt(rng, 1, 11), // explicit pm, 1-11 so hour+12 never touches noon/midnight
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} from ${qw(s.cell)} after ${s.hour} pm`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [s.cell],
+        day: null,
+        span: { start: { hour: s.hour + 12, minute: 0 }, end: DAY_END },
+        existing: null,
+        until: null,
+      }),
+  },
+  {
+    // RM6/RM7: "before T"/"until T" -- 00:00 to the edge; a bare hour under
+    // 7 with no am/pm reads as pm (the same "workday" rule the paired
+    // afternoon reading already uses, `applyLoneEdgeRule`).
+    id: "U15-before-until-edge",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      cell: pick(rng, CELLS_ALL),
+      word: pick(rng, ["before", "until"]),
+      hour: pick(rng, [1, 2, 3, 4, 5, 6]),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} from ${qw(s.cell)} ${s.word} ${s.hour}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [s.cell],
+        day: null,
+        span: { start: { hour: 0, minute: 0 }, end: { hour: s.hour + 12, minute: 0 } },
+        existing: null,
+        until: null,
+      }),
+  },
+  {
+    // EV1: "clear <place> <day>" -- the implicit-place reading only "clear"
+    // gets (R-407): operator EVERYONE, place the word that followed the
+    // verb, no separator at all.
+    id: "U16-clear-cell",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      cell: pick(rng, CELLS_ALL),
+      day: randomBareDay(rng),
+    }),
+    sentence: (s) => `clear ${qw(s.cell)} ${s.day.text}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: EVERYONE,
+        place: [s.cell],
+        day: s.day.day,
+        span: null,
+        existing: null,
+        until: null,
+      }),
+  },
+  {
+    // EV4-EV6: an EXPLICIT everyone/everybody/all word with a from-place and
+    // an edge -- canonical EVERYONE regardless of which alias was said.
+    id: "U17-everyone-after",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      alias: pick(rng, EVERYONE_ALIASES),
+      cell: pick(rng, CELLS_ALL),
+      hour: randInt(rng, 1, 11),
+    }),
+    sentence: (s) => `${s.verb} ${s.alias} from ${qw(s.cell)} after ${s.hour} pm`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: EVERYONE,
+        place: [s.cell],
+        day: null,
+        span: { start: { hour: s.hour + 12, minute: 0 }, end: DAY_END },
+        existing: null,
+        until: null,
+      }),
+  },
+  {
+    // AB1-AB3: "<op> is <absence word> [today|tomorrow]" -- a bare absence
+    // (no day at all) reads as today (AB2's own explicit default); place [],
+    // until null.
+    id: "U18-absence-day",
+    intent: "unassign",
+    genSlots: (rng) => {
+      const withDay = chance(rng, 0.5);
+      return {
+        op: pick(rng, PEOPLE_ALL),
+        word: pick(rng, ABSENCE_WORDS),
+        withDay,
+        dayWord: withDay ? pick(rng, ["today", "tomorrow"]) : null,
+      };
+    },
+    sentence: (s) =>
+      s.withDay ? `${qw(s.op)} is ${s.word} ${s.dayWord}` : `${qw(s.op)} is ${s.word}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [],
+        day: s.withDay && s.dayWord === "tomorrow" ? { kind: "tomorrow" } : { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      }),
+  },
+  {
+    // AB4-AB6: "<op> is <absence word> [from <day>] till/until <weekday>" --
+    // the absence grammar's own `until`; a from-day sets `day`, its absence
+    // leaves `day` as today (AB4's own default).
+    id: "U19-absence-until",
+    intent: "unassign",
+    genSlots: (rng) => {
+      const withFromDay = chance(rng, 0.5);
+      const untilIdx = randInt(rng, 0, 6);
+      const fromDayIdx = withFromDay ? randInt(rng, 0, 6) : null;
+      return {
+        op: pick(rng, PEOPLE_ALL),
+        word: pick(rng, ABSENCE_WORDS),
+        untilWord: pick(rng, ["till", "until"]),
+        untilIdx,
+        untilWeekday: chance(rng, 0.5) ? WEEKDAY_FULL[untilIdx] : WEEKDAY_ABBR[untilIdx],
+        withFromDay,
+        fromDayIdx,
+        fromDayWeekday:
+          fromDayIdx !== null
+            ? chance(rng, 0.5)
+              ? WEEKDAY_FULL[fromDayIdx]
+              : WEEKDAY_ABBR[fromDayIdx]
+            : null,
+      };
+    },
+    sentence: (s) =>
+      s.withFromDay
+        ? `${qw(s.op)} is ${s.word} from ${s.fromDayWeekday} ${s.untilWord} ${s.untilWeekday}`
+        : `${qw(s.op)} is ${s.word} ${s.untilWord} ${s.untilWeekday}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [],
+        day: s.withFromDay ? { kind: "weekday", day: s.fromDayIdx } : { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: { kind: "weekday", day: s.untilIdx },
+      }),
+  },
+  {
+    // BD5: "for the rest of the day" on a removal -- shift END_OF_DAY, span
+    // null (a removal still means "the whole day", D130 item 3).
+    id: "U20-rest-of-day",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      cell: pick(rng, CELLS_ALL),
+      phrase: pick(rng, ["for the rest of the day", "until end of day", "till the end of the day"]),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} from ${qw(s.cell)} ${s.phrase}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [s.cell],
+        day: null,
+        span: null,
+        existing: null,
+        shift: END_OF_DAY,
+        until: null,
       }),
   },
 ];
@@ -1324,6 +1998,37 @@ const moveTemplates = [
         shift: s.name,
       }),
   },
+  {
+    // EV7/EV8: "move everyone (on|from) <place> to <cell> [<day>]" -- the
+    // move grammar's own EVERYONE reading (R-407), with and without a day.
+    id: "M12-move-everyone",
+    intent: "move",
+    genSlots: (rng) => {
+      const withDay = chance(rng, 0.5);
+      return {
+        verb: pick(rng, MOVE_VERBS),
+        alias: pick(rng, EVERYONE_ALIASES),
+        sep: pick(rng, ["on", "from"]),
+        place: pick(rng, LINES_ALL.concat(CELLS_ALL)),
+        toPlace: pick(rng, CELLS_ALL),
+        withDay,
+        day: withDay ? randomDay(rng) : null,
+      };
+    },
+    sentence: (s) =>
+      s.withDay
+        ? `${s.verb} ${s.alias} ${s.sep} ${qw(s.place)} to ${qw(s.toPlace)} ${s.day.text}`
+        : `${s.verb} ${s.alias} ${s.sep} ${qw(s.place)} to ${qw(s.toPlace)}`,
+    form: (s) =>
+      baseCommand("move", {
+        operator: EVERYONE,
+        place: [s.place],
+        toPlace: [s.toPlace],
+        day: s.withDay ? s.day.day : null,
+        span: null,
+        existing: null,
+      }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1577,12 +2282,340 @@ const severalTemplates = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Replace (R1-R4) -- S56 (D130/S55-a brief §3 RP series, R-406): "cover"/
+// "replace" the operator with someone else. Never appears inside a
+// `several` (D130 item 2) -- these forms are top-level only.
+// ---------------------------------------------------------------------------
+
+const replaceTemplates = [
+  {
+    // RP1: "cover <op> with <name> on <place> <day>".
+    id: "R1-cover-place-day",
+    intent: "replace",
+    genSlots: (rng) => {
+      const [op, withOp] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return { op, withOp, cell: pick(rng, CELLS_ALL), day: randomBareDay(rng) };
+    },
+    sentence: (s) => `cover ${qw(s.op)} with ${qw(s.withOp)} on ${qw(s.cell)} ${s.day.text}`,
+    form: (s) => ({
+      intent: "replace",
+      operator: s.op,
+      with: s.withOp,
+      place: [s.cell],
+      day: s.day.day,
+      span: null,
+      shift: null,
+    }),
+  },
+  {
+    // RP2: "replace <op> with <name>" -- no place said, place [].
+    id: "R2-replace-bare",
+    intent: "replace",
+    genSlots: (rng) => {
+      const [op, withOp] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return { op, withOp };
+    },
+    sentence: (s) => `replace ${qw(s.op)} with ${qw(s.withOp)}`,
+    form: (s) => ({
+      intent: "replace",
+      operator: s.op,
+      with: s.withOp,
+      place: [],
+      day: null,
+      span: null,
+      shift: null,
+    }),
+  },
+  {
+    // RP3: "cover <op> with <name> from <t1> to <t2>" -- hours, no place.
+    id: "R3-cover-hours",
+    intent: "replace",
+    genSlots: (rng) => {
+      const [op, withOp] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return { op, withOp, span: randomSpan(rng) };
+    },
+    sentence: (s) => `cover ${qw(s.op)} with ${qw(s.withOp)} from ${s.span.text}`,
+    form: (s) => ({
+      intent: "replace",
+      operator: s.op,
+      with: s.withOp,
+      place: [],
+      day: null,
+      span: { start: s.span.start, end: s.span.end },
+      shift: null,
+    }),
+  },
+  {
+    // RP4: "replace <op> with <name> for shift <name> on <place>" -- a shift
+    // clause instead of hours.
+    id: "R4-replace-shift",
+    intent: "replace",
+    genSlots: (rng) => {
+      const [op, withOp] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return {
+        op,
+        withOp,
+        cell: pick(rng, CELLS_ALL),
+        prep: pick(rng, ["for", "during"]),
+        name: pick(rng, SHIFTS_ALL),
+      };
+    },
+    sentence: (s) =>
+      `replace ${qw(s.op)} with ${qw(s.withOp)} ${s.prep} shift ${qwShift(s.name)} on ${qw(s.cell)}`,
+    form: (s) => ({
+      intent: "replace",
+      operator: s.op,
+      with: s.withOp,
+      place: [s.cell],
+      day: null,
+      span: null,
+      shift: s.name,
+    }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Swap (W1-W3) -- S56 (D130/S55-a brief §3 SW series, R-406): "swap"/
+// "exchange" two operators. Never appears inside a `several` (D130 item 2).
+// ---------------------------------------------------------------------------
+
+const swapTemplates = [
+  {
+    // SW1: "swap <op> and <other>" -- no place, no hours.
+    id: "W1-swap-and",
+    intent: "swap",
+    genSlots: (rng) => {
+      const [op, other] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return { op, other };
+    },
+    sentence: (s) => `swap ${qw(s.op)} and ${qw(s.other)}`,
+    form: (s) => ({
+      intent: "swap",
+      operator: s.op,
+      other: s.other,
+      place: [],
+      day: null,
+      span: null,
+      shift: null,
+    }),
+  },
+  {
+    // SW2: "swap <op> with <other> on <place> <day>".
+    id: "W2-swap-with-place-day",
+    intent: "swap",
+    genSlots: (rng) => {
+      const [op, other] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return { op, other, cell: pick(rng, CELLS_ALL), day: randomBareDay(rng) };
+    },
+    sentence: (s) => `swap ${qw(s.op)} with ${qw(s.other)} on ${qw(s.cell)} ${s.day.text}`,
+    form: (s) => ({
+      intent: "swap",
+      operator: s.op,
+      other: s.other,
+      place: [s.cell],
+      day: s.day.day,
+      span: null,
+      shift: null,
+    }),
+  },
+  {
+    // SW3: "exchange" -- the SWAP_VERBS synonym.
+    id: "W3-exchange",
+    intent: "swap",
+    genSlots: (rng) => {
+      const [op, other] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return { op, other };
+    },
+    sentence: (s) => `exchange ${qw(s.op)} and ${qw(s.other)}`,
+    form: (s) => ({
+      intent: "swap",
+      operator: s.op,
+      other: s.other,
+      place: [],
+      day: null,
+      span: null,
+      shift: null,
+    }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Copy (C1-C5) -- S56 (D130/S55-a brief §3 CP series, R-408): "same as
+// <day|week>" or "copy/repeat <a> [to] <b>". Never appears inside a
+// `several` (D130 item 2).
+// ---------------------------------------------------------------------------
+
+const copyTemplates = [
+  {
+    // CP1/CP2: "same as yesterday [for <place>]" -- day source copies to
+    // today; place [] when unstated.
+    id: "C1-same-as-yesterday",
+    intent: "copy",
+    // S56 (found running `voice:generate --n 6000`, the same collision
+    // shape as C3-week/C4's own reports): the bare "same as yesterday"
+    // sentence has exactly one spelling, so this template's WHOLE clean
+    // sentence space used to be 1 (bare) + 28 (one cell) = 29 -- far short
+    // of what a template drawn ~60-70 times across 6000 rows needs once
+    // held-out has already claimed some of the 29. Widened to cells AND
+    // lines, with an optional second "in <line>" qualifier on a cell (the
+    // same widening C4 already uses), and the bare branch's own weight
+    // lowered so it is drawn less often relative to the now much larger
+    // placed space.
+    genSlots: (rng) => {
+      const withPlace = chance(rng, 0.8);
+      if (!withPlace) return { withPlace };
+      const place = pick(rng, CELLS_ALL.concat(LINES_ALL));
+      const withLine = CELLS_ALL.includes(place) && chance(rng, 0.5);
+      return { withPlace, place, withLine, line: withLine ? pick(rng, LINES_ALL) : null };
+    },
+    sentence: (s) => {
+      if (!s.withPlace) return "same as yesterday";
+      return s.withLine
+        ? `same as yesterday for ${qw(s.place)} in ${qw(s.line)}`
+        : `same as yesterday for ${qw(s.place)}`;
+    },
+    form: (s) => ({
+      intent: "copy",
+      place: s.withPlace ? (s.withLine ? [s.place, s.line] : [s.place]) : [],
+      from: { kind: "yesterday" },
+      to: { kind: "today" },
+    }),
+  },
+  {
+    // CP3/CP4: "copy <weekday> to <weekday> [for <cell> [in <line>]]".
+    id: "C2-copy-weekday-to-weekday",
+    intent: "copy",
+    genSlots: (rng) => {
+      const fromIdx = randInt(rng, 0, 6);
+      let toIdx = randInt(rng, 0, 6);
+      while (toIdx === fromIdx) toIdx = randInt(rng, 0, 6);
+      const withPlace = chance(rng, 0.5);
+      const withLine = withPlace && chance(rng, 0.5);
+      return {
+        fromIdx,
+        toIdx,
+        withPlace,
+        withLine,
+        cell: pick(rng, CELLS_ALL),
+        line: pick(rng, LINES_ALL),
+      };
+    },
+    sentence: (s) => {
+      const base = `copy ${WEEKDAY_FULL[s.fromIdx]} to ${WEEKDAY_FULL[s.toIdx]}`;
+      if (!s.withPlace) return base;
+      return s.withLine
+        ? `${base} for ${qw(s.cell)} in ${qw(s.line)}`
+        : `${base} for ${qw(s.cell)}`;
+    },
+    form: (s) => ({
+      intent: "copy",
+      place: s.withPlace ? (s.withLine ? [s.cell, s.line] : [s.cell]) : [],
+      from: { kind: "weekday", day: s.fromIdx },
+      to: { kind: "weekday", day: s.toIdx },
+    }),
+  },
+  {
+    // CP5/CP6: "repeat <week> <week>" (no "to") / "copy <week> to <week>" --
+    // any two DISTINCT week phrases (not just this/next), plus an optional
+    // place, so the template carries enough entropy for the training
+    // generator's disjointness retries (a fixed "repeat this week next
+    // week"/"copy this week to next week" pair, with no other varying slot,
+    // exhausted its 20 non-colliding retries at n=6000 -- found running V9).
+    id: "C3-week",
+    intent: "copy",
+    genSlots: (rng) => {
+      const weeks = ["this_week", "next_week", "last_week"];
+      const fromWeek = pick(rng, weeks);
+      let toWeek = pick(rng, weeks);
+      while (toWeek === fromWeek) toWeek = pick(rng, weeks);
+      const withPlace = chance(rng, 0.5);
+      const withLine = withPlace && chance(rng, 0.5);
+      return {
+        style: pick(rng, ["repeatNoTo", "copyWithTo"]),
+        fromWeek,
+        toWeek,
+        withPlace,
+        withLine,
+        cell: pick(rng, CELLS_ALL),
+        line: pick(rng, LINES_ALL),
+      };
+    },
+    sentence: (s) => {
+      const words = { this_week: "this week", next_week: "next week", last_week: "last week" };
+      const verb = s.style === "repeatNoTo" ? "repeat" : "copy";
+      const base =
+        s.style === "repeatNoTo"
+          ? `${verb} ${words[s.fromWeek]} ${words[s.toWeek]}`
+          : `${verb} ${words[s.fromWeek]} to ${words[s.toWeek]}`;
+      if (!s.withPlace) return base;
+      return s.withLine
+        ? `${base} for ${qw(s.cell)} in ${qw(s.line)}`
+        : `${base} for ${qw(s.cell)}`;
+    },
+    form: (s) => ({
+      intent: "copy",
+      place: s.withPlace ? (s.withLine ? [s.cell, s.line] : [s.cell]) : [],
+      from: { kind: s.fromWeek },
+      to: { kind: s.toWeek },
+    }),
+  },
+  {
+    // CP7: "same as last week for <line>" -- a week source copies to
+    // this_week.
+    id: "C4-same-as-last-week",
+    intent: "copy",
+    // S56 (found running `voice:generate --n 6000`): a `LINES_ALL`-only pool
+    // (24 entries) ran out of non-colliding clean sentences well before
+    // 6000 draws -- widened to lines AND cells (52), with an optional
+    // second "in <line>" qualifier for far more headroom, the same fix
+    // C3-week's own report already covers for a different low-entropy shape.
+    genSlots: (rng) => {
+      const withLine = chance(rng, 0.5);
+      return {
+        place: pick(rng, LINES_ALL.concat(CELLS_ALL)),
+        withLine,
+        line: withLine ? pick(rng, LINES_ALL) : null,
+      };
+    },
+    sentence: (s) =>
+      s.withLine
+        ? `same as last week for ${qw(s.place)} in ${qw(s.line)}`
+        : `same as last week for ${qw(s.place)}`,
+    form: (s) => ({
+      intent: "copy",
+      place: s.withLine ? [s.place, s.line] : [s.place],
+      from: { kind: "last_week" },
+      to: { kind: "this_week" },
+    }),
+  },
+  {
+    // CP10: "copy <iso> to <iso> on <cell>" -- explicit dates.
+    id: "C5-dates",
+    intent: "copy",
+    genSlots: (rng) => {
+      const [fromIso, toIso] = pickDistinct(rng, ISO_DATES, 2);
+      return { fromIso, toIso, cell: pick(rng, CELLS_ALL) };
+    },
+    sentence: (s) => `copy ${s.fromIso} to ${s.toIso} on ${qw(s.cell)}`,
+    form: (s) => ({
+      intent: "copy",
+      place: [s.cell],
+      from: { kind: "date", iso: s.fromIso },
+      to: { kind: "date", iso: s.toIso },
+    }),
+  },
+];
+
 export const TEMPLATES = [
   ...assignTemplates,
   ...bookTemplates,
   ...unassignTemplates,
   ...moveTemplates,
   ...severalTemplates,
+  ...replaceTemplates,
+  ...swapTemplates,
+  ...copyTemplates,
 ];
 
 export function templateById(id) {

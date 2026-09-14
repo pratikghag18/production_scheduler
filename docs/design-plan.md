@@ -9582,3 +9582,96 @@ grammar, resolver, decoder and bar first, with the rule parser covering every se
 S56 regenerates the data, the held-out set and the prompt and the maintainer runs Colab once (the
 fifth run). While that run trains, the queue's next model-free piece (Whisper, Stage 6's second
 half) can proceed -- the maintainer's parallel question, answered.
+
+## §19.102 — D131: the microphone's second half — Whisper beside the model, audio stays in the building (S57)
+
+> The maintainer, 14 Sept, session 168: *"also can something else be done in parallel?"* — asked
+> while the fifth run's data was being built. The queue's next model-free piece is the voice plan's
+> Stage 6, second half.
+
+### D131 — a second recogniser with the same shape, chosen by configuration, falling back once
+
+**1. The bar does not change.** S46 gave the bar one contract, `Recognizer`: start a session, get
+interim text, get one final text, an error or an end. Whisper is a second function of that exact
+shape, `localRecognizer(baseUrl)`, in its own module beside `browserRecognizer`. The bar keeps its
+microphone button, its listening state, its generation counter and its error wording; nothing in
+`CommandBar.tsx` learns which engine is behind the button.
+
+**2. Whisper is batch, so the session is record-then-transcribe.** The browser's recogniser streams
+words as they are heard; Whisper hears a clip. The local session records from the microphone,
+reports "Listening…" through `onInterim` once (so the input shows something is happening), ends the
+clip on a stop click, on a second and a half of silence after speech was heard, or at twelve
+seconds, then reports "Transcribing…" through `onInterim`, posts the clip and reports the text
+through `onFinal`. Silence is decided by the clip's own loudness (an analyser's RMS against a
+floor), never by the service. The clip is converted in the browser to what whisper.cpp reads
+without ffmpeg — 16 kHz mono 16-bit WAV — by the audio API's own resampler; the encoder is a pure
+function with tests.
+
+**3. Chosen by configuration, the way the model service is.** `VITE_VOICE_URL` says where the
+model is; `VITE_WHISPER_URL` says where the recogniser is, and the dev server proxies `/whisper` to
+it exactly as `/voice` is proxied to the model. Unset means "no local recogniser": the browser's is
+used, as today. Set, the local one is used first; if the service does not answer (a network
+failure, not a bad clip), the bar says so once and that session falls back to the browser's
+recogniser when the window has one — one fallback, then the person decides. The S54 setting (off,
+typed, voice) is untouched: it says whether there is a microphone, not which engine hears it.
+
+**4. Served beside the model, started by the same command.** `npm run voice:serve` starts a second
+container, `scheduler-whisper`, running whisper.cpp's server on 127.0.0.1:8090 with the `base.en`
+model from `data/voice/whisper/` (gitignored, fetched once by `npm run voice:whisper:fetch`);
+`--stop` stops both. The `small.en` model is a one-flag upgrade for a loud floor. Nothing is sent
+anywhere but that port.
+
+**5. What is not decided here.** Streaming (partial words while speaking) needs a different
+server and is not worth it for four-second sentences. Noise suppression beyond what the browser's
+`getUserMedia` constraints offer is the site's microphone's job. The 6b packaging will run the
+same two containers from one file; this stage only adds the second one to the developer's command.
+
+## §19.103 — D132: the form grows a little — group 2 of the catalogue, before the same run (S58)
+
+> The maintainer, 14 Sept, session 168: *"If we did group 2 as well, does it save colab run?"* —
+> *"group 2 too."*
+
+### D132 — five sentences, each the smallest change to the form that carries it
+
+Group 2 of the catalogue (S53) was "the form grows a little". With D130's expansion in place, most
+of it grows the form by one field and lets the board write the rest.
+
+**1. A re-time by one edge is a move with an `adjust`.** "Extend Sam's block by an hour", "shorten
+Sam by 30 minutes", "end Sam early at 3", "finish Sam an hour earlier", "move Sam's start to 9",
+"shift Sam's end an hour later" all name one edge and either a new time or a distance. The move
+form gains `adjust: { edge: "start" | "end"; by: minutes } | { edge; at: ClockTime } | null`, and
+when it is set the span, the shift and the destination are null: the block is the move's own
+("wherever the person is", the which-block question when several), and the resolver computes the
+new hours from the block's own. "Start" stays a booking verb (R-391: every verb in one list), so
+"start Sam an hour later" is not a sentence; "move Sam's start an hour later" is, and the
+possessive edge tail is the same device as S52's timing tail.
+
+**2. A split is a shorten plus an assign, written by the board.** "Split Sam's block at noon" is a
+new intent with four fields (person, place, day, `at`). The expansion finds the block, writes a move
+in time to its first part and an assign of the same person, part, cell and attachment for the
+second, and the lot does both with one yes. An `at` outside the block is a question.
+
+**3. "The job's hours" is one more reserved shift name.** "Add Sam to the Housing A job on Cell 1"
+names a part and a place but no hours: the block takes the job's. The assign form already carries a
+part and a shift; `shift: "the job"` (reserved, D128's road) tells the resolver to find that part's
+run on that cell that day, take its hours and attach the block to it. No run is a question; two
+runs is a question naming their hours.
+
+**4. A job's headcount is a small intent of its own.** "Make the Housing A job on Cell 1 4 people"
+resolves to a run and to one existing write, the run's planned headcount, through the same field
+edit the job's own panel uses. "Make it 4 people" has nothing to hold "it" — the bar keeps no
+memory of the last thing it did — so the grammar asks for the job's name rather than guess. Never
+part of a lot.
+
+**5. "Every weekday this week" is one sentence, five commands.** Two more day words, on an assign
+or a booking only: `weekdays` and `every_day`, each with `this_week` or `next_week`. The
+expansion writes one command per day, in order, and a day off the board names its date. The
+served model's schema and the decoder allow these two kinds only where the grammar produces them,
+as D130 did for the week words.
+
+**What stays out.** "Make it N people" with a remembered "it" (a bar memory is its own decision);
+a split into more than two; repeating on named days ("Mondays and Wednesdays"). Each is a sentence
+away once wanted.
+
+**One run.** S58 lands before the fifth run's data is regenerated, so S56's data lane runs once
+more over both S55 and S58 and the maintainer trains once — the reason the maintainer chose it.

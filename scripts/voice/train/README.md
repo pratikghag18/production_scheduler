@@ -31,10 +31,13 @@ Nothing in the app changes from running this. No model is served until its score
    the left, drag the file in, or use its upload button) — the scoring cell imports it from
    `/content/score_port.py` and fails with a plain message if it is missing. Then:
    Runtime → Change runtime type → T4 GPU, then Runtime → Run all. Measured on the second run,
-   a T4 with fp16 and batch 16 x 2: training took over an hour and the (then 400-row, now 500-row
-   -- S50 added a fifth intent, `several`) Predict cell about another hour (one row at a time, six
-   to nine seconds each), so plan on two and a half hours
-   end to end on a T4. The "30 to 60 minutes" this file said before was an estimate, not a
+   a T4 with fp16 and batch 16 x 2: training took over an hour and the (then 400-row, then 500-row
+   -- S50 added a fifth intent, `several`, now 800-row -- S56 added replace/swap/copy, an eighth
+   intent) Predict cell about another hour (one row at a time, six to nine seconds each), so plan
+   on at least two and a half hours end to end on a T4 -- the Predict cell's own share of that
+   grows roughly with the held-out row count (500 to 800 is +60%), so treat "two and a half hours"
+   as the pre-S56 floor, not a fresh measurement, until the maintainer's next real run confirms it.
+   The "30 to 60 minutes" this file said before was an estimate, not a
    measurement. A paid L4 runs the same notebook unchanged (it picks bf16 by itself) in roughly
    a third of the time; switch runtimes between cells, never mid-training, because a checkpoint
    saved under fp16 resumes badly under bf16. The first run trained on bf16 emulation (a T4 has
@@ -57,12 +60,12 @@ Nothing in the app changes from running this. No model is served until its score
 
    The Predict cell prints its first row's timing alone — `first row: 1.3s for 42 tokens` — so
    an emulated-precision slow path (see above) is visible within seconds instead of a blank cell
-   for the whole 500-row pass (S50: 100 rows each across five intents, `several` included), then
-   one line every 25 rows: `225/500 rows, 310s, 0.73 rows/s, 2
+   for the whole 800-row pass (S56: 100 rows each across eight intents, `replace`/`swap`/`copy`
+   included), then one line every 25 rows: `225/800 rows, 310s, 0.73 rows/s, 2
 failed to parse`. It writes `predictions.jsonl` one row at a time as each is decided, not all
    at once at the end, so a session killed mid-prediction (Colab's free tier has a two-hour
    deadline) can just be re-run: it skips the ids already in the file and prints how many, and
-   continues from there instead of starting the 500 rows over. That resume is by id, and only
+   continues from there instead of starting the 800 rows over. That resume is by id, and only
    safe against the SAME `heldout.jsonl` it started against (F-145: the fourth Colab run's
    `predictions.jsonl` was resumed against a `heldout.jsonl` that had been silently regenerated
    under it, so 400 predictions answered sentences that were no longer in the committed file).
@@ -91,9 +94,11 @@ failed to parse`. It writes `predictions.jsonl` one row at a time as each is dec
    summary: `sentences not checked: N rows (predictions from before F-145)`.
 
 6. **What "good" looks like:** clean at or above 95%; perturbed far above the rule parser's
-   baseline (`ruleParserBaseline.perturbed` in the manifest — currently 5.2% (S52-c: up from
-   3.2% once the shift templates and M10's possessive-timing move gave the same perturbation
-   catalogue more surface); the plan expects
+   baseline (`ruleParserBaseline.perturbed` in the manifest — currently 4.75% (S56 review: down
+   from 6.25% once a reviewer fix stopped two templates drawing the never-said "this night" and
+   filled in A14-duration's missing "half an hour"/decimal spellings, which changed which
+   sentences land on a perturbable word at all; up from S52-c's own 5.2% before replace/swap/copy
+   joined and gave the same perturbation catalogue more surface); the plan expects
    90% or better on sentences shaped like the training ones). A field the model invents that
    the training data never had (`"type":"assign"`, say) does not fail a row by itself — the
    scorer ignores any key the expected form does not have and reports it on the "extra keys
@@ -146,7 +151,10 @@ without failing on the llama.cpp clone; it checks for `convert_hf_to_gguf.py` in
 Two real runs scored `product` at 2.5% before the cause was found: `MAX_LEN = 512` was shorter
 than a full training conversation, so `SFTConfig(max_length=MAX_LEN)` silently cut every row off
 before the answer — the system prompt alone runs 450 tokens, and the answer comes last. `MAX_LEN`
-is now 1280 (raised from 1024 in S50, when the widened prompt and a several of three measured
-about 940 tokens), and the cell after the chat-template round trip tokenises every training
-conversation the same way the trainer will, prints the median and longest length seen, and
-asserts the longest is under `MAX_LEN` before training is allowed to start (F-142).
+is now 1536 (raised from 1280 at S56, when replace/swap/copy and the widened grammar's own longer
+sentences pushed the longest chat row to about 1449 tokens, measured with the served model's own
+`/tokenize` endpoint — 1280 was itself raised from 1024 in S50, when the widened prompt and a
+several of three measured about 940 tokens), and the cell after the chat-template round trip
+tokenises every training conversation the same way the trainer will, prints the median and
+longest length seen, and asserts the longest is under `MAX_LEN` before training is allowed to
+start (F-142).

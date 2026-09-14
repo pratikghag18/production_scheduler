@@ -11,7 +11,12 @@ import { parseCommand } from "../../../src/lib/command/parse.ts";
 
 // S50 (R-398): "several" joins the four -- one sentence naming more than one
 // person or place, one `{intent:"several", commands:[...]}` form.
-export const INTENTS = ["assign", "book", "unassign", "move", "several"];
+//
+// S56 (D130/S55-a brief, R-406/R-408): three board-answered intents join the
+// five -- "replace" (cover/replace), "swap" (swap/exchange), "copy" (same
+// as / copy / repeat). None of the three ever appears inside a `several`
+// (D130 item 2), so they sit alongside it rather than inside its own list.
+export const INTENTS = ["assign", "book", "unassign", "move", "several", "replace", "swap", "copy"];
 
 export function templatesFor(intent) {
   return TEMPLATES.filter((t) => t.intent === intent);

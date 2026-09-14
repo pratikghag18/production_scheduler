@@ -143,6 +143,89 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     expect(source).toContain('"sentence": row["sentence"]');
   });
 
+  it("VT6 (S56): score_port.py prints the same table as score.mjs, on a file covering every intent including the three new ones", () => {
+    // S56 brief §3: "score.mjs's by-field tally must cover the new intents'
+    // fields (with, other, from, to, until) and the port score_port.py must
+    // print the same table on the same file" -- both are already generic
+    // (score.mjs's own `score()` walks `Object.keys(row.form)`, never a
+    // hard-coded field list), so this is the parity CHECK that generic
+    // claim, extended (per the brief) with a row per new intent rather than
+    // VT2's own three assign/book/unassign rows.
+    const oneRowPerIntent: VoiceRow[] = [];
+    const seenIntents = new Set<string>();
+    for (const row of HELDOUT) {
+      if (seenIntents.has(row.intent)) continue;
+      seenIntents.add(row.intent);
+      oneRowPerIntent.push(row);
+    }
+    expect(seenIntents).toEqual(
+      new Set(["assign", "book", "unassign", "move", "several", "replace", "swap", "copy"]),
+    );
+
+    const ruleParserPredict = (row: VoiceRow) => {
+      const result = parseCommand(row.sentence);
+      return result.ok ? result.command : null;
+    };
+
+    const dir = mkdtempSync(join(tmpdir(), "voice-vt6-"));
+    const heldoutPath = join(dir, "heldout.jsonl");
+    const predictionsPath = join(dir, "predictions.jsonl");
+    writeFileSync(
+      heldoutPath,
+      oneRowPerIntent.map((r) => JSON.stringify(r)).join("\n") + "\n",
+      "utf8",
+    );
+    const predictions = oneRowPerIntent.map((row) => ({
+      id: row.id,
+      sentence: row.sentence,
+      form: ruleParserPredict(row),
+    }));
+    writeFileSync(
+      predictionsPath,
+      predictions.map((p) => JSON.stringify(p)).join("\n") + "\n",
+      "utf8",
+    );
+
+    const jsStdout = execFileSync(
+      process.execPath,
+      [
+        "scripts/voice/score.mjs",
+        "--heldout",
+        heldoutPath,
+        "--predictions",
+        predictionsPath,
+        "--bar",
+        "0",
+      ],
+      { encoding: "utf8" },
+    );
+    const pyStdout = execFileSync(
+      "python",
+      ["scripts/voice/train/score_port.py", heldoutPath, predictionsPath, "--bar", "0"],
+      { encoding: "utf8" },
+    );
+
+    // Every "By field" line (including the new intents' own with/other/
+    // from/to/until) must appear, byte for byte, in both printouts.
+    const fieldLines = jsStdout
+      .split("\n")
+      .filter((l) => /^\s{2}(with|other|from|to|until)\s+\d+\/\d+/.test(l));
+    expect(fieldLines.length).toBe(5);
+    for (const line of fieldLines) {
+      expect(pyStdout, `line missing from score_port.py's table: ${line}`).toContain(line.trim());
+    }
+
+    const jsClean = jsStdout.match(/clean:\s+(\d+)\/(\d+)/);
+    const pyClean = pyStdout.match(/clean:\s+(\d+)\/(\d+)/);
+    expect(jsClean, jsStdout).toBeTruthy();
+    expect(pyClean, pyStdout).toBeTruthy();
+    expect(pyClean![0]).toBe(jsClean![0]);
+
+    const jsPerturbed = jsStdout.match(/perturbed:\s+(\d+)\/(\d+)/);
+    const pyPerturbed = pyStdout.match(/perturbed:\s+(\d+)\/(\d+)/);
+    expect(pyPerturbed![0]).toBe(jsPerturbed![0]);
+  });
+
   it("VT5 (F-145): the notebook's Score cell (cell 8) reads predictions.jsonl through score_predictions/load_jsonl, not the unprotected predictions_predict path", () => {
     const notebook = JSON.parse(readFileSync("scripts/voice/train/train_qwen3.ipynb", "utf8")) as {
       cells: Array<{ cell_type: string; source: string[] }>;
