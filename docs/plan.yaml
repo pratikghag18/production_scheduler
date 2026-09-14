@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '45e77c4'
+  tip: '53cb5f1'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2447,6 +2447,59 @@ stages:
   state: >-
     **Briefed session 163 (13 Sept).** Lane A: the grammar and its tests. Then lane B (resolver, board
     context, decoder) and lane C (templates, prompt, schema, held-out, scorers) in parallel.
+    **Lane A done 14 Sept (session 163, 53cb5f1): R-401 covered, R-402's grammar and schema in.** The reviewer found a place named
+    "Shift Bay 2" eaten by the shift clause, a several-word shift name not printing back safely, a move to
+    a new cell dropping its shift silently, and the bare possessive s eating a name like Chris; so the
+    named clause takes only for and during, a printed name is quoted when it needs it, the guard is in
+    both move branches, and the bare s applies only after a digit. Lanes B and C briefed.
+- id: S53
+  track: core
+  num: 53
+  title: The sentence catalogue — what else a scheduler says to the board, and what each costs
+  status: parked
+  owner: maintainer
+  refs:
+  - 'session 163 conversation (the maintainer, 14 Sept: "What other sentences can you think of which could be used in the context of this app?" and "make it part of scheduler buildout as well, so it is visual for me")'
+  what: >-
+    **Not work yet: a menu.** Each group below costs something different; the maintainer picks, and a
+    picked group becomes its own stage (or joins a pending retrain when it is data only).
+
+    **Read after the S50/S52 retrain, nothing to add:** assign, book, remove, move with or without a
+    place, several people or cells in one sentence, "change X's timing", a shift by name, the product
+    last.
+
+    **Same form, only new sentences and data (joins any retrain):**
+    - "put Sam on Housing A on Cell 1 from 8 **for 4 hours**" — the grammar computes the end
+    - "assign Sam to Cell 1 **all day** tomorrow", "**until end of shift**", "**for the rest of the day**"
+    - "Sam **works on** Housing A on Cell 1 8 to 4", "Cell 1 **gets** Sam …" — word orders the model learns
+    - "**take Sam off** Cell 1", "**pull** Sam from the afternoon" — more removal phrasings
+    - "**cover** Sam with Ana on Cell 1", "**replace** Sam with Ana" — a removal plus an assign: a several
+    - "**swap** Sam and Ana" — two moves, once the resolver knows both blocks
+
+    **The form grows a little (a field, the resolver, data):**
+    - "**extend** Sam's block by an hour", "**end** Sam early at 3", "**start Sam an hour later**" — a relative re-time on one edge
+    - "**split** Sam's block at noon" — a new target kind
+    - "book Housing A on Cell 1 8 to 4 **with 3 people**" — headcount exists; only phrasing
+    - "**add** Sam to the Housing A job", "**make it 4 people**" — attach to a run by name; a run's headcount
+    - "assign Sam to Cell 1 **every weekday this week** 8 to 4" — a repeat rule: one sentence, five commands
+
+    **The board answers, not the sentence (the resolver expands one sentence into many from what is on the board):**
+    - "**clear Cell 1** today", "unassign **everyone** from Cell 3 after 2 pm"
+    - "**move everyone** on Line 1 to Cell 2"
+    - "**same as yesterday** for Cell 1", "**copy** Monday to Tuesday", "**repeat** this week next week"
+    - "Sam **is off** today, cover his blocks", "Ana is on leave till Friday" — an absence plus its removals or covers
+    - "**undo** that", "put it back" — needs an undo log
+
+    **Questions, not commands (Stage 8's catalogue, read-only, run as the signed-in person):** who is
+    on Cell 1 now; where is Sam today; who is free from 2 to 4; who can run Housing A; is Cell 2 free
+    at 3; how many people are on Line 1 today; which cells have nobody after 6; is anyone
+    double-booked; when does Sam finish; what changed today. And navigation: show Line 1, go to
+    tomorrow, next week.
+  state: >-
+    **Parked 14 Sept (session 163)** at the maintainer's request, as a menu rather than a queue. The
+    developer session's recommendation: the same-form group into the pending retrain at the maintainer's
+    pick, then the board-answers group as its own stage, because "clear Cell 1" and "cover Sam" are
+    what a supervisor says when someone calls in sick. Unpark a group with a word.
 - id: M1
   track: matrix
   num: 1
@@ -10863,11 +10916,18 @@ requirements:
     11 pm" is a move of A3 in time with no place. shift as a noun ("for shift 2") is untouched because
     it is never the first word. The generator draws the new verbs like every other; the model learns them.
   verified_by:
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "PV1 (change and shift each open a move), PV2 re-pinned (the lists disjoint, both words in move only), SH1 to SH5 (the two change sentences including the recogniser's dotted, apostrophe-less form; shift as a verb; the possessive variants; a mid-sentence shift noun is not a verb)"
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V9 --- every verb in every list, the two new ones included, opens a clean row"
   - kind: manual
     steps: "type change Operator A3's timing to 8 pm to 11 pm into the bar: A3's block is offered wherever it is, moved to 20:00-23:00 on yes"
-  status: uncovered
+  status: covered
   note: >-
-    STATED 13 Sept (session 163). Covered when commandParse.test.ts carries the PV cases re-pinned (PV2's
+    STATED 13 Sept (session 163), COVERED 14 Sept (session 163, 53cb5f1). Written when stated: covered
+    when commandParse.test.ts carries the PV cases re-pinned (PV2's
     "neither shift nor change" becomes "both in move only") and the possessive-tail cases, and V9 draws
     the new verbs.
 
@@ -10897,7 +10957,8 @@ requirements:
     steps: "type assign Operator A2 to work for shift 2 on Cell 1 in Line 1 for Housing A: the pop-up opens prefilled 14:00-22:00; type it with shift 9: the message lists the cell's three shifts"
   status: uncovered
   note: >-
-    STATED 13 Sept (session 163). Covered when commandParse.test.ts carries the SH grammar cases,
+    STATED 13 Sept (session 163). Grammar, decoder and schema in 14 Sept (session 163, 53cb5f1; SH6 to
+    SH14, VR12, VR8 with the field). Covered when
     commandResolve.test.ts the shift-band resolution cases, voiceRead.test.ts the decoder and schema
     cases, voiceData.test.ts the templates and the regenerated held-out set, and the retrained model's
     score is on S52's card with S50's.
@@ -14773,6 +14834,35 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 163
+  date: 2026-09-14
+  title: "Change and shift become verbs, and a shift's name enters the form (S52 lane one, R-401)"
+  shipped: []
+  commits: ['9d0b27c', '53cb5f1']
+  numbers:
+    app_tests: 3199
+    app_test_files: 144
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 14 Sept, after the grammar commit: 3199 tests in 144 files, all passing;
+    tsc clean, no migration or RPC changed; the role walk passed.
+  summary: >-
+    The maintainer answered both open questions in one message: yes to change and shift as verbs, and
+    would the retrain read "assign operator to work for shift X on cell Y, line Z for product A". It
+    would not have --- the form had no shift --- so both went in before the Colab run rather than after
+    it (R-401, R-402, S52, D128). The grammar lane withdrew R-391's exclusion, read the possessive
+    timing tail as the person, gave every form a shift field with the hours nullable beside it, read
+    the shift clause in four phrasings and the maintainer's product-last order, and carried the field
+    into the decoder and the service's grammar file. The reviewer's four finds (a place named Shift Bay
+    eaten, a several-word shift name not printing back, a move to a new cell dropping its shift, a
+    bare possessive s eating Chris) are fixed and pinned. The maintainer also asked what other sentences
+    a scheduler would say; the catalogue is in the parked list, grouped by what each costs, with the
+    same-form group offered for the pending retrain at their pick.
 - id: 162
   date: 2026-09-13
   title: "The data follows the grammar, and the bar runs a several with one yes (S50 lane two, S51, R-400)"
@@ -21955,6 +22045,12 @@ next:
     stack; size it when it is next.
 
 # ------------------------------- PARKED ------------------------------------
+- kind: parked
+  stage: S53
+  text: "The sentence catalogue (session 163) --- what else a scheduler says to the board, grouped by what each costs; the menu is on S53's card"
+  why: >-
+    Asked for by the maintainer on 14 Sept and made a card so it is visual. Same-form sentences can join
+    the pending retrain at their pick; every other group is a stage of its own. Unpark a group with a word.
 - kind: parked
   text: "Save every sentence a person types into the command bar, with the site's permission, to grow the training and held-out sets"
   why: >-
