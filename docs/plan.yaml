@@ -14488,7 +14488,7 @@ sessions:
     voiceBar spec (49 tests listed by the runner; the new ones skip without VOICE_E2E); the role walk passed before the commit. No
     migration or SQL test changed.
   summary: >-
-    The maintainer left the runtime to the developer's recommendation and llama.cpp's server won over
+    The maintainer left the runtime to the developer''s recommendation and llama.cpp's server won over
     Ollama (D121). Two Sonnet lanes built it against one fixed contract: the service side (the container
     script, a probe that sends a sentence or the whole held-out set, the dev proxy) and the app side (a
     reader that sends the training prompt itself and decodes the answer field by field, and the bar's
