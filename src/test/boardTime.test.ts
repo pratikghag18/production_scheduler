@@ -14,7 +14,10 @@ import {
   minutesBetween,
   boardFetchBounds,
   MINUTES_PER_DAY,
+  buildDayAxis,
+  wallOf,
 } from "@/features/board/lib/time";
+import { partsInZone } from "@/lib/format/timezones";
 
 /**
  * F-125: `formatClock`/`formatDayLabel` (and `partsInZone` beneath them) used
@@ -198,5 +201,78 @@ describe("boardFetchBounds (fetch bounds follow the plant zone)", () => {
     expect(to.getTime()).toBe(
       addMinutes(windowStartDate, (dayCount + 1) * MINUTES_PER_DAY).getTime(),
     );
+  });
+});
+
+/**
+ * S55 (D130 item 3, R-404/R-406 to R-410): `wallOf` is the inverse of
+ * `axis.wallToOffset` for a WINDOW offset -- `BoardPage` feeds it to
+ * `ResolveContext.wallOf`, and `expandCommand`'s `copy` (R-408) reads a
+ * block's/run's own wall-clock hours back off its real-minute
+ * `startMin`/`endMin` through it. Reviewer (14 Sept follow-up): the one way
+ * to get this wrong is `offsetMin % 1440` for the minute-of-day -- correct
+ * on an ordinary day, silently wrong on a changeover day, where a real
+ * minute and a wall-clock minute part ways. Pinned against a REAL zone
+ * (America/New_York, the same 2026-03-08/2026-11-01 US changeover
+ * `geometryDst.test.ts` already measures for `America/Chicago` -- the 2 AM
+ * local jump is the same instant of the YEAR everywhere the rule applies,
+ * only the UTC offset differs), never the stub linear `wallToOffset` the
+ * command-bar fixtures use.
+ */
+describe("wallOf (S55, D130 item 3)", () => {
+  const ZONE = "America/New_York";
+
+  it("spring forward, 2026-03-08: before the 02:00 jump, minuteOfDay is the real elapsed minutes", () => {
+    const origin = zonedTimeToInstant(ZONE, 2026, 3, 7, 0, 0);
+    const axis = buildDayAxis(origin, 3, ZONE);
+    expect(axis.dayOffsets).toEqual([0, 1440, 2820, 4260]); // day 1 (Mar 8) is 1380 real minutes
+    const offset = axis.dayOffsets[1] + 50; // 00:50, well before the jump
+    expect(wallOf(axis, offset)).toEqual({ dayIndex: 1, minuteOfDay: 50 });
+  });
+
+  it("spring forward, 2026-03-08: after the 02:00 jump, minuteOfDay is the WALL-CLOCK reading, never offsetMin % 1440", () => {
+    const origin = zonedTimeToInstant(ZONE, 2026, 3, 7, 0, 0);
+    const axis = buildDayAxis(origin, 3, ZONE);
+    const offset = axis.dayOffsets[1] + 500; // 500 real minutes past local midnight on Mar 8
+    const result = wallOf(axis, offset);
+    // The lost hour: 500 real minutes read as 09:20 (560), not 08:20 (500) --
+    // and NOT `offset % 1440`, which lands on 500 here by coincidence
+    // (dayOffsets[1] === 1440) and would be flatly wrong on day 2 or later.
+    expect(result).toEqual({ dayIndex: 1, minuteOfDay: 560 });
+    const instant = addMinutes(axis.windowStart, offset);
+    const parts = partsInZone(instant, ZONE);
+    expect(result.minuteOfDay).toBe(parts.hour * 60 + parts.minute);
+    expect(result.minuteOfDay).not.toBe(offset % 1440);
+  });
+
+  it("an offset exactly at a day boundary belongs to the day that STARTS there, not the one that ends there", () => {
+    const origin = zonedTimeToInstant(ZONE, 2026, 3, 7, 0, 0);
+    const axis = buildDayAxis(origin, 3, ZONE);
+    expect(wallOf(axis, axis.dayOffsets[2])).toEqual({ dayIndex: 2, minuteOfDay: 0 });
+    expect(wallOf(axis, axis.dayOffsets[2] - 1)).toEqual({ dayIndex: 1, minuteOfDay: 1439 });
+  });
+
+  it("fall back, 2026-11-01: the long night's extra hour reads as a wall-clock hour, not a modulo artifact", () => {
+    const origin = zonedTimeToInstant(ZONE, 2026, 10, 31, 0, 0);
+    const axis = buildDayAxis(origin, 3, ZONE);
+    expect(axis.dayOffsets).toEqual([0, 1440, 2940, 4380]); // day 1 (Nov 1) is 1500 real minutes
+    // 200 real minutes past local midnight on Nov 1 -- before the 02:00->01:00
+    // fold, wall clock still reads real elapsed.
+    expect(wallOf(axis, axis.dayOffsets[1] + 90)).toEqual({ dayIndex: 1, minuteOfDay: 90 });
+    // 1000 real minutes in: past the fold, so the clock has gained the hour
+    // back -- wall-clock minuteOfDay is 60 LESS than the real elapsed.
+    const result = wallOf(axis, axis.dayOffsets[1] + 1000);
+    expect(result).toEqual({ dayIndex: 1, minuteOfDay: 940 });
+    expect(result.minuteOfDay).not.toBe(1000 % 1440);
+  });
+
+  it("a window with no changeover is exactly the plain (offset % 1440) shape -- the regression guard", () => {
+    const origin = zonedTimeToInstant(ZONE, 2026, 6, 1, 0, 0);
+    const axis = buildDayAxis(origin, 3, ZONE);
+    for (let day = 0; day <= 2; day++) {
+      for (const m of [0, 90, 600, 1439]) {
+        expect(wallOf(axis, day * 1440 + m)).toEqual({ dayIndex: day, minuteOfDay: m });
+      }
+    }
   });
 });

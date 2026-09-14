@@ -456,12 +456,18 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       expect(equalForms(result.command, form), `${id}: "${sentence}"`).toBe(true);
       const commands = form.intent === "several" ? form.commands : [form];
       for (const c of commands) {
-        expect(c.shift, `${id}: "${sentence}"`).not.toBeNull();
+        expect(
+          (c as Exclude<typeof c, { intent: "copy" }>).shift,
+          `${id}: "${sentence}"`,
+        ).not.toBeNull();
         if (c.intent === "assign" || c.intent === "book") {
           expect(c.start, `${id}: "${sentence}"`).toBeNull();
           expect(c.end, `${id}: "${sentence}"`).toBeNull();
         } else {
-          expect(c.span, `${id}: "${sentence}"`).toBeNull();
+          expect(
+            (c as Exclude<typeof c, { intent: "copy" }>).span,
+            `${id}: "${sentence}"`,
+          ).toBeNull();
         }
       }
     }

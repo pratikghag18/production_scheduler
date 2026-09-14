@@ -82,3 +82,20 @@ llama.cpp turns into a grammar that forbids any answer but the five command shap
 name, no missing or extra key, no out-of-range hour or weekday. Pass `--no-grammar` to
 `npm run voice:probe` to send the plain request instead, the way S44 measured it, so the
 grammar's accuracy and time cost can be compared against a run without it.
+
+## S55: the board-answered shapes
+
+The schema now carries eight `oneOf` branches, not five: the original `assign`/`book`/
+`unassign`/`move`/`several` plus `replace` ("cover Sam with Ana"), `swap` ("swap Sam and Ana")
+and `copy` ("same as yesterday for Cell 1" / "copy Monday to Tuesday") -- `several`'s own inner
+`commands` array still holds only the original four, never one of these three (D130 item 2: the
+board makes the many, not the grammar). `day_word` gains `yesterday` only -- the three week kinds
+(`this_week`/`next_week`/`last_week`) live in a separate `week_word` def, and only `copy`'s
+`from`/`to` reference both (`oneOf [day_word, week_word]`); every other `day_word` use (`day` on
+the other five branches, `unassign`'s own `until`) stays the five ordinary day kinds. The schema
+is the fence, not a hint: the served model is FORCED through this grammar, so a week kind is
+refused there before `decode.ts` ever sees one -- the decoder's own refusal (`decodeDayWord` has
+no case for a week kind) is the second gate, for every caller that is not the served model.
+`unassign` gains a required `until` (`null` or a `day_word`) for "off till Friday". None of this
+moves `max_tokens`: it stays 640, because a board-answered form is still one short JSON object --
+the board makes the many blocks, the model still ever says one.

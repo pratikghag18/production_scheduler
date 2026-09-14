@@ -7,7 +7,7 @@
  * for R32, `run2`) added, per row.
  */
 import { describe, it, expect } from "vitest";
-import { resolveCommand, describeQuestion } from "@/lib/command/resolve";
+import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
 import type {
   ResolveContext,
   ContextRun,
@@ -15,11 +15,16 @@ import type {
   BoardDay,
   Candidate,
 } from "@/lib/command/resolve";
+import { formatCommand } from "@/lib/command/parse";
 import type {
   AssignCommand,
   BookCommand,
   UnassignCommand,
   MoveCommand,
+  ReplaceCommand,
+  SwapCommand,
+  CopyCommand,
+  SingleCommand,
   Attach,
   Existing,
 } from "@/lib/command/parse";
@@ -87,6 +92,8 @@ const run1: ContextRun = {
   endMin: 3 * 1440 + 960,
   label: "Housing A 08:00–16:00",
   span: "08:00–16:00",
+  productName: "Housing A",
+  headcount: null,
 };
 
 const run2: ContextRun = {
@@ -97,6 +104,8 @@ const run2: ContextRun = {
   endMin: 3 * 1440 + 900,
   label: "Housing A 09:00–15:00",
   span: "09:00–15:00",
+  productName: "Housing A",
+  headcount: null,
 };
 
 /** S41-a RB6: a Cover run on c1a (a different part than Housing A, which is
@@ -110,6 +119,8 @@ const runCov: ContextRun = {
   endMin: 3 * 1440 + 960,
   label: "Cover 08:00–16:00",
   span: "08:00–16:00",
+  productName: "Cover",
+  headcount: null,
 };
 
 /** R-385: half-open overlap, the same stub shape the bar passes in. */
@@ -151,6 +162,8 @@ function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
     overlaps,
     findRunOverlap,
     shiftsAt: () => [],
+    nowMinuteOfDay: null,
+    wallOf: (m: number) => ({ dayIndex: Math.floor(m / 1440), minuteOfDay: m % 1440 }),
     ...overrides,
   };
 }
@@ -228,6 +241,7 @@ function unassignCmd(overrides: Partial<UnassignCommand> = {}): UnassignCommand 
     span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
     shift: null,
     existing: null,
+    until: null,
     ...overrides,
   };
 }
@@ -250,6 +264,7 @@ const blk1: ContextAssignment = {
   startMin: 3 * 1440 + 600,
   endMin: 3 * 1440 + 840,
   label: "10:00–14:00",
+  runId: null,
 }; // the maintainer's first sentence
 const blk2: ContextAssignment = {
   ...blk1,
@@ -915,6 +930,8 @@ describe("commandResolve: brief §5 worked examples", () => {
       endMin: 3 * 1440 + 960,
       label: "Housing A 14:00–16:00",
       span: "14:00–16:00",
+      productName: "Housing A",
+      headcount: null,
     };
     const touchRes = resolveCommand(bookCmd(), withRuns([runTouch]));
     expect(touchRes.ok).toBe(true);
@@ -2154,6 +2171,1427 @@ describe("commandResolve: S52 a shift by name", () => {
     expect(noPatternAnywhere).toEqual({
       ok: false,
       question: { kind: "no_shift_pattern", cell: "Cell 2" },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S55 (R-404 to R-410, D130): `expandCommand`'s own fixture, brief §5 --
+// three cells (Cell 1, Cell 2 under Line 1; Cell 3 under Line 2), a pattern
+// on Line 1 only (Shift 1 06:00-14:00, Shift 2 14:00-22:00), five days,
+// today = index 1.
+// ---------------------------------------------------------------------------
+
+describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
+  const zp1 = { id: "zp1", name: "Plant Z", path: "zp1" };
+  const zl1 = { id: "zl1", name: "Line 1", path: "zp1.zl1" };
+  const zl2 = { id: "zl2", name: "Line 2", path: "zp1.zl2" };
+  const zc1 = { id: "zc1", name: "Cell 1", path: "zp1.zl1.zc1" };
+  const zc2 = { id: "zc2", name: "Cell 2", path: "zp1.zl1.zc2" };
+  const zc3 = { id: "zc3", name: "Cell 3", path: "zp1.zl2.zc3" };
+  const zNodeById = new Map([zp1, zl1, zl2, zc1, zc2, zc3].map((n) => [n.id, n]));
+  const zCells = [zc1, zc2, zc3];
+
+  const zDays: BoardDay[] = [
+    { index: 0, iso: "2026-09-01", weekday: 2 },
+    { index: 1, iso: "2026-09-02", weekday: 3 }, // today
+    { index: 2, iso: "2026-09-03", weekday: 4 },
+    { index: 3, iso: "2026-09-04", weekday: 5 },
+    { index: 4, iso: "2026-09-05", weekday: 6 },
+  ];
+
+  const zSam = { id: "zsam", displayName: "Sam", employeeRef: null, active: true };
+  const zAna = { id: "zana", displayName: "Ana", employeeRef: null, active: true };
+  const zLin = { id: "zlin", displayName: "Lin", employeeRef: null, active: true };
+  const zOperators = [zSam, zAna, zLin];
+
+  const zHa = { id: "zha", sku: "HA-1", name: "Housing A" };
+  const zHb = { id: "zhb", sku: "HB-1", name: "Housing B" };
+  const zProducts = [zHa, zHb];
+
+  const zOfferedAt = (): ReadonlyArray<{ id: string }> => [{ id: "zha" }, { id: "zhb" }];
+
+  /** The pattern -- Line 1's own cells only (Cell 1, Cell 2); none on Cell 3
+   *  (Line 2). Contiguous, per the brief's own fixture text. */
+  const zShiftsAt = (nodeId: string): { name: string; startMin: number; endMin: number }[] =>
+    nodeId === "zc1" || nodeId === "zc2"
+      ? [
+          { name: "Shift 1", startMin: 360, endMin: 840 },
+          { name: "Shift 2", startMin: 840, endMin: 1320 },
+        ]
+      : [];
+
+  const zFitsRun = (
+    a: { startMin: number; endMin: number },
+    run: { startMin: number; endMin: number },
+  ): boolean => a.startMin >= run.startMin && a.endMin <= run.endMin;
+  const zOverlaps = (
+    a: { startMin: number; endMin: number },
+    b: { startMin: number; endMin: number },
+  ): boolean => a.startMin < b.endMin && b.startMin < a.endMin;
+  const zFindRunOverlap = (
+    range: { startMin: number; endMin: number },
+    runs: ContextRun[],
+    excludeRunId: string | null,
+  ): ContextRun | null => {
+    for (const r of runs) {
+      if (excludeRunId !== null && r.id === excludeRunId) continue;
+      if (range.startMin < r.endMin && r.startMin < range.endMin) return r;
+    }
+    return null;
+  };
+  const zWallToOffset = (d: number, m: number): number => d * 1440 + m;
+  const zWallOf = (m: number): { dayIndex: number; minuteOfDay: number } => ({
+    dayIndex: Math.floor(m / 1440),
+    minuteOfDay: ((m % 1440) + 1440) % 1440,
+  });
+
+  function zCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
+    return {
+      cells: zCells,
+      nodeById: zNodeById,
+      operators: zOperators,
+      products: zProducts,
+      offeredAt: zOfferedAt,
+      days: zDays,
+      todayIndex: 1,
+      wallToOffset: zWallToOffset,
+      runs: [],
+      fitsRun: zFitsRun,
+      minDurationMinutes: 15,
+      assignments: [],
+      overlaps: zOverlaps,
+      findRunOverlap: zFindRunOverlap,
+      shiftsAt: zShiftsAt,
+      nowMinuteOfDay: null,
+      wallOf: zWallOf,
+      ...overrides,
+    };
+  }
+
+  function zBlk(overrides: Partial<ContextAssignment> = {}): ContextAssignment {
+    return {
+      id: "zblk",
+      nodeId: "zc1",
+      operatorId: "zsam",
+      productId: "zha",
+      productName: "Housing A",
+      startMin: 2 * 1440 + 600, // day 2, 10:00
+      endMin: 2 * 1440 + 840, // day 2, 14:00
+      label: "10:00–14:00",
+      runId: null,
+      ...overrides,
+    };
+  }
+
+  function zRun(overrides: Partial<ContextRun> = {}): ContextRun {
+    return {
+      id: "zrun",
+      nodeId: "zc1",
+      productId: "zha",
+      startMin: 2 * 1440 + 480,
+      endMin: 2 * 1440 + 960,
+      label: "Housing A 08:00–16:00",
+      span: "08:00–16:00",
+      productName: "Housing A",
+      headcount: 3,
+      ...overrides,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // BN1-BN10: boundary names (R-404), inside resolveShiftSpanStep and the
+  // place-less path.
+  // -------------------------------------------------------------------------
+
+  function zAssign(overrides: Partial<AssignCommand> = {}): AssignCommand {
+    return {
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: { kind: "date", iso: "2026-09-03" }, // index 2, not today
+      start: null,
+      end: null,
+      attach: null,
+      existing: null,
+      shift: null,
+      ...overrides,
+    };
+  }
+
+  it("BN1: 'all day' -- first band's start to last band's end", () => {
+    const res = resolveCommand(zAssign({ shift: "all day" }), zCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 360, endMin: 2 * 1440 + 1320 });
+    }
+  });
+
+  it("BN2: 'end of shift' with a start INSIDE a band -- that band's own end", () => {
+    const res = resolveCommand(
+      zAssign({ shift: "end of shift", start: { hour: 10, minute: 0 } }),
+      zCtx(),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // Shift 1 06:00-14:00 contains 10:00 -- its own end, 14:00.
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 840 });
+    }
+  });
+
+  it("BN3: 'end of shift' with a start BETWEEN bands -- the next band's own end", () => {
+    // A gap 14:00-15:00 between Shift 1 and a Shift 2 that starts late.
+    const gappy = () => [
+      { name: "Shift 1", startMin: 360, endMin: 840 },
+      { name: "Shift 2", startMin: 900, endMin: 1320 },
+    ];
+    const res = resolveCommand(
+      zAssign({ shift: "end of shift", start: { hour: 14, minute: 30 } }),
+      zCtx({ shiftsAt: gappy }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // 14:30 falls in the gap -- the next band that starts after it, Shift
+      // 2, its own end 22:00.
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 870, endMin: 2 * 1440 + 1320 });
+    }
+  });
+
+  it("BN4: 'end of shift' with a start AFTER the last band -- no_shift_at", () => {
+    const res = resolveCommand(
+      zAssign({ shift: "end of shift", start: { hour: 23, minute: 0 } }),
+      zCtx(),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "no_shift_at", cell: "Cell 1", time: "23:00" },
+    });
+  });
+
+  it("BN5: 'end of day' with a pattern -- the last band's own end", () => {
+    const res = resolveCommand(
+      zAssign({ shift: "end of day", start: { hour: 10, minute: 0 } }),
+      zCtx(),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 1320 });
+    }
+  });
+
+  it("BN6: 'end of day' with NO pattern on the cell -- midnight", () => {
+    const res = resolveCommand(
+      zAssign({ place: ["Cell 3"], shift: "end of day", start: { hour: 10, minute: 0 } }),
+      zCtx(),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 600, endMin: 3 * 1440 });
+    }
+  });
+
+  it("BN7: no start, TODAY -- rounds 'now' up to the next quarter hour", () => {
+    const res = resolveCommand(
+      zAssign({ day: { kind: "today" }, shift: "end of day" }),
+      zCtx({ nowMinuteOfDay: 607 }), // 10:07
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // 10:07 -> 10:15 (615); end of day with a pattern -> last band's end.
+      expect(res.resolved.range).toEqual({ startMin: 1 * 1440 + 615, endMin: 1 * 1440 + 1320 });
+    }
+  });
+
+  it("BN8: no start, TOMORROW -- an assign asks; a removal covers the whole day", () => {
+    const assignRes = resolveCommand(
+      zAssign({ day: { kind: "date", iso: "2026-09-03" }, shift: "end of day" }),
+      zCtx(),
+    );
+    expect(assignRes).toEqual({
+      ok: false,
+      question: { kind: "no_start", text: "Say when it starts — from 10, say." },
+    });
+
+    const removalBlock = zBlk({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 700 });
+    const removalRes = resolveCommand(
+      {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: "end of day",
+        existing: null,
+        until: null,
+      },
+      zCtx({ assignments: [removalBlock] }),
+    );
+    expect(removalRes.ok).toBe(false);
+    if (!removalRes.ok) {
+      expect(removalRes.question.kind).toBe("remove_which");
+      if (removalRes.question.kind === "remove_which") {
+        expect(removalRes.question.when).toBe("00:00–22:00"); // whole day, to end of day's own end
+      }
+    }
+  });
+
+  it("BN9: a removal's span end at 23:59 reads as midnight (1440), never 1439", () => {
+    // A block sitting exactly in the last minute of the day (23:59-00:00) --
+    // matched only when the window's end is read as midnight, never a
+    // literal 23:59 (which would exclude it, half-open).
+    const edgeBlock = zBlk({ startMin: 2 * 1440 + 1439, endMin: 3 * 1440 });
+    const res = resolveCommand(
+      {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: { start: { hour: 9, minute: 0 }, end: { hour: 23, minute: 59 } },
+        shift: null,
+        existing: null,
+        until: null,
+      },
+      zCtx({ assignments: [edgeBlock] }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.question.kind).toBe("remove_which");
+  });
+
+  it("BN10: a boundary word never matches a band literally named 'All Day'", () => {
+    const named = () => [
+      { name: "All Day", startMin: 0, endMin: 480 },
+      { name: "Shift 2", startMin: 480, endMin: 1320 },
+    ];
+    const res = resolveCommand(zAssign({ shift: "all day" }), zCtx({ shiftsAt: named }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // The FIRST band's start (0) to the LAST band's end (1320) across
+      // every band -- NOT the "All Day" band's own 0-480, which a plain
+      // name lookup would have returned.
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440, endMin: 2 * 1440 + 1320 });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // F-146: a block that ends exactly at midnight -- `clockToMinuteOfDay`'s
+  // own "23:59 reads as 1440" helper, already used by `resolveDaySpanStep`
+  // for EVERY intent (not only a removal's span, BN9 above), now actually
+  // REACHABLE from the assign/book/move grammars too (parse.ts's own fix:
+  // an END spelled "midnight"/"12 am"/"24:00" now writes `DAY_END` instead
+  // of failing `time_order`/`bad_time`/`bad_duration`).
+  // -------------------------------------------------------------------------
+
+  it("F146-R1: an assign 20:00-DAY_END resolves to endMin at the day's own 1440 offset, not 1439", () => {
+    const res = resolveCommand(
+      zAssign({
+        start: { hour: 20, minute: 0 },
+        end: { hour: 23, minute: 59 }, // DAY_END, the one value ClockTime holds
+      }),
+      zCtx(),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // Day index 2: 20:00 is 2*1440+1200; midnight (1440) is 3*1440+0, which
+      // is the SAME real minute as 2*1440+1440 -- the resolver never reduces
+      // mod 1440, so the literal check is against the day's own +1440.
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 1200, endMin: 2 * 1440 + 1440 });
+    }
+  });
+
+  it("F146-R2: the minimum-duration check still runs against a DAY_END span -- 23:50 to midnight is only 10 minutes", () => {
+    const res = resolveCommand(
+      zAssign({
+        start: { hour: 23, minute: 50 },
+        end: { hour: 23, minute: 59 }, // DAY_END -- 23:50 to 24:00 is 10 minutes
+      }),
+      zCtx({ minDurationMinutes: 15 }),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "too_short", minutes: 10, min: 15 },
+    });
+  });
+
+  it("F146-R3: a book 06:00-DAY_END resolves the same way (the shared resolveDaySpanStep, not an assign-only path)", () => {
+    const res = resolveCommand(
+      {
+        intent: "book",
+        product: "Housing A",
+        place: ["Cell 1"],
+        headcount: null,
+        day: { kind: "date", iso: "2026-09-03" },
+        start: { hour: 6, minute: 0 },
+        end: { hour: 23, minute: 59 },
+        existing: null,
+        shift: null,
+      },
+      zCtx(),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 360, endMin: 2 * 1440 + 1440 });
+    }
+  });
+
+  it("F146-R4: a move's own new-hours span to DAY_END resolves the same way", () => {
+    const blk = zBlk({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 700 });
+    const res = resolveCommand(
+      {
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1"],
+        toPlace: null,
+        day: { kind: "date", iso: "2026-09-03" },
+        span: { start: { hour: 20, minute: 0 }, end: { hour: 23, minute: 59 } },
+        existing: null,
+        shift: null,
+      },
+      zCtx({ assignments: [blk] }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 1200, endMin: 2 * 1440 + 1440 });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // EX1-EX6: `everyone` (R-407).
+  // -------------------------------------------------------------------------
+
+  describe("EX: everyone", () => {
+    it("EX1: clear Cell 1 with two blocks -- a several of two removals, board order, existing filled", () => {
+      const blkA = zBlk({
+        id: "blkA",
+        operatorId: "zsam",
+        startMin: 2 * 1440 + 600,
+        endMin: 2 * 1440 + 720,
+        label: "10:00–12:00",
+      });
+      const blkB = zBlk({
+        id: "blkB",
+        operatorId: "zana",
+        productId: "zhb",
+        productName: "Housing B",
+        startMin: 2 * 1440 + 780,
+        endMin: 2 * 1440 + 900,
+        label: "13:00–15:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [blkA, blkB] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        expect(res.command.commands).toHaveLength(2);
+        const [c1, c2] = res.command.commands as UnassignCommand[];
+        expect(c1.operator).toBe("Sam");
+        expect(c1.existing).toEqual({ kind: "remove", assignmentId: "blkA" });
+        expect(c1.place).toEqual(["Cell 1", "Line 1"]);
+        expect(c1.span).toEqual({ start: { hour: 10, minute: 0 }, end: { hour: 12, minute: 0 } });
+        expect(c2.operator).toBe("Ana");
+        expect(c2.existing).toEqual({ kind: "remove", assignmentId: "blkB" });
+      } else {
+        throw new Error("expected a several");
+      }
+    });
+
+    it("EX2: a line -- every cell under it, never a cell on another line", () => {
+      const onCell1 = zBlk({ id: "onCell1", nodeId: "zc1" });
+      const onCell2 = zBlk({ id: "onCell2", nodeId: "zc2", operatorId: "zana" });
+      const onCell3 = zBlk({ id: "onCell3", nodeId: "zc3", operatorId: "zlin" });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Line 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [onCell1, onCell2, onCell3] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const ids = (res.command.commands as UnassignCommand[]).map(
+          (c) => (c.existing as { assignmentId: string }).assignmentId,
+        );
+        expect(ids).toEqual(["onCell1", "onCell2"]); // never onCell3 (Line 2)
+      } else {
+        throw new Error("expected a several");
+      }
+    });
+
+    it("EX3: after 14:00 with a straddling 08:00-16:00 block -- a move to 08:00-14:00", () => {
+      const straddle = zBlk({
+        startMin: 2 * 1440 + 480,
+        endMin: 2 * 1440 + 960,
+        label: "08:00–16:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: { start: { hour: 14, minute: 0 }, end: { hour: 23, minute: 59 } },
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [straddle] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent !== "several") {
+        const move = res.command as MoveCommand;
+        expect(move.intent).toBe("move");
+        expect(move.toPlace).toBeNull();
+        expect(move.span).toEqual({ start: { hour: 8, minute: 0 }, end: { hour: 14, minute: 0 } });
+        expect(move.existing).toEqual({ kind: "move", assignmentId: "zblk" });
+      } else {
+        throw new Error("expected a single move");
+      }
+    });
+
+    it("EX4: a block across BOTH edges -- split_needed, nothing built", () => {
+      const wide = zBlk({ startMin: 2 * 1440 + 480, endMin: 2 * 1440 + 960, label: "08:00–16:00" });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 12, minute: 0 } },
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [wide] }));
+      expect(res).toEqual({
+        ok: false,
+        question: {
+          kind: "split_needed",
+          person: "Sam",
+          cell: "Cell 1",
+          block: "Housing A 08:00–16:00",
+          span: "10:00–12:00",
+        },
+      });
+    });
+
+    it("EX5: nobody on the cell -- nothing_to_do", () => {
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx());
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "nothing_to_do", text: "Cell 1 has nobody on it 2026-09-03." },
+      });
+    });
+
+    it("EX6: move everyone on Line 1 to Cell 3 -- moves, existing filled", () => {
+      const onCell1 = zBlk({ id: "onCell1", nodeId: "zc1" });
+      const onCell2 = zBlk({ id: "onCell2", nodeId: "zc2", operatorId: "zana" });
+      const command: MoveCommand = {
+        intent: "move",
+        operator: "everyone",
+        place: ["Line 1"],
+        toPlace: ["Cell 3"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [onCell1, onCell2] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const moves = res.command.commands as MoveCommand[];
+        expect(moves).toHaveLength(2);
+        expect(moves[0].toPlace).toEqual(["Cell 3"]);
+        expect(moves[0].existing).toEqual({ kind: "move", assignmentId: "onCell1" });
+        expect(moves[1].existing).toEqual({ kind: "move", assignmentId: "onCell2" });
+      } else {
+        throw new Error("expected a several");
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // RP1-RP4: replace (R-406).
+  // -------------------------------------------------------------------------
+
+  describe("RP: replace", () => {
+    function replaceCmd(overrides: Partial<ReplaceCommand> = {}): ReplaceCommand {
+      return {
+        intent: "replace",
+        operator: "Sam",
+        with: "Ana",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        ...overrides,
+      };
+    }
+
+    it("RP1: one direct block -- remove then assign direct", () => {
+      const blk = zBlk();
+      const res = expandCommand(replaceCmd(), zCtx({ assignments: [blk] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const [removal, assign] = res.command.commands;
+        expect(removal.intent).toBe("unassign");
+        expect((removal as UnassignCommand).operator).toBe("Sam");
+        expect((removal as UnassignCommand).existing).toEqual({
+          kind: "remove",
+          assignmentId: "zblk",
+        });
+        expect(assign.intent).toBe("assign");
+        expect((assign as AssignCommand).operator).toBe("Ana");
+        expect((assign as AssignCommand).product).toBe("Housing A");
+        expect((assign as AssignCommand).attach).toEqual({ kind: "direct" });
+      } else {
+        throw new Error("expected a several of two");
+      }
+    });
+
+    it("RP2: one block attached to a run -- the new assign attaches the same run", () => {
+      const blk = zBlk({ runId: "run9" });
+      const res = expandCommand(replaceCmd(), zCtx({ assignments: [blk] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const assign = res.command.commands[1] as AssignCommand;
+        expect(assign.attach).toEqual({ kind: "run", runId: "run9" });
+      } else {
+        throw new Error("expected a several of two");
+      }
+    });
+
+    it("RP3: two blocks -- four commands, removals first", () => {
+      const blk1 = zBlk({ id: "r1", startMin: 2 * 1440 + 360, endMin: 2 * 1440 + 480 });
+      const blk2 = zBlk({ id: "r2", startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const res = expandCommand(replaceCmd(), zCtx({ assignments: [blk1, blk2] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const kinds = res.command.commands.map((c) => c.intent);
+        expect(kinds).toEqual(["unassign", "unassign", "assign", "assign"]);
+      } else {
+        throw new Error("expected a several of four");
+      }
+    });
+
+    it("RP4: Sam with Sam -- nothing_to_do", () => {
+      const res = expandCommand(replaceCmd({ with: "Sam" }), zCtx({ assignments: [zBlk()] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "nothing_to_do", text: "Sam cannot cover for Sam" },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // SW1-SW3: swap (R-406).
+  // -------------------------------------------------------------------------
+
+  describe("SW: swap", () => {
+    function swapCmd(overrides: Partial<SwapCommand> = {}): SwapCommand {
+      return {
+        intent: "swap",
+        operator: "Sam",
+        other: "Ana",
+        place: [],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        ...overrides,
+      };
+    }
+
+    it("SW1: one block each -- four commands, crossed", () => {
+      const samBlk = zBlk({ id: "samBlk", nodeId: "zc1", operatorId: "zsam" });
+      const anaBlk = zBlk({
+        id: "anaBlk",
+        nodeId: "zc2",
+        operatorId: "zana",
+        productId: "zhb",
+        productName: "Housing B",
+        startMin: 2 * 1440 + 900,
+        endMin: 2 * 1440 + 1020,
+        label: "15:00–17:00",
+      });
+      const res = expandCommand(swapCmd(), zCtx({ assignments: [samBlk, anaBlk] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const cmds = res.command.commands;
+        expect(cmds).toHaveLength(4);
+        expect(cmds[0].intent).toBe("unassign");
+        expect((cmds[0] as UnassignCommand).existing).toEqual({
+          kind: "remove",
+          assignmentId: "samBlk",
+        });
+        expect(cmds[1].intent).toBe("unassign");
+        expect((cmds[1] as UnassignCommand).existing).toEqual({
+          kind: "remove",
+          assignmentId: "anaBlk",
+        });
+        // Sam takes Ana's old block (Housing B, Cell 2, 15:00-17:00).
+        expect(cmds[2].intent).toBe("assign");
+        expect((cmds[2] as AssignCommand).operator).toBe("Sam");
+        expect((cmds[2] as AssignCommand).product).toBe("Housing B");
+        expect((cmds[2] as AssignCommand).place).toEqual(["Cell 2", "Line 1"]);
+        // Ana takes Sam's old block (Housing A, Cell 1, 10:00-14:00).
+        expect(cmds[3].intent).toBe("assign");
+        expect((cmds[3] as AssignCommand).operator).toBe("Ana");
+        expect((cmds[3] as AssignCommand).product).toBe("Housing A");
+        expect((cmds[3] as AssignCommand).place).toEqual(["Cell 1", "Line 1"]);
+      } else {
+        throw new Error("expected a several of four");
+      }
+    });
+
+    it("SW2: two blocks for one person -- swap_which", () => {
+      const samBlk1 = zBlk({ id: "s1", startMin: 2 * 1440 + 360, endMin: 2 * 1440 + 480 });
+      const samBlk2 = zBlk({ id: "s2", startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const anaBlk = zBlk({ id: "anaBlk", operatorId: "zana", nodeId: "zc2" });
+      const res = expandCommand(swapCmd(), zCtx({ assignments: [samBlk1, samBlk2, anaBlk] }));
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.question.kind).toBe("swap_which");
+    });
+
+    it("SW3: no block for the other person -- no_block", () => {
+      const samBlk = zBlk();
+      const res = expandCommand(swapCmd(), zCtx({ assignments: [samBlk] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "no_block", person: "Ana", cell: null, when: "2026-09-03" },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // CP1-CP6: copy (R-408).
+  // -------------------------------------------------------------------------
+
+  describe("CP: copy", () => {
+    it("CP1: a day onto a day for one cell -- a run becomes a booking, a block a direct assign", () => {
+      const run = zRun();
+      const blk = zBlk({ nodeId: "zc2", startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx({ runs: [run], assignments: [] }));
+      expect(res.ok).toBe(true);
+      // Exactly one command (the run's own booking) -- wrapMany returns the
+      // single command itself, never a one-item several.
+      if (res.ok && res.command.intent === "book") {
+        const b = res.command;
+        expect(b.product).toBe("Housing A");
+        expect(b.headcount).toBe(3);
+        expect(b.day).toEqual({ kind: "date", iso: "2026-09-04" });
+        expect(b.start).toEqual({ hour: 8, minute: 0 });
+        expect(b.end).toEqual({ hour: 16, minute: 0 });
+        expect(b.place).toEqual(["Cell 1", "Line 1"]);
+      } else {
+        throw new Error("expected a single book");
+      }
+
+      // Blocks on Cell 2 are not touched -- only Cell 1 was named -- so
+      // adding one changes nothing about the (still single) result.
+      const cellFilteredRes = expandCommand(command, zCtx({ runs: [run], assignments: [blk] }));
+      expect(cellFilteredRes.ok).toBe(true);
+      if (cellFilteredRes.ok) expect(cellFilteredRes.command.intent).toBe("book");
+    });
+
+    it("CP2: a block already on the target with the same person/part/hours is skipped", () => {
+      const srcBlk = zBlk({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const alreadyThere = zBlk({
+        id: "already",
+        startMin: 3 * 1440 + 600,
+        endMin: 3 * 1440 + 720,
+      });
+      const otherBlk = zBlk({
+        id: "other",
+        operatorId: "zana",
+        startMin: 2 * 1440 + 780,
+        endMin: 2 * 1440 + 900,
+      });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx({ assignments: [srcBlk, alreadyThere, otherBlk] }));
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        // Sam's block is skipped (already there); Ana's is copied.
+        if (res.command.intent === "several") throw new Error("expected exactly one");
+        expect((res.command as AssignCommand).operator).toBe("Ana");
+      }
+    });
+
+    it("CP3: everything already there -- nothing_to_do", () => {
+      const srcBlk = zBlk({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const alreadyThere = zBlk({
+        id: "already",
+        startMin: 3 * 1440 + 600,
+        endMin: 3 * 1440 + 720,
+      });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx({ assignments: [srcBlk, alreadyThere] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "nothing_to_do", text: "Cell 1 already matches 2026-09-03." },
+      });
+    });
+
+    it("CP4/CP5: week onto week pairs Monday to Monday; a week off the board is day_off_board", () => {
+      // A 21-day window: last week (Mon 2026-08-24 .. Sun 2026-08-30),
+      // this week (Mon 08-31 .. Sun 09-06, today = Wed 09-02), next week
+      // (Mon 09-07 .. Sun 09-13).
+      const weekIsos = [
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-29",
+        "2026-08-30",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-05",
+        "2026-09-06",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-12",
+        "2026-09-13",
+      ];
+      const weekdays = [1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0] as const;
+      const fullWeekDays: BoardDay[] = weekIsos.map((iso, i) => ({
+        index: i,
+        iso,
+        weekday: weekdays[i],
+      }));
+      const weekCtx = (days: BoardDay[]) =>
+        zCtx({
+          days,
+          todayIndex: 9,
+          assignments: [zBlk({ nodeId: "zc1", startMin: 7 * 1440 + 600, endMin: 7 * 1440 + 720 })],
+        });
+      // index 7 = Monday of this_week.
+
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "this_week" },
+        to: { kind: "next_week" },
+      };
+      const res = expandCommand(command, weekCtx(fullWeekDays));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent !== "several" && res.command.intent === "assign") {
+        // Monday (index 7) pairs to next Monday (index 14, 2026-09-07).
+        expect(res.command.day).toEqual({ kind: "date", iso: "2026-09-07" });
+      } else if (res.ok && res.command.intent === "several") {
+        throw new Error("expected exactly one assign (a single block on a single day)");
+      }
+
+      // Cut the board off before next week finishes -- day_off_board.
+      const partialWeekDays = fullWeekDays.slice(0, 18); // missing index 18-20
+      const offBoardRes = expandCommand(command, weekCtx(partialWeekDays));
+      expect(offBoardRes).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2026-09-11" },
+      });
+    });
+
+    it("CP6: over the ceiling -- lot_too_big with the count", () => {
+      const many: ContextAssignment[] = [];
+      for (let i = 0; i < 101; i++) {
+        many.push(
+          zBlk({
+            id: `many${i}`,
+            operatorId: i % 2 === 0 ? "zsam" : "zana",
+            startMin: 2 * 1440 + 360 + i,
+            endMin: 2 * 1440 + 400 + i,
+          }),
+        );
+      }
+      const command: CopyCommand = {
+        intent: "copy",
+        place: [],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx({ assignments: many }));
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.question.kind).toBe("lot_too_big");
+        if (res.question.kind === "lot_too_big") {
+          expect(res.question.count).toBe(101);
+          expect(res.question.max).toBe(100);
+        }
+      }
+    });
+
+    it("CP6b (reviewer finding): EXACTLY at the ceiling -- 100 commands succeeds (a several of 100), never truncated and never refused", () => {
+      const exactly100: ContextAssignment[] = [];
+      for (let i = 0; i < 100; i++) {
+        exactly100.push(
+          zBlk({
+            id: `hundred${i}`,
+            operatorId: i % 2 === 0 ? "zsam" : "zana",
+            startMin: 2 * 1440 + 360 + i,
+            endMin: 2 * 1440 + 400 + i,
+          }),
+        );
+      }
+      const command: CopyCommand = {
+        intent: "copy",
+        place: [],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx({ assignments: exactly100 }));
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.command.intent).toBe("several");
+        if (res.command.intent === "several") expect(res.command.commands.length).toBe(100);
+      }
+    });
+
+    it("CP7 (reviewer finding, 14 Sept follow-up): a week off the board names the right ISO ACROSS A YEAR BOUNDARY -- addDaysToIso's own manual calendar arithmetic, not new Date(...) (commandPurity.test.ts's U1 forbids constructing one at all)", () => {
+      // A short window ending 2026-12-31 (today), so `next_week` (which
+      // starts the Monday after today's own week) runs off the board and
+      // must be named by ADDING days past the window's own last iso --
+      // exactly the arithmetic `addDaysToIso` does, crossing Dec 31 into
+      // January of the following year.
+      const decDays: BoardDay[] = [
+        { index: 0, iso: "2026-12-28", weekday: 1 }, // Mon
+        { index: 1, iso: "2026-12-29", weekday: 2 },
+        { index: 2, iso: "2026-12-30", weekday: 3 },
+        { index: 3, iso: "2026-12-31", weekday: 4 }, // today, Thu
+      ];
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "this_week" },
+        to: { kind: "next_week" },
+      };
+      const res = expandCommand(command, zCtx({ days: decDays, todayIndex: 3 }));
+      // this_week's own Monday (2026-12-28) is index 0 -- on the board; its
+      // OWN days 4-6 (Fri/Sat/Sun) are already off the board too, so the
+      // first missing day is this_week's own Friday, 2027-01-01 -- proving
+      // the month AND year both roll over correctly.
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2027-01-01" },
+      });
+    });
+
+    it("CP8 (reviewer finding): a week off the board whose SOURCE week has a block on Sunday and the TARGET week's Sunday specifically is missing -- day_off_board names that exact iso, not a generic 'off the board'", () => {
+      // this_week's own Monday MUST be on the board too (resolveWeekDays
+      // checks every one of the seven days before this_week even counts as
+      // resolved) -- a Monday-anchored 13-day window, today Wednesday
+      // (index 2), that stops one day short of next_week's own Sunday.
+      const narrowDays: BoardDay[] = [
+        { index: 0, iso: "2026-08-31", weekday: 1 }, // Mon, this_week
+        { index: 1, iso: "2026-09-01", weekday: 2 },
+        { index: 2, iso: "2026-09-02", weekday: 3 }, // today, Wed
+        { index: 3, iso: "2026-09-03", weekday: 4 },
+        { index: 4, iso: "2026-09-04", weekday: 5 },
+        { index: 5, iso: "2026-09-05", weekday: 6 },
+        { index: 6, iso: "2026-09-06", weekday: 0 }, // Sun, this_week's own
+        { index: 7, iso: "2026-09-07", weekday: 1 }, // Mon, next_week
+        { index: 8, iso: "2026-09-08", weekday: 2 },
+        { index: 9, iso: "2026-09-09", weekday: 3 },
+        { index: 10, iso: "2026-09-10", weekday: 4 },
+        { index: 11, iso: "2026-09-11", weekday: 5 },
+        { index: 12, iso: "2026-09-12", weekday: 6 },
+        // 2026-09-13 (next_week's own Sunday) deliberately missing.
+      ];
+      const sourceSundayBlock = zBlk({
+        nodeId: "zc1",
+        startMin: 6 * 1440 + 600,
+        endMin: 6 * 1440 + 840,
+      });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "this_week" },
+        to: { kind: "next_week" },
+      };
+      const res = expandCommand(
+        command,
+        zCtx({ days: narrowDays, todayIndex: 2, assignments: [sourceSundayBlock] }),
+      );
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2026-09-13" },
+      });
+    });
+
+    it("CP9 (reviewer finding, 14 Sept follow-up, probing 'wallOf on a block spanning midnight'): a genuinely overnight run (22:00-02:00) cannot be written as one book command and is skipped, never a negative-duration question", () => {
+      const overnightRun = zRun({
+        startMin: 2 * 1440 + 1320, // 22:00 on 2026-09-03 (day index 2)
+        endMin: 3 * 1440 + 120, // 02:00 on 2026-09-04 (day index 3)
+        span: "22:00-02:00",
+      });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx({ runs: [overnightRun] }));
+      // Nothing else to copy from that day/cell -- skipped down to nothing,
+      // never a `too_short` question with a negative minute count.
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "nothing_to_do", text: "Cell 1 already matches 2026-09-03." },
+      });
+    });
+
+    it("CP10 (reviewer finding): a block ending EXACTLY at midnight copies as an ordinary DAY_END assign, and the written command resolves cleanly", () => {
+      const midnightBlock = zBlk({
+        startMin: 2 * 1440 + 1200, // 20:00 on 2026-09-03 (day index 2)
+        endMin: 3 * 1440 + 0, // exactly midnight -- 2026-09-04, day index 3
+      });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const ctxWithBlock = zCtx({ assignments: [midnightBlock] });
+      const res = expandCommand(command, ctxWithBlock);
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "assign") {
+        expect(res.command.start).toEqual({ hour: 20, minute: 0 });
+        expect(res.command.end).toEqual({ hour: 23, minute: 59 }); // DAY_END
+        const resolved = resolveCommand(res.command, ctxWithBlock);
+        expect(resolved.ok).toBe(true);
+        if (resolved.ok) {
+          expect(resolved.resolved.range).toEqual({
+            startMin: 3 * 1440 + 1200,
+            endMin: 4 * 1440,
+          });
+        }
+      } else {
+        throw new Error("expected a single assign");
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // AB1-AB3: an absence with `until` (R-409).
+  // -------------------------------------------------------------------------
+
+  describe("AB: absence with until", () => {
+    it("AB1: three days, two blocks on two of them -- two removals", () => {
+      const blkDay1 = zBlk({
+        id: "d1",
+        nodeId: "zc1",
+        startMin: 1 * 1440 + 600,
+        endMin: 1 * 1440 + 720,
+      });
+      const blkDay3 = zBlk({
+        id: "d3",
+        nodeId: "zc2",
+        startMin: 3 * 1440 + 600,
+        endMin: 3 * 1440 + 720,
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "date", iso: "2026-09-02" }, // index 1
+        span: null,
+        shift: null,
+        existing: null,
+        until: { kind: "date", iso: "2026-09-04" }, // index 3
+      };
+      const res = expandCommand(command, zCtx({ assignments: [blkDay1, blkDay3] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        expect(res.command.commands).toHaveLength(2);
+        expect((res.command.commands[0] as UnassignCommand).existing).toEqual({
+          kind: "remove",
+          assignmentId: "d1",
+        });
+        expect((res.command.commands[1] as UnassignCommand).existing).toEqual({
+          kind: "remove",
+          assignmentId: "d3",
+        });
+      } else {
+        throw new Error("expected a several of two");
+      }
+    });
+
+    it("AB2: until before the day -- day_order", () => {
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "date", iso: "2026-09-04" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: { kind: "date", iso: "2026-09-02" },
+      };
+      const res = expandCommand(command, zCtx());
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_order", first: "2026-09-04", second: "2026-09-02" },
+      });
+    });
+
+    it("AB3: nothing over the whole range -- nothing_to_do", () => {
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "date", iso: "2026-09-02" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx());
+      expect(res).toEqual({
+        ok: false,
+        question: {
+          kind: "nothing_to_do",
+          text: "Sam has no block from 2026-09-02 to 2026-09-04.",
+        },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // PT1-PT2: an ordinary command and a several come back as the SAME object.
+  // -------------------------------------------------------------------------
+
+  describe("PT: pass-through", () => {
+    it("PT1: an ordinary single -- the exact same object, never a copy", () => {
+      const command = zAssign();
+      const res = expandCommand(command, zCtx());
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.command).toBe(command);
+    });
+
+    it("PT2: an already-built several -- the exact same object", () => {
+      const command = { intent: "several" as const, commands: [zAssign(), zAssign()] };
+      const res = expandCommand(command, zCtx());
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.command).toBe(command);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // SWEEP (reviewer finding, 14 Sept follow-up): one representative written
+  // command per board-answered intent (everyone-unassign, everyone-move,
+  // replace, swap, copy, an absence's until), run through BOTH
+  // resolveCommand AND formatCommand -- neither may throw, and every literal
+  // field the brief names (attach/existing/shift/until, by intent) must be
+  // present, not `undefined`. `commandResolve.test.ts` never called
+  // `formatCommand` at all before this -- the bar's own lot re-runs a
+  // written command's WORDS through the rules parser after every button
+  // press (D127), so a command whose literal is incomplete (a field quietly
+  // `undefined` instead of `null`) would only ever be caught there, live.
+  // -------------------------------------------------------------------------
+
+  describe("SWEEP: every written command is a complete literal; resolveCommand/formatCommand never throw", () => {
+    function sweep(label: string, cmd: SingleCommand, ctxForResolve: ResolveContext) {
+      it(`${label}: complete literal, resolveCommand and formatCommand both run clean`, () => {
+        expect(() => resolveCommand(cmd, ctxForResolve)).not.toThrow();
+        let text = "";
+        expect(() => {
+          text = formatCommand(cmd);
+        }).not.toThrow();
+        expect(text.length).toBeGreaterThan(0);
+        if (cmd.intent === "assign") {
+          expect(cmd.attach).not.toBeUndefined();
+          expect(cmd.existing).not.toBeUndefined();
+          expect(cmd.shift).not.toBeUndefined();
+          expect(cmd.start).not.toBeUndefined();
+          expect(cmd.end).not.toBeUndefined();
+        } else if (cmd.intent === "unassign") {
+          expect(cmd.existing).not.toBeUndefined();
+          expect(cmd.shift).not.toBeUndefined();
+          expect(cmd.until).not.toBeUndefined();
+          expect(cmd.span).not.toBeUndefined();
+        } else if (cmd.intent === "move") {
+          expect(cmd.existing).not.toBeUndefined();
+          expect(cmd.toPlace).not.toBeUndefined();
+          expect(cmd.span).not.toBeUndefined();
+          expect(cmd.shift).not.toBeUndefined();
+        } else if (cmd.intent === "book") {
+          expect(cmd.existing).not.toBeUndefined();
+          expect(cmd.shift).not.toBeUndefined();
+          expect(cmd.headcount).not.toBeUndefined();
+          expect(cmd.start).not.toBeUndefined();
+          expect(cmd.end).not.toBeUndefined();
+        }
+      });
+    }
+
+    function writtenCommandsOf(exp: ReturnType<typeof expandCommand>): SingleCommand[] {
+      if (!exp.ok) return [];
+      return exp.command.intent === "several" ? exp.command.commands : [exp.command];
+    }
+
+    // everyone-unassign.
+    {
+      const b1 = zBlk({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const c = zCtx({ assignments: [b1] });
+      const cmds = writtenCommandsOf(
+        expandCommand(
+          {
+            intent: "unassign",
+            operator: "everyone",
+            place: ["Cell 1"],
+            day: { kind: "date", iso: "2026-09-03" },
+            span: null,
+            existing: null,
+            shift: null,
+            until: null,
+          },
+          c,
+        ),
+      );
+      cmds.forEach((cc, i) => sweep(`SWEEP-EX-unassign-${i}`, cc, c));
+    }
+
+    // everyone-move.
+    {
+      const b1 = zBlk({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const c = zCtx({ assignments: [b1] });
+      const cmds = writtenCommandsOf(
+        expandCommand(
+          {
+            intent: "move",
+            operator: "everyone",
+            place: ["Cell 1"],
+            toPlace: ["Cell 3"],
+            day: { kind: "date", iso: "2026-09-03" },
+            span: null,
+            existing: null,
+            shift: null,
+          },
+          c,
+        ),
+      );
+      cmds.forEach((cc, i) => sweep(`SWEEP-EX-move-${i}`, cc, c));
+    }
+
+    // replace.
+    {
+      const b1 = zBlk({ operatorId: "zsam", startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const c = zCtx({ assignments: [b1] });
+      const cmds = writtenCommandsOf(
+        expandCommand(
+          {
+            intent: "replace",
+            operator: "Sam",
+            with: "Ana",
+            place: [],
+            day: { kind: "date", iso: "2026-09-03" },
+            span: null,
+            shift: null,
+          },
+          c,
+        ),
+      );
+      cmds.forEach((cc, i) => sweep(`SWEEP-RP-${i}`, cc, c));
+    }
+
+    // swap.
+    {
+      const b1 = zBlk({
+        id: "swb1",
+        operatorId: "zsam",
+        nodeId: "zc1",
+        startMin: 2 * 1440 + 600,
+        endMin: 2 * 1440 + 720,
+      });
+      const b2 = zBlk({
+        id: "swb2",
+        operatorId: "zana",
+        nodeId: "zc2",
+        startMin: 2 * 1440 + 780,
+        endMin: 2 * 1440 + 900,
+      });
+      const c = zCtx({ assignments: [b1, b2] });
+      const cmds = writtenCommandsOf(
+        expandCommand(
+          {
+            intent: "swap",
+            operator: "Sam",
+            other: "Ana",
+            place: [],
+            day: { kind: "date", iso: "2026-09-03" },
+            span: null,
+            shift: null,
+          },
+          c,
+        ),
+      );
+      cmds.forEach((cc, i) => sweep(`SWEEP-SW-${i}`, cc, c));
+    }
+
+    // copy.
+    {
+      const run1 = zRun();
+      const c = zCtx({ runs: [run1] });
+      const cmds = writtenCommandsOf(
+        expandCommand(
+          {
+            intent: "copy",
+            place: ["Cell 1"],
+            from: { kind: "date", iso: "2026-09-03" },
+            to: { kind: "date", iso: "2026-09-04" },
+          },
+          c,
+        ),
+      );
+      cmds.forEach((cc, i) => sweep(`SWEEP-CP-${i}`, cc, c));
+    }
+
+    // an absence's own until.
+    {
+      const b1 = zBlk({ operatorId: "zsam", startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const b2 = zBlk({
+        id: "absb2",
+        operatorId: "zsam",
+        startMin: 3 * 1440 + 600,
+        endMin: 3 * 1440 + 720,
+      });
+      const c = zCtx({ assignments: [b1, b2] });
+      const cmds = writtenCommandsOf(
+        expandCommand(
+          {
+            intent: "unassign",
+            operator: "Sam",
+            place: [],
+            day: { kind: "date", iso: "2026-09-03" },
+            span: null,
+            existing: null,
+            shift: null,
+            until: { kind: "date", iso: "2026-09-04" },
+          },
+          c,
+        ),
+      );
+      cmds.forEach((cc, i) => sweep(`SWEEP-AB-${i}`, cc, c));
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // §4: `resolveCommand` on the new shapes.
+  // -------------------------------------------------------------------------
+
+  describe("§4: resolveCommand on unexpanded board commands and everyone/until", () => {
+    it("a BoardCommand reaching resolveCommand unexpanded -- expand_first, never a crash", () => {
+      const replace: ReplaceCommand = {
+        intent: "replace",
+        operator: "Sam",
+        with: "Ana",
+        place: [],
+        day: null,
+        span: null,
+        shift: null,
+      };
+      expect(resolveCommand(replace, zCtx())).toEqual({
+        ok: false,
+        question: { kind: "expand_first", intent: "replace" },
+      });
+
+      const swap: SwapCommand = {
+        intent: "swap",
+        operator: "Sam",
+        other: "Ana",
+        place: [],
+        day: null,
+        span: null,
+        shift: null,
+      };
+      expect(resolveCommand(swap, zCtx())).toEqual({
+        ok: false,
+        question: { kind: "expand_first", intent: "swap" },
+      });
+
+      const copy: CopyCommand = {
+        intent: "copy",
+        place: [],
+        from: { kind: "today" },
+        to: { kind: "tomorrow" },
+      };
+      expect(resolveCommand(copy, zCtx())).toEqual({
+        ok: false,
+        question: { kind: "expand_first", intent: "copy" },
+      });
+    });
+
+    it("an EVERYONE unassign reaching resolveCommand unexpanded -- unknown operator, naturally", () => {
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = resolveCommand(command, zCtx());
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "unknown", field: "operator", text: "everyone" },
+      });
+    });
+
+    it("an unassign with `until` reaching resolveCommand unexpanded -- until is simply never read", () => {
+      const withUntil: UnassignCommand = {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: { kind: "date", iso: "2026-09-05" },
+      };
+      const withoutUntil: UnassignCommand = { ...withUntil, until: null };
+      const blk = zBlk();
+      expect(resolveCommand(withUntil, zCtx({ assignments: [blk] }))).toEqual(
+        resolveCommand(withoutUntil, zCtx({ assignments: [blk] })),
+      );
     });
   });
 });

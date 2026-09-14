@@ -787,6 +787,12 @@ const bookTemplates = [
 // Unassign (U1-U7)
 // ---------------------------------------------------------------------------
 
+// S55 (R-407, found while fixing R-409): "clear" excluded -- see the comment
+// above U8-U10 below, the only templates that put the operator right after
+// the verb with no place separator at all (the one shape R-407's EVERYONE
+// reading now claims).
+const NO_PLACE_UNASSIGN_VERBS = UNASSIGN_VERBS.filter((v) => v !== "clear");
+
 const unassignTemplates = [
   {
     id: "U1-with-hours-two-places",
@@ -807,6 +813,7 @@ const unassignTemplates = [
         day: null,
         span: { start: s.span.start, end: s.span.end },
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
@@ -825,6 +832,7 @@ const unassignTemplates = [
         day: null,
         span: { start: s.span.start, end: s.span.end },
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
@@ -843,6 +851,7 @@ const unassignTemplates = [
         day: null,
         span: { start: s.span.start, end: s.span.end },
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
@@ -862,6 +871,7 @@ const unassignTemplates = [
         day: null,
         span: null,
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
@@ -880,6 +890,7 @@ const unassignTemplates = [
         day: s.day.day,
         span: null,
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
@@ -899,6 +910,7 @@ const unassignTemplates = [
         day: null,
         span: null,
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
@@ -919,17 +931,27 @@ const unassignTemplates = [
         day: s.day.day,
         span: { start: s.span.start, end: s.span.end },
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   // -------------------------------------------------------------------------
   // S50 (R-398, brief §2 item 1): a removal need not name a place at all --
   // `place: []`, "wherever the person is" (S49).
+  //
+  // S55 (R-407, found while fixing R-409): NEVER "clear" here -- these three
+  // templates put the operator right after the verb with no place separator
+  // at all ("clear Marcus Novak sunday"), and that is now exactly the shape
+  // `parseUnassignRest`'s R-407 rule reads as EVERYONE clearing a PLACE
+  // named "Marcus Novak" (operator/place swapped), not a person's removal.
+  // Every other UNASSIGN_VERBS word is unaffected (R-407 special-cases
+  // "clear" alone); U1-U7's own sentences always have a place separator
+  // ("from"/"on"/"off" before a place word) so they were never ambiguous.
   // -------------------------------------------------------------------------
   {
     id: "U8-no-place-day",
     intent: "unassign",
     genSlots: (rng) => ({
-      verb: pick(rng, UNASSIGN_VERBS),
+      verb: pick(rng, NO_PLACE_UNASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       // Reviewer fix: `randomBareDay` (as M8 uses), never `randomDay` -- the
       // "on " prefix `randomDay` sometimes adds is harmless for the UNASSIGN
@@ -947,13 +969,14 @@ const unassignTemplates = [
         day: s.day.day,
         span: null,
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
     id: "U9-no-place-hours",
     intent: "unassign",
     genSlots: (rng) => ({
-      verb: pick(rng, UNASSIGN_VERBS),
+      verb: pick(rng, NO_PLACE_UNASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
       span: randomSpan(rng),
     }),
@@ -965,13 +988,14 @@ const unassignTemplates = [
         day: null,
         span: { start: s.span.start, end: s.span.end },
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   {
     id: "U10-no-place-bare",
     intent: "unassign",
     genSlots: (rng) => ({
-      verb: pick(rng, UNASSIGN_VERBS),
+      verb: pick(rng, NO_PLACE_UNASSIGN_VERBS),
       op: pick(rng, PEOPLE_ALL),
     }),
     sentence: (s) => `${s.verb} ${qw(s.op)}`,
@@ -982,6 +1006,7 @@ const unassignTemplates = [
         day: null,
         span: null,
         existing: null,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
   // -------------------------------------------------------------------------
@@ -1008,6 +1033,7 @@ const unassignTemplates = [
         span: null,
         existing: null,
         shift: s.name,
+        until: null, // S55/R-409: an ordinary removal, no absence end-day
       }),
   },
 ];
@@ -1474,6 +1500,7 @@ const severalTemplates = [
           day: null,
           span: null,
           existing: null,
+          until: null, // S55/R-409: an ordinary removal, no absence end-day
         }),
       ),
     }),

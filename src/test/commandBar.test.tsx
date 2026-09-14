@@ -25,6 +25,8 @@ import {
   type AssignCommand,
   type UnassignCommand,
   type MoveCommand,
+  type ReplaceCommand,
+  type CopyCommand,
 } from "@/lib/command/parse";
 import type {
   ResolveContext,
@@ -105,6 +107,13 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
     findRunOverlap,
     shiftsAt: () => [],
+    // S55 (D130 item 3): null by default -- most cases here never touch a
+    // boundary shift name (`ALL_DAY`/`END_OF_SHIFT`/`END_OF_DAY`), so "no
+    // clock" is the safer default; CB-x-8 overrides it to test the rounding.
+    nowMinuteOfDay: null,
+    // The brief's own plain `wallOf` for a non-DST window -- the exact
+    // inverse of this fixture's `wallToOffset` above.
+    wallOf: (m: number) => ({ dayIndex: Math.floor(m / 1440), minuteOfDay: m % 1440 }),
     ...over,
   };
 }
@@ -118,6 +127,8 @@ const RUN1: ContextRun = {
   endMin: 3 * 1440 + 960,
   label: "Housing A 08:00–16:00",
   span: "08:00–16:00",
+  productName: "Housing A",
+  headcount: 3,
 };
 
 /** S41-a: the same job as RUN1, standing in for "the job of this part
@@ -134,6 +145,8 @@ const JOB_COV: ContextRun = {
   endMin: 3 * 1440 + 960,
   label: "Cover 08:00–16:00",
   span: "08:00–16:00",
+  productName: "Cover",
+  headcount: null,
 };
 
 /** R-385: the sentence's own hours (10:00-14:00), already on the board for
@@ -147,6 +160,7 @@ const BLK1: ContextAssignment = {
   startMin: 3 * 1440 + 600,
   endMin: 3 * 1440 + 840,
   label: "10:00–14:00",
+  runId: null,
 };
 
 const P1_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -1359,6 +1373,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
       existing: { kind: "remove", assignmentId: "blk1" },
       shift: null,
+      until: null,
     };
     const moveCmd: MoveCommand = {
       intent: "move",
@@ -1526,6 +1541,650 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     resolveRunLot!({ done: 2, error: null });
     await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
     expect(input.value).toBe("");
+  });
+});
+
+// -----------------------------------------------------------------------
+// S55 (R-404, R-406 to R-410, D130/brief §5): `expandCommand` runs before
+// EVERY several intercept, board-answered or not, so a "clear Cell 1"/
+// "cover Sam with Ana"/"same as yesterday" sentence lands in the SAME lot
+// machinery CB-lot already proved. `buildCtx`'s own fixture keeps two
+// "Cell 1" nodes on purpose (S49's own ambiguity cases), which would make
+// EVERY one of the brief's own sentences ("clear Cell 1", "cover Sam with
+// Ana on Cell 1") ambiguous here -- so these cases get their OWN small
+// fixture, `buildXCtx`, with three uniquely named cells, an unambiguous
+// "Sam"/"Ana" pair, and `nowMinuteOfDay` set (CB-x-8's own rounding).
+// -----------------------------------------------------------------------
+
+/** CB-x's own nodes: one line, three uniquely-named cells (never two
+ *  "Cell 1"s -- see the block comment above). */
+function buildXNodes() {
+  return [
+    { id: "xp", name: "Plant X", path: "plant_x" },
+    { id: "xl", name: "Line X", path: "plant_x.line_x" },
+    { id: "xc1", name: "Cell 1", path: "plant_x.line_x.cell_1" },
+    { id: "xc2", name: "Cell 2", path: "plant_x.line_x.cell_2" },
+    { id: "xc3", name: "Cell 3", path: "plant_x.line_x.cell_3" },
+  ];
+}
+
+/** Reuses `buildCtx`'s own defaults (days, `wallToOffset`, `overlaps`,
+ *  `findRunOverlap`, `minDurationMinutes`, …) but with the nodes/operators
+ *  above and `nowMinuteOfDay` set to 10:07 -- CB-x-8's own rounding, and
+ *  inert everywhere else (only a boundary-shift sentence reads it). */
+function buildXCtx(over: Partial<ResolveContext> = {}): ResolveContext {
+  const nodes = buildXNodes();
+  return buildCtx({
+    cells: [nodes[2], nodes[3], nodes[4]],
+    nodeById: new Map(nodes.map((n) => [n.id, n] as const)),
+    operators: [
+      { id: "op1", displayName: "Operator 1", employeeRef: "E100", active: true },
+      { id: "sam", displayName: "Sam", employeeRef: null, active: true },
+      { id: "ana", displayName: "Ana", employeeRef: null, active: true },
+    ],
+    nowMinuteOfDay: 10 * 60 + 7,
+    ...over,
+  });
+}
+
+/** Same shape as `renderBar` (brief §5), trimmed to what these cases need:
+ *  `ctx` built by `buildXCtx`, an optional `reader` (CB-x-6) and an
+ *  optional `onRunLot` mock (every lot case). */
+function renderXBar(
+  over: Partial<ResolveContext> = {},
+  reader: Reader | null = null,
+  s51: { onRunLot?: (resolved: ResolvedAny[]) => Promise<LotResult> } = {},
+) {
+  const onOpen = vi.fn();
+  const onRetime = vi.fn();
+  const onBook = vi.fn();
+  const onRetimeRun = vi.fn();
+  const onUnassign = vi.fn();
+  const onMove = vi.fn();
+  const onHighlight = vi.fn();
+  const onRunLot = vi.fn(s51.onRunLot ?? (() => new Promise<LotResult>(() => {})));
+  render(
+    <CommandBar
+      ctx={buildXCtx(over)}
+      dateFormat="d_mon_yyyy"
+      zone="UTC"
+      reader={reader}
+      onOpen={onOpen}
+      onRetime={onRetime}
+      onBook={onBook}
+      onRetimeRun={onRetimeRun}
+      onUnassign={onUnassign}
+      onMove={onMove}
+      onRunLot={onRunLot}
+      onHighlight={onHighlight}
+    />,
+  );
+  const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
+  return {
+    onOpen,
+    onRetime,
+    onBook,
+    onRetimeRun,
+    onUnassign,
+    onMove,
+    onRunLot,
+    onHighlight,
+    input,
+  };
+}
+
+/** CB-x-1/CB-x-4/CB-x-7: two blocks on Cell 1 (xc1), today, direct. */
+const XBLK1: ContextAssignment = {
+  id: "xblk1",
+  nodeId: "xc1",
+  operatorId: "op1",
+  productId: "ha",
+  productName: "Housing A",
+  startMin: 3 * 1440 + 600,
+  endMin: 3 * 1440 + 840,
+  label: "10:00–14:00",
+  runId: null,
+};
+const XBLK2: ContextAssignment = {
+  ...XBLK1,
+  id: "xblk2",
+  startMin: 3 * 1440 + 840,
+  endMin: 3 * 1440 + 960,
+  label: "14:00–16:00",
+};
+
+/** CB-x-2/CB-x-6: a headcounted run on Cell 1, and Sam's own block
+ *  attached to it -- "cover Sam with Ana" must write the assign back onto
+ *  the SAME run, not a direct block. */
+const RUN_X: ContextRun = {
+  id: "runX",
+  nodeId: "xc1",
+  productId: "ha",
+  startMin: 3 * 1440 + 480,
+  endMin: 3 * 1440 + 960,
+  label: "Housing A 08:00–16:00",
+  span: "08:00–16:00",
+  productName: "Housing A",
+  headcount: 3,
+};
+const XSAM: ContextAssignment = {
+  id: "xsam",
+  nodeId: "xc1",
+  operatorId: "sam",
+  productId: "ha",
+  productName: "Housing A",
+  startMin: 3 * 1440 + 600,
+  endMin: 3 * 1440 + 840,
+  label: "10:00–14:00",
+  runId: "runX",
+};
+
+/** CB-x-3: Operator 1's block on Cell 1 YESTERDAY (day index 2) -- the
+ *  fixture "same as yesterday for Cell 1" copies from. */
+const XYESTERDAY_BLK: ContextAssignment = {
+  id: "xyblk",
+  nodeId: "xc1",
+  operatorId: "op1",
+  productId: "ha",
+  productName: "Housing A",
+  startMin: 2 * 1440 + 600,
+  endMin: 2 * 1440 + 840,
+  label: "10:00–14:00",
+  runId: null,
+};
+
+/** CB-x-4: `n` distinct 5-minute blocks on Cell 1 today, never individually
+ *  resolved (the ceiling question fires from the COUNT `expandCommand`
+ *  builds, before any of them ever reaches `resolveCommand`) -- 5 minutes
+ *  apart keeps 101 of them inside one day's 1440-minute window. */
+function manyBlocksOnXC1(n: number): ContextAssignment[] {
+  const out: ContextAssignment[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push({
+      ...XBLK1,
+      id: `xn${i}`,
+      startMin: 3 * 1440 + i * 5,
+      endMin: 3 * 1440 + i * 5 + 5,
+      label: `block ${i}`,
+    });
+  }
+  return out;
+}
+
+/** CB-x-7: `n` distinct blocks on Cell 1 today, each 15 minutes (the
+ *  fixture's own `minDurationMinutes` -- these DO reach `resolveCommand`,
+ *  one per lot step, so each must be long enough to resolve clean) 20
+ *  minutes apart; only the COUNT matters for the 5-and-more truncation. */
+function spacedBlocksOnXC1(n: number): ContextAssignment[] {
+  const out: ContextAssignment[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push({
+      ...XBLK1,
+      id: `xs${i}`,
+      startMin: 3 * 1440 + i * 20,
+      endMin: 3 * 1440 + i * 20 + 15,
+      label: `block ${i}`,
+    });
+  }
+  return out;
+}
+
+describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D130)", () => {
+  it("CB-x-1: 'clear Cell 1 today' expands to a lot of two removals, both blocks outlined, one yes runs them in board order", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input, onHighlight } = renderXBar({ assignments: [XBLK1, XBLK2] }, null, { onRunLot });
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(onHighlight).toHaveBeenLastCalledWith([
+      { kind: "remove", assignmentIds: ["xblk1"] },
+      { kind: "remove", assignmentIds: ["xblk2"] },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["unassign", "unassign"]);
+    expect((resolvedList[0] as ResolvedUnassign).assignmentId).toBe("xblk1");
+    expect((resolvedList[1] as ResolvedUnassign).assignmentId).toBe("xblk2");
+  });
+
+  it("CB-x-2: 'cover Sam with Ana on Cell 1 today' is a lot of two (remove, assign); the assign attaches to Sam's run", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ assignments: [XSAM], runs: [RUN_X] }, null, { onRunLot });
+
+    fireEvent.change(input, { target: { value: "cover Sam with Ana on Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^2 commands ready: /);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["unassign", "assign"]);
+    expect((resolvedList[0] as ResolvedUnassign).assignmentId).toBe("xsam");
+    const assignResolved = resolvedList[1] as ResolvedCommand;
+    expect(assignResolved.operatorId).toBe("ana");
+    expect(assignResolved.target).toEqual({ kind: "run", runId: "runX" });
+  });
+
+  it("CB-x-3: 'same as yesterday for Cell 1' with one block yesterday resolves as a single create, not a lot", () => {
+    const { onOpen, onRunLot, input } = renderXBar({ assignments: [XYESTERDAY_BLK] });
+
+    fireEvent.change(input, { target: { value: "same as yesterday for Cell 1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("xc1");
+    expect(resolved.operatorId).toBe("op1");
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 });
+  });
+
+  it("CB-x-4: an expansion over the 100 ceiling asks for a smaller span; nothing runs", () => {
+    const { onOpen, onRunLot, input } = renderXBar({ assignments: manyBlocksOnXC1(101) });
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "That would be 101 changes; say a smaller span — one cell, or one day.",
+    );
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+  });
+
+  it("CB-x-5: 'clear Cell 3 today' with nobody there is a readout in the resolver's own words, not a question", () => {
+    const { input } = renderXBar();
+
+    fireEvent.change(input, { target: { value: "clear Cell 3 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    expect(statusText()).toBe(`Cell 3 has nobody on it ${dayLabel}.`);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("CB-x-6: the model path decodes a 'replace' form into the same lot the rules would build", async () => {
+    const replaceForm: ReplaceCommand = {
+      intent: "replace",
+      operator: "Sam",
+      with: "Ana",
+      place: ["Cell 1"],
+      day: { kind: "today" },
+      span: null,
+      shift: null,
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: replaceForm,
+      by: "model",
+    }));
+    const { input } = renderXBar({ assignments: [XSAM], runs: [RUN_X] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "cover Sam with Ana on Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+  });
+
+  it("CB-x-7: a lot over six shows five and a count of the rest; six or fewer show every one", () => {
+    const { input } = renderXBar({ assignments: spacedBlocksOnXC1(8) });
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText().startsWith("8 commands ready: 1. ")).toBe(true);
+    expect(statusText()).toContain("… and 3 more");
+    expect(statusText()).not.toContain("6. ");
+
+    cleanup();
+
+    const three = renderXBar({ assignments: spacedBlocksOnXC1(3) });
+    fireEvent.change(three.input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(three.input, { key: "Enter" });
+
+    expect(statusText().startsWith("3 commands ready: 1. ")).toBe(true);
+    expect(statusText()).toContain("3. ");
+    expect(statusText()).not.toContain("more");
+  });
+
+  it("CB-x-8: 'assign Sam to Housing A on Cell 1 for the rest of the day' at 10:07 today rounds the start to 10:15", () => {
+    const { onOpen, input } = renderXBar({ nowMinuteOfDay: 10 * 60 + 7 });
+
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 for the rest of the day" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.range.startMin).toBe(3 * 1440 + 615);
+    expect(statusText()).toContain("10:15");
+  });
+
+  // -----------------------------------------------------------------------
+  // Reviewer (S55 lane D), 14 Sept follow-up: the brief's own cases (CB-x-1
+  // to CB-x-8) prove the happy paths; these attack the seams -- a mid-lot
+  // question answered into the LOT (never `heldRef`'s replace/swap form), an
+  // ambiguous SECOND person on a replace/swap filling the right field, the
+  // lot's own confirm/cancel/edit surface, the model path for `copy` and an
+  // absence's `until`, the exact ceiling, and the same-block collision guard
+  // read against a `swap` (which touches two DIFFERENT blocks, never one
+  // twice).
+  // -----------------------------------------------------------------------
+
+  /** CB-x-9: Ana's own block on Cell 1, same hours as Sam's (XSAM) --
+   *  "cover Sam with Ana" then asks `block_exists` for the assign step. */
+  const XANA_EXISTING: ContextAssignment = {
+    id: "xanaExisting",
+    nodeId: "xc1",
+    operatorId: "ana",
+    productId: "ha",
+    productName: "Housing A",
+    startMin: 3 * 1440 + 600,
+    endMin: 3 * 1440 + 840,
+    label: "10:00–14:00",
+    runId: null,
+  };
+
+  it("CB-x-9: the assign step of an expanded lot asks block_exists, numbered '2 of 2', and the answer substitutes into the LOT, not heldRef's replace form", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ assignments: [XSAM, XANA_EXISTING], runs: [RUN_X] }, null, {
+      onRunLot,
+    });
+
+    fireEvent.change(input, { target: { value: "cover Sam with Ana on Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Step 1 (the removal) resolves cleanly and the lot advances on its own
+    // to step 2 (the assign), which stops on Ana's own overlapping block --
+    // numbered against the LOT's two commands, never the single replace
+    // sentence `heldRef` would have held pre-S55.
+    expect(statusText()).toMatch(/^2 of 2: /);
+    expect(statusText()).toContain("Ana");
+
+    fireEvent.click(screen.getByRole("button", { name: "Separate block" }));
+
+    // The answer re-resolved the LOT's own step 2 -- the lot is now whole,
+    // not a fresh single-command question against the original sentence.
+    expect(statusText()).toMatch(/^2 commands ready: /);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["unassign", "assign"]);
+    const assignResolved = resolvedList[1] as ResolvedCommand;
+    expect(assignResolved.operatorId).toBe("ana");
+  });
+
+  it("CB-x-10: an ambiguous SECOND person on a replace fills `with`, never `operator`, and the lot appears once picked", () => {
+    const { input } = renderXBar({
+      assignments: [XSAM],
+      operators: [
+        { id: "op1", displayName: "Operator 1", employeeRef: "E100", active: true },
+        { id: "sam", displayName: "Sam", employeeRef: null, active: true },
+        { id: "ana", displayName: "Ana", employeeRef: null, active: true },
+        { id: "anna", displayName: "Anna", employeeRef: null, active: true },
+      ],
+    });
+
+    fireEvent.change(input, { target: { value: "cover Sam with An on Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // "Sam" resolved without a question (there is only one); "An" matches
+    // both Ana and Anna -- if the bar had wrongly compared `text` against
+    // `command.with` (or defaulted to `operator`), this button would
+    // overwrite the ALREADY-RESOLVED "Sam" instead of the ambiguous "An".
+    expect(statusText()).toContain('"An" matches 2');
+    expect(screen.getByRole("button", { name: "Ana" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Anna" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ana" }));
+
+    expect(input.value).toBe("cover Sam with Ana on Cell 1 today");
+    expect(statusText()).toMatch(/^2 commands ready: /);
+  });
+
+  it("CB-x-11: an ambiguous SECOND person on a swap fills `other`, never `operator`", () => {
+    const XANA_SWAP2: ContextAssignment = {
+      id: "xanaSwap2",
+      nodeId: "xc1",
+      operatorId: "ana",
+      productId: "hb",
+      productName: "Housing B",
+      startMin: 3 * 1440 + 840,
+      endMin: 3 * 1440 + 960,
+      label: "14:00–16:00",
+      runId: null,
+    };
+    const XSAM_DIRECT: ContextAssignment = {
+      id: "xsamDirect",
+      nodeId: "xc1",
+      operatorId: "sam",
+      productId: "ha",
+      productName: "Housing A",
+      startMin: 3 * 1440 + 600,
+      endMin: 3 * 1440 + 840,
+      label: "10:00–14:00",
+      runId: null,
+    };
+    const { input } = renderXBar({
+      assignments: [XSAM_DIRECT, XANA_SWAP2],
+      operators: [
+        { id: "op1", displayName: "Operator 1", employeeRef: "E100", active: true },
+        { id: "sam", displayName: "Sam", employeeRef: null, active: true },
+        { id: "ana", displayName: "Ana", employeeRef: null, active: true },
+        { id: "anna", displayName: "Anna", employeeRef: null, active: true },
+      ],
+    });
+
+    fireEvent.change(input, { target: { value: "swap Sam and An on Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toContain('"An" matches 2');
+    fireEvent.click(screen.getByRole("button", { name: "Ana" }));
+
+    expect(input.value).toBe("swap Sam and Ana on Cell 1 today");
+    expect(statusText()).toMatch(/^4 commands ready: /);
+  });
+
+  it("CB-x-12: Escape, a cancel word and a typed edit each drop an EXPANDED lot exactly as a raw several does (S51 CB-lot-7, replayed over expandCommand)", () => {
+    function reachExpandedLot() {
+      const rendered = renderXBar({ assignments: [XBLK1, XBLK2] });
+      fireEvent.change(rendered.input, { target: { value: "clear Cell 1 today" } });
+      fireEvent.keyDown(rendered.input, { key: "Enter" });
+      expect(statusText()).toMatch(/^2 commands ready: /);
+      return rendered;
+    }
+
+    // no
+    const first = reachExpandedLot();
+    let { input, onHighlight } = first;
+    const { onRunLot } = first;
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("");
+    expect(input.value).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+    expect(onRunLot).not.toHaveBeenCalled();
+
+    cleanup();
+
+    // Escape
+    ({ input, onHighlight } = reachExpandedLot());
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(statusText()).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+
+    cleanup();
+
+    // a typed edit -- a brand-new sentence works right after
+    ({ input } = reachExpandedLot());
+    fireEvent.change(input, { target: { value: "something else entirely" } });
+    expect(statusText()).toBe("");
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("CB-x-13: the model path decodes a 'copy' form into the same lot the rules would build", async () => {
+    const XYESTERDAY_BLK2: ContextAssignment = {
+      id: "xyblk2",
+      nodeId: "xc1",
+      operatorId: "sam",
+      productId: "ha",
+      productName: "Housing A",
+      startMin: 2 * 1440 + 840,
+      endMin: 2 * 1440 + 960,
+      label: "14:00–16:00",
+      runId: null,
+    };
+    const copyForm: CopyCommand = {
+      intent: "copy",
+      place: ["Cell 1"],
+      from: { kind: "yesterday" },
+      to: { kind: "today" },
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: copyForm,
+      by: "model",
+    }));
+    const { input } = renderXBar({ assignments: [XYESTERDAY_BLK, XYESTERDAY_BLK2] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "copy yesterday to today for Cell 1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+  });
+
+  it("CB-x-14: the model path decodes an unassign with `until` (an absence) into the same lot the rules would build", async () => {
+    const XSAM_TODAY: ContextAssignment = {
+      id: "xsamToday",
+      nodeId: "xc1",
+      operatorId: "sam",
+      productId: "ha",
+      productName: "Housing A",
+      startMin: 3 * 1440 + 600,
+      endMin: 3 * 1440 + 840,
+      label: "10:00–14:00",
+      runId: null,
+    };
+    const XSAM_TOMORROW: ContextAssignment = {
+      ...XSAM_TODAY,
+      id: "xsamTomorrow",
+      startMin: 4 * 1440 + 600,
+      endMin: 4 * 1440 + 840,
+    };
+    const untilForm: UnassignCommand = {
+      intent: "unassign",
+      operator: "Sam",
+      place: [],
+      day: { kind: "today" },
+      span: null,
+      existing: null,
+      shift: null,
+      until: { kind: "tomorrow" },
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: untilForm,
+      by: "model",
+    }));
+    const { input } = renderXBar({ assignments: [XSAM_TODAY, XSAM_TOMORROW] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "Sam is off from today until tomorrow" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+  });
+
+  it("CB-x-15: exactly 100 is a lot (shows five and '… and 95 more'); 101 is still the refusal (CB-x-4)", () => {
+    const { input } = renderXBar({
+      assignments: manyBlocksOnXC1(100).map((b, i) => ({
+        ...b,
+        endMin: b.startMin + 15,
+        label: `block ${i}`,
+      })),
+    });
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText().startsWith("100 commands ready: 1. ")).toBe(true);
+    expect(statusText()).toContain("… and 95 more");
+    expect(screen.getByRole("button", { name: "Do all 100" })).toBeTruthy();
+  });
+
+  it("CB-x-16: 'swap' writes two removals and two assigns on TWO DIFFERENT blocks -- the same-block collision refusal (S51 review fix) must never fire", async () => {
+    const XANA_SWAP: ContextAssignment = {
+      id: "xanaSwap",
+      nodeId: "xc1",
+      operatorId: "ana",
+      productId: "hb",
+      productName: "Housing B",
+      startMin: 3 * 1440 + 840,
+      endMin: 3 * 1440 + 960,
+      label: "14:00–16:00",
+      runId: null,
+    };
+    const XSAM_DIRECT: ContextAssignment = {
+      id: "xsamDirect2",
+      nodeId: "xc1",
+      operatorId: "sam",
+      productId: "ha",
+      productName: "Housing A",
+      startMin: 3 * 1440 + 600,
+      endMin: 3 * 1440 + 840,
+      label: "10:00–14:00",
+      runId: null,
+    };
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ assignments: [XSAM_DIRECT, XANA_SWAP] }, null, { onRunLot });
+
+    fireEvent.change(input, { target: { value: "swap Sam and Ana on Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^4 commands ready: /);
+    expect(statusText()).not.toContain("name the same block");
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 4" }));
+    await waitFor(() => expect(statusText()).toBe("Done: 4 commands."));
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-x-17: 'clear Cell 1 today' with nobody there is a plain readout, never the same-block collision message (no duplicates from an empty expansion)", () => {
+    const { input, onRunLot } = renderXBar();
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    expect(statusText()).toBe(`Cell 1 has nobody on it ${dayLabel}.`);
+    expect(statusText()).not.toContain("name the same block");
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(onRunLot).not.toHaveBeenCalled();
   });
 });
 

@@ -2515,6 +2515,9 @@ stages:
     developer session's recommendation: the same-form group into the pending retrain at the maintainer's
     pick, then the board-answers group as its own stage, because "clear Cell 1" and "cover Sam" are
     what a supervisor says when someone calls in sick. Unpark a group with a word.
+    **Groups 1 and 3 unparked 14 Sept (session 168)** together, one retrain: S55 (the sentences and the
+    board's lot) and S56 (the data and the fifth run), R-404 to R-410. Still parked here: group 2 (the
+    form grows: extend, split, add to a job, every weekday) and "undo that" (its own parked entry).
 - id: S54
   track: core
   num: 54
@@ -2547,6 +2550,73 @@ stages:
     against 0063 by hand and re-ran the script to the same bytes, confirmed the fail-open case runs
     board_window as the supervisor, and found nothing blocking; the SQL file's number collided with an
     existing one and is 98, the next free.
+- id: S55
+  track: core
+  num: 55
+  title: The catalogue's first pick — spans by their edges, other word orders, and the board writing the lot (cover, swap, clear, copy, off till Friday)
+  status: now
+  owner: agent
+  refs:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  - docs/agent-briefs/s55-a-grammar-brief.md
+  - docs/agent-briefs/s55-b-expand-brief.md
+  - docs/agent-briefs/s55-c-decoder-brief.md
+  - docs/agent-briefs/s55-d-bar-brief.md
+  delivers:
+  - R-404
+  - R-405
+  - R-406
+  - R-407
+  - R-408
+  - R-409
+  - R-410
+  what: >-
+    **Groups 1 and 3 of the S53 catalogue, unparked together.** The grammar learns spans said by a
+    length ("from 8 for 4 hours"), by one edge ("after 2 pm" on a removal), or by a boundary the
+    cell's pattern knows ("all day", "until end of shift", "for the rest of the day" — three reserved
+    shift names, D128's road); other word orders ("Sam works on", "Cell 1 gets Sam", "take Sam off",
+    "this afternoon"); and five sentences the board answers: cover/replace, swap, everyone (clear a
+    cell, move a line), copy a day or a week, and an absence with an until. One new pure step in the
+    resolver, expandCommand, turns each board-answered sentence into a several of ordinary
+    commands with existing and attach already filled from the blocks it found, and the S51 lot does
+    the rest: numbered questions, one readout, one yes. Ceiling 100; a block across both edges of a
+    removal span is a question; a cell with nobody on it is a plain answer.
+
+
+    **Known limit, named:** a copied block is a direct block, not attached to the copied job, because
+    the job does not exist until the lot runs. "Undo that" is parked separately (needs a log).
+  state: >-
+    **Briefed 14 Sept (session 168).** Four lanes in order: A the grammar and the types (parse.ts, its
+    tests, formatCommand round trips); then B the resolver (the boundary names, the clock, the
+    expansion, its tests) and C the decoder and schema in parallel; then D the bar and BoardPage (the
+    expansion before the several intercept, the new questions, the clock fed in). A reviewer breaks
+    each before it is called done; the full suite and the role walk before the commit.
+- id: S56
+  track: core
+  num: 56
+  title: The fifth run — the data widens for S55 and the model is taught once
+  status: open
+  owner: maintainer
+  refs:
+  - 'session 168 conversation (the maintainer, 14 Sept: "one retrain")'
+  - §19.101 (D130)
+  - docs/agent-briefs/s56-a-data-brief.md
+  delivers:
+  - R-410
+  what: >-
+    **Data follows the grammar (D126).** Templates for every S55 shape (durations, boundaries, the
+    open edges, the word orders, take-off/pull, the time-of-day words, everyone and clear, cover and
+    replace, swap, copy of a day and of a week, an absence with and without until), three new intents
+    in INTENTS, the system prompt's paragraphs for them, the held-out set regenerated with a new seed
+    and the rule parser's baseline re-read, the notebook's MAX_LEN re-checked against the longest
+    example, the Colab folder prepared. Then the maintainer's one run (the fifth), scored here on the
+    new held-out set; PASS at the 0.95 bar replaces the model file behind the board, and the five
+    kinds of sentence are read through the served model before this closes.
+  state: >-
+    **Waits on S55.** One lane after S55's grammar and decoder land. While the maintainer's Colab run
+    trains, the queue's next model-free piece (Whisper, Stage 6's second half) proceeds — the
+    maintainer's "in parallel" answered.
 - id: M1
   track: matrix
   num: 1
@@ -11081,6 +11151,104 @@ requirements:
     resolved value including the fail-open case), the settings screen cases and the board gate cases
     are in and the role walk passes.
 
+- id: R-404
+  title: A span may be said as a start and a length, as the whole day, or to the end of the shift or the day
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  stated_by: maintainer
+  claim: >-
+    "From 8 for 4 hours" (hours, half hours, minutes, "an hour") is a span the grammar computes; a length that runs past midnight is refused, never clipped. "All day", "until end of shift" and "for the rest of the day" travel as three reserved shift names the resolver answers from the cell's own shift pattern: all day is the first band's start to the last band's end; end of shift, with a start, ends where the band that start falls in ends; end of day ends where the last band ends, or at midnight when the cell has no pattern. The two "end of" names may carry a start (the one amendment to R-402's rule); with no start and today on the board, the start is now rounded up to the quarter hour, read from the board's clock, and on another day the resolver asks for the start. A cell with no pattern asked for all day or end of shift gets the same question a shift's name gets.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S55's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168) as part of the catalogue's group 1 (S53); design §19.101 (D130 item 3).
+- id: R-405
+  title: The same four things said in other word orders and with other words (works on, gets, runs, take off, pull, after, before, this afternoon)
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  stated_by: maintainer
+  claim: >-
+    "Sam works on Housing A on Cell 1 8 to 4" and "Sam is on …" are an assign; "Cell 1 gets Sam on Housing A 8 to 4" is an assign; "Cell 1 runs Housing A 8 to 4" is a booking. "Take Sam off Cell 1" and "pull Sam from Cell 1" are removals (take joins the removal verbs; off joins the removal's place words). On a removal, "after 2 pm" is 14:00 to the day's end and "before 2" or "until 2" is the day's start to 14:00 (the grammar writes the day's end as 23:59 and the resolver reads it as midnight). "This morning", "this afternoon", "this evening", "tonight" and "the night" are read as the shift of that name and resolved against the cell's bands by R-402's matcher; a plant whose bands are called 1, 2, 3 gets the no-shift question, never a guess at what an afternoon is. Every sentence in the catalogue's group 1 that the rule parser reads is in the training and held-out data.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S55's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 1 (S53); design §19.101 (D130 items 3 and 7).
+- id: R-406
+  title: Cover, replace and swap — one sentence names the people, the board finds the blocks, one yes does the rest
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  stated_by: maintainer
+  claim: >-
+    "Cover Sam with Ana on Cell 1 today" and "replace Sam with Ana" become, for each of Sam's blocks the sentence reaches (the named cell or wherever Sam is, the day, the hours or shift if said), a removal of that block and an assign of Ana on the same cell, part and hours, attached to the same job when the block was in one, with existing and attach already filled so no step asks again; the lot shows them numbered and one yes runs them. "Swap Sam and Ana" means each takes the other's block: both blocks removed and both re-created crossed, on the same cells, parts and hours; when either person has no block that day the resolver says so, and when either has more than one the resolver asks for the hours rather than guess. Eligibility questions the assign steps raise (a part not offered, a person already on that cell) stop the lot at that step exactly as R-400 says.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S55's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's groups 1 and 3 (S53); design §19.101 (D130 items 1 and 2).
+- id: R-407
+  title: Everyone — clear a cell, remove everyone after a time, move everyone on a line
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  stated_by: maintainer
+  claim: >-
+    "Clear Cell 1 today", "unassign everyone from Cell 3 after 2 pm" and "move everyone on Line 1 to Cell 2" read everyone (everybody, all) as a reserved operator word on a removal or a move; "clear <place>" with no person is the same removal. The resolver expands it into one command per block on the cells at or below the named place that day (every cell the board shows when no place is named), in board order, with existing filled in: a block inside the span is removed; a block across one edge of the span is re-timed to the part outside; a block across both edges is a question asking for a span that reaches one end of it, never a whole removal and never a hole. A move of everyone moves each block to the named cell keeping its hours; a part the new cell does not offer stops the lot at that step with the same question a single move gets. A cell with nobody on it is a plain answer, not a lot of zero.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S55's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 items 1, 2 and 5).
+- id: R-408
+  title: Copy a day or a week onto another, for one place or the whole board, skipping what is already there
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  stated_by: maintainer
+  claim: >-
+    "Same as yesterday for Cell 1" copies yesterday onto today for Cell 1; "copy Monday to Tuesday" copies every cell the board shows; "repeat this week next week" and "same as last week" copy week onto week, Monday onto Monday, and a day onto a week or a week onto a day is refused by the grammar. The board's window must hold both sides (otherwise the day-off-board question names the missing one). Each job on the source becomes a booking with the same hours and headcount; each person's block becomes a direct block with the same part and hours; a block or job already on the target with the same person, part and hours is skipped, so the same copy said twice does nothing the second time. A copied block is not attached to a copied job (the job does not exist until the lot runs) — named on S55's card as a limit. The four day words yesterday, this week, next week and last week join the grammar and the form.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S55's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 items 2 and 4).
+- id: R-409
+  title: An absence — a person is off today or until a day, and their blocks go with one yes
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  stated_by: maintainer
+  claim: >-
+    "Sam is off today", "Sam is out", "Sam is sick", "Ana is on leave till Friday" and "Ana is away until Friday" are a removal with no place over one day, or over every day from the first to the named one when until is said (a removal's new field, null otherwise); the resolver expands it into one removal per block per day, in board order, with existing filled in; a person with nothing on the board over those days is a plain answer. The board's window must hold the days (the day-off-board question names the first missing one). No absence record is written — the app has none; the blocks go, and that is what the sentence asked.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S55's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 item 2).
+- id: R-410
+  title: A lot the board writes has a ceiling and the same one yes; the model is taught all of it in one run
+  source:
+  - 'session 168 conversation (the maintainer, 14 Sept: "Unpark group 1 and group 3 together, one retrain")'
+  - §19.101 (D130)
+  stated_by: maintainer
+  claim: >-
+    An expansion above 100 commands is a question naming the count and asking for a smaller span (one cell, one day), never a silent cut. Below it the lot is R-400's: numbered questions per step, the readout of every command, one yes, a failure stops it and says how many were done. The rule parser reads every sentence of R-404 to R-409 (tests pin each); the decoder reads the three new intents, the four day words and the until field, and refuses anything else as before; the training templates cover every shape, the held-out set carries them, and one Colab run (the fifth) is scored on it at the 0.95 bar before the model file behind the board is replaced. Nothing in the bar executes a step any differently than a several of the same commands typed by hand would.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S55's tests when the lanes land; the model's own reading by S56's fifth run"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 168): "one retrain"; design §19.101 (D130 items 5 and the closing paragraph).
 findings:
 - id: F-145
   title: The fourth run scored 20% because its predictions answered sentences the held-out file no longer holds, and the scorer joined by id
@@ -22266,10 +22434,16 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  stage: S52
-  text: "Before the retrain --- change and shift as move verbs, a shift's name as the hours (S52, R-401, R-402, in progress)"
+  stage: S55
+  text: "The catalogue's groups 1 and 3 --- spans by their edges, other word orders, cover/swap/clear/copy/off-till (S55, R-404 to R-410, in progress)"
   why: >-
-    The maintainer's word on 13 Sept (session 163), both taught in the one Colab run so it is not run twice.
+    The maintainer's pick on 14 Sept (session 168): both groups at once, one retrain. The grammar and the
+    resolver lead, the data and the fifth run follow (S56).
+- kind: task
+  stage: S56
+  text: "The fifth run --- templates and held-out for S55's shapes, one Colab run, scored at the 0.95 bar (S56, R-410)"
+  why: >-
+    One retrain for both groups, the maintainer's word. While it trains on Colab the next entry proceeds.
 - kind: task
   text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
   why: >-
@@ -22306,6 +22480,13 @@ next:
   why: >-
     Asked for by the maintainer on 14 Sept and made a card so it is visual. Same-form sentences can join
     the pending retrain at their pick; every other group is a stage of its own. Unpark a group with a word.
+    Groups 1 and 3 unparked 14 Sept (session 168) as S55/S56; group 2 stays here.
+- kind: parked
+  text: "Undo that --- a log of what the command bar did, and the sentence that reverses the last entry"
+  why: >-
+    Split out of the catalogue's group 3 on 14 Sept (session 168, D130 item 6): every other sentence in
+    the group is answered from the board as it is; undo needs a record of what the bar changed, which the
+    app does not keep. Its own piece when the maintainer wants it.
 - kind: parked
   text: "Save every sentence a person types into the command bar, with the site's permission, to grow the training and held-out sets"
   why: >-

@@ -300,6 +300,36 @@ export function boardFetchBounds(
   };
 }
 
+/**
+ * S55 (D130 item 3, R-404/R-406 to R-410): the inverse of `axis.wallToOffset`
+ * for a WINDOW offset -- which day (the `dayStarts` band the real instant
+ * `axis.windowStart + offsetMin` falls in) and the wall-clock minute of that
+ * day, in `axis.zone`. `BoardPage` feeds this to `ResolveContext.wallOf`;
+ * `expandCommand` (`src/lib/command/resolve.ts`) uses it to read a run's or a
+ * block's own wall-clock hours back off its real-minute `startMin`/`endMin`
+ * when writing a copy onto another day, and to build the boundary spans of
+ * `ALL_DAY`/`END_OF_SHIFT`/`END_OF_DAY`. The wall-clock reading itself is the
+ * SAME zone helper `formatClock` is built on (`partsInZone`), never
+ * `getHours()` on the local clock (CLAUDE.md §4's own example for this file).
+ * An offset outside the window (defensive: an overnight band carrying past
+ * the last local midnight, or a caller outside this module's own bounds)
+ * clamps to the nearest end rather than silently read the wrong day.
+ */
+export function wallOf(
+  axis: DayAxis,
+  offsetMin: number,
+): { dayIndex: number; minuteOfDay: number } {
+  const instant = addMinutes(axis.windowStart, offsetMin);
+  let dayIndex = axis.dayStarts.findIndex(
+    (s, i) => i < axis.dayCount && instant >= s && instant < axis.dayStarts[i + 1],
+  );
+  if (dayIndex === -1) {
+    dayIndex = instant < axis.dayStarts[0] ? 0 : axis.dayCount - 1;
+  }
+  const p = partsInZone(instant, axis.zone);
+  return { dayIndex, minuteOfDay: p.hour * 60 + p.minute };
+}
+
 /** The mockup's `fmtNum`: 2dp, trailing zeros (and a bare trailing dot) stripped. */
 export function formatNumber(n: number): string {
   let s = n.toFixed(2);

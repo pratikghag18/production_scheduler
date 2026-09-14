@@ -37,6 +37,7 @@ import {
   buildDayAxis,
   formatClock,
   MINUTES_PER_DAY,
+  wallOf as wallOfAxis,
 } from "./lib/time";
 import { BoardToolbar } from "./components/BoardToolbar";
 import { CommandLauncher } from "./components/CommandLauncher";
@@ -534,6 +535,9 @@ export default function BoardPage() {
     const t = axis.dayStarts.findIndex(
       (s, i) => i < axis.dayCount && now >= s && now < axis.dayStarts[i + 1],
     );
+    // S55 (D130 item 3): `now`'s own wall-clock reading, in the plant's
+    // zone -- `nowMinuteOfDay` below is built from this, never `getHours()`.
+    const nowParts = partsInZone(now, index.zone);
     const runs: ContextRun[] = [];
     for (const [nodeId, list] of index.runsByNode) {
       for (const r of list) {
@@ -561,6 +565,12 @@ export default function BoardPage() {
           // Housing A 08:00-16:00" would be worse than naming the hours
           // once).
           span,
+          // S55 (D130 item 4): `expandCommand`'s `copy` writes these onto a
+          // copied `book` command -- the SAME `productViewFor` call `label`
+          // above is already built from (`p`), one step further, and the
+          // run's own field, not retyped.
+          productName: p?.name ?? null,
+          headcount: r.plannedHeadcount,
         });
       }
     }
@@ -591,6 +601,15 @@ export default function BoardPage() {
           startMin: s.startMin,
           endMin: s.endMin,
         })),
+      // S55 (D130 item 3): the SAME `now`/`t` this memo already computed
+      // `todayIndex` with, read as a wall-clock minute of day through the
+      // SAME zone helper `formatClock` is built on (`partsInZone`) -- never
+      // `getHours()` on the local clock. `null` exactly when `todayIndex` is
+      // (today is off the board).
+      nowMinuteOfDay: t === -1 ? null : nowParts.hour * 60 + nowParts.minute,
+      // S55 (D130 item 3/4): the inverse of `wallToOffset` for a window
+      // offset -- `lib/time.ts`'s own `wallOf`, over this window's axis.
+      wallOf: (offsetMin: number) => wallOfAxis(axis, offsetMin),
     };
   }, [boardQuery.data, index, operatorPool]);
 

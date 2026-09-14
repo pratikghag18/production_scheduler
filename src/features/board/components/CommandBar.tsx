@@ -17,7 +17,7 @@ import type {
   Existing,
   ParseFailure,
 } from "@/lib/command/parse";
-import { resolveCommand, describeQuestion } from "@/lib/command/resolve";
+import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
 import type {
   ResolveContext,
   ResolvedCommand,
@@ -461,19 +461,37 @@ export function CommandBar({
    * site omits it, which is byte-for-byte the pre-S44-b behaviour.
    */
   function runCommand(command: Command, suffix?: string): void {
-    // S51 (R-400/D127, brief §2 item 1): a several is intercepted HERE,
-    // before `resolveCommand` ever sees it -- the resolver's own answer to
-    // one (`several_unsupported`) stays exactly what it was for a several
-    // that reaches it some other way (the model, or a future caller); this
-    // is the ONE place both the rules and the model-reader paths land
-    // (`fallbackToRules`/`applyReading` both call `runCommand`), so a lot
-    // starts the same way regardless of which path read it.
-    if (command.intent === "several") {
-      startLot(command.commands);
+    // S55 (R-406 to R-410, D130/brief §2): `expandCommand` runs FIRST, before
+    // the S51 several intercept below -- a board-answered sentence
+    // (`replace`/`swap`/`copy`, `everyone` on a removal/move, an absence's
+    // `until`) turns into an ordinary `several`/single here, and THIS is the
+    // one place both the rules path and the model path land
+    // (`fallbackToRules`/`applyReading` both call `runCommand`), so both
+    // expand the same way. `expandCommand` returns the SAME object for every
+    // ordinary form (an already-single command, or an already-several one),
+    // so the branch below is byte for byte the pre-S55 several intercept for
+    // every sentence that never needed expanding.
+    const expanded = expandCommand(command, ctx);
+    if (!expanded.ok) {
+      // `command` here, never `expanded.command` (there is none) -- the
+      // ORIGINAL sentence's command is what a candidate button must
+      // substitute a field into and re-run (see `pickCandidate`'s own S55
+      // comment below).
+      setStatus(questionToStatus(expanded.question, command));
       return;
     }
+    const resolvedCommand = expanded.command;
+    if (resolvedCommand.intent === "several") {
+      startLot(resolvedCommand.commands);
+      return;
+    }
+    // `heldRef` keeps the ORIGINAL sentence's command (brief §2: "the one a
+    // re-parse after a button press must start from"), never the expanded
+    // form -- for an ordinary sentence the two are the SAME object
+    // (`expandCommand`'s own contract), so this is unchanged from before S55
+    // for every sentence that does not expand.
     heldRef.current = command;
-    const resolution = resolveCommand(command, ctx);
+    const resolution = resolveCommand(resolvedCommand, ctx);
     if (resolution.ok) {
       const resolved = resolution.resolved;
       if (resolved.intent === "book") {
@@ -499,7 +517,13 @@ export function CommandBar({
       setStatus({ kind: "readout", message: renderReadout(resolved.readout) + (suffix ?? "") });
       return;
     }
-    setStatus(questionToStatus(resolution.question, command));
+    // `resolvedCommand`, not `command`: when `expandCommand` collapsed a
+    // board-answered sentence down to the ONE ordinary command it produced
+    // (brief §2: "a single: the existing path"), that is what was actually
+    // handed to `resolveCommand` and so what a candidate button must
+    // substitute a field into -- for an ordinary sentence the two are the
+    // same object, so this is unchanged from before S55 there.
+    setStatus(questionToStatus(resolution.question, resolvedCommand));
   }
 
   /** S51: starts a fresh lot from a several's inner commands and resolves
@@ -647,10 +671,18 @@ export function CommandBar({
       return;
     }
     const n = lot.done.length;
-    const readouts = lot.done.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join("; ");
+    // S55 (brief §4): unchanged for a lot of up to 6 (every existing CB-lot
+    // case pins this small format); above it, the first 5 numbered readouts
+    // followed by a count of the rest -- `expandCommand` can hand back many
+    // more than a person would ever read one by one, and the "N commands
+    // ready" question and the outline (`buildLotHighlights`, below) already
+    // say what the whole lot touches.
+    const shown = n > 6 ? lot.done.slice(0, 5) : lot.done;
+    const readouts = shown.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join("; ");
+    const readoutText = n > 6 ? `${readouts}; … and ${n - 5} more` : readouts;
     setStatus({
       kind: "question",
-      message: `${n} commands ready: ${readouts} — say or type yes to do them, no to leave them.`,
+      message: `${n} commands ready: ${readoutText} — say or type yes to do them, no to leave them.`,
       candidates: [{ key: "__do_all__", label: `Do all ${n}`, onClick: () => runLotNow() }],
       blockHighlight: buildLotHighlights(lot.done),
       lot: true,
@@ -777,35 +809,68 @@ export function CommandBar({
     command: Command,
     field: "operator" | "product" | "place" | "shift",
     candidate: Candidate,
+    // S55 (D130 item 1): the exact word `question.text` was asked about --
+    // needed ONLY to tell a `replace`/`swap`'s TWO person fields apart (see
+    // below); every other caller of this function leaves it unset.
+    text?: string,
   ): void {
-    // "operator" only ever comes from an AssignCommand's ambiguous question
-    // (a `BookCommand` has no operator field, and an `UnassignCommand`'s
-    // ambiguous-operator question re-resolves through its own `operator`
-    // field below rather than this cast). "product" only ever comes from
-    // AssignCommand or BookCommand (S41-b: unassign names no part at all).
-    // "place" comes from any of the four -- never from a SeveralCommand
-    // (S50: a several never reaches an ambiguous/place question; its only
-    // answer is `several_unsupported`, with no candidates at all) -- so the
-    // cast here mirrors that invariant the same way the other two branches
-    // already do, rather than widening `SingleCommand` to prove it. "shift"
-    // (S52-b, R-402) comes from any of the four too -- every single command
-    // carries `shift`.
-    const next: Command =
-      field === "operator"
-        ? command.intent === "unassign"
-          ? { ...command, operator: candidate.word }
-          : { ...(command as AssignCommand), operator: candidate.word }
-        : field === "product"
-          ? { ...(command as AssignCommand | BookCommand), product: candidate.word }
-          : field === "shift"
-            ? {
-                ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
-                shift: candidate.word,
-              }
-            : {
-                ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
-                place: [candidate.word],
-              };
+    let next: Command;
+    if (
+      field === "operator" &&
+      (command.intent === "replace" || command.intent === "swap") &&
+      text !== undefined
+    ) {
+      // S55: both people a `replace`/`swap` names resolve through the SAME
+      // `resolvePersonStep`, so `resolve.ts` can only ever say `field:
+      // "operator"` for either one -- `question.text` is that call's own
+      // input verbatim (`command.operator` for the first person, `with`/
+      // `other` for the second), so comparing it against `command.operator`
+      // tells the two apart without a field name `resolve.ts`'s `Question`
+      // type does not have (this module owns no shape there -- CLAUDE.md
+      // §4: never a copy of the resolver's own rule).
+      next =
+        command.intent === "replace"
+          ? text === command.operator
+            ? { ...command, operator: candidate.word }
+            : { ...command, with: candidate.word }
+          : text === command.operator
+            ? { ...command, operator: candidate.word }
+            : { ...command, other: candidate.word };
+    } else if (
+      field === "place" &&
+      (command.intent === "replace" || command.intent === "swap" || command.intent === "copy")
+    ) {
+      next = { ...command, place: [candidate.word] };
+    } else {
+      // "operator" only ever comes from an AssignCommand's ambiguous question
+      // (a `BookCommand` has no operator field, and an `UnassignCommand`'s
+      // ambiguous-operator question re-resolves through its own `operator`
+      // field below rather than this cast). "product" only ever comes from
+      // AssignCommand or BookCommand (S41-b: unassign names no part at all).
+      // "place" comes from any of the four -- never from a SeveralCommand
+      // (S50: a several never reaches an ambiguous/place question; its only
+      // answer is `several_unsupported`, with no candidates at all) -- so the
+      // cast here mirrors that invariant the same way the other two branches
+      // already do, rather than widening `SingleCommand` to prove it. "shift"
+      // (S52-b, R-402) comes from any of the four too -- every single command
+      // carries `shift`.
+      next =
+        field === "operator"
+          ? command.intent === "unassign"
+            ? { ...command, operator: candidate.word }
+            : { ...(command as AssignCommand), operator: candidate.word }
+          : field === "product"
+            ? { ...(command as AssignCommand | BookCommand), product: candidate.word }
+            : field === "shift"
+              ? {
+                  ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
+                  shift: candidate.word,
+                }
+              : {
+                  ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
+                  place: [candidate.word],
+                };
+    }
     // S51 (brief §2 item 1): while a lot stands, a candidate substitutes
     // into THAT command (`lotRef.current.commands[index]`), never into the
     // input text or the lone `heldRef` -- the input keeps showing the whole
@@ -886,19 +951,75 @@ export function CommandBar({
   }
 
   function questionToStatus(question: Question, command: Command): Status {
+    // S55 (R-406 to R-410, D130/brief §3): the bar's own words for the seven
+    // new `expandCommand` questions -- plainer, or with fields
+    // `describeQuestion`'s generic sentence does not carry, than the
+    // resolver's own wording (which still backs every OTHER kind below,
+    // unchanged). No candidates on any of these (brief §3): a cancel word or
+    // fresh typing clears them exactly as any other question does.
+    // `nothing_to_do` is a plain READOUT, not a question at all -- the text
+    // as the resolver wrote it (brief §3, D130 item 1).
+    if (question.kind === "nothing_to_do") {
+      return { kind: "readout", message: renderReadout(question.text) };
+    }
+    if (question.kind === "lot_too_big") {
+      return {
+        kind: "question",
+        message: `That would be ${question.count} changes; say a smaller span — one cell, or one day.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "split_needed") {
+      return {
+        kind: "question",
+        message: `${question.person}'s ${question.block} block on ${question.cell} runs across both sides of ${question.span}; say a span that reaches one end of it.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "swap_which") {
+      return {
+        kind: "question",
+        message: `${question.person} has more than one block ${question.when}: ${question.blocks.join(", ")}. Say the hours.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "day_order") {
+      return {
+        kind: "question",
+        message: `${question.second} is before ${question.first}; say the days the other way round.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "no_start") {
+      return {
+        kind: "question",
+        message: `Say when it starts — "from 10", say.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "no_shift_at") {
+      return {
+        kind: "question",
+        message: `No shift on ${question.cell} covers ${question.time}.`,
+        candidates: [],
+      };
+    }
+    // `expand_first` (brief §3: "should never show") and every existing kind
+    // keep `describeQuestion`'s own wording, unchanged.
     // CU4 (S41-b brief §5): a question's message can carry an ISO day too
     // (`remove_which`/`no_block`'s whole-day `when`) -- the same
     // `renderReadout` substitution the successful-open readout gets.
     const message = renderReadout(describeQuestion(question));
     if (question.kind === "ambiguous") {
       const field = question.field;
+      const text = question.text;
       return {
         kind: "question",
         message,
         candidates: question.candidates.map((c) => ({
           key: c.id,
           label: c.label,
-          onClick: () => pickCandidate(command, field, c),
+          onClick: () => pickCandidate(command, field, c, text),
         })),
       };
     }

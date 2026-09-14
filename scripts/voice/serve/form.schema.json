@@ -63,6 +63,17 @@
       },
       "required": ["hour", "minute"]
     },
+    "copy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": { "oneOf": [{ "$ref": "#/$defs/day_word" }, { "$ref": "#/$defs/week_word" }] },
+        "intent": { "const": "copy" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "to": { "oneOf": [{ "$ref": "#/$defs/day_word" }, { "$ref": "#/$defs/week_word" }] }
+      },
+      "required": ["from", "intent", "place", "to"]
+    },
     "day_word": {
       "oneOf": [
         {
@@ -75,6 +86,12 @@
           "type": "object",
           "additionalProperties": false,
           "properties": { "kind": { "const": "tomorrow" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "yesterday" } },
           "required": ["kind"]
         },
         {
@@ -117,6 +134,20 @@
       },
       "required": ["day", "existing", "intent", "operator", "place", "shift", "span", "toPlace"]
     },
+    "replace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "intent": { "const": "replace" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
+        "with": { "type": "string" }
+      },
+      "required": ["day", "intent", "operator", "place", "shift", "span", "with"]
+    },
     "span": {
       "type": "object",
       "additionalProperties": false,
@@ -125,6 +156,20 @@
         "start": { "$ref": "#/$defs/clock_time" }
       },
       "required": ["end", "start"]
+    },
+    "swap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "intent": { "const": "swap" },
+        "operator": { "type": "string" },
+        "other": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+      },
+      "required": ["day", "intent", "operator", "other", "place", "shift", "span"]
     },
     "unassign": {
       "type": "object",
@@ -136,9 +181,32 @@
         "operator": { "type": "string" },
         "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
         "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
-        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
+        "until": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] }
       },
-      "required": ["day", "existing", "intent", "operator", "place", "shift", "span"]
+      "required": ["day", "existing", "intent", "operator", "place", "shift", "span", "until"]
+    },
+    "week_word": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "this_week" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "next_week" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "last_week" } },
+          "required": ["kind"]
+        }
+      ]
     }
   },
   "oneOf": [
@@ -146,6 +214,9 @@
     { "$ref": "#/$defs/book" },
     { "$ref": "#/$defs/unassign" },
     { "$ref": "#/$defs/move" },
+    { "$ref": "#/$defs/replace" },
+    { "$ref": "#/$defs/swap" },
+    { "$ref": "#/$defs/copy" },
     {
       "type": "object",
       "additionalProperties": false,

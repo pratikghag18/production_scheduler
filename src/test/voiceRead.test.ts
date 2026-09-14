@@ -274,6 +274,11 @@ describe("VR8: the schema matches the four canonical forms field for field", () 
     { sentence: "book Housing A on Cell 1 in Line 1 from 6 to 2", intent: "book" },
     { sentence: "unassign Sam from Cell 1 in Line 1 from 10 to 2", intent: "unassign" },
     { sentence: "move Sam on Cell 1 in Line 1 to Cell 2", intent: "move" },
+    // S55 (D130 item 2): the three board-answered intents join the walk --
+    // same field-for-field check, same $defs indirection.
+    { sentence: "cover Sam with Ana on Cell 1 today", intent: "replace" },
+    { sentence: "swap Sam and Ana on Cell 1 tomorrow", intent: "swap" },
+    { sentence: "copy Monday to Tuesday for Cell 1", intent: "copy" },
   ];
 
   for (const { sentence, intent } of cases) {
@@ -292,6 +297,13 @@ describe("VR8: the schema matches the four canonical forms field for field", () 
       }
       expect([...(branch.required ?? [])].sort()).toEqual([...formKeys].sort());
       expect(schemaKeys).toEqual([...schemaKeys].sort());
+
+      // S55 (brief §3): "extend it so a form the schema accepts always
+      // decodes and vice versa" -- the schema's own field set (just pinned
+      // above) and the decoder's accepted field set must be the same set,
+      // so a form built from exactly those keys round-trips through
+      // `decodeCommand` back to the parsed command itself.
+      expect(decodeCommand(form)).toEqual(parsed.command);
     });
   }
 
@@ -637,5 +649,295 @@ describe("VR13 (S52-c, R-402): shift is in all four $defs, start/end nullable on
       expect(keys).toContain("shift");
       expect(keys).toEqual([...keys].sort());
     }
+  });
+});
+
+// S55 (docs/agent-briefs/s55-c-decoder-brief.md §1/§3, R-406, design
+// §19.101/D130): "cover Sam with Ana" -- `place` may be empty (wherever the
+// operator is), the day-vs-hours-vs-shift invariants are the same ones
+// unassign/move already have.
+describe("VR14 (S55, R-406): replace decodes", () => {
+  it("VR14: a well-formed replace round-trips through decodeCommand", () => {
+    const parsed = parseCommand("cover Sam with Ana on Cell 1 today");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.command.intent).toBe("replace");
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it('VR14: place may be empty ("replace Sam with Ana")', () => {
+    const parsed = parseCommand("replace Sam with Ana");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "replace") return;
+    expect(parsed.command.place).toEqual([]);
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR14: extra top-level keys are ignored -- a replace has no attach/existing to force null, so an invented one is simply dropped", () => {
+    const parsed = parseCommand("cover Sam with Ana on Cell 1 today");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    const withExtras = { ...valid, unexpectedTopLevel: "surprise", existing: { kind: "separate" } };
+    expect(decodeCommand(withExtras)).toEqual(parsed.command);
+  });
+
+  it("VR14: refuses a replace naming both a shift and hours", () => {
+    const parsed = parseCommand("cover Sam with Ana on Cell 1 from 2 to 4");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const both = { ...(parsed.command as unknown as Record<string, unknown>), shift: "2" };
+    expect(decodeCommand(both)).toBeNull();
+  });
+});
+
+// S55 (R-406): "swap Sam and Ana" -- same shape as replace with `other` in
+// place of `with`.
+describe("VR15 (S55, R-406): swap decodes", () => {
+  it("VR15: a well-formed swap (no place, no day) round-trips through decodeCommand", () => {
+    const parsed = parseCommand("swap Sam and Ana");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.command.intent).toBe("swap");
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR15: a swap with a place and a day round-trips through decodeCommand", () => {
+    const parsed = parseCommand("swap Sam with Ana on Cell 1 tomorrow");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+});
+
+// S55 (R-408, D130 item 4): "same as yesterday for Cell 1" / "copy Monday to
+// Tuesday" -- the one place a week kind (`this_week`/`next_week`/
+// `last_week`) is ever legal.
+describe("VR16 (S55, R-408, D130 item 4): copy decodes, week kinds included", () => {
+  it("VR16: a day-to-day copy round-trips through decodeCommand", () => {
+    const parsed = parseCommand("copy Monday to Tuesday for Cell 1");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.command.intent).toBe("copy");
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR16: a week-to-week copy (this_week to next_week) round-trips through decodeCommand", () => {
+    const parsed = parseCommand("repeat this week next week");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "copy") return;
+    expect(parsed.command.from).toEqual({ kind: "this_week" });
+    expect(parsed.command.to).toEqual({ kind: "next_week" });
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it('VR16: "same as yesterday" (a day source implying a day destination) round-trips, place may be empty', () => {
+    const parsed = parseCommand("same as yesterday");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "copy") return;
+    expect(parsed.command.from).toEqual({ kind: "yesterday" });
+    expect(parsed.command.to).toEqual({ kind: "today" });
+    expect(parsed.command.place).toEqual([]);
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR16: extra top-level keys are ignored on a copy", () => {
+    const parsed = parseCommand("copy Monday to Tuesday for Cell 1");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    const withExtras = { ...valid, unexpectedTopLevel: "surprise" };
+    expect(decodeCommand(withExtras)).toEqual(parsed.command);
+  });
+});
+
+// S55 (R-409): `until` joins `UnassignCommand` -- REQUIRED (a missing key
+// garbles the form, the same strictness `shift` got at VR8/VR13), `null` on
+// every removal that is not an absence carrying its own `until`.
+describe("VR17 (S55, R-409): unassign's until -- required, decodes, missing is garbled", () => {
+  it('VR17: an absence with an until ("Ana is on leave till Friday") round-trips through decodeCommand', () => {
+    const parsed = parseCommand("Ana is on leave till Friday");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "unassign") return;
+    expect(parsed.command.until).toEqual({ kind: "weekday", day: 5 });
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR17: an ordinary removal's until is null and round-trips through decodeCommand", () => {
+    const parsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "unassign") return;
+    expect(parsed.command.until).toBeNull();
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR17: a missing until is garbled", () => {
+    const parsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    delete valid.until;
+    expect(decodeCommand(valid)).toBeNull();
+  });
+});
+
+// S55 (brief §1; coordinator correction, 14 Sept): the three week kinds are
+// legal ONLY on a copy's from/to -- refused everywhere else by BOTH gates.
+// The schema is the fence the served model is physically forced through
+// (`day_word` itself carries only the five ordinary day kinds; `week_word`,
+// the three week kinds, is reachable only from `$defs.copy`'s own from/to),
+// and `decodeDayWord` (used for `day` everywhere, and for `until`) is the
+// second gate, for every caller that is not the served model -- it has no
+// case for a week kind, so one anywhere else garbles the whole form.
+describe("VR18 (S55): a week kind is garbled everywhere except a copy's from/to", () => {
+  it("VR18: the schema itself refuses a week kind on day_word -- week_word's three kinds are reachable only from copy's own from/to", () => {
+    type JsonSchemaNode = {
+      $ref?: string;
+      properties?: Record<string, unknown>;
+      oneOf?: JsonSchemaNode[];
+    };
+    const root = formSchema as { $defs: Record<string, JsonSchemaNode> };
+
+    const dayWordKinds = (root.$defs.day_word.oneOf ?? [])
+      .map((n) => (n.properties?.kind as { const?: string } | undefined)?.const)
+      .sort();
+    expect(dayWordKinds).toEqual(["date", "today", "tomorrow", "weekday", "yesterday"]);
+
+    const weekWordKinds = (root.$defs.week_word.oneOf ?? [])
+      .map((n) => (n.properties?.kind as { const?: string } | undefined)?.const)
+      .sort();
+    expect(weekWordKinds).toEqual(["last_week", "next_week", "this_week"]);
+
+    // Every branch with a `day` (and unassign's own `until`) points at
+    // `day_word` alone -- `week_word` never appears there -- so the served
+    // model is physically unable to emit a week kind on any of them.
+    for (const name of ["assign", "book", "unassign", "move", "replace", "swap"]) {
+      const branch = root.$defs[name];
+      const dayProp = branch.properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
+      const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
+      expect(refs, `${name}.day`).toEqual(["#/$defs/day_word"]);
+    }
+    const untilProp = root.$defs.unassign.properties?.until as
+      { oneOf?: JsonSchemaNode[] } | undefined;
+    const untilRefs = (untilProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
+    expect(untilRefs).toEqual(["#/$defs/day_word"]);
+
+    // The copy branch is the one place both defs are reachable.
+    const copyFrom = root.$defs.copy.properties?.from as { oneOf?: JsonSchemaNode[] } | undefined;
+    const copyTo = root.$defs.copy.properties?.to as { oneOf?: JsonSchemaNode[] } | undefined;
+    expect((copyFrom?.oneOf ?? []).map((n) => n.$ref)).toEqual([
+      "#/$defs/day_word",
+      "#/$defs/week_word",
+    ]);
+    expect((copyTo?.oneOf ?? []).map((n) => n.$ref)).toEqual([
+      "#/$defs/day_word",
+      "#/$defs/week_word",
+    ]);
+
+    // ... and the decoder, the second gate, refuses the same shapes the
+    // schema (the first gate) now refuses.
+    const assignParsed = parseCommand("assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
+    expect(assignParsed.ok).toBe(true);
+    if (assignParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(assignParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, day: { kind: "this_week" } })).toBeNull();
+    }
+    const unassignParsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(unassignParsed.ok).toBe(true);
+    if (unassignParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(unassignParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, until: { kind: "next_week" } })).toBeNull();
+    }
+  });
+
+  it("VR18: a week kind on an assign's day is garbled", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, day: { kind: "this_week" } })).toBeNull();
+  });
+
+  it("VR18: a week kind on an unassign's until is garbled", () => {
+    const parsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, until: { kind: "next_week" } })).toBeNull();
+  });
+
+  it("VR18: a week kind on a replace's or a swap's day is garbled", () => {
+    const replaceParsed = parseCommand("cover Sam with Ana on Cell 1 today");
+    expect(replaceParsed.ok).toBe(true);
+    if (replaceParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(replaceParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, day: { kind: "last_week" } })).toBeNull();
+    }
+
+    const swapParsed = parseCommand("swap Sam and Ana");
+    expect(swapParsed.ok).toBe(true);
+    if (swapParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(swapParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, day: { kind: "this_week" } })).toBeNull();
+    }
+  });
+});
+
+// S55 (D130 item 2): a `several` never holds a `replace`/`swap`/`copy` -- the
+// model says two or three plain commands, or one of these three; the board
+// makes the many. `decodeSingle` (shared by `decodeSeveral`) has no case for
+// any of the three, so one anywhere in `commands` garbles the whole form.
+describe("VR19 (S55, D130 item 2): a several never holds replace/swap/copy", () => {
+  const validInnerAssign = {
+    intent: "assign",
+    operator: "A2",
+    product: "Housing A",
+    place: ["Cell 1"],
+    day: null,
+    start: { hour: 10, minute: 0 },
+    end: { hour: 14, minute: 0 },
+    attach: null,
+    shift: null,
+    existing: null,
+  };
+
+  it("VR19: a replace inside commands garbles the whole several", () => {
+    const replaceParsed = parseCommand("cover Sam with Ana on Cell 1 today");
+    expect(replaceParsed.ok).toBe(true);
+    if (!replaceParsed.ok) return;
+    const replaceForm: unknown = JSON.parse(JSON.stringify(replaceParsed.command));
+    expect(
+      decodeCommand({ intent: "several", commands: [validInnerAssign, replaceForm] }),
+    ).toBeNull();
+  });
+
+  it("VR19: a swap inside commands garbles the whole several", () => {
+    const swapParsed = parseCommand("swap Sam and Ana");
+    expect(swapParsed.ok).toBe(true);
+    if (!swapParsed.ok) return;
+    const swapForm: unknown = JSON.parse(JSON.stringify(swapParsed.command));
+    expect(decodeCommand({ intent: "several", commands: [validInnerAssign, swapForm] })).toBeNull();
+  });
+
+  it("VR19: a copy inside commands garbles the whole several", () => {
+    const copyParsed = parseCommand("copy Monday to Tuesday for Cell 1");
+    expect(copyParsed.ok).toBe(true);
+    if (!copyParsed.ok) return;
+    const copyForm: unknown = JSON.parse(JSON.stringify(copyParsed.command));
+    expect(decodeCommand({ intent: "several", commands: [validInnerAssign, copyForm] })).toBeNull();
   });
 });

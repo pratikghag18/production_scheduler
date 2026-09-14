@@ -27,6 +27,23 @@ out from under this file, which is its job; a red V4 means come back here and
 decide, in the open, whether to accept the drift (and regenerate, deliberately,
 with a new seed and a plan entry saying so) or fix the grammar.
 
+**Migrated 14 Sept 2026 (session 168, S55, R-409):** every unassign form in
+this file (direct, and each unassign inner command of an S5 "several" row)
+now carries `until: null` — S55 lane A added the field to `UnassignCommand`
+for "off till Friday" / "on leave until Wednesday"; every removal recorded
+here is an ordinary one, so `until` is `null` throughout. No sentence
+changed for this, and no other field changed. One row, `ho-00229`, had its
+sentence's verb changed from "clear" to "remove" ("clear Marcus Novak
+sunday" → "remove Marcus Novak sunday") — a genuine, unrelated defect found
+while doing this migration: R-407 (also S55) reads "clear `<word>`" with no
+place separator as EVERYONE clearing a place named `<word>`, so the row's
+already-correct recorded form (`operator: "Marcus Novak", place: []`) no
+longer matched what the current grammar parses from that exact sentence.
+`scripts/voice/lib/templates.mjs`'s U8/U9/U10 templates were fixed the same
+way (excluded from picking "clear") so `voice:generate` will not reproduce
+this. S56 regenerates the whole held-out set anyway, on seed `20260915`, so
+this migration is a bridge until then, not a new steady state.
+
 ## `train.jsonl` — gitignored, generated on demand
 
 Not committed. Generate it with:

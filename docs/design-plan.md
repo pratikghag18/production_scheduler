@@ -9512,3 +9512,73 @@ that asserts every guard it expects before writing, adding one key beside `date_
 lesson of DEF-0011, never retyped.
 
 Brief: `docs/agent-briefs/s54-a-command-bar-switch-brief.md`.
+
+## §19.101 — D130: the board answers by expanding a sentence into a lot, and a span may be said by its edges (S55, S56)
+
+> The maintainer, 14 Sept, session 168, on the S53 catalogue: *"Unpark group 1 and group 3
+> together, one retrain, also can something else be done in parallel?"*
+
+### D130 — the two groups are one stage because they share one mechanism
+
+The catalogue (S53) sorted what a scheduler says by what each costs. Group 1 was "the same form,
+only new sentences"; group 3 was "the board answers, not the sentence". Read together they
+collapse into one design decision and one small widening of the form:
+
+**1. A board-answered sentence is a several the board writes.** "Clear Cell 1", "cover Sam with
+Ana", "swap Sam and Ana", "same as yesterday for Cell 1", "Ana is on leave till Friday" all name
+blocks the sentence does not spell out. Rather than a new kind of resolution for each, the resolver
+gains one pure step, `expandCommand`, that turns such a sentence into an ordinary `several` of
+`SingleCommand`s -- one removal, move, assign or booking per block the board finds, in board order,
+with `existing` and `attach` already filled in from the blocks themselves -- and hands it to the
+lot machinery D127 built (one numbered question per step if any, one "N commands ready", one yes).
+Nothing new executes; the lot does what it already does. The bar calls the expansion once, before
+its several intercept, so the rules path and the model path expand the same way.
+
+**2. The form grows by exactly what the sentence cannot avoid.** Three new intents whose fields
+are only the words said -- `replace` (who, with whom), `swap` (who, with whom), `copy` (which place,
+from which day or week, to which) -- and one new field, `until` on a removal, for "off till Friday".
+`everyone` is not a field: it is a reserved operator word on a removal or a move, which is what
+"clear Cell 1" and "move everyone on Line 1" already are. A `several` never holds one of these three
+(the model says two or three plain commands, or one of these; the board makes the many).
+
+**3. A span may be said by one edge, or by its length, or by a boundary the board knows.** "From 8
+for 4 hours" is arithmetic the grammar does. "After 2 pm" on a removal is 14:00 to the day's end;
+"before 2" is the day's start to 14:00 (the grammar writes the day's end as 23:59, the one value the
+clock type can hold, and the resolver reads that as midnight). "All day", "until end of shift" and
+"for the rest of the day" are boundaries only the cell's shift pattern knows, so they travel the way
+a shift's name already does (D128): as three reserved shift names the resolver answers from the
+pattern, never from the clock -- all day is the first band's start to the last band's end; end of
+shift, with a start, is the end of the band that start falls in; end of day is the last band's end,
+or midnight when the cell has no pattern. The one amendment to R-402's invariant: the two "end of"
+names may carry a start, because they name only the other edge. With no start and today on the
+board, the start is now, rounded up to the quarter hour -- the first time the resolver reads the
+clock, fed by the board (`nowMinuteOfDay`), never by this module.
+
+**4. What a copy is.** A day copies to a day, a week to a week (Monday onto Monday), for the named
+place or every cell the board shows. Each job becomes a booking with the same hours and headcount;
+each person's block becomes a direct block with the same hours and part; a block already there with
+the same person, part and hours is skipped, so a copy said twice does nothing the second time. A
+copied block is NOT attached to a copied job: the job does not exist until the lot runs, and the lot
+resolves everything before the yes. Named as a limit on S55's card; attaching after the fact is a
+later piece.
+
+**5. Two refusals that keep a lot honest.** An expansion above a ceiling (100 commands) is a
+question naming the count and asking for a smaller span, never a silent truncation. A block that
+sits across BOTH edges of a removal span ("clear Cell 1 from 10 to 12" against an 8-to-4 block)
+would need a split the app does not have; the expansion asks for a span that reaches one end of
+the block rather than removing the whole thing or inventing a hole.
+
+**6. Undo stays out.** "Undo that" needs a log of what the bar did, which is its own piece and not a
+sentence; it goes to the queue as parked, beside the catalogue.
+
+**7. The morning is a shift's name.** "This afternoon", "tonight", "the night" are read as the
+shift called afternoon or night and resolved by D128's matcher against the cell's own bands; a
+plant whose bands are called 1, 2, 3 gets the same "no shift called afternoon" question a wrong
+name gets. No clock arithmetic decides what an afternoon is.
+
+**Why one retrain.** Every one of these shapes changes what the model must say (three intents, one
+field, four day words, the reserved words) and the maintainer asked for one run. S55 lands the
+grammar, resolver, decoder and bar first, with the rule parser covering every sentence in tests;
+S56 regenerates the data, the held-out set and the prompt and the maintainer runs Colab once (the
+fifth run). While that run trains, the queue's next model-free piece (Whisper, Stage 6's second
+half) can proceed -- the maintainer's parallel question, answered.

@@ -27,6 +27,10 @@ export function commandAssignments(
       endMin: a.endMin,
       label: `${formatClock(addMinutes(index.windowStart, a.startMin), index.zone)}–${formatClock(addMinutes(index.windowStart, a.endMin), index.zone)}`,
       productName: productId !== null ? (index.productById.get(productId)?.name ?? null) : null,
+      // S55 (D130 item 1): the block's own run, null for a direct block --
+      // `expandCommand`'s `replace`/`swap` (resolve.ts) read this straight
+      // off the block rather than re-deriving it from `fitsRun`.
+      runId: a.runId,
     });
   }
   return out;

@@ -21,16 +21,35 @@
  * `commands` is refused (an inner command is always a `SingleCommand`). The
  * model does not emit this shape yet (S50-b's training set does); the
  * decoder accepts it now so the pipeline is ready the day it does.
+ *
+ * S55 (brief docs/agent-briefs/s55-c-decoder-brief.md §1, design
+ * §19.101/D130): `DayWord` gains `yesterday` (decoded anywhere a day word
+ * already is) and three WEEK kinds (`this_week`/`next_week`/`last_week`),
+ * legal ONLY on a `CopyCommand`'s `from`/`to` — `decodeDayWord` itself never
+ * grows a case for them, so a week kind anywhere else (an assign's `day`, an
+ * unassign's `until`) falls through to its existing `return undefined` and
+ * the whole form is garbled; `decodeDayOrWeekWord`, used only by `decodeCopy`,
+ * is the one place that adds them. `UnassignCommand` gains `until: DayWord |
+ * null`, now REQUIRED — a missing key is garbled, the same strictness
+ * `shift` got at S52-c's VR8. Three new top-level decoders, `replace`/`swap`/
+ * `copy`, dispatched only from `decodeCommand` itself, never from
+ * `decodeSingle` — D130 item 2's rule that a `several` never holds one of
+ * these three holds here for free: `decodeSeveral` calls `decodeSingle` on
+ * every inner item, which has no case for these three intents and simply
+ * refuses them.
  */
 import type {
   AssignCommand,
   BookCommand,
   ClockTime,
   Command,
+  CopyCommand,
   DayWord,
   MoveCommand,
+  ReplaceCommand,
   SeveralCommand,
   SingleCommand,
+  SwapCommand,
   UnassignCommand,
 } from "../command/parse.ts";
 
@@ -88,13 +107,20 @@ function decodeShift(value: unknown): string | null | undefined {
 }
 
 /** `undefined` means "invalid"; `null` is itself a valid answer ("the day
- *  the board is showing"), so the two must not share a sentinel. */
+ *  the board is showing"), so the two must not share a sentinel. S55: adds
+ *  `yesterday`, a day like any other. The three week kinds are deliberately
+ *  NOT here — they are legal only on a `CopyCommand`'s `from`/`to`
+ *  (`decodeDayOrWeekWord`, below); everywhere else this file uses
+ *  `decodeDayWord`, so a week kind simply falls through to `return
+ *  undefined` and garbles the form, the same way an unknown `kind` always
+ *  has. */
 function decodeDayWord(value: unknown): DayWord | null | undefined {
   if (value === null) return null;
   if (!isRecord(value)) return undefined;
   const kind = value.kind;
   if (kind === "today") return { kind: "today" };
   if (kind === "tomorrow") return { kind: "tomorrow" };
+  if (kind === "yesterday") return { kind: "yesterday" };
   if (kind === "weekday") {
     const day = value.day;
     if (isInt(day) && day >= 0 && day <= 6) {
@@ -106,6 +132,25 @@ function decodeDayWord(value: unknown): DayWord | null | undefined {
     return isNonEmptyString(value.iso) ? { kind: "date", iso: value.iso } : undefined;
   }
   return undefined;
+}
+
+/** S55 (D130 item 4): `CopyCommand.from`/`to` are the only fields where a
+ *  week kind is legal, and they are REQUIRED, non-null `DayWord`s (unlike
+ *  every other day field in this file, `null` is not itself a valid answer
+ *  here — there is no "the day the board is showing" reading of a copy's
+ *  source or destination). Reuses `decodeDayWord` for the five ordinary
+ *  kinds so the two never disagree about what a plain day looks like; the
+ *  day-vs-week PAIRING check (`copy_mismatch`/`copy_same`) is the grammar's
+ *  own job, not this decoder's (brief §1 note; `form.schema.json` does not
+ *  enforce it either) — this only decodes the shape. */
+function decodeDayOrWeekWord(value: unknown): DayWord | undefined {
+  if (!isRecord(value)) return undefined;
+  const kind = value.kind;
+  if (kind === "this_week") return { kind: "this_week" };
+  if (kind === "next_week") return { kind: "next_week" };
+  if (kind === "last_week") return { kind: "last_week" };
+  const day = decodeDayWord(value);
+  return day === null || day === undefined ? undefined : day;
 }
 
 /** Same `undefined`-means-invalid convention as `decodeDayWord`: `null`
@@ -198,6 +243,13 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
   if (shift === undefined) return null;
   // R-402: never both a shift and hours.
   if (shift !== null && span !== null) return null;
+  // S55 (R-409): `until` is REQUIRED -- a missing key (`undefined`) fails
+  // `decodeDayWord`'s `isRecord` check and garbles the whole form, the same
+  // strictness `shift` got at VR8. Plain `decodeDayWord`, not
+  // `decodeDayOrWeekWord`: a week kind on `until` is garbled too (the
+  // grammar never produces one there -- see `DayWord`'s own doc comment).
+  const until = decodeDayWord(obj.until);
+  if (until === undefined) return null;
   return {
     intent: "unassign",
     operator: obj.operator,
@@ -206,6 +258,7 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
     span,
     existing: null,
     shift,
+    until,
   };
 }
 
@@ -238,11 +291,82 @@ function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
   };
 }
 
+/** S55 (R-406): "cover Sam with Ana on Cell 1 today" -- `place` may be empty
+ *  ("wherever the operator is", the same reading `isStringArray` already
+ *  gives unassign/move). R-402's shift-or-hours invariant, unchanged:
+ *  non-null `shift` implies `span` null. */
+function decodeReplace(obj: Record<string, unknown>): ReplaceCommand | null {
+  if (!isNonEmptyString(obj.operator)) return null;
+  if (!isNonEmptyString(obj.with)) return null;
+  if (!isStringArray(obj.place)) return null;
+  const day = decodeDayWord(obj.day);
+  if (day === undefined) return null;
+  const span = decodeSpan(obj.span);
+  if (span === undefined) return null;
+  const shift = decodeShift(obj.shift);
+  if (shift === undefined) return null;
+  if (shift !== null && span !== null) return null;
+  return {
+    intent: "replace",
+    operator: obj.operator,
+    with: obj.with,
+    place: obj.place,
+    day,
+    span,
+    shift,
+  };
+}
+
+/** S55 (R-406): "swap Sam and Ana on Cell 1 tomorrow" -- same shape as
+ *  `decodeReplace` with `other` in place of `with`. */
+function decodeSwap(obj: Record<string, unknown>): SwapCommand | null {
+  if (!isNonEmptyString(obj.operator)) return null;
+  if (!isNonEmptyString(obj.other)) return null;
+  if (!isStringArray(obj.place)) return null;
+  const day = decodeDayWord(obj.day);
+  if (day === undefined) return null;
+  const span = decodeSpan(obj.span);
+  if (span === undefined) return null;
+  const shift = decodeShift(obj.shift);
+  if (shift === undefined) return null;
+  if (shift !== null && span !== null) return null;
+  return {
+    intent: "swap",
+    operator: obj.operator,
+    other: obj.other,
+    place: obj.place,
+    day,
+    span,
+    shift,
+  };
+}
+
+/** S55 (R-408, D130 item 4): "same as yesterday for Cell 1" / "copy Monday
+ *  to Tuesday" -- `place` may be empty (every cell the board shows).
+ *  `from`/`to` are required, non-null `DayWord`s, decoded through
+ *  `decodeDayOrWeekWord` so a week kind is accepted here and nowhere else in
+ *  this file. No `copy_mismatch`/`copy_same` cross-check -- that pairing is
+ *  the grammar's job, not the decoder's (see `decodeDayOrWeekWord`'s own
+ *  comment). */
+function decodeCopy(obj: Record<string, unknown>): CopyCommand | null {
+  if (!isStringArray(obj.place)) return null;
+  const from = decodeDayOrWeekWord(obj.from);
+  if (from === undefined) return null;
+  const to = decodeDayOrWeekWord(obj.to);
+  if (to === undefined) return null;
+  return { intent: "copy", place: obj.place, from, to };
+}
+
 /** Accepts an object whose `intent` is one of the four single shapes and
  *  every field of that intent's interface is present with the right shape;
  *  otherwise `null`. Never throws. Shared by `decodeCommand` (the top level)
  *  and `decodeSeveral` (each inner command) so the two never disagree about
- *  what a valid single command looks like. */
+ *  what a valid single command looks like. S55 (D130 item 2): deliberately
+ *  has no case for `replace`/`swap`/`copy` -- those are dispatched only from
+ *  `decodeCommand` itself, so a `several` (which decodes every inner item
+ *  through this function) can never hold one of them; an inner object with
+ *  one of those three intents simply falls through to `return null` below,
+ *  same as any other unrecognised intent always has. */
 function decodeSingle(obj: Record<string, unknown>): SingleCommand | null {
   const intent = obj.intent;
   if (intent === "assign") return decodeAssign(obj);
@@ -273,11 +397,15 @@ function decodeSeveral(obj: Record<string, unknown>): SeveralCommand | null {
   return { intent: "several", commands };
 }
 
-/** Accepts an object whose `intent` is one of the four single shapes, or
- *  `"several"` (S50: an array of two or more of them); otherwise `null`.
- *  Never throws. */
+/** Accepts an object whose `intent` is one of the four single shapes,
+ *  `"several"` (S50: an array of two or more of them), or one of S55's three
+ *  board-answered intents (`replace`/`swap`/`copy`); otherwise `null`. Never
+ *  throws. */
 export function decodeCommand(value: unknown): Command | null {
   if (!isRecord(value)) return null;
   if (value.intent === "several") return decodeSeveral(value);
+  if (value.intent === "replace") return decodeReplace(value);
+  if (value.intent === "swap") return decodeSwap(value);
+  if (value.intent === "copy") return decodeCopy(value);
   return decodeSingle(value);
 }

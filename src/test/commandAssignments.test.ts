@@ -109,6 +109,7 @@ describe("commandAssignments (R-385, brief §7)", () => {
         endMin: 600,
         label: "06:00–10:00",
         productName: "Housing A",
+        runId: null,
       },
     ]);
   });
@@ -157,5 +158,25 @@ describe("commandAssignments (R-385, brief §7)", () => {
     const a = baseAssignment({ productId: "prod-missing", runId: null });
     const out = commandAssignments(indexOf([a], [], []));
     expect(out[0].productName).toBe(null);
+  });
+
+  // -------------------------------------------------------------------------
+  // S55 (D130 item 1): `runId`, brief s55-d-bar-brief.md §1 (A8-A9) --
+  // `expandCommand`'s `replace`/`swap` read this straight off the block to
+  // write a copied assign's own `attach`, without re-deriving it from
+  // `fitsRun`.
+  // -------------------------------------------------------------------------
+
+  it("A8: a direct block carries runId null", () => {
+    const a = baseAssignment({ productId: "prod-1", runId: null });
+    const out = commandAssignments(indexOf([a], [], [baseProduct({ id: "prod-1" })]));
+    expect(out[0].runId).toBe(null);
+  });
+
+  it("A9: a run-attached block carries its own run's id", () => {
+    const a = baseAssignment({ productId: null, runId: "run-1" });
+    const run = baseRun({ id: "run-1", productId: "prod-run" });
+    const out = commandAssignments(indexOf([a], [run]));
+    expect(out[0].runId).toBe("run-1");
   });
 });

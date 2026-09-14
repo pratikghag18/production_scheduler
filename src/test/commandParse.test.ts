@@ -10,11 +10,27 @@
 import { describe, it, expect } from "vitest";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
 import { ASSIGN_VERBS, BOOK_VERBS, UNASSIGN_VERBS, MOVE_VERBS } from "@/lib/command/parse";
+import {
+  REPLACE_VERBS,
+  SWAP_VERBS,
+  COPY_VERBS,
+  EVERYONE,
+  ALL_DAY,
+  END_OF_SHIFT,
+  END_OF_DAY,
+  BOUNDARY_SHIFTS,
+  DAY_END,
+  ABSENCE_WORDS,
+  TIME_OF_DAY_WORDS,
+} from "@/lib/command/parse";
 import type {
   AssignCommand,
   BookCommand,
   UnassignCommand,
   MoveCommand,
+  ReplaceCommand,
+  SwapCommand,
+  CopyCommand,
   Command,
 } from "@/lib/command/parse";
 
@@ -521,6 +537,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
         shift: null,
         existing: null,
+        until: null,
       },
     });
   });
@@ -733,6 +750,12 @@ describe("commandParse: S41-a book-a-job worked examples", () => {
  * same one-`it()`-per-case shape as the P- and B-cases above.
  */
 describe("commandParse: S41-b unassign worked examples", () => {
+  // S55 re-pin (R-409): `UnassignCommand` gains `until: DayWord | null`
+  // (brief §1). Every existing unassign-shaped case in this file -- every
+  // call through this helper, and every raw literal elsewhere (U10, MV11,
+  // SH10, the dotted section, L1-L4, L15, L18) -- is re-pinned with
+  // `until: null` added; none of their asserted VALUES changed, so one note
+  // here stands for all of them rather than repeating it at each site.
   function unassignOk(overrides: Partial<UnassignCommand> = {}): {
     ok: true;
     command: UnassignCommand;
@@ -747,6 +770,7 @@ describe("commandParse: S41-b unassign worked examples", () => {
         span: null,
         shift: null,
         existing: null,
+        until: null,
         ...overrides,
       },
     };
@@ -796,6 +820,7 @@ describe("commandParse: S41-b unassign worked examples", () => {
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
         shift: null,
         existing: null,
+        until: null,
       },
     });
   });
@@ -1005,6 +1030,7 @@ describe("commandParse: S41-c move worked examples", () => {
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
         shift: null,
         existing: null,
+        until: null,
       },
     });
   });
@@ -1251,6 +1277,7 @@ describe("commandParse: S52 change, shift, and a shift by name", () => {
         span: null,
         existing: null,
         shift: "1",
+        until: null,
       }),
     );
   });
@@ -1494,6 +1521,7 @@ describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
         span: { start: { hour: 8, minute: 0 }, end: { hour: 11, minute: 0 } },
         shift: null,
         existing: null,
+        until: null,
       }),
     );
   });
@@ -1550,6 +1578,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         span: null,
         shift: null,
         existing: null,
+        until: null,
       },
     });
   });
@@ -1565,6 +1594,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         span: null,
         shift: null,
         existing: null,
+        until: null,
       },
     });
   });
@@ -1580,6 +1610,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         span: { start: { hour: 3, minute: 0 }, end: { hour: 5, minute: 0 } },
         shift: null,
         existing: null,
+        until: null,
       },
     });
   });
@@ -1604,6 +1635,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         span: { start: { hour: 3, minute: 0 }, end: { hour: 5, minute: 0 } },
         shift: null,
         existing: null,
+        until: null,
       },
     });
   });
@@ -1832,6 +1864,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             span: null,
             shift: null,
             existing: null,
+            until: null,
           },
           {
             intent: "unassign",
@@ -1841,6 +1874,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             span: null,
             shift: null,
             existing: null,
+            until: null,
           },
         ],
       },
@@ -1899,6 +1933,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         span: null,
         shift: null,
         existing: null,
+        until: null,
       },
       {
         intent: "unassign",
@@ -1908,6 +1943,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         span: null,
         shift: null,
         existing: null,
+        until: null,
       },
     ]);
     const rendered = formatCommand(parsed.command);
@@ -1943,5 +1979,1481 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         existing: null,
       },
     });
+  });
+});
+
+/**
+ * S55 (docs/agent-briefs/s55-a-grammar-brief.md, R-404-R-409, design
+ * §19.101/D130) — the grammar widens for the catalogue's groups 1 and 3:
+ * durations and boundaries (R-404), the word-order grammar (R-405), cover/
+ * replace and swap (R-406), everyone (R-407), copy (R-408), and absence
+ * (R-409). Each id below is the brief's own test-case id, one `it()` per
+ * case, the same shape as every describe block above.
+ */
+describe("commandParse: S55 durations (R-404)", () => {
+  const TAIL = "Sam on Housing A on Cell 1";
+
+  it("DU1: put Sam on Housing A on Cell 1 from 8 for 4 hours -- 08:00-12:00", () => {
+    expect(parseCommand(`put ${TAIL} from 8 for 4 hours`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 12, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("DU2: assign Sam to Housing A on Cell 1 at 8 for an hour -- 08:00-09:00", () => {
+    expect(parseCommand(`assign ${TAIL} at 8 for an hour`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 9, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("DU3: ... from 8 for 2 and a half hours -- 08:00-10:30", () => {
+    expect(parseCommand(`put ${TAIL} from 8 for 2 and a half hours`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 10, minute: 30 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("DU4: ... from 8 for 1.5 hours -- 90 minutes: the developer's own reading of the brief's 'same' is 'same as DU5' (both are 1.5 hours = 90 minutes = 09:30), not 'same as DU3' (2.5 hours) -- the arithmetic is unambiguous even where the prose is not", () => {
+    expect(parseCommand(`put ${TAIL} from 8 for 1.5 hours`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 9, minute: 30 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("DU5: ... from 8 for 90 minutes -- 09:30", () => {
+    expect(parseCommand(`put ${TAIL} from 8 for 90 minutes`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 9, minute: 30 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("DU6: ... from 8 for half an hour -- 08:30; hrs/hr/mins/min accepted", () => {
+    expect(parseCommand(`put ${TAIL} from 8 for half an hour`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 8, minute: 30 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+    expect(parseCommand(`put ${TAIL} from 8 for 4 hrs`).ok).toBe(true);
+    expect(parseCommand(`put ${TAIL} from 8 for 1 hr`).ok).toBe(true);
+    expect(parseCommand(`put ${TAIL} from 8 for 30 mins`).ok).toBe(true);
+    expect(parseCommand(`put ${TAIL} from 8 for 30 min`).ok).toBe(true);
+  });
+
+  it("DU7: ... from 10 pm for 4 hours -- bad_duration, past midnight, never clipped", () => {
+    expect(parseCommand(`put ${TAIL} from 10 pm for 4 hours`)).toEqual({
+      ok: false,
+      failure: { kind: "bad_duration", text: "4 hours" },
+    });
+  });
+
+  it("DU8: ... from 8 for 0 hours -- bad_duration", () => {
+    expect(parseCommand(`put ${TAIL} from 8 for 0 hours`)).toEqual({
+      ok: false,
+      failure: { kind: "bad_duration", text: "0 hours" },
+    });
+  });
+
+  it("DU9: book Housing A on Cell 1 from 8 for 4 hours for 3 people -- two 'for' clauses, the unit word tells them apart", () => {
+    expect(parseCommand("book Housing A on Cell 1 from 8 for 4 hours for 3 people")).toEqual(
+      bookOk({
+        start: { hour: 8, minute: 0 },
+        end: { hour: 12, minute: 0 },
+        headcount: 3,
+      }),
+    );
+  });
+
+  it("DU10 (the developer's own decision -- see the brief report): assign Sam to Housing A on Cell 1 8 to 4 for 2 hours -- a bare pair AND a duration, neither anchored by from/at, so nothing says which reading is real; reuses bad_time (never a new ParseFailure kind) since the sentence, read as a whole, is a malformed time clause", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 8 to 4 for 2 hours")).toEqual({
+      ok: false,
+      failure: { kind: "bad_time", text: "8 to 4 for 2 hours" },
+    });
+  });
+});
+
+describe("commandParse: F-146 -- a block that can end exactly at midnight", () => {
+  const TAIL = "Sam to Housing A on Cell 1";
+
+  it("F146-1: assign Sam to Housing A on Cell 1 from 8 pm to midnight -- end DAY_END, not time_order", () => {
+    expect(parseCommand(`assign ${TAIL} from 8 pm to midnight`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 20, minute: 0 },
+        end: DAY_END,
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("F146-2: assign Sam ... from 8 pm to 12 am -- end DAY_END too, the explicit-meridiem spelling", () => {
+    expect(parseCommand(`assign ${TAIL} from 8 pm to 12 am`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 20, minute: 0 },
+        end: DAY_END,
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("F146-3: assign Sam ... from 20:00 to 24:00 -- literal 24:00 is not bad_time, end DAY_END", () => {
+    expect(parseCommand(`assign ${TAIL} from 20:00 to 24:00`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 20, minute: 0 },
+        end: DAY_END,
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("F146-4: assign Sam ... from 8 pm for 4 hours -- a duration landing exactly on 24:00 writes DAY_END, never bad_duration", () => {
+    expect(parseCommand(`assign ${TAIL} from 8 pm for 4 hours`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 20, minute: 0 },
+        end: DAY_END,
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("F146-5: from 8 pm for 5 hours -- still bad_duration (runs PAST midnight, not onto it)", () => {
+    expect(parseCommand(`assign ${TAIL} from 8 pm for 5 hours`)).toEqual({
+      ok: false,
+      failure: { kind: "bad_duration", text: "5 hours" },
+    });
+  });
+
+  it("F146-6: from midnight to 8 -- a START spelled midnight stays the literal 0:00, never DAY_END", () => {
+    expect(parseCommand(`assign ${TAIL} from midnight to 8`)).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 0, minute: 0 },
+        end: { hour: 8, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("F146-7: formatCommand prints a DAY_END end as 'midnight' ('from 20:00 to midnight'), and the round trip holds", () => {
+    const first = parseCommand(`assign ${TAIL} from 8 pm to midnight`);
+    if (!first.ok) throw new Error("F146-1 must parse");
+    const sentence = formatCommand(first.command);
+    expect(sentence).toBe("assign Sam to Housing A on Cell 1 from 20:00 to midnight");
+    expect(parseCommand(sentence)).toEqual(first);
+  });
+
+  it("F146-8: book Housing A on Cell 1 from 20:00 to midnight -- the booking grammar gets DAY_END too, and round-trips", () => {
+    const first = parseCommand("book Housing A on Cell 1 from 20:00 to midnight");
+    expect(first).toEqual(bookOk({ start: { hour: 20, minute: 0 }, end: DAY_END }));
+    if (!first.ok) throw new Error("must parse");
+    expect(parseCommand(formatCommand(first.command))).toEqual(first);
+  });
+
+  it("F146-9: unassign Sam from Cell 1 from 20:00 to midnight -- the removal grammar's own PAIRED clause gets DAY_END too (distinct from its lone-edge 'after 2 pm')", () => {
+    const first = parseCommand("unassign Sam from Cell 1 from 20:00 to midnight");
+    expect(first).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: { start: { hour: 20, minute: 0 }, end: DAY_END },
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+    if (!first.ok) throw new Error("must parse");
+    expect(parseCommand(formatCommand(first.command))).toEqual(first);
+  });
+
+  it("F146-10: move Sam on Cell 1 to Cell 2 from 20:00 to midnight -- the move grammar's 'from' clause (extractOptionalTimeClause) gets DAY_END, round-trips", () => {
+    const first = parseCommand("move Sam on Cell 1 to Cell 2 from 20:00 to midnight");
+    expect(first).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1"],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: { start: { hour: 20, minute: 0 }, end: DAY_END },
+        existing: null,
+        shift: null,
+      },
+    });
+    if (!first.ok) throw new Error("must parse");
+    expect(parseCommand(formatCommand(first.command))).toEqual(first);
+  });
+
+  it("F146-11: move Sam on Cell 1 in Line 1 to 20:00 to midnight -- the move grammar's OTHER time clause (extractToTimeClause, no 'from' at all) gets DAY_END too", () => {
+    expect(parseCommand("move Sam on Cell 1 in Line 1 to 20:00 to midnight")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1", "Line 1"],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 20, minute: 0 }, end: DAY_END },
+        existing: null,
+        shift: null,
+      },
+    });
+  });
+
+  it("F146-12: assign Sam ... 20:00 to midnight -- the bare (word-order) pair grammar's own END slot never matches 'midnight' at all (TIME_TOKEN_INLINE is digit-only) -- unaffected, out of F-146's scope, stays no_time/bad_time the way it always did", () => {
+    // Documents the boundary of the fix rather than asserting a specific
+    // failure kind, since the sentence still needs a leading verb reading to
+    // decide which of several failures applies; the point is only that the
+    // bare-pair grammar was never claimed fixed.
+    const result = parseCommand("Cell 1 runs Housing A 20:00 to midnight");
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("commandParse: S55 boundaries -- ALL_DAY/END_OF_SHIFT/END_OF_DAY (R-404, D130 item 3)", () => {
+  it("BD1: assign Sam to Housing A on Cell 1 all day tomorrow -- shift ALL_DAY, start/end null, day tomorrow", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 all day tomorrow")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: { kind: "tomorrow" },
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: ALL_DAY,
+      }),
+    );
+  });
+
+  it("BD2: from 10 until end of shift -- start 10:00, end null, shift END_OF_SHIFT; till/to the end of the shift/until the end of shift/for the rest of the shift all read the same", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 until end of shift")).toEqual(
+      expected,
+    );
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 till end of shift")).toEqual(
+      expected,
+    );
+    expect(
+      parseCommand("assign Sam to Housing A on Cell 1 from 10 to the end of the shift"),
+    ).toEqual(expected);
+    expect(
+      parseCommand("assign Sam to Housing A on Cell 1 from 10 until the end of shift"),
+    ).toEqual(expected);
+    expect(
+      parseCommand("assign Sam to Housing A on Cell 1 from 10 for the rest of the shift"),
+    ).toEqual(expected);
+  });
+
+  it("BD3: put Sam on Housing A on Cell 1 for the rest of the day -- start null, shift END_OF_DAY; until end of day / till the end of the day the same", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: null,
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_DAY,
+    });
+    expect(parseCommand("put Sam on Housing A on Cell 1 for the rest of the day")).toEqual(
+      expected,
+    );
+    expect(parseCommand("put Sam on Housing A on Cell 1 until end of day")).toEqual(expected);
+    expect(parseCommand("put Sam on Housing A on Cell 1 till the end of the day")).toEqual(
+      expected,
+    );
+  });
+
+  it("BD4: ... from 10 for the rest of the day -- start 10:00", () => {
+    expect(parseCommand("put Sam on Housing A on Cell 1 from 10 for the rest of the day")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 10, minute: 0 },
+        end: null,
+        attach: null,
+        existing: null,
+        shift: END_OF_DAY,
+      }),
+    );
+  });
+
+  it("BD5: remove Sam from Cell 1 for the rest of the day -- unassign shift END_OF_DAY, span null", () => {
+    expect(parseCommand("remove Sam from Cell 1 for the rest of the day")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: END_OF_DAY,
+        until: null,
+      },
+    });
+  });
+
+  it("BD6: remove Sam from Cell 1 all day -- shift null, span null (ALL_DAY on a removal reads as nothing, and is dropped)", () => {
+    expect(parseCommand("remove Sam from Cell 1 all day")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("BD7: assign Sam to Housing A on Cell 1 all day from 8 to 4 -- shift_and_hours", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 all day from 8 to 4")).toEqual({
+      ok: false,
+      failure: { kind: "shift_and_hours" },
+    });
+  });
+
+  it("BD8: formatCommand round-trips BD1-BD3 (exact printed text pinned to the real output, not reasoned about)", () => {
+    const bd1 = parseCommand("assign Sam to Housing A on Cell 1 all day tomorrow");
+    if (!bd1.ok) throw new Error("BD1 must parse");
+    expect(parseCommand(formatCommand(bd1.command))).toEqual(bd1);
+
+    const bd2 = parseCommand("assign Sam to Housing A on Cell 1 from 10 until end of shift");
+    if (!bd2.ok) throw new Error("BD2 must parse");
+    expect(formatCommand(bd2.command)).toContain("from 10:00 until end of shift");
+    expect(parseCommand(formatCommand(bd2.command))).toEqual(bd2);
+
+    const bd3 = parseCommand("put Sam on Housing A on Cell 1 for the rest of the day");
+    if (!bd3.ok) throw new Error("BD3 must parse");
+    expect(formatCommand(bd3.command)).toContain("for the rest of the day");
+    expect(parseCommand(formatCommand(bd3.command))).toEqual(bd3);
+  });
+});
+
+describe("commandParse: S55 word order (R-405)", () => {
+  it("WO1: Sam works on Housing A on Cell 1 8 to 4 -- assign", () => {
+    expect(parseCommand("Sam works on Housing A on Cell 1 8 to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("WO2: Sam is on Housing A on Cell 1 from 8 to 4 -- assign", () => {
+    expect(parseCommand("Sam is on Housing A on Cell 1 from 8 to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("WO3: Cell 1 gets Sam on Housing A 8 to 4 -- assign, place ['Cell 1']", () => {
+    expect(parseCommand("Cell 1 gets Sam on Housing A 8 to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("WO4: Cell 1 in Line 1 gets Sam on Housing A 8 to 4 -- place ['Cell 1','Line 1']", () => {
+    expect(parseCommand("Cell 1 in Line 1 gets Sam on Housing A 8 to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1", "Line 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("WO5: Cell 1 runs Housing A 8 to 4 -- book, headcount null", () => {
+    expect(parseCommand("Cell 1 runs Housing A 8 to 4")).toEqual(
+      bookOk({
+        place: ["Cell 1"],
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+      }),
+    );
+  });
+
+  it("WO6: Cell 1 runs Housing A 8 to 4 with 3 people -- headcount 3 ('with N people' joins 'for N people' as a headcount clause, for every book form)", () => {
+    expect(parseCommand("Cell 1 runs Housing A 8 to 4 with 3 people")).toEqual(
+      bookOk({
+        place: ["Cell 1"],
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        headcount: 3,
+      }),
+    );
+    expect(parseCommand("book Housing A on Cell 1 with 3 people from 6 to 2")).toEqual(
+      bookOk({ headcount: 3 }),
+    );
+  });
+
+  it('WO7: quoted names still atomic: "Sam is on" works on Housing A on Cell 1 8 to 4 -- operator "Sam is on"', () => {
+    expect(parseCommand('"Sam is on" works on Housing A on Cell 1 8 to 4')).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam is on",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+});
+
+describe("commandParse: S55 removals -- take, lone edges (R-404/R-405)", () => {
+  it("RM1: take Sam off Cell 1 -- unassign, place ['Cell 1'], span null", () => {
+    expect(parseCommand("take Sam off Cell 1")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("RM2: take Sam off Cell 1 today from 2 to 4 -- 02:00-04:00 (the afternoon rule never fires here: 4 is already after 2, exactly like P9/L4's own precedent)", () => {
+    expect(parseCommand("take Sam off Cell 1 today from 2 to 4")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: { kind: "today" },
+        span: { start: { hour: 2, minute: 0 }, end: { hour: 4, minute: 0 } },
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("RM3: pull Sam from Cell 1", () => {
+    expect(parseCommand("pull Sam from Cell 1")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("RM4: pull Sam off Cell 1 in Line 1", () => {
+    expect(parseCommand("pull Sam off Cell 1 in Line 1")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1", "Line 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("RM5: remove Sam from Cell 1 after 2 pm -- span 14:00-DAY_END", () => {
+    expect(parseCommand("remove Sam from Cell 1 after 2 pm")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: { start: { hour: 14, minute: 0 }, end: DAY_END },
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("RM6 (the developer's own decision -- see the brief report): remove Sam from Cell 1 before 2 -- 00:00-14:00, the 'workday' rule: a lone edge under 7 with no am/pm reads as PM, the same instinct the paired afternoon rule already encodes", () => {
+    expect(parseCommand("remove Sam from Cell 1 before 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: { start: { hour: 0, minute: 0 }, end: { hour: 14, minute: 0 } },
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("RM7: unassign Sam from Cell 1 until 2 -- 00:00-14:00", () => {
+    expect(parseCommand("unassign Sam from Cell 1 until 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: { start: { hour: 0, minute: 0 }, end: { hour: 14, minute: 0 } },
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("RM8: assign Sam to Housing A on Cell 1 after 2 -- open_span (assign/book need both ends said)", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 after 2")).toEqual({
+      ok: false,
+      failure: { kind: "open_span", text: "after 2" },
+    });
+  });
+
+  it("RM9: formatCommand prints RM5 as '... after 14:00' and RM6 as '... before 14:00', both round-trip", () => {
+    const rm5 = parseCommand("remove Sam from Cell 1 after 2 pm");
+    if (!rm5.ok) throw new Error("RM5 must parse");
+    expect(formatCommand(rm5.command)).toBe("unassign Sam from Cell 1 after 14:00");
+    expect(parseCommand(formatCommand(rm5.command))).toEqual(rm5);
+
+    const rm6 = parseCommand("remove Sam from Cell 1 before 2");
+    if (!rm6.ok) throw new Error("RM6 must parse");
+    expect(formatCommand(rm6.command)).toBe("unassign Sam from Cell 1 before 14:00");
+    expect(parseCommand(formatCommand(rm6.command))).toEqual(rm6);
+  });
+
+  it("R-405 comment case (UNASSIGN_VERBS doc comment): 'take Sam to Cell 2' reads as a removal, not a move -- 'to' is not one of the removal grammar's own place prepositions (from/off/on/at), so the whole remainder reads as the operator; the price of R-391's one-list-per-verb rule", () => {
+    expect(parseCommand("take Sam to Cell 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam to Cell 2",
+        place: [],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+});
+
+describe("commandParse: S55 time-of-day words (R-405, D130 item 7)", () => {
+  it("TD1: assign Sam to Housing A on Cell 1 this afternoon -- shift 'afternoon', day today", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 this afternoon")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: { kind: "today" },
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "afternoon",
+      }),
+    );
+  });
+
+  it("TD2: ... tonight -- 'night', today", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 tonight")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: { kind: "today" },
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "night",
+      }),
+    );
+  });
+
+  it("TD3: assign Sam to Housing A on Cell 1 tomorrow morning -- 'morning', tomorrow", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 tomorrow morning")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: { kind: "tomorrow" },
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "morning",
+      }),
+    );
+  });
+
+  it("TD4: put Sam on Housing A on Cell 1 for the night -- 'night', day null", () => {
+    expect(parseCommand("put Sam on Housing A on Cell 1 for the night")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "night",
+      }),
+    );
+  });
+
+  it("TD5: pull Sam off Cell 1 this afternoon -- unassign shift 'afternoon', day today", () => {
+    expect(parseCommand("pull Sam off Cell 1 this afternoon")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: "afternoon",
+        until: null,
+      },
+    });
+  });
+
+  it("TD6: ... this afternoon from 2 to 4 -- shift_and_hours", () => {
+    expect(parseCommand("pull Sam off Cell 1 this afternoon from 2 to 4")).toEqual({
+      ok: false,
+      failure: { kind: "shift_and_hours" },
+    });
+  });
+
+  it("TD7: ... this afternoon tomorrow -- two_days, never a guess", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 this afternoon tomorrow")).toEqual({
+      ok: false,
+      failure: { kind: "two_days", first: "this afternoon", second: "tomorrow" },
+    });
+  });
+});
+
+describe("commandParse: S55 everyone (R-407)", () => {
+  it("EV1: clear Cell 1 today -- unassign, EVERYONE, place ['Cell 1'], day today, span null, until null", () => {
+    expect(parseCommand("clear Cell 1 today")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: EVERYONE,
+        place: ["Cell 1"],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("EV2: clear Cell 1 in Line 1 after 2 pm -- place ['Cell 1','Line 1'], span 14:00-DAY_END", () => {
+    expect(parseCommand("clear Cell 1 in Line 1 after 2 pm")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: EVERYONE,
+        place: ["Cell 1", "Line 1"],
+        day: null,
+        span: { start: { hour: 14, minute: 0 }, end: DAY_END },
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("EV3: clear Sam from Cell 1 -- operator 'Sam' (a from/off keeps the person reading)", () => {
+    expect(parseCommand("clear Sam from Cell 1")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("EV4/EV5/EV6: unassign everyone / remove everybody / remove all -- all three canonicalize to EVERYONE, whatever was said", () => {
+    expect(parseCommand("unassign everyone from Cell 3 after 2 pm")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: EVERYONE,
+        place: ["Cell 3"],
+        day: null,
+        span: { start: { hour: 14, minute: 0 }, end: DAY_END },
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+    expect(parseCommand("remove everybody from Line 1 tomorrow")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: EVERYONE,
+        place: ["Line 1"],
+        day: { kind: "tomorrow" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+    expect(parseCommand("remove all from Cell 1")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: EVERYONE,
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("EV7: move everyone on Line 1 to Cell 2 -- move, EVERYONE, place ['Line 1'], toPlace ['Cell 2']", () => {
+    expect(parseCommand("move everyone on Line 1 to Cell 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: EVERYONE,
+        place: ["Line 1"],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+      },
+    });
+  });
+
+  it("EV8: move everyone from Cell 1 to Cell 2 today", () => {
+    expect(parseCommand("move everyone from Cell 1 to Cell 2 today")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: EVERYONE,
+        place: ["Cell 1"],
+        toPlace: ["Cell 2"],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+      },
+    });
+  });
+
+  it("EV9: clear everyone -- unassign, EVERYONE, place [] (allowed -- the resolver reads it as every cell shown)", () => {
+    expect(parseCommand("clear everyone")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: EVERYONE,
+        place: [],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("EV10: assign everyone to Housing A on Cell 1 8 to 4 -- operator 'everyone' as a PERSON'S words, unchanged; the reserved reading is a removal's or a move's only", () => {
+    expect(parseCommand("assign everyone to Housing A on Cell 1 8 to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "everyone",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+});
+
+describe("commandParse: S55 cover, replace, swap (R-406)", () => {
+  function replaceOk(overrides: Partial<ReplaceCommand> = {}): {
+    ok: true;
+    command: ReplaceCommand;
+  } {
+    return {
+      ok: true,
+      command: {
+        intent: "replace",
+        operator: "Sam",
+        with: "Ana",
+        place: [],
+        day: null,
+        span: null,
+        shift: null,
+        ...overrides,
+      },
+    };
+  }
+  function swapOk(overrides: Partial<SwapCommand> = {}): { ok: true; command: SwapCommand } {
+    return {
+      ok: true,
+      command: {
+        intent: "swap",
+        operator: "Sam",
+        other: "Ana",
+        place: [],
+        day: null,
+        span: null,
+        shift: null,
+        ...overrides,
+      },
+    };
+  }
+
+  it("RP1: cover Sam with Ana on Cell 1 today", () => {
+    expect(parseCommand("cover Sam with Ana on Cell 1 today")).toEqual(
+      replaceOk({ place: ["Cell 1"], day: { kind: "today" } }),
+    );
+  });
+
+  it("RP2: replace Sam with Ana -- place []", () => {
+    expect(parseCommand("replace Sam with Ana")).toEqual(replaceOk());
+  });
+
+  it("RP3: cover Sam with Ana from 2 to 4 -- span (the same afternoon-rule mechanics as every other time clause in this file: 4 is already after 2, so no +12h)", () => {
+    expect(parseCommand("cover Sam with Ana from 2 to 4")).toEqual(
+      replaceOk({ span: { start: { hour: 2, minute: 0 }, end: { hour: 4, minute: 0 } } }),
+    );
+  });
+
+  it('RP4: replace Sam with Ana for shift 2 on Cell 1 -- shift "2"', () => {
+    expect(parseCommand("replace Sam with Ana for shift 2 on Cell 1")).toEqual(
+      replaceOk({ place: ["Cell 1"], shift: "2" }),
+    );
+  });
+
+  it("RP5: cover Sam with Ana from 2 to 4 for shift 2 -- shift_and_hours", () => {
+    expect(parseCommand("cover Sam with Ana from 2 to 4 for shift 2")).toEqual({
+      ok: false,
+      failure: { kind: "shift_and_hours" },
+    });
+  });
+
+  it("RP6 (the developer's own decision -- see the brief report): cover Sam -- no_product (operator given, nothing after it that names a replacement)", () => {
+    expect(parseCommand("cover Sam")).toEqual({ ok: false, failure: { kind: "no_product" } });
+  });
+
+  it("SW1: swap Sam and Ana", () => {
+    expect(parseCommand("swap Sam and Ana")).toEqual(swapOk());
+  });
+
+  it("SW2: swap Sam with Ana on Cell 1 tomorrow", () => {
+    expect(parseCommand("swap Sam with Ana on Cell 1 tomorrow")).toEqual(
+      swapOk({ place: ["Cell 1"], day: { kind: "tomorrow" } }),
+    );
+  });
+
+  it("SW3: exchange Sam and Ana", () => {
+    expect(parseCommand("exchange Sam and Ana")).toEqual(swapOk());
+  });
+
+  it("SW4 (the developer's own decision -- see the brief report): swap Sam -- no_product, the same choice as RP6", () => {
+    expect(parseCommand("swap Sam")).toEqual({ ok: false, failure: { kind: "no_product" } });
+  });
+
+  it("RP7/SW5: formatCommand prints the canonical cover/swap sentences and round-trips", () => {
+    const rp1 = parseCommand("cover Sam with Ana on Cell 1 today");
+    if (!rp1.ok) throw new Error("RP1 must parse");
+    expect(formatCommand(rp1.command)).toBe("cover Sam with Ana on Cell 1 today");
+    expect(parseCommand(formatCommand(rp1.command))).toEqual(rp1);
+
+    const sw2 = parseCommand("swap Sam with Ana on Cell 1 tomorrow");
+    if (!sw2.ok) throw new Error("SW2 must parse");
+    expect(formatCommand(sw2.command)).toBe("swap Sam and Ana on Cell 1 tomorrow");
+    expect(parseCommand(formatCommand(sw2.command))).toEqual(sw2);
+  });
+});
+
+describe("commandParse: S55 copy (R-408)", () => {
+  function copyOk(overrides: Partial<CopyCommand> & Pick<CopyCommand, "from" | "to">): {
+    ok: true;
+    command: CopyCommand;
+  } {
+    return { ok: true, command: { intent: "copy", place: [], ...overrides } };
+  }
+
+  it("CP1: same as yesterday for Cell 1 -- copy {['Cell 1'], yesterday, today}", () => {
+    expect(parseCommand("same as yesterday for Cell 1")).toEqual(
+      copyOk({ place: ["Cell 1"], from: { kind: "yesterday" }, to: { kind: "today" } }),
+    );
+  });
+
+  it("CP2: same as yesterday -- place []", () => {
+    expect(parseCommand("same as yesterday")).toEqual(
+      copyOk({ from: { kind: "yesterday" }, to: { kind: "today" } }),
+    );
+  });
+
+  it("CP3: copy Monday to Tuesday -- weekday 1 -> weekday 2, place []", () => {
+    expect(parseCommand("copy Monday to Tuesday")).toEqual(
+      copyOk({ from: { kind: "weekday", day: 1 }, to: { kind: "weekday", day: 2 } }),
+    );
+  });
+
+  it("CP4: copy Monday to Tuesday for Cell 1 in Line 1", () => {
+    expect(parseCommand("copy Monday to Tuesday for Cell 1 in Line 1")).toEqual(
+      copyOk({
+        place: ["Cell 1", "Line 1"],
+        from: { kind: "weekday", day: 1 },
+        to: { kind: "weekday", day: 2 },
+      }),
+    );
+  });
+
+  it("CP5: repeat this week next week -- this_week -> next_week, no 'to' needed", () => {
+    expect(parseCommand("repeat this week next week")).toEqual(
+      copyOk({ from: { kind: "this_week" }, to: { kind: "next_week" } }),
+    );
+  });
+
+  it("CP6: copy this week to next week", () => {
+    expect(parseCommand("copy this week to next week")).toEqual(
+      copyOk({ from: { kind: "this_week" }, to: { kind: "next_week" } }),
+    );
+  });
+
+  it("CP7: same as last week for Line 1 -- last_week -> this_week", () => {
+    expect(parseCommand("same as last week for Line 1")).toEqual(
+      copyOk({ place: ["Line 1"], from: { kind: "last_week" }, to: { kind: "this_week" } }),
+    );
+  });
+
+  it("CP8: copy Monday to next week -- copy_mismatch, a day onto a week", () => {
+    expect(parseCommand("copy Monday to next week")).toEqual({
+      ok: false,
+      failure: { kind: "copy_mismatch", from: "Monday", to: "next week" },
+    });
+  });
+
+  it("CP9: copy Monday to Monday -- copy_same", () => {
+    expect(parseCommand("copy Monday to Monday")).toEqual({
+      ok: false,
+      failure: { kind: "copy_same" },
+    });
+  });
+
+  it("CP10: copy 2026-09-07 to 2026-09-14 on Cell 1 -- dates, place preposition 'on' as well as 'for'", () => {
+    expect(parseCommand("copy 2026-09-07 to 2026-09-14 on Cell 1")).toEqual(
+      copyOk({
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-07" },
+        to: { kind: "date", iso: "2026-09-14" },
+      }),
+    );
+  });
+
+  it("CP11: formatCommand prints CP1 as 'copy yesterday to today for Cell 1', CP5 as 'copy this week to next week'; round trip", () => {
+    const cp1 = parseCommand("same as yesterday for Cell 1");
+    if (!cp1.ok) throw new Error("CP1 must parse");
+    expect(formatCommand(cp1.command)).toBe("copy yesterday to today for Cell 1");
+    expect(parseCommand(formatCommand(cp1.command))).toEqual(cp1);
+
+    const cp5 = parseCommand("repeat this week next week");
+    if (!cp5.ok) throw new Error("CP5 must parse");
+    expect(formatCommand(cp5.command)).toBe("copy this week to next week");
+    expect(parseCommand(formatCommand(cp5.command))).toEqual(cp5);
+  });
+});
+
+describe("commandParse: S55 absence (R-409)", () => {
+  it("AB1: Sam is off today", () => {
+    expect(parseCommand("Sam is off today")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("AB2: Sam is out -- day today (explicit default: an absence with no day means today)", () => {
+    expect(parseCommand("Sam is out")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("AB3: Sam is sick tomorrow", () => {
+    expect(parseCommand("Sam is sick tomorrow")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "tomorrow" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("AB4: Ana is on leave till Friday -- day today, until weekday 5", () => {
+    expect(parseCommand("Ana is on leave till Friday")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Ana",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: { kind: "weekday", day: 5 },
+      },
+    });
+  });
+
+  it("AB5: Ana is away until Friday", () => {
+    expect(parseCommand("Ana is away until Friday")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Ana",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: { kind: "weekday", day: 5 },
+      },
+    });
+  });
+
+  it("AB6: Ana is off from Monday until Wednesday -- day Monday, until Wednesday", () => {
+    expect(parseCommand("Ana is off from Monday until Wednesday")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Ana",
+        place: [],
+        day: { kind: "weekday", day: 1 },
+        span: null,
+        existing: null,
+        shift: null,
+        until: { kind: "weekday", day: 3 },
+      },
+    });
+  });
+
+  it("AB7: Sam is on holiday -- day today", () => {
+    expect(parseCommand("Sam is on holiday")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+    });
+  });
+
+  it("AB8: Ana is off until 2026-09-18 -- until date", () => {
+    expect(parseCommand("Ana is off until 2026-09-18")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Ana",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: { kind: "date", iso: "2026-09-18" },
+      },
+    });
+  });
+
+  it("AB9: formatCommand reads back AB4's own until-clause (real output differs from the brief's illustrative prose -- see the comment on formatUnassignCommand, R-409)", () => {
+    const ab4 = parseCommand("Ana is on leave till Friday");
+    if (!ab4.ok) throw new Error("AB4 must parse");
+    expect(parseCommand(formatCommand(ab4.command))).toEqual(ab4);
+  });
+
+  it("AB10: Sam is on Housing A on Cell 1 8 to 4 -- stays WO2's assign reading (the absence pattern needs an ABSENCE_WORD right after 'is')", () => {
+    expect(parseCommand("Sam is on Housing A on Cell 1 8 to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+});
+
+describe("commandParse: S55 exported constants", () => {
+  it("UNASSIGN_VERBS gains 'take' (R-405); every verb list stays pairwise disjoint", () => {
+    expect(UNASSIGN_VERBS).toContain("take");
+    const lists: readonly (readonly string[])[] = [
+      ASSIGN_VERBS,
+      BOOK_VERBS,
+      UNASSIGN_VERBS,
+      MOVE_VERBS,
+      REPLACE_VERBS,
+      SWAP_VERBS,
+      COPY_VERBS,
+    ];
+    const all = lists.flatMap((list) => list);
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("BOUNDARY_SHIFTS/ABSENCE_WORDS/TIME_OF_DAY_WORDS are exported with the brief's own spellings", () => {
+    expect(BOUNDARY_SHIFTS).toEqual([ALL_DAY, END_OF_SHIFT, END_OF_DAY]);
+    expect(ABSENCE_WORDS).toContain("on leave");
+    expect(TIME_OF_DAY_WORDS).toEqual(["morning", "afternoon", "evening", "night"]);
+  });
+});
+
+describe("commandParse: S55 reviewer fixes (lane A review, four regressions found and fixed here)", () => {
+  it("REV1: a QUOTED person named 'Everyone' stays that literal name on a removal, never the reserved EVERYONE word -- canonicalizeEveryone used to run AFTER restoreQuotes, so a quoted alias collapsed into the reserved reading same as an unquoted one", () => {
+    expect(parseCommand('remove "Everyone" from Cell 1')).toEqual(
+      ok({
+        intent: "unassign",
+        operator: "Everyone",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      } satisfies UnassignCommand),
+    );
+  });
+
+  it("REV2: the same fix on 'clear', where the operator/place split is implicit", () => {
+    const r = parseCommand('clear "Everyone" from Cell 1');
+    expect(r.ok).toBe(true);
+    if (r.ok && r.command.intent === "unassign") expect(r.command.operator).toBe("Everyone");
+  });
+
+  it("REV3: the same fix on move -- a quoted 'Everyone' operator is a person, not R-407's reserved word", () => {
+    expect(parseCommand('move "Everyone" on Line 1 to Cell 2')).toEqual(
+      ok({
+        intent: "move",
+        operator: "Everyone",
+        place: ["Line 1"],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+      } satisfies MoveCommand),
+    );
+  });
+
+  it("REV4: formatCommand round-trips a quoted operator containing an absence-grammar trigger word ('Sam is off') -- ABSENCE_RE runs unanchored on the WHOLE sentence before any verb dispatch, so printing this name unquoted used to read back as an absence command failing bad_day", () => {
+    const parsed = parseCommand('assign "Sam is off" to Housing A on Cell 1 8 to 4');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("must parse");
+    const printed = formatCommand(parsed.command);
+    expect(printed).toBe('assign "Sam is off" to Housing A on Cell 1 from 08:00 to 16:00');
+    expect(parseCommand(printed)).toEqual(parsed);
+  });
+
+  it("REV5: the same fix on replace's operator ('cover \"Sam is off\" with Ana ...')", () => {
+    const parsed = parseCommand('cover "Sam is off" with Ana on Cell 1 today');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("must parse");
+    expect(parseCommand(formatCommand(parsed.command))).toEqual(parsed);
+  });
+
+  it("REV6: formatCommand round-trips a quoted place named 'All Day' on an assign -- ALL_DAY_RE is an unanchored 'all day' search over the whole sentence, so printing this place unquoted used to be misread as the ALL_DAY boundary shift and collide with the real hours (shift_and_hours)", () => {
+    const parsed = parseCommand('assign Sam to Housing A on "All Day" 8 to 4');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("must parse");
+    const printed = formatCommand(parsed.command);
+    expect(printed).toBe('assign Sam to Housing A on "All Day" from 08:00 to 16:00');
+    expect(parseCommand(printed)).toEqual(parsed);
+  });
+
+  it("REV7: the same fix on a removal's place -- 'remove Sam from \"All Day\"' used to lose the place entirely on round trip (ALL_DAY read and dropped, per R-404's own amendment)", () => {
+    const parsed = parseCommand('remove Sam from "All Day"');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("must parse");
+    const printed = formatCommand(parsed.command);
+    expect(printed).toBe('unassign Sam from "All Day"');
+    expect(parseCommand(printed)).toEqual(parsed);
+  });
+
+  it("REV8: 'remove Sam from Cell 1 from Monday to Tuesday' is bad_time, not a silent garbage place -- extractOptionalTimeClause's own lenient fallback (added for RM7/EV8: revert to 'no time clause' when a found from-X-to-Y pair's START is not a time) used to leave the whole clause sitting unconsumed, so this read as place 'Cell 1 from Monday to', day Tuesday, with no error at all", () => {
+    expect(parseCommand("remove Sam from Cell 1 from Monday to Tuesday")).toEqual({
+      ok: false,
+      failure: { kind: "bad_time", text: "Cell 1 from Monday to" },
+    });
+  });
+
+  it("REV9: the same shape with two non-day, non-time words ('from lunch to dinner') is bad_time too -- not just a day-shaped false positive", () => {
+    expect(parseCommand("remove Sam from Cell 1 from lunch to dinner")).toEqual({
+      ok: false,
+      failure: { kind: "bad_time", text: "Cell 1 from lunch to dinner" },
+    });
+  });
+
+  it("REV10: the same leftover-clause guard on replace ('cover Sam with Ana from Monday to Tuesday')", () => {
+    expect(parseCommand("cover Sam with Ana from Monday to Tuesday")).toEqual({
+      ok: false,
+      failure: { kind: "bad_time", text: "Ana from Monday to" },
+    });
+  });
+
+  it("REV11: the same leftover-clause guard on swap ('swap Sam and Ana from Monday to Tuesday')", () => {
+    expect(parseCommand("swap Sam and Ana from Monday to Tuesday")).toEqual({
+      ok: false,
+      failure: { kind: "bad_time", text: "Ana from Monday to" },
+    });
+  });
+
+  it("REV12: RM7/EV8's own fix still holds after the above -- a lone 'until <time>' still reads as the lone-edge span, not bad_time (extractOptionalTimeClause's fallback is still needed and still fires for the case it was written for)", () => {
+    expect(parseCommand("unassign Sam from Cell 1 until 2")).toEqual(
+      ok({
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: { start: { hour: 0, minute: 0 }, end: { hour: 14, minute: 0 } },
+        existing: null,
+        shift: null,
+        until: null,
+      } satisfies UnassignCommand),
+    );
+    expect(parseCommand("move everyone from Cell 1 to Cell 2 today")).toEqual(
+      ok({
+        intent: "move",
+        operator: EVERYONE,
+        place: ["Cell 1"],
+        toPlace: ["Cell 2"],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+      } satisfies MoveCommand),
+    );
   });
 });

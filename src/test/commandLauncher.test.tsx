@@ -75,6 +75,10 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
     findRunOverlap,
     shiftsAt: () => [],
+    // S55 (D130 item 3): same defaults as `commandBar.test.tsx`'s own
+    // `buildCtx` -- this file never touches a boundary shift name.
+    nowMinuteOfDay: null,
+    wallOf: (m: number) => ({ dayIndex: Math.floor(m / 1440), minuteOfDay: m % 1440 }),
     ...over,
   };
 }
@@ -90,6 +94,7 @@ const BLK1: ContextAssignment = {
   startMin: 3 * 1440 + 600,
   endMin: 3 * 1440 + 840,
   label: "10:00–14:00",
+  runId: null,
 };
 
 const UNASSIGN_SENTENCE = "Unassign Operator 1 from Cell 1 in Line 1 from 10 to 2";
