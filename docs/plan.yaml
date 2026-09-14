@@ -10539,7 +10539,7 @@ requirements:
 - id: R-396
   title: The command bar lives behind a launcher button in the lower right; the panel it opens holds the bar entire
   source:
-  - 'session 158 conversation (the maintainer, 13 Sept: "the command line should be like a chatbot icon on the lower right corner of the screen, you click on it to start writing" --- one icon, not two, on the developer\'s recommendation; "that icon is no dice, we need a fancy one which is more recognisable"; "Go ahead and build it" on the mock)'
+  - 'session 158 conversation (the maintainer, 13 Sept: "the command line should be like a chatbot icon on the lower right corner of the screen, you click on it to start writing" --- one icon, not two, on the developer''s recommendation; "that icon is no dice, we need a fancy one which is more recognisable"; "Go ahead and build it" on the mock)'
   - §19.95 (D124)
   stated_by: maintainer
   claim: >-
