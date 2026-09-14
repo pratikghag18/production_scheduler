@@ -9427,3 +9427,40 @@ the model the same sentence; when the model's several form arrives through the d
 enters the same queue.
 
 Brief: `docs/agent-briefs/s51-a-lot-brief.md`.
+
+## §19.99 — D128: a shift's name is hours the board already knows (S52)
+
+> The maintainer, 13 Sept, session 163: *"Yes, do add them to the verb list."* And: *"the user can
+> use the sentence like 'Assign operator to work for shift X on cell Y, line Z for product A', will
+> this be handled by the retraining model?"*
+
+### D128 — two more shapes before the one retrain, and why the grammar still leads
+
+**The verbs.** R-391 kept "change" and "shift" out on the developer's reasoning — "shift" is a
+noun everywhere in the app, "change" too broad as a first word. The maintainer's own sentences
+begin with "change", and the first-word rule already keeps a noun "shift" mid-sentence out of the
+verb's way. Both join the move list at the maintainer's word; the lists stay disjoint. The
+possessive tail — "A3's timing", "A3s timing" as the recogniser writes it, "A3's hours" — is read
+as the person, because that is what the sentence means and the resolver has no timing to find.
+
+**The shift.** A scheduler thinks in shifts more than in clock times, and the board already
+knows what "Shift 2" means on Cell 1 today: the shift pattern attached to the cell's line or
+plant, resolved on the server as a definer (D116, DEF-0016) and drawn as the board's bands and
+the pop-up's shift chips. So the form carries the shift's *name*, not hours the model would have
+to guess, and the resolver turns the name into that cell's band for that day from the same
+pattern the chips come from — one source, no copy (CLAUDE.md §4). An overnight band ends past
+midnight exactly as the board's blocks do. A name the cell does not have is a question that
+lists the ones it has; a cell with no pattern says so and asks for the hours; two matches ask
+which (R-379). The model never invents hours for a shift it has only heard the name of.
+
+**Why now.** A Colab run is the maintainer's afternoon. The data for R-399 is generated but not
+yet trained on; adding both shapes first means one run, not two. The order is D126's: grammar
+first, because the generator refuses any sentence its oracle cannot parse; then the resolver and
+the board's context in one lane and the data in another; then the run.
+
+**The maintainer's word order.** "Assign operator to work for shift X on cell Y, line Z for
+product A" puts the product last. The rule grammar reads a trailing "for <product>" when nothing
+before the places named one, so the generator can write that order and the model learn it; the
+canonical sentence the bar prints back stays product-first.
+
+Briefs: `docs/agent-briefs/s52-a-shift-grammar-brief.md`, then the resolver and data briefs.

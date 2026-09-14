@@ -2422,6 +2422,31 @@ stages:
     with the reason, the lot stopping there and saying how many were done. A lot naming one block
     twice is refused before the yes; a second yes while working is ignored; Escape while working
     leaves the run to finish. The writers table is in the lane report behind the brief.
+- id: S52
+  track: core
+  num: 52
+  title: Before the retrain — change and shift become move verbs, and a shift's name stands in for the hours
+  status: now
+  owner: agent
+  refs:
+  - 'session 163 conversation (the maintainer, 13 Sept: "Yes, do add them to the verb list"; "Assign operator to work for shift X on cell Y, line Z for product A, will this be handled by the retraining model?")'
+  - §19.99 (D128)
+  - docs/agent-briefs/s52-a-shift-grammar-brief.md
+  delivers:
+  - R-401
+  - R-402
+  what: >-
+    **Two more sentence shapes, taught in the same retrain.** The maintainer reversed R-391's exclusion:
+    change and shift are move verbs ("change A3's timing to 8 pm to 11 pm", "shift A3 to Cell 2"),
+    with the possessive tail ("A3's timing", "A3's hours") read as the person. And a sentence may name a
+    shift instead of hours: "assign A2 to work for shift 2 on Cell 1 in Line 1 for Housing A" --- the
+    form carries the shift's name, the resolver turns it into that cell's own band for that day from
+    the same shift pattern the board draws, and a name the cell does not have is a question listing
+    the ones it has. Grammar first (the oracle), then the resolver and the board's context in one lane
+    and the data in another, then the one Colab run.
+  state: >-
+    **Briefed session 163 (13 Sept).** Lane A: the grammar and its tests. Then lane B (resolver, board
+    context, decoder) and lane C (templates, prompt, schema, held-out, scorers) in parallel.
 - id: M1
   track: matrix
   num: 1
@@ -10823,6 +10848,59 @@ requirements:
     STATED 13 Sept (session 161), COVERED 13 Sept (session 162, 45e77c4). Written when stated; the CB-lot
     cases and H3 carry it, the writers reach the pop-ups' own mutations (the table is in the brief's lane
     report, recorded on S51's card).
+
+- id: R-401
+  title: Change and shift are move verbs, and a possessive timing tail names the person (amends R-391)
+  source:
+  - 'session 163 conversation (the maintainer, 13 Sept: "Yes, do add them to the verb list", asked whether "change X''s timing to" should be recognised; F-144''s screenshot "change operator a3s timing to 8:00 p.m. to 11:00 p.m.")'
+  - §19.99 (D128)
+  stated_by: maintainer
+  claim: >-
+    The move verb list gains change and shift (R-391's "shift and change are not verbs here" is
+    withdrawn by the maintainer; the lists stay disjoint and the first word still decides). In a move
+    sentence a person named with a possessive timing tail --- "A3's timing", "A3s timing", "A3's hours",
+    "A3's time", "A3's schedule" --- reads as the person A3, so "change Operator A3's timing to 8 pm to
+    11 pm" is a move of A3 in time with no place. shift as a noun ("for shift 2") is untouched because
+    it is never the first word. The generator draws the new verbs like every other; the model learns them.
+  verified_by:
+  - kind: manual
+    steps: "type change Operator A3's timing to 8 pm to 11 pm into the bar: A3's block is offered wherever it is, moved to 20:00-23:00 on yes"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 163). Covered when commandParse.test.ts carries the PV cases re-pinned (PV2's
+    "neither shift nor change" becomes "both in move only") and the possessive-tail cases, and V9 draws
+    the new verbs.
+
+- id: R-402
+  title: A sentence may name a shift instead of hours; the resolver turns it into the cell's own band that day
+  source:
+  - 'session 163 conversation (the maintainer, 13 Sept: "the user can use the sentence like Assign operator to work for shift X on cell Y, line Z for product A, will this be handled by the retraining model?")'
+  - §19.99 (D128)
+  stated_by: maintainer
+  claim: >-
+    Every single form gains a field shift (a string, or null). An assign or a book with a shift named
+    has start and end null; a removal or a move with a shift named has span null; a form with both a
+    shift and hours is malformed and refused by the decoder. The grammar reads "for shift 2", "on shift
+    2", "for the night shift", "on the morning shift" anywhere after the person, and an assign whose
+    product comes last as "for <product>" ("assign A2 to work for shift 2 on Cell 1 in Line 1 for
+    Housing A"). The resolver, given the shift bands of the cell for that day from the same shift
+    pattern the board draws its chips from (no copy), matches the name case-blind, exactly or as the
+    one band whose name contains the words, and uses that band's start and end as the hours (an
+    overnight band ends past midnight the same way the board's blocks do); a name that matches none
+    asks "No shift called X on Cell 1; it has Shift 1, Shift 2, Shift 3.", a cell with no pattern asks
+    "Cell 1 has no shift pattern, so say the hours.", and two matches ask which. Everything after the
+    hours (the block, the run, the questions) is unchanged. The generator writes shift sentences with
+    the names the demo plant uses and realistic ones; the prompt and the grammar file say the field;
+    the model is taught it in the same retrain as R-399.
+  verified_by:
+  - kind: manual
+    steps: "type assign Operator A2 to work for shift 2 on Cell 1 in Line 1 for Housing A: the pop-up opens prefilled 14:00-22:00; type it with shift 9: the message lists the cell's three shifts"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 163). Covered when commandParse.test.ts carries the SH grammar cases,
+    commandResolve.test.ts the shift-band resolution cases, voiceRead.test.ts the decoder and schema
+    cases, voiceData.test.ts the templates and the regenerated held-out set, and the retrained model's
+    score is on S52's card with S50's.
 
 findings:
 - id: F-144
@@ -21834,7 +21912,7 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S50
-  text: "Voice plan Stage 7, second half --- the retrain: the grammar, the data, the schema and the bar are in; the maintainer runs the S43 pipeline on the 500-row set and the score goes on S50's card (S50, R-399); the change-the-timing phrasing waits on the maintainer's word against R-391"
+  text: "Voice plan Stage 7, second half --- the retrain, after S52: the maintainer runs the S43 pipeline on the regenerated set and the score goes on S50's and S52's cards (S50, R-399; S52, R-402)"
   why: >-
     Three things the maintainer met on 13 Sept (session 158). After S49 the board side is ready. Then one retrain: the form
     allows an absent place for a move or a removal, the generator writes such sentences and the
@@ -21842,6 +21920,11 @@ next:
     Cell 1 and Cell 2 from 3 to 5" becomes several commands, each outlined, one yes for the lot (the
     maintainer's example, parked here at their word: "lets wait till we reach that point"). Each
     retrain is the S43 pipeline again: generate, prepare, the notebook on Colab, the probe here.
+- kind: task
+  stage: S52
+  text: "Before the retrain --- change and shift as move verbs, a shift's name as the hours (S52, R-401, R-402, in progress)"
+  why: >-
+    The maintainer's word on 13 Sept (session 163), both taught in the one Colab run so it is not run twice.
 - kind: task
   text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
   why: >-
