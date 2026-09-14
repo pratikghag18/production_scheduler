@@ -2354,7 +2354,7 @@ stages:
   track: core
   num: 50
   title: Stage 7, second half — the sentences widen once (no place, several people or cells) and the model is taught once
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 160 conversation (the maintainer, 13 Sept: "Start stage 7"; session 158: the compound sentence, parked "till we reach that point")'
@@ -2388,6 +2388,11 @@ stages:
     prompt (~700 tokens now), the grammar file with a fifth branch, the decoder, both scorers, the reply
     budget 640; the notebook's cap 1280 after a several of three measured ~940. The retrain is the
     maintainer's: the S43 pipeline on the 500-row set; S50 closes when the score is on this card.
+    **DONE 14 Sept (session 167): the fourth run, T4, on the 500-row set ---** clean 249/250 (99.6%), perturbed 243/250 (97.2%); by intent assign 50/48, book 50/48, unassign 50/49,
+    move 49/49, several 50/49 (clean/perturbed of 50); by field every one at 99.5% or above, extra keys 0,
+    every sentence checked (F-145). Served Q4_K_M with the grammar on, the maintainer's five sentences read
+    right: the two F-144 screenshots as moves with no place, "remove Operator A3 today", the compound
+    sentence as two commands paired in order, the shift sentence as shift "2" with no hours.
 - id: S51
   track: core
   num: 51
@@ -2426,7 +2431,7 @@ stages:
   track: core
   num: 52
   title: Before the retrain — change and shift become move verbs, and a shift's name stands in for the hours
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 163 conversation (the maintainer, 13 Sept: "Yes, do add them to the verb list"; "Assign operator to work for shift X on cell Y, line Z for product A, will this be handled by the retraining model?")'
@@ -2460,6 +2465,8 @@ stages:
     the notebook's 1280; the reviewer's finds (a template saying shift twice, "on the day a shift", the
     several paragraph not naming the shift) are in. What remains is the
     maintainer's Colab run on the regenerated set; S52 and S50 close together when its score is on the cards.
+    **DONE 14 Sept (session 167)** with S50: the same run, shift 612/614 by field, the shift sentence read
+    right through the served model (the score is on S50's card).
 - id: S53
   track: core
   num: 53
@@ -10893,11 +10900,18 @@ requirements:
     grammar, scores at or above the bar (0.95 clean) on the new held-out set, and reads the
     maintainer's three F-144 sentences and the compound sentence into the right forms through the probe.
   verified_by:
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V2 over the new templates, V4 (500 rows, five intents), V6/V13 (the rule parser's baseline), V14 (the scorer on a several), V15 to V18"
+  - kind: vitest
+    file: src/test/voiceRead.test.ts
+    cases: "VR10 (a several decodes; malformed, fewer than two, more than three, nested refused), VR11 (the schema's fifth branch), VR12, VR13"
   - kind: manual
-    steps: "npm run voice:generate, voice:prepare, the notebook on Colab, download predictions, node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions <file> --bar 0.95: PASS; npm run voice:probe on the four sentences"
-  status: uncovered
+    steps: "the fourth Colab run scored on the 500-row set: clean 99.6%, perturbed 97.2%, PASS at the 0.95 bar; the served model read the compound sentence and the place-less sentences right through the probe (session 167)"
+  status: covered
   note: >-
-    STATED 13 Sept (session 160). Data side done 13 Sept (session 162, ddad6f8): voiceData.test.ts pins
+    STATED 13 Sept (session 160), COVERED 14 Sept (session 167): the fourth run passed the bar and the served
+    model reads the sentences. Data side done 13 Sept (session 162, ddad6f8): voiceData.test.ts pins
     the 500-row held-out set and the oracle on the new templates, voiceRead.test.ts pins the several
     decoding and the schema branch. Covered when the S43 pipeline's score on the retrained model is
     recorded on S50's card --- the maintainer's Colab run.
@@ -11014,7 +11028,8 @@ requirements:
   note: >-
     STATED 13 Sept (session 163). COVERED on the board side 14 Sept (session 164, a4d73c9, 12b57c8):
     the resolver turns a name into the cell's band, the data carries the sentences. The model's own
-    reading of them is the retrain's, recorded on S52's card when the maintainer's run is scored. Grammar, decoder and schema in 14 Sept (session 163, 53cb5f1; SH6 to
+    reading arrived with the fourth run (session 167): shift 612/614 by field, the maintainer's shift
+    sentence read right through the served model. Grammar, decoder and schema in 14 Sept (session 163, 53cb5f1; SH6 to
     SH14, VR12, VR8 with the field). Covered when
     commandResolve.test.ts the shift-band resolution cases, voiceRead.test.ts the decoder and schema
     cases, voiceData.test.ts the templates and the regenerated held-out set, and the retrained model's
@@ -11101,7 +11116,7 @@ findings:
 - id: F-144
   title: A sentence that names no place gets a place the model made up, and a "change X's timing" phrasing loses the pm
   tag: The form and the data have a gap the model fills with a guess
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S44
   refs:
@@ -11124,7 +11139,8 @@ findings:
     Half fixed 13 Sept (session 160, b9e0411, S49): the resolver offers the person's blocks that day as
     candidates when the place named matches none, instead of "no block on Cell 1" --- with S47 they
     light up and a yes picks one, and a move's question spells out the destination so an invented
-    cell is read before the yes; no retrain. Still open, Stage 7's second half: (2) the form allows an absent place for a move or a
+    cell is read before the yes; no retrain. Closed 14 Sept (session 167) by the fourth run: the served model
+    reads both screenshot sentences as moves with no place and the right hours. Stage 7's second half was: (2) the form allows an absent place for a move or a
     removal, the generator writes such sentences and the "change X's timing to", "shift X to" phrasings,
     and the model is retrained once. Until then the safe phrasing names the place: "move Operator A3 on
     Cell 1 to 8 pm to 11 pm".
@@ -14968,6 +14984,31 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 167
+  date: 2026-09-14
+  title: "The fourth run passes at 99.6% and is served; Stage 7 closes (S50, S52, R-399, R-402, F-144)"
+  shipped: [S50, S52]
+  commits: ['4e12064']
+  numbers:
+    app_tests: 3240
+    app_test_files: 145
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    No code changed this session; the numbers are session 166's. The model file under data/voice/model
+    is the fourth run's Q4_K_M (gitignored); the previous one is kept beside it as a backup.
+  summary: >-
+    The maintainer re-ran prediction only, from the trained adapter, on a deleted predictions file with
+    the F-145 notebook, and pasted the table: clean 249/250 (99.6%), perturbed 243/250 (97.2%); by intent assign 50/48, book 50/48, unassign 50/49, move 49/49, several 50/49 (clean/perturbed of 50); by field every one at 99.5% or above, extra keys 0, every sentence checked (F-145). Served Q4_K_M with the grammar on, the maintainer's five sentences read right: the two F-144 screenshots as moves with no place, "remove Operator A3 today", the compound sentence as two commands paired in order, the shift sentence as shift "2" with no hours. The developer session put the
+    fourth run's model behind the board and read the five sentences through it. Stage 7 of the voice
+    plan is closed: a wrong or missing cell is a question, a sentence need not name a place, several
+    people or cells are several commands with one yes, change and shift are verbs, a shift's name is the
+    cell's own band, and the model was taught all of it in one run. Left open on purpose: the sentence
+    catalogue (S53) at the maintainer's pick, Stage 6's second half (Whisper), Stages 8 to 11, 6b.
 - id: 166
   date: 2026-09-14
   title: "The fourth run's 20% was the instrument, not the model: predictions now name their sentences (F-145)"
@@ -22224,16 +22265,6 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  stage: S50
-  text: "Voice plan Stage 7, second half --- the retrain, after S52: the maintainer runs the S43 pipeline on the regenerated set and the score goes on S50's and S52's cards (S50, R-399; S52, R-402)"
-  why: >-
-    Three things the maintainer met on 13 Sept (session 158). After S49 the board side is ready. Then one retrain: the form
-    allows an absent place for a move or a removal, the generator writes such sentences and the
-    "change X's timing to", "shift X to" phrasings, and lists --- "assign A2 and A3 to Product XYZ on
-    Cell 1 and Cell 2 from 3 to 5" becomes several commands, each outlined, one yes for the lot (the
-    maintainer's example, parked here at their word: "lets wait till we reach that point"). Each
-    retrain is the S43 pipeline again: generate, prepare, the notebook on Colab, the probe here.
 - kind: task
   stage: S52
   text: "Before the retrain --- change and shift as move verbs, a shift's name as the hours (S52, R-401, R-402, in progress)"
