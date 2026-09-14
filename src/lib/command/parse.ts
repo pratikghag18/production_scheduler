@@ -237,7 +237,13 @@ const DAY_TAIL_RE = new RegExp(
 
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-const TIME_TOKEN_RE = /^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$/i;
+/** F-1xx: the browser's speech recogniser writes "7:00 p.m." / "8 a.m." with
+ *  dots -- `a\.?m\.?`/`p\.?m\.?` accepts the plain `am`/`pm` this already
+ *  read, plus `a.m.`/`p.m.`/`a.m`/`p.m` (any case, the trailing dot always
+ *  optional since `parseCommand` strips one sentence-final period before
+ *  this ever runs). Normalised by stripping dots before the am/pm check
+ *  below, so nothing past this line needs to know the dotted form exists. */
+const TIME_TOKEN_RE = /^(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/i;
 
 /** S41-a: only `for <digits>` is a headcount clause (brief §3, B5) — a `for`
  *  not followed by a whole number is ordinary place text ("for lunch"). */
@@ -286,7 +292,7 @@ function parseTimeToken(
   if (!m) return null;
   const hourRaw = Number(m[1]);
   const minute = m[2] !== undefined ? Number(m[2]) : 0;
-  const meridiem = m[3] ? m[3].toLowerCase() : null;
+  const meridiem = m[3] ? m[3].toLowerCase().replace(/\./g, "") : null;
   if (minute > 59) return null;
   if (meridiem) {
     if (hourRaw < 1 || hourRaw > 12) return null;

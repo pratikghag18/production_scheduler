@@ -5,6 +5,7 @@ import { formatClock, formatFull, addMinutes } from "../lib/time";
 import type { DayAxis } from "../lib/time";
 import { targetDisplay } from "../lib/standardTarget";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
+import { useHighlightKind } from "../lib/highlight";
 import styles from "./AssignmentChip.module.css";
 
 function initials(name: string): string {
@@ -70,6 +71,10 @@ export function AssignmentChip({
   onKeyUp: (e: React.KeyboardEvent) => void;
 }) {
   const dragging = activeDrag !== null;
+  // S47 / R-395: see DirectBlock.tsx's identical line -- same context, same
+  // reasoning (a run-attached chip is still an assignment a remove/move
+  // sentence can name).
+  const highlightKind = useHighlightKind(assignment.id);
   const range =
     dragging && activeDrag.candidate
       ? activeDrag.candidate
@@ -105,7 +110,7 @@ export function AssignmentChip({
 
   return (
     <div
-      className={`${styles.achip} ${assignment.eligibilityOverride ? styles.override : ""} ${dragging ? styles.dragging : ""}`}
+      className={`${styles.achip} ${assignment.eligibilityOverride ? styles.override : ""} ${dragging ? styles.dragging : ""} ${highlightKind === "remove" ? styles.outlineRemove : ""} ${highlightKind === "move" || highlightKind === "retime" ? styles.outlineMove : ""}`}
       style={{
         left,
         width,

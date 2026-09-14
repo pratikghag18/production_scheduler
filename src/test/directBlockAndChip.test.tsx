@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DirectBlock } from "@/features/board/components/DirectBlock";
 import { AssignmentChip } from "@/features/board/components/AssignmentChip";
+import { HighlightProvider } from "@/features/board/lib/highlight";
 import type { IndexedAssignment } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
 import { buildDayAxis } from "@/features/board/lib/time";
@@ -121,5 +122,76 @@ describe("DirectBlock vs AssignmentChip — the rendering half of R-028", () => 
     unmount();
     render(<AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />);
     expect(screen.getByRole("button").getAttribute("tabIndex")).toBe("0");
+  });
+});
+
+/**
+ * S47 / R-395: the command bar's remove/move/retime question draws an
+ * outline on the block(s) it names -- `useHighlightKind` (`../lib/highlight.ts`),
+ * read here through `HighlightProvider` exactly as `BoardPage` provides it,
+ * never as a prop threaded through `BoardGrid`/`TrackRow`.
+ *
+ * `css: false` in `vitest.config.ts` makes every CSS Module import here
+ * resolve to `{}` (an empty object, confirmed empirically), so
+ * `styles.outlineRemove` is `undefined` in this file exactly as it is inside
+ * `DirectBlock.tsx`/`AssignmentChip.tsx` themselves -- a literal
+ * `toContain("outlineRemove")` would read a class name that never appears
+ * even on a genuinely highlighted block. The R-028 tests above already made
+ * this call ("not by asserting on a CSS class"); this one instead asserts
+ * that the highlighted render's `className` DIFFERS from an unhighlighted
+ * baseline, and an id NOT in the highlight's set renders identically to
+ * that baseline -- true regardless of what the CSS Module transform does
+ * with the class names in any given environment.
+ */
+describe("S47 / R-395: the highlight a remove/move/retime question draws", () => {
+  it("H1: DirectBlock -- the named assignment's class differs from an unhighlighted one; an unnamed id is unaffected", () => {
+    const { container: plain } = render(<DirectBlock assignment={assignment} {...sharedProps} />);
+    const baseline = plain.querySelector('[role="button"]')!.className;
+
+    const { container: named } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: [assignment.id] }}>
+        <DirectBlock assignment={assignment} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(named.querySelector('[role="button"]')!.className).not.toBe(baseline);
+
+    const { container: unnamed } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: ["some-other-block"] }}>
+        <DirectBlock assignment={assignment} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(unnamed.querySelector('[role="button"]')!.className).toBe(baseline);
+  });
+
+  it("H2: AssignmentChip -- same rule, and 'move'/'retime' both draw the same class (never the removal one)", () => {
+    const { container: plain } = render(
+      <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />,
+    );
+    const baseline = plain.querySelector('[role="button"]')!.className;
+
+    const { container: moved } = render(
+      <HighlightProvider value={{ kind: "move", assignmentIds: [assignment.id] }}>
+        <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    const withMove = moved.querySelector('[role="button"]')!.className;
+    expect(withMove).not.toBe(baseline);
+
+    const { container: retimed } = render(
+      <HighlightProvider value={{ kind: "retime", assignmentIds: [assignment.id] }}>
+        <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    // "move" and "retime" both draw `.outlineMove` (never red) -- the SAME
+    // class, so the two renders' class lists match each other exactly.
+    expect(retimed.querySelector('[role="button"]')!.className).toBe(withMove);
+
+    const { container: removed } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: [assignment.id] }}>
+        <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    // A removal draws a DIFFERENT class than a move/retime does.
+    expect(removed.querySelector('[role="button"]')!.className).not.toBe(withMove);
   });
 });

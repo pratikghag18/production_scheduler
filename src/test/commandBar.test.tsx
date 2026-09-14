@@ -17,9 +17,9 @@
  * Same shape as `settingsPanel.test.tsx`: `@testing-library/react` + jsdom.
  */
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { formatDayLabel } from "@/features/board/lib/time";
-import { formatCommand, type AssignCommand } from "@/lib/command/parse";
+import { formatCommand, parseCommand, type AssignCommand } from "@/lib/command/parse";
 import type {
   ResolveContext,
   ResolvedCommand,
@@ -29,7 +29,9 @@ import type {
   ContextRun,
   ContextAssignment,
 } from "@/lib/command/resolve";
-import { CommandBar } from "@/features/board/components/CommandBar";
+import { CommandBar, type ConfirmWordResult } from "@/features/board/components/CommandBar";
+import type { Reader, Reading } from "@/lib/voice/readSentence";
+import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 
 /** S41-a: `findRunOverlap`, the same stub shape `interaction.ts`'s own
  *  function has (half-open, `excludeRunId` skipped). */
@@ -163,28 +165,83 @@ const BLK2: ContextAssignment = {
   label: "14:00–16:00",
 };
 
-function renderBar(over: Partial<ResolveContext> = {}) {
+/** S44-b: `reader` defaults to `null` -- every pre-S44-b call site (one
+ *  argument only) is unaffected; the CB-model describe block below is the
+ *  only caller that passes a second argument. S46-a widens this with a
+ *  third, also defaulted, argument the same way -- every earlier call site
+ *  (one or two arguments) is unaffected. S47 widens it again with a fourth,
+ *  optional, options object -- `onHighlight` is always a fresh `vi.fn()`
+ *  (a plain callback prop here has no case that needs a caller-supplied
+ *  one; every test reads it off the returned spy instead) and
+ *  `onConfirmWord`/`onCancelWord` default to `undefined` (CommandBar's own
+ *  default), so every pre-S47 call site (up to three positional arguments)
+ *  is unaffected either way. */
+function renderBar(
+  over: Partial<ResolveContext> = {},
+  reader: Reader | null = null,
+  recognizer: Recognizer | null = null,
+  s47: {
+    onConfirmWord?: () => ConfirmWordResult;
+    onCancelWord?: () => boolean;
+  } = {},
+) {
   const onOpen = vi.fn();
   const onRetime = vi.fn();
   const onBook = vi.fn();
   const onRetimeRun = vi.fn();
   const onUnassign = vi.fn();
   const onMove = vi.fn();
+  const onHighlight = vi.fn();
   render(
     <CommandBar
       ctx={buildCtx(over)}
       dateFormat="d_mon_yyyy"
       zone="UTC"
+      reader={reader}
+      recognizer={recognizer}
       onOpen={onOpen}
       onRetime={onRetime}
       onBook={onBook}
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
       onMove={onMove}
+      onHighlight={onHighlight}
+      onConfirmWord={s47.onConfirmWord}
+      onCancelWord={s47.onCancelWord}
     />,
   );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
-  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, input };
+  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, onHighlight, input };
+}
+
+/** S46-a: a fake recogniser (brief §2.4) -- records the `RecognizerEvents`
+ *  object the bar hands it and returns a handle with a `stop` spy. `fire`
+ *  lets a test drive the captured events without reaching into internals. */
+function makeFakeRecognizer() {
+  const stop = vi.fn();
+  let captured: RecognizerEvents | null = null;
+  const recognizer: Recognizer = (events) => {
+    captured = events;
+    return { stop };
+  };
+  return {
+    recognizer,
+    stop,
+    fire: {
+      interim(text: string): void {
+        act(() => captured?.onInterim(text));
+      },
+      final(text: string): void {
+        act(() => captured?.onFinal(text));
+      },
+      error(kind: "not-allowed" | "no-speech" | "other", detail?: string): void {
+        act(() => captured?.onError(kind, detail));
+      },
+      end(): void {
+        act(() => captured?.onEnd());
+      },
+    },
+  };
 }
 
 /** The one `aria-live="polite"` status element (brief §6). */
@@ -412,8 +469,11 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
+    // S47 / R-395: one candidate ("Separate block") -- the message now
+    // gains the yes/no suffix (CB-yes-1's rule applies to block_exists too).
     expect(statusText()).toBe(
-      "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?",
+      "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?" +
+        " — say or type yes to do it, no to leave it.",
     );
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Change /i })).toBeNull();
@@ -515,7 +575,12 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe("Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?");
+    // S47 / R-395: one candidate ("Remove it") -- the message now gains the
+    // yes/no suffix (CB-yes-1).
+    expect(statusText()).toBe(
+      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?" +
+        " — say or type yes to do it, no to leave it.",
+    );
     expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
     expect(screen.queryAllByRole("button")).toHaveLength(1);
     expect(onOpen).not.toHaveBeenCalled();
@@ -649,5 +714,626 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onRetimeRun).not.toHaveBeenCalled();
     expect(onUnassign).not.toHaveBeenCalled();
     expect(onMove).not.toHaveBeenCalled();
+  });
+});
+
+// -----------------------------------------------------------------------
+// S47 / R-395: the outline and the spoken yes (brief
+// docs/agent-briefs/s47-a-outline-and-yes-brief.md). `onHighlight` is the
+// bar telling the board what a remove/move/retime question is about; a
+// confirm/cancel word is `submitText`'s own shortcut around that same
+// question BEFORE parsing, and, with none standing, around
+// `onConfirmWord`/`onCancelWord` (R-384's pop-up).
+// -----------------------------------------------------------------------
+
+describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
+  it("CB-yes-1: a remove sentence with one matching block highlights it and the message gains the yes suffix", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1] });
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+    expect(statusText()).toBe(
+      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00? — say or type yes to do it, no to leave it.",
+    );
+  });
+
+  it("CB-yes-2: typing yes + Enter calls onUnassign with that block and clears the highlight", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-3: no clears the status, the outline and the input; onUnassign is never called", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(statusText()).toBe("");
+    expect(input.value).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-4: two matching blocks highlight both with no suffix; a bare yes asks which one and writes nothing", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: UNASSIGN_WHOLE_DAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "remove",
+      assignmentIds: ["blk1", "blk2"],
+    });
+    expect(statusText()).not.toMatch(/say or type yes/);
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Which one? Remove Housing A 10:00–14:00, Remove Housing A 14:00–16:00",
+    );
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CB-yes-5: a spoken final result 'yes' confirms exactly like typing", () => {
+    // The sentence is typed; "yes" is spoken as its OWN session (the browser
+    // recogniser ends a session after one final result -- `recognizer.ts`'s
+    // `continuous = false` -- so a second word always takes a second press).
+    // The press itself must not erase the standing question -- see
+    // `startListening`'s S47 comment.
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input, onUnassign } = renderBar({ assignments: [BLK1] }, null, recognizer);
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fire.final("yes");
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it("CB-yes-6: Escape clears the highlight", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(statusText()).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-7: a new sentence replaces the highlight with the new one", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "move",
+      assignmentIds: ["blk1", "blk2"],
+    });
+  });
+
+  it("CB-yes-8: yes with no question defers to onConfirmWord -- 'none' falls to the rules, 'created' clears the input", () => {
+    const onConfirmWordNone = vi.fn((): ConfirmWordResult => "none");
+    const { input } = renderBar({}, null, null, { onConfirmWord: onConfirmWordNone });
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onConfirmWordNone).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe(SHAPE);
+    expect(input.value).toBe("yes");
+
+    cleanup();
+    const onConfirmWordCreated = vi.fn((): ConfirmWordResult => "created");
+    const second = renderBar({}, null, null, { onConfirmWord: onConfirmWordCreated });
+
+    fireEvent.change(second.input, { target: { value: "yes" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+
+    expect(onConfirmWordCreated).toHaveBeenCalledTimes(1);
+    expect(second.input.value).toBe("");
+  });
+
+  it("CB-yes-9: a move sentence highlights both candidates as kind move; picking one (after a bare yes asks which) reaches onMove", () => {
+    const { input, onMove, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "move",
+      assignmentIds: ["blk1", "blk2"],
+    });
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onMove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" }));
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk2");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-10: a typed edit while a block question stands clears the question, the outline and the stale button", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: `${UNASSIGN_SENTENCE}x` } });
+
+    expect(statusText()).toBe("");
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+
+    // The stale button is really gone, not just hidden -- confirm words
+    // now go to the ordinary path (the sentence-plus-"x" makes "yes" alone
+    // moot here, so this instead proves nothing is bound to click any more:
+    // there is no button left to click).
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CB-yes-11: an interim speech result leaves a standing block question (and its highlight) alone; a final 'yes' then confirms", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] }, null, recognizer);
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    onHighlight.mockClear();
+
+    // A fresh mic press preserves the standing question (see
+    // `startListening`'s S47 comment) -- an interim result must not undo
+    // that just because the input's text now reads "ye".
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fire.interim("ye");
+
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    expect(statusText().endsWith(" — say or type yes to do it, no to leave it.")).toBe(true);
+    expect(onHighlight).not.toHaveBeenCalled();
+
+    fire.final("yes");
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it("CB-yes-12: 'remove it' does not confirm a standing MOVE question (shape hint, no onMove); 'move it' does", () => {
+    // move_which is never asked for exactly one block (CM3's own comment:
+    // "a move takes it without asking" -- resolve.ts's `resolveMoveCommand`
+    // only ever calls `askMoveWhich` when more than one block matches), so
+    // the smallest standing "move" question has two candidates. That is
+    // enough to prove the kind gate at the point it actually acts: a
+    // mismatched word is refused OUTRIGHT (never even entering the
+    // "Which one?" flow), while a matching one is accepted as a confirm and
+    // reaches `onMove`, same as any other confirm word would.
+    const { input, onMove, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "move",
+      assignmentIds: ["blk1", "blk2"],
+    });
+
+    fireEvent.change(input, { target: { value: "remove it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(statusText()).toBe(SHAPE);
+
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "move it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Which one? Move Housing A 10:00–14:00, Move Housing A 14:00–16:00");
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 10:00–14:00" }));
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it("CB-yes-13: onConfirmWord's three results -- 'created' clears the input, 'needs-decision' shows the message and keeps the input, 'none' goes to the rules", () => {
+    const created = vi.fn((): ConfirmWordResult => "created");
+    const first = renderBar({}, null, null, { onConfirmWord: created });
+    fireEvent.change(first.input, { target: { value: "yes" } });
+    fireEvent.keyDown(first.input, { key: "Enter" });
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(first.input.value).toBe("");
+
+    cleanup();
+    const needsDecision = vi.fn((): ConfirmWordResult => "needs-decision");
+    const second = renderBar({}, null, null, { onConfirmWord: needsDecision });
+    fireEvent.change(second.input, { target: { value: "yes" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    expect(needsDecision).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe("The pop-up needs a decision first.");
+    expect(second.input.value).toBe("yes");
+
+    cleanup();
+    const none = vi.fn((): ConfirmWordResult => "none");
+    const third = renderBar({}, null, null, { onConfirmWord: none });
+    fireEvent.change(third.input, { target: { value: "yes" } });
+    fireEvent.keyDown(third.input, { key: "Enter" });
+    expect(none).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe(SHAPE);
+    expect(third.input.value).toBe("yes");
+  });
+});
+
+// -----------------------------------------------------------------------
+// S44-b: the bar reads through the model service, with a fake `reader`
+// (brief docs/agent-briefs/s44-b-read-by-model-brief.md §3.5). `readSentence`
+// itself (the real `fetch`-backed one) is `src/test/voiceRead.test.ts`'s
+// concern (VR1-VR7); these tests are only about `CommandBar`'s OWN wiring
+// -- the pending status, the abort-and-restart on a second Enter, Escape,
+// and the rules fallback with its readout suffix.
+// -----------------------------------------------------------------------
+
+describe("CB-model: the bar reads through a model reader (S44-b)", () => {
+  it("CB-model-1: a clean model answer opens the popover exactly as the rules would, readout says read by the model", async () => {
+    const parsed = parseCommand(P1_SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsed.command,
+      by: "model",
+    }));
+
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Reading…");
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+
+    // The same fields C2 asserts for the rules reading this exact sentence.
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("c1a");
+    expect(resolved.operatorId).toBe("op1");
+    expect(resolved.target).toEqual({ kind: "direct", productId: "ha" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 });
+    expect(statusText().endsWith(" · read by the model")).toBe(true);
+  });
+
+  it("CB-model-2: 'unavailable' falls back to the rules, readout says why", async () => {
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "unavailable",
+    }));
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+
+    expect(statusText()).toContain("· read by the rules (the model service is off)");
+  });
+
+  it("CB-model-3: a failed parse under 'timeout' is prefixed with why the rules read it", async () => {
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "timeout",
+    }));
+    const { input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(statusText()).toBe(`The model took too long, so the rules read this: ${SHAPE}`),
+    );
+  });
+
+  it("CB-model-4: 'Reading…' shows while pending; a second Enter aborts the first (its signal) and reads again", async () => {
+    const captured: { first: AbortSignal | null } = { first: null };
+    let calls = 0;
+    const fakeReader: Reader = vi.fn((_text: string, signal: AbortSignal) => {
+      calls += 1;
+      if (calls === 1) {
+        captured.first = signal;
+        return new Promise<Reading>(() => {
+          // Never settles -- superseded by the second Enter below.
+        });
+      }
+      return Promise.resolve({ ok: false, reason: "no-service" } as Reading);
+    });
+
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+    expect(calls).toBe(1);
+    expect(captured.first?.aborted ?? false).toBe(false);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(calls).toBe(2);
+    expect(captured.first?.aborted).toBe(true);
+
+    // The second reading answers "no-service" -> exactly the null-reader
+    // path -- the rules read P1_SENTENCE and open the popover, no suffix.
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+    expect(statusText().endsWith("· read by")).toBe(false);
+  });
+
+  it("CB-model-5: Escape while reading aborts it and clears the status", () => {
+    const captured: { signal: AbortSignal | null } = { signal: null };
+    const fakeReader: Reader = vi.fn((_text: string, sig: AbortSignal) => {
+      captured.signal = sig;
+      return new Promise<Reading>(() => {
+        // Never settles.
+      });
+    });
+
+    const { input } = renderBar({ runs: [] }, fakeReader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(captured.signal?.aborted).toBe(true);
+    expect(statusText()).toBe("");
+  });
+
+  it("CB-model-6: a null reader makes no call -- the bar behaves exactly as before S44-b", () => {
+    const spyReader: Reader = vi.fn();
+    const { onOpen, input } = renderBar({ runs: [] }, null);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(spyReader).not.toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(statusText().includes("read by")).toBe(false);
+  });
+
+  // Review finding 1: an edit while reading used to leave "Reading…" on
+  // screen (a stuck-looking spinner) until the next Enter or Escape.
+  it("CB-model-7: an edit while reading aborts it and clears the 'Reading…' status", () => {
+    const fakeReader: Reader = vi.fn(
+      (): Promise<Reading> =>
+        new Promise(() => {
+          // Never settles.
+        }),
+    );
+    const { input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+
+    fireEvent.change(input, { target: { value: `${P1_SENTENCE} more` } });
+    expect(statusText()).toBe("");
+  });
+
+  // Review finding 2: Enter on empty/whitespace-only text used to reach the
+  // reader (a network round trip, possibly a 20s wait) and then fall back
+  // with a misleading "not a form" prefix. It must take exactly the
+  // null-reader path instead.
+  it("CB-model-8: empty or whitespace-only text never reaches the reader", () => {
+    const fakeReader: Reader = vi.fn();
+    const { input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fakeReader).not.toHaveBeenCalled();
+    expect(statusText()).toBe(SHAPE);
+
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fakeReader).not.toHaveBeenCalled();
+    expect(statusText()).toBe(SHAPE);
+  });
+});
+
+// -----------------------------------------------------------------------
+// S46-a: the microphone -- the browser's recogniser types the sentence
+// (brief docs/agent-briefs/s46-a-microphone-brief.md §2, CB-mic-1..7). A
+// fake `Recognizer` (`makeFakeRecognizer` above) stands in for the browser's
+// Web Speech API; `browserRecognizer()`'s own mapping onto that API is
+// `src/lib/voice/recognizer.ts`'s concern, untested here (jsdom has no
+// `SpeechRecognition`) -- these tests are only about `CommandBar`'s own
+// wiring of whatever `Recognizer` it is given.
+// -----------------------------------------------------------------------
+
+describe("CB-mic: the microphone button (S46-a)", () => {
+  it("CB-mic-1: no recognizer renders no button; a fake one does", () => {
+    renderBar({}, null, null);
+    expect(screen.queryByRole("button", { name: "Speak a sentence" })).toBeNull();
+
+    cleanup();
+    const { recognizer } = makeFakeRecognizer();
+    renderBar({}, null, recognizer);
+    expect(screen.getByRole("button", { name: "Speak a sentence" })).toBeTruthy();
+  });
+
+  it("CB-mic-2: pressing starts a session, shows Listening… and aria-pressed, and aborts an in-flight reading", () => {
+    const { recognizer } = makeFakeRecognizer();
+    const captured: { signal: AbortSignal | null } = { signal: null };
+    const neverResolves: Reader = vi.fn((_text: string, signal: AbortSignal) => {
+      captured.signal = signal;
+      return new Promise<Reading>(() => {
+        // Never settles -- superseded by pressing the mic button below.
+      });
+    });
+    const { input } = renderBar({ runs: [] }, neverResolves, recognizer);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    expect(neverResolves).toHaveBeenCalledTimes(1);
+    expect(captured.signal?.aborted).toBe(true);
+    expect(micButton.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+  });
+
+  it("CB-mic-3: an interim result puts the heard text in the input", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fire.interim("put ana");
+
+    expect(input.value).toBe("put ana");
+  });
+
+  it("CB-mic-4: a final result submits exactly as Enter does", async () => {
+    const first = makeFakeRecognizer();
+    const { onOpen, input } = renderBar({ runs: [] }, null, first.recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    first.fire.final(P1_SENTENCE);
+
+    expect(input.value).toBe(P1_SENTENCE);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.operatorId).toBe("op1");
+
+    cleanup();
+    const second = makeFakeRecognizer();
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "no-service",
+    }));
+    const { onOpen: onOpen2 } = renderBar({ runs: [] }, fakeReader, second.recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    second.fire.final(P1_SENTENCE);
+
+    expect(fakeReader).toHaveBeenCalledWith(P1_SENTENCE, expect.anything());
+    await waitFor(() => expect(onOpen2).toHaveBeenCalledTimes(1));
+  });
+
+  it("CB-mic-5: pressing again while listening stops it, keeps the text, and returns to idle", () => {
+    const { recognizer, stop } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+    fireEvent.change(input, { target: { value: "put ana" } });
+
+    fireEvent.click(micButton);
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe("put ana");
+    expect(micButton.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("CB-mic-6: Escape while listening stops it, keeps text and status", () => {
+    const { recognizer, stop } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fireEvent.change(input, { target: { value: "put ana" } });
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe("put ana");
+    expect(statusText()).toBe("");
+  });
+
+  it("CB-mic-7: each error kind sets the status line and ends listening", () => {
+    const cases: Array<[Parameters<RecognizerEvents["onError"]>[0], string | undefined, string]> = [
+      [
+        "not-allowed",
+        undefined,
+        "The microphone was refused. Allow it in the browser's address bar and try again.",
+      ],
+      ["no-speech", undefined, "Nothing was heard."],
+      ["other", "network", "The recogniser stopped: network."],
+    ];
+    for (const [kind, detail, expected] of cases) {
+      cleanup();
+      const { recognizer, fire } = makeFakeRecognizer();
+      renderBar({}, null, recognizer);
+      const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+      fireEvent.click(micButton);
+
+      fire.error(kind, detail);
+
+      expect(statusText()).toBe(expected);
+      expect(micButton.getAttribute("aria-pressed")).toBe("false");
+    }
+  });
+
+  // Review findings 1-3 (races caught reviewing S46-a): CB-mic-8 to CB-mic-10.
+
+  it("CB-mic-8: onEnd after a final clears the session, so a later Escape runs the normal rules instead of stopping a dead handle", () => {
+    const { recognizer, fire, stop } = makeFakeRecognizer();
+    const { input, onOpen } = renderBar({ runs: [] }, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fire.final(P1_SENTENCE);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(statusText()).not.toBe("");
+
+    // The real API fires `onEnd` on its own once a final result has settled
+    // the session -- nothing here presses the mic button again.
+    fire.end();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    // Review finding 1: pre-fix, `recognitionRef` still held the dead
+    // handle, so this Escape called `stop()` on it and returned before the
+    // status line was cleared.
+    expect(stop).not.toHaveBeenCalled();
+    expect(statusText()).toBe("");
+    expect(input.value).toBe(P1_SENTENCE);
+  });
+
+  it("CB-mic-9: a synchronous onError from the recognizer factory itself leaves the button idle with the error status", () => {
+    // recognizer.ts's own `start()` try/catch can call `onError` before
+    // `browserRecognizer()`'s inner function returns a handle -- this fake
+    // reproduces exactly that shape (review finding 2).
+    const stop = vi.fn();
+    const recognizer: Recognizer = (events) => {
+      events.onError("other", "sync-boom");
+      return { stop };
+    };
+    renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+
+    fireEvent.click(micButton);
+
+    expect(micButton.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText("Listening…")).toBeNull();
+    expect(statusText()).toBe("The recogniser stopped: sync-boom.");
+  });
+
+  it("CB-mic-10: a final result arriving after stop is a no-op", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input, onOpen } = renderBar({ runs: [] }, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+    fireEvent.click(micButton); // stop -- listening ends before any result
+
+    fire.final(P1_SENTENCE);
+
+    expect(input.value).toBe("");
+    expect(onOpen).not.toHaveBeenCalled();
   });
 });

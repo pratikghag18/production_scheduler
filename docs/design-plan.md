@@ -9114,3 +9114,123 @@ would show nothing to decide (R-384) — sends `move_assignment` instead of `cre
 The move in time on the same cell is R-385's path, reached by a sentence that says so.
 
 Brief: `docs/agent-briefs/s41-c-move-brief.md`.
+
+## §19.92 — D121: the model is served by llama.cpp's server, and the bar reads through it with the rules behind (S44)
+
+> *"Go ahead and do what you think is the best option."* — the maintainer, 13 Sept, on which
+> runtime serves the fine-tuned model, after the developer recommended llama.cpp's server over
+> Ollama.
+
+### D121 — the runtime, and the shape of the reader
+
+The S43 model passed (clean 100%, perturbed 93.5%). Serving it means one small process that
+holds the quantised file and answers a sentence with a form. Two candidates fit the "run it
+yourself" spirit: Ollama, and llama.cpp's own `llama-server`. Ollama is the friendlier install,
+but it wraps the same engine, wants its own model registry and its own file format around the
+GGUF, and puts one more moving part between the bar and the model. `llama-server` reads the
+GGUF directly, has an OpenAI-shaped chat endpoint, caches the prompt prefix between calls (the
+450-token system prompt is paid once, not per sentence), runs the chat template with thinking
+off from the request, and can later constrain decoding with a grammar so an invented key is
+impossible rather than merely unlikely. It ships as a multi-architecture container, so it runs
+on this machine's ARM processor next to the Supabase containers with no build step. That is the
+choice; the grammar is a follow-up, not part of this stage, because the third run answered with
+no invented key in 400 rows and the app checks the shape anyway.
+
+**The reader is a second way to obtain a `Command`, never a second door.** `parse.ts` stays
+what it is: pure, the rules, the fixed sentences. The model reader lives in `src/lib/voice/`,
+outside `src/lib/command/`, because the purity audit (U1) walks that folder and forbids every
+runtime import, and the reader must import the training prompt and call `fetch`. The bar takes
+the reader as a prop, so tests hand it a fake and the board hands it the real one. Whatever
+answers — the model or the rules — produces the same `Command`, and everything after it is the
+code S40 and S41 already have: `resolveCommand`, the questions, the pop-up, and the pop-up's one
+writer. `commandPurity.test.ts`'s U2 needles still apply to the bar unchanged.
+
+**The answer is checked, not trusted.** A decoder turns the service's JSON into a `Command` or
+refuses: the four intents, every required field present with the right shape, an extra key
+ignored (F-140's lesson, applied at the door), anything else refused. A refused answer is a
+fallback, not an error the person has to read.
+
+**The fallback announces itself.** The plan's own sentence is "falls back to the rule parser
+and says so". Three reasons fall back: the service is off (the request fails), the service is
+slow (a timeout, generous because the first call on a cold cache pays the prompt), or the
+answer is not a form. In each case the rules read the sentence and the status line names the
+reader and the reason in plain words, so a person who typed a free phrasing and got "I don't
+understand" from the rules knows the model was not consulted, and goes to look at the
+container rather than at their sentence. When the model answers, the readout line says so
+too, briefly, so the maintainer can see at a glance which reader is on.
+
+**No address, no request.** The service address comes from `VITE_VOICE_URL`. Unset, the bar
+makes no request and is byte for byte the S41 bar; the tester's role walk and every existing
+bar test run that way. In development the address is `/voice`, a Vite proxy to the container's
+port, so the browser talks to its own origin and no CORS setting is needed on the service.
+
+**One prompt.** The app sends `scripts/voice/train/system_prompt.txt` itself, imported as text,
+so the sentence the model reads in the app is the sentence it was trained on. A test compares
+the two byte for byte; a copy would drift.
+
+Briefs: `docs/agent-briefs/s44-a-serve-brief.md` and `docs/agent-briefs/s44-b-read-by-model-brief.md`.
+
+## §19.93 — D122: the service refuses a wrong key by grammar (S45)
+
+> *"Do it and don't stop unless you need me to intervene."* — the maintainer, 13 Sept, on Stage 5b
+> and Stage 6 together.
+
+### D122 — one schema, sent by the app and by the probe, in the model's own key order
+
+The served four-bit file scored clean 98% where the full-precision file scored 100% (session
+157). Three of the four misses were the same thing: the answer carried `type` where `intent`
+belonged, and the decoder rightly refused it. That is not a reading error; it is a spelling
+error at the last step of a compressed model, and llama.cpp's server has the tool for exactly
+this: a JSON schema in the request, converted to a grammar, so that a token which would break
+the schema has zero probability. A wrong key becomes impossible.
+
+Two rules make the schema safe rather than harmful. **Key order follows the model, not the
+type.** The model was trained on canonical forms with keys sorted alphabetically and writes
+them that way; a grammar that demanded another order would drag every answer off the path the
+model learned. So the schema lists properties alphabetically, all required, no additional
+properties, and the four forms as alternatives on `intent`. **One file, two senders.** The
+schema is a JSON file beside the serving scripts; the app's reader imports it and the probe
+reads it, so the app and the measurement send the same constraint and a drift between them is
+impossible. The probe keeps a switch to send no schema, so the held-out set can be run both
+ways and the two tables compared on the card; the switch is for measuring, not for serving.
+
+The grammar constrains which tokens may come next; it does not tell the model what to say.
+The system prompt still does that, and the decoder still checks every field, because a schema
+cannot say that an hour is 13 and not 23. The eight-bit file is the other half of the gap and
+is not built here: it needs the full-precision file from Drive and the quantiser, and only if
+the grammar leaves misses worth the doubled file size and the slower answer.
+
+Brief: `docs/agent-briefs/s45-a-grammar-brief.md`.
+
+## §19.94 — D123: the microphone is the browser's recogniser feeding the same input (S46)
+
+### D123 — a button that types, not a second way in
+
+The plan's Stage 6 says: a button next to the bar, the browser's built-in recogniser first.
+The design follows the rule every voice stage has followed: nothing new after the sentence
+exists. The recogniser's job ends when a sentence is in the input, and from there the bar does
+what it does for a typed one — the model reader when a service is configured, the rules
+otherwise, the resolver, the questions, the pop-up, and the pop-up's one writer. The
+microphone cannot create a block that typing could not.
+
+**Where it lives.** Inside the bar, as a button beside the input, because the maintainer's
+standing preference is to fold a capability into the existing control rather than add a
+parallel one. The bar takes the recogniser as a prop, the way it takes the reader, so tests
+hand it a fake and the board hands it the browser's, and a browser without one renders no
+button at all: absent, not disabled, since a disabled control is a promise the browser cannot
+keep.
+
+**What the person sees.** Press: the button says it is listening and the input shows what has
+been heard so far, updated as the recogniser revises it. A final result lands in the input and
+is submitted through the same path as Enter. Press again or Escape: listening stops and the
+words heard so far stay in the input, editable, because a half-heard sentence is worth
+correcting rather than losing. A refused microphone, silence, and any other recogniser error
+each become one plain sentence in the status line; none of them throws.
+
+**What leaves the machine.** This version sends the audio to the browser maker's service,
+Chrome to Google and Edge to Microsoft, as `docs/voice-commands-plan.md` says of it; the
+button's tooltip says so in one line, so a site that will not accept that knows before pressing.
+The local Whisper version, through the same service as the model, is the plan's second step
+and is not part of this stage.
+
+Brief: `docs/agent-briefs/s46-a-microphone-brief.md`.

@@ -13,7 +13,10 @@
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { CreatePopover } from "@/features/board/components/CreatePopover";
+import {
+  CreatePopover,
+  type PopoverConfirmHandle,
+} from "@/features/board/components/CreatePopover";
 import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { AbsenceRow } from "@/lib/absence";
 
@@ -45,6 +48,15 @@ const operator: BoardOperator = {
 const CNC: Skill = { id: "sk-cnc", name: "CNC" };
 const trainedOperator: BoardOperator = { ...operator, skillIds: ["sk-cnc"] };
 const untrainedOperator: BoardOperator = { ...operator, skillIds: [] };
+/** S47 fixtures: a SECOND, distinct id -- `submitIfClean()`'s "starts dirty,
+ *  becomes clean" case needs two operators actually offered together (the
+ *  operator `<select>` is never disabled by `presetOperatorId` alone, only
+ *  by `presetMode`/`presetMove` -- so switching it is a real interaction). */
+const trainedOperator2: BoardOperator = {
+  ...trainedOperator,
+  id: "op-2",
+  displayName: "Ben Cruz",
+};
 
 function renderPopover(
   over: {
@@ -65,6 +77,12 @@ function renderPopover(
     /** R-384: renders under `<StrictMode>`, the way `src/main.tsx` mounts the
      *  app — needed to prove the auto-press fires exactly once (F-128). */
     strict?: boolean;
+    /**
+     * S47 / R-395 item 4: a plain mutable ref object (not necessarily one
+     * from `useRef` -- this file has no component of its own to hold one),
+     * read the way `BoardPage` reads it -- `ref.current?.submitIfClean()`.
+     */
+    ref?: { current: PopoverConfirmHandle | null };
   } = {},
 ) {
   const onSubmitRun = vi.fn();
@@ -74,6 +92,7 @@ function renderPopover(
   const ops = over.operators ?? [operator];
   const element = (
     <CreatePopover
+      ref={over.ref}
       nodeId="cell-1"
       anchor={{ x: 0, y: 0 }}
       initialRange={{ startMin: 360, endMin: 480 }}
@@ -495,5 +514,78 @@ describe("CreatePopover — S41-c: presetMove (move to another cell)", () => {
     expect(onSubmitMove.mock.calls[1][2]).toBe("asg-2");
     expect(onSubmitRun).not.toHaveBeenCalled();
     expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * S47 / R-395 item 4 -- `PopoverConfirmHandle.submitIfClean()`, what
+ * `CommandBar`'s `onConfirmWord` reaches through `BoardPage`'s ref for a
+ * spoken/typed yes that arrives AFTER mount (once R-384's own mount-only
+ * auto-press has already had its one chance). A pop-up that is clean AND
+ * `autoCreate` at MOUNT time is already spent by that auto-press before a
+ * ref call could ever reach it -- see AC1 -- so the "created" case here has
+ * to start dirty (autoCreate does not fire) and become clean through the
+ * SAME override tick a person would use, exactly as a real "yes" arriving
+ * after the pop-up already asked a question would.
+ */
+describe("CreatePopover — R-395: submitIfClean() through the ref", () => {
+  it("CP-H1: a pop-up that becomes clean returns 'created' once, submitting; a second call returns 'none' and submits nothing more", () => {
+    const ref: { current: PopoverConfirmHandle | null } = { current: null };
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator, trainedOperator2],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      ref,
+    });
+    // Dirty at mount (op-1 lacks CNC) -- the R-384 auto-press does not fire
+    // (AC2's own case), so `autoFiredRef` is still unspent here.
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+
+    // The pop-up becomes clean the way a person actually resolves one that
+    // is not — not by ticking the override box, which the `clean` verdict
+    // deliberately ignores (a `warn` box is still a decision, never clean;
+    // see the comment on `clean` itself), but by picking the OTHER, trained
+    // operator instead. `presetOperatorId` only pre-selects; it does not
+    // disable this select (that is `presetMode`/`presetMove`'s doing).
+    fireEvent.change(screen.getByLabelText("Operator"), { target: { value: "op-2" } });
+
+    expect(ref.current!.submitIfClean()).toBe("created");
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+    expect(onSubmitDirect.mock.calls[0][2]).toBe("op-2");
+
+    expect(ref.current!.submitIfClean()).toBe("none");
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+  });
+
+  it("CP-H2: a dirty sentence-opened pop-up returns 'needs-decision' and submits nothing; one with autoCreate false returns 'none'", () => {
+    const dirtyRef: { current: PopoverConfirmHandle | null } = { current: null };
+    const { onSubmitDirect: dirtySubmit } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      ref: dirtyRef,
+    });
+
+    expect(dirtyRef.current!.submitIfClean()).toBe("needs-decision");
+    expect(dirtySubmit).not.toHaveBeenCalled();
+
+    const noAutoRef: { current: PopoverConfirmHandle | null } = { current: null };
+    const { onSubmitDirect: cleanSubmit } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      // autoCreate omitted -- a drag or a keyboard create, never a sentence.
+      ref: noAutoRef,
+    });
+
+    expect(noAutoRef.current!.submitIfClean()).toBe("none");
+    expect(cleanSubmit).not.toHaveBeenCalled();
   });
 });

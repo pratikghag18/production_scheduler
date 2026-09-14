@@ -1,0 +1,131 @@
+{
+  "$defs": {
+    "clock_time": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hour": { "type": "integer", "minimum": 0, "maximum": 23 },
+        "minute": { "type": "integer", "minimum": 0, "maximum": 59 }
+      },
+      "required": ["hour", "minute"]
+    },
+    "day_word": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "today" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "tomorrow" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "day": { "type": "integer", "minimum": 0, "maximum": 6 },
+            "kind": { "const": "weekday" }
+          },
+          "required": ["day", "kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "iso": { "type": "string" },
+            "kind": { "const": "date" }
+          },
+          "required": ["iso", "kind"]
+        }
+      ]
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "end": { "$ref": "#/$defs/clock_time" },
+        "start": { "$ref": "#/$defs/clock_time" }
+      },
+      "required": ["end", "start"]
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attach": { "type": "null" },
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "end": { "$ref": "#/$defs/clock_time" },
+        "existing": { "type": "null" },
+        "intent": { "const": "assign" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "start": { "$ref": "#/$defs/clock_time" }
+      },
+      "required": [
+        "attach",
+        "day",
+        "end",
+        "existing",
+        "intent",
+        "operator",
+        "place",
+        "product",
+        "start"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "end": { "$ref": "#/$defs/clock_time" },
+        "existing": { "type": "null" },
+        "headcount": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+        "intent": { "const": "book" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "start": { "$ref": "#/$defs/clock_time" }
+      },
+      "required": ["day", "end", "existing", "headcount", "intent", "place", "product", "start"]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "existing": { "type": "null" },
+        "intent": { "const": "unassign" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+      },
+      "required": ["day", "existing", "intent", "operator", "place", "span"]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "existing": { "type": "null" },
+        "intent": { "const": "move" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
+        "toPlace": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
+        }
+      },
+      "required": ["day", "existing", "intent", "operator", "place", "span", "toPlace"]
+    }
+  ]
+}

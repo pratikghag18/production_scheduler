@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-12'
-  tip: '3090059'
+  updated: '2026-09-13'
+  tip: '3ca8f29'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2081,6 +2081,212 @@ stages:
     **Shipped session 148 (b204a96).** The generator, the perturbation catalogue, the committed
     held-out set and the scorer; the rule parser's baseline on the held-out set is recorded below and
     is what any model must beat: clean 200/200 (100%), perturbed 8/200 (4%); by intent, perturbed: assign 0/50, book 3/50, unassign 1/50, move 4/50.
+- id: S43
+  track: core
+  num: 43
+  title: The first model — fine-tune Qwen3 1.7B and score it against the held-out set
+  status: done
+  owner: maintainer
+  refs:
+  - docs/voice-commands-plan.md (Stage 4)
+  - docs/agent-briefs/s43-a-first-model-brief.md
+  - session 152 conversation (the base model chosen)
+  delivers:
+  - R-392
+  what: >-
+    **Teach a small model to read any phrasing.** The board reads four fixed sentences; the model sits in
+    front of the bar as a translator, turning however a person says it into the strict form the board
+    already reads. The base is Qwen3 1.7B (Apache 2.0; the maintainer's pick from a shortlist of three).
+    A Colab notebook the repo carries loads the generated training set, fine-tunes with LoRA, scores the
+    result on the 400 held-out rows with the repo's own scorer, and exports the compressed file the
+    local runtime (Stage 5) will serve. The training runs on Google Colab's free GPU because this
+    machine has none; the maintainer presses run and hands back the files.
+  state: >-
+    **Briefed session 152 (12 Sept).** The notebook, its data step, the predictions format and the
+    scoring path are the developer's; the Colab run and the resulting score are the maintainer's. The
+    bar: the model must beat the rule parser's baseline on perturbed rows (4%) by a wide margin while
+    staying at the bar on clean rows; the number is recorded on this card when the run has happened.
+    **The notebook shipped in session 152 (5b09a61).** The data step, the predictions round trip, the
+    Python port of the scorer and every code cell's syntax are verified here; the training cells are
+    unverified until the maintainer's first Colab run. The README under scripts/voice/train is the
+    maintainer's step-by-step. **Waiting on the maintainer:** the run, and the score.
+    **First run, session 153:** died in the load-data cell on Colab's TensorFlow (F-135), fixed the same
+    hour; the run continues from that cell. Then the next cell died on a mixed transformers install
+    (F-136, the converter's requirements file); fixed by installing only what the converter needs, and
+    the run restarts on a fresh runtime. On that runtime the model loaded and the LoRA step met
+    Colab's old torchao (F-137); removed, and the run continues from the LoRA cell. Training then ran
+    on emulated bf16 at a hundred seconds a step (F-138); stopped by hand at step 110 with the loss at
+    its floor, the adapter saved, and the run continued to prediction and scoring --- blind, because
+    the Predict cell printed nothing until the end (F-139); now it shows progress and writes as it goes.
+    The one-row probe answered correctly in every field plus an invented key (F-140); the scorer now
+    judges the known fields and reports extras.
+    **THE FIRST SCORE (13 Sept, session 153): FAIL.** Clean 90/200 (45%), perturbed 77/200 (38.5%);
+    by intent, unassign 100% clean and move 78%, assign 2% and book 0%. One cause, read from the
+    predictions file rather than the totals: in 397 of 400 answers the model left out the `product`
+    field entirely and put invented fields in its place (`type` 148 rows, `span` 83, `text` 73);
+    every other field it filled in was mostly right (operator 96%, start and end 97.5%, intent 98.8%).
+    The training data is not the cause --- all 2203 assign and book training answers carry the key
+    and the system prompt names it. The run that produced this was stopped by hand at step 110 of
+    375, under one pass over the data, on emulated bf16, then cast to fp16 for prediction; the
+    part's name is the hardest field (fifty realistic names with digits and slashes) and the one a
+    model that has seen each example once has not learned to emit. The second run is the fixed
+    notebook as committed: fp16 from the start, three full passes, checkpoints on Drive.
+    **THE SECOND SCORE (13 Sept, session 155): FAIL, and the same shape.** Clean 94/200 (47%),
+    perturbed 85/200 (42.5%); product 5/200; unassign 98% clean, move 82%, assign 8%, book 0%. That
+    ruled out under-training and the cause was found in the notebook, not the model: the 512-token
+    cut removed the product key from every assign and book training answer (F-142). The reading in
+    session 153 was wrong. **Run three** is the notebook with the cut lifted and a measured-length
+    check in the data cell; same base, same data, same instrument, one variable changed. Waiting on
+    the maintainer's run and its score.
+    **THE THIRD SCORE (13 Sept, session 156): PASS.** Clean 200/200 (100%), perturbed 187/200
+    (93.5%), against a rule parser that reads 3.5% of the perturbed rows; no invented keys in any
+    row. By intent, perturbed: assign 94%, book 96%, unassign 94%, move 90%. The table's span and
+    day lines read low and that was the instrument (F-143), fixed and re-scored. The model is Qwen3
+    1.7B as chosen; the Qwen3.5 comparison is now optional, not owed.
+    **DONE 13 Sept (session 156).** Re-scored with the fixed instrument: clean 200/200, perturbed
+    187/200 (93.5%); by field, every one at or above 96% (span 200/200, day 399/400, toPlace 96/100).
+    The 13 misses are all perturbed rows and all of one kind: a name mangled by the perturbation
+    ("rTim Station", "Sevn Horvath", "hCassis Line", "Driverain") read back as a different but
+    plausible name, or a product cut short ("Harness" for "Wire Harness"); the resolver's own
+    matching (D117) decides those at the pop-up, with the person's word last. The quantised model,
+    model-q4_k_m.gguf (1.1 GB), and the predictions file are on this machine under
+    data/voice/runs/third-run (gitignored; the GGUF is the Stage 5 artefact). Three runs, 2.5 hours
+    each on a T4; the last on the notebook as committed.
+- id: S44
+  track: core
+  num: 44
+  title: Serve the model beside the database — the bar reads by the model and falls back to the rules
+  status: done
+  owner: agent
+  refs:
+  - docs/voice-commands-plan.md (Stage 5)
+  - §19.92 (D121)
+  - docs/agent-briefs/s44-a-serve-brief.md
+  - docs/agent-briefs/s44-b-read-by-model-brief.md
+  - session 156 conversation (the runtime chosen)
+  delivers:
+  - R-393
+  what: >-
+    **Type it however you like, and the board does it.** The fine-tuned model from S43 runs as a small
+    service next to the local database (llama.cpp's server in a container, reading the quantised file
+    on this machine's own processor). The command bar sends the typed sentence there and gets back the
+    same form the rule parser produces, so the resolver, the questions and the pop-up are untouched: the
+    model writes words, the app resolves them (D117). When the service is off, slow, or answers
+    something that is not a form, the rule parser answers instead and the status line says so. With no
+    service configured the bar is exactly what it was.
+  state: >-
+    **Briefed session 156 (13 Sept).** Two lanes: the serving side (the container script, a probe that
+    sends one sentence and prints the form and the time, the dev proxy, the README) and the app side
+    (the reader that calls the service and checks the answer is a form, the bar's pending state and
+    its "read by" line, the tests). The contract between them is fixed in both briefs. Proof: the
+    lanes' tests, the probe run on this machine against the S43 file, and a free phrasing typed into
+    the running app.
+    **DONE 13 Sept (session 157).** Both lanes landed (ba4d928), a reviewer's four findings folded in
+    (an edit clears a stuck reading status, an empty Enter never reaches the model, the serve script
+    takes --model, a held-out run killed mid-line resumes). On this machine the service answers a
+    sentence in 7 s cold and 2.6 s with the prompt cached. **The served file's own score,** all 400
+    held-out rows through the container (the 4-bit file, not Colab's full-precision one): clean 196/200
+    (98%), perturbed 185/200 (92.5%), pass. The two-point loss on clean rows is the compression: one
+    afternoon bump wrong ("11 - 1:30pm" read as 23:30) and three unassign answers that wrote the
+    invented key type instead of intent --- which the decoder refuses, so in the app those three
+    fixed sentences fall to the rules and are read correctly; the fallback is doing its job. The
+    browser proof (e41a17e): a free phrasing typed into the running app with the service on opens
+    the pop-up preset, gated on VOICE_E2E so the tester and CI skip it. Six seconds a row on this
+    processor for the held-out run; one sentence at the bar is two to four seconds after the first.
+- id: S45
+  track: core
+  num: 45
+  title: Close the compression gap — the service refuses a wrong key by grammar, measured against the held-out set
+  status: done
+  owner: agent
+  refs:
+  - §19.93 (D122)
+  - docs/agent-briefs/s45-a-grammar-brief.md
+  - session 157 (the four misses of the served file)
+  delivers:
+  - R-393
+  what: >-
+    **The served model cannot answer with a key the form does not have.** The four-bit file scored two
+    points under the full-precision one, and three of its four clean misses were an invented key where
+    intent should be. llama.cpp's server can constrain decoding to a JSON schema, so a wrong key becomes
+    impossible instead of merely unlikely. One schema file describes the four forms with keys in the
+    order the model writes them; the app's reader and the probe both send it; the held-out set is run
+    through the service with and without it and the two tables sit side by side on this card. The
+    eight-bit file is the second half of the question and waits on the full-precision file from Drive,
+    only if the grammar leaves a gap.
+  state: >-
+    **Briefed session 158 (13 Sept).** One lane: the schema file, the probe's flag, the reader's
+    request, the tests, and the measurement on this machine.
+    **DONE 13 Sept (session 158, 9dabd9f).** All 400 held-out rows through the container, the same
+    four-bit file: **with the grammar clean 199/200 (99.5%), perturbed 189/200 (94.5%), no invented key
+    in any row; without it clean 196/200 (98%), perturbed 185/200 (92.5%), eight rows with an invented
+    key.** The three answers that wrote type for intent are gone; the one clean miss left is "11 -
+    1:30pm" read as ending at 23:30. The grammar costs nothing visible per sentence. The eight-bit file
+    is not needed and is not built. The reader sends the schema on every request; the probe's
+    --no-grammar switch exists for measuring only.
+- id: S46
+  track: core
+  num: 46
+  title: The microphone — say the sentence, the browser's own recogniser types it
+  status: done
+  owner: agent
+  refs:
+  - docs/voice-commands-plan.md (Stage 6)
+  - §19.94 (D123)
+  - docs/agent-briefs/s46-a-microphone-brief.md
+  delivers:
+  - R-394
+  what: >-
+    **Press the button, say it, and the board does it.** A microphone button inside the command bar
+    starts the browser's built-in speech recogniser; what it hears appears in the input as it goes, and
+    when the sentence is final it is read exactly as a typed one (the model when the service is on, the
+    rules otherwise) and opens the same pop-up. Nothing writes without the pop-up's Create. The button
+    exists only in browsers that have a recogniser; where the microphone is refused or nothing is heard
+    the status line says so. This version sends the audio to the browser maker's service (Chrome to
+    Google, Edge to Microsoft), as the plan says; the local Whisper version is the later one.
+  state: >-
+    **Briefed session 158 (13 Sept).** One lane: the recogniser wrapper, the bar's listening state and
+    button, the tests with a fake recogniser, and the role walk unchanged.
+    **DONE 13 Sept (session 158, dfaa505).** A reviewer with one job found three races (a final result
+    after a stop still submitted; a synchronous error during start left the bar listening; a finished
+    session kept its handle and swallowed the next Escape) and a join without a space between two
+    result segments; all four fixed and pinned. The maintainer used it the same evening to remove
+    someone and met the confirmation button, which became S47. The recogniser writes "7:00 p.m." and
+    the rule parser refused it; the rules now read a dotted meridiem (213de6c), since they are the
+    fallback for every spoken sentence.
+- id: S47
+  track: core
+  num: 47
+  title: Show what the sentence will do, then a word does it — the outline and the spoken yes
+  status: done
+  owner: agent
+  refs:
+  - session 158 conversation (the maintainer, 13 Sept)
+  - docs/agent-briefs/s47-a-outline-and-yes-brief.md
+  delivers:
+  - R-395
+  what: >-
+    **The board shows what a sentence is about to do, and yes does it.** Today a sentence that acts on
+    a block that already exists --- remove Ana from Cell 1, move her block, make it longer --- ends in a
+    button in the bar, and the click is the confirmation. This stage draws the answer on the board
+    instead: the block the sentence resolved to gets an outline (red for a removal, the board's accent
+    for a move or a re-time) while the question stands, and when there is exactly one candidate a
+    typed or spoken yes runs the same command the button runs; no, or Escape, clears the outline. With
+    two candidates both are outlined and the buttons stay, since yes would be ambiguous. Wherever a
+    sentence opens the create pop-up, a yes at the bar while the pop-up would create on Enter (R-384)
+    creates it, so a whole command can be said hands-free. Nothing writes without the word or the click;
+    the writer behind them is the one the button already calls.
+  state: >-
+    **Stated 13 Sept (session 158)**, after the maintainer used the microphone to remove someone and
+    met the button. Briefed when S45 and S46 have landed, because all three touch the bar.
+    **DONE 13 Sept (session 158, 3ca8f29).** The bar tells the board which blocks a question is
+    about and the board outlines them (red for a removal, the ring colour for a move or a re-time), on
+    direct blocks and on run chips alike; with one candidate the message says a yes will do it and yes,
+    confirm, do it, remove it, move it or ok, typed or spoken, run the same command the button runs; no,
+    cancel, leave it or stop clear the question and the outline; with several candidates a bare yes
+    answers "Which one?" with the labels. A yes at the bar while a sentence-opened create pop-up is
+    clean creates it through the pop-up's own R-384 condition; a no closes only a pop-up a sentence
+    opened. Every write still goes through onUnassign, onMove, onRetime or the pop-up.
 - id: M1
   track: matrix
   num: 1
@@ -10170,7 +10376,389 @@ requirements:
   note: >-
     STATED 12 Sept (session 151), BUILT the same session. Left out on purpose, for the model stage: word
     orders that put the verb after the person ("Sam works on …") or split it ("take Sam off …").
+- id: R-392
+  title: A fine-tuned Qwen3 1.7B reads free phrasings into the parser's form and is scored on the held-out set before anything serves it
+  source:
+  - 'session 152 conversation (the maintainer, 12 Sept: "Go with Qwen, write the Colab script and tell me step by step what and how it needs to happen.")'
+  - docs/voice-commands-plan.md (Stage 4)
+  - docs/agent-briefs/s43-a-first-model-brief.md
+  stated_by: maintainer
+  claim: >-
+    The repo carries a Colab notebook that, given the generated training set and the committed held-out
+    set, fine-tunes Qwen/Qwen3-1.7B with LoRA to answer a sentence with the parser's form as JSON and
+    nothing else (thinking off), writes a predictions file the repo's scorer reads by row id, prints the
+    same per-intent and per-field table, merges the adapter and exports a quantised GGUF for the local
+    runtime. The model is scored ONLY against held-out rows it never trained on; the training set and
+    the held-out set share no sentence. The first run's score is recorded on S43's card, and no model is
+    served (Stage 5) until its clean rate meets the bar and its perturbed rate clearly beats the rule
+    parser's baseline.
+  verified_by:
+  - kind: vitest
+    file: src/test/voiceTrain.test.ts
+    cases: "VT1-VT3 --- the chat row for a sample is the system prompt, the sentence and canonical(form); a predictions file scores through the repo's scorer exactly as the rule parser's own answers do; the manifest's sample canonical matches form.mjs"
+  - kind: manual
+    steps: "npm run voice:generate; npm run voice:prepare; upload data/voice/colab/* to Drive; open scripts/voice/train/train_qwen3.ipynb in Colab on a T4; Run all; download predictions.jsonl and model-q4_k_m.gguf; node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions <file> --bar 0.95 --- the table goes on S43's card"
+  status: covered
+  note: >-
+    STATED 12 Sept (session 152); the repo-provable half BUILT the same session; the score PROVED 13 Sept
+    (session 156) on the third Colab run: clean 100%, perturbed 93.5%, the table on S43's card. What the repo can prove without a GPU: the data step
+    (a chat-format file built from train.jsonl), the predictions format against the scorer, and the
+    notebook's syntax. What only the Colab run proves: the score. Both halves are named in verified_by
+    when they exist.
+- id: R-393
+  title: The bar reads a sentence through the local model service, and falls back to the rule parser and says so
+  source:
+  - 'session 156 conversation (the maintainer, 13 Sept, on the runtime: "Go ahead and do what you think is the best option" --- llama.cpp server, as recommended)'
+  - docs/voice-commands-plan.md (Stage 5)
+  - §19.92 (D121)
+  stated_by: maintainer
+  claim: >-
+    When a service address is configured, Enter in the command bar sends the typed sentence to the
+    local model service (llama.cpp's server, in a container beside the database, with the system prompt
+    the model was trained on, thinking off, temperature zero) and reads its answer as the parser's form;
+    that form goes through the same resolver and the same pop-up as a typed fixed sentence, and the bar
+    never writes (D117). While the service is answering the bar shows that it is reading, a second
+    Enter or Escape cancels, and the input stays editable. When the service is off, does not answer in
+    time, or answers something that is not a form, the rule parser answers and the status line says
+    which reader answered and why. When no service address is configured the bar behaves exactly as
+    before and makes no request. The system prompt the app sends is the training file itself, not a copy.
+  verified_by:
+  - kind: vitest
+    file: src/test/voiceRead.test.ts
+    cases: "VR1-VR7 --- each of the four forms decodes; a missing or mistyped field is refused; an invented key is ignored and attach/existing forced null; off (a rejected fetch, a 503) is unavailable; slow is timeout; no object, bad JSON and a refused shape are garbled; the system message equals scripts/voice/train/system_prompt.txt byte for byte and the body carries the contract's fields; no address means no request"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-model-1 to CB-model-8 --- the model's form opens the pop-up as the typed fixed sentence would, with the read-by-the-model suffix; unavailable falls back to the rules and says so; the failure prefix wording; a second Enter aborts the first reading and reads again; Escape aborts and clears; a null reader is never called; an edit clears a stuck reading status; an empty Enter never reaches the model"
+  - kind: e2e
+    file: e2e/voiceBar.spec.ts
+    cases: "gated on VOICE_E2E, three serial cases --- a free phrasing the rules cannot read opens the create pop-up preset and the readout says read by the model; a fixed sentence is still read by the model; behind VOICE_E2E_STOP_CONTAINER the service is stopped, the fixed sentence reads by the rules with the status saying the service is off, and the service is started again"
+  - kind: manual
+    steps: "copy the S43 file to data/voice/model/scheduler-voice.gguf; npm run voice:serve; npm run voice:probe -- \"put Ana on Housing A at Cell 1 tomorrow 8 till noon\" prints the form and the time; set VITE_VOICE_URL=/voice in .env.local, npm run dev, type a free phrasing, the pop-up opens preset; stop the container, type again, the rules answer and the line says so"
+  status: covered
+  note: >-
+    STATED 13 Sept (session 156), COVERED 13 Sept (session 157); the grammar (S45, session 158) added
+    VR8 and the response_format field to VR6. Originally: the two test files carry the cases,
+    the gated browser spec ran here with the service on, and the probe scored the served file on all
+    400 rows (S44's card). Written when the lanes were briefed: covered when src/test/voiceRead.test.ts
+    carries VR1-VR7 (each of the four forms decodes; a missing or mistyped field is refused; an
+    invented key is ignored; off, slow and garbled each yield their reason; the prompt equals the
+    training file byte for byte; no address means no request) and src/test/commandBar.test.tsx
+    carries the model cases (the model's form opens the pop-up; off falls back and says so; Enter
+    while reading re-reads; Escape cancels; no address means no request), and the probe has run here.
+
+- id: R-394
+  title: A microphone button in the bar dictates the sentence through the browser's recogniser, and the sentence is then read like a typed one
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: "Continue onto stage 6 as well as next step or in parallel if you can.")'
+  - docs/voice-commands-plan.md (Stage 6)
+  - §19.94 (D123)
+  stated_by: maintainer
+  claim: >-
+    In a browser that has a speech recogniser the command bar shows a microphone button; pressing it
+    starts listening and the button says so, what is heard so far appears in the input as it is
+    recognised, and when the recogniser reports a final sentence that sentence is submitted exactly as
+    if it had been typed and Enter pressed --- the model reader when a service is configured, the rules
+    otherwise, then the same resolver and pop-up, and nothing is written without the pop-up. Pressing
+    the button again, or Escape, stops listening and keeps whatever was heard in the input. A refused
+    microphone, no speech, or a recogniser error each put a plain sentence in the status line. In a
+    browser without a recogniser the button is absent and the bar is unchanged. The recogniser is the
+    browser's own (audio leaves the machine, as docs/voice-commands-plan.md says of this version).
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-mic-1 to CB-mic-10 --- no button without a recogniser; a press starts a session, says Listening and aborts an in-flight reading; interim text lands in the input; a final result submits through the Enter path with and without a reader; a second press stops and keeps the text; Escape stops and keeps text and status; not-allowed, no-speech and other each set their sentence; a finished session releases its handle so Escape behaves as before; a synchronous error during start leaves the bar idle; a final result after a stop is ignored"
+  - kind: vitest
+    file: src/test/voiceRecognizer.test.ts
+    cases: "VREC-1 to VREC-4 --- two result segments join with a space; a final flag calls onFinal once; an error followed by end calls onError then onEnd once each; stop prefers abort"
+  - kind: manual
+    steps: "in Chrome or Edge on the board, press the microphone button, say a sentence, watch it appear and the pop-up open; press it again mid-sentence and see listening stop with the words kept; deny the microphone and read the status line; open the board in Firefox and see no button"
+  status: covered
+  note: >-
+    STATED 13 Sept (session 158), COVERED the same day (dfaa505); the maintainer used it that evening.
+    Written when briefed: covered when src/test/commandBar.test.tsx carries the CB-mic cases (button
+    absent without a recogniser; press starts and the bar says listening; interim text lands in the
+    input; a final result submits through the same Enter path; press again stops and keeps the text;
+    not-allowed, no-speech and a generic error each set their status line) and the role walk is unchanged.
+
+- id: R-395
+  title: A sentence that acts on existing blocks outlines them on the board, and a typed or spoken yes confirms when there is one
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: "it should highlight the assignment with a red border to show what is going to be removed and then I should be able to confirm it verbally/text and the board removes it" --- and, asked whether to apply it wherever it fits: "Yes, please add the same logic wherever applicable.")'
+  stated_by: maintainer
+  claim: >-
+    When a sentence resolves to a question whose candidates are blocks already on the board (which block
+    to remove, which to move, whether to make a person's own block longer), the board outlines those
+    blocks while the question stands --- red for a removal, the board's accent colour otherwise --- and
+    the outline clears when the question is answered, cleared, or replaced by a new sentence. When the
+    question has exactly one candidate, the status line says a yes will do it, and yes, typed or spoken
+    (yes, confirm, do it, remove it, move it), runs the same command the candidate button runs; no,
+    cancel or Escape clears the question and the outline. With several candidates the buttons remain and
+    a bare yes is refused with a sentence naming the choices. While a create pop-up opened by a sentence
+    is showing and would create on Enter (R-384), a yes at the bar creates it; a no closes it. Nothing
+    is written except through the writer the button or the pop-up already calls.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-yes-1 to CB-yes-9 --- a remove with one matching block highlights it and the message carries the yes suffix; yes runs onUnassign and clears the highlight; no clears status, outline and input without a write; two matching blocks highlight both, no suffix, and a bare yes asks which one; a spoken yes confirms like a typed one; Escape clears the highlight; a new sentence replaces it; yes with no question goes to the rules or to the pop-up's confirm; a move highlights with kind move and yes reaches onMove"
+  - kind: vitest
+    file: src/test/directBlockAndChip.test.tsx
+    cases: "H1-H2 --- the block and the run chip whose id is highlighted render the outline class and the others do not"
+  - kind: manual
+    steps: "say or type remove <person> from <cell> <hours>; the block gets a red outline and the line says a yes will remove it; say yes; the block is gone. Repeat with a move to another cell: the block is outlined, yes opens the pop-up preset, yes again creates. Say no after the outline appears: nothing changes, the outline clears."
+  status: covered
+  note: >-
+    STATED 13 Sept (session 158), COVERED the same day (3ca8f29). Written when stated: to be built as
+    S47 after S45 and S46 land; covered when the bar's
+    tests carry the yes/no cases for one and several candidates and the pop-up yes, and the board's
+    tests show the outline follows the question.
+
 findings:
+- id: F-144
+  title: A sentence that names no place gets a place the model made up, and a "change X's timing" phrasing loses the pm
+  tag: The form and the data have a gap the model fills with a guess
+  status: open
+  found_by: maintainer
+  stage: S44
+  refs:
+  - R-393
+  - R-392
+  story: >-
+    Reported 13 Sept (session 158) with three screenshots from the microphone. "change operator a3s
+    timing to 8:00 p.m. to 11:00 p.m." was read as a move of A3's block on Cell 1 to 08:00-23:00: the
+    sentence names no place and the model wrote Cell 1, and the start lost its pm. "move operator A2
+    from 7:00 p.m. to 8:00 p.m." was read as a move from Cell 1 to Cell 2, neither of which was said,
+    and the resolver rightly answered that A2 has no block on Cell 1. The developer session sent both
+    through the probe with and without the dotted p.m. and with the grammar on: identical answers, so
+    the dots are not the cause and the grammar cannot help (it constrains keys, not values). The cause
+    is in the data: all 1,797 move and unassign training sentences name a place, and none uses a
+    "change X's timing" phrasing, so the model has never seen either and fills the gap with the most
+    common answer. A third screenshot, "the model took too long", was the 20-second limit hit because
+    the 400-row measurement was queued ahead of the maintainer's sentence on the one-slot service; the
+    fallback then did its job, and its own refusal of "7:00 p.m." is fixed (213de6c).
+  fix: >-
+    Open; queued as Stage 7's first two items: (1) the resolver offers the person's blocks that day as
+    candidates when the place named matches none, instead of "no block on Cell 1" --- with S47 they
+    light up and a yes picks one; no retrain; (2) the form allows an absent place for a move or a
+    removal, the generator writes such sentences and the "change X's timing to", "shift X to" phrasings,
+    and the model is retrained once. Until then the safe phrasing names the place: "move Operator A3 on
+    Cell 1 to 8 pm to 11 pm".
+- id: F-143
+  title: The scorer's field table judged key order, so two fields read as half wrong on a run that was all right
+  tag: Two comparisons in one instrument, one of them stricter than the verdict
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-390
+  - R-392
+  - F-140
+  story: >-
+    Reported 13 Sept (session 156) with the third run's table: every clean row exact (200/200), yet
+    span 94/200 (47%) and day 351/400 (87.8%). The maintainer asked whether to worry. The two numbers
+    cannot both hold, and the cause is in the instrument: the row verdict compares forms with keys
+    sorted, but the per-field tally compared raw JSON text, so a value the model writes as
+    {"end":...,"start":...} counted as wrong against the generator's {"start":...,"end":...}. Only
+    fields whose values are objects with more than one key were hit --- every non-null span and every
+    weekday or date day --- which is why span sat at exactly 94/200 (the null spans) in runs two and
+    three alike. The Python port copied the raw comparison on purpose, "to match". The by-field
+    numbers for day and span in sessions 153 and 155 were understated by the same amount; the row
+    verdicts and every overall rate were right.
+  fix: >-
+    Session 156 (06c210b). Both scorers judge a field with the same key-order-blind comparison as the
+    row, on the normalised prediction; a test pins a reordered prediction as correct in both tables
+    and a one-minute difference as still wrong. The rule parser's baseline is unchanged. The third
+    run's table, re-scored with the fixed instrument, is the one on S43's card.
+- id: F-142
+  title: The notebook cut every training example at 512 tokens, and the answer's tail is what it cut
+  tag: A budget set without measuring what had to fit in it
+  status: fixed
+  found_by: agent
+  stage: S43
+  refs:
+  - R-392
+  - F-140
+  story: >-
+    Found 13 Sept (session 155) after the second run scored the same as the first: clean 94/200
+    (47%), perturbed 85/200 (42.5%), product 5/200. Three full passes at native fp16 had moved the
+    field from 3 to 5 of 200, so "under-trained" (session 153's reading) was wrong. The wrong answers
+    had one shape: keys in alphabetical order, everything through place right, product skipped, then
+    start and invented keys that also sort after start. The developer session measured the training
+    rows with Qwen3's own tokenizer: the system turn is 450 tokens, a full prompt 470 to 526, the
+    answers 50 to 80 and last in the sequence; the Settings cell set MAX_LEN 512 and the trainer cuts
+    from the right. The product key survived the cut in 0 of 1,361 assign rows and 0 of 842 book
+    rows; start in 0; toPlace in 197 of 771 move rows. Every field's score follows its survival
+    count. The assistant-only loss was fine (TRL patches Qwen3's template itself); the loss of
+    0.005 was real, over the twenty-odd easy tokens a row that made it in. The brief that chose 512
+    (S43-a) never measured the prompt; two Colab runs and an evening were spent on it.
+  fix: >-
+    Session 155 (0b30628). MAX_LEN is 1024, with the measured maximum in its comment; the data cell
+    tokenises every training conversation exactly as the trainer sees it, prints the median and the
+    longest, and refuses to continue when the longest would not fit. The README carries the finding
+    and says the checkpoints folder must go with the adapter before a retrain, since the resume logic
+    would pick up a checkpoint trained under the cut. Run three is the fixed notebook, same base,
+    same data, same instrument; the Qwen3.5 question waits until a run has been scored fairly.
+- id: F-141
+  title: The notebook's Setup cell failed when run a second time in the same runtime
+  tag: A step that cannot be repeated in a cell that will be
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-136
+  story: >-
+    Reported 13 Sept (session 154), starting the second run: the Setup cell raised
+    CalledProcessError, exit 128, on the llama.cpp clone. The clone writes into a fixed folder and
+    git refuses when the folder is already there, which it is the moment the cell runs twice in one
+    runtime --- after a disconnect, or after any later cell fails and the person starts again from
+    the top. Every other step in the cell (the pip installs) is safe to repeat; this one was not, and
+    because the clone's stderr was not captured the output did not say why.
+  fix: >-
+    Session 154 (07ace87). The cell checks for the converter script in the folder first and skips the
+    clone when it is present, printing one line; when the clone does fail it stops with git's own
+    message. The README says the cell may be run again after a disconnect. Paste-in fix for the open
+    Colab: delete the folder, or disconnect and delete the runtime and Run all.
+- id: F-140
+  title: The first model's first answer was right in every field and wrong to the scorer, because it added a key
+  tag: The instrument judged the text, not the form
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-390
+  - R-392
+  story: >-
+    Reported 12 Sept (session 153): the maintainer ran a one-row probe against the adapter saved at
+    step 110 and pasted the answer --- the correct form for "Assign Zara Meyer to work on Sleeve 22 on
+    Test Stand 2 in Line 3 from 7:15am until 13:45", every field right, plus a key the model invented,
+    `"type":"assign"`, which appears nowhere in the training data (checked: zero rows in
+    train.chat.jsonl, heldout.jsonl or the manifest). The scorer decided a row by comparing the whole
+    canonical text, so this row would have counted as wrong; the command bar's resolver only ever reads
+    the fields it knows and would ignore the extra key. Also seen in the same probe: 11.7 seconds for 71
+    tokens on the first call, fp16 with an unmerged adapter and warm-up included --- slow but inside
+    the session deadline for 400 rows.
+  fix: >-
+    Session 153 (a5d6433). The scorer and its Python port keep only the expected form's keys before
+    comparing, at the top level and inside the time objects, and count rows that carried an extra key
+    under a separate bucket printed in the table, so the diagnostic stays visible without distorting
+    the verdict; a missing key is still wrong; the rule parser's baseline is unchanged. Why the model
+    adds the key, and whether constrained decoding at serving time (Stage 5, a grammar for the local
+    runtime) should forbid it outright, is a question for the score, not for the instrument.
+- id: F-139
+  title: The Predict cell was silent until it finished and wrote its file only at the end
+  tag: A blind wait under a session deadline
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-138
+  story: >-
+    Reported 12 Sept (session 153): after the training cell was stopped by hand and the adapter saved,
+    the Predict cell ran for minutes with a blank output, and Colab's free tier showed "this runtime
+    may last up to 2 hours". The cell printed only at the end and wrote predictions.jsonl only at the
+    end, so there was no way to tell the fast fp16 path from the emulated one (F-138), and a session
+    kill would have lost every row predicted so far. The maintainer was given a one-row timing probe to
+    run by hand to tell the two apart.
+  fix: >-
+    Session 153 (2ca0d26). The cell times its first row on its own, prints a progress line every
+    twenty-five rows with the rate and the parse failures so far, and appends each prediction to the
+    file the moment it is decided; a re-run skips the ids already written and continues. The README
+    says what the line looks like and that a re-run resumes.
+- id: F-138
+  title: The notebook chose bf16 on a T4, which emulates it, and trained ten times slower than it should
+  tag: Supported is not the same as fast
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-137
+  story: >-
+    Reported 12 Sept (session 153) with a screenshot of the training cell after two hours and
+    thirty-nine minutes: 110 of 375 steps at 0.01 steps a second, an estimate of over six hours to
+    finish, while the loss column had reached its floor by step 80 (0.365 at step 20, then 0.021,
+    0.009, 0.005, 0.007). The developer session had said "well under an hour". The Settings cell
+    chose bf16 because torch answers yes to "is bf16 supported" on a T4, which has no bf16 hardware
+    and emulates it; a T4 wants fp16. The maintainer was told to stop the cell, save the adapter by
+    hand (the model had plainly learned the task) and continue to prediction, scoring and export.
+  fix: >-
+    Session 153 (a4817ff). Precision is decided by compute capability --- bf16 from Ampere up, fp16
+    below --- and printed beside the GPU name. Because a session can die before the end, the trainer
+    checkpoints to Drive every fifty steps and resumes from the newest; the run folder has a fixed name
+    and a Run all that finds a saved adapter loads it and skips training. The README's "about an hour"
+    is replaced by the honest range and the first run's time, with the stop-and-save recipe.
+- id: F-137
+  title: Colab's preinstalled torchao is older than peft accepts, and peft's probe raises instead of skipping
+  tag: A library we never use, refused for us
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-136
+  story: >-
+    Reported 12 Sept (session 153) from the maintainer's first Colab run, three cells past F-136 --- the
+    install held, Drive mounted, the base model loaded --- and `get_peft_model` raised `Found an
+    incompatible version of torchao. Found version 0.10.0, but only versions above 0.16.0 are
+    supported`. peft's LoRA injection tries a torchao dispatcher when torchao is importable, and its
+    version probe raises rather than declining; Colab preinstalls torchao 0.10.0. Nothing in this
+    pipeline quantises with torchao.
+  fix: >-
+    Session 153 (e79e846). The install cell uninstalls torchao before anything else and the
+    version-assertion block checks it is gone; upgrading it was ruled out because it pulls its own
+    torch and the runtime's GPU build must not move. The maintainer was given a one-cell uninstall and
+    a session restart to continue the run without re-uploading. The README names this as the third
+    known first-run finding.
+- id: F-136
+  title: The llama.cpp converter's requirements file downgraded transformers under our pin, and pins a CPU-only torch
+  tag: A requirements file that fights the pins
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  - F-135
+  story: >-
+    Reported 12 Sept (session 153) from the maintainer's first Colab run, the cell after F-135's:
+    `from transformers import AutoModelForCausalLM` raised `cannot import name 'GenerationMixin'`. The
+    install cell installed our five pins and THEN `requirements-convert_hf_to_gguf.txt` from the
+    llama.cpp clone; that file includes `requirements-convert_legacy_llama.txt`, which pins
+    `transformers==4.57.6` (plus numpy, sentencepiece, gguf and protobuf<5), so transformers was
+    downgraded underneath ours and two versions lay mixed on disk. Read at llama.cpp HEAD by the lane,
+    the outer file also pins `torch==2.11.0` from a CPU-only wheel index --- a hazard the run had not
+    reached, since a fresh runtime could have had Colab's GPU torch replaced by a CPU build and the GPU
+    check would have blamed the runtime type.
+  fix: >-
+    Session 153 (138a040). The requirements file is not installed at all: the converter script needs
+    only gguf and sentencepiece beyond what training already has, and those two are installed on their
+    own, before our pins; the clone stays for the converter script and llama-quantize. The install
+    cell asserts every pinned version after installing and prints the torch version beside the GPU
+    name, so a future file that fights a pin fails there, loudly. The export cell's comment says the
+    converter runs on transformers 5.17 and that a separate venv, never a downgrade, is the answer if
+    it ever objects. The maintainer was given the one-line change to paste before restarting.
+- id: F-135
+  title: The notebook's seed helper imported TensorFlow and died on Colab's protobuf
+  tag: A first-run finding, as the README predicted
+  status: fixed
+  found_by: maintainer
+  stage: S43
+  refs:
+  - R-392
+  story: >-
+    Reported 12 Sept (session 153) from the maintainer's first Colab run, with the traceback: the
+    load-data cell's `set_seed(SEED)` raised `ImportError: cannot import name 'runtime_version' from
+    'google.protobuf'` eight frames inside `import tensorflow`. transformers' seed helper checks
+    whether TensorFlow is installed and, since Colab preinstalls it, imports it to seed that too; the
+    llama.cpp converter's requirements, installed a cell earlier, had replaced protobuf with a
+    version Colab's TensorFlow cannot load. Nothing in the pipeline uses TensorFlow. Exactly the class
+    of failure the README named as expected first-run work: a cell no machine without a GPU could run.
+  fix: >-
+    Session 153 (5c13587). The install cell and the load-data cell set USE_TF=0, USE_TORCH=1 and
+    TRANSFORMERS_NO_TF=1 before anything imports transformers, and the seeding of random, numpy,
+    torch and every CUDA device is written out by hand with no TensorFlow path; that was the only seed
+    call in the notebook. The maintainer was given the same lines to paste into the open Colab so the
+    run could continue without a re-upload. Every cell still compiles.
 - id: F-134
   title: A start stated in 24-hour form still lets the afternoon rule bump the end by twelve hours
   tag: The afternoon rule does not read the start
@@ -13794,13 +14382,79 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
-- id: 152
-  date: 2026-09-12
-  title: "Tester run: sessions 142-151 (F-130 through F-134, S41 R-386 to R-389, S42 R-390, R-391) verified cold; nothing filed"
-  commits: []
+- id: 158
+  date: 2026-09-13
+  title: "Stage 5b, Stage 6 and the outline shipped in one evening: the grammar, the microphone, and a word that does it (S45, S46, S47)"
+  shipped: [S45, S46, S47]
+  commits: ['9796bc8', '59bd59c', 'dfaa505', '213de6c', '9dabd9f', '3ca8f29']
   numbers:
-    app_tests: 3018
-    app_test_files: 140
+    app_tests: 3085
+    app_test_files: 143
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept, after the outline commit: 3085 tests in 143 files, all passing. tsc
+    clean; no migration or RPC changed. The role walk passed after each of the three feature commits
+    (once flaky under the load of the 400-row measurement, then green alone and green again).
+  summary: >-
+    The maintainer said take Stage 5b and Stage 6 together and do not stop, so two Sonnet lanes ran in
+    parallel against briefs that named disjoint files. The grammar lane put one schema beside the
+    serving scripts, in the model's own alphabetical key order, sent by the app's reader and by the
+    probe, and measured all 400 held-out rows through the container: clean 99.5% and perturbed 94.5%
+    with no invented key, against 98% and 92.5% without; the eight-bit file is not needed. The
+    microphone lane put a button inside the bar over the browser's recogniser; a reviewer found three
+    races and a join bug, all fixed and pinned. The maintainer used the microphone the same evening,
+    met the confirmation button, and asked for the block to be outlined in red and a spoken yes to do
+    it, wherever that applies: written as R-395 and S47 before the code, briefed the moment the bar
+    file was free, built, reviewed and shipped. On the way: the rules now read "7:00 p.m." as the
+    recogniser writes it; two spoken sentences that named no place got a place the model made up
+    (F-144), which is the data's gap, not the grammar's, and is Stage 7's first item together with the
+    maintainer's compound sentence, parked at their word. The laptop's memory was the evening's
+    constraint: one probe killed and resumed, one walk flaky under load.
+- id: 157
+  date: 2026-09-13
+  title: "Stage 5 shipped: the bar reads through the local model service and falls back to the rules (S44, R-393 covered)"
+  shipped: [S44]
+  commits: ['f73186e', 'ba4d928', 'e41a17e']
+  numbers:
+    app_tests: 3045
+    app_test_files: 142
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept: 3045 tests in 142 files, all passing (the reader's VR1-VR7 and the bar's
+    CB-model cases are the additions since session 156). tsc, eslint and prettier clean over the repo
+    (prettier's two warnings are line endings on untouched files, no diff). e2e gains the gated
+    voiceBar spec (49 tests listed by the runner; the new ones skip without VOICE_E2E); the role walk passed before the commit. No
+    migration or SQL test changed.
+  summary: >-
+    The maintainer left the runtime to the developer's recommendation and llama.cpp's server won over
+    Ollama (D121). Two Sonnet lanes built it against one fixed contract: the service side (the container
+    script, a probe that sends a sentence or the whole held-out set, the dev proxy) and the app side (a
+    reader that sends the training prompt itself and decodes the answer field by field, and the bar's
+    reading state with its read-by line). A third agent reviewed with one job, break it, and found four
+    things worth fixing and nothing in the contract, the decoder or the race handling; a fourth wrote
+    the gated browser proof. On this machine the service answers in 7 s cold and about 3 s warm, and
+    the served 4-bit file scores clean 98%, perturbed 92.5% on all 400 rows --- a pass, two points under
+    Colab's full-precision file, with the gap named and queued as Stage 5b. The laptop ran short of
+    memory once during the 400-row run (Docker, two dev servers, a browser and the probe together); the
+    probe's resume rule meant nothing was lost.
+- id: 156
+  date: 2026-09-13
+  title: "The third run passes the bar, and the field table's last two low numbers were the instrument (F-143)"
+  shipped: [S43]
+  commits: ['06c210b']
+  numbers:
+    app_tests: 3027
+    app_test_files: 141
     tsc: 0
     eslint: 0
     db_checks: 845
@@ -13808,73 +14462,137 @@ sessions:
     e2e: 46
   confirmed: true
   numbers_note: >-
-    `git merge --ff-only Development` brought the tester branch from 1620fc9 (session 140) to
-    ea93d45 (session 150), nine sessions and their commits; `package-lock.json` unchanged in the
-    range, so no `npm ci`. Fresh `node scripts/tester-stack.mjs up`. VITEST: the runner's own line
-    reads `Test Files 140 passed (140)`, `Tests 2994 passed (2994)`, copied verbatim -- the total
-    2994 in 140 matches the plan's newest confirmed session (150) EXACTLY. `tsc -b` clean, and
-    `db:types` regenerated against the tester stack is BYTE-IDENTICAL to the committed
-    `database.types.ts` (`cmp` reports identical; `git ls-files --eol` reads i/lf w/crlf, so the
-    runner's own "types are stale" WARN is a Windows pipe-comparison artifact, not developer drift --
-    the word `tsc: 0` is honest, not "inconclusive"). `eslint .` clean, now covering `scripts/` too.
-    SQL: every file green through the runner, including the two new suites `96_a_join_stays_inside_
-    its_run_test.sql` and `97_move_assignment_test.sql`; db_checks (845) carried as session 147
-    recorded it (96 adds 9, 97 adds 13). `format:check` FAILs on ~all files including `.prettierrc`,
-    `package.json` and `CLAUDE.md` -- pure line endings: `git ls-files --eol` shows the committed
-    content is LF and prettier-clean, the tester worktree checks out CRLF under `core.autocrlf=true`,
-    and `prettier --check --end-of-line auto` passes every file; not the developer's code. `playwright
-    e2e`: 46 tests, 43 passed, 2 skipped (the load-volume fixture, absent by design, R-366), 1 failed
-    -- `weekTemplates.spec.ts`'s `afterAll` teardown hit the 30s hook timeout while signing in fresh as
-    admin under the 6-worker load; re-run alone it is `3 passed (13.9s)`, so a teardown flake (the same
-    category session 141 named), and `weekTemplates` is untouched by sessions 142-150. Every roleWalk
-    case passed, viewers `panel=false canPlace=false`. `npm run voice:score` run by hand: clean
-    200/200 (100.0%), perturbed 7/200, PASS/exit 0; with `--bar 1.01` exit 1.
-    ⭐ A TENTH SESSION (151, R-391) ARRIVED MID-RUN and was merged and verified in the same run. The
-    merge was not a fast-forward (my session-151 tester entry and the developer's session-151 R-391
-    entry both sat at the top of `sessions`): resolved by keeping both, renumbering the tester entry to
-    152, newest first, and regenerating the page --- `npm run plan` validates. `npm run test` at the new
-    tip (ff2e3b0) reads `Test Files 140 passed (140)`, `Tests 3018 passed (3018)`, copied from the
-    runner --- up 24 from 2994, exactly session 151's count. R-391 is pure parser and generator (no
-    migration, no SQL, no screen), so the SQL and e2e evidence above carries unchanged. `voice:score`
-    re-run clean 200/200 PASS; `git diff data/voice/heldout.jsonl` empty, the set untouched.
+    npm run test, 13 Sept: 3027 tests in 141 files, all passing. Up six from session 152's 3021: four
+    voice-data cases from session 153 (V10-V13) and two scorer cases from this session (V5c, V5d).
+    The other numbers are carried; no migration, SQL test or e2e spec changed today.
   summary: >-
-    Merged ten sessions of committed developer work (142-151) and judged every requirement they
-    touched from outside the code. Nothing filed: the build is green at 3018 in 140, and all three
-    red/warn lines the runner printed are this Windows worktree's own environment, each proven so
-    rather than assumed.
-    ⭐ R-391 (THE VERBS EACH SENTENCE ACCEPTS) VERIFIED, AND ITS ONE-COPY CLAIM HELD. The four verb
-    lists are exported from `parse.ts` once, the intent regexes are built from them, and the training
-    generator IMPORTS them (`from "../../../src/lib/command/parse.ts"`) rather than copying --- grep for
-    the distinctive verbs (allocate, relocate, reschedule) finds no second literal anywhere. The 29
-    verbs are pairwise disjoint, "schedule" is in assign only, and neither "shift" nor "change" is a
-    verb. Proven non-vacuous: dropping "staff" from the assign list turns PV1 red (the operator parses
-    as "staff Sam"); adding "plan" to the assign list as well as book turns PV2 (disjointness) red.
-    ⭐ THE THREE ANOMALIES ARE ENVIRONMENT, NOT DEFECTS, PROVEN. (1) `db:types` "stale" WARN: a fresh
-    regen is byte-identical to the committed file (`cmp`), so it is a CRLF pipe artifact. (2)
-    `format:check` FAIL: `--end-of-line auto` passes every file and `git ls-files --eol` shows the
-    index is LF; the CRLF is the tester checkout under `autocrlf=true`. (3) `e2e` FAIL: a single
-    `afterAll` teardown timeout under parallel load; the spec is `3 passed` in isolation and is
-    unrelated to the diff. Session 141 hit the same three; this run confirms the pattern.
-    ⭐ THE TWO NON-VACUOUS PROOFS. I broke two of the session's headline fixes on scratch copies and a
-    named case went red each time. F-134 (the afternoon rule reads the START): removing the
-    `startPinned` gate turned P32 ("17:15 till 10:30") and P33 ("1pm to 10") red -- the pin catches a
-    24h/meridiem start that the old rule would have bumped by twelve hours. R-385/F-132 (the bar sees
-    a person's OWN block): neutering the own-block step turned R34 (the maintainer's own two
-    sentences), R35, R42 and R44 red -- so the resolver test would catch a regression to the exact
-    bug the maintainer reported.
-    ⭐ THE RISKIEST CHANGE READ CLEAN. `move_assignment` (migration 0080, R-389) is the one new server
-    writer: it guards permission on BOTH the source and target node, compares ROW_COUNT so an
-    RLS-filtered UPDATE cannot report a false success, NULLs `run_id` and carries the run's product
-    forward, and refuses a departed person's row and a run whose product is gone. SQL suite 97
-    (MA0-MA12) runs as `authenticated` (never the superuser) and reads the row back on every refusal
-    to prove nothing moved; it is not vacuous. The resolver's move step finds the block over the WHOLE
-    DAY, not the new hours (RM9), and a run-attached block carries its run's effective product into the
-    context (`commandAssignments`), so a move to another cell is not falsely refused as `not_offered`.
-    ⭐ R-390 (the training set and the held-out scorer) confirmed by hand end to end: the committed
-    scorer exits 0 at 100% clean and exits 1 below an impossible bar, the property the build rests on.
-    The sweeps turned up nothing new: no column went nullable, no dark column, and the "company-wide"/
-    "no longer"/"the server will" comment hits are the standing pre-existing set, with the new command
-    modules' own comments read against their code and found true.
+    With the token cut lifted, the maintainer's third run scored clean 200/200 and perturbed 187/200
+    (93.5%) with no invented keys --- the first fair score of Qwen3 1.7B on this task, and a pass
+    against a bar of 95% clean and a rule-parser baseline of 3.5% perturbed. The maintainer asked
+    whether to worry about span at 47% and day at 88% in the field table. They cannot be true beside
+    200/200 clean rows, and they were not: the field tally compared raw JSON text while the row
+    verdict sorts keys (F-143). A Sonnet lane fixed both scorers and pinned it; the re-scored table is
+    on S43's card. Earlier today: the README's run time corrected to the measured two and a half
+    hours on a T4, and the maintainer's question about training on this laptop answered (a Snapdragon
+    X with no CUDA: days per run on the CPU, so Colab trains and this machine serves). The maintainer
+    handed over the predictions file and the 1.1 GB quantised model; re-scored with the fixed
+    instrument, every field is at or above 96% and the 13 misses are mangled names the resolver
+    decides. S43 done; the queue's next item is Stage 5, serving the model beside the database.
+- id: 155
+  date: 2026-09-13
+  title: "The second score repeats the first, and the cause is found in the notebook: a 512-token cut (F-142)"
+  commits: ['0b30628', '65b63b5']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: false
+  numbers_note: >-
+    Carried from session 153 unchanged: the notebook and its README are the only files touched and no
+    runner covers them; check_notebook.py passed. The next full run confirms.
+  summary: >-
+    The maintainer's second run scored clean 47%, perturbed 42.5%, product 5 of 200: three full passes
+    at native fp16 had not moved the missing field, so session 153's "under-trained" was wrong. The
+    developer session read the wrong answers' shape (alphabetical keys, right through place, product
+    skipped, invented keys after start), then measured every training row with Qwen3's own tokenizer:
+    a 450-token system turn, prompts of 470 to 526 tokens, answers of 50 to 80 tokens at the end, and
+    a MAX_LEN of 512 that the trainer cuts from the right. The product key survived in none of the
+    2,203 assign and book rows; each field's score tracks how often it survived. F-142 is the
+    developer's own: the brief chose 512 without measuring the prompt. A Sonnet lane lifted the cut
+    to 1024 and made the data cell measure and refuse; the README says the checkpoints folder goes
+    with the adapter before a retrain. Run three is the same base, same data, same instrument, one
+    change; the Qwen3.5 question waits for a fair score. The maintainer also corrected the README's
+    run time: the second run measured over an hour of training and about an hour of prediction on a
+    T4, not the thirty to sixty minutes the file estimated; the file now says so.
+- id: 154
+  date: 2026-09-13
+  title: "Run two begins: the Setup cell learns to run twice (F-141)"
+  commits: ['07ace87']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: false
+  numbers_note: >-
+    Carried from session 153 unchanged: this session touched only the notebook and its README, which
+    no runner covers; check_notebook.py passed (every code cell compiles). The next full run confirms.
+  summary: >-
+    The maintainer started the second training run and the Setup cell fell over on the llama.cpp
+    clone, because the cell had already run once in that runtime and the clone cannot be repeated
+    (F-141). A Sonnet lane guarded the clone and made its failure readable; the developer session
+    reviewed the diff (the Setup cell only, every other cell byte for byte the same) and gave the
+    maintainer the two paste-in ways out. Run two is otherwise the committed notebook with BATCH 16
+    and GRAD_ACCUM 2; its score is still owed on S43.
+- id: 153
+  date: 2026-09-13
+  title: "The first model's first run: five first-run findings fixed, and a score that fails on one missing field"
+  commits: ['5c13587', '138a040', 'e79e846', 'a4817ff', '2ca0d26', 'a5d6433']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: false
+  numbers_note: >-
+    Carried from session 152 except app_tests: the voice-data file gained V10-V13 (+4) in a5d6433 and
+    only that file and the training file were run (17 passed in 2), not the full suite; the next full
+    run will confirm. tsc, eslint and prettier were clean on every touched file per commit.
+  summary: >-
+    The maintainer ran the Colab notebook for the first time, over an evening, pasting each traceback
+    as it came; the developer session answered each with a paste-in fix for the open Colab and a
+    Sonnet-lane fix for the repo copy, and recorded each as a finding. Five in a row: transformers'
+    seed helper importing Colab's TensorFlow (F-135); the llama.cpp converter's requirements file
+    downgrading transformers and pinning a CPU-only torch (F-136); Colab's old torchao refused by peft
+    (F-137); bf16 emulation on a T4 at a hundred seconds a step, when the developer session had
+    promised under an hour (F-138); and a Predict cell that printed nothing and wrote nothing until
+    the end, under a two-hour session deadline (F-139). Then the first answer came back right in
+    every field with an invented key, and the scorer, which compared whole texts, would have failed it
+    (F-140); the scorer and its Python port now judge the known fields and report extras.
+    ⚠️ THE FIRST SCORE FAILS THE BAR, AND THE REASON IS ONE FIELD. Clean 45%, perturbed 38.5%. Read
+    from the predictions file: 397 of 400 answers omit `product` and carry invented keys instead;
+    unassign and move, which have no product field, scored 100% and 78% clean. The training data is
+    right (every assign and book answer carries the key; checked). The run had been stopped by hand
+    at step 110 of 375, under one pass, on emulated bf16, then cast to fp16 for prediction --- the
+    hardest field is the one a model that saw each example once has not learned to emit. The second
+    run is the committed notebook as is: fp16 natively, three passes, checkpoints; the adapter folder
+    on Drive deleted so it retrains. No notebook change was made for the score itself, on purpose:
+    one variable at a time.
+    ⭐ WHAT THE EVENING PROVED ANYWAY: the whole path runs --- data to Drive, train, save, predict
+    with progress, score with the repo's instrument, merge, convert to f16 GGUF (the q4 quantise
+    was still building when the score came back). R-392 stays covered on the repo half and the
+    score line on S43 is the honest state.
+- id: 152
+  date: 2026-09-12
+  title: "The first model: Qwen3 1.7B chosen, the Colab notebook and its data step shipped (S43, R-392 half-proved)"
+  commits: ['5b09a61']
+  numbers:
+    app_tests: 3021
+    app_test_files: 141
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 46
+  confirmed: true
+  numbers_note: >-
+    `npm run test` after the lane and the developer session's own checks: `Test Files 141 passed (141)`, `Tests 3021 passed (3021)`, copied from the runner --- up 3 from 3018 (voiceTrain VT1-VT3, a new file, hence 141). `tsc -b --force` clean. `eslint .` clean. Prettier clean on the touched files. `npm run voice:prepare` ran here and printed the manifest (4000 train rows, 400 held-out, the rule parser's baseline 1.0 clean / 0.035 perturbed, the git sha, one sample's canonical form); `python scripts/voice/train/check_notebook.py` compiled every code cell (467 lines); `score_port.py` matched `npm run voice:score` count for count. The training cells are unverified: no GPU here.
+  summary: >-
+    The maintainer, on the next step explained plainly and a shortlist of three: *"Go with Qwen, write the Colab script and tell me step by step what and how it needs to happen."* Stage S43 and R-392 written first, then a Sonnet lane built everything the repo can carry for a run this machine cannot make.
+    ⭐ THE FORM IS THE PARSER'S, BYTE FOR BYTE. The data step turns the generated training set into chat rows whose answer is `canonical(form)`, writes a manifest with the counts, the seeds, the git sha and one sample's serialisation, and refuses to write anything if a training sentence appears in the held-out set --- which it did on the first run, because the gitignored train.jsonl on disk was stale from before F-134's regeneration; regenerating fixed it, and that is the check earning its keep. The one system prompt travels inside the manifest so the notebook reads it rather than retypes it.
+    ⭐ THE NOTEBOOK, ELEVEN CELLS. Settings in one cell (Qwen/Qwen3-1.7B, LoRA r=16 on the attention and MLP projections, three epochs, effective batch 32, seed 20260912); pinned libraries the lane checked against PyPI on the day rather than from memory (transformers 5.17, peft 0.20, trl 1.13 with assistant-only loss, datasets 5.0.1, accelerate 1.15; llama.cpp cloned at HEAD and said so); a plain-sentence refusal without a GPU; thinking OFF; generation stopped at the first complete JSON object; predictions keyed by held-out id; the score printed beside the rule parser's baseline; merge and export to Q4_K_M GGUF; everything saved to Drive so a dropped session loses nothing.
+    ⭐ WHAT IS PROVED HERE AND WHAT IS NOT. VT2 feeds the rule parser's own answers through the real `score.mjs --predictions` and through the direct path and gets the same table; the Python port matches the JS scorer count for count (one display rounding differs on a .5 tie, 71.3 vs 71.2, both 285/400); every code cell compiles. The training cells cannot be verified without a GPU, and the README and this entry say so. R-392 stays uncovered until the maintainer's first Colab run puts a score on S43's card.
+    ⭐ THE MAINTAINER'S STEPS are in scripts/voice/train/README.md and in the session's closing message: generate, prepare, upload three files, Run all on a T4, bring back predictions.jsonl and the GGUF, score locally, paste the table.
 - id: 151
   date: 2026-09-12
   title: "The verbs each sentence accepts (R-391) --- the maintainer's list, one copy, exported"
@@ -20681,25 +21399,21 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  text: "Voice plan Stage 4 --- fine-tune the first small model and score it against the rule parser"
+  text: "Voice plan Stage 7 --- widen the sentences: a place the person did not say, the change-the-timing phrasings, and several people or cells in one sentence"
   why: >-
-    LoRA on a small open base (no base locked yet; the plan's table is the shortlist), scored on the
-    Stage 3 held-out set beside the rule parser on the same sentences, exported to the local
-    runtime's format, output constrained to the form's exact shape at generation time. Training on
-    Colab; the laptop does everything else.
+    Three things the maintainer met on 13 Sept (session 158). First, no retrain: when a sentence's place
+    matches none of the person's blocks that day, the resolver offers those blocks as candidates and
+    the board outlines them (S47), instead of "no block on Cell 1" (F-144). Then one retrain: the form
+    allows an absent place for a move or a removal, the generator writes such sentences and the
+    "change X's timing to", "shift X to" phrasings, and lists --- "assign A2 and A3 to Product XYZ on
+    Cell 1 and Cell 2 from 3 to 5" becomes several commands, each outlined, one yes for the lot (the
+    maintainer's example, parked here at their word: "lets wait till we reach that point"). Each
+    retrain is the S43 pipeline again: generate, prepare, the notebook on Colab, the probe here.
 - kind: task
-  text: "Voice plan Stage 5 --- serve the model beside the database; the bar falls back to the rule parser and says so"
+  text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
   why: >-
-    A small container (Ollama or llama.cpp) next to the local stack. The bar sends the sentence and
-    gets the form back; when the service is down the rule parser answers and the bar says which one
-    did. The form still goes through the same resolver and the same pop-up: the model writes words,
-    the app resolves them (D117).
-- kind: task
-  text: "Voice plan Stage 6 --- the microphone: browser recogniser first, local Whisper second"
-  why: >-
-    A button beside the bar. First the browser's own recogniser (zero setup, audio leaves the
-    building, some sites will refuse); then Whisper through the Stage 5 service so audio stays on
-    site. Both hand their text to the bar and nothing else changes.
+    The browser's recogniser (S46) sends audio to the browser maker's service; the plan's second version
+    runs Whisper beside the model on the same box. Wanted before a site that will not accept the first.
 - kind: task
   text: "Voice plan Stage 8 --- the question catalog: twenty to thirty questions schedulers ask, one tested lookup each"
   why: >-

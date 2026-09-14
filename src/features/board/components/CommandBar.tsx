@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DateFormat } from "@/lib/format/dates";
 import { formatDayLabel } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
+import type { Reader, Reading } from "@/lib/voice/readSentence";
+import type { Recognizer, RecognizerHandle } from "@/lib/voice/recognizer";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
 import type {
   AssignCommand,
@@ -24,6 +26,9 @@ import type {
   Question,
   Candidate,
 } from "@/lib/command/resolve";
+import type { Highlight } from "../lib/highlight";
+
+export type { Highlight };
 
 /**
  * P1-7a — "Tell the board": the typed command bar (brief
@@ -51,6 +56,45 @@ import type {
  * removes the named block through the SAME `dragApi.removeAssignment` the
  * block's own Delete button calls. No second door here either.
  *
+ * S44-b (docs/agent-briefs/s44-b-read-by-model-brief.md) adds the optional
+ * `reader` prop: when set, Enter reads the sentence through the model
+ * service (`src/lib/voice/readSentence.ts`) first and falls back to the same
+ * `parseCommand` rules on anything but a clean answer, saying so in the
+ * readout. `reader` null (the default) is BYTE FOR BYTE the pre-S44-b
+ * behaviour -- every earlier test in this file passes untouched.
+ *
+ * S46-a (docs/agent-briefs/s46-a-microphone-brief.md) adds the optional
+ * `recognizer` prop: `null` (the default) renders no microphone button and
+ * is otherwise byte for byte the pre-S46-a behaviour. Set, a button appears
+ * after the input; pressing it starts a `Recognizer` session
+ * (`src/lib/voice/recognizer.ts`) that writes interim text into the input as
+ * it is heard and, on a final result, submits it exactly as Enter would
+ * (`submitText`, extracted from `handleKeyDown`'s Enter branch for this).
+ * One capability folded into the existing control, not a parallel widget
+ * (CLAUDE.md §4).
+ *
+ * S47-a (docs/agent-briefs/s47-a-outline-and-yes-brief.md, R-395) adds three
+ * optional props, none of which changes anything for a caller that omits
+ * them. `onHighlight` is called with a `Highlight` (`../lib/highlight.ts`)
+ * whenever a `remove_which`/`move_which`/`block_exists` question is the
+ * current status (the ids to outline and which colour), and with `null`
+ * whenever that status is replaced, cleared or this component unmounts --
+ * done in one `useEffect` keyed on `status` (see below) rather than at every
+ * `setStatus` call site, so the many existing ones stay untouched. When such
+ * a question has exactly one candidate, its message gains a yes/no suffix
+ * and `submitText` recognises the confirmation words below it BEFORE
+ * parsing: a confirm word runs that one candidate's `onClick` (several
+ * candidates: a bare confirm asks "Which one?" instead, buttons unchanged);
+ * a cancel word clears the question, the outline and the input. `onOpen`ed
+ * pop-ups are the OTHER half (R-384's "Enter creates when clean" widened to
+ * a spoken yes): when NO such question stands, a confirm/cancel word is
+ * offered first to `onConfirmWord`/`onCancelWord` (only ever true when a
+ * create pop-up a SENTENCE opened is showing); either returning `false`
+ * means "not for me" and the word falls through to the ordinary parse path
+ * (the rules refuse it with the usual shape hint, same as any other
+ * unparseable sentence) -- so both props are safe to omit or to return
+ * false unconditionally.
+ *
  * The bar holds no rule of its own: parsing is `parseCommand`/`formatCommand`
  * (`src/lib/command/parse.ts`), resolving is `resolveCommand`/`describeQuestion`
  * (`src/lib/command/resolve.ts`) against the `ctx` the caller (`BoardPage`)
@@ -67,8 +111,71 @@ import type {
 
 type Status =
   | { kind: "shape"; message: string }
-  | { kind: "question"; message: string; candidates: CandidateButton[] }
-  | { kind: "readout"; message: string };
+  | {
+      kind: "question";
+      message: string;
+      candidates: CandidateButton[];
+      /** S47: set only for remove_which/move_which/block_exists -- the ids
+       *  to outline on the board (`onHighlight`) while this status stands. */
+      blockHighlight?: Highlight;
+    }
+  | { kind: "readout"; message: string }
+  /** S44-b: shown while `reader(text, signal)` is pending. */
+  | { kind: "reading"; message: string };
+
+/** S47: appended to a block question's message when it has exactly one
+ *  candidate (brief §2 item 3) -- the ONLY place this string is written. */
+const YES_SUFFIX = " — say or type yes to do it, no to leave it.";
+
+/** S47: recognised by `submitText` before parsing (case-insensitive,
+ *  trimmed, trailing punctuation ignored -- see `normalizeWord`). These five
+ *  confirm ANY block question, or a pop-up, regardless of kind. "remove it"
+ *  and "move it" are NOT here -- review fix: they used to be, which meant
+ *  saying "remove it" to a standing MOVE question ran the move (the word
+ *  was never checked against what was actually being asked). They are
+ *  matched against the standing question's own kind instead, in
+ *  `confirmsQuestion` below. */
+const UNIVERSAL_CONFIRM_WORDS = new Set(["yes", "yes please", "confirm", "do it", "ok"]);
+const CANCEL_WORDS = new Set(["no", "cancel", "leave it", "stop"]);
+
+/**
+ * S47 review fix: true when `word` confirms a block question of `kind` --
+ * one of the five universal words always does; "remove it" only confirms a
+ * `remove_which` question (`kind === "remove"`); "move it" only confirms a
+ * `move_which` OR a `block_exists` re-time question (`kind === "move"` or
+ * `"retime"` -- a re-time is not a removal, so "move it" reaches it too).
+ * Used against the OTHER kind, "remove it"/"move it" are ordinary text, same
+ * as any word this function returns false for.
+ */
+function confirmsQuestion(word: string, kind: Highlight["kind"]): boolean {
+  if (UNIVERSAL_CONFIRM_WORDS.has(word)) return true;
+  if (word === "remove it") return kind === "remove";
+  if (word === "move it") return kind === "move" || kind === "retime";
+  return false;
+}
+
+/**
+ * True for any word `confirmsQuestion` or a cancel could ever act on, for
+ * SOME kind -- used by `handleChange` below to tell "the person is typing a
+ * word that might confirm or cancel the standing question" apart from "the
+ * person is editing the sentence itself" without knowing yet which kind is
+ * standing (that check is `confirmsQuestion`'s, run again at Enter).
+ */
+function isConfirmOrCancelWord(word: string): boolean {
+  return (
+    UNIVERSAL_CONFIRM_WORDS.has(word) ||
+    CANCEL_WORDS.has(word) ||
+    word === "remove it" ||
+    word === "move it"
+  );
+}
+
+function normalizeWord(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?,;:]+$/, "");
+}
 
 interface CandidateButton {
   key: string;
@@ -102,7 +209,47 @@ export interface CommandBarProps {
    *  a `retime` re-times through the drag's own path, a `move_cell` opens
    *  the create pop-up preset under `presetMove`. */
   onMove: (resolved: ResolvedMove, anchor: { x: number; y: number }) => void;
+  /** S44-b: when set, Enter reads the sentence through the model service
+   *  first and falls back to the rules on anything but a clean answer.
+   *  `null` (the default) is the pre-S44-b behaviour, unchanged. */
+  reader?: Reader | null;
+  /** S46-a: when set, a microphone button appears after the input. `null`
+   *  (the default) renders no button -- byte for byte the pre-S46-a
+   *  behaviour. */
+  recognizer?: Recognizer | null;
+  /** S47 / R-395: told what is in question -- the ids to outline and which
+   *  colour -- whenever a remove/move/retime question stands, and `null`
+   *  whenever it is answered, cleared or this component unmounts. */
+  onHighlight?: (highlight: Highlight | null) => void;
+  /**
+   * S47 / R-385/R-384: called when a confirm word (`yes`, `confirm`, ...)
+   * arrives and no block question stands. Three outcomes, review fix
+   * (a bare boolean could not say WHY nothing happened):
+   *   - `"created"`: a create pop-up a sentence opened was showing, read
+   *     clean (R-384, unweakened), and has now been submitted through that
+   *     same path -- the bar clears the input.
+   *   - `"needs-decision"`: that pop-up was showing but was NOT clean (it
+   *     would show something to decide) -- nothing is sent; the bar says so
+   *     verbatim and leaves the input as it was.
+   *   - `"none"`: no such pop-up is showing (or `autoCreate` was never set)
+   *     -- the bar treats the word as ordinary text, same as any other
+   *     unparseable sentence (the rules' shape hint).
+   * Omit to leave every confirm word here as ordinary text.
+   */
+  onConfirmWord?: () => ConfirmWordResult;
+  /** S47: the cancel-word twin of `onConfirmWord` -- true when a create
+   *  pop-up a sentence opened was showing and this closed it; false
+   *  otherwise (then the bar treats the word as ordinary text, refused with
+   *  the usual shape hint like any other unparseable sentence). */
+  onCancelWord?: () => boolean;
 }
+
+/** S47 review fix: see `onConfirmWord`'s own doc above for what each value
+ *  means. `PopoverConfirmHandle.submitIfClean()` (`CreatePopover.tsx`)
+ *  returns the same three strings -- structurally, not by a shared import,
+ *  since the bar imports nothing from the popover (brief §2: "no second
+ *  door"). */
+export type ConfirmWordResult = "created" | "needs-decision" | "none";
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
 
@@ -143,9 +290,15 @@ export function CommandBar({
   onRetimeRun,
   onUnassign,
   onMove,
+  reader = null,
+  recognizer = null,
+  onHighlight,
+  onConfirmWord,
+  onCancelWord,
 }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
+  const [listening, setListening] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   // The last parsed command, kept so a candidate button can substitute one
   // field and so a run/job-question button can set `attach`/`existing`
@@ -153,6 +306,61 @@ export function CommandBar({
   // invalidates it. S41-a widens this from `AssignCommand` to `Command`
   // (the union also holding `BookCommand`) since the bar now parses both.
   const heldRef = useRef<Command | null>(null);
+  // S44-b: the in-flight reading's own abort controller (null when nothing
+  // is pending) and a sequence number bumped by every Enter, Escape and edit
+  // so a reading that settles after a newer one has started is discarded
+  // rather than clobbering whatever the bar is doing by then.
+  const readingAbortRef = useRef<AbortController | null>(null);
+  const readingSeqRef = useRef(0);
+  // S46-a: the in-flight recognition session's handle (null when idle) and a
+  // sequence number bumped every time a session ends -- by `stopListening`,
+  // by unmount, or by the session's own `onError`/`onEnd` -- so a callback
+  // from a session that is no longer the current one (a late `onFinal` after
+  // Escape/stop, or a synchronous `onError` fired from inside the
+  // `Recognizer` call itself, before this file has assigned the ref) is a
+  // no-op rather than clobbering whatever the bar is doing by then (review
+  // findings 1-3).
+  const recognitionRef = useRef<RecognizerHandle | null>(null);
+  const recognitionSeqRef = useRef(0);
+
+  // S46-a: stop a listening session on unmount rather than leak it, and
+  // retire its generation so a callback that fires after teardown is a
+  // no-op.
+  useEffect(() => {
+    return () => {
+      // `recognitionRef`/`recognitionSeqRef` are plain mutable refs (a
+      // session handle and a counter), not DOM nodes -- reading their LIVE
+      // value at unmount (not a stale snapshot captured when the effect
+      // ran) is exactly what stopping whatever session is current requires,
+      // so the rule's usual "copy it to a variable first" fix does not
+      // apply here.
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      recognitionSeqRef.current++;
+    };
+  }, []);
+
+  // S47: kept in a ref, not the effect's own dependency array, below -- a
+  // caller that passes a fresh inline function every render (BoardPage does)
+  // must not re-fire the effect on every unrelated render, only when
+  // `status` itself actually changes.
+  const onHighlightRef = useRef(onHighlight);
+  onHighlightRef.current = onHighlight;
+
+  // S47 / R-395: reports the outline `status` implies -- a block question's
+  // `blockHighlight` when that is the current status, `null` otherwise --
+  // and, via the cleanup function every effect gets, `null` again the moment
+  // `status` changes away from it OR this component unmounts (brief §2 item
+  // 1: "call it with null whenever that status is replaced, cleared ... or
+  // the bar unmounts"). One `useEffect` here instead of touching every
+  // `setStatus` call site above and below.
+  useEffect(() => {
+    onHighlightRef.current?.(
+      status?.kind === "question" && status.blockHighlight ? status.blockHighlight : null,
+    );
+    return () => onHighlightRef.current?.(null);
+  }, [status]);
 
   function renderReadout(readout: string): string {
     return readout.replace(ISO_DAY, (iso) =>
@@ -165,7 +373,13 @@ export function CommandBar({
     return { x: rect?.left ?? 0, y: rect?.bottom ?? 0 };
   }
 
-  function runCommand(command: Command): void {
+  /**
+   * S44-b: `suffix`, when given, is appended to the readout text ONLY --
+   * never to a question's message (brief §3.3: "when that produces a
+   * readout status, append ... to the readout text"). Every existing call
+   * site omits it, which is byte-for-byte the pre-S44-b behaviour.
+   */
+  function runCommand(command: Command, suffix?: string): void {
     heldRef.current = command;
     const resolution = resolveCommand(command, ctx);
     if (resolution.ok) {
@@ -190,10 +404,77 @@ export function CommandBar({
           onOpen(resolved, anchorOfInput());
         }
       }
-      setStatus({ kind: "readout", message: renderReadout(resolved.readout) });
+      setStatus({ kind: "readout", message: renderReadout(resolved.readout) + (suffix ?? "") });
       return;
     }
     setStatus(questionToStatus(resolution.question, command));
+  }
+
+  /** S44-b: the three "why the rules read this instead" phrases, shared by
+   *  the readout suffix and the failure-message prefix below. */
+  function whyForReason(reason: "unavailable" | "timeout" | "garbled"): string {
+    if (reason === "unavailable") return "the model service is off";
+    if (reason === "timeout") return "the model took too long";
+    return "the model's answer was not a form";
+  }
+
+  /** S44-b: `"the model service is off"` -> `"The model service is off, so
+   *  the rules read this: "` -- the same phrase, capitalised, as a prefix. */
+  function failurePrefixForReason(reason: "unavailable" | "timeout" | "garbled"): string {
+    const why = whyForReason(reason);
+    return `${why.charAt(0).toUpperCase()}${why.slice(1)}, so the rules read this: `;
+  }
+
+  /**
+   * S44-b: the fallback path once the model reader has answered anything but
+   * `ok` — re-parses `sentence` through the rules exactly as a null-reader
+   * Enter would, then either runs it as-is (`reason` null, the `no-service`
+   * case) or annotates the result with why the rules read it instead.
+   */
+  function fallbackToRules(
+    sentence: string,
+    reason: "unavailable" | "timeout" | "garbled" | null,
+  ): void {
+    const parsed = parseCommand(sentence);
+    if (!parsed.ok) {
+      heldRef.current = null;
+      const base = failureToStatus(parsed.failure);
+      setStatus(
+        reason === null
+          ? base
+          : { ...base, message: `${failurePrefixForReason(reason)}${base.message}` },
+      );
+      return;
+    }
+    runCommand(
+      parsed.command,
+      reason === null ? undefined : ` · read by the rules (${whyForReason(reason)})`,
+    );
+  }
+
+  /** S44-b: settles a reading that is still current (brief §3.3). */
+  function applyReading(sentence: string, result: Reading): void {
+    if (result.ok) {
+      runCommand(result.command, " · read by the model");
+      return;
+    }
+    fallbackToRules(sentence, result.reason === "no-service" ? null : result.reason);
+  }
+
+  /** S44-b: starts (or restarts) a reading through `activeReader` -- a
+   *  second Enter aborts whatever is in flight first (brief §3.3). */
+  function startReading(sentence: string, activeReader: Reader): void {
+    readingAbortRef.current?.abort();
+    const controller = new AbortController();
+    readingAbortRef.current = controller;
+    const mySeq = ++readingSeqRef.current;
+    setStatus({ kind: "reading", message: "Reading…" });
+    activeReader(sentence, controller.signal).then((result) => {
+      // A newer Enter, Escape or edit has happened since -- discard.
+      if (readingSeqRef.current !== mySeq) return;
+      readingAbortRef.current = null;
+      applyReading(sentence, result);
+    });
   }
 
   function pickCandidate(
@@ -256,6 +537,25 @@ export function CommandBar({
     runCommand({ ...command, existing } as Command);
   }
 
+  /**
+   * S47: the one place a `Status` gains a `blockHighlight` -- called only
+   * for `remove_which`/`move_which`/`block_exists` (brief §2 items 1 and 3).
+   * With exactly one candidate the message also gets `YES_SUFFIX`; with
+   * several, the outline still covers every one of `assignmentIds` but the
+   * message is left as `describeQuestion` wrote it (a bare yes would be
+   * ambiguous -- `submitText` below asks "Which one?" instead).
+   */
+  function withBlockHighlight(
+    status: Status,
+    kind: Highlight["kind"],
+    assignmentIds: string[],
+  ): Status {
+    if (status.kind !== "question") return status;
+    const withSuffix =
+      status.candidates.length === 1 ? { ...status, message: status.message + YES_SUFFIX } : status;
+    return { ...withSuffix, blockHighlight: { kind, assignmentIds } };
+  }
+
   function questionToStatus(question: Question, command: Command): Status {
     // CU4 (S41-b brief §5): a question's message can carry an ISO day too
     // (`remove_which`/`no_block`'s whole-day `when`) -- the same
@@ -300,21 +600,30 @@ export function CommandBar({
         label: "Separate block",
         onClick: () => pickExisting(assignCommand, { kind: "separate" }),
       };
+      const ids = question.blocks.map((b) => b.id);
       if (question.same) {
-        return { kind: "question", message, candidates: [separate] };
+        return withBlockHighlight(
+          { kind: "question", message, candidates: [separate] },
+          "retime",
+          ids,
+        );
       }
-      return {
-        kind: "question",
-        message,
-        candidates: [
-          ...question.blocks.map((b) => ({
-            key: b.id,
-            label: `Change ${b.label}`,
-            onClick: () => pickExisting(assignCommand, { kind: "retime", assignmentId: b.id }),
-          })),
-          separate,
-        ],
-      };
+      return withBlockHighlight(
+        {
+          kind: "question",
+          message,
+          candidates: [
+            ...question.blocks.map((b) => ({
+              key: b.id,
+              label: `Change ${b.label}`,
+              onClick: () => pickExisting(assignCommand, { kind: "retime", assignmentId: b.id }),
+            })),
+            separate,
+          ],
+        },
+        "retime",
+        ids,
+      );
     }
     if (question.kind === "block_gone") {
       const assignCommand = command as AssignCommand;
@@ -369,45 +678,58 @@ export function CommandBar({
     if (question.kind === "remove_which") {
       // Only ever asked from the unassign path (S41-b).
       const unassignCommand = command as UnassignCommand;
+      const ids = question.blocks.map((b) => b.id);
       if (question.blocks.length === 1) {
         const only = question.blocks[0];
-        return {
+        return withBlockHighlight(
+          {
+            kind: "question",
+            message,
+            candidates: [
+              {
+                key: only.id,
+                label: "Remove it",
+                onClick: () =>
+                  pickExisting(unassignCommand, { kind: "remove", assignmentId: only.id }),
+              },
+            ],
+          },
+          "remove",
+          ids,
+        );
+      }
+      return withBlockHighlight(
+        {
           kind: "question",
           message,
-          candidates: [
-            {
-              key: only.id,
-              label: "Remove it",
-              onClick: () =>
-                pickExisting(unassignCommand, { kind: "remove", assignmentId: only.id }),
-            },
-          ],
-        };
-      }
-      return {
-        kind: "question",
-        message,
-        candidates: question.blocks.map((b) => ({
-          key: b.id,
-          label: `Remove ${b.label}`,
-          onClick: () => pickExisting(unassignCommand, { kind: "remove", assignmentId: b.id }),
-        })),
-      };
+          candidates: question.blocks.map((b) => ({
+            key: b.id,
+            label: `Remove ${b.label}`,
+            onClick: () => pickExisting(unassignCommand, { kind: "remove", assignmentId: b.id }),
+          })),
+        },
+        "remove",
+        ids,
+      );
     }
     if (question.kind === "move_which") {
       // Only ever asked from the move path (S41-c). Unlike remove_which,
       // this is never asked for exactly one block (a move takes it without
       // asking), so there is no one-block branch here.
       const moveCommand = command as MoveCommand;
-      return {
-        kind: "question",
-        message,
-        candidates: question.blocks.map((b) => ({
-          key: b.id,
-          label: `Move ${b.label}`,
-          onClick: () => pickExisting(moveCommand, { kind: "move", assignmentId: b.id }),
-        })),
-      };
+      return withBlockHighlight(
+        {
+          kind: "question",
+          message,
+          candidates: question.blocks.map((b) => ({
+            key: b.id,
+            label: `Move ${b.label}`,
+            onClick: () => pickExisting(moveCommand, { kind: "move", assignmentId: b.id }),
+          })),
+        },
+        "move",
+        question.blocks.map((b) => b.id),
+      );
     }
     if (question.kind === "no_block" || question.kind === "block_gone_remove") {
       return { kind: "question", message, candidates: [] };
@@ -421,21 +743,260 @@ export function CommandBar({
     // attach (a new sentence is a new question)." Clearing the held command
     // clears its `existing` (R-385) the same way it clears `attach`.
     heldRef.current = null;
+    // S44-b: any edit aborts an in-flight reading (brief §3.3) -- the bump
+    // discards a response that settles after this point even if abort()
+    // itself has no effect on an already-settled fetch. Review finding 1:
+    // clear the "Reading…" status too, or it sits on screen (looking like a
+    // stuck spinner) until the next Enter or Escape -- a readout/question
+    // status is left exactly as it was (the pre-S44-b behaviour).
+    if (readingAbortRef.current) {
+      readingAbortRef.current.abort();
+      readingAbortRef.current = null;
+      readingSeqRef.current++;
+    }
+    // S47 review must-fix: a TYPED edit also clears a standing block
+    // question (remove_which/move_which/block_exists) -- its buttons are
+    // bound to the OLD command, so leaving them up under unrelated text
+    // would keep a stale "Remove it" clickable. This goes through the
+    // ordinary `status` state, so the highlight effect clears the outline
+    // the same way Escape does.
+    //
+    // EXCEPT when the new text is itself a confirm/cancel candidate
+    // (`isConfirmOrCancelWord` -- the same words `submitText` reads at
+    // Enter): typing "yes" is a normal way to answer a standing question
+    // (CB-yes-2), so that keystroke must not erase the very question it is
+    // about to answer. Which KIND it actually confirms is re-checked at
+    // Enter (`confirmsQuestion`) -- this only decides whether to keep the
+    // question standing long enough to ask.
+    //
+    // This handler is the DOM input's own `onChange` -- `onInterim` (S46-a)
+    // calls `setText` directly and never reaches here, so a speech result
+    // that is still interim (the person may be about to say "yes") leaves a
+    // standing question alone regardless, on purpose.
+    setStatus((prev) => {
+      if (prev?.kind === "reading") return null;
+      if (prev?.kind === "question" && prev.blockHighlight) {
+        return isConfirmOrCancelWord(normalizeWord(e.target.value)) ? prev : null;
+      }
+      return prev;
+    });
+  }
+
+  /**
+   * S46-a: extracted from the Enter branch below (brief §2.2) so a final
+   * recognition result submits exactly as Enter does. Behaviour is
+   * unchanged from the pre-S46-a Enter path.
+   */
+  function submitText(value: string): void {
+    // S47 / R-395 (brief §2 item 3): a confirm/cancel word is read BEFORE
+    // parsing -- ahead of even the model reader below, since "yes" is never
+    // a sentence to send there. Two contexts, checked in order:
+    //   1. A block question stands (`status.blockHighlight` -- remove_which/
+    //      move_which/block_exists): the word acts on IT (its one candidate,
+    //      or "Which one?" with several; a cancel clears it) and nothing
+    //      else runs -- PROVIDED it actually confirms THIS question's kind
+    //      (`confirmsQuestion`, review fix: "remove it" no longer confirms a
+    //      move, nor "move it" a removal). A kind-mismatched word is neither
+    //      a confirm nor a cancel here -- it falls all the way through to
+    //      the ordinary path below, same as any other word that means
+    //      nothing to this question.
+    //   2. No question stands at all: a candidate word is offered to
+    //      `onConfirmWord`/`onCancelWord` (R-384's pop-up, S47 item 4) --
+    //      "none" (or `onCancelWord`'s false) falls through to the ordinary
+    //      path below, same as any other word that means nothing here.
+    // A word that fits neither -- e.g. a question of some OTHER kind
+    // (`ambiguous`, `run_exists`, ...) stands -- also falls through.
+    const normalized = normalizeWord(value);
+    const isCancel = CANCEL_WORDS.has(normalized);
+    // "remove it"/"move it" are only ever confirm CANDIDATES -- whether they
+    // actually confirm depends on the standing question's kind, decided
+    // below by `confirmsQuestion`; the five universal words always are.
+    const isConfirmCandidate =
+      UNIVERSAL_CONFIRM_WORDS.has(normalized) ||
+      normalized === "remove it" ||
+      normalized === "move it";
+    if (isConfirmCandidate || isCancel) {
+      if (status?.kind === "question" && status.blockHighlight) {
+        if (isConfirmCandidate && confirmsQuestion(normalized, status.blockHighlight.kind)) {
+          if (status.candidates.length === 1) {
+            status.candidates[0].onClick();
+          } else {
+            // Several candidates: a bare confirm is ambiguous (brief §2
+            // item 3) -- ask which one, buttons unchanged, nothing written.
+            setStatus({
+              ...status,
+              message: `Which one? ${status.candidates.map((c) => c.label).join(", ")}`,
+            });
+          }
+          return;
+        }
+        if (isCancel) {
+          setStatus(null);
+          setText("");
+          return;
+        }
+        // A confirm candidate that does not match THIS question's kind --
+        // ordinary text, falls through below (never treated as a cancel).
+      } else if (status?.kind !== "question") {
+        if (isConfirmCandidate && onConfirmWord) {
+          const result = onConfirmWord();
+          if (result === "created") {
+            setText("");
+            return;
+          }
+          if (result === "needs-decision") {
+            setStatus({ kind: "shape", message: "The pop-up needs a decision first." });
+            return;
+          }
+          // "none" -- falls through to the ordinary path below.
+        } else if (isCancel && onCancelWord) {
+          if (onCancelWord()) {
+            setStatus(null);
+            setText("");
+            return;
+          }
+        }
+      }
+      // Neither context claimed it -- ordinary text, falls through below.
+    }
+    // Review finding 2: empty/whitespace-only text takes exactly the
+    // null-reader path -- no network round trip (and no 20s wait) for a
+    // sentence that can only ever fail to parse, and no misleading "not a
+    // form" prefix on top of it.
+    if (reader && value.trim() !== "") {
+      startReading(value, reader);
+      return;
+    }
+    const parsed = parseCommand(value);
+    if (!parsed.ok) {
+      heldRef.current = null;
+      setStatus(failureToStatus(parsed.failure));
+      return;
+    }
+    runCommand(parsed.command);
+  }
+
+  /** S46-a: ends the current session's generation -- shared by a stopped
+   *  session (`stopListening`) and by the session's own `onError`/`onEnd`
+   *  -- so any callback still to arrive from THIS session (a late
+   *  `onFinal`, or `onEnd` after `onError` already ran) is a no-op (review
+   *  findings 1 and 3): `recognitionRef`/`listening` only ever describe a
+   *  session whose generation is still current. */
+  function endSession(): void {
+    recognitionRef.current = null;
+    recognitionSeqRef.current++;
+    setListening(false);
+  }
+
+  /** S46-a: stops the in-flight recognition session, if any -- shared by a
+   *  second press of the mic button and by Escape while listening. Text is
+   *  kept and the status line is left untouched (brief §2.2). */
+  function stopListening(): void {
+    recognitionRef.current?.stop();
+    endSession();
+  }
+
+  /** S46-a: starts a recognition session through `activeRecognizer`.
+   *
+   * `mySeq` is captured BEFORE `activeRecognizer(...)` is called and every
+   * callback below checks it against `recognitionSeqRef.current` before
+   * doing anything: `recognizer.ts` can call `onError` synchronously, from
+   * inside `start()`'s own try/catch, before this function's call to
+   * `activeRecognizer` has even returned a handle (review finding 2) -- that
+   * `onError` already bumps the generation via `endSession`, so the
+   * unconditional-looking assignment after the call is guarded by the same
+   * `isCurrent()` check and never resurrects a session that ended inline. */
+  function startListening(activeRecognizer: Recognizer): void {
+    // Press when idle aborts any in-flight reading (the S44 path), same as
+    // an edit (brief §2.2).
+    if (readingAbortRef.current) {
+      readingAbortRef.current.abort();
+      readingAbortRef.current = null;
+      readingSeqRef.current++;
+    }
+    // S47 / R-395: a standing block question (remove/move/retime) survives a
+    // fresh mic press -- the browser's own recogniser ends a session after
+    // one final result (`recognizer.ts`'s `continuous = false`), so saying
+    // the confirming "yes" out loud takes a SECOND press; that press must
+    // not erase the very question the word is about to answer. Anything
+    // else (a readout, a shape hint, an ordinary question) still clears, as
+    // before S47.
+    setStatus((prev) => (prev?.kind === "question" && prev.blockHighlight ? prev : null));
+    const mySeq = ++recognitionSeqRef.current;
+    function isCurrent(): boolean {
+      return recognitionSeqRef.current === mySeq;
+    }
+    const handle = activeRecognizer({
+      onInterim(interimText: string): void {
+        if (!isCurrent()) return;
+        heldRef.current = null;
+        setText(interimText);
+      },
+      onFinal(finalText: string): void {
+        if (!isCurrent()) return;
+        setText(finalText);
+        submitText(finalText);
+      },
+      onError(kind, detail): void {
+        if (!isCurrent()) return;
+        endSession();
+        if (kind === "not-allowed") {
+          setStatus({
+            kind: "shape",
+            message:
+              "The microphone was refused. Allow it in the browser's address bar and try again.",
+          });
+        } else if (kind === "no-speech") {
+          setStatus({ kind: "shape", message: "Nothing was heard." });
+        } else {
+          setStatus({ kind: "shape", message: `The recogniser stopped: ${detail}.` });
+        }
+      },
+      onEnd(): void {
+        if (!isCurrent()) return;
+        endSession();
+      },
+    });
+    // The session may already have ended (a synchronous `onError`) during
+    // the call above -- do not resurrect it as listening (review finding 2).
+    if (!isCurrent()) return;
+    recognitionRef.current = handle;
+    setListening(true);
+  }
+
+  function handleMicClick(): void {
+    if (listening) {
+      stopListening();
+      return;
+    }
+    if (recognizer) {
+      startListening(recognizer);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
     if (e.key === "Enter") {
       e.preventDefault();
-      const parsed = parseCommand(text);
-      if (!parsed.ok) {
-        heldRef.current = null;
-        setStatus(failureToStatus(parsed.failure));
-        return;
-      }
-      runCommand(parsed.command);
+      submitText(text);
       return;
     }
     if (e.key === "Escape") {
+      // S44-b: Escape while reading aborts it and clears the status, then
+      // the existing Escape rules apply from the NEXT Escape (brief §3.3).
+      if (readingAbortRef.current) {
+        readingAbortRef.current.abort();
+        readingAbortRef.current = null;
+        readingSeqRef.current++;
+        setStatus(null);
+        return;
+      }
+      // S46-a: Escape while listening stops it, text and status untouched,
+      // then the existing Escape rules apply from the NEXT Escape (brief
+      // §2.2 -- the same shape as the reading branch above).
+      if (recognitionRef.current) {
+        stopListening();
+        return;
+      }
       // First Escape clears the status line; a second clears the input.
       if (status !== null) {
         setStatus(null);
@@ -462,8 +1023,28 @@ export function CommandBar({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
         />
+        {recognizer && (
+          <>
+            <button
+              type="button"
+              className={`${fieldStyles.btn} ${styles.micButton}`}
+              aria-label="Speak a sentence"
+              aria-pressed={listening}
+              title="Uses the browser's speech recogniser; audio is sent to the browser maker's service"
+              onClick={handleMicClick}
+            >
+              🎤
+            </button>
+            {listening && <span className={styles.listeningLabel}>Listening…</span>}
+          </>
+        )}
       </div>
-      <p className={styles.statusLine} aria-live="polite">
+      <p
+        className={
+          status?.kind === "reading" ? `${styles.statusLine} ${styles.reading}` : styles.statusLine
+        }
+        aria-live="polite"
+      >
         {status?.message ?? ""}
       </p>
       {status?.kind === "question" && status.candidates.length > 0 && (

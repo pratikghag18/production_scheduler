@@ -180,6 +180,62 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       expect(result.byField.headcount).toEqual({ n: 1, correct: 1 });
       expect(result.byField.place).toEqual({ n: 2, correct: 2 });
     });
+
+    it("V5c (F-143): a per-field tally is not fooled by key order or an invented key inside a nested time object", () => {
+      const moveForm: Command = {
+        intent: "move",
+        operator: "Sam Patel",
+        place: ["Cell 1"],
+        toPlace: ["Cell 2"],
+        day: { kind: "weekday", day: 3 },
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        existing: null,
+      };
+      const moveRows: VoiceRow[] = [
+        { id: "m1", intent: "move", sentence: "n/a", form: moveForm, clean: true, source: "x" },
+      ];
+      // Every object's keys reversed in insertion order, plus an invented
+      // key ("meridiem") inside `span.start` -- a fine-tuned model's shape.
+      const predicted = {
+        existing: null,
+        span: {
+          end: { minute: 0, hour: 14 },
+          start: { minute: 0, hour: 10, meridiem: "am" },
+        },
+        day: { day: 3, kind: "weekday" },
+        toPlace: ["Cell 2"],
+        place: ["Cell 1"],
+        operator: "Sam Patel",
+        intent: "move",
+      } as unknown as Command;
+      const result = score(moveRows, () => predicted);
+      expect(rate(result.clean)).toBe(1); // the row is correct despite key order and the extra key
+      expect(result.byField.day).toEqual({ n: 1, correct: 1 });
+      expect(result.byField.span).toEqual({ n: 1, correct: 1 });
+    });
+
+    it("V5d (F-143): the tally still discriminates -- a span END off by one minute is wrong in span but right in day", () => {
+      const moveForm: Command = {
+        intent: "move",
+        operator: "Sam Patel",
+        place: ["Cell 1"],
+        toPlace: ["Cell 2"],
+        day: { kind: "weekday", day: 3 },
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        existing: null,
+      };
+      const moveRows: VoiceRow[] = [
+        { id: "m1", intent: "move", sentence: "n/a", form: moveForm, clean: true, source: "x" },
+      ];
+      const predicted: Command = {
+        ...moveForm,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 1 } },
+      };
+      const result = score(moveRows, () => predicted);
+      expect(rate(result.clean)).toBe(0); // the row itself is wrong (span differs)
+      expect(result.byField.day).toEqual({ n: 1, correct: 1 });
+      expect(result.byField.span).toEqual({ n: 1, correct: 0 });
+    });
   });
 
   it("V6: the rule parser's own baseline on held-out is 1.0 clean, well below 0.5 perturbed", () => {
@@ -251,5 +307,56 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
         expect(firstWords.has(verb), verb).toBe(true);
       }
     }
+  });
+
+  describe("V10-V12 (extra keys): a fine-tuned model's invented field does not fail a row", () => {
+    const form: Command = {
+      intent: "assign",
+      operator: "Sam Patel",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      attach: null,
+      existing: null,
+    };
+    const rows: VoiceRow[] = [
+      { id: "r1", intent: "assign", sentence: "n/a", form, clean: true, source: "x" },
+    ];
+
+    it("V10: a prediction equal to the form plus an extra top-level key scores correct and is counted once under extraKeys", () => {
+      const predicted = { ...form, type: "assign" };
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(1);
+      expect(result.extraKeys).toEqual({ n: 1, keys: { type: 1 } });
+    });
+
+    it("V11: an extra key inside `start` is ignored the same way", () => {
+      const predicted = { ...form, start: { ...form.start, explicitMeridiem: true } };
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(1);
+      expect(result.extraKeys).toEqual({ n: 1, keys: { explicitMeridiem: 1 } });
+    });
+
+    it("V12: a prediction missing `product` is still wrong (missing is not extra)", () => {
+      const predicted = { ...form } as Record<string, unknown>;
+      delete predicted.product;
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(0);
+      expect(result.extraKeys).toEqual({ n: 0, keys: {} });
+    });
+  });
+
+  it("V13: the rule parser's held-out baseline is unchanged by the extra-key normalisation (re-pins V6)", () => {
+    const predict = (row: VoiceRow) => {
+      const result = parseCommand(row.sentence);
+      return result.ok ? result.command : null;
+    };
+    const result = score(HELDOUT, predict);
+    expect(rate(result.clean)).toBe(1);
+    expect(rate(result.perturbed)).toBeGreaterThan(0);
+    expect(rate(result.perturbed)).toBeLessThan(0.5);
+    expect(rate(result.perturbed)).toBeCloseTo(0.04, 1);
   });
 });
