@@ -21,7 +21,12 @@ import { mulberry32 } from "../../scripts/voice/lib/rng.mjs";
 import { TEMPLATES, templateById } from "../../scripts/voice/lib/templates.mjs";
 import { CATALOG, PERTURBATION_IDS, perturbedRowForm } from "../../scripts/voice/lib/perturb.mjs";
 import { canonical, equalForms } from "../../scripts/voice/lib/form.mjs";
-import { score, rate } from "../../scripts/voice/lib/score.mjs";
+import {
+  score,
+  rate,
+  scorePredictions,
+  formatSentencesNotCheckedLine,
+} from "../../scripts/voice/lib/score.mjs";
 import { generateTrainingRows } from "../../scripts/voice/lib/rows.mjs";
 import type { VoiceRow } from "../../scripts/voice/lib/rows.mjs";
 
@@ -555,6 +560,55 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       // The row's own top-level keys (commands, intent) are still tallied.
       expect(result.byField.intent).toEqual({ n: 1, correct: 1 });
       expect(result.byField.commands.n).toBe(1);
+    });
+  });
+
+  describe("V18 (F-145): scorePredictions checks a prediction row's sentence against the held-out row of the same id", () => {
+    const form: Command = {
+      intent: "assign",
+      operator: "Sam Patel",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      attach: null,
+      shift: null,
+      existing: null,
+    };
+    const rows: VoiceRow[] = [
+      {
+        id: "r1",
+        intent: "assign",
+        sentence: "assign Sam Patel to Housing A in Cell 1 from 10am to 2pm",
+        form,
+        clean: true,
+        source: "x",
+      },
+    ];
+
+    it("V18a: a predictions row whose sentence differs from the held-out row's throws, naming F-145 and the id", () => {
+      const predictionRows = [{ id: "r1", sentence: "a completely different sentence", form }];
+      expect(() => scorePredictions(rows, predictionRows)).toThrow(/F-145/);
+      expect(() => scorePredictions(rows, predictionRows)).toThrow(/r1/);
+      expect(() => scorePredictions(rows, predictionRows)).toThrow(/different held-out file/);
+    });
+
+    it("V18b: a predictions row with the right sentence scores normally", () => {
+      const predictionRows = [{ id: "r1", sentence: rows[0].sentence, form }];
+      const result = scorePredictions(rows, predictionRows);
+      expect(rate(result.clean)).toBe(1);
+      expect(result.sentencesNotChecked).toBe(0);
+    });
+
+    it("V18c: a predictions row with no sentence field scores and is counted in the not-checked line", () => {
+      const predictionRows = [{ id: "r1", form }];
+      const result = scorePredictions(rows, predictionRows);
+      expect(rate(result.clean)).toBe(1);
+      expect(result.sentencesNotChecked).toBe(1);
+      expect(formatSentencesNotCheckedLine(result.sentencesNotChecked)).toBe(
+        "sentences not checked: 1 rows (predictions from before F-145)",
+      );
     });
   });
 });

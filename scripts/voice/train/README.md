@@ -62,7 +62,14 @@ Nothing in the app changes from running this. No model is served until its score
 failed to parse`. It writes `predictions.jsonl` one row at a time as each is decided, not all
    at once at the end, so a session killed mid-prediction (Colab's free tier has a two-hour
    deadline) can just be re-run: it skips the ids already in the file and prints how many, and
-   continues from there instead of starting the 500 rows over.
+   continues from there instead of starting the 500 rows over. That resume is by id, and only
+   safe against the SAME `heldout.jsonl` it started against (F-145: the fourth Colab run's
+   `predictions.jsonl` was resumed against a `heldout.jsonl` that had been silently regenerated
+   under it, so 400 predictions answered sentences that were no longer in the committed file).
+   Re-running the Predict cell on a DIFFERENT held-out file must start from a deleted
+   `predictions.jsonl` — the cell now refuses to resume across files, checking each existing
+   row's `sentence` against the current held-out row of the same id and stopping with an
+   F-145 message before skipping anything if they differ (or if the file predates this check).
 
 4. **When it finishes**, download `predictions.jsonl` and `model-q4_k_m.gguf` from the run
    folder in Drive (`scheduler-voice/run-qwen3-1.7b/`, a fixed name — the exact path is printed
@@ -75,7 +82,13 @@ failed to parse`. It writes `predictions.jsonl` one row at a time as each is dec
    node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions data/voice/runs/<timestamp>/predictions.jsonl --bar 0.95
    ```
 
-   Paste the table to the developer session; it goes on S43's card.
+   Paste the table to the developer session; it goes on S43's card. The scorer checks the
+   sentences too (F-145): a `predictions.jsonl` written by the current notebook carries each
+   row's `sentence` alongside `id`/`form`, and the scorer refuses to print a table at all if any
+   of them does not match the held-out row of the same id — a plain sign the predictions file
+   and the held-out file disagree, instead of a silently wrong score. A `predictions.jsonl` from
+   before this change (no `sentence` field on any row) still scores, with one extra line in the
+   summary: `sentences not checked: N rows (predictions from before F-145)`.
 
 6. **What "good" looks like:** clean at or above 95%; perturbed far above the rule parser's
    baseline (`ruleParserBaseline.perturbed` in the manifest — currently 5.2% (S52-c: up from

@@ -24,3 +24,16 @@ export function score<TRow extends { intent: string; clean: boolean; form: unkno
 ): ScoreResult;
 export function rate(bucket: ScoreBucket): number;
 export function formatExtraKeysLine(extraKeys: ExtraKeysBucket): string;
+
+/** F-145: `ScoreResult` plus how many prediction rows carried no `sentence`
+ *  at all (a predictions file from before this change). */
+export interface ScoreResultWithSentenceCheck extends ScoreResult {
+  sentencesNotChecked: number;
+}
+export function scorePredictions<
+  TRow extends { id: string; sentence: string; intent: string; clean: boolean; form: unknown },
+>(
+  heldoutRows: readonly TRow[],
+  predictionRows: readonly { id: string; sentence?: string | null; form: unknown }[],
+): ScoreResultWithSentenceCheck;
+export function formatSentencesNotCheckedLine(n: number): string;

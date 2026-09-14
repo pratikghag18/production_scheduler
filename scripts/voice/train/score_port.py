@@ -158,8 +158,24 @@ def score(
         for field in row["form"].keys():
             field_bucket = by_field.setdefault(field, _empty_bucket())
             field_bucket["n"] += 1
-            if same_intent and canonical(normalized_predicted.get(field)) == canonical(
-                row["form"][field]
+            # F-145/F-143: `normalized_predicted.get(field)` reads a field
+            # MISSING from the prediction the same as one explicitly `None`
+            # -- Python's dict has no `undefined` distinct from `null`.
+            # `score.mjs`'s `normalizedPredicted[field]` is JS `undefined`
+            # for a missing key, and `canonical(undefined)` (the bare JS
+            # value, never the string `"null"`) never equals
+            # `canonical(null)` -- so the JS scorer correctly marks a
+            # missing field wrong even when `expected` is `null`, and this
+            # port must too (V17: missing stays missing, never an implicit
+            # match). The fourth-run predictions (pre-`shift`, F-145) proved
+            # the gap: `shift` missing entirely on every row scored
+            # 562/614 "correct" here against `score.mjs`'s 212/614 for the
+            # same file. `field in normalized_predicted` is the presence
+            # check `.get()` skips; only then is the value itself compared.
+            if (
+                same_intent
+                and field in normalized_predicted
+                and canonical(normalized_predicted[field]) == canonical(row["form"][field])
             ):
                 field_bucket["correct"] += 1
 
@@ -187,8 +203,14 @@ def score(
                     for field in expected_inner.keys():
                         field_bucket = by_field.setdefault(field, _empty_bucket())
                         field_bucket["n"] += 1
-                        if same_inner_intent and canonical(predicted_inner.get(field)) == canonical(
-                            expected_inner[field]
+                        # F-145/F-143: same fix as the top-level tally above
+                        # -- `field in predicted_inner` before comparing, so
+                        # a field missing from an inner command is wrong,
+                        # never an implicit match against an expected `null`.
+                        if (
+                            same_inner_intent
+                            and field in predicted_inner
+                            and canonical(predicted_inner[field]) == canonical(expected_inner[field])
                         ):
                             field_bucket["correct"] += 1
 
@@ -238,19 +260,57 @@ def print_table(result: Dict[str, Any]) -> None:
         print(f"  {field.ljust(12)} {bucket['correct']}/{bucket['n']}  ({pct(rate(bucket))})")
 
     print(f"\n{format_extra_keys_line(result['extraKeys'])}")
+    if "sentencesNotChecked" in result:
+        print(format_sentences_not_checked_line(result["sentencesNotChecked"]))
     print("")
 
 
-def predictions_predict(
-    predictions_path: str,
-) -> Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    rows = load_jsonl(predictions_path)
-    by_id = {r["id"]: r.get("form") for r in rows}
+def score_predictions(
+    heldout_rows: List[Dict[str, Any]], prediction_rows: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Mirrors `lib/score.mjs`'s `scorePredictions` in intent (F-145): the
+    maintainer's fourth Colab run's predictions.jsonl had been resumed (by
+    id) against a DIFFERENT held-out file than the committed
+    data/voice/heldout.jsonl -- 400 single-row predictions silently answered
+    sentences no longer in the file the scorer joined them against by id.
+    A prediction row that carries "sentence" must equal the held-out row of
+    the same id, checked in HELD-OUT-ROW order so the first mismatch is
+    found and reported before any table is printed. A prediction row with no
+    "sentence" at all (or an explicit None) is a file from before this
+    change -- accepted, but tallied into "sentencesNotChecked" so the
+    summary line (`format_sentences_not_checked_line`) can say so."""
+    by_id = {r["id"]: r for r in prediction_rows}
+    sentences_not_checked = 0
+
+    for row in heldout_rows:
+        prediction = by_id.get(row["id"])
+        if prediction is None:
+            continue
+        predicted_sentence = prediction.get("sentence")
+        if predicted_sentence is None:
+            sentences_not_checked += 1
+            continue
+        if predicted_sentence != row["sentence"]:
+            raise ValueError(
+                f'F-145: predictions row for id "{row["id"]}" does not match '
+                "data/voice/heldout.jsonl -- these predictions answered a "
+                "different held-out file.\n"
+                f"  predicted sentence: {json.dumps(predicted_sentence, ensure_ascii=False)}\n"
+                f"  held-out sentence:  {json.dumps(row['sentence'], ensure_ascii=False)}"
+            )
 
     def predict(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        return by_id.get(row["id"])
+        prediction = by_id.get(row["id"])
+        return prediction.get("form") if prediction is not None else None
 
-    return predict
+    result = score(heldout_rows, predict)
+    result["sentencesNotChecked"] = sentences_not_checked
+    return result
+
+
+def format_sentences_not_checked_line(n: int) -> str:
+    """Mirrors `lib/score.mjs`'s `formatSentencesNotCheckedLine`."""
+    return f"sentences not checked: {n} rows (predictions from before F-145)"
 
 
 def main(argv: List[str]) -> int:
@@ -261,8 +321,8 @@ def main(argv: List[str]) -> int:
     args = parser.parse_args(argv)
 
     rows = load_jsonl(args.heldout)
-    predict = predictions_predict(args.predictions)
-    result = score(rows, predict)
+    prediction_rows = load_jsonl(args.predictions)
+    result = score_predictions(rows, prediction_rows)
     print_table(result)
 
     clean_rate = rate(result["clean"])

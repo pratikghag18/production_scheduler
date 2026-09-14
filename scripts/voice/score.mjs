@@ -9,7 +9,13 @@
 // gated -- brief §2: "that gap is the whole reason for a model."
 import { readFileSync } from "node:fs";
 import { parseCommand } from "../../src/lib/command/parse.ts";
-import { score, rate, formatExtraKeysLine } from "./lib/score.mjs";
+import {
+  score,
+  rate,
+  formatExtraKeysLine,
+  scorePredictions,
+  formatSentencesNotCheckedLine,
+} from "./lib/score.mjs";
 
 function parseArgs(argv) {
   const out = { heldout: null, predictions: null, ruleParser: false, bar: 0.95 };
@@ -42,12 +48,6 @@ function ruleParserPredict(row) {
   return result.ok ? result.command : null;
 }
 
-function predictionsPredict(path) {
-  const rows = loadJsonl(path);
-  const byId = new Map(rows.map((r) => [r.id, r.form]));
-  return (row) => byId.get(row.id) ?? null;
-}
-
 function pct(n) {
   return `${(n * 100).toFixed(1)}%`;
 }
@@ -74,15 +74,19 @@ function printTable(result) {
     console.log(`  ${field.padEnd(12)} ${bucket.correct}/${bucket.n}  (${pct(rate(bucket))})`);
   }
   console.log(`\n${formatExtraKeysLine(result.extraKeys)}`);
+  if (result.sentencesNotChecked !== undefined) {
+    console.log(formatSentencesNotCheckedLine(result.sentencesNotChecked));
+  }
   console.log("");
 }
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const rows = loadJsonl(args.heldout);
-  const predict = args.ruleParser ? ruleParserPredict : predictionsPredict(args.predictions);
+  const result = args.ruleParser
+    ? score(rows, ruleParserPredict)
+    : scorePredictions(rows, loadJsonl(args.predictions));
 
-  const result = score(rows, predict);
   printTable(result);
 
   const cleanRate = rate(result.clean);

@@ -57,7 +57,11 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     const heldoutPath = join(dir, "heldout.jsonl");
     const predictionsPath = join(dir, "predictions.jsonl");
     writeFileSync(heldoutPath, threeRows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
-    const predictions = threeRows.map((row) => ({ id: row.id, form: ruleParserPredict(row) }));
+    const predictions = threeRows.map((row) => ({
+      id: row.id,
+      sentence: row.sentence,
+      form: ruleParserPredict(row),
+    }));
     writeFileSync(
       predictionsPath,
       predictions.map((p) => JSON.stringify(p)).join("\n") + "\n",
@@ -110,5 +114,50 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     expect(sampleRow, manifest.sample.id).toBeTruthy();
     expect(manifest.sample.sentence).toBe(sampleRow!.sentence);
     expect(manifest.sample.canonicalForm).toBe(canonical(sampleRow!.form as Command));
+  });
+
+  it("VT4 (F-145): the notebook's Predict cell refuses to resume across a different held-out file", () => {
+    const notebook = JSON.parse(readFileSync("scripts/voice/train/train_qwen3.ipynb", "utf8")) as {
+      cells: Array<{ cell_type: string; source: string[] }>;
+    };
+    const predictCell = notebook.cells.find(
+      (cell) => cell.cell_type === "code" && cell.source.join("").includes("Predict on held-out"),
+    );
+    expect(predictCell, "Predict cell not found in the notebook").toBeTruthy();
+    const source = predictCell!.source.join("");
+    expect(source).toContain("F-145");
+    // Pin the MECHANISM, not just the word "F-145" -- a doc comment alone
+    // could carry the string while the actual check was deleted. The cell
+    // must still raise, and must still compare the two sentences by name.
+    expect(source).toContain("raise RuntimeError");
+    expect(source).toContain("existing_sentence != heldout_sentence");
+    // A third reason: an id from predictions.jsonl that is not in the
+    // CURRENT held-out file at all must say so, rather than falling into
+    // "answers a different sentence" and printing a misleading
+    // "held-out sentence: None" as though that None were a real mismatch.
+    expect(source).toContain("is not in the current held-out file");
+    // The refusal fires before any id is treated as already predicted --
+    // it must appear ahead of the resume skip, not after it.
+    expect(source.indexOf("F-145")).toBeLessThan(source.indexOf("if done_ids:"));
+    // Every prediction row now carries its own sentence alongside id/form.
+    expect(source).toContain('"sentence": row["sentence"]');
+  });
+
+  it("VT5 (F-145): the notebook's Score cell (cell 8) reads predictions.jsonl through score_predictions/load_jsonl, not the unprotected predictions_predict path", () => {
+    const notebook = JSON.parse(readFileSync("scripts/voice/train/train_qwen3.ipynb", "utf8")) as {
+      cells: Array<{ cell_type: string; source: string[] }>;
+    };
+    const scoreCell = notebook.cells.find(
+      (cell) =>
+        cell.cell_type === "code" && cell.source.join("").includes("score_port.print_table"),
+    );
+    expect(scoreCell, "Score cell not found in the notebook").toBeTruthy();
+    const source = scoreCell!.source.join("");
+    expect(source).toContain("score_port.score_predictions(");
+    expect(source).toContain("score_port.load_jsonl(PREDICTIONS_PATH)");
+    // The old unprotected call this incident happened around must be gone
+    // from the cell that scores the very predictions.jsonl the Predict
+    // cell just wrote.
+    expect(source).not.toContain("predictions_predict");
   });
 });

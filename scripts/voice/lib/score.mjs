@@ -184,3 +184,55 @@ export function formatExtraKeysLine(extraKeys) {
   const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
   return `extra keys ignored: ${extraKeys.n} rows${suffix}`;
 }
+
+/**
+ * F-145: the maintainer's fourth Colab run's `predictions.jsonl` had been
+ * resumed (by id) against a DIFFERENT held-out file than the committed
+ * `data/voice/heldout.jsonl` -- `data/voice/heldout.jsonl` was regenerated
+ * twice on 14 Sept with the same seed and the same ids, so 400 single-row
+ * predictions silently answered sentences that were no longer in the file
+ * the scorer joined them against by id. `scorePredictions(heldoutRows,
+ * predictionRows)` is what both CLIs (`score.mjs` and `score_port.py`) call
+ * instead of building an id->form map by hand: a prediction row that
+ * carries `sentence` must equal the held-out row of the same id, checked in
+ * HELD-OUT-ROW order so the first mismatch is found and reported before any
+ * table is printed. A prediction row with no `sentence` at all (or an
+ * explicit `null`) is a file from before this change -- accepted, but
+ * tallied into `sentencesNotChecked` so the summary line can say so
+ * (`formatSentencesNotCheckedLine`, printed by `printTable`/`print_table`
+ * whenever the result carries that key).
+ */
+export function scorePredictions(heldoutRows, predictionRows) {
+  const byId = new Map(predictionRows.map((row) => [row.id, row]));
+  let sentencesNotChecked = 0;
+
+  for (const row of heldoutRows) {
+    const prediction = byId.get(row.id);
+    if (prediction == null) continue;
+    if (prediction.sentence == null) {
+      sentencesNotChecked++;
+      continue;
+    }
+    if (prediction.sentence !== row.sentence) {
+      throw new Error(
+        `F-145: predictions row for id "${row.id}" does not match data/voice/heldout.jsonl -- ` +
+          `these predictions answered a different held-out file.\n` +
+          `  predicted sentence: ${JSON.stringify(prediction.sentence)}\n` +
+          `  held-out sentence:  ${JSON.stringify(row.sentence)}`,
+      );
+    }
+  }
+
+  const predict = (row) => byId.get(row.id)?.form ?? null;
+  const result = score(heldoutRows, predict);
+  return { ...result, sentencesNotChecked };
+}
+
+/** "sentences not checked: N rows (predictions from before F-145)" -- the
+ *  one line both `score.mjs` and `score_port.py` print, alongside
+ *  `formatExtraKeysLine`, whenever a `score()` result came from
+ *  `scorePredictions`/`score_predictions` (the key is absent otherwise, e.g.
+ *  `--rule-parser` mode, so the line is skipped there). */
+export function formatSentencesNotCheckedLine(n) {
+  return `sentences not checked: ${n} rows (predictions from before F-145)`;
+}
