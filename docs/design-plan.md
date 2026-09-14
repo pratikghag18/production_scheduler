@@ -9234,3 +9234,45 @@ The local Whisper version, through the same service as the model, is the plan's 
 and is not part of this stage.
 
 Brief: `docs/agent-briefs/s46-a-microphone-brief.md`.
+
+## §19.95 — D124: the bar behind a launcher in the corner (S48)
+
+> *"I feel the command line should be like a chatbot icon on the lower right corner of the
+> screen, you click on it to start writing … that icon is no dice, we need a fancy one which is
+> more recognisable."* — the maintainer, 13 Sept, after an evening of using the bar and the
+> microphone. And, on the mock: *"Go ahead and build it."*
+
+### D124 — one door, moved; one icon, not two
+
+The command bar has sat at the top of the board since S40. It is now the way most things get
+done by voice, and the board underneath it is what the outline stage (S47) draws on. A launcher
+in the lower right, the pattern every chat widget has taught people, gives the board the whole
+screen until a person wants to talk to it, and puts the words beside the outline they refer to
+rather than a screen-height away from it. It is also where the chat panel of Stage 10 will
+live, so the panel built here is not thrown away.
+
+**The bar does not change; its frame does.** The panel contains the `CommandBar` component as
+it is, with every prop it has today. Nothing about how a sentence is read, resolved, confirmed
+or written moves. The launcher is a new component around the bar, the board renders the
+launcher where it rendered the bar, and the same server flag that hid the bar from a viewer
+hides the launcher.
+
+**One icon.** The maintainer asked whether voice should have its own icon beside the launcher.
+No: two floating buttons are two doors to one place, and the voice door would need the panel
+anyway to show what it heard and to ask its questions. The microphone stays inside the panel
+beside the input, and the maintainer's standing preference — fold a capability into the
+existing control — holds. The launcher's glyph is a speech bubble, "tell the board"; the
+microphone is the outline everyone knows from a phone. Both are drawn inline in the app's own
+icon file, because the app has no icon library and gains none.
+
+**Open and closed are the bar's states, not new ones.** Escape closes the panel only when the
+bar has nothing left to clear, so the bar's own Escape rules (clear the status, then the
+input, stop listening) run first and closing is the last thing Escape does. A click outside
+closes at any time, and closing unmounts the bar, which is what clears a standing question, its
+outline, and any reading or listening in flight — the same cleanup the bar already does on
+unmount. The panel never closes itself while a question stands or a reading is in flight,
+because a panel that vanishes mid-answer would leave an outline with no words. The slash key
+opens it for people who type, as in every tool that has a command palette.
+
+Brief: `docs/agent-briefs/s48-a-launcher-brief.md`. Mock: the artifact the maintainer approved,
+two frames of the board in the app's own tokens.

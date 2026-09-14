@@ -2287,6 +2287,30 @@ stages:
     answers "Which one?" with the labels. A yes at the bar while a sentence-opened create pop-up is
     clean creates it through the pop-up's own R-384 condition; a no closes only a pop-up a sentence
     opened. Every write still goes through onUnassign, onMove, onRetime or the pop-up.
+- id: S48
+  track: core
+  num: 48
+  title: The corner launcher — the command bar becomes a button in the lower right that opens a panel
+  status: now
+  owner: agent
+  refs:
+  - session 158 conversation (the maintainer, 13 Sept; the mock they approved)
+  - §19.95 (D124)
+  - docs/agent-briefs/s48-a-launcher-brief.md
+  delivers:
+  - R-396
+  what: >-
+    **The board is the whole screen until you want to talk to it.** The bar leaves the top of the board
+    and becomes a round button in the lower right with a speech-bubble glyph. Pressing it, or the slash
+    key, opens a panel above the button holding exactly what the bar holds now: the input, the
+    microphone (a drawn microphone, not the emoji), the status line and the candidate buttons. The panel
+    stays open while a question stands so the outline on the board and the words are read together;
+    Escape, a click outside, or the button closes it. A viewer sees no button, as they saw no bar. The
+    same panel is the chat panel's home later (Stage 10).
+  state: >-
+    **Briefed session 158 (13 Sept)** from a static mock the maintainer approved (closed, and open on
+    a removal with the block outlined). One lane: the launcher component, two icons, the board's
+    placement, the tests, the two browser specs that must open the panel first.
 - id: M1
   track: matrix
   num: 1
@@ -10511,6 +10535,34 @@ requirements:
     S47 after S45 and S46 land; covered when the bar's
     tests carry the yes/no cases for one and several candidates and the pop-up yes, and the board's
     tests show the outline follows the question.
+
+- id: R-396
+  title: The command bar lives behind a launcher button in the lower right; the panel it opens holds the bar entire
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: "the command line should be like a chatbot icon on the lower right corner of the screen, you click on it to start writing" --- one icon, not two, on the developer\'s recommendation; "that icon is no dice, we need a fancy one which is more recognisable"; "Go ahead and build it" on the mock)'
+  - §19.95 (D124)
+  stated_by: maintainer
+  claim: >-
+    On the board, a person who can place people sees a round launcher button fixed in the lower right
+    with a speech-bubble glyph; a viewer sees none. Pressing it, or pressing the slash key when no
+    input has focus, opens a panel anchored above the button that contains the command bar exactly as
+    it is --- the input (focused on open), the microphone button with a drawn microphone glyph and a
+    visible listening state, the status line, the candidate buttons --- and nothing else changes in
+    how a sentence is read, resolved, confirmed or written. Escape closes the panel only when the bar
+    has nothing left to clear (no status, empty input, not listening); a click outside the panel or
+    the button closes it at any time. Closing the panel clears any standing question and outline and
+    aborts any reading or listening in flight. The panel stays open on its own while a question
+    stands or a reading is in flight. The tester's role walk and the gated voice spec open the panel
+    before they use the bar.
+  verified_by:
+  - kind: manual
+    steps: "open the board as an admin: the launcher sits in the lower right; press it, the panel opens with the cursor in the input; type a removal, see the outline, say yes; press Escape until the panel closes; press slash, it reopens; open the board as a viewer: no launcher"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 158). Covered when src/test/commandLauncher.test.tsx carries the CL cases (no
+    button without canPlace; press opens and focuses; slash opens; Escape closes only when the bar is
+    clear; click outside closes; closing clears the highlight and aborts a reading) and the role walk
+    passes opening the panel.
 
 findings:
 - id: F-144
@@ -21398,6 +21450,12 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
+- kind: task
+  stage: S48
+  text: "The corner launcher --- the bar behind a button in the lower right, the panel above it (S48, R-396, in progress)"
+  why: >-
+    The maintainer's call on 13 Sept after using the bar with the microphone; the mock was approved the
+    same evening. Built before Stage 7 because it changes where every later voice piece lives.
 - kind: task
   text: "Voice plan Stage 7 --- widen the sentences: a place the person did not say, the change-the-timing phrasings, and several people or cells in one sentence"
   why: >-

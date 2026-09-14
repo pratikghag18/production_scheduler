@@ -1,0 +1,158 @@
+<title>Board Launcher Mock</title>
+<style>
+  :root {
+    --surface: #fcfcfb; --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10); --crit: #d03b3b;
+    --p1: #2a78d6; --p2: #eb6834; --p3: #1baf7a; --p4: #eda100;
+    --break: repeating-linear-gradient(45deg, rgba(137,135,129,.18) 0 4px, transparent 4px 8px);
+  }
+  html { color-scheme: light; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 -apple-system, "Segoe UI", system-ui, Roboto, sans-serif; padding-block: 28px; padding-inline: 24px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--ink-2); margin: 0 0 22px; max-width: 64ch; }
+  .frames { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 22px; align-items: start; }
+  @media (max-width: 460px) { .frames { grid-template-columns: 1fr; } }
+  .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+  .frame { position: relative; background: var(--surface); border: 1px solid var(--grid); border-radius: 6px; overflow: hidden; box-shadow: 0 1px 0 rgba(11,11,11,.03); }
+  .shell { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--grid); font-size: 12px; color: var(--ink-2); }
+  .shell b { color: var(--ink); font-weight: 600; }
+  .shell .pill { margin-left: auto; font-size: 11px; padding: 2px 8px; border: 1px solid var(--grid); border-radius: 999px; color: var(--muted); }
+  .board { display: grid; grid-template-columns: 104px 1fr; }
+  .rail { border-right: 1px solid var(--grid); }
+  .rail div, .axis div { height: 34px; display: flex; align-items: center; padding-inline: 12px; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--grid); }
+  .rail .head { height: 28px; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+  .lanes { position: relative; }
+  .axis { display: grid; grid-template-columns: repeat(12, 1fr); height: 28px; border-bottom: 1px solid var(--grid); font-size: 11px; color: var(--muted); }
+  .axis span { display: flex; align-items: center; padding-left: 6px; border-left: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  .lane { position: relative; height: 34px; border-bottom: 1px solid var(--grid);
+    background-image: repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px calc(100% / 12)); }
+  .blk { position: absolute; top: 5px; height: 24px; border-radius: 3px; color: #fff; font-size: 11px; display: flex; align-items: center; gap: 6px; padding-inline: 7px; white-space: nowrap; overflow: hidden; }
+  .blk .av { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,.28); display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; }
+  .brk { position: absolute; top: 0; height: 100%; background: var(--break), rgba(137,135,129,.07); }
+  .outline-remove { box-shadow: inset 0 0 0 2px var(--crit), 0 0 0 2px var(--surface), 0 0 0 4px var(--crit); }
+  .body { height: 78px; }
+  /* launcher */
+  .launch { position: absolute; right: 18px; bottom: 18px; width: 48px; height: 48px; border-radius: 50%; background: var(--ink); color: #fff; border: 0; display: grid; place-items: center; box-shadow: 0 6px 18px rgba(11,11,11,.22); cursor: pointer; }
+  .launch svg { width: 24px; height: 24px; }
+  .launch.open { background: var(--surface); color: var(--ink); border: 1px solid var(--grid); box-shadow: 0 2px 8px rgba(11,11,11,.12); }
+  .kbd { position: absolute; right: 74px; bottom: 30px; font-size: 11px; color: var(--muted); }
+  .kbd code { font: 11px/1 ui-monospace, Consolas, monospace; border: 1px solid var(--grid); border-radius: 3px; padding: 1px 5px; background: var(--page); color: var(--ink-2); }
+  /* panel */
+  .panel { position: absolute; right: 18px; bottom: 76px; width: 372px; max-width: calc(100% - 36px); background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; box-shadow: 0 14px 36px rgba(11,11,11,.16); }
+  .panel .ph { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 0; font-size: 12px; color: var(--muted); }
+  .panel .ph span { letter-spacing: .06em; text-transform: uppercase; font-size: 10.5px; }
+  .row { display: flex; gap: 8px; padding: 8px 12px 0; align-items: center; }
+  .input { flex: 1; border: 1px solid var(--axis); border-radius: 4px; padding: 7px 10px; font-size: 13px; background: #fff; color: var(--ink); white-space: nowrap; overflow: hidden; }
+  .input .caret { display: inline-block; width: 1px; height: 14px; background: var(--ink); vertical-align: -2px; margin-left: 1px; }
+  .mic { width: 36px; height: 36px; border-radius: 4px; border: 1px solid var(--axis); background: #fff; color: var(--ink); display: grid; place-items: center; }
+  .mic svg { width: 18px; height: 18px; }
+  .status { padding: 8px 12px 0; font-size: 12px; color: var(--ink-2); }
+  .status .yes { color: var(--ink); }
+  .cands { display: flex; gap: 8px; padding: 8px 12px 12px; }
+  .cand { font-size: 12px; padding: 4px 10px; border: 1px solid var(--axis); border-radius: 4px; background: var(--page); color: var(--ink); }
+  .cand.danger { border-color: var(--crit); color: var(--crit); }
+  /* icons strip */
+  .icons { margin-top: 26px; }
+  .iconrow { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; }
+  .ic { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+  .ic .big { width: 64px; height: 64px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; }
+  .ic .big svg { width: 32px; height: 32px; }
+  .ic .sq { width: 48px; height: 48px; border-radius: 6px; border: 1px solid var(--axis); background: #fff; color: var(--ink); display: grid; place-items: center; }
+  .ic .sq svg { width: 24px; height: 24px; }
+  .ic .sq.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+  .listen { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--crit); }
+  .notes { margin-top: 22px; color: var(--ink-2); max-width: 66ch; font-size: 13px; }
+  .notes li { margin-bottom: 4px; }
+</style>
+
+<h1>The corner launcher</h1>
+<p class="lede">The command bar leaves the top of the board and becomes a button in the lower right. Left: closed, the board is the whole screen. Right: open on "remove Operator A1 from Cell 1 today", the block outlined in red, waiting for a yes.</p>
+
+<div class="frames">
+  <div>
+    <p class="label">Closed</p>
+    <div class="frame">
+      <div class="shell"><b>Plant A</b> › Area 1 › Line 1 <span>Sun 13 – Tue 15 Sep</span><span class="pill">Standard</span></div>
+      <div class="board">
+        <div class="rail"><div class="head">CELL</div><div>Cell 1</div><div>Cell 2</div><div>Cell 3</div></div>
+        <div class="lanes">
+          <div class="axis"><span>06</span><span>07</span><span>08</span><span>09</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span></div>
+          <div class="lane">
+            <div class="blk" style="left:16.7%;width:33%;background:var(--p1)"><i class="av">A1</i>Housing A · 08–12</div>
+            <div class="brk" style="left:50%;width:4.2%"></div>
+            <div class="blk" style="left:58.3%;width:25%;background:var(--p2)"><i class="av">A4</i>Bracket A · 13–16</div>
+          </div>
+          <div class="lane">
+            <div class="blk" style="left:8.3%;width:33%;background:var(--p3)"><i class="av">A2</i>Gadget Z · 07–11</div>
+            <div class="blk" style="left:66.7%;width:25%;background:var(--p1)"><i class="av">A3</i>Housing A · 14–17</div>
+          </div>
+          <div class="lane">
+            <div class="blk" style="left:25%;width:41.7%;background:var(--p4)"><i class="av">A5</i>Rework · 09–14</div>
+          </div>
+        </div>
+      </div>
+      <div class="body"></div>
+      <div class="kbd">press <code>/</code></div>
+      <button class="launch" aria-label="Tell the board">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.6 3.6c-.5.4-1.4 0-1.4-.7V5.5z"/><path d="M8 8h8M8 11.5h5"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div>
+    <p class="label">Open · a removal in question</p>
+    <div class="frame">
+      <div class="shell"><b>Plant A</b> › Area 1 › Line 1 <span>Sun 13 – Tue 15 Sep</span><span class="pill">Standard</span></div>
+      <div class="board">
+        <div class="rail"><div class="head">CELL</div><div>Cell 1</div><div>Cell 2</div><div>Cell 3</div></div>
+        <div class="lanes">
+          <div class="axis"><span>06</span><span>07</span><span>08</span><span>09</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span></div>
+          <div class="lane">
+            <div class="blk outline-remove" style="left:16.7%;width:33%;background:var(--p1)"><i class="av">A1</i>Housing A · 08–12</div>
+            <div class="brk" style="left:50%;width:4.2%"></div>
+            <div class="blk" style="left:58.3%;width:25%;background:var(--p2)"><i class="av">A4</i>Bracket A · 13–16</div>
+          </div>
+          <div class="lane">
+            <div class="blk" style="left:8.3%;width:33%;background:var(--p3)"><i class="av">A2</i>Gadget Z · 07–11</div>
+            <div class="blk" style="left:66.7%;width:25%;background:var(--p1)"><i class="av">A3</i>Housing A · 14–17</div>
+          </div>
+          <div class="lane">
+            <div class="blk" style="left:25%;width:41.7%;background:var(--p4)"><i class="av">A5</i>Rework · 09–14</div>
+          </div>
+        </div>
+      </div>
+      <div class="body" style="height:176px"></div>
+      <div class="panel" role="dialog" aria-label="Tell the board">
+        <div class="ph"><span>Tell the board</span><span style="text-transform:none;letter-spacing:0">Esc closes</span></div>
+        <div class="row">
+          <div class="input">remove Operator A1 from Cell 1 today<i class="caret"></i></div>
+          <button class="mic" aria-label="Speak a sentence">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21M8.5 21h7"/></svg>
+          </button>
+        </div>
+        <div class="status">Removing Operator A1's Housing A block · Cell 1 · Sun 13 Sep · 08:00–12:00 · read by the model<br><span class="yes">Say or type <b>yes</b> to do it, <b>no</b> to leave it.</span></div>
+        <div class="cands"><span class="cand danger">Remove it</span></div>
+      </div>
+      <button class="launch open" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="icons">
+  <p class="label">The two icons, at size</p>
+  <div class="iconrow">
+    <div class="ic"><div class="big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.6 3.6c-.5.4-1.4 0-1.4-.7V5.5z"/><path d="M8 8h8M8 11.5h5"/></svg></div>launcher</div>
+    <div class="ic"><div class="sq"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21M8.5 21h7"/></svg></div>microphone, idle</div>
+    <div class="ic"><div class="sq on"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path fill="none" d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path fill="none" d="M12 17.5V21M8.5 21h7"/></svg></div><span class="listen"><i class="dot"></i>listening</span></div>
+  </div>
+</div>
+
+<ul class="notes">
+  <li>The launcher shows only for people who can place on the board; a viewer never sees it, as with the bar today.</li>
+  <li>The panel holds exactly what the bar holds now: the input, the microphone, the status line, the candidate buttons.</li>
+  <li>The panel stays open while a question stands, so the outline on the board and the words in the panel are read together.</li>
+  <li>Esc or a click outside closes it. The <code>/</code> key opens it for people who type.</li>
+</ul>
