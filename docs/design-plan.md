@@ -9324,3 +9324,53 @@ sentence's. A stale answer re-asks with whatever the board holds now.
 
 Brief: `docs/agent-briefs/s49-a-elsewhere-brief.md`. The bar and the launcher are untouched:
 their block-question branches outline whatever candidates the resolver names.
+
+## §19.97 — D126: the sentences widen once, and the model learns them once (S50)
+
+> The maintainer, 13 Sept: *"Can I say something like I want to assign Operator A2 and operator
+> A3 to working on Product XYZ on cell 1 and cell 2 on line 1 today from 3 to 5?"* and, on the
+> place-less sentence the model got wrong (F-144): *"lets wait till we reach that point."* Then,
+> session 160: *"Start stage 7."*
+
+### D126 — the rule grammar leads, the data follows, the model is taught last
+
+Three gaps met on one evening: a sentence that names no place, the "change X's timing"
+phrasing, and several people or places in one sentence. Each is a data gap — the generator
+never wrote such a sentence, so the model never saw one — but the generator cannot write a
+sentence its oracle refuses: every clean row is checked against the rule parser (S42), and that
+check is the one thing that keeps the training set honest. So the order is fixed: **the rule
+grammar widens first, with tests; the templates follow, checked by the oracle; the prompt and
+the schema say the new shapes; the model is taught once.** The board side (S49) is already
+there: a place-less form resolves as "wherever they are".
+
+**A place-less removal or move.** `unassign <op> [day] [from <time> to <time>]` and
+`move <op> [day] to <time> to <time>` with no place parse to `place: []`. The parser today
+answers `no_place`; that failure stays for an assign and a booking, which need a place to mean
+anything, and `no_move` stays for a move that names neither a new cell nor new hours.
+
+**"Change X's timing".** R-391 kept "shift" and "change" out of every verb list on purpose:
+"shift" is a noun everywhere in the app, "change" is too broad as a first word. The
+maintainer's own spoken sentence began with "change". The developer session's proposal is a
+*pattern*, not a verb — `change <op>['s] (timing|hours|time) to <time> to <time>` is a move in
+time, recognised whole, so a bare "change" still opens nothing — but R-391 was the
+maintainer's decision and this waits on their word. Not in the first brief.
+
+**Several in one sentence.** `assign A2 and A3 to Product XYZ on Cell 1 and Cell 2 in Line 1
+today from 3 to 5`. Two lists, one sentence, and one reading: the same count pairs them in
+order (A2 on Cell 1, A3 on Cell 2); one place and several people puts them all there; one
+person and several places is that person on each; two lists of different lengths above one is
+a failure that names both counts, never a guess (R-379). Only the operator segment and the
+FIRST place segment list; a qualifier after the list ("in Line 1"), the day and the hours apply
+to every command. The form is `{"intent":"several","commands":[...]}` — an object with an
+intent like every other form, so the decoder, the scorer and the grammar treat it as a fifth
+branch, and each inner command is a complete form of its own, `attach` and `existing`
+included. The bar today resolves one command; resolving each in turn, outlining every block a
+removal or a move would touch, one readout per command and one yes for the lot is its own
+stage after this one, buildable on the rule parser before the model has learnt the sentence.
+
+**One retrain.** Generate, prepare, the notebook on Colab (the maintainer's afternoon), the
+probe here, the held-out score above the bar. The held-out set is regenerated — a new
+reference set, versioned by its commit, because the old one cannot contain sentences its
+grammar could not parse — and the rule parser's own baseline is measured again on it.
+
+Briefs: `docs/agent-briefs/s50-a-grammar-brief.md` (the parser), then the data brief.

@@ -2350,6 +2350,34 @@ stages:
     RU6 had pinned the old refusal for the person's own block on another cell; the contract changed and
     the case now pins the offer. The rule grammar is untouched: the place-less sentence and the
     change-the-timing phrasings are the second half's, with the retrain.
+- id: S50
+  track: core
+  num: 50
+  title: Stage 7, second half — the sentences widen once (no place, several people or cells) and the model is taught once
+  status: now
+  owner: agent
+  refs:
+  - 'session 160 conversation (the maintainer, 13 Sept: "Start stage 7"; session 158: the compound sentence, parked "till we reach that point")'
+  - F-144
+  - §19.97 (D126)
+  - docs/agent-briefs/s50-a-grammar-brief.md
+  delivers:
+  - R-398
+  - R-399
+  what: >-
+    **Say it the way you would say it, once.** A removal or a move need not name a place ("remove A3
+    today", "move A3 to 8 pm to 11 pm"); the board finds the block (S49). Several people or cells go
+    in one sentence ("assign A2 and A3 to Housing A on Cell 1 and Cell 2 in Line 1 today from 3 to
+    5") and become several commands, one form of a new kind, several. The rule grammar learns both
+    first, because the generator checks every training sentence against it; then the templates write
+    the new sentences, the prompt and the schema say the new shapes, the held-out set is regenerated,
+    and the model is trained once more on Colab and scored against the bar. The bar's one-yes-for-
+    the-lot confirmation of a several is its own stage after this one.
+  state: >-
+    **Briefed session 160 (13 Sept).** Lane one: the grammar (parse.ts) and its tests. Then lane two:
+    templates, prompt, schema, decoder, scorer, the regenerated held-out set; then the maintainer's
+    Colab run and the probe here. One decision waits on the maintainer: whether "change X's timing to"
+    is recognised as a fixed pattern despite R-391 keeping "change" out of every verb list.
 - id: M1
   track: matrix
   num: 1
@@ -10648,6 +10676,58 @@ requirements:
     STATED 13 Sept (session 160), COVERED 13 Sept (session 160, b9e0411). Written when stated; the three
     files carry the cases named and the role walk passed. Stage 7's second half (the form's absent place, the generator's new phrasings, the retrain)
     is a separate requirement when it is briefed.
+
+- id: R-398
+  title: The rule grammar reads a removal or a move with no place, and several people or first places in one sentence as several commands
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: "Can I say something like I want to assign Operator A2 and operator A3 to working on Product XYZ on cell 1 and cell 2 on line 1 today from 3 to 5?") and session 160 ("Start stage 7")'
+  - §19.97 (D126)
+  stated_by: maintainer
+  claim: >-
+    An unassign sentence with no place ("remove A3", "remove A3 today", "unassign A3 from 3 to 5")
+    parses with an empty place; a move sentence with no place and new hours ("move A3 to 8 pm to
+    11 pm", "move A3 tomorrow to 8 to 11") parses with an empty place; an assign or a book without a
+    place still fails as no_place, and a move with neither a new cell nor new hours still fails as
+    no_move. A sentence whose operator segment, or whose first place segment, lists several names
+    joined by "and" (outside quotes) parses to a form of intent several whose commands are complete
+    single forms in the sentence's order: several people and one place puts each on that place;
+    one person and several places puts that person on each; the same number of people and places
+    pairs them in order; different numbers above one is a parse failure naming both counts, never a
+    guess. Qualifiers after the list ("in Line 1"), the day and the hours apply to every command.
+    A quoted name containing "and" is one name. formatCommand prints a several as its commands'
+    sentences joined by "; " and round-trips. Every existing worked example parses as before.
+  verified_by:
+  - kind: manual
+    steps: "type the maintainer's sentence with two people and two cells into the bar: two readouts, one per pair; type it with one cell: both people on it; type a removal with no place: the block is offered wherever it is"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 160). Covered when src/test/commandParse.test.ts carries the L cases (the
+    place-less removal and move, the four list shapes, the mismatch failure, the quoted "and", the
+    round trip) and every earlier P/B/U/M case is unchanged.
+
+- id: R-399
+  title: The model is taught the widened sentences once and clears the bar on a regenerated held-out set
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept, on the compound sentence: "lets wait till we reach that point"; session 160: "Start stage 7")'
+  - §19.97 (D126)
+  stated_by: maintainer
+  claim: >-
+    The generator writes place-less removal and move sentences and list sentences from templates
+    checked by the rule-parser oracle; the held-out set is regenerated with rows of every intent
+    including several, and committed as the new reference; the system prompt and the grammar
+    schema describe the empty place and the several form; the decoder reads a several form into
+    complete commands and refuses a malformed inner command; the scorer tallies several by intent
+    and by inner field. The model retrained on the new set, served through the same container and
+    grammar, scores at or above the bar (0.95 clean) on the new held-out set, and reads the
+    maintainer's three F-144 sentences and the compound sentence into the right forms through the probe.
+  verified_by:
+  - kind: manual
+    steps: "npm run voice:generate, voice:prepare, the notebook on Colab, download predictions, node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions <file> --bar 0.95: PASS; npm run voice:probe on the four sentences"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 160). Covered when voiceData.test.ts pins the new held-out set and the
+    oracle on the new templates, voiceRead.test.ts pins the several decoding and the schema branch,
+    and the S43 pipeline's score on the retrained model is recorded on S50's card.
 
 findings:
 - id: F-144
@@ -21598,7 +21678,8 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  text: "Voice plan Stage 7, second half --- widen the sentences: a form with an absent place, the change-the-timing phrasings, and several people or cells in one sentence; one retrain"
+  stage: S50
+  text: "Voice plan Stage 7, second half --- widen the sentences: a form with an absent place, several people or cells in one sentence, one retrain (S50, R-398, R-399, in progress); the change-the-timing phrasing waits on the maintainer's word against R-391"
   why: >-
     Three things the maintainer met on 13 Sept (session 158). After S49 the board side is ready. Then one retrain: the form
     allows an absent place for a move or a removal, the generator writes such sentences and the
