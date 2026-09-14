@@ -9374,3 +9374,44 @@ reference set, versioned by its commit, because the old one cannot contain sente
 grammar could not parse — and the rule parser's own baseline is measured again on it.
 
 Briefs: `docs/agent-briefs/s50-a-grammar-brief.md` (the parser), then the data brief.
+
+## §19.98 — D127: several commands, one at a time, one yes (S51)
+
+> The maintainer, 13 Sept: *"I want to assign Operator A2 and operator A3 to working on Product
+> XYZ on cell 1 and cell 2 on line 1 today from 3 to 5."*
+
+### D127 — a lot is a queue of single commands, not a new kind of command
+
+The grammar (D126) turns that sentence into two complete single commands. Nothing downstream
+should have to learn a new shape: the resolver already answers one command with one question
+or one readout, the bar already asks one question at a time and outlines the blocks it is
+asking about, the board already has one writer per thing a sentence can do. So the bar runs a
+several as a queue: resolve command one; if it asks, ask it, numbered *"1 of 2"*, with the
+same buttons and outline; when it resolves, keep the result and move to command two. The
+person answers the same questions they would have answered typing the sentences one by one,
+in the same words, and never two at once (R-379 — one question at a time — holds for a lot).
+
+**One yes, at the end, with everything visible.** When every command has resolved, the bar
+shows every readout numbered, outlines every block a removal or a move in the lot would touch
+(each in its own colour; the highlight becomes a list), and asks once. Only the universal
+confirm words confirm a lot — "remove it" and "move it" name one thing, and a lot may hold
+both — and are answered in place as they are for a mismatched single question (S50 lane one).
+A typed edit, no, or Escape drops the whole lot: a half-answered lot is nothing, never a
+partial write.
+
+**The writers are the pop-ups' own.** On yes the board writes the commands in order. A removal
+goes through the removal the assignment pop-up's Delete calls; a re-time through the drag's
+own re-time (D119, no second path); a create and a move to another cell through the same
+mutation the create pop-up's clean Enter (R-384) and the move pop-up's confirm call — the
+board gains a direct call into that submit path, not a second copy of it (CLAUDE.md §4:
+whatever a client offers is decided by the same test the server runs; the resolver already
+ran the pop-up's own rules — `offeredAt`, `fitsRun`, `findRunOverlap` — before the yes). The
+lot stops at the first failure and says how many were done, because the writes are not one
+transaction and pretending otherwise would hide a half-done board.
+
+**Built before the model knows the sentence.** The rule parser reads the sentence today, so
+the bar can be built and tested on it while the data lane and the maintainer's retrain give
+the model the same sentence; when the model's several form arrives through the decoder it
+enters the same queue.
+
+Brief: `docs/agent-briefs/s51-a-lot-brief.md`.

@@ -2383,6 +2383,30 @@ stages:
     and that a doubled "and" made a person called "and Bob"; both fixed and pinned. A confirm word that
     does not fit the standing block question is now answered in place, never parsed. Lane two (the data)
     briefed the same evening.
+- id: S51
+  track: core
+  num: 51
+  title: The bar runs a several — one question at a time, every block outlined, one yes for the lot
+  status: now
+  owner: agent
+  refs:
+  - 'session 158 conversation (the maintainer, 13 Sept: the compound sentence) and session 161 (built in parallel with the data lane)'
+  - §19.98 (D127)
+  - docs/agent-briefs/s51-a-lot-brief.md
+  delivers:
+  - R-400
+  what: >-
+    **Two people, two cells, one sentence, one yes.** The grammar (S50 lane one) reads the maintainer's
+    sentence as several commands; the bar answered "read but not yet run". Now it resolves them one
+    at a time with the resolver every single sentence uses, asks each command's question in turn
+    (numbered, with the usual buttons and outline), and when all are resolved shows every readout,
+    outlines every block a removal or a move would touch, and takes one yes for the lot --- written
+    in order through the same writers the pop-ups call, stopping at the first failure and saying how
+    many were done. Built on the rule parser, so it works before the model has learnt the sentence.
+  state: >-
+    **Briefed session 161 (13 Sept)**, one lane in parallel with S50's data lane (no shared files): the
+    bar's lot state, the numbered questions, the lot highlight, the board's direct writers reused from
+    the pop-ups' own submit paths, the tests.
 - id: M1
   track: matrix
   num: 1
@@ -10743,6 +10767,36 @@ requirements:
     STATED 13 Sept (session 160). Covered when voiceData.test.ts pins the new held-out set and the
     oracle on the new templates, voiceRead.test.ts pins the several decoding and the schema branch,
     and the S43 pipeline's score on the retrained model is recorded on S50's card.
+
+- id: R-400
+  title: A sentence that reads as several commands is resolved one at a time, its blocks outlined together, and written in order on one yes
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: "I want to assign Operator A2 and operator A3 to working on Product XYZ on cell 1 and cell 2 on line 1 today from 3 to 5"; "if ... already part of stage 7, lets wait till we reach that point")'
+  - §19.98 (D127)
+  stated_by: maintainer
+  claim: >-
+    When the bar's sentence parses as several commands, the bar resolves each inner command in the
+    sentence's order with the same resolver a single sentence uses. A question from command i is shown
+    as "i of N: <the question>" with that question's buttons and outline; answering it (a button, a
+    typed candidate word, a confirm word for a one-candidate block question) re-resolves command i and
+    continues; a typed edit, no, or Escape drops the whole lot. When every command has resolved, the
+    status lists every readout, numbered, every block a removal or a move would touch is outlined at
+    once (each in its own kind's colour), and the message ends with a yes/no invitation for the lot;
+    only the universal confirm words confirm it ("remove it"/"move it" are answered in place).
+    On yes the board writes the commands in order through the same writers the single sentence and
+    the pop-ups use --- a removal through the removal the pop-up's Delete calls, a re-time through the
+    drag's own re-time, a create and a move to another cell through the same mutation the pop-up's
+    clean Enter calls --- and stops at the first failure with "Did k of N; the next failed: <error>";
+    on success the status says "Done: N commands." and the input clears. A several that reads
+    without the bar (the resolver alone) still answers its one honest question. Nothing changes for a
+    single sentence.
+  verified_by:
+  - kind: manual
+    steps: "type the maintainer's sentence into the bar with two people who are free: two readouts, both outlined... no blocks to outline for creates; say yes: two blocks appear. Type a removal of two people from one cell: both outlined red; yes removes both. Type it with one person on another cell: the 1 of 2 question offers the block elsewhere; answer; yes removes both"
+  status: uncovered
+  note: >-
+    STATED 13 Sept (session 161). Covered when src/test/commandBar.test.tsx carries the CB-lot cases and
+    the board's direct writers are pinned to the pop-ups' own mutations.
 
 findings:
 - id: F-144
@@ -21732,6 +21786,12 @@ next:
     Cell 1 and Cell 2 from 3 to 5" becomes several commands, each outlined, one yes for the lot (the
     maintainer's example, parked here at their word: "lets wait till we reach that point"). Each
     retrain is the S43 pipeline again: generate, prepare, the notebook on Colab, the probe here.
+- kind: task
+  stage: S51
+  text: "The bar runs a several --- one question at a time, every block outlined, one yes for the lot (S51, R-400, in progress, parallel with S50's data lane)"
+  why: >-
+    The maintainer's compound sentence needs both the grammar (S50) and a bar that can run more than one
+    command; the bar half is built on the rule parser so it is ready before the retrained model is.
 - kind: task
   text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
   why: >-
