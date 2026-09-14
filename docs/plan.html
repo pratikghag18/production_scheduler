@@ -113,17 +113,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 165 · 2026-09-14 · The command bar switch: off, typed only, or typed and voice, per plant, resolved for the board's root (S54, R-403)</h2>
-  <div class="lead"><p>The maintainer asked whether the chatbot could be switched off from settings while a plant gets used to it, and said go to a three-position switch: off, typed only, typed and voice. Built as the fourth plant setting beside the eligibility rule, the date format and the time zone (R-403, S54, D129): a company value, a per-plant override through the same set and clear functions, the two checks widened by drop-and-re-add, and the value resolved for the board's own root on the server inside board_window, on the line the date format travels, so an override on a plant root a line supervisor cannot read still reaches her board. Off hides the launcher, typed withholds the microphone, an unknown value hides the button. One lane, the migration assembled from 0063's text by a script; the reviewer diffed the re-emitted functions against 0063 by hand, re-ran the script to the same bytes, confirmed the fail-open case runs board_window as the supervisor, and found nothing blocking beyond a test file number that collided with an existing one.</p></div>
+  <h2>Session 166 · 2026-09-14 · The fourth run's 20% was the instrument, not the model: predictions now name their sentences (F-145)</h2>
+  <div class="lead"><p>The maintainer pasted the fourth run's table: 20% clean, every compound row right, every single row wrong, the intent right everywhere. The developer session compared the predictions with the held-out file and found the 400 single rows answered sentences the file no longer holds --- the set had been regenerated twice with the same seed and ids as the shift sentences went in, and the notebook had resumed from a predictions file already on Drive --- while the 100 compound rows, predicted fresh, carried the shift field and were 100% right, which says the adapter trained on the current data. Recorded as F-145 and fixed in the instrument: every prediction names its sentence, the notebook refuses to resume across a different file, both scorers refuse a mismatch before printing a table, and the Python port's lenient by-field read of a missing key is gone. The maintainer re-runs prediction only, from the trained adapter, on a deleted predictions file.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">3235</span><span class="l">app tests in 145 files — session 165, 2026-09-14</span></div>
+  <div class="stat ok"><span class="n">3240</span><span class="l">app tests in 145 files — session 166, 2026-09-14</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">856</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">80</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
   <div class="stat "><span class="n">297 / 346</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>847c7cc</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>2fc8bc3</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2263,7 +2263,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>144 things that weren't in the plan</h2>
+  <h2>145 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3537,6 +3537,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <div class="aside"><span class="k">Fix</span><p>Half fixed 13 Sept (session 160, b9e0411, S49): the resolver offers the person's blocks that day as candidates when the place named matches none, instead of &quot;no block on Cell 1&quot; --- with S47 they light up and a yes picks one, and a move's question spells out the destination so an invented cell is read before the yes; no retrain. Still open, Stage 7's second half: (2) the form allows an absent place for a move or a removal, the generator writes such sentences and the &quot;change X's timing to&quot;, &quot;shift X to&quot; phrasings, and the model is retrained once. Until then the safe phrasing names the place: &quot;move Operator A3 on Cell 1 to 8 pm to 11 pm&quot;.</p></div>
   <p class="fine">R-393 · R-392</p>
+</div>
+<div class="find fix" id="F-145">
+  <span class="tag">An instrument that cannot tell it was handed the wrong file · fixed · you found it · <a href="#S50">S50</a></span>
+  <h3>The fourth run scored 20% because its predictions answered sentences the held-out file no longer holds, and the scorer joined by id</h3>
+  <p>Reported 14 Sept (session 166) with the fourth run's table: every single-sentence row wrong, every compound row right, the intent right on all 714. The developer session compared the predictions with the held-out file: the 400 single rows answer sentences that are not in the committed file at all (row ho-00000 was predicted as Zara Meyer on Test Stand 2 where the file says Chidi Hoang on Cell 3), while the 100 compound rows match it and are right. The held-out set was regenerated twice on 14 Sept with the same seed and the same ids as the shift templates went in, and the notebook's Predict cell resumes by id from whatever predictions.jsonl already sits on Drive; the scorer joins the two files by id and has no way to notice that an id now names a different sentence. The model is not the problem: the compound rows, predicted fresh, carry the shift field and are 100% right, which says the adapter trained on the current data.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 166 (2fc8bc3). Every prediction row carries its sentence; the notebook refuses to resume across a file whose sentences differ or that has none; both scorers refuse a predictions file whose sentence differs from the held-out row's before printing any table, and say how many rows of an older file went unchecked. On the way the Python port was found reading a missing field as equal to an expected null in the by-field tally where the scorer counted it wrong (the two tables disagreed on one line); it now mirrors the scorer, V18 and VT4 pin the refusals (brief docs/agent-briefs/f-145-predictions-must-name-their-sentence-brief.md). For the run in hand: delete predictions.jsonl on Drive, confirm the held-out file there starts with Chidi Hoang, and run from the Predict cell only --- the adapter is trained.</p></div>
+  <p class="fine">R-392 · R-399 · R-402</p>
 </div>
 </section>
 
@@ -5976,6 +5984,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 166</b> · 2026-09-14 · The fourth run's 20% was the instrument, not the model: predictions now name their sentences (F-145) <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer pasted the fourth run's table: 20% clean, every compound row right, every single row wrong, the intent right everywhere. The developer session compared the predictions with the held-out file and found the 400 single rows answered sentences the file no longer holds --- the set had been regenerated twice with the same seed and ids as the shift sentences went in, and the notebook had resumed from a predictions file already on Drive --- while the 100 compound rows, predicted fresh, carried the shift field and were 100% right, which says the adapter trained on the current data. Recorded as F-145 and fixed in the instrument: every prediction names its sentence, the notebook refuses to resume across a different file, both scorers refuse a mismatch before printing a table, and the Python port's lenient by-field read of a missing key is gone. The maintainer re-runs prediction only, from the trained adapter, on a deleted predictions file.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>npm run test, 14 Sept, after the F-145 commit: 3240 tests in 145 files, all passing; tsc clean, no migration or RPC changed; the role walk not re-run (no board file changed).</p></div>
+    <p class="fine">3240 app tests in 145 files · 856 database checks · 80 migrations · tsc 0 · eslint 0 · commits 9a63219, 2fc8bc3</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 165</b> · 2026-09-14 · The command bar switch: off, typed only, or typed and voice, per plant, resolved for the board's root (S54, R-403) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer asked whether the chatbot could be switched off from settings while a plant gets used to it, and said go to a three-position switch: off, typed only, typed and voice. Built as the fourth plant setting beside the eligibility rule, the date format and the time zone (R-403, S54, D129): a company value, a per-plant override through the same set and clear functions, the two checks widened by drop-and-re-add, and the value resolved for the board's own root on the server inside board_window, on the line the date format travels, so an override on a plant root a line supervisor cannot read still reaches her board. Off hides the launcher, typed withholds the microphone, an unknown value hides the button. One lane, the migration assembled from 0063's text by a script; the reviewer diffed the re-emitted functions against 0063 by hand, re-ran the script to the same bytes, confirmed the fail-open case runs board_window as the supervisor, and found nothing blocking beyond a test file number that collided with an existing one.</p>

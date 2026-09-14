@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '847c7cc'
+  tip: '2fc8bc3'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -11067,6 +11067,37 @@ requirements:
     are in and the role walk passes.
 
 findings:
+- id: F-145
+  title: The fourth run scored 20% because its predictions answered sentences the held-out file no longer holds, and the scorer joined by id
+  tag: An instrument that cannot tell it was handed the wrong file
+  status: fixed
+  found_by: maintainer
+  stage: S50
+  refs:
+  - R-392
+  - R-399
+  - R-402
+  story: >-
+    Reported 14 Sept (session 166) with the fourth run's table: every single-sentence row wrong, every
+    compound row right, the intent right on all 714. The developer session compared the predictions
+    with the held-out file: the 400 single rows answer sentences that are not in the committed file at
+    all (row ho-00000 was predicted as Zara Meyer on Test Stand 2 where the file says Chidi Hoang on
+    Cell 3), while the 100 compound rows match it and are right. The held-out set was regenerated
+    twice on 14 Sept with the same seed and the same ids as the shift templates went in, and the
+    notebook's Predict cell resumes by id from whatever predictions.jsonl already sits on Drive; the
+    scorer joins the two files by id and has no way to notice that an id now names a different
+    sentence. The model is not the problem: the compound rows, predicted fresh, carry the shift field
+    and are 100% right, which says the adapter trained on the current data.
+  fix: >-
+    Session 166 (2fc8bc3). Every prediction row carries its sentence; the notebook refuses to resume across a
+    file whose sentences differ or that has none; both scorers refuse a predictions file whose sentence
+    differs from the held-out row's before printing any table, and say how many rows of an older file
+    went unchecked. On the way the Python port was found reading a missing field as equal to an
+    expected null in the by-field tally where the scorer counted it wrong (the two tables disagreed on
+    one line); it now mirrors the scorer, V18 and VT4 pin the refusals (brief
+    docs/agent-briefs/f-145-predictions-must-name-their-sentence-brief.md). For the run in hand: delete
+    predictions.jsonl on Drive, confirm the held-out file there starts with Chidi Hoang, and run from
+    the Predict cell only --- the adapter is trained.
 - id: F-144
   title: A sentence that names no place gets a place the model made up, and a "change X's timing" phrasing loses the pm
   tag: The form and the data have a gap the model fills with a guess
@@ -14937,6 +14968,34 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 166
+  date: 2026-09-14
+  title: "The fourth run's 20% was the instrument, not the model: predictions now name their sentences (F-145)"
+  shipped: []
+  commits: ['9a63219', '2fc8bc3']
+  numbers:
+    app_tests: 3240
+    app_test_files: 145
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 14 Sept, after the F-145 commit: 3240 tests in 145 files, all passing;
+    tsc clean, no migration or RPC changed; the role walk not re-run (no board file changed).
+  summary: >-
+    The maintainer pasted the fourth run's table: 20% clean, every compound row right, every single row
+    wrong, the intent right everywhere. The developer session compared the predictions with the
+    held-out file and found the 400 single rows answered sentences the file no longer holds --- the set
+    had been regenerated twice with the same seed and ids as the shift sentences went in, and the
+    notebook had resumed from a predictions file already on Drive --- while the 100 compound rows,
+    predicted fresh, carried the shift field and were 100% right, which says the adapter trained on the
+    current data. Recorded as F-145 and fixed in the instrument: every prediction names its sentence,
+    the notebook refuses to resume across a different file, both scorers refuse a mismatch before
+    printing a table, and the Python port's lenient by-field read of a missing key is gone. The
+    maintainer re-runs prediction only, from the trained adapter, on a deleted predictions file.
 - id: 165
   date: 2026-09-14
   title: "The command bar switch: off, typed only, or typed and voice, per plant, resolved for the board's root (S54, R-403)"
