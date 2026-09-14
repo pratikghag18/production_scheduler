@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: 'a33fc01'
+  tip: 'b9e0411'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2318,6 +2318,38 @@ stages:
     chat panel becomes a second such case, fold corner placement into the shell then. The reviewer
     found two keyboard gaps --- Escape only from inside the input, and focus lost on a click outside
     --- both fixed and pinned. The reviewer's screenshot of the real panel matched the mock.
+- id: S49
+  track: core
+  num: 49
+  title: Stage 7, first half — a removal or a move finds the person's block wherever it is when the cell named is wrong or missing
+  status: done
+  owner: agent
+  refs:
+  - 'session 160 conversation (the maintainer, 13 Sept: "Start stage 7")'
+  - F-144
+  - §19.96 (D125)
+  - docs/agent-briefs/s49-a-elsewhere-brief.md
+  delivers:
+  - R-397
+  what: >-
+    **The board knows where the person is; the sentence need not.** Today a removal or a move whose
+    cell is wrong answers "no block on Cell 1" and stops, which is what the maintainer met when the
+    model wrote a cell the sentence never said (F-144). Now the resolver looks for the person's blocks
+    that day on every cell the board shows: one block is offered with its cell named and the
+    destination spelled out, the board outlines it (S47), and a yes does it; several are offered as
+    buttons, each named by its cell; none is still "no block". A sentence that names no place at all
+    resolves the same way, so the retrain in Stage 7's second half (a form with an absent place) has
+    nothing left to build on the board side. No model change, no rule-grammar change, no retrain.
+  state: >-
+    **Briefed session 160 (13 Sept).** One lane: the resolver's unassign and move paths, the decoder
+    (an empty place allowed for a move or a removal), the tests. The bar and the launcher are untouched;
+    the bar's block-question branches already outline whatever candidates the resolver names.
+    **DONE 13 Sept (session 160, b9e0411).** One lane, one reviewer. The reviewer found the new question path could
+    throw on a decoded move that named neither a new cell nor new hours (the text grammar refused such a
+    sentence, the decoder did not): the decoder now refuses it too and the destination text is defensive.
+    RU6 had pinned the old refusal for the person's own block on another cell; the contract changed and
+    the case now pins the offer. The rule grammar is untouched: the place-less sentence and the
+    change-the-timing phrasings are the second half's, with the retrain.
 - id: M1
   track: matrix
   num: 1
@@ -10578,6 +10610,45 @@ requirements:
     clear; click outside closes; closing clears the highlight and aborts a reading) and the role walk
     passes opening the panel.
 
+- id: R-397
+  title: A removal or a move whose cell is wrong or missing offers the person's blocks elsewhere that day, never a bare refusal and never a guess
+  source:
+  - 'session 158 conversation (the maintainer, 13 Sept: three screenshots, F-144 --- "change operator a3s timing to 8:00 p.m. to 11:00 p.m." read as a move on Cell 1, a cell the sentence never named) and session 160 ("Start stage 7")'
+  - §19.96 (D125)
+  stated_by: maintainer
+  claim: >-
+    When a removal or a move sentence names a cell that exists but the person has no block on it (for
+    the sentence's hours, or that day when it gave none), the resolver gathers the person's blocks for
+    that day and those hours on every cell the board shows. One block: the question names the cell
+    the sentence said, the cell the block is on, the block's part and hours, and --- for a move --- the
+    destination in the sentence's own words, so an invented destination is visible before the yes; the
+    board outlines that block and a yes acts on it. Several: each is a button carrying its cell's name
+    and all are outlined; a bare yes asks which. None: the answer stays "no block on <cell> <when>".
+    A move that would take its one block without asking still asks when the block is not on the cell
+    the sentence named. A sentence whose place list is empty (the decoder accepts an empty place for a
+    move or a removal, never for an assign or a booking) resolves as "wherever they are": the same
+    candidates, the one-block removal asks as always, a move with exactly one block takes it. When the
+    answer names a block, the resolver accepts it from the named cell or from elsewhere, the readout
+    and a re-time name the block's own cell, and a stale answer re-asks with the current blocks, never
+    guesses. Nothing changes for a sentence whose cell is right; the assign and book paths are untouched.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RE1 to RE14 --- a wrong cell with one block elsewhere (with hours and whole-day), several in board order, none anywhere; the answer accepted from elsewhere with the readout naming the block's own cell; a stale answer re-asks or reports the block gone; a move in time and in place with the destination in the question; a re-time from elsewhere targets the block's cell; an empty place for a removal (one asks, several ask, none is no_block with no cell) and a move (one is taken, two ask); a move naming neither a new cell nor new hours never throws; RU6 re-pinned to the new contract, RU1 to RU10 and RM1 to RM10 otherwise unchanged"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-else-1 to CB-else-4 --- a wrong-cell removal outlines the elsewhere block and yes removes it; a wrong-cell move with one block asks with the destination in the message and yes re-times it; several elsewhere blocks outline all and a bare yes asks which; a right-cell removal is unchanged"
+  - kind: vitest
+    file: src/test/voiceRead.test.ts
+    cases: "VR9 --- decodeCommand accepts an empty place for unassign and move, refuses it for assign and book, and refuses a move naming neither a new cell nor new hours"
+  - kind: manual
+    steps: "as an admin, type a removal naming a cell the person is not on: the block they are on is outlined and the message names both cells; say yes, it is removed. Type a move in time naming the wrong cell: the message names the block and the destination; say no, nothing moves"
+  status: covered
+  note: >-
+    STATED 13 Sept (session 160), COVERED 13 Sept (session 160, b9e0411). Written when stated; the three
+    files carry the cases named and the role walk passed. Stage 7's second half (the form's absent place, the generator's new phrasings, the retrain)
+    is a separate requirement when it is briefed.
+
 findings:
 - id: F-144
   title: A sentence that names no place gets a place the model made up, and a "change X's timing" phrasing loses the pm
@@ -10602,9 +10673,10 @@ findings:
     the 400-row measurement was queued ahead of the maintainer's sentence on the one-slot service; the
     fallback then did its job, and its own refusal of "7:00 p.m." is fixed (213de6c).
   fix: >-
-    Open; queued as Stage 7's first two items: (1) the resolver offers the person's blocks that day as
+    Half fixed 13 Sept (session 160, b9e0411, S49): the resolver offers the person's blocks that day as
     candidates when the place named matches none, instead of "no block on Cell 1" --- with S47 they
-    light up and a yes picks one; no retrain; (2) the form allows an absent place for a move or a
+    light up and a yes picks one, and a move's question spells out the destination so an invented
+    cell is read before the yes; no retrain. Still open, Stage 7's second half: (2) the form allows an absent place for a move or a
     removal, the generator writes such sentences and the "change X's timing to", "shift X to" phrasings,
     and the model is retrained once. Until then the safe phrasing names the place: "move Operator A3 on
     Cell 1 to 8 pm to 11 pm".
@@ -14448,6 +14520,37 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 160
+  date: 2026-09-13
+  title: "Stage 7 begins: a wrong or missing cell offers the person's blocks elsewhere, outlined, with the destination in the question (S49, R-397)"
+  shipped: [S49]
+  commits: ['b9e0411']
+  numbers:
+    app_tests: 3116
+    app_test_files: 144
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept, after the S49 commit: 3116 tests in 144 files, all passing;
+    tsc clean, no migration or RPC changed; the role walk passed.
+  summary: >-
+    The maintainer said "Start stage 7" and the developer session took the half that needs no retrain
+    first: the resolver's removal and move paths, which refused a sentence whose cell had none of the
+    person's blocks (F-144), now gather the person's blocks that day on every cell the board shows and
+    ask with them --- one outlined with both cells in the message and a yes acting on it, several as
+    cell-named buttons, none still the old refusal. A move whose cell is wrong asks even for one block
+    and spells the destination in the sentence's own words, so an invented cell is read before the yes.
+    An empty place resolves as "wherever they are", so the second half's retrain is a data change on
+    the board side. Written as R-397, S49 and D125 before the code; one Sonnet lane built it, the
+    reviewer found the new path could throw on a decoded move with neither a new cell nor new hours,
+    fixed in the decoder and defensively in the resolver. The rule grammar is untouched; the second
+    half (a place-less sentence, the change-the-timing phrasings, several people in one sentence, one
+    retrain) is next in the queue, with one decision for the maintainer: R-391 kept "change" and
+    "shift" out of every verb list on purpose, and their own spoken sentence began with "change".
 - id: 159
   date: 2026-09-13
   title: "The corner launcher: the bar behind a button in the lower right, from an approved mock to shipped in one sitting (S48, R-396)"
@@ -21495,11 +21598,9 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  text: "Voice plan Stage 7 --- widen the sentences: a place the person did not say, the change-the-timing phrasings, and several people or cells in one sentence"
+  text: "Voice plan Stage 7, second half --- widen the sentences: a form with an absent place, the change-the-timing phrasings, and several people or cells in one sentence; one retrain"
   why: >-
-    Three things the maintainer met on 13 Sept (session 158). First, no retrain: when a sentence's place
-    matches none of the person's blocks that day, the resolver offers those blocks as candidates and
-    the board outlines them (S47), instead of "no block on Cell 1" (F-144). Then one retrain: the form
+    Three things the maintainer met on 13 Sept (session 158). After S49 the board side is ready. Then one retrain: the form
     allows an absent place for a move or a removal, the generator writes such sentences and the
     "change X's timing to", "shift X to" phrasings, and lists --- "assign A2 and A3 to Product XYZ on
     Cell 1 and Cell 2 from 3 to 5" becomes several commands, each outlined, one yes for the lot (the
