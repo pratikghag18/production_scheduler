@@ -9276,3 +9276,51 @@ opens it for people who type, as in every tool that has a command palette.
 
 Brief: `docs/agent-briefs/s48-a-launcher-brief.md`. Mock: the artifact the maintainer approved,
 two frames of the board in the app's own tokens.
+
+## §19.96 — D125: the board knows where the person is; the sentence need not (S49)
+
+> *"change operator a3s timing to 8:00 p.m. to 11:00 p.m."* — read by the model as a move of A3's
+> block on Cell 1, a cell the sentence never named (F-144, 13 Sept). And the maintainer, session
+> 160: *"Start stage 7."*
+
+### D125 — a wrong cell is a question, not a refusal
+
+The resolver's removal and move paths (D119) find the block by three things the sentence gives:
+the person, the cell, the day (and, for a removal, the hours). When the cell is right this is
+exact and never guesses. When the cell is wrong — the model filled a gap with the most common
+answer, or the person misremembered — the answer today is *"A3 has no block on Cell 1 today"*, and
+the sentence is dead. That is a refusal for something the board already knows: where A3's blocks
+are.
+
+**Look past the named cell, and say so.** When the named cell has none of the person's blocks
+for the sentence's day and hours, the resolver gathers the person's blocks that day on every cell
+the board shows. One block becomes the block question (`remove_which` / `move_which`) with one
+candidate, so the board outlines it (S47) and a yes acts on it; the message names both cells —
+*"A3 has no block on Cell 1 today, but has one on Cell 2: Product X 19:00–23:00. Remove that
+one?"* — because the sentence was wrong about something and the person must see what the board
+is about to do instead. Several blocks are buttons, each named by its cell. None is still the old
+refusal, unchanged.
+
+**A move with one block elsewhere asks.** A move whose cell is right takes its one block without
+asking (D119: a move never asks for one). A move whose cell is wrong asks even for one, and the
+question spells out the destination in the sentence's own words — *"Move that one to Cell 2 ·
+20:00–23:00?"* — because the same model that invents a source cell invents a destination too
+(the second screenshot in F-144 had both), and the destination is the thing a yes would write.
+The person reads the invented cell and says no. That is the whole safety of this stage: the
+resolver never acts on a guess of its own or the model's without the words on the screen first.
+
+**An empty place means "wherever they are".** The same code path, entered without a cell step.
+Nothing writes an empty place today — the rule grammar refuses a sentence without one, and the
+grammar-constrained model cannot emit an empty list — but Stage 7's second half retrains the
+model on sentences that name no place, and its form needs somewhere to land. The resolver and the
+decoder accept it now, tested, so the retrain is a data change and nothing else. The one-block
+removal asks, as every removal does; a move with exactly one block that day takes it, as every
+move with one block does. The rule grammar is not widened here: the "change X's timing" phrasings
+are the second half's, with the retrain.
+
+**The answer may point elsewhere.** A candidate the person picks is accepted from the named
+cell or from the elsewhere set; the readout and a re-time use the block's own cell, never the
+sentence's. A stale answer re-asks with whatever the board holds now.
+
+Brief: `docs/agent-briefs/s49-a-elsewhere-brief.md`. The bar and the launcher are untouched:
+their block-question branches outline whatever candidates the resolver names.

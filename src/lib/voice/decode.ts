@@ -35,6 +35,14 @@ function isNonEmptyStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
 }
 
+/** S49 (R-397): `place` for a removal or a move may be empty ("wherever the
+ *  person is") -- still an array of non-empty strings, just possibly none of
+ *  them. `assign`/`book` keep the non-empty check above (a create always
+ *  needs a place). */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isNonEmptyString);
+}
+
 function isInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
@@ -139,7 +147,7 @@ function decodeBook(obj: Record<string, unknown>): BookCommand | null {
 
 function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
   if (!isNonEmptyString(obj.operator)) return null;
-  if (!isNonEmptyStringArray(obj.place)) return null;
+  if (!isStringArray(obj.place)) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
@@ -156,13 +164,16 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
 
 function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
   if (!isNonEmptyString(obj.operator)) return null;
-  if (!isNonEmptyStringArray(obj.place)) return null;
+  if (!isStringArray(obj.place)) return null;
   const toPlace = decodeToPlace(obj.toPlace);
   if (toPlace === undefined) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
   if (span === undefined) return null;
+  // R-389 (parseMoveRest's own `no_move` check, mirrored here): a move must
+  // give a new cell or new hours -- naming neither is nothing to move.
+  if (toPlace === null && span === null) return null;
   return {
     intent: "move",
     operator: obj.operator,

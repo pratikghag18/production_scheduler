@@ -280,3 +280,56 @@ describe("VR8: the schema matches the four canonical forms field for field", () 
     walk(root);
   });
 });
+
+// S49 (R-397, docs/agent-briefs/s49-a-elsewhere-brief.md §5): the decoder
+// accepts an empty `place` for a removal or a move ("wherever the person
+// is") -- never for an assign or a booking, which still need a place to
+// create anything.
+describe("VR9: an empty place decodes for unassign/move, never for assign/book", () => {
+  it("VR9: decodeCommand accepts place: [] for unassign and move", () => {
+    const unassignParsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(unassignParsed.ok).toBe(true);
+    if (!unassignParsed.ok) return;
+    const unassignForm = { ...(unassignParsed.command as unknown as Record<string, unknown>) };
+    unassignForm.place = [];
+    expect(decodeCommand(unassignForm)).toEqual({ ...unassignParsed.command, place: [] });
+
+    const moveParsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(moveParsed.ok).toBe(true);
+    if (!moveParsed.ok) return;
+    const moveForm = { ...(moveParsed.command as unknown as Record<string, unknown>) };
+    moveForm.place = [];
+    expect(decodeCommand(moveForm)).toEqual({ ...moveParsed.command, place: [] });
+  });
+
+  it("VR9: decodeCommand refuses place: [] for assign and book", () => {
+    const assignParsed = parseCommand("assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
+    expect(assignParsed.ok).toBe(true);
+    if (!assignParsed.ok) return;
+    const assignForm = { ...(assignParsed.command as unknown as Record<string, unknown>) };
+    assignForm.place = [];
+    expect(decodeCommand(assignForm)).toBeNull();
+
+    const bookParsed = parseCommand("book Housing A on Cell 1 in Line 1 from 6 to 2");
+    expect(bookParsed.ok).toBe(true);
+    if (!bookParsed.ok) return;
+    const bookForm = { ...(bookParsed.command as unknown as Record<string, unknown>) };
+    bookForm.place = [];
+    expect(decodeCommand(bookForm)).toBeNull();
+  });
+
+  // Reviewer fix (S49): `decodeMove` must refuse `toPlace: null` AND
+  // `span: null` together -- the text grammar's own R-389 check
+  // (parseMoveRest's `no_move`), which nothing enforced on the decoder side
+  // before this. Without it, a model answer naming neither a new cell nor
+  // new hours reached `resolveCommand` and `buildDestinationText` threw.
+  it("VR9: decodeCommand refuses a move naming neither a new cell nor new hours", () => {
+    const moveParsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(moveParsed.ok).toBe(true);
+    if (!moveParsed.ok) return;
+    const neitherForm = { ...(moveParsed.command as unknown as Record<string, unknown>) };
+    neitherForm.toPlace = null;
+    neitherForm.span = null;
+    expect(decodeCommand(neitherForm)).toBeNull();
+  });
+});

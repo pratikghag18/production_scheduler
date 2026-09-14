@@ -165,6 +165,14 @@ const BLK2: ContextAssignment = {
   label: "14:00–16:00",
 };
 
+/** S49: BLK1's same hours, but on Cell 2 (c2) instead of Cell 1 (c1a) --
+ *  UNASSIGN_SENTENCE/MOVE_RETIME_SENTENCE both name Cell 1 in Line 1 (c1a),
+ *  so this block is "elsewhere". */
+const BLK_C2: ContextAssignment = { ...BLK1, id: "blkC2", nodeId: "c2" };
+/** S49: BLK1's same hours, on the OTHER "Cell 1" (Line 3, c1b) -- same name
+ *  as the sentence's named cell, a different node. */
+const BLK_C1B: ContextAssignment = { ...BLK1, id: "blkC1b", nodeId: "c1b" };
+
 /** S44-b: `reader` defaults to `null` -- every pre-S44-b call site (one
  *  argument only) is unaffected; the CB-model describe block below is the
  *  only caller that passes a second argument. S46-a widens this with a
@@ -980,6 +988,86 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     expect(none).toHaveBeenCalledTimes(1);
     expect(statusText()).toBe(SHAPE);
     expect(third.input.value).toBe("yes");
+  });
+});
+
+// -----------------------------------------------------------------------
+// S49 / R-397 (§19.96/D125, docs/agent-briefs/s49-a-elsewhere-brief.md §5):
+// a wrong or missing cell offers the person's blocks elsewhere -- the bar's
+// own wiring (the resolver's own cases are commandResolve.test.ts's RE1-12).
+// -----------------------------------------------------------------------
+
+describe("CB-else: a wrong or missing cell offers the person's blocks elsewhere (S49)", () => {
+  it("CB-else-1: a wrong-cell removal outlines the elsewhere block; yes removes it", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK_C2] });
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blkC2"] });
+    expect(statusText()).toBe(
+      "Operator 1 has no block on Cell 1 10:00–14:00, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?" +
+        " — say or type yes to do it, no to leave it.",
+    );
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blkC2");
+  });
+
+  it("CB-else-2: a wrong-cell move in time asks (no onMove yet); the message names the destination hours; yes retimes the elsewhere block", () => {
+    const { input, onMove, onHighlight } = renderBar({ assignments: [BLK_C2] });
+
+    fireEvent.change(input, { target: { value: MOVE_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "move", assignmentIds: ["blkC2"] });
+    expect(statusText()).toContain("Move that one to 10:00–15:00?");
+    expect(screen.getByRole("button", { name: "Move it" })).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blkC2");
+    expect(resolved.target).toEqual({ kind: "retime" });
+  });
+
+  it("CB-else-3: several elsewhere blocks outline all; a bare yes asks which one", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK_C2, BLK_C1B] });
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "remove",
+      assignmentIds: ["blkC2", "blkC1b"],
+    });
+    expect(statusText()).not.toMatch(/say or type yes/);
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^Which one\? /);
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CB-else-4: a right-cell removal behaves as CB-yes-1 -- no 'but has' wording", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1] });
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+    expect(statusText()).not.toContain("but has");
+    expect(statusText()).toBe(
+      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00? — say or type yes to do it, no to leave it.",
+    );
   });
 });
 

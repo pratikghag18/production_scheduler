@@ -222,6 +222,14 @@ export type Candidate = {
    *  message doesn't have to recover it by parsing `label` back apart.
    *  Every other question leaves this undefined. */
   part?: string | null;
+  /** S49: the candidate's OWN cell name and bare hours ("10:00–14:00", the
+   *  block's own `label`) -- set ONLY on a candidate built from the
+   *  "elsewhere" gathering (a `remove_which`/`move_which` whose hits on the
+   *  named cell came up empty, or whose sentence named no cell at all), so
+   *  `describeQuestion` never parses `label` ("<cell> · <part> <hours>")
+   *  back apart. Every other candidate leaves these undefined. */
+  cell?: string;
+  when?: string;
 };
 
 export type Question =
@@ -274,20 +282,44 @@ export type Question =
    *  no other job overlaps — the board changed under the question. */
   | { kind: "job_gone"; product: string; cell: string }
   /** S41-b / R-388: the blocks the sentence names, each a button; `same` is
-   *  irrelevant here (a removal, never a re-time). */
-  | { kind: "remove_which"; person: string; cell: string; when: string; blocks: Candidate[] }
+   *  irrelevant here (a removal, never a re-time). S49: `cell` is `null`
+   *  when the sentence named no place at all ("wherever they are");
+   *  `elsewhere` is set ONLY when a cell WAS named and it had none of the
+   *  person's blocks -- `blocks` are then gathered from every other cell,
+   *  each candidate carrying its own `cell`/`when` (R-397). */
+  | {
+      kind: "remove_which";
+      person: string;
+      cell: string | null;
+      when: string;
+      blocks: Candidate[];
+      elsewhere?: true;
+    }
   /** S41-b: no block of this person's on this cell (for the sentence's
-   *  hours, or the whole day when it gave none) — nothing to remove. */
-  | { kind: "no_block"; person: string; cell: string; when: string }
+   *  hours, or the whole day when it gave none) — nothing to remove. S49:
+   *  `cell` is `null` when the sentence named no place at all. */
+  | { kind: "no_block"; person: string; cell: string | null; when: string }
   /** S41-b: `command.existing` names a block that is no longer among the
    *  hits and no other block overlaps — the board changed under the
-   *  question. */
-  | { kind: "block_gone_remove"; person: string; cell: string }
+   *  question. S49: `cell` is `null` when the sentence named no place. */
+  | { kind: "block_gone_remove"; person: string; cell: string | null }
   /** S41-c / R-389: more than one block matches the move sentence's person,
    *  cell and day, and `command.existing` is still null -- each a button,
    *  in `remove_which`'s shape (a removal asks even for one; a move never
-   *  does -- exactly one hit is taken without asking). */
-  | { kind: "move_which"; person: string; cell: string; when: string; blocks: Candidate[] };
+   *  does -- exactly one hit is taken without asking, UNLESS the block is
+   *  elsewhere: S49, a move whose named cell was wrong asks even for one).
+   *  `cell`, `elsewhere` as `remove_which`'s; `destination` is set ONLY in
+   *  the elsewhere case -- the sentence's own words for where the move would
+   *  land, built without resolving the destination cell (R-397). */
+  | {
+      kind: "move_which";
+      person: string;
+      cell: string | null;
+      when: string;
+      blocks: Candidate[];
+      elsewhere?: true;
+      destination?: string;
+    };
 
 export type Resolution =
   | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove }
@@ -380,6 +412,48 @@ function filterByQualifier(cands: Node[], qualifier: string, byPath: Map<string,
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
+}
+
+/** The one place "HH:MM–HH:MM" is built from a start/end pair -- used by
+ *  `resolveDaySpanStep`'s `timeText` (the arrow) AND (S49) by the elsewhere
+ *  destination text, so the two are always the same string for the same
+ *  hours. */
+function formatSpan(
+  start: { hour: number; minute: number },
+  end: { hour: number; minute: number },
+): string {
+  return `${pad2(start.hour)}:${pad2(start.minute)}–${pad2(end.hour)}:${pad2(end.minute)}`;
+}
+
+/** S49 (R-397, §19.96/D125): a candidate built from a block NOT on the
+ *  sentence's named cell (or, when the sentence named none, from any cell)
+ *  -- carries its OWN cell name and bare hours so `describeQuestion` never
+ *  parses `label` back apart. */
+function elsewhereCandidate(x: ContextAssignment, ctx: ResolveContext): Candidate {
+  const cellName = ctx.nodeById.get(x.nodeId)?.name ?? "";
+  return {
+    id: x.id,
+    label: `${cellName} · ${x.productName ?? "block"} ${x.label}`,
+    word: "",
+    part: x.productName,
+    cell: cellName,
+    when: x.label,
+  };
+}
+
+function elsewhereCandidates(list: readonly ContextAssignment[], ctx: ResolveContext): Candidate[] {
+  return list.map((x) => elsewhereCandidate(x, ctx));
+}
+
+/** S49: the person's blocks overlapping `window` on ANY cell -- gathered
+ *  only once the named cell (or "wherever they are" for an empty place) has
+ *  come up with nothing, in board order (`ctx.assignments`' own order). */
+function gatherElsewhereBlocks(
+  operatorId: string,
+  window: { startMin: number; endMin: number },
+  ctx: ResolveContext,
+): ContextAssignment[] {
+  return ctx.assignments.filter((x) => x.operatorId === operatorId && ctx.overlaps(window, x));
 }
 
 const WEEKDAY_FULL_NAMES: readonly string[] = [
@@ -548,7 +622,7 @@ function resolveDaySpanStep(
       question: { kind: "too_short", minutes: endMin - startMin, min: ctx.minDurationMinutes },
     };
   }
-  const timeText = `${pad2(start.hour)}:${pad2(start.minute)}–${pad2(end.hour)}:${pad2(end.minute)}`;
+  const timeText = formatSpan(start, end);
   return { ok: true, dayIndex, startMin, endMin, timeText };
 }
 
@@ -853,10 +927,13 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
 function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): Resolution {
   const byPath = buildPathIndex(ctx.nodeById);
 
-  // 1. Cell.
-  const cellResult = resolveCellStep(command.place, ctx, byPath);
-  if (!cellResult.ok) return { ok: false, question: cellResult.question };
-  const cell = cellResult.cell;
+  // 1. Cell -- OPTIONAL (S49: an empty place means "wherever they are").
+  let cell: Node | null = null;
+  if (command.place.length > 0) {
+    const cellResult = resolveCellStep(command.place, ctx, byPath);
+    if (!cellResult.ok) return { ok: false, question: cellResult.question };
+    cell = cellResult.cell;
+  }
 
   // 2. Person (shared with assign).
   const personResult = resolvePersonStep(command.operator, ctx);
@@ -884,12 +961,18 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
     whenText = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
   }
 
-  // 4. The block(s) -- brief §3: NO product filter (the sentence never names
-  // a part), just person, cell and overlap.
-  const hits = ctx.assignments.filter(
-    (x) =>
-      x.nodeId === cell.id && x.operatorId === operator.id && ctx.overlaps({ startMin, endMin }, x),
-  );
+  // 4. The block(s) on the NAMED cell -- brief §3: no product filter, just
+  // person, cell and overlap. `hits` is empty by definition when no cell was
+  // named (there is no cell to filter on).
+  const hits =
+    cell === null
+      ? []
+      : ctx.assignments.filter(
+          (x) =>
+            x.nodeId === cell!.id &&
+            x.operatorId === operator.id &&
+            ctx.overlaps({ startMin, endMin }, x),
+        );
   const blockCandidates = (): Candidate[] =>
     hits.map((x) => ({
       id: x.id,
@@ -897,47 +980,92 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
       word: "",
       part: x.productName,
     }));
-  const askRemoveWhich = (): Resolution => ({
+  // S49: a named cell with none of the person's blocks (or no cell named at
+  // all) looks further -- the person's blocks that day/window on every OTHER
+  // cell. `flagElsewhere` (the Question's `elsewhere: true`) is set ONLY
+  // when a cell WAS named and turned out wrong -- nothing was "wrong" about
+  // an empty place, so that case's candidates still carry their own cell
+  // names (the caller's buttons still need to disambiguate) without the flag
+  // or the "but has ... elsewhere" wording.
+  const askRemoveWhich = (list: ContextAssignment[], fromElsewhere: boolean): Resolution => ({
     ok: false,
     question: {
       kind: "remove_which",
       person: operator.displayName,
-      cell: cell.name,
+      cell: cell?.name ?? null,
       when: whenText,
-      blocks: blockCandidates(),
+      blocks: fromElsewhere ? elsewhereCandidates(list, ctx) : blockCandidates(),
+      ...(fromElsewhere && cell !== null ? { elsewhere: true as const } : {}),
     },
   });
+  const finishRemoval = (hit: ContextAssignment): Resolution => {
+    const hitCellNode = ctx.nodeById.get(hit.nodeId) ?? null;
+    const ancestorNames = hitCellNode ? ancestorsOf(hitCellNode, byPath).map((n) => n.name) : [];
+    const chain = hitCellNode ? [...ancestorNames, hitCellNode.name].join(" › ") : "";
+    const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+    const readout = `Removing ${operator.displayName}'s ${hit.productName ?? "block"} block · ${chain} · ${iso} · ${hit.label}`;
+    return { ok: true, resolved: { intent: "unassign", assignmentId: hit.id, readout } };
+  };
 
   if (command.existing === null) {
-    if (hits.length === 0) {
+    if (hits.length > 0) return askRemoveWhich(hits, false);
+    const elsewhere = gatherElsewhereBlocks(operator.id, { startMin, endMin }, ctx);
+    if (elsewhere.length === 0) {
       return {
         ok: false,
         question: {
           kind: "no_block",
           person: operator.displayName,
-          cell: cell.name,
+          cell: cell?.name ?? null,
           when: whenText,
         },
       };
     }
-    return askRemoveWhich();
-  }
-  const hit = hits.find((x) => x.id === command.existing!.assignmentId) ?? null;
-  if (!hit) {
-    if (hits.length > 0) return askRemoveWhich(); // the board changed: re-ask, never guess
-    return {
-      ok: false,
-      question: { kind: "block_gone_remove", person: operator.displayName, cell: cell.name },
-    };
+    return askRemoveWhich(elsewhere, true);
   }
 
-  // Readout.
-  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
-  const chain = [...ancestorNames, cell.name].join(" › ");
-  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
-  const readout = `Removing ${operator.displayName}'s ${hit.productName ?? "block"} block · ${chain} · ${iso} · ${hit.label}`;
+  // An answer was given: look it up in the named cell's hits, then in the
+  // elsewhere set (S49: "the resolver accepts it from the named cell or from
+  // elsewhere").
+  const wantedId = command.existing.assignmentId;
+  const hitOnCell = hits.find((x) => x.id === wantedId) ?? null;
+  if (hitOnCell) return finishRemoval(hitOnCell);
 
-  return { ok: true, resolved: { intent: "unassign", assignmentId: hit.id, readout } };
+  const elsewhere = gatherElsewhereBlocks(operator.id, { startMin, endMin }, ctx);
+  const hitElsewhere = elsewhere.find((x) => x.id === wantedId) ?? null;
+  if (hitElsewhere) return finishRemoval(hitElsewhere);
+
+  // Stale: the board changed under the question -- re-ask with whatever it
+  // holds now, never guess.
+  if (hits.length > 0) return askRemoveWhich(hits, false);
+  if (elsewhere.length > 0) return askRemoveWhich(elsewhere, true);
+  return {
+    ok: false,
+    question: { kind: "block_gone_remove", person: operator.displayName, cell: cell?.name ?? null },
+  };
+}
+
+/** S49: the destination in the SENTENCE'S OWN WORDS, for the elsewhere
+ *  question's `Move that one to ...?` -- never resolves the destination
+ *  cell (that still happens below, only once a block has been chosen).
+ *  `toPlace`'s words are joined with " in " (place order is "most specific
+ *  first", the same order `toPlace` itself is in); the span, when given, is
+ *  `formatSpan` -- the SAME helper the arrow uses -- joined with " · ". */
+function buildDestinationText(command: MoveCommand): string {
+  if (command.toPlace === null) {
+    // A move naming no destination cell must give new hours -- the TEXT
+    // grammar's own check (R-389, parseMoveRest's `no_move`). `decodeMove`
+    // mirrors that check too (a model answer with both null is refused,
+    // never reaches here), but this module never trusts a caller's shape:
+    // review fix (reviewer, S49) -- an untrusted `Command` union member with
+    // BOTH null must still get a Resolution back, never throw.
+    if (command.span === null) return "the same place and hours";
+    return formatSpan(command.span.start, command.span.end);
+  }
+  const placeText = command.toPlace.join(" in ");
+  if (command.span !== null)
+    return `${placeText} · ${formatSpan(command.span.start, command.span.end)}`;
+  return placeText;
 }
 
 /**
@@ -953,17 +1081,22 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
 function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resolution {
   const byPath = buildPathIndex(ctx.nodeById);
 
-  // 1. The current cell.
-  const cellResult = resolveCellStep(command.place, ctx, byPath);
-  if (!cellResult.ok) return { ok: false, question: cellResult.question };
-  const cell = cellResult.cell;
+  // 1. The current cell -- OPTIONAL (S49: an empty place means "wherever
+  // they are").
+  let cell: Node | null = null;
+  if (command.place.length > 0) {
+    const cellResult = resolveCellStep(command.place, ctx, byPath);
+    if (!cellResult.ok) return { ok: false, question: cellResult.question };
+    cell = cellResult.cell;
+  }
 
   // 2. The person (shared with assign/unassign).
   const personResult = resolvePersonStep(command.operator, ctx);
   if (!personResult.ok) return { ok: false, question: personResult.question };
   const operator = personResult.operator;
 
-  // 3. The day, and the block(s) -- searched over the WHOLE DAY.
+  // 3. The day, and the block(s) on the NAMED cell -- searched over the
+  // WHOLE DAY. `hits` is empty by definition when no cell was named.
   const dayResolution = resolveDay(command.day, ctx);
   if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
   const dayIndex = dayResolution.dayIndex;
@@ -971,12 +1104,15 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   const dayEnd = ctx.wallToOffset(dayIndex, 24 * 60);
   const whenText = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
 
-  const hits = ctx.assignments.filter(
-    (x) =>
-      x.nodeId === cell.id &&
-      x.operatorId === operator.id &&
-      ctx.overlaps({ startMin: dayStart, endMin: dayEnd }, x),
-  );
+  const hits =
+    cell === null
+      ? []
+      : ctx.assignments.filter(
+          (x) =>
+            x.nodeId === cell!.id &&
+            x.operatorId === operator.id &&
+            ctx.overlaps({ startMin: dayStart, endMin: dayEnd }, x),
+        );
   const blockCandidates = (): Candidate[] =>
     hits.map((x) => ({
       id: x.id,
@@ -984,30 +1120,61 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
       word: "",
       part: x.productName,
     }));
-  const askMoveWhich = (): Resolution => ({
+  // S49: `wrongCellNamed` gates both the Question's `elsewhere: true` and
+  // whether one block is taken without asking -- a cell WAS named and had
+  // nothing (D125: "a move that would take its one block without asking
+  // still asks when the block is not on the cell the sentence named"); an
+  // empty place is never "wrong" (nothing was said to be wrong about), so
+  // one block there is still taken, as every move with one block is.
+  const askMoveWhich = (list: ContextAssignment[], fromElsewhere: boolean): Resolution => ({
     ok: false,
     question: {
       kind: "move_which",
       person: operator.displayName,
-      cell: cell.name,
+      cell: cell?.name ?? null,
       when: whenText,
-      blocks: blockCandidates(),
+      blocks: fromElsewhere ? elsewhereCandidates(list, ctx) : blockCandidates(),
+      ...(fromElsewhere && cell !== null
+        ? { elsewhere: true as const, destination: buildDestinationText(command) }
+        : {}),
     },
   });
 
   let blk: ContextAssignment;
   if (hits.length === 0) {
-    return {
-      ok: false,
-      question: { kind: "no_block", person: operator.displayName, cell: cell.name, when: whenText },
-    };
+    const elsewhere = gatherElsewhereBlocks(
+      operator.id,
+      { startMin: dayStart, endMin: dayEnd },
+      ctx,
+    );
+    if (elsewhere.length === 0) {
+      return {
+        ok: false,
+        question: {
+          kind: "no_block",
+          person: operator.displayName,
+          cell: cell?.name ?? null,
+          when: whenText,
+        },
+      };
+    }
+    const wrongCellNamed = cell !== null;
+    if (!wrongCellNamed && elsewhere.length === 1 && command.existing === null) {
+      blk = elsewhere[0];
+    } else if (command.existing !== null) {
+      const hit = elsewhere.find((x) => x.id === command.existing!.assignmentId) ?? null;
+      if (!hit) return askMoveWhich(elsewhere, true); // stale: re-ask, never guess
+      blk = hit;
+    } else {
+      return askMoveWhich(elsewhere, true);
+    }
   } else if (hits.length === 1) {
     blk = hits[0];
   } else if (command.existing === null) {
-    return askMoveWhich();
+    return askMoveWhich(hits, false);
   } else {
     const hit = hits.find((x) => x.id === command.existing!.assignmentId) ?? null;
-    if (!hit) return askMoveWhich(); // the board changed: re-ask, never guess
+    if (!hit) return askMoveWhich(hits, false); // the board changed: re-ask, never guess
     blk = hit;
   }
 
@@ -1021,13 +1188,14 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   if (command.toPlace === null) {
     // Move in time only -- R-385's own retime target (command.span is
     // guaranteed non-null here: parseMoveRest never returns toPlace null
-    // and span null together).
+    // and span null together). S49: the target is the BLOCK's own cell,
+    // never the sentence's (the block may have come from elsewhere).
     const spanResult = resolveDaySpanStep(command.day, command.span!.start, command.span!.end, ctx);
     if (!spanResult.ok) return { ok: false, question: spanResult.question };
     startMin = spanResult.startMin;
     endMin = spanResult.endMin;
     target = { kind: "retime" };
-    targetNodeId = cell.id;
+    targetNodeId = blk.nodeId;
     arrow = spanResult.timeText;
   } else {
     const newCellResult = resolveCellStep(command.toPlace, ctx, byPath);
@@ -1055,9 +1223,11 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
     targetNodeId = newCell.id;
   }
 
-  // Readout.
-  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
-  const chain = [...ancestorNames, cell.name].join(" › ");
+  // Readout -- the chain names the BLOCK's own cell (S49: it may have come
+  // from elsewhere, never the sentence's named cell).
+  const blkCellNode = ctx.nodeById.get(blk.nodeId) ?? null;
+  const ancestorNames = blkCellNode ? ancestorsOf(blkCellNode, byPath).map((n) => n.name) : [];
+  const chain = blkCellNode ? [...ancestorNames, blkCellNode.name].join(" › ") : "";
   const readout = `Moving ${operator.displayName}'s ${blk.productName ?? "block"} block · ${chain} · ${whenText} · ${blk.label} → ${arrow}`;
 
   return {
@@ -1117,6 +1287,14 @@ function fieldWord(field: "operator" | "product" | "place"): string {
   return "cell";
 }
 
+/** S49: "<part> <hours>" with a known part, "a block <hours>" without --
+ *  the elsewhere question's own phrase for its one candidate, read off
+ *  `part`/`when` directly (never `label`, which already carries the cell
+ *  name too). */
+function partHoursPhrase(c: Candidate): string {
+  return c.part ? `${c.part} ${c.when}` : `a block ${c.when}`;
+}
+
 /** The sentence for a Question — the words the bar shows. Pure, so it is tested verbatim. */
 export function describeQuestion(q: Question): string {
   switch (q.kind) {
@@ -1161,6 +1339,16 @@ export function describeQuestion(q: Question): string {
     case "remove_which": {
       if (q.blocks.length === 1) {
         const candidate = q.blocks[0];
+        if (q.elsewhere) {
+          // S49: the sentence's cell was wrong -- name both (§19.96/D125).
+          return `${q.person} has no block on ${q.cell} ${q.when}, but has one on ${candidate.cell}: ${partHoursPhrase(candidate)}. Remove that one?`;
+        }
+        if (q.cell === null) {
+          // S49: no place at all -- name the block's OWN cell.
+          return candidate.part
+            ? `Remove ${q.person}'s ${candidate.part} block on ${candidate.cell}, ${candidate.when}?`
+            : `Remove ${q.person}'s block on ${candidate.cell}, ${candidate.when}?`;
+        }
         // The candidate's own `part` (S41-b), never recovered by parsing
         // `label` back apart -- `label` stays the combined "<part> <time>"
         // string the many-block buttons read, so only the KNOWN prefix
@@ -1174,13 +1362,35 @@ export function describeQuestion(q: Question): string {
           ? `Remove ${q.person}'s ${candidate.part} block on ${q.cell}, ${when}?`
           : `Remove ${q.person}'s block on ${q.cell}, ${when}?`;
       }
+      if (q.elsewhere) {
+        return `${q.person} has no block on ${q.cell} ${q.when}, but has ${q.blocks.length} elsewhere. Remove which?`;
+      }
+      if (q.cell === null) {
+        return `${q.person} has ${q.blocks.length} blocks ${q.when}. Remove which?`;
+      }
       return `${q.person} has ${q.blocks.length} blocks on ${q.cell} ${q.when}. Remove which?`;
     }
     case "no_block":
-      return `${q.person} has no block on ${q.cell} ${q.when}.`;
+      return q.cell === null
+        ? `${q.person} has no block ${q.when}.`
+        : `${q.person} has no block on ${q.cell} ${q.when}.`;
     case "block_gone_remove":
-      return `That block of ${q.person}'s on ${q.cell} is already gone.`;
-    case "move_which":
+      return q.cell === null
+        ? `That block of ${q.person}'s is already gone.`
+        : `That block of ${q.person}'s on ${q.cell} is already gone.`;
+    case "move_which": {
+      if (q.elsewhere) {
+        const destination = q.destination ?? "";
+        if (q.blocks.length === 1) {
+          const candidate = q.blocks[0];
+          return `${q.person} has no block on ${q.cell} ${q.when}, but has one on ${candidate.cell}: ${partHoursPhrase(candidate)}. Move that one to ${destination}?`;
+        }
+        return `${q.person} has no block on ${q.cell} ${q.when}, but has ${q.blocks.length} elsewhere. Move which to ${destination}?`;
+      }
+      if (q.cell === null) {
+        return `${q.person} has ${q.blocks.length} blocks ${q.when}. Move which?`;
+      }
       return `${q.person} has ${q.blocks.length} blocks on ${q.cell} ${q.when}. Move which?`;
+    }
   }
 }

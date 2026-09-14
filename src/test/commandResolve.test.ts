@@ -263,6 +263,9 @@ const blkHb: ContextAssignment = {
 const blkSp: ContextAssignment = { ...blk1, id: "blkSp", operatorId: "sp" };
 const blkGone: ContextAssignment = { ...blk1, id: "blkGone", operatorId: null };
 const blkC2: ContextAssignment = { ...blk1, id: "blkC2", nodeId: "c2" };
+/** S49: op1's block on the OTHER "Cell 1" (Line 3) -- distinct from blk1's
+ *  c1a, same name as the sentence's named cell (both are called "Cell 1"). */
+const blkC1b: ContextAssignment = { ...blk1, id: "blkC1b", nodeId: "c1b" };
 
 describe("commandResolve: brief §5 worked examples", () => {
   it("R1: ok, direct, today's index, the readout byte-for-byte", () => {
@@ -1088,17 +1091,26 @@ describe("commandResolve: S41-b unassign worked examples", () => {
     });
   });
 
-  it("RU6: another person's or another cell's block asks nothing but no_block", () => {
+  it("RU6: another person's block asks nothing but no_block; the person's own block on another cell is offered (S49, R-397)", () => {
     const bySp = resolveCommand(unassignCmd(), withBlocks([blkSp]));
     expect(bySp).toEqual({
       ok: false,
       question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
     });
+    // Until S49 this half pinned `no_block` for the person's OWN block on
+    // Cell 2 -- the refusal F-144 was about. The contract changed (R-397):
+    // the block elsewhere is offered, with both cells named. RE1 pins the
+    // full shape and message; this keeps the kind and the flag.
     const byC2 = resolveCommand(unassignCmd(), withBlocks([blkC2]));
-    expect(byC2).toEqual({
-      ok: false,
-      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
-    });
+    expect(byC2.ok).toBe(false);
+    if (!byC2.ok) {
+      expect(byC2.question.kind).toBe("remove_which");
+      if (byC2.question.kind === "remove_which") {
+        expect(byC2.question.elsewhere).toBe(true);
+        expect(byC2.question.cell).toBe("Cell 1");
+        expect(byC2.question.blocks.map((b) => b.id)).toEqual(["blkC2"]);
+      }
+    }
   });
 
   it("RU7: a stale answer re-asks, never falls back, and reports block_gone_remove when the block vanished", () => {
@@ -1403,5 +1415,405 @@ describe("commandResolve: S41-c move worked examples", () => {
           "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00",
       },
     });
+  });
+});
+
+/**
+ * S49 (R-397, §19.96/D125, docs/agent-briefs/s49-a-elsewhere-brief.md §5):
+ * a removal or a move whose named cell is wrong -- or whose place is empty
+ * altogether -- looks further, RE1-RE12.
+ */
+describe("commandResolve: S49 the block is elsewhere", () => {
+  it("RE1: removal, wrong cell, one block elsewhere -- remove_which, elsewhere:true, verbatim", () => {
+    const res = resolveCommand(unassignCmd(), withBlocks([blkC2]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "10:00–14:00",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+        ],
+        elsewhere: true,
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 has no block on Cell 1 10:00–14:00, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?",
+      );
+    }
+  });
+
+  it("RE2: the same, whole day -- the brief's own worked example, verbatim", () => {
+    const res = resolveCommand(unassignCmd({ span: null }), withBlocks([blkC2]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "2026-09-03",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+        ],
+        elsewhere: true,
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 has no block on Cell 1 2026-09-03, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?",
+      );
+    }
+  });
+
+  it("RE3: removal, wrong cell, several elsewhere -- board order, verbatim", () => {
+    const res = resolveCommand(unassignCmd(), withBlocks([blkC2, blkC1b]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "10:00–14:00",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+          {
+            id: "blkC1b",
+            label: "Cell 1 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 1",
+            when: "10:00–14:00",
+          },
+        ],
+        elsewhere: true,
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 has no block on Cell 1 10:00–14:00, but has 2 elsewhere. Remove which?",
+      );
+    }
+  });
+
+  it("RE4: removal, wrong cell, none anywhere -- no_block unchanged", () => {
+    const res = resolveCommand(unassignCmd(), withBlocks([blkSp]));
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
+    });
+  });
+
+  it("RE5: the answer names the elsewhere block -- ok, readout chain names the block's own cell", () => {
+    const existing = { kind: "remove" as const, assignmentId: "blkC2" };
+    const res = resolveCommand(unassignCmd({ existing }), withBlocks([blkC2]));
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "unassign",
+        assignmentId: "blkC2",
+        readout:
+          "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 2 · 2026-09-03 · 10:00–14:00",
+      },
+    });
+  });
+
+  it("RE6: a stale answer re-asks with elsewhere, block_gone_remove when nothing is anywhere", () => {
+    const existing = { kind: "remove" as const, assignmentId: "blk9" };
+    const stillThere = resolveCommand(unassignCmd({ existing }), withBlocks([blkC2]));
+    expect(stillThere.ok).toBe(false);
+    if (!stillThere.ok) {
+      expect(stillThere.question).toEqual({
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "10:00–14:00",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+        ],
+        elsewhere: true,
+      });
+    }
+
+    const gone = resolveCommand(unassignCmd({ existing }), withBlocks([]));
+    expect(gone).toEqual({
+      ok: false,
+      question: { kind: "block_gone_remove", person: "Operator 1", cell: "Cell 1" },
+    });
+  });
+
+  it("RE7: move in time, wrong cell, one block elsewhere -- move_which asks, destination is the hours", () => {
+    const res = resolveCommand(
+      moveCmd({
+        toPlace: null,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+      }),
+      withBlocks([blkC2]),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "move_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "2026-09-03",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+        ],
+        elsewhere: true,
+        destination: "10:00–14:00",
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Operator 1 has no block on Cell 1 2026-09-03, but has one on Cell 2: Housing A 10:00–14:00. Move that one to 10:00–14:00?",
+      );
+    }
+  });
+
+  it("RE8: move to a named place with new hours, wrong current cell -- destination names both", () => {
+    const res = resolveCommand(
+      moveCmd({
+        toPlace: ["Cell 2", "Line 1"],
+        span: { start: { hour: 12, minute: 0 }, end: { hour: 16, minute: 0 } },
+      }),
+      withBlocks([blkC2]),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.question.kind).toBe("move_which");
+      if (res.question.kind === "move_which") {
+        expect(res.question.destination).toBe("Cell 2 in Line 1 · 12:00–16:00");
+      }
+    }
+  });
+
+  it("RE9: the answer for a move-in-time picks the elsewhere block -- retime targets its own cell", () => {
+    const existing = { kind: "move" as const, assignmentId: "blkC2" };
+    const res = resolveCommand(
+      moveCmd({
+        toPlace: null,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+        existing,
+      }),
+      withBlocks([blkC2]),
+    );
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "move",
+        assignmentId: "blkC2",
+        nodeId: "c2",
+        operatorId: "op1",
+        productId: "ha",
+        range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
+        target: { kind: "retime" },
+        readout:
+          "Moving Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 2 · 2026-09-03 · 10:00–14:00 → 10:00–15:00",
+      },
+    });
+  });
+
+  it("RE10: move, wrong cell, several elsewhere -- move_which lists all, board order", () => {
+    const res = resolveCommand(moveCmd(), withBlocks([blkC2, blkC1b]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "move_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "2026-09-03",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+          {
+            id: "blkC1b",
+            label: "Cell 1 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 1",
+            when: "10:00–14:00",
+          },
+        ],
+        elsewhere: true,
+        destination: "Cell 2",
+      },
+    });
+  });
+
+  it("RE11: empty place -- one block asks plainly, several use the cell:null message, none is no_block", () => {
+    const one = resolveCommand(unassignCmd({ place: [] }), withBlocks([blk1]));
+    expect(one).toEqual({
+      ok: false,
+      question: {
+        kind: "remove_which",
+        person: "Operator 1",
+        cell: null,
+        when: "10:00–14:00",
+        blocks: [
+          {
+            id: "blk1",
+            label: "Cell 1 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 1",
+            when: "10:00–14:00",
+          },
+        ],
+      },
+    });
+    if (!one.ok) {
+      expect(describeQuestion(one.question)).toBe(
+        "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?",
+      );
+    }
+
+    const several = resolveCommand(unassignCmd({ place: [] }), withBlocks([blk1, blkC2]));
+    expect(several.ok).toBe(false);
+    if (!several.ok) {
+      expect(several.question.kind).toBe("remove_which");
+      if (several.question.kind === "remove_which") {
+        expect(several.question.cell).toBeNull();
+        expect(several.question.elsewhere).toBeUndefined();
+        expect(several.question.blocks.map((b) => b.id)).toEqual(["blk1", "blkC2"]);
+      }
+      expect(describeQuestion(several.question)).toBe(
+        "Operator 1 has 2 blocks 10:00–14:00. Remove which?",
+      );
+    }
+
+    const none = resolveCommand(unassignCmd({ place: [] }), withBlocks([blkSp]));
+    expect(none).toEqual({
+      ok: false,
+      question: { kind: "no_block", person: "Operator 1", cell: null, when: "10:00–14:00" },
+    });
+    if (!none.ok) {
+      expect(describeQuestion(none.question)).toBe("Operator 1 has no block 10:00–14:00.");
+    }
+  });
+
+  it("RE12: empty place, move -- one block is taken, two ask (cell:null, no destination)", () => {
+    const taken = resolveCommand(
+      moveCmd({
+        place: [],
+        toPlace: null,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+      }),
+      withBlocks([blkC2]),
+    );
+    expect(taken.ok).toBe(true);
+    if (taken.ok) {
+      expect(taken.resolved.assignmentId).toBe("blkC2");
+      expect(taken.resolved.nodeId).toBe("c2");
+      expect(taken.resolved.target).toEqual({ kind: "retime" });
+    }
+
+    const asked = resolveCommand(
+      moveCmd({
+        place: [],
+        toPlace: null,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+      }),
+      withBlocks([blkC2, blkC1b]),
+    );
+    expect(asked.ok).toBe(false);
+    if (!asked.ok) {
+      expect(asked.question.kind).toBe("move_which");
+      if (asked.question.kind === "move_which") {
+        expect(asked.question.cell).toBeNull();
+        expect(asked.question.elsewhere).toBeUndefined();
+        expect(asked.question.destination).toBeUndefined();
+      }
+      expect(describeQuestion(asked.question)).toBe(
+        "Operator 1 has 2 blocks 2026-09-03. Move which?",
+      );
+    }
+  });
+
+  // Reviewer fix (S49): `decodeMove`/the text grammar both refuse a move
+  // naming neither a new cell nor new hours, but `resolveCommand` takes any
+  // `MoveCommand` -- this shape must still get a Resolution back, never
+  // throw (`buildDestinationText` used to read `command.span!.start`
+  // unguarded).
+  it("RE13: a move naming neither a new cell nor new hours never throws -- move_which, the fallback destination", () => {
+    const res = resolveCommand(moveCmd({ toPlace: null, span: null }), withBlocks([blkC2]));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "move_which",
+        person: "Operator 1",
+        cell: "Cell 1",
+        when: "2026-09-03",
+        blocks: [
+          {
+            id: "blkC2",
+            label: "Cell 2 · Housing A 10:00–14:00",
+            word: "",
+            part: "Housing A",
+            cell: "Cell 2",
+            when: "10:00–14:00",
+          },
+        ],
+        elsewhere: true,
+        destination: "the same place and hours",
+      },
+    });
+  });
+
+  // Nit fix (S49): the `block_gone_remove` message for an empty place
+  // (`cell: null`) was untested.
+  it("RE14: empty place, a stale answer with nothing anywhere -- block_gone_remove, cell:null, verbatim", () => {
+    const existing = { kind: "remove" as const, assignmentId: "blk9" };
+    const res = resolveCommand(unassignCmd({ place: [], existing }), withBlocks([]));
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "block_gone_remove", person: "Operator 1", cell: null },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe("That block of Operator 1's is already gone.");
+    }
   });
 });

@@ -78,7 +78,9 @@ export interface UnassignCommand {
   intent: "unassign";
   /** The words the person used, trimmed, original case. NEVER an id. */
   operator: string;
-  /** Place words, most specific first — same shape as `AssignCommand.place`. At least one. */
+  /** Place words, most specific first — same shape as `AssignCommand.place`.
+   *  At least one for an assign or a booking; may be empty for a removal or
+   *  a move: wherever the person is (S49, R-397). */
   place: string[];
   day: DayWord | null;
   /** null when the sentence gave no hours: the whole day. */
@@ -118,7 +120,9 @@ export interface MoveCommand {
   intent: "move";
   /** The words the person used, trimmed, original case. NEVER an id. */
   operator: string;
-  /** WHERE the block is now. Most specific first, at least one. */
+  /** WHERE the block is now, most specific first. At least one for an
+   *  assign or a booking; may be empty for a removal or a move: wherever
+   *  the person is (S49, R-397). */
   place: string[];
   /** The new cell, most specific first -- or null for a move in time only. */
   toPlace: string[] | null;

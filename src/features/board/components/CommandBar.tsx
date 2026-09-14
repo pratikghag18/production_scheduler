@@ -729,9 +729,12 @@ export function CommandBar({
       );
     }
     if (question.kind === "move_which") {
-      // Only ever asked from the move path (S41-c). Unlike remove_which,
-      // this is never asked for exactly one block (a move takes it without
-      // asking), so there is no one-block branch here.
+      // Only ever asked from the move path (S41-c). A move on the right
+      // cell never asks for exactly one block (it is just taken); S49's
+      // elsewhere case does ask for one (the sentence's cell was wrong), so
+      // that one candidate reads "Move it", same as remove_which's own
+      // one-block label -- `withBlockHighlight` already adds the yes suffix
+      // for exactly one candidate.
       const moveCommand = command as MoveCommand;
       return withBlockHighlight(
         {
@@ -739,7 +742,7 @@ export function CommandBar({
           message,
           candidates: question.blocks.map((b) => ({
             key: b.id,
-            label: `Move ${b.label}`,
+            label: question.blocks.length === 1 ? "Move it" : `Move ${b.label}`,
             onClick: () => pickExisting(moveCommand, { kind: "move", assignmentId: b.id }),
           })),
         },
