@@ -4,14 +4,14 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '12b57c8'
+  tip: '847c7cc'
   baseline:
     app_tests: 2750
     app_test_files: 133
     tsc: 0
     eslint: 0
     db_checks: 845
-    migrations: 79
+    migrations: 80
     mutations: 509 of 536
 tracks:
 - id: core
@@ -2512,7 +2512,7 @@ stages:
   track: core
   num: 54
   title: The command bar switch — off, typed only, or typed and voice, set per plant and inherited down the tree
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 164 conversation (the maintainer, 14 Sept: "Is there a way we can enable and disable the chatbot from the settings? I''m thinking if I want to limit the feature during the initial getting used to period." and "Yes, go.")'
@@ -2532,6 +2532,14 @@ stages:
     **Briefed session 164 (14 Sept).** One lane: the migration (the key, the two checks, the writers,
     board_window re-emitted from 0063's text by a script), the SQL cases, the client types after
     db:types, the board's gate, the settings screen's row, the tests.
+    **DONE 14 Sept (session 165, 847c7cc).** Migration 0081 re-emits board_window, set_node_setting and
+    clear_node_setting from 0063's text through scripts/migrations/assemble-0081.mjs, which asserts the
+    guards and the hunk count before writing; the SQL cases include the fail-open case through
+    board_window for a supervisor under a plant she cannot read. The settings screen's three row-count
+    assertions moved from three settings to four. The reviewer diffed the three re-emitted functions
+    against 0063 by hand and re-ran the script to the same bytes, confirmed the fail-open case runs
+    board_window as the supervisor, and found nothing blocking; the SQL file's number collided with an
+    existing one and is 98, the next free.
 - id: M1
   track: matrix
   num: 1
@@ -11031,11 +11039,30 @@ requirements:
     and the consequence in plain words. An unrecognised value read from the server hides the button
     (fails safe). Nothing else about the bar changes.
   verified_by:
+  - kind: sql
+    file: supabase/tests/98_command_bar_setting_test.sql
+    cases: "C0 to C9 --- the roles fixture; the value check accepts off, typed and voice and refuses anything else, NOT NULL refuses a null; a plant admin sets the plant's value and reads it back effective; a supervisor is refused; clearing removes the row; the company writer stores the value with the bag's siblings intact and refuses a non-admin; the resolver answers the plant's override for a line under it; a supervisor whose board is rooted at a line under a plant root she cannot read that is set to off gets off from board_window; no row anywhere gives voice; an unknown value is invalid_argument naming command_bar"
+  - kind: vitest
+    file: src/test/commandBarGate.test.ts
+    cases: "G1 to G4 and one more --- off hides whatever canPlace says; typed shows the launcher without a recogniser; voice shows it with one; an unrecognised mode fails safe; canPlace false hides for every mode"
+  - kind: vitest
+    file: src/test/settingsPanel.test.tsx
+    cases: "R-403 describe: SP-cb-1 to SP-cb-4 (the row shows the company value and the three options; choosing typed on a plant calls set_node_setting with command_bar; inherit calls clear_node_setting; the consequence line names what is in force), the label wording, the company writer's save, busy and error states, a site admin cannot change the company value, two per-plant cases; the three row-count assertions moved from three settings to four (R-403)"
+  - kind: vitest
+    file: src/test/shapes.test.ts
+    cases: "the board's window carries the command bar mode: missing reads as voice, unrecognised fails safe to off"
+  - kind: vitest
+    file: src/test/apiPlantSettingsShape.test.ts
+    cases: "the client offers exactly the four keys the server validates; the command bar mode is set and cleared through the same two functions"
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: "the default voice leaves every placing role its launcher and every viewer none"
   - kind: manual
     steps: "as a system admin set the company to typed: the microphone disappears on every board; set Plant A to off: Ana's Line 1 board has no button while Marco's board on Plant B still has one; clear Plant A: the button returns; set Plant A to voice while the company is typed: only Plant A has the microphone"
-  status: uncovered
+  status: covered
   note: >-
-    STATED 14 Sept (session 164). Covered when the SQL cases (the checks, the writers, board_window's
+    STATED 14 Sept (session 164), COVERED 14 Sept (session 165, 847c7cc). Written when stated: covered
+    when the SQL cases (the checks, the writers, board_window's
     resolved value including the fail-open case), the settings screen cases and the board gate cases
     are in and the role walk passes.
 
@@ -14910,6 +14937,36 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 165
+  date: 2026-09-14
+  title: "The command bar switch: off, typed only, or typed and voice, per plant, resolved for the board's root (S54, R-403)"
+  shipped: [S54]
+  commits: ['9d10d97', '847c7cc']
+  numbers:
+    app_tests: 3235
+    app_test_files: 145
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 14 Sept, after the S54 commit: 3235 tests in 145 files, all passing; tsc
+    conclusive after db:types; db_checks is the prior tally plus the new file's cases (the full SQL
+    recount is the tester's, as before); migrations counted from the folder; the role walk passed.
+  summary: >-
+    The maintainer asked whether the chatbot could be switched off from settings while a plant gets
+    used to it, and said go to a three-position switch: off, typed only, typed and voice. Built as the
+    fourth plant setting beside the eligibility rule, the date format and the time zone (R-403, S54,
+    D129): a company value, a per-plant override through the same set and clear functions, the two
+    checks widened by drop-and-re-add, and the value resolved for the board's own root on the server
+    inside board_window, on the line the date format travels, so an override on a plant root a line
+    supervisor cannot read still reaches her board. Off hides the launcher, typed withholds the
+    microphone, an unknown value hides the button. One lane, the migration assembled from 0063's text
+    by a script; the reviewer diffed the re-emitted functions against 0063 by hand, re-ran the script to
+    the same bytes, confirmed the fail-open case runs board_window as the supervisor, and found nothing
+    blocking beyond a test file number that collided with an existing one.
 - id: 164
   date: 2026-09-14
   title: "A shift's name becomes the cell's own band, and the data learns the new sentences (S52 lanes two and three, R-402)"
@@ -22123,12 +22180,6 @@ next:
   text: "Before the retrain --- change and shift as move verbs, a shift's name as the hours (S52, R-401, R-402, in progress)"
   why: >-
     The maintainer's word on 13 Sept (session 163), both taught in the one Colab run so it is not run twice.
-- kind: task
-  stage: S54
-  text: "The command bar switch --- off, typed only, or typed and voice, per plant (S54, R-403, in progress)"
-  why: >-
-    The maintainer wants to limit the feature while a plant gets used to it (14 Sept, session 164). Built as
-    a plant setting like the eligibility rule, resolved on the server for the board's root.
 - kind: task
   text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
   why: >-
