@@ -27,6 +27,7 @@ import type {
   Candidate,
 } from "@/lib/command/resolve";
 import type { Highlight } from "../lib/highlight";
+import { Microphone } from "@/components/icons";
 
 export type { Highlight };
 
@@ -62,6 +63,14 @@ export type { Highlight };
  * `parseCommand` rules on anything but a clean answer, saying so in the
  * readout. `reader` null (the default) is BYTE FOR BYTE the pre-S44-b
  * behaviour -- every earlier test in this file passes untouched.
+ *
+ * S48-a (docs/agent-briefs/s48-a-launcher-brief.md, R-396) adds the optional
+ * `onEscapeIdle` prop and swaps the microphone button's emoji for the drawn
+ * `<Microphone>` glyph (`@/components/icons`) -- nothing else here changes.
+ * `onEscapeIdle` is called from the Escape branch below ONLY when Escape
+ * found nothing left to do (not listening, no status, empty input) -- the
+ * launcher's own signal to close the panel around this bar, since the bar
+ * itself owns no notion of that panel.
  *
  * S46-a (docs/agent-briefs/s46-a-microphone-brief.md) adds the optional
  * `recognizer` prop: `null` (the default) renders no microphone button and
@@ -242,6 +251,12 @@ export interface CommandBarProps {
    *  otherwise (then the bar treats the word as ordinary text, refused with
    *  the usual shape hint like any other unparseable sentence). */
   onCancelWord?: () => boolean;
+  /** S48-a / R-396: called from the Escape branch below ONLY when Escape
+   *  found nothing left to do -- not listening, no status standing, and the
+   *  input already empty. The launcher wraps this bar in a panel and uses
+   *  this as its own "nothing left to clear, so close the panel" signal;
+   *  omit to leave Escape exactly as it was before S48-a. */
+  onEscapeIdle?: () => void;
 }
 
 /** S47 review fix: see `onConfirmWord`'s own doc above for what each value
@@ -295,6 +310,7 @@ export function CommandBar({
   onHighlight,
   onConfirmWord,
   onCancelWord,
+  onEscapeIdle,
 }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
@@ -998,11 +1014,16 @@ export function CommandBar({
         return;
       }
       // First Escape clears the status line; a second clears the input.
+      // S48-a: a THIRD Escape -- status already clear, input already empty
+      // -- has nothing left to do here, so the launcher is told to close
+      // the panel instead (`onEscapeIdle`, brief §2 item 2).
       if (status !== null) {
         setStatus(null);
-      } else {
+      } else if (text !== "") {
         setText("");
         heldRef.current = null;
+      } else {
+        onEscapeIdle?.();
       }
     }
   }
@@ -1033,7 +1054,7 @@ export function CommandBar({
               title="Uses the browser's speech recogniser; audio is sent to the browser maker's service"
               onClick={handleMicClick}
             >
-              🎤
+              <Microphone size={18} filled={listening} />
             </button>
             {listening && <span className={styles.listeningLabel}>Listening…</span>}
           </>

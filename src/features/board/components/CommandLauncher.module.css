@@ -1,0 +1,70 @@
+/* S48-a / R-396 — the corner launcher's own layout, traced from the
+   maintainer's approved mock (docs/mockups/launcher-corner.html). Fixed
+   screen-corner chrome, not board content, so it is sized in the mock's own
+   px values rather than `--chrome-scale`/`--ui-scale` (CommandBar.module.css's
+   own reasoning is the opposite way round: that bar sits IN the toolbar band
+   and scales with it; this button and panel sit OUTSIDE the board entirely,
+   pinned to the viewport corner the way `Toasts` is). No colour introduced —
+   every value below is an existing token (`tokens.css`); `--avatar-fg` is the
+   app's one "white text on a dark fill" token (avatars already use it), reused
+   here instead of a bare `#fff` for the launcher's icon so this stays name-only.
+
+   z-index 80: above ordinary board content (the highest board-body value is
+   `AssignmentChip`/`DirectBlock`/`RunBand`'s dragging state at 50) and below
+   the shared `Popover` shell's 90 — a create pop-up a sentence opens must
+   still sit over this panel, and `Toasts` at 95 over both. */
+
+.launch {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--avatar-fg);
+  border: 0;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 18px rgba(11, 11, 11, 0.22);
+  cursor: pointer;
+  z-index: 80;
+  padding: 0;
+}
+
+.launch.open {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--grid);
+  box-shadow: 0 2px 8px rgba(11, 11, 11, 0.12);
+}
+
+.panel {
+  position: fixed;
+  right: 18px;
+  bottom: 76px;
+  width: 372px;
+  max-width: calc(100% - 36px);
+  background: var(--surface);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(11, 11, 11, 0.16);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.headerLabel {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+}

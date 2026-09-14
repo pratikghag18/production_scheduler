@@ -26,8 +26,22 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 
-/** The one module allowed to render a dialog; everyone else composes it. */
-export const POPOVER_ALLOWLIST: readonly string[] = ["src/components/Popover.tsx"];
+/** The modules allowed to write `role="dialog"` themselves; everyone else
+ *  composes the shared shell.
+ *
+ *  S48-a / R-396: `CommandLauncher.tsx`'s panel is the SECOND deliberate
+ *  entry, not a lapse. `<Popover>` computes its position from an anchor
+ *  point via `resolvePopoverPlacement` and takes its width from this same
+ *  module's `rem`-sized `.pop`/`.wide` classes -- both wrong for a panel the
+ *  mock pins to a fixed screen corner (18px/76px from the edges) at a fixed
+ *  372px width, independent of any click point. The launcher's panel IS a
+ *  dialog semantically (R-396's own contract names the role), so it keeps
+ *  the role; it is not built from the shared shell because the shell's
+ *  placement/sizing model does not fit a fixed-corner panel. */
+export const POPOVER_ALLOWLIST: readonly string[] = [
+  "src/components/Popover.tsx",
+  "src/features/board/components/CommandLauncher.tsx",
+];
 
 const NEEDLES: readonly string[] = ['role="dialog"', "role='dialog'"];
 

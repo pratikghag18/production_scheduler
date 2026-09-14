@@ -283,7 +283,14 @@ async function observeBoard(page: Page, person: Person): Promise<BoardFacts> {
     .join(",");
 
   const panelPresent = (await page.getByRole("complementary", { name: "Operators" }).count()) > 0;
-  // P1-7a: same fact as `panelPresent`, for the typed command bar.
+  // P1-7a: same fact as `panelPresent`, for the typed command bar. S48-a:
+  // the bar now lives behind the corner launcher button -- open the panel
+  // first if the button is there at all; a viewer has no launcher (same
+  // guard as the bar had), so the textbox stays absent for them either way.
+  const launcherButton = page.getByRole("button", { name: "Tell the board" });
+  if ((await launcherButton.count()) > 0) {
+    await launcherButton.click();
+  }
   const commandBarPresent =
     (await page.getByRole("textbox", { name: "Tell the board" }).count()) > 0;
 

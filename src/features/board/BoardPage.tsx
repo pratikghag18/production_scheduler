@@ -38,7 +38,7 @@ import {
   MINUTES_PER_DAY,
 } from "./lib/time";
 import { BoardToolbar } from "./components/BoardToolbar";
-import { CommandBar } from "./components/CommandBar";
+import { CommandLauncher } from "./components/CommandLauncher";
 import { BoardGrid } from "./components/BoardGrid";
 import { OperatorPanel } from "./components/OperatorPanel";
 import { BoardEmptyState } from "./components/BoardEmptyState";
@@ -784,9 +784,16 @@ export default function BoardPage() {
               create pop-up further down (`canPlace`, DEF-0015/R-239) -- a
               viewer never sees a bar whose pop-up cannot open. `commandCtx`
               is null until the board has data, which the outer `hasData &&
-              index` guard already ensures once this renders. */}
+              index` guard already ensures once this renders.
+
+              S48-a / R-396: the bar itself now lives behind `CommandLauncher`
+              -- a fixed corner button and the panel it opens -- rather than
+              rendering at the top of the board; it is still gated on the
+              same `canPlace && commandCtx !== null` a viewer never clears,
+              and can render anywhere in the page tree since the launcher is
+              fixed-positioned regardless of where this sits. */}
           {canPlace && commandCtx !== null && (
-            <CommandBar
+            <CommandLauncher
               ctx={commandCtx}
               dateFormat={dateFormat}
               zone={index.zone}

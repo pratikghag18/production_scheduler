@@ -38,10 +38,13 @@ function statusLine(page: Page): Locator {
   return page.locator('p[aria-live="polite"]');
 }
 
-/** Sign in, wait for the board, type a sentence, press Enter. */
+/** Sign in, wait for the board, open the corner launcher, type a sentence,
+ *  press Enter. S48-a: the bar now lives behind the launcher button -- every
+ *  case here needs the panel open before it can reach `#command-bar-input`. */
 async function openBoardAndType(page: Page, sentence: string): Promise<void> {
   await signIn(page, EMAIL, "/");
   await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Tell the board" }).click();
   await page.locator("#command-bar-input").fill(sentence);
   await page.locator("#command-bar-input").press("Enter");
 }
