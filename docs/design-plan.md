@@ -9474,3 +9474,41 @@ before the places named one, so the generator can write that order and the model
 canonical sentence the bar prints back stays product-first.
 
 Briefs: `docs/agent-briefs/s52-a-shift-grammar-brief.md`, then the resolver and data briefs.
+
+## §19.100 — D129: the command bar is a plant setting, resolved where the authority is (S54)
+
+> The maintainer, 14 Sept, session 164: *"Is there a way we can enable and disable the chatbot
+> from the settings? I'm thinking if I want to limit the feature during the initial getting used
+> to period."* Shown three values: *"Yes, go."*
+
+### D129 — a switch with three positions, the plant's, not the machine's
+
+**Why a setting and not a flag.** What exists today is coarse: an environment variable on the
+machine decides whether the model service is used at all, and the launcher shows to whoever may
+place, which is a permission, not a choice. A plant getting used to the board wants to say "typed
+only for now" or "not yet", and a company with three plants wants to say it per plant. That is
+exactly what the eligibility rule, the date format and the time zone already are: a company
+value, a per-place override, one resolver. A fourth key, `command_bar`, with three values:
+`off`, `typed`, `voice`. The default, when nothing is set anywhere, is `voice` — the board today.
+
+**Resolved for the board's root, on the server.** DEF-0017 taught this: a line supervisor's
+board is rooted at a line inside a plant, and the plant's override row sits above what she may
+read, so a client-side walk falls through to the company default and the plant's choice is
+silently lost for exactly the people it was made for. `board_window` therefore carries the
+value resolved by `app_resolve_node_setting`, the definer, for the board's own root — the same
+line the date format travels on. The board never resolves anything; it reads an answer.
+
+**What the board does with it.** `off`: no launcher, the viewer's view, for everyone on that
+board. `typed`: the launcher and the bar, no microphone — the bar already hides the microphone
+when it is given no recogniser, so the board simply withholds it. `voice`: as today. An
+unrecognised value hides the button: a switch that limits a feature fails closed, and the board
+still renders. Nothing about reading, resolving, confirming or writing a sentence moves.
+
+**The migration.** Append-only, as always: the two CHECK constraints on `node_settings` are
+dropped and re-added with the new key and its three values (0063 did the same for the time
+zone); `set_node_setting` gains one `WHEN`; a company-wide writer `set_org_command_bar` mirrors
+`set_org_eligibility_policy`; and `board_window` is re-emitted from 0063's text by a script
+that asserts every guard it expects before writing, adding one key beside `date_format` — the
+lesson of DEF-0011, never retyped.
+
+Brief: `docs/agent-briefs/s54-a-command-bar-switch-brief.md`.

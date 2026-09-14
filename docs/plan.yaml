@@ -2508,6 +2508,30 @@ stages:
     developer session's recommendation: the same-form group into the pending retrain at the maintainer's
     pick, then the board-answers group as its own stage, because "clear Cell 1" and "cover Sam" are
     what a supervisor says when someone calls in sick. Unpark a group with a word.
+- id: S54
+  track: core
+  num: 54
+  title: The command bar switch — off, typed only, or typed and voice, set per plant and inherited down the tree
+  status: now
+  owner: agent
+  refs:
+  - 'session 164 conversation (the maintainer, 14 Sept: "Is there a way we can enable and disable the chatbot from the settings? I''m thinking if I want to limit the feature during the initial getting used to period." and "Yes, go.")'
+  - §19.100 (D129)
+  - docs/agent-briefs/s54-a-command-bar-switch-brief.md
+  delivers:
+  - R-403
+  what: >-
+    **A plant decides how much of the bar its people get.** A fourth setting beside the eligibility rule,
+    the date format and the time zone: off (no button at all), typed (the button and the bar, no
+    microphone), or typed and voice (everything, the default). Set for the company, overridden per
+    plant, and resolved for the board's own root on the server the way the date format is, so a line
+    supervisor under a plant that switched it off sees nothing even though the plant's row sits above
+    what they may read. The board hides what the setting forbids; nothing about reading or writing a
+    sentence changes.
+  state: >-
+    **Briefed session 164 (14 Sept).** One lane: the migration (the key, the two checks, the writers,
+    board_window re-emitted from 0063's text by a script), the SQL cases, the client types after
+    db:types, the board's gate, the settings screen's row, the tests.
 - id: M1
   track: matrix
   num: 1
@@ -10987,6 +11011,33 @@ requirements:
     commandResolve.test.ts the shift-band resolution cases, voiceRead.test.ts the decoder and schema
     cases, voiceData.test.ts the templates and the regenerated held-out set, and the retrained model's
     score is on S52's card with S50's.
+
+- id: R-403
+  title: A plant setting switches the command bar off, to typed only, or to typed and voice, resolved for the board's root on the server
+  source:
+  - 'session 164 conversation (the maintainer, 14 Sept: "Is there a way we can enable and disable the chatbot from the settings? I''m thinking if I want to limit the feature during the initial getting used to period."; shown the three values, "Yes, go.")'
+  - §19.100 (D129)
+  stated_by: maintainer
+  claim: >-
+    A setting command_bar with the values off, typed and voice lives beside the other plant settings:
+    a company-wide value a system admin sets, a per-place override a plant admin sets or clears through
+    the same set/clear functions the other settings use, and the same key and value checks (a value
+    outside the three is refused, a null cannot be stored). When nothing is set anywhere the value is
+    voice. The board's window carries the value resolved for the board's own root by the server's
+    definer resolver, so an override on a plant root a line supervisor cannot read still applies to
+    their board. On the board: off hides the launcher button entirely (a viewer's view, for everyone);
+    typed shows the launcher and the bar without the microphone; voice shows everything. The Settings
+    screen shows the row with the company value, each plant's own choice or "use the company setting",
+    and the consequence in plain words. An unrecognised value read from the server hides the button
+    (fails safe). Nothing else about the bar changes.
+  verified_by:
+  - kind: manual
+    steps: "as a system admin set the company to typed: the microphone disappears on every board; set Plant A to off: Ana's Line 1 board has no button while Marco's board on Plant B still has one; clear Plant A: the button returns; set Plant A to voice while the company is typed: only Plant A has the microphone"
+  status: uncovered
+  note: >-
+    STATED 14 Sept (session 164). Covered when the SQL cases (the checks, the writers, board_window's
+    resolved value including the fail-open case), the settings screen cases and the board gate cases
+    are in and the role walk passes.
 
 findings:
 - id: F-144
@@ -22072,6 +22123,12 @@ next:
   text: "Before the retrain --- change and shift as move verbs, a shift's name as the hours (S52, R-401, R-402, in progress)"
   why: >-
     The maintainer's word on 13 Sept (session 163), both taught in the one Colab run so it is not run twice.
+- kind: task
+  stage: S54
+  text: "The command bar switch --- off, typed only, or typed and voice, per plant (S54, R-403, in progress)"
+  why: >-
+    The maintainer wants to limit the feature while a plant gets used to it (14 Sept, session 164). Built as
+    a plant setting like the eligibility rule, resolved on the server for the board's root.
 - kind: task
   text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
   why: >-
