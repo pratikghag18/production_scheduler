@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: 'abdae16'
+  tip: '45e77c4'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2383,11 +2383,16 @@ stages:
     and that a doubled "and" made a person called "and Bob"; both fixed and pinned. A confirm word that
     does not fit the standing block question is now answered in place, never parsed. Lane two (the data)
     briefed the same evening.
+    **Lane two done 13 Sept (session 162, ddad6f8).** Twelve templates checked by the oracle, the
+    held-out set regenerated to 500 rows over five intents (rule parser 100% clean, 3.2% perturbed), the
+    prompt (~700 tokens now), the grammar file with a fifth branch, the decoder, both scorers, the reply
+    budget 640; the notebook's cap 1280 after a several of three measured ~940. The retrain is the
+    maintainer's: the S43 pipeline on the 500-row set; S50 closes when the score is on this card.
 - id: S51
   track: core
   num: 51
   title: The bar runs a several — one question at a time, every block outlined, one yes for the lot
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 158 conversation (the maintainer, 13 Sept: the compound sentence) and session 161 (built in parallel with the data lane)'
@@ -2407,6 +2412,16 @@ stages:
     **Briefed session 161 (13 Sept)**, one lane in parallel with S50's data lane (no shared files): the
     bar's lot state, the numbered questions, the lot highlight, the board's direct writers reused from
     the pop-ups' own submit paths, the tests.
+    **DONE 13 Sept (session 162, 45e77c4).** A several is a queue: each inner command resolved with the
+    resolver a single sentence uses, each question numbered and asked alone, every touched block outlined
+    at once, one yes writing them in order. The reviewer found the removals and re-times were fired and
+    counted done before the server answered, and that a re-time could open the drag's own confirm
+    pop-up mid-lot; now every step awaits the same mutation the pop-up awaits (deleteAssignment,
+    updateAssignmentFields, updateRunFields, createAssignment, createRun, the move writer) through
+    plan helpers lifted out of the drag's own re-time, and a step that would have asked again refuses
+    with the reason, the lot stopping there and saying how many were done. A lot naming one block
+    twice is refused before the yes; a second yes while working is ignored; Escape while working
+    leaves the run to finish. The writers table is in the lane report behind the brief.
 - id: M1
   track: matrix
   num: 1
@@ -10764,9 +10779,10 @@ requirements:
     steps: "npm run voice:generate, voice:prepare, the notebook on Colab, download predictions, node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions <file> --bar 0.95: PASS; npm run voice:probe on the four sentences"
   status: uncovered
   note: >-
-    STATED 13 Sept (session 160). Covered when voiceData.test.ts pins the new held-out set and the
-    oracle on the new templates, voiceRead.test.ts pins the several decoding and the schema branch,
-    and the S43 pipeline's score on the retrained model is recorded on S50's card.
+    STATED 13 Sept (session 160). Data side done 13 Sept (session 162, ddad6f8): voiceData.test.ts pins
+    the 500-row held-out set and the oracle on the new templates, voiceRead.test.ts pins the several
+    decoding and the schema branch. Covered when the S43 pipeline's score on the retrained model is
+    recorded on S50's card --- the maintainer's Colab run.
 
 - id: R-400
   title: A sentence that reads as several commands is resolved one at a time, its blocks outlined together, and written in order on one yes
@@ -10791,12 +10807,22 @@ requirements:
     without the bar (the resolver alone) still answers its one honest question. Nothing changes for a
     single sentence.
   verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-lot-1 to CB-lot-13 --- two removals walk both questions to the lot status with both outlined and a Do-all button; yes calls onRunLot with both resolved in order and says Done; a partial result says how many were done and keeps the input; a numbered ambiguous question continues to the next command; a block elsewhere (S49) is offered numbered and a yes answers it; remove it at the lot status is answered in place; no, Escape and a typed edit drop the lot; a mixed lot outlines two kinds; a single sentence never calls onRunLot; a second yes while working is ignored; two commands naming one block are refused; Escape and a typed edit while working leave the run to finish. dragGesture.test.ts: a refused removal stops the lot at zero with the toast wording; a lot re-time that would ask refuses and writes nothing; a plain re-time awaits the update"
+  - kind: vitest
+    file: src/test/directBlockAndChip.test.tsx
+    cases: "H3 --- a list highlight colours each id by its own kind"
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: "every role walks clean with the lot writers wired"
   - kind: manual
-    steps: "type the maintainer's sentence into the bar with two people who are free: two readouts, both outlined... no blocks to outline for creates; say yes: two blocks appear. Type a removal of two people from one cell: both outlined red; yes removes both. Type it with one person on another cell: the 1 of 2 question offers the block elsewhere; answer; yes removes both"
-  status: uncovered
+    steps: "type a removal of two people from one cell: both outlined red, two readouts, yes removes both; type it with one person on another cell: the 1 of 2 question offers the block elsewhere, answer, yes removes both; type the maintainer's assign sentence with two free people: two readouts, yes creates two blocks"
+  status: covered
   note: >-
-    STATED 13 Sept (session 161). Covered when src/test/commandBar.test.tsx carries the CB-lot cases and
-    the board's direct writers are pinned to the pop-ups' own mutations.
+    STATED 13 Sept (session 161), COVERED 13 Sept (session 162, 45e77c4). Written when stated; the CB-lot
+    cases and H3 carry it, the writers reach the pop-ups' own mutations (the table is in the brief's lane
+    report, recorded on S51's card).
 
 findings:
 - id: F-144
@@ -14669,6 +14695,36 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 162
+  date: 2026-09-13
+  title: "The data follows the grammar, and the bar runs a several with one yes (S50 lane two, S51, R-400)"
+  shipped: [S51]
+  commits: ['91d48a3', 'ddad6f8', '45e77c4']
+  numbers:
+    app_tests: 3172
+    app_test_files: 144
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept, after both commits: 3172 tests in 144 files, all passing; tsc
+    clean, no migration or RPC changed; the role walk passed.
+  summary: >-
+    Two lanes in parallel on disjoint files. The data lane made the generator write what the grammar
+    now reads (place-less removals and moves, several people or cells), regenerated the held-out set to
+    500 rows over five intents, widened the prompt and the grammar file, taught the decoder and both
+    scorers the several form, and raised the reply budget; the developer session measured the longest
+    training example against the notebook's cap with the served model's tokenizer and raised the cap.
+    The bar lane made a several run as a queue of single commands, one numbered question at a time,
+    every touched block outlined, one yes writing them in order through the pop-ups' own mutations.
+    Its reviewer found the removals and re-times were fired and counted done before the server
+    answered, and that a re-time could open the drag's own confirm pop-up mid-lot with nothing
+    linking it back; both fixed by awaiting the same mutations and refusing a step that would have
+    asked again (D127). What remains of Stage 7 is the maintainer's Colab run on the new set, and
+    their word on the change-the-timing phrasing against R-391.
 - id: 161
   date: 2026-09-13
   title: "The grammar widens: no place, and several people or cells in one sentence (S50 lane one, R-398)"
@@ -21778,7 +21834,7 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S50
-  text: "Voice plan Stage 7, second half --- widen the sentences: a form with an absent place, several people or cells in one sentence, one retrain (S50, R-398, R-399, in progress); the change-the-timing phrasing waits on the maintainer's word against R-391"
+  text: "Voice plan Stage 7, second half --- the retrain: the grammar, the data, the schema and the bar are in; the maintainer runs the S43 pipeline on the 500-row set and the score goes on S50's card (S50, R-399); the change-the-timing phrasing waits on the maintainer's word against R-391"
   why: >-
     Three things the maintainer met on 13 Sept (session 158). After S49 the board side is ready. Then one retrain: the form
     allows an absent place for a move or a removal, the generator writes such sentences and the
@@ -21786,12 +21842,6 @@ next:
     Cell 1 and Cell 2 from 3 to 5" becomes several commands, each outlined, one yes for the lot (the
     maintainer's example, parked here at their word: "lets wait till we reach that point"). Each
     retrain is the S43 pipeline again: generate, prepare, the notebook on Colab, the probe here.
-- kind: task
-  stage: S51
-  text: "The bar runs a several --- one question at a time, every block outlined, one yes for the lot (S51, R-400, in progress, parallel with S50's data lane)"
-  why: >-
-    The maintainer's compound sentence needs both the grammar (S50) and a bar that can run more than one
-    command; the bar half is built on the rule parser so it is ready before the retrained model is.
 - kind: task
   text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building"
   why: >-
