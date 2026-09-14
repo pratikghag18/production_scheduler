@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '3ca8f29'
+  tip: 'a33fc01'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2291,7 +2291,7 @@ stages:
   track: core
   num: 48
   title: The corner launcher — the command bar becomes a button in the lower right that opens a panel
-  status: now
+  status: done
   owner: agent
   refs:
   - session 158 conversation (the maintainer, 13 Sept; the mock they approved)
@@ -2311,6 +2311,13 @@ stages:
     **Briefed session 158 (13 Sept)** from a static mock the maintainer approved (closed, and open on
     a removal with the block outlined). One lane: the launcher component, two icons, the board's
     placement, the tests, the two browser specs that must open the panel first.
+    **DONE 13 Sept (session 159, a33fc01).** The bar is unchanged but for the drawn microphone and one
+    prop that tells the launcher Escape found nothing left to clear. The panel is pinned to the corner
+    rather than anchored to an element, so it is an explicit, commented exception in the shared
+    pop-up guardrail (popoverStandard.test.ts) instead of composing the Popover shell; if the Stage 10
+    chat panel becomes a second such case, fold corner placement into the shell then. The reviewer
+    found two keyboard gaps --- Escape only from inside the input, and focus lost on a click outside
+    --- both fixed and pinned. The reviewer's screenshot of the real panel matched the mock.
 - id: M1
   track: matrix
   num: 1
@@ -10555,11 +10562,18 @@ requirements:
     stands or a reading is in flight. The tester's role walk and the gated voice spec open the panel
     before they use the bar.
   verified_by:
+  - kind: vitest
+    file: src/test/commandLauncher.test.tsx
+    cases: "CL-1 to CL-9 --- a button and no panel at rest; pressing opens with the input focused; slash opens except inside an editable; Escape clears the status first and closes only when the bar is clear; a mousedown outside closes, one inside a pop-up the bar opened does not; closing with a question standing clears the highlight; aria-expanded tracks; Escape from any element in the panel closes; focus returns to the button after Escape"
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: "every placing role opens the launcher before the bar is asserted; every viewer has no launcher"
   - kind: manual
     steps: "open the board as an admin: the launcher sits in the lower right; press it, the panel opens with the cursor in the input; type a removal, see the outline, say yes; press Escape until the panel closes; press slash, it reopens; open the board as a viewer: no launcher"
-  status: uncovered
+  status: covered
   note: >-
-    STATED 13 Sept (session 158). Covered when src/test/commandLauncher.test.tsx carries the CL cases (no
+    STATED 13 Sept (session 158), COVERED 13 Sept (session 159, a33fc01). Written when stated: covered
+    when src/test/commandLauncher.test.tsx carries the CL cases (no
     button without canPlace; press opens and focuses; slash opens; Escape closes only when the bar is
     clear; click outside closes; closing clears the highlight and aborts a reading) and the role walk
     passes opening the panel.
@@ -14434,6 +14448,36 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 159
+  date: 2026-09-13
+  title: "The corner launcher: the bar behind a button in the lower right, from an approved mock to shipped in one sitting (S48, R-396)"
+  shipped: [S48]
+  commits: ['75df1df', 'fad631b', 'a33fc01']
+  numbers:
+    app_tests: 3095
+    app_test_files: 144
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept, after the launcher commit: 3095 tests in 144 files, all passing;
+    tsc clean, no migration or RPC changed; the role walk passed with every placing role opening the
+    launcher first and every viewer seeing none.
+  summary: >-
+    The maintainer, after an evening with the bar and the microphone, wanted the command line as a
+    chatbot-style icon in the lower right and a more recognisable microphone, and asked whether voice
+    should have its own icon. The developer session answered one icon, not two (the microphone lives
+    inside the panel), drew a static mock in the app's own tokens --- closed, and open on a removal with
+    the block outlined --- and the maintainer approved it. Written as R-396, S48 and D124 before the
+    code; one Sonnet lane built the launcher around the unchanged bar with two drawn icons, a slash key,
+    an Escape rule that lets the bar clear itself first, and a click-outside that spares the pop-ups
+    the bar opens; a reviewer found Escape only worked from inside the input and focus was lost on a
+    click outside, both fixed and pinned; the reviewer's screenshot of the real panel matched the mock.
+    The panel is an explicit exception in the pop-up guardrail, with the reason written beside it. The
+    plan commit that stated R-396 carried a bad quote and did not parse for two commits; fixed.
 - id: 158
   date: 2026-09-13
   title: "Stage 5b, Stage 6 and the outline shipped in one evening: the grammar, the microphone, and a word that does it (S45, S46, S47)"
@@ -21450,12 +21494,6 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  stage: S48
-  text: "The corner launcher --- the bar behind a button in the lower right, the panel above it (S48, R-396, in progress)"
-  why: >-
-    The maintainer's call on 13 Sept after using the bar with the microphone; the mock was approved the
-    same evening. Built before Stage 7 because it changes where every later voice piece lives.
 - kind: task
   text: "Voice plan Stage 7 --- widen the sentences: a place the person did not say, the change-the-timing phrasings, and several people or cells in one sentence"
   why: >-
