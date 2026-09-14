@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: '53cb5f1'
+  tip: '12b57c8'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2452,6 +2452,14 @@ stages:
     a new cell dropping its shift silently, and the bare possessive s eating a name like Chris; so the
     named clause takes only for and during, a printed name is quoted when it needs it, the guard is in
     both move branches, and the bare s applies only after a digit. Lanes B and C briefed.
+    **Lanes B and C done 14 Sept (session 164, a4d73c9, 12b57c8).** The resolver turns a name into the cell's band
+    from the same map the pop-up's chips read; a place-less removal tries each of the person's blocks'
+    cells in board order (the reviewer showed the first build depended on that order; D128 now says the
+    rule). The data carries eight templates for the shift sentences and the change-timing move, the
+    held-out set regenerated with the field, the prompt at 867 tokens, the longest example ~1134 against
+    the notebook's 1280; the reviewer's finds (a template saying shift twice, "on the day a shift", the
+    several paragraph not naming the shift) are in. What remains is the
+    maintainer's Colab run on the regenerated set; S52 and S50 close together when its score is on the cards.
 - id: S53
   track: core
   num: 53
@@ -10953,11 +10961,28 @@ requirements:
     the names the demo plant uses and realistic ones; the prompt and the grammar file say the field;
     the model is taught it in the same retrain as R-399.
   verified_by:
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "SH6 to SH17 --- the shift clause in its phrasings, shift and hours refused, the product last, round trips with quoting, a several copying the shift, a place named Shift Bay left alone"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "SR1 to SR12 --- for shift 2 equals 14:00-22:00 typed, readout included; shift 2, Shift 2 and 2 all match; night matches Night Shift by its last token; shift 9 is no_shift verbatim listing the cell's bands; no pattern is no_shift_pattern verbatim; two bands sharing a word ask which and the answer resolves; Shift 3 overnight ends on the next day with the board's own time text; a removal for shift 1 finds the block overlapping 06:00-14:00; a move during shift 3 re-times to the overnight band; a booking for shift 1 resolves as the hours form; a place-less removal with a shift takes the window from the first block's own cell; a place-less move during shift 3 re-times on the block's cell"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-shift-1 (the maintainer's sentence reaches the pop-up with 14:00-22:00), CB-shift-2 (shift 9 shows the no_shift message and opens nothing)"
+  - kind: vitest
+    file: src/test/voiceRead.test.ts
+    cases: "VR12 (the decoder: shift accepted, both or neither refused), VR13 (the schema carries shift in the four branches with the hours nullable only for assign and book)"
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V2 over the eight new templates (the shift sentences in six shapes, the change-timing move with and without the apostrophe, a several with a shift), V4 (500 rows, five intents, every form carrying shift), V6 and V13 (the rule parser's baseline re-read: 100% clean, 5.2% perturbed), V15 (a shift template's form has null hours and a name; the oracle holds), V16 (the apostrophe-less possessive parses to the same move), V17 re-pinned (a missing shift key is an extra key now that every row carries it)"
   - kind: manual
-    steps: "type assign Operator A2 to work for shift 2 on Cell 1 in Line 1 for Housing A: the pop-up opens prefilled 14:00-22:00; type it with shift 9: the message lists the cell's three shifts"
-  status: uncovered
+    steps: "type assign Operator A2 to work for shift 2 on Cell 1 in Line 1 for Housing A: the pop-up opens prefilled 14:00-22:00; type it with shift 9: the message lists the cell's three shifts; after the Colab run, the probe reads the same sentence into the form with shift 2 and null hours"
+  status: covered
   note: >-
-    STATED 13 Sept (session 163). Grammar, decoder and schema in 14 Sept (session 163, 53cb5f1; SH6 to
+    STATED 13 Sept (session 163). COVERED on the board side 14 Sept (session 164, a4d73c9, 12b57c8):
+    the resolver turns a name into the cell's band, the data carries the sentences. The model's own
+    reading of them is the retrain's, recorded on S52's card when the maintainer's run is scored. Grammar, decoder and schema in 14 Sept (session 163, 53cb5f1; SH6 to
     SH14, VR12, VR8 with the field). Covered when
     commandResolve.test.ts the shift-band resolution cases, voiceRead.test.ts the decoder and schema
     cases, voiceData.test.ts the templates and the regenerated held-out set, and the retrained model's
@@ -14834,6 +14859,38 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 164
+  date: 2026-09-14
+  title: "A shift's name becomes the cell's own band, and the data learns the new sentences (S52 lanes two and three, R-402)"
+  shipped: []
+  commits: ['29bd4d0', 'a4d73c9', '12b57c8']
+  numbers:
+    app_tests: 3217
+    app_test_files: 144
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 14 Sept, after both commits: 3217 tests in 144 files, all passing; tsc
+    clean, no migration or RPC changed; the role walk passed.
+  summary: >-
+    Two lanes in parallel on disjoint files, each with its reviewer. The resolver lane gave the
+    context the bands of the pattern that applies to a node, fed by the board from the same map the
+    pop-up's shift chips read, and turns a shift's name into that band for the day --- exactly, by
+    the name's last token, or as the one band containing the words --- with a wrong name answered by
+    the cell's own list, a cell with no pattern asking for the hours, and a tie asking which; a
+    place-less removal or move with a shift takes the band from the block's own cell, never ignoring
+    the name. The data lane wrote eight templates for the shift sentences and the change-timing move,
+    regenerated the held-out set with the field, removed the two tolerances that had bridged the
+    older set, and re-read the rule parser's baseline; the prompt is 867 tokens and the longest
+    example 1134 against the notebook's 1280. The resolver's reviewer showed the place-less rule the
+    developer session had given depended on the order the blocks arrived in, now fixed and written in
+    D128; the data's reviewer caught a template saying shift twice and "on the day a shift". The
+    maintainer's catalogue card (S53) went on the page at their request. The Colab files are prepared; what
+    remains of Stage 7 is the maintainer's run.
 - id: 163
   date: 2026-09-14
   title: "Change and shift become verbs, and a shift's name enters the form (S52 lane one, R-401)"
