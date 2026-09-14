@@ -5,14 +5,17 @@ S42-a (`docs/agent-briefs/s42-a-training-set-brief.md`), Stage 3 of
 
 ## `heldout.jsonl` — committed, generated ONCE, never regenerated
 
-400 rows: 100 per intent (assign, book, unassign, move), half clean and half
-perturbed within each intent. Generated with a fixed seed so it is
-reproducible, but the file itself — not the command that made it — is the
-source of truth from here on:
+500 rows: 100 per intent (assign, book, unassign, move, several — "several"
+joined the other four at S50), half clean and half perturbed within each
+intent. Generated with a fixed seed so it is reproducible, but the file
+itself — not the command that made it — is the source of truth from here on:
 
 ```
 node scripts/voice/generate.mjs --out data/voice/heldout.jsonl --n 400 --seed 20260911 --heldout
 ```
+
+(the `--n` above is ignored for `--heldout`; the row count is fixed by
+`generateHeldoutRows` itself, 50 clean + 50 perturbed per intent.)
 
 Every model this project ever trains, including the rule parser itself, is
 scored against this exact file (`npm run voice:score`). Regenerating it would

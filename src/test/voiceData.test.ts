@@ -18,7 +18,7 @@ import {
 } from "@/lib/command/parse";
 import type { Command, SingleCommand } from "@/lib/command/parse";
 import { mulberry32 } from "../../scripts/voice/lib/rng.mjs";
-import { TEMPLATES } from "../../scripts/voice/lib/templates.mjs";
+import { TEMPLATES, templateById } from "../../scripts/voice/lib/templates.mjs";
 import { CATALOG, PERTURBATION_IDS, perturbedRowForm } from "../../scripts/voice/lib/perturb.mjs";
 import { canonical, equalForms } from "../../scripts/voice/lib/form.mjs";
 import { score, rate } from "../../scripts/voice/lib/score.mjs";
@@ -205,6 +205,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       // key ("meridiem") inside `span.start` -- a fine-tuned model's shape.
       const predicted = {
         existing: null,
+        shift: null,
         span: {
           end: { minute: 0, hour: 14 },
           start: { minute: 0, hour: 10, meridiem: "am" },
@@ -247,12 +248,14 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
   });
 
   it("V6: the rule parser's own baseline on held-out is 1.0 clean, well below 0.5 perturbed", () => {
-    // S50: re-pinned on the regenerated 500-row set (read from
+    // S52-c: re-pinned on the regenerated 500-row set (read from
     // `node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl
-    // --rule-parser --bar 0.95`, after the reviewer's M7/U8 template fixes):
-    // clean 250/250 (1.0), perturbed 8/250 (0.032) -- close to the pre-S50
-    // ~4% by construction (the same perturbation catalogue, one more
-    // intent's worth of templates).
+    // --rule-parser --bar 0.95`, after the shift templates and M10's
+    // possessive-timing move were added): clean 250/250 (1.0), perturbed
+    // 13/250 (0.052) -- up from S50's 8/250 (0.032) because the new
+    // templates give the SAME perturbation catalogue more surface (a shift
+    // name's own spelling can now be perturbed too), not because anything
+    // stopped perturbing.
     const predict = (row: VoiceRow) => {
       const result = parseCommand(row.sentence);
       return result.ok ? result.command : null;
@@ -260,14 +263,14 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
     expect(result.clean).toEqual({ n: 250, correct: 250 });
-    expect(result.perturbed).toEqual({ n: 250, correct: 8 });
+    expect(result.perturbed).toEqual({ n: 250, correct: 13 });
     // Pinned with a tolerance around the number this generator actually
-    // produces (~3.2%) -- a perturbation catalogue that stopped perturbing
+    // produces (~5.2%) -- a perturbation catalogue that stopped perturbing
     // (every function became a no-op) would push this toward 1.0, and that
     // is exactly the drift this pin exists to catch.
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.032, 2);
+    expect(rate(result.perturbed)).toBeCloseTo(0.052, 2);
   });
 
   it("V7: a generated training set (n=200, seed 1) shares no sentence with held-out and is ~50% clean", () => {
@@ -365,10 +368,15 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     });
   });
 
-  it("V17 (S52-a, reviewer should-fix 2): a null shift on a prediction against a shift-less row (the committed held-out set, pre-S52) is never counted as an extra key", () => {
-    // A raw stand-in for a committed held-out row's own form -- no `shift`
-    // key at all (regenerating the set is the data lane's job; once it
-    // carries `shift` this tolerance is moot, but harmless either way).
+  it("V17 (re-pinned, S52-c): now that every held-out row carries `shift`, a `shift: null` prediction against a shift-LESS expected form IS an extra key", () => {
+    // The tolerance V17 used to pin (S52-a, reviewer should-fix 2) existed
+    // only because the committed held-out set predated the `shift` field.
+    // `data/voice/heldout.jsonl` has since been regenerated (S52-c) with
+    // `shift` on every row, so `collectExtraKeys` (score.mjs) no longer
+    // special-cases it -- this is a raw stand-in for what a row's `form`
+    // looked like BEFORE that regeneration, kept only to prove the old
+    // special case is gone, not to describe any row in the committed set
+    // any more.
     const shiftlessForm = {
       intent: "assign",
       operator: "Sam Patel",
@@ -393,14 +401,18 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
 
     const predicted = { ...shiftlessForm, shift: null };
     const result = score(rows, () => predicted);
+    // The row itself still scores correct -- `normalizeToKnownKeys` strips
+    // `shift` off the prediction before the whole-row compare runs, exactly
+    // as it would strip any other key `expected` lacks. `extraKeys` is the
+    // separate, un-normalised diagnostic, and it now counts `shift` like
+    // any other invented field.
     expect(rate(result.clean)).toBe(1);
-    expect(result.extraKeys).toEqual({ n: 0, keys: {} });
+    expect(result.extraKeys).toEqual({ n: 1, keys: { shift: 1 } });
 
-    // Contrast: the tolerance is specific to `shift: null` -- a genuinely
-    // invented key is still counted.
+    // A genuinely invented key is still counted right alongside it.
     const withRealExtra = { ...shiftlessForm, shift: null, type: "assign" };
     const result2 = score(rows, () => withRealExtra);
-    expect(result2.extraKeys).toEqual({ n: 1, keys: { type: 1 } });
+    expect(result2.extraKeys).toEqual({ n: 1, keys: { shift: 1, type: 1 } });
   });
 
   it("V13: the rule parser's held-out baseline is unchanged by the extra-key normalisation (re-pins V6)", () => {
@@ -411,10 +423,72 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
     expect(result.clean).toEqual({ n: 250, correct: 250 });
-    expect(result.perturbed).toEqual({ n: 250, correct: 8 });
+    expect(result.perturbed).toEqual({ n: 250, correct: 13 });
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.032, 2);
+    expect(rate(result.perturbed)).toBeCloseTo(0.052, 2);
+  });
+
+  it("V15 (S52-c, R-402): a shift template's form has start/end null and a name -- the oracle holds", () => {
+    const shiftTemplateIds = [
+      "A11-shift",
+      "A12-shift-product-last",
+      "A13-the-x-shift",
+      "B7-shift",
+      "U11-shift",
+      "M11-shift",
+      "S7-several-shift",
+    ];
+    for (const id of shiftTemplateIds) {
+      const t = templateById(id);
+      const rng = mulberry32(seedFrom(id, "V15"));
+      const slots = t.genSlots(rng);
+      const sentence = t.sentence(slots);
+      const form = t.form(slots) as Command;
+      const result = parseCommand(sentence);
+      expect(result.ok, `${id}: "${sentence}" did not parse`).toBe(true);
+      if (!result.ok) continue;
+      expect(equalForms(result.command, form), `${id}: "${sentence}"`).toBe(true);
+      const commands = form.intent === "several" ? form.commands : [form];
+      for (const c of commands) {
+        expect(c.shift, `${id}: "${sentence}"`).not.toBeNull();
+        if (c.intent === "assign" || c.intent === "book") {
+          expect(c.start, `${id}: "${sentence}"`).toBeNull();
+          expect(c.end, `${id}: "${sentence}"`).toBeNull();
+        } else {
+          expect(c.span, `${id}: "${sentence}"`).toBeNull();
+        }
+      }
+    }
+  });
+
+  it("V16 (S52-c, R-401/F-144): the apostrophe-less possessive parses to the same move as the apostrophe form", () => {
+    const t = templateById("M10-change-timing");
+    // Fixed slots, forced to each spelling in turn: same everything else,
+    // only `noApostrophe` differs, and the resulting FORM (in particular
+    // `operator`, the whole point of the possessive-tail strip) must agree.
+    const rng = mulberry32(seedFrom("M10-change-timing", "V16"));
+    const slots = t.genSlots(rng) as { op: string };
+    const withApostrophe = { ...slots, noApostrophe: false };
+    const withoutApostrophe = { ...slots, noApostrophe: true, op: "Operator A3" };
+    withApostrophe.op = "Operator A3"; // digit-ending, so both spellings are legal for this op
+
+    const sentenceA = t.sentence(withApostrophe);
+    const sentenceB = t.sentence(withoutApostrophe);
+    expect(sentenceA).not.toBe(sentenceB);
+    expect(sentenceA).toContain("'s");
+    expect(sentenceB).not.toContain("'");
+
+    const resultA = parseCommand(sentenceA);
+    const resultB = parseCommand(sentenceB);
+    expect(resultA.ok, sentenceA).toBe(true);
+    expect(resultB.ok, sentenceB).toBe(true);
+    if (!resultA.ok || !resultB.ok) return;
+    expect(equalForms(resultA.command, resultB.command)).toBe(true);
+    expect(resultA.command.intent).toBe("move");
+    if (resultA.command.intent === "move") {
+      expect(resultA.command.operator).toBe("Operator A3");
+    }
   });
 
   describe("V14 (S50, R-398): the scorer tallies a several's inner fields", () => {

@@ -1,27 +1,13 @@
 // scripts/voice/lib/form.mjs — a stable text form for a `Command`, so two
 // structurally-equal forms compare equal regardless of key order (S42-a §3).
 
-// R-402 (S52-a, docs/agent-briefs/s52-a-shift-grammar-brief.md §2 item 5):
-// every single command gained a `shift` field, but the COMMITTED
-// `data/voice/heldout.jsonl` predates it -- none of its forms carry the key
-// at all. Regenerating that file is the data lane's own job (a later
-// brief), so here, the one comparison point every caller shares, a missing
-// `shift` on a single-command-shaped object is read the same as an explicit
-// `shift: null` ("no shift"), so an old row and a freshly parsed command
-// that both mean "no shift" still compare equal.
-const SINGLE_COMMAND_INTENTS = new Set(["assign", "book", "unassign", "move"]);
-
-function withDefaultShift(value) {
-  if (Array.isArray(value)) return value.map(withDefaultShift);
-  if (value !== null && typeof value === "object") {
-    const out = {};
-    for (const key of Object.keys(value)) out[key] = withDefaultShift(value[key]);
-    if (SINGLE_COMMAND_INTENTS.has(out.intent) && !("shift" in out)) out.shift = null;
-    return out;
-  }
-  return value;
-}
-
+// R-402 (S52-a, docs/agent-briefs/s52-a-shift-grammar-brief.md §2 item 5,
+// closed by the S52-c data brief): every single command carries a `shift`
+// field now, and `data/voice/heldout.jsonl` has been regenerated to carry
+// it on every row -- the tolerance that used to read a MISSING `shift` key
+// as an implicit `null` (for the committed set that predated the field) is
+// gone. `canonical`/`equalForms` compare exactly what is there; a form
+// missing `shift` is simply missing it, the same as any other field.
 function sortKeysDeep(value) {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
   if (value !== null && typeof value === "object") {
@@ -33,10 +19,9 @@ function sortKeysDeep(value) {
 }
 
 /** JSON text for `form` with every object's keys sorted, recursively --
- *  `canonical({a:1,b:2})  === canonical({b:2,a:1})`. A missing `shift` on a
- *  single command reads as `shift: null` (S52-a, see the comment above). */
+ *  `canonical({a:1,b:2})  === canonical({b:2,a:1})`. */
 export function canonical(form) {
-  return JSON.stringify(sortKeysDeep(withDefaultShift(form)));
+  return JSON.stringify(sortKeysDeep(form));
 }
 
 /** Structural equality of two forms, independent of key order. */

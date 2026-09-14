@@ -344,3 +344,36 @@ export const ISO_DATES = (() => {
 /** Plausible shift-hour starting points, 24h. */
 export const TIME_HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 export const TIME_MINUTES = [0, 0, 0, 15, 30, 45]; // weighted toward :00
+
+// ---------------------------------------------------------------------------
+// Shift names (S52-a, R-402): a shift's NAME, never its hours -- the
+// resolver (a later lane) turns the name into that cell's own band for the
+// day, the same shift pattern the board's chips already draw from. SHIFTS_DEMO
+// is the demo plant's own pattern names (`supabase/seed.sql` ~line 138:
+// "Shift 1" 06:00-14:00, "Shift 2" 14:00-22:00, "Shift 3" 22:00-06:00) and
+// the bare numbers a person would actually say ("for shift 2"); SHIFTS_REALISTIC
+// is names a real plant might use instead, so the model does not learn one
+// plant's vocabulary (brief docs/agent-briefs/s52-c-shift-data-brief.md §1).
+// ---------------------------------------------------------------------------
+export const SHIFTS_DEMO = ["Shift 1", "Shift 2", "Shift 3", "1", "2", "3"];
+export const SHIFTS_REALISTIC = [
+  "Morning",
+  "Day",
+  "Afternoon",
+  "Evening",
+  "Night",
+  "Nights",
+  "Early",
+  "Late",
+  "A",
+  "B",
+  "C",
+  "Day A",
+  "Day B",
+  "First",
+  "Second",
+  "Third",
+  "Weekend",
+  "Late Turn",
+];
+export const SHIFTS_ALL = [...SHIFTS_DEMO, ...SHIFTS_REALISTIC];

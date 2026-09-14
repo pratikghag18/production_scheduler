@@ -13,6 +13,7 @@ import { pick, randInt, chance } from "./rng.mjs";
 import { buildTimePair, TIME_SEPARATORS } from "./time.mjs";
 import {
   PEOPLE_ALL,
+  PEOPLE_DEMO,
   PARTS_ALL,
   CELLS_ALL,
   LINES_ALL,
@@ -20,6 +21,8 @@ import {
   WEEKDAY_FULL,
   WEEKDAY_ABBR,
   ISO_DATES,
+  SHIFTS_ALL,
+  SHIFTS_REALISTIC,
 } from "./pools.mjs";
 // R-391: the four verb lists are the one export from parse.ts (this is the
 // oracle's own import path, `rows.mjs`'s), so a template's verb is drawn from
@@ -51,6 +54,37 @@ function needsQuoting(word) {
 
 function qw(word) {
   return needsQuoting(word) ? `"${word}"` : word;
+}
+
+/** S52-a (R-402): mirrors parse.ts's own `needsShiftQuoting`/`quoteShiftIfNeeded`
+ *  (the shift grammar's own stop-word set, spelled out here since that file
+ *  exports no quoting helper -- same reason `needsQuoting`/`qw` above mirror
+ *  the place-name quoting rule instead of importing it). A shift name of more
+ *  than one word, containing a comma, or equal (case-insensitively) to one of
+ *  the shift clause's own keywords ("Shift 1" starts with the word "shift"
+ *  itself) must be quoted so the NAMED form ("for shift X") reads it back as
+ *  one name rather than mis-splitting on its own syntax. */
+const SHIFT_QUOTING_STOP_WORDS = new Set([
+  "on",
+  "at",
+  "in",
+  "for",
+  "during",
+  "to",
+  "from",
+  "and",
+  "shift",
+]);
+
+function needsShiftQuoting(name) {
+  if (name.includes(",")) return true;
+  const words = name.trim().split(/\s+/);
+  if (words.length > 1) return true;
+  return SHIFT_QUOTING_STOP_WORDS.has(words[0].toLowerCase());
+}
+
+function qwShift(name) {
+  return needsShiftQuoting(name) ? `"${name}"` : name;
 }
 
 /** Names built on purpose to need quoting -- exercises the parser's quoted-
@@ -469,6 +503,112 @@ const assignTemplates = [
         existing: null,
       }),
   },
+  // -------------------------------------------------------------------------
+  // S52-a (R-402, brief §2 item 2): a sentence may name a shift instead of
+  // hours. `A9`/`A10` are already taken (A9-noon, A10-24h-dash-two-places),
+  // so these pick up the numbering where assign's own list actually left
+  // off -- the brief's own A9/A10/A11 ids are renumbered here, said in the
+  // lane report.
+  // -------------------------------------------------------------------------
+  {
+    id: "A11-shift",
+    intent: "assign",
+    genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      line: pick(rng, LINES_ALL),
+      prep: pick(rng, ["for", "during"]),
+      name: pick(rng, SHIFTS_ALL),
+    }),
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${qw(s.op)} to work on ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} ${s.prep} shift ${qwShift(s.name)}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell, s.line],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: s.name,
+      }),
+  },
+  {
+    // The maintainer's own word order (design §19.99/D128, session 163):
+    // "Assign operator to work for shift X on cell Y, line Z for product A"
+    // -- the product comes LAST, as a trailing "for <product>" the grammar
+    // reads only once a shift clause has already been read out of the
+    // sentence (parse.ts's `parseAssignRest`, brief item 2/4).
+    id: "A12-shift-product-last",
+    intent: "assign",
+    genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      line: pick(rng, LINES_ALL),
+      name: pick(rng, SHIFTS_ALL),
+    }),
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${qw(s.op)} to work for shift ${qwShift(s.name)} on ${qw(s.cell)} in ${qw(s.line)} for ${qw(s.part)}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell, s.line],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: s.name,
+      }),
+  },
+  {
+    // "on the night shift" -- the TRAILING-WORD form (parse.ts's
+    // `SHIFT_TRAILING_WORD_RE`): the name PRECEDES the literal word "shift",
+    // which is unambiguous, so no quoting is needed even for a two-word
+    // realistic name ("late turn shift" reads back as one name).
+    id: "A13-the-x-shift",
+    intent: "assign",
+    genSlots: (rng) => ({
+      verb: pick(rng, ASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      // A name ENDING in a single letter reads oddly in this form -- "on
+      // the a shift" ("A"), and just as oddly "on the day a shift" ("Day
+      // A") -- SHIFT_NAME parses either fine (the trailing form's own
+      // comment above), but no one would say it that way, so this template
+      // excludes any name whose LAST word is one letter (never by the
+      // whole name's string length, which "Day A"/"Day B" would slip past).
+      word: pick(
+        rng,
+        SHIFTS_REALISTIC.filter((n) => {
+          const words = n.split(/\s+/);
+          return words[words.length - 1].length > 1;
+        }),
+      ).toLowerCase(),
+    }),
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${qw(s.op)} to work on ${qw(s.part)} on ${qw(s.cell)} on the ${s.word} shift`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: s.word,
+      }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -610,6 +750,35 @@ const bookTemplates = [
         start: s.span.start,
         end: s.span.end,
         existing: null,
+      }),
+  },
+  // -------------------------------------------------------------------------
+  // S52-a (R-402, brief §2 item 2): a shift name in place of the hours --
+  // book has no operator field to worry about product-last ordering.
+  // -------------------------------------------------------------------------
+  {
+    id: "B7-shift",
+    intent: "book",
+    genSlots: (rng) => ({
+      verb: pick(rng, BOOK_VERBS),
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      line: pick(rng, LINES_ALL),
+      prep: pick(rng, ["for", "during"]),
+      name: pick(rng, SHIFTS_ALL),
+    }),
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${qw(s.part)} on ${qw(s.cell)} in ${qw(s.line)} ${s.prep} shift ${qwShift(s.name)}`,
+    form: (s) =>
+      baseCommand("book", {
+        product: s.part,
+        place: [s.cell, s.line],
+        headcount: null,
+        day: null,
+        start: null,
+        end: null,
+        existing: null,
+        shift: s.name,
       }),
   },
 ];
@@ -813,6 +982,32 @@ const unassignTemplates = [
         day: null,
         span: null,
         existing: null,
+      }),
+  },
+  // -------------------------------------------------------------------------
+  // S52-a (R-402, brief §2 item 2): a shift name in place of the hours -- a
+  // removal still means "the whole day", `span` stays null (the shift's
+  // name is not the resolver's concern yet).
+  // -------------------------------------------------------------------------
+  {
+    id: "U11-shift",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      cell: pick(rng, CELLS_ALL),
+      prep: pick(rng, ["for", "during"]),
+      name: pick(rng, SHIFTS_ALL),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} from ${qw(s.cell)} ${s.prep} shift ${qwShift(s.name)}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [s.cell],
+        day: null,
+        span: null,
+        existing: null,
+        shift: s.name,
       }),
   },
 ];
@@ -1027,10 +1222,86 @@ const moveTemplates = [
         existing: null,
       }),
   },
+  // -------------------------------------------------------------------------
+  // S52-a (R-401, brief §2 item 1): "change" and "shift" join `MOVE_VERBS`
+  // (nothing new to add there -- V9 already proves every verb opens a clean
+  // row), and a possessive timing tail on the operator segment ("A3's
+  // timing", "A3s timing") reads as the person, a move in time only. Half
+  // the draws write the possessive WITHOUT the apostrophe, the way the
+  // browser's speech recogniser does (F-144) -- `parse.ts`'s
+  // `POSSESSIVE_TIMING_TAIL_RE` only accepts the bare-`s` spelling right
+  // after a DIGIT, so that half draws its operator from `PEOPLE_DEMO`
+  // ("Operator A3", every name ending in a digit) rather than `PEOPLE_ALL`.
+  // -------------------------------------------------------------------------
+  {
+    id: "M10-change-timing",
+    intent: "move",
+    genSlots: (rng) => {
+      const noApostrophe = chance(rng, 0.5);
+      const op = noApostrophe ? pick(rng, PEOPLE_DEMO) : pick(rng, PEOPLE_ALL);
+      return {
+        verb: pick(rng, ["change", "shift"]),
+        op,
+        noApostrophe,
+        tail: pick(rng, ["timing", "hours", "time"]),
+        // Same reviewer fix `randomSpan` documents for M7: the outer clause
+        // word is itself "to" ("... timing to 8 pm to 11 pm"), so the
+        // pair's own separator is forced to "to" too -- otherwise a random
+        // "until"/"till" pick stacks two different prepositions no one
+        // would actually say.
+        span: randomSpan(rng, "to"),
+      };
+    },
+    sentence: (s) => {
+      const possessive = s.noApostrophe ? `${qw(s.op)}s` : `${qw(s.op)}'s`;
+      return `${s.verb} ${possessive} ${s.tail} to ${s.span.text}`;
+    },
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: s.span.start, end: s.span.end },
+        existing: null,
+      }),
+  },
+  // -------------------------------------------------------------------------
+  // S52-a (R-402, brief §2 item 2): a shift name stands in for new hours --
+  // a move in time only, `toPlace` and `span` both null, no current place
+  // named either (matches M7-M9's own place-less shape).
+  // -------------------------------------------------------------------------
+  {
+    id: "M11-shift",
+    intent: "move",
+    genSlots: (rng) => ({
+      // S52-c (reviewer fix): never the verb "shift" itself here -- "shift
+      // Sven Horvath for shift Day" reads as the clause's own noun doubled
+      // up with the verb. Every OTHER move verb still exercises this shape.
+      verb: pick(
+        rng,
+        MOVE_VERBS.filter((v) => v !== "shift"),
+      ),
+      op: pick(rng, PEOPLE_ALL),
+      prep: pick(rng, ["for", "during"]),
+      name: pick(rng, SHIFTS_ALL),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} ${s.prep} shift ${qwShift(s.name)}`,
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: [],
+        toPlace: null,
+        day: null,
+        span: null,
+        existing: null,
+        shift: s.name,
+      }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
-// Several (S1-S6) -- S50 (R-398, brief §2 item 3): the OPERATOR segment
+// Several (S1-S7) -- S50 (R-398, brief §2 item 3): the OPERATOR segment
 // (assign, unassign, move) or the FIRST PLACE segment (assign, book) names
 // more than one thing, joined by " and " (an operator list also accepts a
 // ", "-joined run before the final " and "). Every `form` here is
@@ -1233,6 +1504,46 @@ const severalTemplates = [
           start: s.span.start,
           end: s.span.end,
           existing: null,
+        }),
+      ),
+    }),
+  },
+  // -------------------------------------------------------------------------
+  // S52-a (R-402, brief §2 item 2): two people, one cell, a shift name in
+  // place of the hours -- the same product-first path `parseAssignRest`'s
+  // list branch takes when there is no leftover "for" text after the shift
+  // clause is already stripped.
+  // -------------------------------------------------------------------------
+  {
+    id: "S7-several-shift",
+    intent: "several",
+    genSlots: (rng) => {
+      const [op1, op2] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op1,
+        op2,
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        prep: pick(rng, ["for", "during"]),
+        name: pick(rng, SHIFTS_ALL),
+      };
+    },
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${joinAnd([qw(s.op1), qw(s.op2)])} to ${qw(s.part)} on ${qw(s.cell)} ${s.prep} shift ${qwShift(s.name)}`,
+    form: (s) => ({
+      intent: "several",
+      commands: [s.op1, s.op2].map((op) =>
+        baseCommand("assign", {
+          operator: op,
+          product: s.part,
+          place: [s.cell],
+          day: null,
+          start: null,
+          end: null,
+          attach: null,
+          existing: null,
+          shift: s.name,
         }),
       ),
     }),

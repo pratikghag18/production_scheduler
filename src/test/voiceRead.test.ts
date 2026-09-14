@@ -589,3 +589,53 @@ describe("VR12 (R-402): decode accepts shift, refuses both, refuses neither", ()
     expect(decodeCommand(both)).toBeNull();
   });
 });
+
+// S52-c (docs/agent-briefs/s52-c-shift-data-brief.md §2 item 6, R-402): the
+// schema check VR8/VR11 already run field-for-field does not itself name
+// `shift` or the newly-nullable `start`/`end` -- this pins those two facts
+// directly, the way VR11's own `place` check pins `minItems` directly.
+describe("VR13 (S52-c, R-402): shift is in all four $defs, start/end nullable only in assign and book", () => {
+  type JsonSchemaNode = {
+    $ref?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+    oneOf?: JsonSchemaNode[];
+  };
+  const root = formSchema as { $defs: Record<string, JsonSchemaNode>; oneOf: JsonSchemaNode[] };
+
+  it("VR13: every one of the four $defs branches declares shift (nullable string) and requires it", () => {
+    for (const name of ["assign", "book", "unassign", "move"]) {
+      const branch = root.$defs[name];
+      expect(branch.properties?.shift, name).toEqual({
+        oneOf: [{ type: "null" }, { type: "string" }],
+      });
+      expect(branch.required, name).toContain("shift");
+    }
+  });
+
+  it("VR13: start/end are nullable ({oneOf: [null, clock_time]}) in assign and book, absent from unassign and move", () => {
+    for (const name of ["assign", "book"]) {
+      const branch = root.$defs[name];
+      for (const field of ["start", "end"]) {
+        expect(branch.properties?.[field], `${name}.${field}`).toEqual({
+          oneOf: [{ type: "null" }, { $ref: "#/$defs/clock_time" }],
+        });
+        expect(branch.required, `${name}.${field}`).toContain(field);
+      }
+    }
+    for (const name of ["unassign", "move"]) {
+      const branch = root.$defs[name];
+      expect(branch.properties?.start, name).toBeUndefined();
+      expect(branch.properties?.end, name).toBeUndefined();
+    }
+  });
+
+  it("VR13: shift's own key sits alphabetically among each branch's other keys (VR8's own rule, restated for this one field)", () => {
+    for (const name of ["assign", "book", "unassign", "move"]) {
+      const branch = root.$defs[name];
+      const keys = Object.keys(branch.properties ?? {});
+      expect(keys).toContain("shift");
+      expect(keys).toEqual([...keys].sort());
+    }
+  });
+});

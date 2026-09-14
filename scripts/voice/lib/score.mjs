@@ -43,21 +43,16 @@ function normalizeToKnownKeys(predicted, expected) {
  *  depth where both sides are plain objects, into `into` (one entry per
  *  occurrence).
  *
- * S52-a (reviewer, should-fix 2): `shift` predates the committed held-out
- * set (`data/voice/heldout.jsonl`) -- regenerating it is the data lane's own
- * job, and until that runs every ordinary prediction (the rule parser's
- * included) carries a `shift` key no row's own `expected` form has at all.
- * A `shift: null` prediction means the same thing a missing `shift` key on
- * the row does -- "no shift" -- so it is never counted as an invented field
- * the way a genuine extra key (a fine-tuned model's stray `"type"`, say)
- * is. Once the held-out set carries `shift` on every row this branch never
- * fires (the key is never "not in expected" any more) and is moot, not
- * wrong, so it is left in rather than pulled back out. */
+ * S52-a/S52-c (R-402): `shift` predated the committed held-out set; now that
+ * `data/voice/heldout.jsonl` has been regenerated with the field on every
+ * row (the S52-c data brief), the tolerance that used to excuse a
+ * `shift: null` prediction against a row whose `expected` form lacked the
+ * key entirely is gone -- a `shift` key `expected` does not have is a
+ * genuine extra key, tallied the same as any other invented field. */
 function collectExtraKeys(predicted, expected, into) {
   if (!isPlainObject(predicted) || !isPlainObject(expected)) return;
   for (const key of Object.keys(predicted)) {
     if (!(key in expected)) {
-      if (key === "shift" && predicted[key] === null) continue;
       into.push(key);
     } else {
       collectExtraKeys(predicted[key], expected[key], into);
