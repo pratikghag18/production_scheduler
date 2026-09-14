@@ -355,6 +355,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
       end: { hour: 14, minute: 0 },
       attach: null,
       existing: null,
+      shift: null,
     };
     expect(input.value).toBe(formatCommand(expectedCommand));
     expect(onOpen).toHaveBeenCalledTimes(1);
@@ -1356,6 +1357,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       day: null,
       span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
       existing: { kind: "remove", assignmentId: "blk1" },
+      shift: null,
     };
     const moveCmd: MoveCommand = {
       intent: "move",
@@ -1365,6 +1367,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       day: null,
       span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
       existing: null,
+      shift: null,
     };
     // S51's own note (brief §2 item 1 / design §19.98): a mixed-intent
     // several never comes off the TEXT grammar (each `parseXRest` only ever

@@ -46,10 +46,12 @@ shift-band step and the data are the next lanes.
    documented invariant "shift null ⇒ start and end non-null; shift non-null ⇒ both null".
    `UnassignCommand`/`MoveCommand`: `shift` non-null ⇒ `span` null. Grammar: a shift clause
    anywhere after the person, extracted BEFORE the time clause and the places are read:
-   `(for|on|in|during)\s+(?:the\s+)?shift\s+(<name>)` where `<name>` is the next one or two
-   words up to the next preposition/comma/end (`for shift 2`, `on shift B`, `for shift "Late
-   Turn"` quoted), or `(for|on|in|during)\s+the\s+(<words>)\s+shift` (`for the night shift`,
-   `on the morning shift` → shift "night"/"morning"). The name is stored as written (trimmed,
+   `(for|during)\s+(?:the\s+)?shift\s+(<name>)` (reviewer, blocker 1: `on`/`in` are never this
+   form's own preposition -- they are place prepositions, and a place follows them, so `on Shift
+   Bay 2` stays a place, unquoted) where `<name>` is the next one or two words up to the next
+   preposition/comma/end (`for shift 2`, `during shift 3`, `for shift "Late Turn"` quoted), or
+   `(for|on|during)\s+the\s+(<words>)\s+shift` (`for the night shift`, `on the morning shift` →
+   shift "night"/"morning"). The name is stored as written (trimmed,
    quotes restored). With a shift clause present, assign/book no longer require the time
    clause (`no_time` only when neither hours nor a shift were said); a sentence with BOTH a
    shift and hours fails `{kind:"shift_and_hours"}` (add to `ParseFailure`). A move with a

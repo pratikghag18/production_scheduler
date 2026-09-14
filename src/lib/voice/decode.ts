@@ -68,6 +68,25 @@ function decodeClockTime(value: unknown): ClockTime | null {
   return { hour, minute };
 }
 
+/** R-402 (S52-a): same `undefined`-means-invalid convention as
+ *  `decodeDayWord`/`decodeSpan` -- `null` is now a valid answer for
+ *  `start`/`end` (a shift named instead of hours); the cross-check against
+ *  `shift` happens in each caller. */
+function decodeClockTimeOrNull(value: unknown): ClockTime | null | undefined {
+  if (value === null) return null;
+  const t = decodeClockTime(value);
+  return t === null ? undefined : t;
+}
+
+/** R-402 (S52-a): the shift's name, or `null`. A MISSING key (`undefined`,
+ *  every fixture and held-out row that predates this field) is read the
+ *  same as an explicit `null` -- "no shift" -- so nothing that could decode
+ *  before this field existed stops decoding now. */
+function decodeShift(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  return isNonEmptyString(value) ? value : undefined;
+}
+
 /** `undefined` means "invalid"; `null` is itself a valid answer ("the day
  *  the board is showing"), so the two must not share a sentinel. */
 function decodeDayWord(value: unknown): DayWord | null | undefined {
@@ -116,10 +135,16 @@ function decodeAssign(obj: Record<string, unknown>): AssignCommand | null {
   if (!isNonEmptyStringArray(obj.place)) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
-  const start = decodeClockTime(obj.start);
-  if (start === null) return null;
-  const end = decodeClockTime(obj.end);
-  if (end === null) return null;
+  const shift = decodeShift(obj.shift);
+  if (shift === undefined) return null;
+  const start = decodeClockTimeOrNull(obj.start);
+  if (start === undefined) return null;
+  const end = decodeClockTimeOrNull(obj.end);
+  if (end === undefined) return null;
+  // R-402: refuse a form with both a shift and hours, and refuse
+  // start/end null without a shift -- the type's own invariant.
+  if (shift !== null && (start !== null || end !== null)) return null;
+  if (shift === null && (start === null || end === null)) return null;
   return {
     intent: "assign",
     operator: obj.operator,
@@ -130,6 +155,7 @@ function decodeAssign(obj: Record<string, unknown>): AssignCommand | null {
     end,
     attach: null,
     existing: null,
+    shift,
   };
 }
 
@@ -140,10 +166,14 @@ function decodeBook(obj: Record<string, unknown>): BookCommand | null {
   if (headcount === undefined) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
-  const start = decodeClockTime(obj.start);
-  if (start === null) return null;
-  const end = decodeClockTime(obj.end);
-  if (end === null) return null;
+  const shift = decodeShift(obj.shift);
+  if (shift === undefined) return null;
+  const start = decodeClockTimeOrNull(obj.start);
+  if (start === undefined) return null;
+  const end = decodeClockTimeOrNull(obj.end);
+  if (end === undefined) return null;
+  if (shift !== null && (start !== null || end !== null)) return null;
+  if (shift === null && (start === null || end === null)) return null;
   return {
     intent: "book",
     product: obj.product,
@@ -153,6 +183,7 @@ function decodeBook(obj: Record<string, unknown>): BookCommand | null {
     start,
     end,
     existing: null,
+    shift,
   };
 }
 
@@ -163,6 +194,10 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
   if (span === undefined) return null;
+  const shift = decodeShift(obj.shift);
+  if (shift === undefined) return null;
+  // R-402: never both a shift and hours.
+  if (shift !== null && span !== null) return null;
   return {
     intent: "unassign",
     operator: obj.operator,
@@ -170,6 +205,7 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
     day,
     span,
     existing: null,
+    shift,
   };
 }
 
@@ -182,9 +218,14 @@ function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
   if (span === undefined) return null;
-  // R-389 (parseMoveRest's own `no_move` check, mirrored here): a move must
-  // give a new cell or new hours -- naming neither is nothing to move.
-  if (toPlace === null && span === null) return null;
+  const shift = decodeShift(obj.shift);
+  if (shift === undefined) return null;
+  // R-402: never both a shift and hours.
+  if (shift !== null && span !== null) return null;
+  // R-389 (parseMoveRest's own `no_move` check, mirrored here), widened by
+  // R-402: a move must give a new cell, new hours, or a shift -- naming none
+  // of the three is nothing to move.
+  if (toPlace === null && span === null && shift === null) return null;
   return {
     intent: "move",
     operator: obj.operator,
@@ -193,6 +234,7 @@ function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
     day,
     span,
     existing: null,
+    shift,
   };
 }
 

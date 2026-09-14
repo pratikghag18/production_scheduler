@@ -324,7 +324,11 @@ export type Question =
    *  more than one operator or place segment in one sentence. Resolving and
    *  confirming each inner command is its own later stage; for now the bar
    *  only says so. `count` is `command.commands.length`. */
-  | { kind: "several_unsupported"; count: number };
+  | { kind: "several_unsupported"; count: number }
+  /** R-402 (S52-a): the sentence named a shift instead of hours -- read by
+   *  the parser but not yet turned into that cell's own band for the day
+   *  (the next lane). `text` is the shift's name as said. */
+  | { kind: "shift_unsupported"; text: string };
 
 export type Resolution =
   | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove }
@@ -690,8 +694,13 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
   if (!personResult.ok) return { ok: false, question: personResult.question };
   const operator = personResult.operator;
 
-  // 4. Day and span.
-  const spanResult = resolveDaySpanStep(command.day, command.start, command.end, ctx);
+  // 4. Day and span. R-402 (S52-a): a shift name is read but not yet
+  // resolved into a band -- ask for now (the type's own invariant means
+  // `start`/`end` are null exactly when `shift` is not).
+  if (command.shift !== null) {
+    return { ok: false, question: { kind: "shift_unsupported", text: command.shift } };
+  }
+  const spanResult = resolveDaySpanStep(command.day, command.start!, command.end!, ctx);
   if (!spanResult.ok) return { ok: false, question: spanResult.question };
   const { dayIndex, startMin, endMin, timeText } = spanResult;
 
@@ -833,8 +842,12 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
   if (!partResult.ok) return { ok: false, question: partResult.question };
   const product = partResult.product;
 
-  // 3. Day and span.
-  const spanResult = resolveDaySpanStep(command.day, command.start, command.end, ctx);
+  // 3. Day and span. R-402 (S52-a): a shift name is read but not yet
+  // resolved -- ask for now.
+  if (command.shift !== null) {
+    return { ok: false, question: { kind: "shift_unsupported", text: command.shift } };
+  }
+  const spanResult = resolveDaySpanStep(command.day, command.start!, command.end!, ctx);
   if (!spanResult.ok) return { ok: false, question: spanResult.question };
   const { dayIndex, startMin, endMin, timeText } = spanResult;
 
@@ -1183,7 +1196,15 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
     blk = hit;
   }
 
-  // 4. The destination.
+  // 4. The destination. R-402/S52-a (reviewer, blocker 3): a shift name is
+  // read but not yet resolved into a band -- ask, regardless of whether a
+  // new cell was ALSO said. A `toPlace` set does not excuse this: the
+  // pre-fix code fell into the "keep the block's own hours" branch below
+  // and dropped the shift silently.
+  if (command.shift !== null) {
+    return { ok: false, question: { kind: "shift_unsupported", text: command.shift } };
+  }
+
   let target: { kind: "retime" } | { kind: "move_cell" };
   let targetNodeId: string;
   let startMin: number;
@@ -1191,9 +1212,10 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   let arrow: string;
 
   if (command.toPlace === null) {
-    // Move in time only -- R-385's own retime target (command.span is
-    // guaranteed non-null here: parseMoveRest never returns toPlace null
-    // and span null together). S49: the target is the BLOCK's own cell,
+    // Move in time only -- R-385's own retime target (`command.span` is
+    // guaranteed non-null here: `shift` is null by the guard above, and
+    // parseMoveRest's own R-389/R-402 check never returns toPlace, span AND
+    // shift all null together). S49: the target is the BLOCK's own cell,
     // never the sentence's (the block may have come from elsewhere).
     const spanResult = resolveDaySpanStep(command.day, command.span!.start, command.span!.end, ctx);
     if (!spanResult.ok) return { ok: false, question: spanResult.question };
@@ -1404,5 +1426,7 @@ export function describeQuestion(q: Question): string {
     }
     case "several_unsupported":
       return "Several commands in one sentence are read but not yet run; say them one at a time for now.";
+    case "shift_unsupported":
+      return "Shifts by name are read but not yet resolved; say the hours for now.";
   }
 }

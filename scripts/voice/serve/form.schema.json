@@ -6,13 +6,14 @@
       "properties": {
         "attach": { "type": "null" },
         "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
-        "end": { "$ref": "#/$defs/clock_time" },
+        "end": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] },
         "existing": { "type": "null" },
         "intent": { "const": "assign" },
         "operator": { "type": "string" },
         "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "product": { "type": "string" },
-        "start": { "$ref": "#/$defs/clock_time" }
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "start": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] }
       },
       "required": [
         "attach",
@@ -23,6 +24,7 @@
         "operator",
         "place",
         "product",
+        "shift",
         "start"
       ]
     },
@@ -31,15 +33,26 @@
       "additionalProperties": false,
       "properties": {
         "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
-        "end": { "$ref": "#/$defs/clock_time" },
+        "end": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] },
         "existing": { "type": "null" },
         "headcount": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
         "intent": { "const": "book" },
         "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "product": { "type": "string" },
-        "start": { "$ref": "#/$defs/clock_time" }
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "start": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] }
       },
-      "required": ["day", "end", "existing", "headcount", "intent", "place", "product", "start"]
+      "required": [
+        "day",
+        "end",
+        "existing",
+        "headcount",
+        "intent",
+        "place",
+        "product",
+        "shift",
+        "start"
+      ]
     },
     "clock_time": {
       "type": "object",
@@ -93,6 +106,7 @@
         "intent": { "const": "move" },
         "operator": { "type": "string" },
         "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
         "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
         "toPlace": {
           "oneOf": [
@@ -101,7 +115,7 @@
           ]
         }
       },
-      "required": ["day", "existing", "intent", "operator", "place", "span", "toPlace"]
+      "required": ["day", "existing", "intent", "operator", "place", "shift", "span", "toPlace"]
     },
     "span": {
       "type": "object",
@@ -121,9 +135,10 @@
         "intent": { "const": "unassign" },
         "operator": { "type": "string" },
         "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
         "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
       },
-      "required": ["day", "existing", "intent", "operator", "place", "span"]
+      "required": ["day", "existing", "intent", "operator", "place", "shift", "span"]
     }
   },
   "oneOf": [

@@ -379,6 +379,7 @@ describe("VR10: a several decodes to complete commands, or refuses", () => {
     start: { hour: 10, minute: 0 },
     end: { hour: 14, minute: 0 },
     attach: null,
+    shift: null,
     existing: null,
   };
   const validInnerB = {
@@ -390,6 +391,7 @@ describe("VR10: a several decodes to complete commands, or refuses", () => {
     start: { hour: 10, minute: 0 },
     end: { hour: 14, minute: 0 },
     attach: null,
+    shift: null,
     existing: null,
   };
   const validInnerC = {
@@ -401,6 +403,7 @@ describe("VR10: a several decodes to complete commands, or refuses", () => {
     start: { hour: 10, minute: 0 },
     end: { hour: 14, minute: 0 },
     attach: null,
+    shift: null,
     existing: null,
   };
 
@@ -516,5 +519,73 @@ describe("VR11: the schema's fifth branch is a several of the four $defs", () =>
         .find((b) => (b.properties?.intent as { const?: string } | undefined)?.const === intent);
       expect(branch, intent).toBeTruthy();
     }
+  });
+});
+
+// S52-a (docs/agent-briefs/s52-a-shift-grammar-brief.md, R-402): the decoder
+// accepts a `shift` field (string or null), refuses a form naming BOTH a
+// shift and hours, and refuses one naming NEITHER.
+describe("VR12 (R-402): decode accepts shift, refuses both, refuses neither", () => {
+  it("VR12: an assign with a shift and null start/end round-trips through decodeCommand", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 for shift 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR12: refuses an assign naming both a shift and hours", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const both = { ...(parsed.command as unknown as Record<string, unknown>), shift: "2" };
+    expect(decodeCommand(both)).toBeNull();
+  });
+
+  it("VR12: refuses an assign naming neither a shift nor hours", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const neither = {
+      ...(parsed.command as unknown as Record<string, unknown>),
+      start: null,
+      end: null,
+    };
+    expect(decodeCommand(neither)).toBeNull();
+  });
+
+  it("VR12: a book with a shift round-trips the same way, and unassign/move accept a shift with span null", () => {
+    const bookParsed = parseCommand("book Housing A on Cell 1 in Line 1 on the night shift");
+    expect(bookParsed.ok).toBe(true);
+    if (bookParsed.ok) {
+      const roundTripped: unknown = JSON.parse(JSON.stringify(bookParsed.command));
+      expect(decodeCommand(roundTripped)).toEqual(bookParsed.command);
+    }
+
+    const unassignParsed = parseCommand("unassign Sam from Cell 1 for shift 1");
+    expect(unassignParsed.ok).toBe(true);
+    if (unassignParsed.ok) {
+      const roundTripped: unknown = JSON.parse(JSON.stringify(unassignParsed.command));
+      expect(decodeCommand(roundTripped)).toEqual(unassignParsed.command);
+    }
+
+    const moveParsed = parseCommand("move Sam on Cell 1 for shift 2");
+    expect(moveParsed.ok).toBe(true);
+    if (moveParsed.ok) {
+      const roundTripped: unknown = JSON.parse(JSON.stringify(moveParsed.command));
+      expect(decodeCommand(roundTripped)).toEqual(moveParsed.command);
+    }
+  });
+
+  it("VR12: refuses a move naming both a shift and new hours", () => {
+    const moveParsed = parseCommand("move Sam on Cell 1 to Cell 2");
+    expect(moveParsed.ok).toBe(true);
+    if (!moveParsed.ok) return;
+    const both = {
+      ...(moveParsed.command as unknown as Record<string, unknown>),
+      span: { start: { hour: 10, minute: 0 }, end: { hour: 12, minute: 0 } },
+      shift: "2",
+    };
+    expect(decodeCommand(both)).toBeNull();
   });
 });

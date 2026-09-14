@@ -150,6 +150,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      shift: null,
       existing: null,
     };
     const bookForm: Command = {
@@ -160,6 +161,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       day: null,
       start: { hour: 6, minute: 0 },
       end: { hour: 14, minute: 0 },
+      shift: null,
       existing: null,
     };
     const rows: VoiceRow[] = [
@@ -193,6 +195,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
         toPlace: ["Cell 2"],
         day: { kind: "weekday", day: 3 },
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        shift: null,
         existing: null,
       };
       const moveRows: VoiceRow[] = [
@@ -226,6 +229,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
         toPlace: ["Cell 2"],
         day: { kind: "weekday", day: 3 },
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        shift: null,
         existing: null,
       };
       const moveRows: VoiceRow[] = [
@@ -331,6 +335,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      shift: null,
       existing: null,
     };
     const rows: VoiceRow[] = [
@@ -360,6 +365,44 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     });
   });
 
+  it("V17 (S52-a, reviewer should-fix 2): a null shift on a prediction against a shift-less row (the committed held-out set, pre-S52) is never counted as an extra key", () => {
+    // A raw stand-in for a committed held-out row's own form -- no `shift`
+    // key at all (regenerating the set is the data lane's job; once it
+    // carries `shift` this tolerance is moot, but harmless either way).
+    const shiftlessForm = {
+      intent: "assign",
+      operator: "Sam Patel",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      attach: null,
+      existing: null,
+    } as unknown as Command;
+    const rows: VoiceRow[] = [
+      {
+        id: "r1",
+        intent: "assign",
+        sentence: "n/a",
+        form: shiftlessForm,
+        clean: true,
+        source: "x",
+      },
+    ];
+
+    const predicted = { ...shiftlessForm, shift: null };
+    const result = score(rows, () => predicted);
+    expect(rate(result.clean)).toBe(1);
+    expect(result.extraKeys).toEqual({ n: 0, keys: {} });
+
+    // Contrast: the tolerance is specific to `shift: null` -- a genuinely
+    // invented key is still counted.
+    const withRealExtra = { ...shiftlessForm, shift: null, type: "assign" };
+    const result2 = score(rows, () => withRealExtra);
+    expect(result2.extraKeys).toEqual({ n: 1, keys: { type: 1 } });
+  });
+
   it("V13: the rule parser's held-out baseline is unchanged by the extra-key normalisation (re-pins V6)", () => {
     const predict = (row: VoiceRow) => {
       const result = parseCommand(row.sentence);
@@ -384,6 +427,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      shift: null,
       existing: null,
     };
     const innerB: SingleCommand = {
@@ -395,6 +439,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      shift: null,
       existing: null,
     };
     const severalForm: Command = { intent: "several", commands: [innerA, innerB] };

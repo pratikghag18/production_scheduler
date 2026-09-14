@@ -174,8 +174,12 @@ function randomSpan(rng, forcedSep) {
   return pair;
 }
 
+// R-402 (S52-a): every form gains `shift` -- every template's own form is
+// still hours-only (`shift: null`); the shift-grammar's own training rows
+// are the data lane's job (docs/agent-briefs/s52-a-shift-grammar-brief.md
+// §2 item 5).
 function baseCommand(intent, extra) {
-  return { intent, ...extra };
+  return { intent, shift: null, ...extra };
 }
 
 // ---------------------------------------------------------------------------

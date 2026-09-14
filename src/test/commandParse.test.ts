@@ -33,6 +33,7 @@ function bookOk(overrides: Partial<BookCommand> = {}): { ok: true; command: Book
       day: null,
       start: { hour: 6, minute: 0 },
       end: { hour: 14, minute: 0 },
+      shift: null,
       existing: null,
       ...overrides,
     },
@@ -55,6 +56,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -71,6 +73,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -89,6 +92,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 6, minute: 30 },
         end: { hour: 14, minute: 30 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -105,6 +109,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -121,6 +126,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -137,6 +143,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -153,6 +160,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -176,6 +184,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 22, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -192,6 +201,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 12, minute: 0 },
         end: { hour: 15, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -208,6 +218,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 0, minute: 0 },
         end: { hour: 4, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -258,6 +269,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -274,6 +286,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -297,6 +310,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -313,6 +327,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 8, minute: 0 },
         end: { hour: 16, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -329,6 +344,7 @@ describe("commandParse: brief §4 worked examples", () => {
         start: { hour: 9, minute: 0 },
         end: { hour: 9, minute: 15 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -354,6 +370,7 @@ describe("commandParse: brief §4 worked examples", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      shift: null,
       existing: null,
     };
     const sentence = formatCommand(command);
@@ -391,6 +408,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -407,6 +425,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       });
     expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2 on 2026-09-12")).toEqual(
@@ -436,6 +455,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -499,6 +519,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         place: ["Cell 1", "Line 1"],
         day: { kind: "weekday", day: 6 },
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        shift: null,
         existing: null,
       },
     });
@@ -514,6 +535,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         toPlace: ["Cell 2"],
         day: { kind: "weekday", day: 6 },
         span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+        shift: null,
         existing: null,
       },
     });
@@ -550,6 +572,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         start: { hour: 13, minute: 0 },
         end: { hour: 22, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -566,6 +589,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         start: { hour: 10, minute: 0 },
         end: { hour: 22, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -579,6 +603,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         start: { hour: 0, minute: 0 },
         end: { hour: 4, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -595,6 +620,7 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
         start: { hour: 12, minute: 0 },
         end: { hour: 15, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -684,6 +710,7 @@ describe("commandParse: S41-a book-a-job worked examples", () => {
       start: { hour: 10, minute: 0 },
       end: { hour: 14, minute: 0 },
       attach: null,
+      shift: null,
       existing: null,
     };
     expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2")).toEqual(ok(expected));
@@ -718,6 +745,7 @@ describe("commandParse: S41-b unassign worked examples", () => {
         place: ["Cell 1"],
         day: null,
         span: null,
+        shift: null,
         existing: null,
         ...overrides,
       },
@@ -766,6 +794,7 @@ describe("commandParse: S41-b unassign worked examples", () => {
         place: [],
         day: null,
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        shift: null,
         existing: null,
       },
     });
@@ -801,6 +830,7 @@ describe("commandParse: S41-b unassign worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       },
     });
@@ -816,6 +846,7 @@ describe("commandParse: S41-b unassign worked examples", () => {
         day: null,
         start: { hour: 6, minute: 0 },
         end: { hour: 14, minute: 0 },
+        shift: null,
         existing: null,
       },
     });
@@ -838,6 +869,7 @@ describe("commandParse: S41-c move worked examples", () => {
         toPlace: null,
         day: null,
         span: null,
+        shift: null,
         existing: null,
         ...overrides,
       },
@@ -882,6 +914,7 @@ describe("commandParse: S41-c move worked examples", () => {
         toPlace: ["Cell 2"],
         day: null,
         span: null,
+        shift: null,
         existing: null,
       },
     });
@@ -944,6 +977,7 @@ describe("commandParse: S41-c move worked examples", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       },
     });
@@ -957,6 +991,7 @@ describe("commandParse: S41-c move worked examples", () => {
         day: null,
         start: { hour: 6, minute: 0 },
         end: { hour: 14, minute: 0 },
+        shift: null,
         existing: null,
       },
     });
@@ -968,6 +1003,7 @@ describe("commandParse: S41-c move worked examples", () => {
         place: ["Cell 1", "Line 1"],
         day: null,
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        shift: null,
         existing: null,
       },
     });
@@ -981,7 +1017,9 @@ describe("commandParse: R-391 the optional verb widens, one list per sentence", 
   const NEW_ASSIGN_VERBS = ["staff", "place", "allocate", "give", "set"];
   const NEW_BOOK_VERBS = ["plan", "open", "start", "launch", "create"];
   const NEW_UNASSIGN_VERBS = ["drop", "cancel", "delete", "pull", "free"];
-  const NEW_MOVE_VERBS = ["reschedule", "transfer", "relocate", "switch"];
+  // R-401 (13 Sept, session 163): "change" and "shift" join the move list --
+  // the maintainer withdrew R-391's exclusion.
+  const NEW_MOVE_VERBS = ["reschedule", "transfer", "relocate", "switch", "change", "shift"];
 
   const ASSIGN_TAIL = "Sam to Housing A on Cell 1 from 10 to 2";
   const BOOK_TAIL = "Housing A on Cell 1 in Line 1 from 6 to 2";
@@ -1014,7 +1052,7 @@ describe("commandParse: R-391 the optional verb widens, one list per sentence", 
     });
   }
 
-  it("PV2: the four exported verb lists are pairwise disjoint and contain neither 'shift' nor 'change'", () => {
+  it("PV2 (re-pinned, R-401): the four exported verb lists are pairwise disjoint; 'shift' and 'change' are both in the move list only", () => {
     const lists: readonly (readonly string[])[] = [
       ASSIGN_VERBS,
       BOOK_VERBS,
@@ -1023,8 +1061,14 @@ describe("commandParse: R-391 the optional verb widens, one list per sentence", 
     ];
     const all = lists.flatMap((list) => list);
     expect(new Set(all).size).toBe(all.length);
-    expect(all).not.toContain("shift");
-    expect(all).not.toContain("change");
+    expect(MOVE_VERBS).toContain("shift");
+    expect(MOVE_VERBS).toContain("change");
+    expect(ASSIGN_VERBS).not.toContain("shift");
+    expect(ASSIGN_VERBS).not.toContain("change");
+    expect(BOOK_VERBS).not.toContain("shift");
+    expect(BOOK_VERBS).not.toContain("change");
+    expect(UNASSIGN_VERBS).not.toContain("shift");
+    expect(UNASSIGN_VERBS).not.toContain("change");
   });
 
   it("PV3: 'schedule Housing A on Cell 1 from 6 to 2' is still read as an assign sentence and fails no_place", () => {
@@ -1056,6 +1100,372 @@ describe("commandParse: R-391 the optional verb widens, one list per sentence", 
   });
 });
 
+/**
+ * S52-a (docs/agent-briefs/s52-a-shift-grammar-brief.md, R-401/R-402, design
+ * §19.99/D128) -- change and shift join the move verb list, a possessive
+ * timing tail on the move grammar's operator segment reads as the person,
+ * and a shift clause anywhere after the person stands in for the hours on
+ * every intent. SH1-SH14, one `it()` per case.
+ */
+describe("commandParse: S52 change, shift, and a shift by name", () => {
+  it("SH1 (R-401): change Operator A3's timing to 8 pm to 11 pm -- move in time, no place, the possessive tail names the person", () => {
+    expect(parseCommand("change Operator A3's timing to 8 pm to 11 pm")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Operator A3",
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 20, minute: 0 }, end: { hour: 23, minute: 0 } },
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("SH2 (R-401, F-144): change operator a3s timing to 8:00 p.m. to 11:00 p.m. -- the recogniser's bare-s, dotted-meridiem spelling reads the same person", () => {
+    expect(parseCommand("change operator a3s timing to 8:00 p.m. to 11:00 p.m.")).toEqual(
+      ok({
+        intent: "move",
+        operator: "operator a3",
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 20, minute: 0 }, end: { hour: 23, minute: 0 } },
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("SH3 (R-401): change Sam’s hours to 9 to 5 -- the curly apostrophe and the 'hours' spelling both strip", () => {
+    expect(parseCommand("change Sam’s hours to 9 to 5")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Sam",
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 9, minute: 0 }, end: { hour: 17, minute: 0 } },
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("SH4 (R-401): change Operator A3s schedule to 8 to 9 -- the bare-s spelling with 'schedule' also strips", () => {
+    expect(parseCommand("change Operator A3s schedule to 8 to 9")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Operator A3",
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 8, minute: 0 }, end: { hour: 9, minute: 0 } },
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("SH5 (R-401): shift Operator A3 to Cell 2 -- shift as a verb, moved to Cell 2", () => {
+    expect(parseCommand("shift Operator A3 to Cell 2")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Operator A3",
+        place: [],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("SH6 (R-401): change Sam on Cell 1 to Cell 2 -- the placed move, no possessive tail to strip", () => {
+    expect(parseCommand("change Sam on Cell 1 to Cell 2")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1"],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+
+  it("SH7 (R-402): move Sam on Cell 1 for shift 2 -- 'shift' mid-sentence is the shift clause, not a verb, and it alone satisfies R-389's new hours", () => {
+    expect(parseCommand("move Sam on Cell 1 for shift 2")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Sam",
+        place: ["Cell 1"],
+        toPlace: null,
+        day: null,
+        span: null,
+        existing: null,
+        shift: "2",
+      }),
+    );
+  });
+
+  it("SH8 (R-402): assign Sam to Housing A on Cell 1 for shift 2 -- start/end null, shift '2'", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 for shift 2")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "2",
+      }),
+    );
+  });
+
+  it("SH9 (R-402): book Housing A on Cell 1 in Line 1 on the night shift -- the name PRECEDES the word 'shift'", () => {
+    expect(parseCommand("book Housing A on Cell 1 in Line 1 on the night shift")).toEqual(
+      bookOk({
+        place: ["Cell 1", "Line 1"],
+        start: null,
+        end: null,
+        shift: "night",
+      }),
+    );
+  });
+
+  it("SH10 (R-402): unassign Sam from Cell 1 for shift 1 -- a removal, span null", () => {
+    expect(parseCommand("unassign Sam from Cell 1 for shift 1")).toEqual(
+      ok({
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: "1",
+      }),
+    );
+  });
+
+  it('SH11 (R-402): assign Sam to Housing A on Cell 1 for shift "Late Turn" -- a quoted, multi-word shift name', () => {
+    expect(parseCommand('assign Sam to Housing A on Cell 1 for shift "Late Turn"')).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "Late Turn",
+      }),
+    );
+  });
+
+  it("SH12 (R-402): a shift AND hours together -- shift_and_hours, never a guess which wins", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 for shift 2 from 10 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "shift_and_hours" },
+    });
+  });
+
+  it("SH13 (R-402): no hours and no shift on an assign -- no_time, unchanged", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1")).toEqual({
+      ok: false,
+      failure: { kind: "no_time" },
+    });
+  });
+
+  it("SH14 (R-402): the maintainer's product-last sentence, its comma variant, a product-first sentence with a shift, both round trips, and a several copying shift onto both", () => {
+    const productLast = parseCommand(
+      "assign Operator A2 to work for shift 2 on Cell 1 in Line 1 for Housing A",
+    );
+    const expectedProductLast = ok({
+      intent: "assign",
+      operator: "Operator A2",
+      product: "Housing A",
+      place: ["Cell 1", "Line 1"],
+      day: null,
+      start: null,
+      end: null,
+      attach: null,
+      existing: null,
+      shift: "2",
+    });
+    expect(productLast).toEqual(expectedProductLast);
+
+    // The comma qualifier reads the same way.
+    expect(
+      parseCommand("Assign Operator A2 to work for shift 2 on Cell 1, Line 1 for Housing A"),
+    ).toEqual(expectedProductLast);
+
+    // A product-first sentence with a shift also works (the product precedes
+    // the places, so nothing after the operator separator needs the
+    // trailing-"for" reading at all).
+    expect(parseCommand("put Sam on Housing A on Cell 1 for shift 1")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "1",
+      }),
+    );
+
+    // formatCommand round-trips a shift assign...
+    if (productLast.ok) {
+      const printed = formatCommand(productLast.command);
+      expect(parseCommand(printed)).toEqual(productLast);
+    }
+    // ...and a shift removal.
+    const removal = parseCommand("unassign Sam from Cell 1 for shift 1");
+    expect(removal.ok).toBe(true);
+    if (removal.ok) {
+      const printed = formatCommand(removal.command);
+      expect(parseCommand(printed)).toEqual(removal);
+    }
+
+    // A several with a shift copies it onto every inner command.
+    expect(parseCommand("assign A2 and A3 to Housing A on Cell 1 for shift 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "several",
+        commands: [
+          {
+            intent: "assign",
+            operator: "A2",
+            product: "Housing A",
+            place: ["Cell 1"],
+            day: null,
+            start: null,
+            end: null,
+            attach: null,
+            existing: null,
+            shift: "2",
+          },
+          {
+            intent: "assign",
+            operator: "A3",
+            product: "Housing A",
+            place: ["Cell 1"],
+            day: null,
+            start: null,
+            end: null,
+            attach: null,
+            existing: null,
+            shift: "2",
+          },
+        ],
+      },
+    });
+  });
+
+  it("SH15 (reviewer, blocker 1): 'on Shift Bay 2' is a place (on/in are never the NAMED form's own preposition), while a quoted 'for shift \"Bay 2\"' is still a shift", () => {
+    expect(parseCommand("assign Sam to Housing A on Shift Bay 2 from 8 to 4")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Shift Bay 2"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+
+    expect(parseCommand('assign Sam to Housing A on Cell 1 for shift "Bay 2"')).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "Bay 2",
+      }),
+    );
+  });
+
+  it("SH16 (reviewer, blocker 2): formatCommand quotes a shift name whenever printing it unquoted would not round-trip", () => {
+    const base = {
+      intent: "assign" as const,
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: null,
+      end: null,
+      attach: null,
+      existing: null,
+    };
+    const cases: Array<{ shift: string; quoted: boolean }> = [
+      { shift: "2", quoted: false },
+      { shift: "Night", quoted: false },
+      { shift: "Late Turn", quoted: true },
+      { shift: "Day For Real", quoted: true },
+      { shift: "Late Turn Alpha", quoted: true },
+    ];
+    for (const { shift, quoted } of cases) {
+      const command: AssignCommand = { ...base, shift };
+      const printed = formatCommand(command);
+      expect(printed.includes(`"${shift}"`), `${shift}: quoted in "${printed}"`).toBe(quoted);
+      if (!quoted) expect(printed.endsWith(`shift ${shift}`), printed).toBe(true);
+      expect(parseCommand(printed)).toEqual(ok(command));
+    }
+  });
+
+  it("SH17 (reviewer, should-fix 1): the bare-s possessive only fires right after a digit -- 'a3s timing' still strips, 'Chris time' does not", () => {
+    expect(parseCommand("change operator a3s timing to 8 pm to 11 pm")).toEqual(
+      ok({
+        intent: "move",
+        operator: "operator a3",
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 20, minute: 0 }, end: { hour: 23, minute: 0 } },
+        existing: null,
+        shift: null,
+      }),
+    );
+
+    // "Chris" ends in "s" but not right after a digit -- the possessive
+    // tail is left alone (a choice, pinned so it stays one).
+    expect(parseCommand("move Chris time to Cell 2")).toEqual(
+      ok({
+        intent: "move",
+        operator: "Chris time",
+        place: [],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+      }),
+    );
+  });
+});
+
 describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
   it("assign, dotted meridiem with a trailing sentence period: 7:00 p.m. to 8:00 p.m.", () => {
     expect(parseCommand("assign Sam to Housing A on Cell 1 from 7:00 p.m. to 8:00 p.m.")).toEqual(
@@ -1068,6 +1478,7 @@ describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
         start: { hour: 19, minute: 0 },
         end: { hour: 20, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -1081,6 +1492,7 @@ describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
         place: ["Cell 1"],
         day: null,
         span: { start: { hour: 8, minute: 0 }, end: { hour: 11, minute: 0 } },
+        shift: null,
         existing: null,
       }),
     );
@@ -1095,6 +1507,7 @@ describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
         toPlace: null,
         day: null,
         span: { start: { hour: 19, minute: 0 }, end: { hour: 21, minute: 0 } },
+        shift: null,
         existing: null,
       }),
     );
@@ -1111,6 +1524,7 @@ describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
         start: { hour: 7, minute: 0 },
         end: { hour: 8, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -1134,6 +1548,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         place: [],
         day: null,
         span: null,
+        shift: null,
         existing: null,
       },
     });
@@ -1148,6 +1563,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         place: [],
         day: { kind: "today" },
         span: null,
+        shift: null,
         existing: null,
       },
     });
@@ -1162,6 +1578,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         place: [],
         day: null,
         span: { start: { hour: 3, minute: 0 }, end: { hour: 5, minute: 0 } },
+        shift: null,
         existing: null,
       },
     });
@@ -1185,6 +1602,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         place: [],
         day: null,
         span: { start: { hour: 3, minute: 0 }, end: { hour: 5, minute: 0 } },
+        shift: null,
         existing: null,
       },
     });
@@ -1208,6 +1626,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         toPlace: null,
         day: null,
         span: { start: { hour: 20, minute: 0 }, end: { hour: 23, minute: 0 } },
+        shift: null,
         existing: null,
       },
     });
@@ -1223,6 +1642,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         toPlace: ["Cell 2"],
         day: { kind: "tomorrow" },
         span: null,
+        shift: null,
         existing: null,
       },
     });
@@ -1238,6 +1658,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         toPlace: ["Cell 2"],
         day: null,
         span: null,
+        shift: null,
         existing: null,
       },
     });
@@ -1270,6 +1691,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             start: { hour: 3, minute: 0 },
             end: { hour: 5, minute: 0 },
             attach: null,
+            shift: null,
             existing: null,
           },
           {
@@ -1281,6 +1703,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             start: { hour: 3, minute: 0 },
             end: { hour: 5, minute: 0 },
             attach: null,
+            shift: null,
             existing: null,
           },
         ],
@@ -1303,6 +1726,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             start: { hour: 10, minute: 0 },
             end: { hour: 14, minute: 0 },
             attach: null,
+            shift: null,
             existing: null,
           },
           {
@@ -1314,6 +1738,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             start: { hour: 10, minute: 0 },
             end: { hour: 14, minute: 0 },
             attach: null,
+            shift: null,
             existing: null,
           },
         ],
@@ -1336,6 +1761,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             start: { hour: 10, minute: 0 },
             end: { hour: 14, minute: 0 },
             attach: null,
+            shift: null,
             existing: null,
           },
           {
@@ -1347,6 +1773,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             start: { hour: 10, minute: 0 },
             end: { hour: 14, minute: 0 },
             attach: null,
+            shift: null,
             existing: null,
           },
         ],
@@ -1374,6 +1801,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         start: { hour: 10, minute: 0 },
         end: { hour: 14, minute: 0 },
         attach: null,
+        shift: null,
         existing: null,
       }),
     );
@@ -1402,6 +1830,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             place: ["Cell 1"],
             day: null,
             span: null,
+            shift: null,
             existing: null,
           },
           {
@@ -1410,6 +1839,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
             place: ["Cell 1"],
             day: null,
             span: null,
+            shift: null,
             existing: null,
           },
         ],
@@ -1467,6 +1897,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         place: [],
         day: { kind: "today" },
         span: null,
+        shift: null,
         existing: null,
       },
       {
@@ -1475,6 +1906,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         place: [],
         day: { kind: "today" },
         span: null,
+        shift: null,
         existing: null,
       },
     ]);
@@ -1507,6 +1939,7 @@ describe("commandParse: S50 no place, and several in one sentence", () => {
         toPlace: ["Cell 2"],
         day: null,
         span: null,
+        shift: null,
         existing: null,
       },
     });

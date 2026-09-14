@@ -34,6 +34,19 @@
  * member, `several` -- one complete `SingleCommand` per item, in the
  * sentence's order, every other field copied onto each. A quoted "and" is
  * one name (the sentinel makes it atomic, same as every other keyword).
+ *
+ * S52-a (docs/agent-briefs/s52-a-shift-grammar-brief.md, R-401/R-402, design
+ * §19.99/D128) widens the grammar twice more, again without a new intent
+ * word: (1) "change" and "shift" join `MOVE_VERBS`, and a possessive timing
+ * tail on the move grammar's operator segment ("A3's timing", "Sam's
+ * hours") reads as the person. (2) every single command gains `shift:
+ * string | null` -- a name that stands in for the hours, read anywhere
+ * after the person as `for shift 2` / `during shift 3` (the NAMED form: only
+ * "for"/"during" are its own preposition -- "on"/"in" are PLACE
+ * prepositions, and a place is what follows them, so "on Shift Bay 2" stays
+ * a place) or `for the night shift` / `on the morning shift` (the
+ * TRAILING-WORD form, unambiguous, so it keeps "on" too). `shift` and hours
+ * together is `shift_and_hours`, never a guess which wins.
  */
 
 /** A clock time on the board's own clock, 24h. The plant's zone is the
@@ -75,10 +88,19 @@ export interface AssignCommand {
   /** Place words, most specific first: "Cell 1 in Line 1" -> ["Cell 1", "Line 1"]. At least one. */
   place: string[];
   day: DayWord | null;
-  start: ClockTime;
-  end: ClockTime;
+  /** R-402: the invariant is `shift === null` implies both non-null, and
+   *  `shift !== null` implies both null -- a shift clause stands in for the
+   *  hours, never alongside them (`shift_and_hours`). */
+  start: ClockTime | null;
+  end: ClockTime | null;
   attach: Attach | null;
   existing: Existing | null;
+  /** R-402 (the maintainer, 13 Sept, session 163): the shift's name as said
+   *  ("2", "B", "night", "Late Turn"), or `null` when the sentence gave hours
+   *  instead. Read but not yet resolved -- `resolve.ts` asks
+   *  `shift_unsupported` for now; the next lane turns it into that cell's own
+   *  band for the day. */
+  shift: string | null;
 }
 
 /**
@@ -100,6 +122,10 @@ export interface UnassignCommand {
   span: { start: ClockTime; end: ClockTime } | null;
   /** The pressed button's answer; null until asked. */
   existing: { kind: "remove"; assignmentId: string } | null;
+  /** R-402: a shift clause instead of hours -- non-null here implies `span`
+   *  is null (the removal still means "the whole day", the shift's name is
+   *  not yet resolved into a band). */
+  shift: string | null;
 }
 
 /**
@@ -115,10 +141,14 @@ export interface BookCommand {
   /** "for 3" / "for 3 people" — null when the sentence did not say. */
   headcount: number | null;
   day: DayWord | null;
-  start: ClockTime;
-  end: ClockTime;
+  /** R-402: same invariant as `AssignCommand.start`/`end` -- non-null exactly
+   *  when `shift` is null. */
+  start: ClockTime | null;
+  end: ClockTime | null;
   /** R-387: the answer to "change that job's hours?" — null until asked. */
   existing: { kind: "retime"; runId: string } | null;
+  /** R-402: the shift's name in place of hours, or null. */
+  shift: string | null;
 }
 
 /**
@@ -144,6 +174,11 @@ export interface MoveCommand {
   span: { start: ClockTime; end: ClockTime } | null;
   /** Which block, when several match; null until asked. */
   existing: { kind: "move"; assignmentId: string } | null;
+  /** R-402: a shift clause instead of new hours -- non-null here implies
+   *  `span` is null. `toPlace === null && span === null` is only ever
+   *  `no_move` when `shift` is ALSO null: a shift with no destination cell is
+   *  a move in time (R-389's "new hours" satisfied by the shift's name). */
+  shift: string | null;
 }
 
 /** The four intents that name a single block/job/removal/move -- what
@@ -193,7 +228,10 @@ export type ParseFailure =
   | { kind: "bad_list"; text: string }
   /** S50: the operator segment and the first place segment both listed more
    *  than one item, and the two counts disagree -- never a guess (R-379). */
-  | { kind: "list_mismatch"; people: number; places: number };
+  | { kind: "list_mismatch"; people: number; places: number }
+  /** R-402: the sentence named BOTH a shift and hours -- never a guess which
+   *  one wins. */
+  | { kind: "shift_and_hours" };
 
 export type ParseResult = { ok: true; command: Command } | { ok: false; failure: ParseFailure };
 
@@ -212,9 +250,14 @@ const QUOTE_CLOSE = "";
  * one list per sentence, every verb in exactly one list so the first word
  * never needs a guess. `scripts/voice/lib/templates.mjs` draws its templates'
  * verbs from these same exports rather than hard-coding them (this file is
- * the one door). "shift" (a noun everywhere else in this app -- a shift
- * chip, a shift pattern) and "change" (too broad) are never verbs here, on
- * purpose, in any list.
+ * the one door).
+ *
+ * R-401 (the maintainer, 13 Sept, session 163): the exclusion of "shift" and
+ * "change" below is WITHDRAWN -- both now join `MOVE_VERBS`. "shift" reads
+ * as a noun everywhere else in this app (a shift chip, a shift pattern,
+ * R-402's own shift clause), but the first-word rule already keeps a shift
+ * clause or any other mid-sentence use of the word out of the verb's way --
+ * only the FIRST word of the sentence is ever tried against a verb list.
  */
 export const ASSIGN_VERBS = [
   "assign",
@@ -244,8 +287,17 @@ export const UNASSIGN_VERBS = [
   "free",
 ] as const;
 
-/** S41-c, widened by R-391. */
-export const MOVE_VERBS = ["move", "reschedule", "transfer", "relocate", "switch"] as const;
+/** S41-c, widened by R-391; gains "change" and "shift" at R-401 (the
+ *  maintainer, 13 Sept, session 163 -- see the comment above `ASSIGN_VERBS`). */
+export const MOVE_VERBS = [
+  "move",
+  "reschedule",
+  "transfer",
+  "relocate",
+  "switch",
+  "change",
+  "shift",
+] as const;
 
 /** The first word decides book vs assign. Built from `BOOK_VERBS`. */
 const BOOK_VERB_RE = new RegExp(`^(${BOOK_VERBS.join("|")})\\b\\s*`, "i");
@@ -296,6 +348,74 @@ const TIME_TOKEN_RE = /^(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/i;
 /** S41-a: only `for <digits>` is a headcount clause (brief §3, B5) — a `for`
  *  not followed by a whole number is ordinary place text ("for lunch"). */
 const HEADCOUNT_CLAUSE_RE = /\s+for\s+(\S+)(?:\s+(?:people|persons|operators|heads))?\s*$/i;
+
+/**
+ * R-402 (the maintainer, 13 Sept, session 163): the shift clause -- read
+ * anywhere in the sentence (it is never the first word, so an unanchored
+ * search is safe), BEFORE the time clause and the places are read (brief
+ * item 3). One word stops a name early wherever it would otherwise swallow
+ * the next clause's own preposition or the word "shift" itself.
+ *
+ * Reviewer fix, blocker 1: the NAMED form (`for shift 2`, `during shift 3`)
+ * takes only "for"/"during" as its own preposition, never "on"/"in" -- those
+ * are PLACE prepositions, and a place is what follows them ("on Shift Bay
+ * 2" is a place named "Shift Bay 2", unquoted, and must stay one). The
+ * TRAILING-WORD form ("for the night shift", "on the morning shift") is
+ * unambiguous -- "shift" is the very last word, nothing to confuse with a
+ * place -- so it keeps "on" (and drops "in", which was never exercised).
+ */
+const SHIFT_STOP_WORD = "(?:on|at|in|for|during|to|from|and|shift)";
+/** One name word: not a quote placeholder (that is its own alternative,
+ *  below), not a comma (the char class excludes it, so a name never reaches
+ *  across one), and not one of the stop words above. */
+const SHIFT_NAME_WORD = `(?:(?!\\b${SHIFT_STOP_WORD}\\b)[^\\s,]+)`;
+/** One or two name words, or a whole quoted segment (already a single
+ *  atomic token by the time this runs, brief item 3: `for shift "Late
+ *  Turn"`). */
+const SHIFT_NAME = `(${QUOTE_OPEN}\\d+${QUOTE_CLOSE}|${SHIFT_NAME_WORD}(?:\\s+${SHIFT_NAME_WORD})?)`;
+/** "for shift 2", "during shift 3", "for the shift 2" -- the name follows
+ *  the word "shift" itself. Never "on"/"in" (blocker 1): those introduce a
+ *  PLACE ("on Shift Bay 2"), not this clause. */
+const SHIFT_NAMED_RE = new RegExp(
+  `\\s*\\b(?:for|during)\\s+(?:the\\s+)?shift\\s+${SHIFT_NAME}`,
+  "i",
+);
+/** "for the night shift", "on the morning shift" -- the name PRECEDES the
+ *  word "shift", which is unambiguous (nothing to confuse with a place). */
+const SHIFT_TRAILING_WORD_RE = new RegExp(
+  `\\s*\\b(?:for|on|during)\\s+the\\s+${SHIFT_NAME}\\s+shift\\b`,
+  "i",
+);
+
+/** R-402: pulls the (at most one) shift clause out of `text`, wherever it
+ *  sits, restoring a quoted name to its original words. `shift: null` and
+ *  `text` unchanged when neither form is found. */
+function extractShiftClause(
+  text: string,
+  quotes: string[],
+): { rest: string; shift: string | null } {
+  const m = text.match(SHIFT_NAMED_RE) ?? text.match(SHIFT_TRAILING_WORD_RE);
+  if (!m || m.index === undefined) return { rest: text, shift: null };
+  const shift = restoreQuotes(m[1], quotes);
+  const rest = (text.slice(0, m.index) + text.slice(m.index + m[0].length))
+    .replace(/\s+/g, " ")
+    .trim();
+  return { rest, shift };
+}
+
+/** R-401: a person named by a possessive timing tail in the move grammar --
+ *  "Operator A3's timing", "operator a3s timing" (F-144's dotted-recogniser
+ *  spelling drops the apostrophe), "Sam's hours"/"time"/"schedule"/"slot" --
+ *  reads as the person; the resolver has no timing to look up. Only ever
+ *  applied to the move grammar's own operator segment.
+ *
+ *  Reviewer fix, should-fix 1: the bare-`s` alternative (no apostrophe --
+ *  the recogniser's own dropped-apostrophe spelling) fires ONLY when the
+ *  character right before it is a DIGIT ("a3s timing", "b12s hours") -- an
+ *  ordinary name that happens to end in "s" ("Chris") is never mistaken for
+ *  one. `'s`/`’s` (a real apostrophe, typed or spoken correctly) still
+ *  apply to any name -- there the intent is unambiguous. */
+const POSSESSIVE_TIMING_TAIL_RE = /\s*(?:'s|’s|(?<=\d)s)\s+(?:timing|hours|time|schedule|slot)$/i;
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -653,9 +773,10 @@ function combineLists<T>(
 function parseAssignRest(
   rest: string,
   day: DayWord | null,
-  start: ClockTime,
-  end: ClockTime,
+  start: ClockTime | null,
+  end: ClockTime | null,
   quotes: string[],
+  shift: string | null,
 ): ParseResult {
   // 4. Verb — optional leading verb, one of ASSIGN_VERBS.
   const verbMatch = rest.match(new RegExp(`^(${ASSIGN_VERBS.join("|")})\\s+`, "i"));
@@ -674,6 +795,74 @@ function parseAssignRest(
   }
   if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
   if (productPlaces === "") return { ok: false, failure: { kind: "no_product" } };
+
+  // R-402 (brief item 4): once a shift clause has already been read out of
+  // the sentence, a trailing "for <product>" left in `productPlaces` (the
+  // LAST " for " -- the shift clause itself is already gone) names the
+  // product LAST, and everything before it is ALL places, never a product
+  // followed by places. Without a shift, or without a leftover " for ",
+  // nothing here changes: pieces[0] is the product exactly as before.
+  let productLastText: string | null = null;
+  let placesOnlyText = productPlaces;
+  if (shift !== null) {
+    const forRe = /\bfor\b/gi;
+    let lastFor = -1;
+    let fm: RegExpExecArray | null;
+    while ((fm = forRe.exec(productPlaces)) !== null) lastFor = fm.index;
+    if (lastFor !== -1) {
+      placesOnlyText = productPlaces.slice(0, lastFor).trim();
+      productLastText = productPlaces.slice(lastFor + "for".length).trim();
+    }
+  }
+
+  if (productLastText !== null) {
+    if (placesOnlyText === "") return { ok: false, failure: { kind: "no_place" } };
+    const placePieces = splitProductPlaces(placesOnlyText);
+    if (placePieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+
+    const operatorList = detectAndList(operatorPart, true);
+    if (operatorList.kind === "bad")
+      return { ok: false, failure: { kind: "bad_list", text: operatorPart } };
+    const placeList = detectAndList(placePieces[0], false);
+    if (placeList.kind === "bad")
+      return { ok: false, failure: { kind: "bad_list", text: placePieces[0] } };
+
+    const product = restoreQuotes(productLastText, quotes);
+    if (operatorList.kind === "list" || placeList.kind === "list") {
+      const operatorItems = operatorList.kind === "list" ? operatorList.items : [operatorPart];
+      const placeItems = placeList.kind === "list" ? placeList.items : [placePieces[0]];
+      const combined = combineLists(operatorItems, placeItems, (op, pl) => ({
+        intent: "assign" as const,
+        operator: restoreQuotes(op, quotes),
+        product,
+        place: [pl, ...placePieces.slice(1)].map((p) => restoreQuotes(p, quotes)),
+        day,
+        start,
+        end,
+        attach: null,
+        existing: null,
+        shift,
+      }));
+      if (!combined.ok) return combined;
+      return { ok: true, command: { intent: "several", commands: combined.items } };
+    }
+
+    return {
+      ok: true,
+      command: {
+        intent: "assign",
+        operator: restoreQuotes(operatorPart, quotes),
+        product,
+        place: placePieces.map((p) => restoreQuotes(p, quotes)),
+        day,
+        start,
+        end,
+        attach: null,
+        existing: null,
+        shift,
+      },
+    };
+  }
 
   const pieces = splitProductPlaces(productPlaces);
   if (pieces.length === 0) return { ok: false, failure: { kind: "no_product" } };
@@ -703,6 +892,7 @@ function parseAssignRest(
       end,
       attach: null,
       existing: null,
+      shift,
     }));
     if (!combined.ok) return combined;
     return { ok: true, command: { intent: "several", commands: combined.items } };
@@ -724,6 +914,7 @@ function parseAssignRest(
       end,
       attach: null,
       existing: null,
+      shift,
     },
   };
 }
@@ -751,9 +942,10 @@ function extractHeadcount(
 function parseBookRest(
   rest: string,
   day: DayWord | null,
-  start: ClockTime,
-  end: ClockTime,
+  start: ClockTime | null,
+  end: ClockTime | null,
   quotes: string[],
+  shift: string | null,
 ): ParseResult {
   const hc = extractHeadcount(rest);
   if (!hc.ok) return { ok: false, failure: hc.failure };
@@ -781,6 +973,7 @@ function parseBookRest(
       start,
       end,
       existing: null,
+      shift,
     }));
     return { ok: true, command: { intent: "several", commands } };
   }
@@ -799,6 +992,7 @@ function parseBookRest(
       start,
       end,
       existing: null,
+      shift,
     },
   };
 }
@@ -894,8 +1088,18 @@ function splitOperatorPlaces(text: string): { operator: string; placesText: stri
  * all), which is still `empty`, checked first, unchanged.
  */
 function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
+  // R-402: the shift clause, read before the (optional) time clause and the
+  // places -- "for shift 1" on a removal means span null, shift "1", never
+  // hours to compute.
+  const shiftClause = extractShiftClause(rest, quotes);
+  const shift = shiftClause.shift;
+  rest = shiftClause.rest;
+
   const tc = extractOptionalTimeClause(rest);
   if (!tc.ok) return tc;
+  if (shift !== null && tc.span !== null) {
+    return { ok: false, failure: { kind: "shift_and_hours" } };
+  }
 
   const dayResult = extractDayWord(tc.rest);
   if (!dayResult.ok) return dayResult;
@@ -927,6 +1131,7 @@ function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
       day: merged.day,
       span: tc.span,
       existing: null,
+      shift,
     }));
     return { ok: true, command: { intent: "several", commands } };
   }
@@ -943,6 +1148,7 @@ function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
       day: merged.day,
       span: tc.span,
       existing: null,
+      shift,
     },
   };
 }
@@ -1069,6 +1275,11 @@ function splitOnFirstTo(text: string): { before: string; after: string | null } 
  * the "after" half) -- never on both (F-133's own rule, `mergeDay` below).
  */
 function parseMoveRest(rest: string, quotes: string[]): ParseResult {
+  // R-402: the shift clause, read before the time clause and the places.
+  const shiftClause = extractShiftClause(rest, quotes);
+  const shift = shiftClause.shift;
+  rest = shiftClause.rest;
+
   const fromClause = extractOptionalTimeClause(rest);
   if (!fromClause.ok) return fromClause;
   let afterTime = fromClause.rest;
@@ -1143,6 +1354,11 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
     placePieces = pieces;
   }
 
+  // R-401: a trailing possessive timing tail on the operator segment ("A3's
+  // timing", "a3s timing", "Sam's hours") names the person -- the resolver
+  // has no timing to look up. Only the move grammar strips this.
+  operator = operator.replace(POSSESSIVE_TIMING_TAIL_RE, "").trim();
+
   // F-133: merge with the trailing day either time-clause helper may have
   // read off the end of the hours.
   const merged = mergeDay({ day, word: dayWord }, { day: trailingDay, word: trailingWord });
@@ -1163,8 +1379,14 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
       ? toPieces.map((p) => restoreQuotes(p, quotes))
       : null;
 
-  // R-389: at least one of "a new cell" / "new hours" must be said.
-  if (toPlace === null && span === null) {
+  // R-402: the sentence named both a shift and hours -- never a guess which wins.
+  if (shift !== null && span !== null) {
+    return { ok: false, failure: { kind: "shift_and_hours" } };
+  }
+
+  // R-389, widened by R-402: at least one of "a new cell" / "new hours" must
+  // be said -- a shift's name stands in for the new hours (a move in time).
+  if (toPlace === null && span === null && shift === null) {
     return { ok: false, failure: { kind: "no_move" } };
   }
 
@@ -1183,6 +1405,7 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
       day,
       span,
       existing: null,
+      shift,
     }));
     return { ok: true, command: { intent: "several", commands } };
   }
@@ -1200,6 +1423,7 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
       day,
       span,
       existing: null,
+      shift,
     },
   };
 }
@@ -1231,14 +1455,52 @@ export function parseCommand(text: string): ParseResult {
     return parseMoveRest(norm.slice(moveVerbMatch[0].length), quotes);
   }
 
+  // R-402: a shift clause stands in for the mandatory hours on assign/book
+  // too -- tried BEFORE `parseTimeAndDay`'s own (mandatory) time clause,
+  // since a shift sentence need not have one at all.
+  const shiftClause = extractShiftClause(norm, quotes);
+  if (shiftClause.shift !== null) {
+    const stillHasTime = parseTimeAndDay(shiftClause.rest);
+    if (stillHasTime.ok) {
+      // Both a shift and hours were said -- never a guess which wins.
+      return { ok: false, failure: { kind: "shift_and_hours" } };
+    }
+    if (stillHasTime.failure.kind !== "no_time") {
+      // A real time-clause problem, unrelated to the shift -- surface it.
+      return stillHasTime;
+    }
+    const dayResult = extractDayWord(shiftClause.rest);
+    if (!dayResult.ok) return dayResult;
+
+    const bookVerbMatch = dayResult.rest.match(BOOK_VERB_RE);
+    if (bookVerbMatch) {
+      return parseBookRest(
+        dayResult.rest.slice(bookVerbMatch[0].length),
+        dayResult.day,
+        null,
+        null,
+        quotes,
+        shiftClause.shift,
+      );
+    }
+    return parseAssignRest(dayResult.rest, dayResult.day, null, null, quotes, shiftClause.shift);
+  }
+
   const td = parseTimeAndDay(norm);
   if (!td.ok) return td;
 
   const bookVerbMatch = td.rest.match(BOOK_VERB_RE);
   if (bookVerbMatch) {
-    return parseBookRest(td.rest.slice(bookVerbMatch[0].length), td.day, td.start, td.end, quotes);
+    return parseBookRest(
+      td.rest.slice(bookVerbMatch[0].length),
+      td.day,
+      td.start,
+      td.end,
+      quotes,
+      null,
+    );
   }
-  return parseAssignRest(td.rest, td.day, td.start, td.end, quotes);
+  return parseAssignRest(td.rest, td.day, td.start, td.end, quotes, null);
 }
 
 function needsQuoting(word: string): boolean {
@@ -1247,6 +1509,36 @@ function needsQuoting(word: string): boolean {
 
 function quoteIfNeeded(word: string): string {
   return needsQuoting(word) ? `"${word}"` : word;
+}
+
+/** Reviewer fix, blocker 2: a shift name of three-or-more words, or one
+ *  containing any word of the shift grammar's own stop list (`SHIFT_STOP_WORD`
+ *  above, spelled out here since that constant is a regex-alternation
+ *  string, not a lookup set), never round-trips unquoted -- `for shift Day
+ *  For Real` would re-read "For" as the NAMED form's own preposition and
+ *  "Real" (or less) as the name. Quoted whenever it is more than one word,
+ *  contains a comma, or IS (case-insensitively) one of those stop words. */
+const SHIFT_QUOTING_STOP_WORDS = new Set([
+  "on",
+  "at",
+  "in",
+  "for",
+  "during",
+  "to",
+  "from",
+  "and",
+  "shift",
+]);
+
+function needsShiftQuoting(name: string): boolean {
+  if (name.includes(",")) return true;
+  const words = name.trim().split(/\s+/);
+  if (words.length > 1) return true;
+  return SHIFT_QUOTING_STOP_WORDS.has(words[0].toLowerCase());
+}
+
+function quoteShiftIfNeeded(name: string): string {
+  return needsShiftQuoting(name) ? `"${name}"` : name;
 }
 
 function dayToCanonicalText(day: DayWord): string {
@@ -1276,12 +1568,19 @@ function formatAssignCommand(command: AssignCommand): string {
   if (command.day) {
     parts.push("on", dayToCanonicalText(command.day));
   }
-  parts.push(
-    "from",
-    `${pad2(command.start.hour)}:${pad2(command.start.minute)}`,
-    "to",
-    `${pad2(command.end.hour)}:${pad2(command.end.minute)}`,
-  );
+  // R-402: a shift clause prints in place of the hours; the invariant
+  // (`shift` non-null <=> `start`/`end` null) means exactly one of the two
+  // branches below ever runs.
+  if (command.shift !== null) {
+    parts.push("for", "shift", quoteShiftIfNeeded(command.shift));
+  } else {
+    parts.push(
+      "from",
+      `${pad2(command.start!.hour)}:${pad2(command.start!.minute)}`,
+      "to",
+      `${pad2(command.end!.hour)}:${pad2(command.end!.minute)}`,
+    );
+  }
   return parts.join(" ");
 }
 
@@ -1302,12 +1601,17 @@ function formatBookCommand(command: BookCommand): string {
   if (command.day) {
     parts.push("on", dayToCanonicalText(command.day));
   }
-  parts.push(
-    "from",
-    `${pad2(command.start.hour)}:${pad2(command.start.minute)}`,
-    "to",
-    `${pad2(command.end.hour)}:${pad2(command.end.minute)}`,
-  );
+  // R-402: a shift clause in place of the hours -- same invariant as `formatAssignCommand`.
+  if (command.shift !== null) {
+    parts.push("for", "shift", quoteShiftIfNeeded(command.shift));
+  } else {
+    parts.push(
+      "from",
+      `${pad2(command.start!.hour)}:${pad2(command.start!.minute)}`,
+      "to",
+      `${pad2(command.end!.hour)}:${pad2(command.end!.minute)}`,
+    );
+  }
   return parts.join(" ");
 }
 
@@ -1334,7 +1638,11 @@ function formatUnassignCommand(command: UnassignCommand): string {
   if (command.day) {
     parts.push("on", dayToCanonicalText(command.day));
   }
-  if (command.span) {
+  // R-402: a shift clause in place of the hours -- `span` is null whenever
+  // `shift` is not (the type's own invariant).
+  if (command.shift !== null) {
+    parts.push("for", "shift", quoteShiftIfNeeded(command.shift));
+  } else if (command.span) {
     parts.push(
       "from",
       `${pad2(command.span.start.hour)}:${pad2(command.span.start.minute)}`,
@@ -1381,7 +1689,11 @@ function formatMoveCommand(command: MoveCommand): string {
   if (command.day) {
     parts.push("on", dayToCanonicalText(command.day));
   }
-  if (command.span) {
+  // R-402: a shift clause in place of new hours -- `span` is null whenever
+  // `shift` is not.
+  if (command.shift !== null) {
+    parts.push("for", "shift", quoteShiftIfNeeded(command.shift));
+  } else if (command.span) {
     parts.push(
       "from",
       `${pad2(command.span.start.hour)}:${pad2(command.span.start.minute)}`,

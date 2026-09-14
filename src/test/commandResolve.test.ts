@@ -176,6 +176,7 @@ function cmd(overrides: Partial<AssignCommand> = {}): AssignCommand {
     start: { hour: 10, minute: 0 },
     end: { hour: 14, minute: 0 },
     attach: null,
+    shift: null,
     existing: null,
     ...overrides,
   };
@@ -192,6 +193,7 @@ function bookCmd(overrides: Partial<BookCommand> = {}): BookCommand {
     day: null,
     start: { hour: 6, minute: 0 },
     end: { hour: 14, minute: 0 },
+    shift: null,
     existing: null,
     ...overrides,
   };
@@ -208,6 +210,7 @@ function moveCmd(overrides: Partial<MoveCommand> = {}): MoveCommand {
     toPlace: ["Cell 2"],
     day: null,
     span: null,
+    shift: null,
     existing: null,
     ...overrides,
   };
@@ -222,6 +225,7 @@ function unassignCmd(overrides: Partial<UnassignCommand> = {}): UnassignCommand 
     place: ["Cell 1", "Line 1"],
     day: null,
     span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+    shift: null,
     existing: null,
     ...overrides,
   };
@@ -1840,5 +1844,36 @@ describe("commandResolve: S50 a several is read but not yet run", () => {
         "Several commands in one sentence are read but not yet run; say them one at a time for now.",
       );
     }
+  });
+});
+
+/**
+ * S52-a (docs/agent-briefs/s52-a-shift-grammar-brief.md, R-402): a shift's
+ * name is read by the parser but not yet turned into a band by this lane --
+ * the resolver asks for now (the next lane replaces this).
+ */
+describe("commandResolve: S52-a a shift by name is read but not yet resolved", () => {
+  it("RS2: an assign with a shift resolves to shift_unsupported with the message verbatim", () => {
+    const res = resolveCommand(cmd({ start: null, end: null, shift: "2" }), baseCtx({ runs: [] }));
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "shift_unsupported", text: "2" },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Shifts by name are read but not yet resolved; say the hours for now.",
+      );
+    }
+  });
+
+  it("RS3 (reviewer, blocker 3): a move with a new cell AND a shift also resolves to shift_unsupported, never the block's own hours", () => {
+    const res = resolveCommand(
+      moveCmd({ toPlace: ["Cell 2"], span: null, shift: "3" }),
+      withBlocks([blk1]),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "shift_unsupported", text: "3" },
+    });
   });
 });
