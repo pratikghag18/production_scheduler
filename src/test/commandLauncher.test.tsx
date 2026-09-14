@@ -101,6 +101,9 @@ function renderLauncher(over: Partial<ResolveContext> = {}, recognizer: Recogniz
   const onUnassign = vi.fn();
   const onMove = vi.fn();
   const onHighlight = vi.fn();
+  // S51: required on `CommandBarProps`, unused by every case in this file --
+  // none of them types a several.
+  const onRunLot = vi.fn(() => new Promise<never>(() => {}));
   render(
     <CommandLauncher
       ctx={buildCtx(over)}
@@ -113,6 +116,7 @@ function renderLauncher(over: Partial<ResolveContext> = {}, recognizer: Recogniz
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
       onMove={onMove}
+      onRunLot={onRunLot}
       onHighlight={onHighlight}
     />,
   );

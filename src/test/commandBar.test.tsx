@@ -19,7 +19,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { formatDayLabel } from "@/features/board/lib/time";
-import { formatCommand, parseCommand, type AssignCommand } from "@/lib/command/parse";
+import {
+  formatCommand,
+  parseCommand,
+  type AssignCommand,
+  type UnassignCommand,
+  type MoveCommand,
+} from "@/lib/command/parse";
 import type {
   ResolveContext,
   ResolvedCommand,
@@ -29,7 +35,12 @@ import type {
   ContextRun,
   ContextAssignment,
 } from "@/lib/command/resolve";
-import { CommandBar, type ConfirmWordResult } from "@/features/board/components/CommandBar";
+import {
+  CommandBar,
+  type ConfirmWordResult,
+  type ResolvedAny,
+  type LotResult,
+} from "@/features/board/components/CommandBar";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 
@@ -173,6 +184,17 @@ const BLK_C2: ContextAssignment = { ...BLK1, id: "blkC2", nodeId: "c2" };
  *  as the sentence's named cell, a different node. */
 const BLK_C1B: ContextAssignment = { ...BLK1, id: "blkC1b", nodeId: "c1b" };
 
+/** S51: BLK1's same cell and hours, but Sam Patel's block instead of
+ *  Operator 1's -- the several-lot fixtures' second person. */
+const BLK_SP: ContextAssignment = { ...BLK1, id: "blkSp", operatorId: "sp" };
+
+/** S51: "assign A2 and A3 ..." shape -- two removals in one sentence,
+ *  Operator 1 and Sam Patel, both from Cell 1 in Line 1, 10 to 2. */
+const LOT_REMOVE_SENTENCE = "Unassign Operator 1 and Sam Patel from Cell 1 in Line 1 from 10 to 2";
+/** S51: the same two people, no hours -- the whole day (CU3's shape),
+ *  used where a command needs more than one candidate to ask about. */
+const LOT_REMOVE_WHOLE_DAY_SENTENCE = "Unassign Operator 1 and Sam Patel from Cell 1 in Line 1";
+
 /** S44-b: `reader` defaults to `null` -- every pre-S44-b call site (one
  *  argument only) is unaffected; the CB-model describe block below is the
  *  only caller that passes a second argument. S46-a widens this with a
@@ -192,6 +214,10 @@ function renderBar(
     onConfirmWord?: () => ConfirmWordResult;
     onCancelWord?: () => boolean;
   } = {},
+  // S51: `onRunLot` defaults to a no-op that never resolves, since almost
+  // every case in this file never triggers a lot at all -- CB-lot's own
+  // tests pass a real mock through this.
+  s51: { onRunLot?: (resolved: ResolvedAny[]) => Promise<LotResult> } = {},
 ) {
   const onOpen = vi.fn();
   const onRetime = vi.fn();
@@ -200,6 +226,7 @@ function renderBar(
   const onUnassign = vi.fn();
   const onMove = vi.fn();
   const onHighlight = vi.fn();
+  const onRunLot = vi.fn(s51.onRunLot ?? (() => new Promise<LotResult>(() => {})));
   render(
     <CommandBar
       ctx={buildCtx(over)}
@@ -213,13 +240,24 @@ function renderBar(
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
       onMove={onMove}
+      onRunLot={onRunLot}
       onHighlight={onHighlight}
       onConfirmWord={s47.onConfirmWord}
       onCancelWord={s47.onCancelWord}
     />,
   );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
-  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, onHighlight, input };
+  return {
+    onOpen,
+    onRetime,
+    onBook,
+    onRetimeRun,
+    onUnassign,
+    onMove,
+    onRunLot,
+    onHighlight,
+    input,
+  };
 }
 
 /** S46-a: a fake recogniser (brief §2.4) -- records the `RecognizerEvents`
@@ -1109,6 +1147,381 @@ describe("CB-else: a wrong or missing cell offers the person's blocks elsewhere 
     expect(statusText()).toBe(
       "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00? — say or type yes to do it, no to leave it.",
     );
+  });
+});
+
+// -----------------------------------------------------------------------
+// S51 (R-400, design §19.98/D127): a several runs one question at a time,
+// docs/agent-briefs/s51-a-lot-brief.md §2 items 5 (CB-lot-1..9).
+// -----------------------------------------------------------------------
+
+describe("CB-lot: a several runs one question at a time and writes on one yes (S51)", () => {
+  it("CB-lot-1: a several of two removals from one cell, both people with one block, walks both questions to the lot status", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1, BLK_SP] });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "1 of 2: Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?" +
+        " — say or type yes to do it, no to leave it.",
+    );
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    expect(statusText()).toBe(
+      "2 of 2: Remove Sam Patel's Housing A block on Cell 1, 10:00–14:00?" +
+        " — say or type yes to do it, no to leave it.",
+    );
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blkSp"] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    expect(statusText()).toBe(
+      "2 commands ready: " +
+        `1. Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · ${dayLabel} · 10:00–14:00; ` +
+        `2. Removing Sam Patel's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · ${dayLabel} · 10:00–14:00` +
+        " — say or type yes to do them, no to leave them.",
+    );
+    expect(onHighlight).toHaveBeenLastCalledWith([
+      { kind: "remove", assignmentIds: ["blk1"] },
+      { kind: "remove", assignmentIds: ["blkSp"] },
+    ]);
+    expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
+  });
+
+  it("CB-lot-2: yes + Enter calls onRunLot with two ResolvedUnassign in order and shows 'Done: 2 commands.' with the input cleared", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input, onHighlight } = renderBar(
+      { assignments: [BLK1, BLK_SP] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList).toHaveLength(2);
+    expect(resolvedList.map((r) => r.intent)).toEqual(["unassign", "unassign"]);
+    expect((resolvedList[0] as ResolvedUnassign).assignmentId).toBe("blk1");
+    expect((resolvedList[1] as ResolvedUnassign).assignmentId).toBe("blkSp");
+    expect(input.value).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-lot-3: onRunLot resolving {done:1, error:'boom'} shows the partial-failure message, input kept, highlight cleared", async () => {
+    const onRunLot = vi.fn(async (): Promise<LotResult> => ({ done: 1, error: "boom" }));
+    const { input, onHighlight } = renderBar(
+      { assignments: [BLK1, BLK_SP] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toBe("Did 1 of 2; the next failed: boom"));
+
+    expect(input.value).toBe("yes");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-lot-4: the first command's ambiguous block question is numbered and its buttons continue to the next command, then the lot status", () => {
+    const { input } = renderBar({ assignments: [BLK1, BLK2, BLK_SP] });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_WHOLE_DAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^1 of 2: /);
+    expect(screen.getByRole("button", { name: "Remove Housing A 10:00–14:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Housing A 14:00–16:00" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Housing A 10:00–14:00" }));
+
+    expect(statusText()).toMatch(/^2 of 2: /);
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
+  });
+
+  it("CB-lot-5: the first command's block is elsewhere (S49), numbered; yes answers that one-candidate question, then the lot", () => {
+    const { input } = renderBar({ assignments: [BLK_C2, BLK_SP] });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "1 of 2: Operator 1 has no block on Cell 1 10:00–14:00, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?" +
+        " — say or type yes to do it, no to leave it.",
+    );
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^2 of 2: /);
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    expect(statusText()).toMatch(/^2 commands ready: /);
+  });
+
+  it("CB-lot-6: 'remove it' at the lot status is answered in place, no onRunLot", () => {
+    const onRunLot = vi.fn(async (): Promise<LotResult> => ({ done: 2, error: null }));
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(statusText()).toMatch(/^2 commands ready: /);
+
+    fireEvent.change(input, { target: { value: "remove it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("That is a lot of 2 commands; say yes to do them all, or no.");
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
+  });
+
+  it("CB-lot-7: no / Escape / a typed edit each drop the lot and clear the highlight", () => {
+    function reachLotStatus() {
+      const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1, BLK_SP] });
+      fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+      expect(statusText()).toMatch(/^2 commands ready: /);
+      return { input, onUnassign, onHighlight };
+    }
+
+    // no
+    const first = reachLotStatus();
+    let { input, onHighlight } = first;
+    const { onUnassign } = first;
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("");
+    expect(input.value).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+    expect(onUnassign).not.toHaveBeenCalled();
+
+    cleanup();
+
+    // Escape
+    ({ input, onHighlight } = reachLotStatus());
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(statusText()).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+
+    cleanup();
+
+    // a typed edit
+    ({ input, onHighlight } = reachLotStatus());
+    fireEvent.change(input, { target: { value: `${LOT_REMOVE_SENTENCE}x` } });
+    expect(statusText()).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-lot-8: a mixed lot (one removal, one move in time) outlines with two kinds and onRunLot receives both resolved shapes", async () => {
+    const unassignCmd: UnassignCommand = {
+      intent: "unassign",
+      operator: "Operator 1",
+      place: ["Cell 1", "Line 1"],
+      day: null,
+      span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+      existing: { kind: "remove", assignmentId: "blk1" },
+    };
+    const moveCmd: MoveCommand = {
+      intent: "move",
+      operator: "Sam Patel",
+      place: ["Cell 1", "Line 1"],
+      toPlace: null,
+      day: null,
+      span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
+      existing: null,
+    };
+    // S51's own note (brief §2 item 1 / design §19.98): a mixed-intent
+    // several never comes off the TEXT grammar (each `parseXRest` only ever
+    // lists one intent) -- this drives it through the model-reader path
+    // instead, exactly as the several form will arrive once the model
+    // learns it, standing in for that here with a fake `reader`.
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      by: "model",
+      command: { intent: "several", commands: [unassignCmd, moveCmd] },
+    }));
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input, onHighlight } = renderBar(
+      { assignments: [BLK1, BLK_SP] },
+      reader,
+      null,
+      {},
+      { onRunLot },
+    );
+
+    fireEvent.change(input, { target: { value: "anything" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+    expect(onHighlight).toHaveBeenLastCalledWith([
+      { kind: "remove", assignmentIds: ["blk1"] },
+      { kind: "retime", assignmentIds: ["blkSp"] },
+    ]);
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["unassign", "move"]);
+    expect((resolvedList[0] as ResolvedUnassign).assignmentId).toBe("blk1");
+    expect((resolvedList[1] as ResolvedMove).assignmentId).toBe("blkSp");
+  });
+
+  it("CB-lot-9: a single sentence still calls onUnassign, never onRunLot (regression pin)", () => {
+    const { onUnassign, onRunLot, input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    expect(onRunLot).not.toHaveBeenCalled();
+  });
+
+  it("CB-lot-10: a second yes while Working… does not call onRunLot again", async () => {
+    let resolveRunLot: ((r: LotResult) => void) | null = null;
+    const onRunLot = vi.fn(
+      () =>
+        new Promise<LotResult>((resolve) => {
+          resolveRunLot = resolve;
+        }),
+    );
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe("Working…");
+
+    // A second "yes" while the first run is still in flight -- the same
+    // word that started it -- must never start a second one (small 2).
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+
+    resolveRunLot!({ done: 2, error: null });
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+  });
+
+  it("CB-lot-11: two commands naming the same block drop the lot with the collision message", () => {
+    const { input } = renderBar({ assignments: [BLK1] });
+
+    fireEvent.change(input, {
+      target: { value: "Unassign Operator 1 and Operator 1 from Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toMatch(/^1 of 2: /);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(statusText()).toMatch(/^2 of 2: /);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    expect(statusText()).toBe("Commands 1 and 2 name the same block; say them one at a time.");
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("CB-lot-12: Escape during Working… leaves it standing, and the result message still arrives", async () => {
+    let resolveRunLot: ((r: LotResult) => void) | null = null;
+    const onRunLot = vi.fn(
+      () =>
+        new Promise<LotResult>((resolve) => {
+          resolveRunLot = resolve;
+        }),
+    );
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+
+    // Escape closes nothing while a lot is writing in the background --
+    // not even the launcher's own "nothing left, close the panel" signal.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(statusText()).toBe("Working…");
+
+    resolveRunLot!({ done: 2, error: null });
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+  });
+
+  it("CB-lot-13: a typed edit during Working… is ignored -- the input stays unchanged", async () => {
+    let resolveRunLot: ((r: LotResult) => void) | null = null;
+    const onRunLot = vi.fn(
+      () =>
+        new Promise<LotResult>((resolve) => {
+          resolveRunLot = resolve;
+        }),
+    );
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("yes");
+    expect(statusText()).toBe("Working…");
+
+    // A typed edit while the lot is writing in the background is a no-op --
+    // the controlled input snaps straight back, and the status stands.
+    fireEvent.change(input, { target: { value: "something else entirely" } });
+    expect(input.value).toBe("yes");
+    expect(statusText()).toBe("Working…");
+
+    resolveRunLot!({ done: 2, error: null });
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    expect(input.value).toBe("");
   });
 });
 

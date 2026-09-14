@@ -9409,6 +9409,18 @@ ran the pop-up's own rules — `offeredAt`, `fitsRun`, `findRunOverlap` — befo
 lot stops at the first failure and says how many were done, because the writes are not one
 transaction and pretending otherwise would hide a half-done board.
 
+**A step that would ask again stops the lot.** The reviewer found two things in the first
+build: a removal inside a lot was fired and counted done before the server answered, so
+"Done: 2 commands" could stand beside a toast saying the first was refused; and a re-time
+inside a lot could open the drag's own confirm pop-up (an attachment change, keep-or-scale,
+crew left outside a resized run) with nothing linking it back to the lot. The rule that
+follows from "never write before the yes": every step awaits the same mutation the pop-up
+awaits, and a step that would have asked a further question refuses instead — the yes covered
+the readouts on the screen, and a question after it means a readout was incomplete. The lot
+reports that step as its failure and says how many were done; the person does that one on
+its own. The same holds for a lot that names one block twice: refused before the yes, not
+discovered after.
+
 **Built before the model knows the sentence.** The rule parser reads the sentence today, so
 the bar can be built and tested on it while the data lane and the maintainer's retrain give
 the model the same sentence; when the model's several form arrives through the decoder it

@@ -439,8 +439,11 @@ export default function BoardPage() {
   // S47 / R-395: what the bar told us is in question, drawn on the board via
   // `HighlightProvider` below -- read by `DirectBlock`/`AssignmentChip`
   // through `useHighlightKind`, never threaded through `BoardGrid`/`TrackRow`
-  // as a prop (`../lib/highlight.ts`'s own file comment says why).
-  const [highlight, setHighlight] = useState<Highlight | null>(null);
+  // as a prop (`../lib/highlight.ts`'s own file comment says why). S51: a
+  // several's finished lot widens this to a LIST -- one outline per block a
+  // removal or a move in it would touch -- `HighlightProvider`/
+  // `useHighlightKind` already normalise either shape.
+  const [highlight, setHighlight] = useState<Highlight | Highlight[] | null>(null);
   // S47 / R-395 item 4: the currently-open create pop-up's imperative handle
   // (null when none is mounted) -- `CommandBar`'s `onConfirmWord` reaches
   // through it for a spoken yes that arrives after mount, once R-384's own
@@ -866,6 +869,12 @@ export default function BoardPage() {
               // S47 / R-395: told what is in question -- drawn on the board
               // through `HighlightProvider` below.
               onHighlight={setHighlight}
+              // S51 / R-400 (design §19.98/D127): the several-lot's one
+              // writer -- runs the resolved commands in order through the
+              // SAME doors the props above already use, never a second copy
+              // (see `useDragGesture.ts`'s own `runLot` doc for the writer
+              // each resolved shape reaches).
+              onRunLot={dragApi.runLot}
               // S47 / R-395 item 4: a spoken/typed yes with no question
               // standing reaches the currently-open create pop-up ONLY when
               // a sentence opened it (`autoCreate`) -- `submitIfClean` itself

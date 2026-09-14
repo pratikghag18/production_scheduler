@@ -23,15 +23,33 @@ export type Highlight = {
  * only ones that need the answer, for exactly one assignment id each. Adding
  * a prop to every row/grid layer in between just to relay one value neither
  * of them reads would be new plumbing for its own sake.
+ *
+ * S51 (R-400/D127): a several's lot status outlines every block a removal or
+ * a move in it would touch, at once, each in its own kind's colour -- so the
+ * value this context carries widens to ALSO accept a LIST of `Highlight`s.
+ * The `Highlight` type itself is unchanged (brief §2 item 2: "keep the
+ * Highlight type"); only the context's own value and `useHighlightKind`'s
+ * lookup widen to normalise either shape, so `DirectBlock`/`AssignmentChip`
+ * (and every existing single-highlight caller, `BoardPage` included) need no
+ * changes at all.
  */
-const HighlightContext = createContext<Highlight | null>(null);
+const HighlightContext = createContext<Highlight | Highlight[] | null>(null);
 
 export const HighlightProvider = HighlightContext.Provider;
 
+function highlightMatches(h: Highlight, assignmentId: string): boolean {
+  return h.assignmentIds.includes(assignmentId);
+}
+
 /** `null` when nothing is highlighted, or `assignmentId` is not in the
- *  current highlight's set; otherwise the colour to draw. */
+ *  current highlight's set (single or, S51, any one of a list); otherwise
+ *  the colour to draw. */
 export function useHighlightKind(assignmentId: string): Highlight["kind"] | null {
   const highlight = useContext(HighlightContext);
-  if (highlight && highlight.assignmentIds.includes(assignmentId)) return highlight.kind;
-  return null;
+  if (highlight === null) return null;
+  if (Array.isArray(highlight)) {
+    const hit = highlight.find((h) => highlightMatches(h, assignmentId));
+    return hit ? hit.kind : null;
+  }
+  return highlightMatches(highlight, assignmentId) ? highlight.kind : null;
 }

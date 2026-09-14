@@ -15,6 +15,7 @@ import { absenceKeys } from "@/features/board/hooks/useAbsences";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
 import { buildDayAxis } from "@/features/board/lib/time";
+import type { ResolvedAny, LotResult } from "@/features/board/components/CommandBar";
 
 /**
  * Authored, not run in this container (no npm — see the agent report).
@@ -1865,6 +1866,113 @@ describe("useDragGesture", () => {
       expect(api.updateRunFields).not.toHaveBeenCalled();
       const messages = useToastStore.getState().toasts.map((t) => t.message);
       expect(messages).toContain("That job is no longer on the board. — reverted.");
+    });
+  });
+
+  /**
+   * S51 review fix -- blocker 1 (an awaited removal reports the lot's own
+   * failure instead of counting a refused write as done) and blocker 2 (a
+   * retime that would need a popover's own decision rejects instead of
+   * opening one mid-lot, D127: the yes already given was for the readouts
+   * shown, never for a question raised after it).
+   */
+  describe("S51 review fix: runLot", () => {
+    it("a refused removal (the mutation rejects) yields {done: 0, error: <the toast wording>}, and the second command is never attempted", async () => {
+      const api = await import("@/lib/api");
+      // requireWritten's own shape for an RLS-refused zero-row delete.
+      vi.mocked(api.deleteAssignment).mockRejectedValueOnce({ kind: "WriteRefused" });
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      const lot: ResolvedAny[] = [
+        { intent: "unassign", assignmentId: "asg-1", readout: "Removing block 1" },
+        { intent: "unassign", assignmentId: "asg-2", readout: "Removing block 2" },
+      ];
+
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+
+      expect(outcome).toEqual({ done: 0, error: "You don't have permission to change that." });
+      expect(api.deleteAssignment).toHaveBeenCalledTimes(1);
+      expect(api.deleteAssignment).toHaveBeenCalledWith("asg-1");
+    });
+
+    it("a lot-aware retime that would need a decision (an attachment change) rejects with the message and writes nothing", async () => {
+      const api = await import("@/lib/api");
+      const a = crewFixture(); // 360-600, attached to run-1 (also 360-600)
+      const index = buildIndex([a]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      const lot: ResolvedAny[] = [
+        {
+          intent: "move",
+          assignmentId: a.id,
+          nodeId: "cell-1",
+          operatorId: "op-1",
+          productId: "prod-1",
+          range: { startMin: 360, endMin: 720 }, // past run-1's own end -- an attachment change
+          target: { kind: "retime" },
+          readout: "Moving Test Person's block",
+        },
+      ];
+
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+
+      expect(outcome).toEqual({
+        done: 0,
+        error:
+          "the re-time of Moving Test Person's block needs a decision the pop-up asks; do it on its own",
+      });
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+      expect(result.current.popover).toBeNull(); // never opened, D127
+    });
+
+    it("a plain retime (no ask needed) awaits the update mutation and reports it done", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+      const a: IndexedAssignment = {
+        ...crewFixture(),
+        id: "asg-direct",
+        runId: null,
+        productId: "prod-1",
+        startMin: 360,
+        endMin: 480,
+      };
+      const index = buildIndex([a]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      const lot: ResolvedAny[] = [
+        {
+          intent: "assign",
+          nodeId: "cell-1",
+          operatorId: "op-1",
+          productId: "prod-1",
+          target: { kind: "retime", assignmentId: "asg-direct" },
+          range: { startMin: 360, endMin: 720 },
+          readout: "Test Person → Widget · Cell 1 · 06:00–12:00",
+        },
+      ];
+
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+
+      expect(outcome).toEqual({ done: 1, error: null });
+      expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1);
+      const call = vi.mocked(api.updateAssignmentFields).mock.calls[0];
+      expect(call?.[0]).toBe("asg-direct");
+      expect(call?.[1]).toEqual({
+        timerange: {
+          start: new Date("2026-08-24T06:00:00.000Z"),
+          end: new Date("2026-08-24T12:00:00.000Z"),
+        },
+      });
     });
   });
 });

@@ -194,4 +194,54 @@ describe("S47 / R-395: the highlight a remove/move/retime question draws", () =>
     // A removal draws a DIFFERENT class than a move/retime does.
     expect(removed.querySelector('[role="button"]')!.className).not.toBe(withMove);
   });
+
+  /**
+   * S51 (R-400/D127): a several's finished lot status outlines every block
+   * a removal or a move in it would touch AT ONCE, each in its own kind's
+   * colour -- `HighlightProvider`'s value widens to a LIST for exactly this
+   * (`../lib/highlight.ts`); `useHighlightKind` is unchanged for the two
+   * components under test here, which never learn the value can be a list.
+   */
+  it("H3: a list highlight colours each id by its own kind", () => {
+    const other: IndexedAssignment = { ...assignment, id: "asg-2" };
+
+    const { container } = render(
+      <HighlightProvider
+        value={[
+          { kind: "remove", assignmentIds: [assignment.id] },
+          { kind: "move", assignmentIds: [other.id] },
+        ]}
+      >
+        <DirectBlock assignment={assignment} {...sharedProps} />
+        <AssignmentChip assignment={other} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    const buttons = container.querySelectorAll('[role="button"]');
+    expect(buttons).toHaveLength(2);
+
+    // Each button gets ITS OWN kind, not the other's, not neither -- proven
+    // by matching each against a SOLO single-highlight render of the same
+    // kind (H1/H2's own shape), so this does not depend on knowing what the
+    // CSS Module transform actually names the class.
+    const { container: soloRemove } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: [assignment.id] }}>
+        <DirectBlock assignment={assignment} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(buttons[0].className).toBe(soloRemove.querySelector('[role="button"]')!.className);
+
+    const { container: soloMove } = render(
+      <HighlightProvider value={{ kind: "move", assignmentIds: [other.id] }}>
+        <AssignmentChip assignment={other} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(buttons[1].className).toBe(soloMove.querySelector('[role="button"]')!.className);
+
+    // And they differ from an unhighlighted baseline, and from each other.
+    const { container: plainBlock } = render(
+      <DirectBlock assignment={assignment} {...sharedProps} />,
+    );
+    expect(buttons[0].className).not.toBe(plainBlock.querySelector('[role="button"]')!.className);
+    expect(buttons[0].className).not.toBe(buttons[1].className);
+  });
 });

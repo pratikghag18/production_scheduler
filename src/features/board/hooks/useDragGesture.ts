@@ -25,6 +25,7 @@ import type {
   BoardOperator,
   CreateAssignmentInput,
   AssignmentFieldEdit,
+  RunFieldEdit,
   ReassignAssignmentInput,
   MoveAssignmentInput,
   CapacityProbe,
@@ -43,7 +44,7 @@ import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geom
 import type { DayAxis } from "../lib/time";
 import { formatClock, addMinutes } from "../lib/time";
 import { leaveLine } from "../lib/leave";
-import { absenceGaps } from "@/lib/absence";
+import { absenceGaps, type AbsenceRow } from "@/lib/absence";
 import { useAbsences } from "./useAbsences";
 import type { DateFormat } from "@/lib/format/dates";
 import {
@@ -73,7 +74,16 @@ import {
   useUpdateAssignmentFields,
   useApplySplitCoverage,
 } from "./useAssignmentMutations";
-import { useSchedulerToast, type ToastResolveCtx } from "./useSchedulerToast";
+import {
+  useSchedulerToast,
+  buildSchedulerErrorToast,
+  type ToastResolveCtx,
+} from "./useSchedulerToast";
+// S51 (R-400/D127): type-only -- `ResolvedAny`/`LotResult` are declared
+// beside the bar's own resolved-shape props (`CommandBar.tsx`) since the bar
+// is what hands them to `runLot` below; this hook holds no rule of the
+// bar's, only the writers a resolved lot item ends in.
+import type { ResolvedAny, LotResult } from "../components/CommandBar";
 
 export type { DragMode };
 
@@ -382,6 +392,259 @@ function toastCtx(index: BoardIndex, dateFormat: DateFormat): ToastResolveCtx {
     zone: index.zone,
     dateFormat,
   };
+}
+
+/**
+ * S51 (R-400/D127): the one place `CreateAssignmentInput`'s fields are built
+ * from a node/range/operator/target, so `submitCreateDirect`'s own
+ * popover-driven Create and the several-lot's `createFromCommand` (below)
+ * can never drift into two different payload shapes for the same write.
+ * `overrides` supplies the fields only a popover's own state ever decides
+ * (efficiency, a typed target, an eligibility/area override and its
+ * reason); the lot never has any of those to give -- a resolved `assign`
+ * carries none of them -- so its defaults ARE a clean pop-up's own defaults
+ * (R-384's own `clean`: 100% efficiency, no typed target, no override).
+ */
+function buildCreateAssignmentInput(
+  windowStart: Date,
+  r: { nodeId: string; range: Range; operatorId: string; target: AssignmentTarget },
+  overrides: Partial<
+    Pick<
+      CreateAssignmentInput,
+      | "efficiencyPercent"
+      | "targetQty"
+      | "targetUnit"
+      | "eligibilityOverride"
+      | "overrideReason"
+      | "areaOverride"
+      | "areaOverrideReason"
+    >
+  > = {},
+): CreateAssignmentInput {
+  return {
+    nodeId: r.nodeId,
+    operatorId: r.operatorId,
+    target: r.target,
+    start: minuteDate(windowStart, r.range.startMin),
+    end: minuteDate(windowStart, r.range.endMin),
+    efficiencyPercent: overrides.efficiencyPercent ?? 100,
+    targetQty: overrides.targetQty,
+    targetUnit: overrides.targetUnit,
+    eligibilityOverride: overrides.eligibilityOverride ?? false,
+    overrideReason: overrides.overrideReason,
+    areaOverride: overrides.areaOverride ?? false,
+    areaOverrideReason: overrides.areaOverrideReason,
+  };
+}
+
+/**
+ * S51 review fix (blocker 2): rejects a lot step that could not be written
+ * without either a decision only a popover asks (an attachment change, a
+ * keep/scale ambiguity, crew stranded outside a resized run) or a plain
+ * refusal a drag would otherwise just toast (the block/job is gone, an
+ * overlap). D127's "never write before the yes" cuts both ways: the yes the
+ * person gave was for the READOUTS shown, so hitting a FURTHER question
+ * mid-lot must stop the lot, never pop one open silently. `message` is
+ * already the plain sentence `LotResult.error` should show verbatim --
+ * `runLot`'s catch reads this class specifically, never the
+ * `SchedulerError`/`buildSchedulerErrorToast` machinery real API errors go
+ * through, so this text is never generalised into "Something went wrong."
+ */
+class LotStepRefused extends Error {}
+
+/**
+ * S51 review fix (blocker 2): the pure decision half of `retimeAssignment`'s
+ * assignment branch (attachment by containment, D66; the R-365
+ * attachment-change ask; the R-031 keep-or-scale ask), extracted so the
+ * lot-aware `retimeAssignmentForLot` (below) can ask the SAME questions
+ * without ever opening a popover for them -- it rejects instead. Pure: no
+ * `setPopover`, no mutation; `runWarnMirrors` is returned as a thunk so a
+ * caller only pays for the R-361 mirror toasts once it has actually decided
+ * to write.
+ */
+function planAssignmentRetime(
+  a: IndexedAssignment,
+  nodeId: string,
+  homeRun: IndexedRun | null,
+  candidate: Range,
+  index: BoardIndex,
+  ctx: ToastResolveCtx,
+  toast: ReturnType<typeof useSchedulerToast>,
+  dateFormat: DateFormat,
+  resizeAbsences: readonly AbsenceRow[],
+): {
+  edit: AssignmentFieldEdit;
+  /** R-365: null when no ask is needed (same run both sides, or an
+   *  already-direct chip staying direct); otherwise the message an ask
+   *  would show. */
+  attachmentMessage: string | null;
+  /** R-031: null when no ask is needed. */
+  keepOrScale: { message: string; typed: number; unit: string | null; scaledQty: number } | null;
+  /** R-361: the warn-policy mirror toasts, run once, only by a caller that
+   *  has actually decided to write. */
+  runWarnMirrors: () => void;
+} {
+  // D66: does the candidate still fit its current run? A different run on
+  // the SAME node? No run at all (detach, or stay direct)? Picking the
+  // target by CONTAINMENT (assignmentFitsRun) is what makes D66's "dropping
+  // onto a run whose time range does not contain the assignment is refused
+  // before sending" hold BY CONSTRUCTION here.
+  const stillFitsHome = homeRun !== null && assignmentFitsRun(candidate, homeRun);
+  const runsHere = index.runsByNode.get(nodeId) ?? [];
+  const otherFit = stillFitsHome
+    ? null
+    : (runsHere.find(
+        (r) => (homeRun === null || r.id !== homeRun.id) && assignmentFitsRun(candidate, r),
+      ) ?? null);
+
+  const edit: AssignmentFieldEdit = {
+    timerange: {
+      start: minuteDate(index.windowStart, candidate.startMin),
+      end: minuteDate(index.windowStart, candidate.endMin),
+    },
+  };
+  if (!stillFitsHome) {
+    if (otherFit) {
+      edit.runId = otherFit.id;
+      edit.productId = null;
+    } else if (homeRun !== null) {
+      // Detach: mirrors `delete_run`'s own detach-mode UPDATE (docs/api.md
+      // §3) — `run_id = NULL, product_id = <run's product>`, both in the
+      // same patch.
+      edit.runId = null;
+      edit.productId = homeRun.productId;
+    }
+    // else: was already direct and still fits no run — no runId/productId
+    // change, just the time move.
+  }
+
+  // R-365 / D66: the RUN the candidate ends up attached to — the same
+  // choice `edit` above already made.
+  const targetRun = stillFitsHome ? homeRun : otherFit;
+  const runLabel = (run: IndexedRun | null): string | null => {
+    if (run === null) return null;
+    const p = productViewFor(run, index.productById);
+    return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`.trim();
+  };
+  // D110: a departed person's row has `operatorId === null` — nobody to
+  // name in the prompt, so it falls back the same way the mirror toasts do.
+  const person =
+    a.operatorId !== null
+      ? (index.operatorById.get(a.operatorId)?.displayName ?? "This person")
+      : "This person";
+  const attachmentMessage =
+    (homeRun?.id ?? null) === (targetRun?.id ?? null)
+      ? null
+      : attachmentChangeMessage({ person, from: runLabel(homeRun), to: runLabel(targetRun) });
+
+  // R-031: a TYPED target is a total for the block's window, so a resize
+  // that changes the window's length changes what the number means.
+  const oldMinutes = a.endMin - a.startMin;
+  const newMinutes = candidate.endMin - candidate.startMin;
+  const scaled =
+    a.targetQty !== null && newMinutes !== oldMinutes
+      ? scaledTarget(a.targetQty, oldMinutes, newMinutes)
+      : null;
+  const keepOrScale =
+    a.targetQty !== null && scaled !== null && scaled !== a.targetQty
+      ? {
+          message: targetResizeMessage({
+            person,
+            qty: a.targetQty,
+            unit: a.targetUnit,
+            oldMinutes,
+            newMinutes,
+            scaled,
+          }),
+          typed: a.targetQty,
+          unit: a.targetUnit,
+          scaledQty: scaled,
+        }
+      : null;
+
+  const runWarnMirrors = () => {
+    // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge, or
+    // a same-cell nudge) — migration 0070's `assignments_resize_guard` asks
+    // `check_eligibility`/`absence_overlap` on it. Under `warn` the client
+    // runs the SAME two mirrors the create/reassign pop-ups already run. A
+    // departed person's row (`a.operatorId === null`, D110) has nobody to
+    // ask about and is skipped, matching the trigger's own guard.
+    if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
+      const operatorId = a.operatorId;
+      const windowEnd = minuteDate(index.windowStart, candidate.endMin);
+      const operatorRecord = index.operatorById.get(operatorId);
+      const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
+      const operatorName = operatorRecord?.displayName ?? operatorId;
+
+      if (operatorRecord) {
+        const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
+        const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
+        if (gaps.length > 0) {
+          toast.info(
+            `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
+          );
+        }
+      }
+
+      const absenceHit = absenceGaps(resizeAbsences, operatorId, {
+        start: minuteDate(index.windowStart, candidate.startMin),
+        end: windowEnd,
+      });
+      if (absenceHit !== null) {
+        const when = leaveLine(absenceHit, dateFormat, index.zone);
+        toast.info(`1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`);
+      }
+    }
+  };
+
+  return { edit, attachmentMessage, keepOrScale, runWarnMirrors };
+}
+
+/**
+ * S51 review fix (blocker 2): the pure decision half of `retimeRun`'s
+ * resize branch (the overlap refusal, the "N crew fall outside" ask),
+ * extracted the same way `planAssignmentRetime` is, for `retimeRunForLot`
+ * (below).
+ */
+function planRunRetime(
+  run: IndexedRun,
+  nodeId: string,
+  candidate: Range,
+  index: BoardIndex,
+  ctx: ToastResolveCtx,
+): {
+  edit: RunFieldEdit;
+  /** Not a question — an outright refusal (an overlap): nothing to ask,
+   *  nothing written, just why. */
+  overlapMessage: string | null;
+  /** The R-361-style "N crew fall outside the new run window. Continue?" ask. */
+  crewMessage: string | null;
+} {
+  const currentRunsOnNode = index.runsByNode.get(nodeId) ?? [];
+  const currentCrew = index.assignmentsByRun.get(run.id) ?? [];
+
+  const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
+  const overlapMessage = overlap
+    ? `${index.nodeById.get(nodeId)?.name ?? nodeId} already runs ${productViewFor(overlap, index.productById)?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`
+    : null;
+
+  let crewMessage: string | null = null;
+  if (!overlap && currentCrew.length > 0) {
+    const { clipped, stranded } = classifyCrewAgainstRun(candidate, currentCrew);
+    const affected = clipped.length + stranded.length;
+    if (affected > 0) {
+      crewMessage = `${affected} crew assignment${affected === 1 ? "" : "s"} fall outside the new run window. Continue?`;
+    }
+  }
+
+  const edit: RunFieldEdit = {
+    timerange: {
+      start: minuteDate(index.windowStart, candidate.startMin),
+      end: minuteDate(index.windowStart, candidate.endMin),
+    },
+  };
+
+  return { edit, overlapMessage, crewMessage };
 }
 
 export function useDragGesture(args: UseDragGestureArgs) {
@@ -740,158 +1003,50 @@ export function useDragGesture(args: UseDragGestureArgs) {
       anchor: { x: number; y: number },
       revert: string,
     ) => {
-      // D66: does the candidate still fit its current run? A different
-      // run on the SAME node? No run at all (detach, or stay direct)?
-      // Picking the target by CONTAINMENT (assignmentFitsRun) is what
-      // makes D66's "dropping onto a run whose time range does not
-      // contain the assignment is refused before sending" hold BY
-      // CONSTRUCTION here — we only ever select a run that already
-      // contains the candidate, so there is no separate rejection branch
-      // to write (see the agent report's assumptions section for the
-      // fuller reasoning, including the direct-assignment-onto-a-run
-      // direction this generalizes to, which the mockup's `startDirectDrag`
-      // does not attempt but which reuses the identical mechanism).
-      const stillFitsHome = homeRun !== null && assignmentFitsRun(candidate, homeRun);
-      const runsHere = index.runsByNode.get(nodeId) ?? [];
-      const otherFit = stillFitsHome
-        ? null
-        : (runsHere.find(
-            (r) => (homeRun === null || r.id !== homeRun.id) && assignmentFitsRun(candidate, r),
-          ) ?? null);
-
-      const edit: AssignmentFieldEdit = {
-        timerange: {
-          start: minuteDate(index.windowStart, candidate.startMin),
-          end: minuteDate(index.windowStart, candidate.endMin),
-        },
-      };
-      if (!stillFitsHome) {
-        if (otherFit) {
-          edit.runId = otherFit.id;
-          edit.productId = null;
-        } else if (homeRun !== null) {
-          // Detach: mirrors `delete_run`'s own detach-mode UPDATE
-          // (docs/api.md §3) — `run_id = NULL, product_id = <run's
-          // product>`, both in the same patch.
-          edit.runId = null;
-          edit.productId = homeRun.productId;
-        }
-        // else: was already direct and still fits no run — no
-        // runId/productId change, just the time move.
-      }
-
-      // R-365 / D66: the RUN the candidate ends up attached to — the same
-      // choice `edit` above already made (`stillFitsHome` keeps `homeRun`,
-      // otherwise `otherFit`, which is `null` for a detach or an
-      // already-direct chip that still fits nothing). Reusing the value
-      // rather than recomputing it is what keeps the confirm prompt and
-      // the write it guards from ever disagreeing about what is about to
-      // happen.
-      const targetRun = stillFitsHome ? homeRun : otherFit;
-      const runLabel = (run: IndexedRun | null): string | null => {
-        if (run === null) return null;
-        const p = productViewFor(run, index.productById);
-        return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`.trim();
-      };
-      // D110: a departed person's row has `operatorId === null` — nobody
-      // to name in the prompt, so it falls back the same way the mirror
-      // toasts below already do.
-      const person =
-        a.operatorId !== null
-          ? (index.operatorById.get(a.operatorId)?.displayName ?? "This person")
-          : "This person";
-      // Decided on run IDS here, not on the labels the message shows: two
-      // runs on one track cannot overlap (`findRunOverlap`), so equal labels
-      // do imply the same run today -- but that is a rule living in another
-      // function, and "is it the same run?" is a fact this branch already
-      // holds. `attachmentChangeMessage`'s own label compare is a guard, not
-      // the decision.
-      const attachmentMessage =
-        (homeRun?.id ?? null) === (targetRun?.id ?? null)
-          ? null
-          : attachmentChangeMessage({
-              person,
-              from: runLabel(homeRun),
-              to: runLabel(targetRun),
-            });
+      const plan = planAssignmentRetime(
+        a,
+        nodeId,
+        homeRun,
+        candidate,
+        index,
+        ctx,
+        toast,
+        dateFormat,
+        resizeAbsences,
+      );
 
       // R-365: everything from the R-361 mirror toasts through the write
-      // itself is deferred into this closure so a prompted drop toasts and
+      // itself is deferred until this runs so a prompted drop toasts and
       // writes NOTHING until Continue — the mirrors must not run ahead of
       // the confirm, because a toast (unlike the mutation) cannot be
       // un-sent on Cancel.
-      const commitAssignmentMove = () => {
+      const commitAssignmentMove = (edit: AssignmentFieldEdit) => {
         // P1-4e considered, and rejected, running a `capacity_probe` +
-        // split-coverage popover ahead of an EXISTING chip's own time
-        // move (brief §5 step 1 lists "chip move" as a split-coverage
-        // trigger). `apply_split_coverage`'s `p_adjustments` shape
-        // (docs/api.md §3) only ever carries `{assignment_id, efficiency}`
-        // — no `timerange` — so an existing assignment that is both
-        // MOVING and needing its efficiency dialled down cannot be
-        // expressed as that call's `p_new_assignment` (reserved for a
-        // brand-new INSERT) either. Making this case go through the split
-        // flow would need a second write after `apply_split_coverage`,
-        // which hazard #4 forbids ("never several calls"). Left as the
-        // ordinary `updateAssignmentFields` PATCH below; the
-        // `assignments_capacity` trigger still guards it exactly as
-        // before P1-4e, and a rejection surfaces through the existing
-        // `CapacityExceeded` toast path (`failWith`), unchanged.
-        //
-        // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge,
-        // or a same-cell nudge) — migration 0070's `assignments_resize_guard`
-        // now asks `check_eligibility`/`absence_overlap` on it exactly as the
-        // four scheduler RPCs do. Under `block` a refusal comes back as
-        // `NotEligible`/`Absent` and `failWith` below shows it, unchanged. A
-        // trigger cannot return a warning, so under `warn` the client runs
-        // the SAME two mirrors the create/reassign pop-ups already run
-        // (`certificateGaps`, `absenceGaps`) against the window it is about
-        // to write, and on a hit toasts the SAME wording the crew-drag
-        // success toast already uses above (`commitBlockDrag`'s `run`/`move`
-        // branch) — count 1, not invented copy. A departed person's row
-        // (`a.operatorId === null`, D110) has nobody to ask about and is
-        // skipped, matching the trigger's own guard.
-        if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
-          const operatorId = a.operatorId;
-          const windowEnd = minuteDate(index.windowStart, candidate.endMin);
-          const operatorRecord = index.operatorById.get(operatorId);
-          const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
-          const operatorName = operatorRecord?.displayName ?? operatorId;
-
-          if (operatorRecord) {
-            const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
-            const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
-            if (gaps.length > 0) {
-              toast.info(
-                `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
-              );
-            }
-          }
-
-          const absenceHit = absenceGaps(resizeAbsences, operatorId, {
-            start: minuteDate(index.windowStart, candidate.startMin),
-            end: windowEnd,
-          });
-          if (absenceHit !== null) {
-            const when = leaveLine(absenceHit, dateFormat, index.zone);
-            toast.info(
-              `1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`,
-            );
-          }
-        }
-
+        // split-coverage popover ahead of an EXISTING chip's own time move
+        // (brief §5 step 1 lists "chip move" as a split-coverage trigger).
+        // `apply_split_coverage`'s `p_adjustments` shape (docs/api.md §3)
+        // only ever carries `{assignment_id, efficiency}` — no
+        // `timerange` — so an existing assignment that is both MOVING and
+        // needing its efficiency dialled down cannot be expressed as that
+        // call's `p_new_assignment` (reserved for a brand-new INSERT)
+        // either. Left as the ordinary `updateAssignmentFields` PATCH
+        // below; the `assignments_capacity` trigger still guards it
+        // exactly as before P1-4e, and a rejection surfaces through the
+        // existing `CapacityExceeded` toast path (`failWith`), unchanged.
+        plan.runWarnMirrors();
         updateAssignmentFields.mutate(
           { assignmentId: a.id, edit },
           { onError: (err) => failWith(err, revert) },
         );
       };
 
-      const proceed = () => {
-        if (attachmentMessage === null) {
+      const proceed = (edit: AssignmentFieldEdit) => {
+        if (plan.attachmentMessage === null) {
           // No attachment change (same run both sides, or an already-direct
           // chip staying direct) — R-365 only asks when the run a chip
           // belongs to would change, so this is the unchanged, un-prompted
           // path.
-          commitAssignmentMove();
+          commitAssignmentMove(edit);
         } else {
           // R-365: Cancel needs no extra code here. `endBlockDrag` (above)
           // already cleared `activeDrag` before calling `commitBlockDrag`
@@ -899,55 +1054,28 @@ export function useDragGesture(args: UseDragGestureArgs) {
           // has been written or optimistically patched — the chip is
           // already back where the (untouched) index has it. `confirmNo`
           // just closes the popover.
-          askConfirm(attachmentMessage, anchor, commitAssignmentMove);
+          askConfirm(plan.attachmentMessage, anchor, () => commitAssignmentMove(edit));
         }
       };
 
       // R-031: a TYPED target is a total for the block's window, so a
       // resize that changes the window's length changes what the number
       // means. Ask which the person meant — keep the total, or scale it to
-      // the new length — before anything is written. Only an edge drag
-      // can get here with a different length (a move keeps it), only a
-      // typed target asks (a derived one already follows the resize, R-316),
-      // and a scaled figure that rounds back to the typed one has nothing
-      // to ask about. `edit` is the same object `commitAssignmentMove`
-      // reads, so choosing Scale sets the quantity on the very write the
-      // prompt guards, and the unit stays as typed. Cancel writes nothing,
-      // exactly as R-365's own prompt.
-      const oldMinutes = a.endMin - a.startMin;
-      const newMinutes = candidate.endMin - candidate.startMin;
-      const scaled =
-        a.targetQty !== null && newMinutes !== oldMinutes
-          ? scaledTarget(a.targetQty, oldMinutes, newMinutes)
-          : null;
-      if (a.targetQty !== null && scaled !== null && scaled !== a.targetQty) {
-        const typed = a.targetQty;
-        const unitSuffix = a.targetUnit ? ` ${a.targetUnit}` : "";
-        askChoice(
-          "Keep or scale?",
-          targetResizeMessage({
-            person,
-            qty: typed,
-            unit: a.targetUnit,
-            oldMinutes,
-            newMinutes,
-            scaled,
-          }),
-          anchor,
-          [
-            { label: `Keep ${typed}${unitSuffix}`, onChoose: proceed },
-            {
-              label: `Scale to ${scaled}${unitSuffix}`,
-              onChoose: () => {
-                edit.targetQty = scaled;
-                proceed();
-              },
-            },
-          ],
-        );
+      // the new length — before anything is written. Cancel writes
+      // nothing, exactly as R-365's own prompt.
+      if (plan.keepOrScale !== null) {
+        const { typed, unit, scaledQty, message } = plan.keepOrScale;
+        const unitSuffix = unit ? ` ${unit}` : "";
+        askChoice("Keep or scale?", message, anchor, [
+          { label: `Keep ${typed}${unitSuffix}`, onChoose: () => proceed(plan.edit) },
+          {
+            label: `Scale to ${scaledQty}${unitSuffix}`,
+            onChoose: () => proceed({ ...plan.edit, targetQty: scaledQty }),
+          },
+        ]);
         return;
       }
-      proceed();
+      proceed(plan.edit);
     },
     [
       index,
@@ -960,6 +1088,45 @@ export function useDragGesture(args: UseDragGestureArgs) {
       dateFormat,
       resizeAbsences,
     ],
+  );
+
+  /**
+   * S51 review fix (blocker 2): the several-lot's lot-aware re-time writer
+   * for an `assign`/`move` resolved to `target.kind === "retime"` --
+   * `planAssignmentRetime`'s SAME decision (attachment by containment, the
+   * R-365 attachment ask, the R-031 keep-or-scale ask), but a would-be ask
+   * REJECTS instead of opening a popover (D127: the yes already given was
+   * for the readouts shown; a further question mid-lot must stop the lot),
+   * and a clean plan awaits the SAME `updateAssignmentFields` mutation
+   * `retimeAssignment` sends, via `mutateAsync` so the lot can observe it.
+   */
+  const retimeAssignmentForLot = useCallback(
+    async (r: { assignmentId: string; range: Range; readout: string }): Promise<void> => {
+      const a = index.assignmentById.get(r.assignmentId);
+      if (!a) {
+        throw new LotStepRefused(`${r.readout} is no longer on the board.`);
+      }
+      const homeRun = a.runId !== null ? (index.runById.get(a.runId) ?? null) : null;
+      const plan = planAssignmentRetime(
+        a,
+        a.nodeId,
+        homeRun,
+        r.range,
+        index,
+        ctx,
+        toast,
+        dateFormat,
+        resizeAbsences,
+      );
+      if (plan.attachmentMessage !== null || plan.keepOrScale !== null) {
+        throw new LotStepRefused(
+          `the re-time of ${r.readout} needs a decision the pop-up asks; do it on its own`,
+        );
+      }
+      plan.runWarnMirrors();
+      await updateAssignmentFields.mutateAsync({ assignmentId: a.id, edit: plan.edit });
+    },
+    [index, ctx, toast, updateAssignmentFields, dateFormat, resizeAbsences],
   );
 
   /**
@@ -984,47 +1151,52 @@ export function useDragGesture(args: UseDragGestureArgs) {
       anchor: { x: number; y: number },
       revert: string,
     ) => {
-      const currentRunsOnNode = index.runsByNode.get(nodeId) ?? [];
-      const currentCrew = index.assignmentsByRun.get(run.id) ?? [];
-
+      const plan = planRunRetime(run, nodeId, candidate, index, ctx);
       // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
-      const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
-      if (overlap) {
-        const p = productViewFor(overlap, index.productById);
-        toast.reverted(
-          `${index.nodeById.get(nodeId)?.name ?? nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
-        );
+      if (plan.overlapMessage !== null) {
+        toast.reverted(plan.overlapMessage);
         return;
       }
       const commitResize = () => {
         updateRunFields.mutate(
-          {
-            runId: run.id,
-            edit: {
-              timerange: {
-                start: minuteDate(index.windowStart, candidate.startMin),
-                end: minuteDate(index.windowStart, candidate.endMin),
-              },
-            },
-          },
+          { runId: run.id, edit: plan.edit },
           { onError: (err) => failWith(err, revert) },
         );
       };
-      if (currentCrew.length > 0) {
-        const { clipped, stranded } = classifyCrewAgainstRun(candidate, currentCrew);
-        const affected = clipped.length + stranded.length;
-        if (affected > 0) {
-          askConfirm(
-            `${affected} crew assignment${affected === 1 ? "" : "s"} fall outside the new run window. Continue?`,
-            anchor,
-            commitResize,
-          );
-          return;
-        }
+      if (plan.crewMessage !== null) {
+        askConfirm(plan.crewMessage, anchor, commitResize);
+        return;
       }
       commitResize();
     },
     [index, ctx, toast, updateRunFields, failWith, askConfirm],
+  );
+
+  /**
+   * S51 review fix (blocker 2): the several-lot's lot-aware re-time writer
+   * for a `book` resolved to `retime_run` -- `planRunRetime`'s SAME
+   * decision (the overlap refusal, the "N crew fall outside" ask), but
+   * EITHER one rejects instead of toasting/asking, and a clean plan awaits
+   * the SAME `updateRunFields` mutation `retimeRun` sends.
+   */
+  const retimeRunForLot = useCallback(
+    async (r: { runId: string; range: Range; readout: string }): Promise<void> => {
+      const run = index.runById.get(r.runId);
+      if (!run) {
+        throw new LotStepRefused(`${r.readout} is no longer on the board.`);
+      }
+      const plan = planRunRetime(run, run.nodeId, r.range, index, ctx);
+      if (plan.overlapMessage !== null) {
+        throw new LotStepRefused(plan.overlapMessage);
+      }
+      if (plan.crewMessage !== null) {
+        throw new LotStepRefused(
+          `the re-time of ${r.readout} needs a decision the pop-up asks; do it on its own`,
+        );
+      }
+      await updateRunFields.mutateAsync({ runId: run.id, edit: plan.edit });
+    },
+    [index, ctx, updateRunFields],
   );
 
   const commitBlockDrag = useCallback(
@@ -1682,6 +1854,34 @@ export function useDragGesture(args: UseDragGestureArgs) {
   );
 
   /**
+   * S51 (R-400/D127): the several-lot's writer for an `assign` resolved to
+   * `direct` or `run` (never `retime` -- that target writes through
+   * `retimeAssignmentFromCommand` instead, same as the single-sentence bar's
+   * own `onRetime`). Sends the SAME `createAssignment` mutation
+   * `submitCreateDirect` sends -- via `mutateAsync` so the lot can await
+   * success or failure, and WITHOUT the capacity probe / split-coverage
+   * popover `submitCreateDirect` opens on a tight fit: a lot write must
+   * never open a SECOND piece of UI mid-sequence (CLAUDE.md §4 -- a stranded
+   * split popover mid-lot would be exactly the hidden partial write the rule
+   * forbids). The probe there is a courtesy too (its own comment: "never a
+   * gate"); skipping it here skips only the fast guess, never the rule -- an
+   * authoritative `CapacityExceeded` refusal, if this write earns one, still
+   * comes back from this SAME mutation and is exactly what the lot reports.
+   */
+  const createFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      target: AssignmentTarget;
+    }): Promise<void> => {
+      const input = buildCreateAssignmentInput(index.windowStart, r);
+      return createAssignment.mutateAsync(input).then(() => undefined);
+    },
+    [index, createAssignment],
+  );
+
+  /**
    * S41-c: the typed command bar's "move to another cell" write path --
    * opens the SAME create popover a drag/command-bar assign opens, direct
    * mode forced by `presetOperatorId` (exactly as `openCreateFromCommand`
@@ -1751,6 +1951,40 @@ export function useDragGesture(args: UseDragGestureArgs) {
       });
     },
     [index],
+  );
+
+  /**
+   * S51 (R-400/D127): the several-lot's writer for a `book` resolved to
+   * `run_create` -- the SAME `createRun` mutation the run pop-up's clean
+   * submit sends (`submitCreateRun`), via `mutateAsync` so the lot can await
+   * it. Skips `submitCreateRun`'s own client-side overlap re-check on
+   * purpose: the resolver (`resolveBookCommand`'s own `findRunOverlap` call)
+   * already refused this exact overlap before ever returning a `run_create`
+   * target, so re-checking it here would be a second copy of the same
+   * guard, not a second guard -- and the authoritative `RunOverlap`
+   * refusal, if the write still earns one (a race), comes back from this
+   * SAME mutation either way. `headcount` defaults to 2, the SAME default
+   * `CreatePopover`'s own `plannedHeadcount` field opens with when the
+   * sentence gave no number.
+   */
+  const createRunFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      productId: string;
+      headcount: number | null;
+    }): Promise<void> => {
+      return createRun
+        .mutateAsync({
+          nodeId: r.nodeId,
+          productId: r.productId,
+          start: minuteDate(index.windowStart, r.range.startMin),
+          end: minuteDate(index.windowStart, r.range.endMin),
+          plannedHeadcount: r.headcount ?? 2,
+        })
+        .then(() => undefined);
+    },
+    [index, createRun],
   );
 
   /**
@@ -1868,22 +2102,23 @@ export function useDragGesture(args: UseDragGestureArgs) {
       areaOverrideReason: string | undefined,
       anchor: { x: number; y: number },
     ) => {
-      const start = minuteDate(index.windowStart, range.startMin);
-      const end = minuteDate(index.windowStart, range.endMin);
-      const input: CreateAssignmentInput = {
-        nodeId,
-        operatorId,
-        target,
-        start,
-        end,
-        efficiencyPercent,
-        targetQty,
-        targetUnit,
-        eligibilityOverride,
-        overrideReason,
-        areaOverride,
-        areaOverrideReason,
-      };
+      // S51: built through the one shared helper (`buildCreateAssignmentInput`,
+      // above `useDragGesture`) so this popover-driven Create and the
+      // several-lot's `createFromCommand` can never send two different
+      // shapes for the same write.
+      const input = buildCreateAssignmentInput(
+        index.windowStart,
+        { nodeId, range, operatorId, target },
+        {
+          efficiencyPercent,
+          targetQty,
+          targetUnit,
+          eligibilityOverride,
+          overrideReason,
+          areaOverride,
+          areaOverrideReason,
+        },
+      );
       const sendCreate = () => {
         createAssignment.mutate(input, {
           onError: (err) => {
@@ -1898,7 +2133,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
         });
         setPopover(null);
       };
-      probeCapacity({ operatorId, start, end, efficiencyPercent })
+      probeCapacity({ operatorId, start: input.start, end: input.end, efficiencyPercent })
         .then((probe) => {
           if (probe.fits) {
             sendCreate();
@@ -2175,6 +2410,120 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [deleteAssignment, failWith, assignmentLabelById],
   );
 
+  /**
+   * S51 (R-400, design §19.98/D127): the several-lot's one writer, called
+   * once on the bar's single "yes" for the whole lot -- writes the resolved
+   * commands IN ORDER, through the SAME doors the single-sentence bar and
+   * the pop-ups already write through (never a second copy, never a new
+   * RPC), and stops at the first failure -- the writes are not one
+   * transaction, and pretending otherwise would hide a half-done board
+   * (CLAUDE.md §4).
+   *
+   * S51 review fix (blocker 1): `unassign` awaits `deleteAssignment`'s OWN
+   * `mutateAsync` directly (the same mutation object `removeAssignment`
+   * calls, no second door) rather than `removeAssignment`'s fire-and-forget
+   * `.mutate` -- a removal an RLS policy refuses (`requireWritten` throwing
+   * on a zero-row delete) is now the lot's own caught failure, never a
+   * step silently counted "done" while a toast alone said otherwise.
+   *
+   * S51 review fix (blocker 2): a `retime` target (an assign's own-block
+   * change, a move-in-time, or a job's re-time) goes through the LOT-AWARE
+   * `retimeAssignmentForLot`/`retimeRunForLot` (above) instead of
+   * `retimeAssignmentFromCommand`/`retimeRunFromCommand` -- those can open
+   * their OWN confirm popover (an attachment change, a keep/scale
+   * ambiguity, crew stranded outside a resized run) or toast an outright
+   * refusal (a run overlap) with no promise to await either way; the
+   * lot-aware versions run the SAME pre-checks and reject instead, so a
+   * step that would have needed a further decision is the lot's own
+   * caught failure too (D127: the yes already given was for the readouts
+   * shown, never for a question raised after it).
+   *
+   * Every other target -- a create, a job, a move to another cell -- goes
+   * through a `mutateAsync` call this function can actually await, so
+   * THOSE failures (and blocker 1/2's) are what `LotResult.error` reports,
+   * worded through the SAME `buildSchedulerErrorToast` helper the toasts on
+   * those other paths already use -- except a `LotStepRefused`, whose own
+   * plain message is used verbatim (see its own doc comment above).
+   */
+  const runLot = useCallback(
+    async (resolved: ResolvedAny[]): Promise<LotResult> => {
+      let done = 0;
+      for (const r of resolved) {
+        try {
+          if (r.intent === "unassign") {
+            await deleteAssignment.mutateAsync(r.assignmentId);
+          } else if (r.intent === "move") {
+            if (r.target.kind === "retime") {
+              await retimeAssignmentForLot({
+                assignmentId: r.assignmentId,
+                range: r.range,
+                readout: r.readout,
+              });
+            } else {
+              await submitMove(
+                r.nodeId,
+                r.range,
+                r.assignmentId,
+                false,
+                undefined,
+                false,
+                undefined,
+              );
+            }
+          } else if (r.intent === "assign") {
+            if (r.target.kind === "retime") {
+              await retimeAssignmentForLot({
+                assignmentId: r.target.assignmentId,
+                range: r.range,
+                readout: r.readout,
+              });
+            } else {
+              await createFromCommand({
+                nodeId: r.nodeId,
+                range: r.range,
+                operatorId: r.operatorId,
+                target: r.target,
+              });
+            }
+          } else {
+            // r.intent === "book"
+            if (r.target.kind === "run_create") {
+              await createRunFromCommand({
+                nodeId: r.nodeId,
+                range: r.range,
+                productId: r.target.productId,
+                headcount: r.target.headcount,
+              });
+            } else {
+              await retimeRunForLot({
+                runId: r.target.runId,
+                range: r.range,
+                readout: r.readout,
+              });
+            }
+          }
+          done++;
+        } catch (err) {
+          if (err instanceof LotStepRefused) {
+            return { done, error: err.message };
+          }
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { done, error: buildSchedulerErrorToast(se, ctx).message };
+        }
+      }
+      return { done, error: null };
+    },
+    [
+      ctx,
+      deleteAssignment,
+      retimeAssignmentForLot,
+      retimeRunForLot,
+      createFromCommand,
+      createRunFromCommand,
+      submitMove,
+    ],
+  );
+
   return {
     activeDrag: activeDrag as ActiveDrag | null,
     popover,
@@ -2196,11 +2545,16 @@ export function useDragGesture(args: UseDragGestureArgs) {
     submitCreateRun,
     submitCreateDirect,
     openCreateFromCommand,
+    createFromCommand,
     retimeAssignmentFromCommand,
+    retimeAssignmentForLot,
     openCreateRunFromCommand,
+    createRunFromCommand,
     retimeRunFromCommand,
+    retimeRunForLot,
     openMoveFromCommand,
     submitMove,
+    runLot,
     saveRunFields,
     deleteRunWithMode,
     saveAssignmentFields,

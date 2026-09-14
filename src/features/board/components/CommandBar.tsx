@@ -11,6 +11,7 @@ import type {
   BookCommand,
   UnassignCommand,
   MoveCommand,
+  SingleCommand,
   Command,
   Attach,
   Existing,
@@ -30,6 +31,24 @@ import type { Highlight } from "../lib/highlight";
 import { Microphone } from "@/components/icons";
 
 export type { Highlight };
+
+/**
+ * S51 (R-400, design §19.98/D127): a several's inner commands are always one
+ * of the resolver's four SINGLE resolved shapes -- `SeveralCommand.commands`
+ * is typed on `SingleCommand` (`parse.ts`'s own invariant: a several is
+ * never itself nested inside another), so `resolveCommand` on each of them
+ * can only ever return one of these four, never a fifth "several" shape.
+ */
+export type ResolvedAny = ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove;
+
+/** S51: `onRunLot`'s own answer -- `done` is how many of the lot's commands
+ *  were written before either everything succeeded or the first one failed;
+ *  `error` is that failure's sentence (the same wording a toast would show),
+ *  or `null` on a clean sweep. */
+export interface LotResult {
+  done: number;
+  error: string | null;
+}
 
 /**
  * P1-7a — "Tell the board": the typed command bar (brief
@@ -125,8 +144,16 @@ type Status =
       message: string;
       candidates: CandidateButton[];
       /** S47: set only for remove_which/move_which/block_exists -- the ids
-       *  to outline on the board (`onHighlight`) while this status stands. */
-      blockHighlight?: Highlight;
+       *  to outline on the board (`onHighlight`) while this status stands.
+       *  S51: the LOT's own finished status sets this to a LIST -- one
+       *  outline per block a removal or a move in it would touch. */
+      blockHighlight?: Highlight | Highlight[];
+      /** S51: set ONLY on the lot's own "N commands ready" status -- the
+       *  marker `submitText` needs since `blockHighlight` no longer
+       *  identifies a single kind once it can be a list (brief §2 item 2:
+       *  "the lot's status needs a marker ... since blockHighlight.kind no
+       *  longer identifies it"). Never set on a per-command question. */
+      lot?: boolean;
     }
   | { kind: "readout"; message: string }
   /** S44-b: shown while `reader(text, signal)` is pending. */
@@ -218,6 +245,16 @@ export interface CommandBarProps {
    *  a `retime` re-times through the drag's own path, a `move_cell` opens
    *  the create pop-up preset under `presetMove`. */
   onMove: (resolved: ResolvedMove, anchor: { x: number; y: number }) => void;
+  /**
+   * S51 / R-400 (design §19.98/D127): a sentence that reads as SEVERAL
+   * commands resolves them one at a time (below) and, on the lot's single
+   * "yes", calls this once with every resolved command IN ORDER -- the
+   * caller writes them in order through the same doors `onOpen`/`onRetime`/
+   * `onBook`/`onRetimeRun`/`onUnassign`/`onMove` above already write
+   * through, stopping at the first failure. Never called for a single
+   * (non-several) sentence -- see CB-lot-9's regression pin.
+   */
+  onRunLot: (resolved: ResolvedAny[]) => Promise<LotResult>;
   /** S44-b: when set, Enter reads the sentence through the model service
    *  first and falls back to the rules on anything but a clean answer.
    *  `null` (the default) is the pre-S44-b behaviour, unchanged. */
@@ -228,8 +265,10 @@ export interface CommandBarProps {
   recognizer?: Recognizer | null;
   /** S47 / R-395: told what is in question -- the ids to outline and which
    *  colour -- whenever a remove/move/retime question stands, and `null`
-   *  whenever it is answered, cleared or this component unmounts. */
-  onHighlight?: (highlight: Highlight | null) => void;
+   *  whenever it is answered, cleared or this component unmounts. S51: a
+   *  several's finished lot status widens this to a LIST -- one outline per
+   *  block a removal or a move in it would touch, each its own kind. */
+  onHighlight?: (highlight: Highlight | Highlight[] | null) => void;
   /**
    * S47 / R-385/R-384: called when a confirm word (`yes`, `confirm`, ...)
    * arrives and no block question stands. Three outcomes, review fix
@@ -305,6 +344,7 @@ export function CommandBar({
   onRetimeRun,
   onUnassign,
   onMove,
+  onRunLot,
   reader = null,
   recognizer = null,
   onHighlight,
@@ -322,6 +362,31 @@ export function CommandBar({
   // invalidates it. S41-a widens this from `AssignCommand` to `Command`
   // (the union also holding `BookCommand`) since the bar now parses both.
   const heldRef = useRef<Command | null>(null);
+  // S51 (R-400/D127): the lot a `several` sentence is being walked through --
+  // `commands` in the sentence's order, `index` the one being resolved right
+  // now, `done` the resolutions gathered so far. `null` whenever no several
+  // is standing (every pre-S51 path, and the ordinary end of a lot: a typed
+  // edit, a cancel word, or Escape drops it back to `null`, same as a single
+  // question). A ref, not state, for the same reason `heldRef` is one: it is
+  // read and written from event handlers, never rendered directly -- what IS
+  // rendered is always the derived `Status` those handlers build from it.
+  const lotRef = useRef<{ commands: SingleCommand[]; index: number; done: ResolvedAny[] } | null>(
+    null,
+  );
+  // S51 review fix (small 2): true while `onRunLot` is in flight for the
+  // CURRENT lot -- `runLotNow`'s own early-return guard, so a second "yes"
+  // can never start a second run over the same lot. Also read by
+  // `submitText`/`handleChange`/Escape below: a lot writing in the
+  // background cannot be cancelled or typed out from under itself, so all
+  // three leave the "Working…" status exactly as it is while this is true.
+  const runningLotRef = useRef(false);
+  // S51 review fix: bumped by every `runLotNow` call, compared on resolve --
+  // the same shape as `readingSeqRef`/`recognitionSeqRef` below, so a run
+  // that somehow settles after a newer one has started (never possible
+  // today, since `runningLotRef` above already refuses a second run to
+  // START -- kept anyway, belt and braces, exactly as those two refs are)
+  // is discarded rather than clobbering whatever the bar is doing by then.
+  const lotRunSeqRef = useRef(0);
   // S44-b: the in-flight reading's own abort controller (null when nothing
   // is pending) and a sequence number bumped by every Enter, Escape and edit
   // so a reading that settles after a newer one has started is discarded
@@ -396,6 +461,17 @@ export function CommandBar({
    * site omits it, which is byte-for-byte the pre-S44-b behaviour.
    */
   function runCommand(command: Command, suffix?: string): void {
+    // S51 (R-400/D127, brief §2 item 1): a several is intercepted HERE,
+    // before `resolveCommand` ever sees it -- the resolver's own answer to
+    // one (`several_unsupported`) stays exactly what it was for a several
+    // that reaches it some other way (the model, or a future caller); this
+    // is the ONE place both the rules and the model-reader paths land
+    // (`fallbackToRules`/`applyReading` both call `runCommand`), so a lot
+    // starts the same way regardless of which path read it.
+    if (command.intent === "several") {
+      startLot(command.commands);
+      return;
+    }
     heldRef.current = command;
     const resolution = resolveCommand(command, ctx);
     if (resolution.ok) {
@@ -424,6 +500,210 @@ export function CommandBar({
       return;
     }
     setStatus(questionToStatus(resolution.question, command));
+  }
+
+  /** S51: starts a fresh lot from a several's inner commands and resolves
+   *  the first one (brief §2 item 1). */
+  function startLot(commands: SingleCommand[]): void {
+    lotRef.current = { commands, index: 0, done: [] };
+    resolveLotStep();
+  }
+
+  /**
+   * S51: resolves `lotRef.current`'s CURRENT command with the same
+   * `resolveCommand` a single sentence uses; an `ok` result is kept and the
+   * lot advances to the next command (recursing, exactly as a chain of
+   * always-resolved single sentences would); a question is shown numbered
+   * "i of N: ..." with that question's own buttons and outline
+   * (`questionToStatus`, unchanged); once every command has resolved, the
+   * lot status is shown instead (brief §2 items 1-2).
+   */
+  function resolveLotStep(): void {
+    const lot = lotRef.current;
+    if (!lot) return;
+    if (lot.index >= lot.commands.length) {
+      showLotStatus();
+      return;
+    }
+    const command = lot.commands[lot.index];
+    const resolution = resolveCommand(command, ctx);
+    if (resolution.ok) {
+      lotRef.current = {
+        ...lot,
+        done: [...lot.done, resolution.resolved],
+        index: lot.index + 1,
+      };
+      resolveLotStep();
+      return;
+    }
+    const base = questionToStatus(resolution.question, command);
+    if (base.kind !== "question") {
+      // Every SingleCommand's own Resolution question is always a
+      // "question" status through questionToStatus -- this branch exists
+      // only so TypeScript sees the numbering below is safe, never because
+      // a several's inner command can reach a different Status kind.
+      setStatus(base);
+      return;
+    }
+    setStatus({ ...base, message: `${lot.index + 1} of ${lot.commands.length}: ${base.message}` });
+  }
+
+  /**
+   * S51 (brief §2 item 1): a candidate button or a confirm word answering
+   * the lot's CURRENT command substitutes into `lotRef.current.commands[index]`
+   * (never into `heldRef`, which is not in play while a lot stands) and
+   * re-resolves from that same index -- called by `pickCandidate`/
+   * `pickAttach`/`pickExisting` below INSTEAD of `runCommand` whenever a lot
+   * is standing.
+   */
+  function updateLotCommand(next: SingleCommand): void {
+    const lot = lotRef.current;
+    if (!lot) return;
+    const commands = lot.commands.slice();
+    commands[lot.index] = next;
+    lotRef.current = { ...lot, commands };
+    resolveLotStep();
+  }
+
+  /**
+   * S51 (brief §2 item 2): one `Highlight` per removal (`remove`), per
+   * re-time (`retime` -- an assign's own-block change, or a move-in-time)
+   * and per move to another cell (`move`), in the lot's own order; a create
+   * or a booking adds nothing (neither ever names an assignment id to
+   * outline).
+   */
+  function buildLotHighlights(done: readonly ResolvedAny[]): Highlight[] {
+    const highlights: Highlight[] = [];
+    for (const r of done) {
+      if (r.intent === "unassign") {
+        highlights.push({ kind: "remove", assignmentIds: [r.assignmentId] });
+      } else if (r.intent === "move") {
+        highlights.push({
+          kind: r.target.kind === "retime" ? "retime" : "move",
+          assignmentIds: [r.assignmentId],
+        });
+      } else if (r.intent === "assign" && r.target.kind === "retime") {
+        highlights.push({ kind: "retime", assignmentIds: [r.target.assignmentId] });
+      }
+      // "assign" with a direct/run target, and every "book": nothing to
+      // outline -- a create or a booking names no existing block.
+    }
+    return highlights;
+  }
+
+  /** S51 review fix (small 1): the one assignment id a resolved command
+   *  actually NAMES -- a removal, a move (either target), or an assign's
+   *  own-block retime; `null` for a create/booking, which names no
+   *  existing block at all and so can never collide with anything. */
+  function namedAssignmentId(r: ResolvedAny): string | null {
+    if (r.intent === "unassign") return r.assignmentId;
+    if (r.intent === "move") return r.assignmentId;
+    if (r.intent === "assign" && r.target.kind === "retime") return r.target.assignmentId;
+    return null;
+  }
+
+  /**
+   * S51 review fix (small 1): the first two commands (1-based, sentence
+   * order) that name the SAME block -- a removal or a re-time of it twice
+   * over, which the resolver has no way to catch on its own (each inner
+   * command resolves against the board, never against its SIBLINGS in the
+   * lot). `null` when every named id in the lot is distinct.
+   */
+  function findDuplicateBlockPair(done: readonly ResolvedAny[]): [number, number] | null {
+    const seenAt = new Map<string, number>();
+    for (let i = 0; i < done.length; i++) {
+      const id = namedAssignmentId(done[i]);
+      if (id === null) continue;
+      const firstIndex = seenAt.get(id);
+      if (firstIndex !== undefined) return [firstIndex, i + 1];
+      seenAt.set(id, i + 1);
+    }
+    return null;
+  }
+
+  /**
+   * S51 (brief §2 item 2): every command has resolved -- show every readout
+   * numbered, outline everything a removal or a move in the lot would
+   * touch, and ask once. Only the universal confirm words confirm it
+   * (`submitText`'s own `status.lot` branch); a typed edit, "no" or Escape
+   * drop it exactly as they drop a single question.
+   *
+   * S51 review fix (small 1): two commands naming the SAME block (a removal
+   * or a re-time of it twice) never reach that lot status at all -- there is
+   * no sane "one outline, one write" answer for a block asked about twice,
+   * so this drops the lot outright and says which two commands collided,
+   * in plain sentence positions.
+   */
+  function showLotStatus(): void {
+    const lot = lotRef.current;
+    if (!lot) return;
+    const dup = findDuplicateBlockPair(lot.done);
+    if (dup) {
+      lotRef.current = null;
+      setStatus({
+        kind: "shape",
+        message: `Commands ${dup[0]} and ${dup[1]} name the same block; say them one at a time.`,
+      });
+      return;
+    }
+    const n = lot.done.length;
+    const readouts = lot.done.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join("; ");
+    setStatus({
+      kind: "question",
+      message: `${n} commands ready: ${readouts} — say or type yes to do them, no to leave them.`,
+      candidates: [{ key: "__do_all__", label: `Do all ${n}`, onClick: () => runLotNow() }],
+      blockHighlight: buildLotHighlights(lot.done),
+      lot: true,
+    });
+  }
+
+  /**
+   * S51 (brief §2 item 3): the lot's single "yes" -- a busy status while
+   * `onRunLot` is in flight, then either "Done: N commands." (input
+   * cleared) or "Did k of N; the next failed: <error>" (input kept). The
+   * lot is dropped either way: a half-answered lot never lingers once its
+   * one question has been answered.
+   *
+   * S51 review fix (small 2): `runningLotRef` is an explicit early-return
+   * guard, checked first -- a second "yes" (a stray double click on "Do all
+   * N" before React has re-rendered it away, or any other path that might
+   * someday reach here again while the first run is still in flight) must
+   * never start a SECOND `onRunLot` call over the same lot.
+   *
+   * S51 review fix: `mySeq` is this run's own generation, checked again on
+   * resolve (`lotRunSeqRef.current !== mySeq`) before touching `status` or
+   * `lotRef` -- a stale finish can never overwrite a newer status. Escape, a
+   * typed edit and the cancel words all leave "Working…" standing while
+   * `runningLotRef` is true (`handleKeyDown`/`handleChange`/`submitText`
+   * below), so nothing today actually produces a second generation before
+   * this one settles -- the check is kept anyway, the same belt-and-braces
+   * shape `readingSeqRef`/`recognitionSeqRef` already use elsewhere here.
+   */
+  function runLotNow(): void {
+    if (runningLotRef.current) return;
+    const lot = lotRef.current;
+    if (!lot) return;
+    runningLotRef.current = true;
+    const mySeq = ++lotRunSeqRef.current;
+    const n = lot.done.length;
+    const resolved = lot.done;
+    setStatus({ kind: "reading", message: "Working…" });
+    onRunLot(resolved).then((result) => {
+      // A stale finish touches NOTHING -- not the flag, not the lot, not
+      // the status -- exactly as if it had never arrived.
+      if (lotRunSeqRef.current !== mySeq) return;
+      runningLotRef.current = false;
+      lotRef.current = null;
+      if (result.error === null) {
+        setStatus({ kind: "readout", message: `Done: ${n} commands.` });
+        setText("");
+      } else {
+        setStatus({
+          kind: "shape",
+          message: `Did ${result.done} of ${n}; the next failed: ${result.error}`,
+        });
+      }
+    });
   }
 
   /** S44-b: the three "why the rules read this instead" phrases, shared by
@@ -519,6 +799,15 @@ export function CommandBar({
               ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
               place: [candidate.word],
             };
+    // S51 (brief §2 item 1): while a lot stands, a candidate substitutes
+    // into THAT command (`lotRef.current.commands[index]`), never into the
+    // input text or the lone `heldRef` -- the input keeps showing the whole
+    // several sentence throughout, and `resolveLotStep` re-resolves from the
+    // same index.
+    if (lotRef.current) {
+      updateLotCommand(next as SingleCommand);
+      return;
+    }
     const rendered = formatCommand(next);
     setText(rendered);
     const parsed = parseCommand(rendered);
@@ -534,7 +823,12 @@ export function CommandBar({
     // R-383: the sentence stays as it is -- only the held command's `attach`
     // changes -- so this re-resolves directly rather than going back through
     // `parseCommand` (which always returns `attach: null`).
-    runCommand({ ...command, attach });
+    const next = { ...command, attach };
+    if (lotRef.current) {
+      updateLotCommand(next);
+      return;
+    }
+    runCommand(next);
   }
 
   /**
@@ -556,7 +850,13 @@ export function CommandBar({
     existing:
       Existing | BookCommand["existing"] | UnassignCommand["existing"] | MoveCommand["existing"],
   ): void {
-    runCommand({ ...command, existing } as Command);
+    const next = { ...command, existing } as Command;
+    // S51 (brief §2 item 1): same lot substitution as `pickCandidate` above.
+    if (lotRef.current) {
+      updateLotCommand(next as SingleCommand);
+      return;
+    }
+    runCommand(next);
   }
 
   /**
@@ -763,6 +1063,14 @@ export function CommandBar({
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>): void {
+    // S51 review fix: a lot writing in the background cannot be typed out
+    // from under itself -- while `runningLotRef` is true this is a no-op,
+    // and since the input is CONTROLLED (`value={text}` below), React
+    // simply redraws the keystroke away rather than committing it, so the
+    // input reads unchanged through to the result. `status`/`lotRef` are
+    // untouched either way -- "Working…" stands until `runLotNow`'s own
+    // `.then()` replaces it.
+    if (runningLotRef.current) return;
     setText(e.target.value);
     // Brief §6: "Any edit to the input clears the held command and its
     // attach (a new sentence is a new question)." Clearing the held command
@@ -798,6 +1106,18 @@ export function CommandBar({
     // calls `setText` directly and never reaches here, so a speech result
     // that is still interim (the person may be about to say "yes") leaves a
     // standing question alone regardless, on purpose.
+    //
+    // S51 (brief §2 item 1): a typed edit drops a standing LOT entirely,
+    // same as it drops a single block question -- computed off `status`
+    // (this render's own closed-over value, not React's updater `prev`) so
+    // clearing the ref never sits inside the `setStatus` updater itself.
+    if (
+      status?.kind === "question" &&
+      status.blockHighlight &&
+      !isConfirmOrCancelWord(normalizeWord(e.target.value))
+    ) {
+      lotRef.current = null;
+    }
     setStatus((prev) => {
       if (prev?.kind === "reading") return null;
       if (prev?.kind === "question" && prev.blockHighlight) {
@@ -813,6 +1133,12 @@ export function CommandBar({
    * unchanged from the pre-S46-a Enter path.
    */
   function submitText(value: string): void {
+    // S51 review fix: a lot writing in the background cannot be cancelled
+    // or re-confirmed out from under itself -- Enter on ANY word (a cancel
+    // word, a stray "yes", an ordinary sentence) is a no-op while
+    // `runningLotRef` is true, so "Working…" stands until `runLotNow`'s own
+    // `.then()` replaces it with the result.
+    if (runningLotRef.current) return;
     // S47 / R-395 (brief §2 item 3): a confirm/cancel word is read BEFORE
     // parsing -- ahead of even the model reader below, since "yes" is never
     // a sentence to send there. Two contexts, checked in order:
@@ -847,7 +1173,36 @@ export function CommandBar({
       normalized === "remove it" ||
       normalized === "move it";
     if (isConfirmCandidate || isCancel) {
-      if (status?.kind === "question" && status.blockHighlight) {
+      // S51 (brief §2 item 2): the LOT's own finished status, checked BEFORE
+      // the generic block-question branch below (its `blockHighlight` is a
+      // LIST, not one kind -- this is the marker the brief calls for). Only
+      // the universal confirm words confirm it; "remove it"/"move it" name
+      // one thing, and a lot may hold several of each kind, so they are
+      // answered in place instead, same shape as a kind-mismatched single
+      // question; a cancel drops the lot exactly as it drops a single one.
+      if (status?.kind === "question" && status.lot) {
+        if (isCancel) {
+          setStatus(null);
+          setText("");
+          lotRef.current = null;
+          return;
+        }
+        if (UNIVERSAL_CONFIRM_WORDS.has(normalized)) {
+          runLotNow();
+          return;
+        }
+        const n = lotRef.current?.done.length ?? status.candidates.length;
+        setStatus({
+          ...status,
+          message: `That is a lot of ${n} commands; say yes to do them all, or no.`,
+        });
+        return;
+      }
+      if (
+        status?.kind === "question" &&
+        status.blockHighlight &&
+        !Array.isArray(status.blockHighlight)
+      ) {
         if (isConfirmCandidate && confirmsQuestion(normalized, status.blockHighlight.kind)) {
           if (status.candidates.length === 1) {
             status.candidates[0].onClick();
@@ -1023,6 +1378,12 @@ export function CommandBar({
       return;
     }
     if (e.key === "Escape") {
+      // S51 review fix: a lot writing in the background cannot be
+      // cancelled by Escape either -- not even the launcher's own
+      // "nothing left, close the panel" signal (`onEscapeIdle`) fires here,
+      // since there IS something left: "Working…" stands untouched until
+      // `runLotNow`'s own `.then()` replaces it with the result.
+      if (runningLotRef.current) return;
       // S44-b: Escape while reading aborts it and clears the status, then
       // the existing Escape rules apply from the NEXT Escape (brief §3.3).
       if (readingAbortRef.current) {
@@ -1044,6 +1405,9 @@ export function CommandBar({
       // -- has nothing left to do here, so the launcher is told to close
       // the panel instead (`onEscapeIdle`, brief §2 item 2).
       if (status !== null) {
+        // S51 (brief §2 item 1): drops a standing lot exactly as it drops a
+        // single question.
+        lotRef.current = null;
         setStatus(null);
       } else if (text !== "") {
         setText("");
