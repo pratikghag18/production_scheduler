@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-13'
-  tip: 'b9e0411'
+  tip: 'abdae16'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2378,6 +2378,11 @@ stages:
     templates, prompt, schema, decoder, scorer, the regenerated held-out set; then the maintainer's
     Colab run and the probe here. One decision waits on the maintainer: whether "change X's timing to"
     is recognised as a fixed pattern despite R-391 keeping "change" out of every verb list.
+    **Lane one done 13 Sept (session 161, abdae16): R-398 covered.** The reviewer found that printing a
+    place-less command back into a sentence crashed (the bar does that after an ambiguous-person answer)
+    and that a doubled "and" made a person called "and Bob"; both fixed and pinned. A confirm word that
+    does not fit the standing block question is now answered in place, never parsed. Lane two (the data)
+    briefed the same evening.
 - id: M1
   track: matrix
   num: 1
@@ -10697,11 +10702,21 @@ requirements:
     A quoted name containing "and" is one name. formatCommand prints a several as its commands'
     sentences joined by "; " and round-trips. Every existing worked example parses as before.
   verified_by:
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "L1 to L20 --- a removal with no place (bare, with a day, with hours, a quoted name), remove alone still empty; a move with no place to new hours, with a day, to a new cell, move alone still no_move; the maintainer's sentence as a several of two pairs with every field copied; two people one cell; one person two cells; three people two cells is list_mismatch naming both counts; a quoted name containing and is one name and A1, A2 and A3 is three; a several removal; formatCommand of a several joins its inner sentences and each inner round-trips; the four place-less shapes round-trip; a doubled and is bad_list; a doubled to is read once; U6 and MV5 re-pinned to the empty place"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RS1 --- a several resolves to the several_unsupported question with the count and the message verbatim"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-yes-12 (re-pinned) --- a confirm word that does not fit the standing block question is answered in place and never parsed as a sentence"
   - kind: manual
-    steps: "type the maintainer's sentence with two people and two cells into the bar: two readouts, one per pair; type it with one cell: both people on it; type a removal with no place: the block is offered wherever it is"
-  status: uncovered
+    steps: "type the maintainer's sentence with two people and two cells into the bar: the bar says several commands are read but not yet run (the next stage runs them); type a removal with no place: the block is offered wherever it is"
+  status: covered
   note: >-
-    STATED 13 Sept (session 160). Covered when src/test/commandParse.test.ts carries the L cases (the
+    STATED 13 Sept (session 160), COVERED 13 Sept (session 161, abdae16). Written when stated: covered
+    when src/test/commandParse.test.ts carries the L cases (the
     place-less removal and move, the four list shapes, the mismatch failure, the quoted "and", the
     round trip) and every earlier P/B/U/M case is unchanged.
 
@@ -14600,6 +14615,36 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 161
+  date: 2026-09-13
+  title: "The grammar widens: no place, and several people or cells in one sentence (S50 lane one, R-398)"
+  shipped: []
+  commits: ['aa3ac86', 'abdae16']
+  numbers:
+    app_tests: 3141
+    app_test_files: 144
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 13 Sept, after the grammar commit: 3141 tests in 144 files, all passing;
+    tsc clean, no migration or RPC changed; the role walk passed.
+  summary: >-
+    The second half of Stage 7 opened with its record (R-398, R-399, S50, D126) and the grammar lane ran
+    first, because the generator checks every training sentence against the rule parser and so the data
+    cannot widen before the rules do. A removal or a move with no place now parses with an empty place,
+    which S49's resolver reads as wherever they are; several people or first places joined by and become
+    a form of intent several, paired in order, one against many, a mismatch that names both counts. The
+    resolver answers a several with one honest question for now (read but not yet run); running them
+    with one yes is the next stage. The reviewer found the printed-back sentence crashed on an empty
+    place and a doubled and slipped through; both fixed. Two old cases pinned the narrower grammar and
+    were re-pinned with the reason written beside them, and one bar case exposed a real regression
+    ("remove it" against a move question had become a removal of a person called it) that is now
+    answered in place. The data lane is briefed; the change-the-timing phrasing still waits on the
+    maintainer's word against R-391.
 - id: 160
   date: 2026-09-13
   title: "Stage 7 begins: a wrong or missing cell offers the person's blocks elsewhere, outlined, with the destination in the question (S49, R-397)"
