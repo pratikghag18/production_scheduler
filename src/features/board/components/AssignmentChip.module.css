@@ -52,6 +52,19 @@
   outline-offset: 1px;
 }
 
+/* S47 / R-395: see DirectBlock.module.css's identical rule and comment --
+   same tokens, same reasoning, this chip is the other shape an assignment
+   the bar names can take. */
+.outlineRemove {
+  outline: 2px solid var(--crit);
+  outline-offset: -2px;
+}
+
+.outlineMove {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 /* Ported from the mockup's .achip.dragging — kept as the compound
    `.achip.dragging` (§10.1's trap: see RunBand.module.css's `.band.dragging`
    for the full reasoning). `.achip` and `.dragging` land on the same

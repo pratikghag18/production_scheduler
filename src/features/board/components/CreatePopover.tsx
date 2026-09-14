@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { Product, BoardOperator, Skill, AssignmentTarget, SchedulerError } from "@/lib/api";
 import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
@@ -89,7 +89,38 @@ function operatorLabelSuffix(gaps: readonly CertificateGap[]): string {
  * to every form in the app; `.body` reproduces the mockup's id-scoped
  * descendant shape locally instead of flattening it away (§10.1's trap).
  */
+/**
+ * S47 / R-395 item 4: what a spoken "yes" at the command bar reaches when no
+ * question stands there but a create pop-up a SENTENCE opened is showing --
+ * `BoardPage` holds the ref and calls this from `CommandBar`'s
+ * `onConfirmWord`. React 19 takes `ref` as a plain prop (no `forwardRef`
+ * needed), the smaller of the brief's two options given this component was
+ * already a plain function.
+ */
+export interface PopoverConfirmHandle {
+  /**
+   * Three outcomes (review fix: a bare boolean could not tell "nothing to
+   * do here" apart from "there IS something, but it needs a decision" --
+   * the bar has a different sentence for each):
+   *   - `"created"`: this pop-up was opened by a sentence (`autoCreate`),
+   *     read clean (R-384's own `clean`, unweakened -- the SAME verdict the
+   *     mount-only auto-press below reads) and had not already fired --
+   *     submits through the SAME `submitDirect`/`submitRun` the Create
+   *     button and the auto-press call, via `autoFiredRef` so the two can
+   *     never fire twice for one pop-up.
+   *   - `"needs-decision"`: `autoCreate` is set and this has not already
+   *     fired, but `clean` reads false -- the pop-up is showing something
+   *     to decide (a training gap, an area mark, a leave line). Nothing is
+   *     submitted; the caller says so.
+   *   - `"none"`: `autoCreate` is not set (a drag or a keyboard create
+   *     opened this pop-up) or it already fired once -- there is nothing
+   *     for a spoken yes to do here at all.
+   */
+  submitIfClean(): "created" | "needs-decision" | "none";
+}
+
 export function CreatePopover({
+  ref,
   nodeId,
   anchor,
   initialRange,
@@ -118,6 +149,7 @@ export function CreatePopover({
   onSubmitMove,
   defaultTargetFor,
 }: {
+  ref?: React.Ref<PopoverConfirmHandle>;
   nodeId: string;
   anchor: { x: number; y: number };
   initialRange: { startMin: number; endMin: number };
@@ -638,6 +670,26 @@ export function CreatePopover({
     // dependency change would defeat that guard, not strengthen it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // S47 / R-395 item 4: the SAME guard the effect above reads (`autoCreate`,
+  // `clean`, `autoFiredRef`) exposed for a LATER press -- a spoken yes that
+  // arrives after mount, once the pop-up is already showing, rather than the
+  // one auto-press Enter itself may already have spent. No new deps array
+  // worth memoising over: `clean`/`mode`/`submitDirect`/`submitRun` are all
+  // read fresh, exactly as the mount effect reads them.
+  useImperativeHandle(ref, (): PopoverConfirmHandle => ({
+    submitIfClean() {
+      if (!autoCreate || autoFiredRef.current) return "none";
+      if (!clean) return "needs-decision";
+      autoFiredRef.current = true;
+      if (mode === "run") {
+        submitRun();
+      } else {
+        void submitDirect();
+      }
+      return "created";
+    },
+  }));
 
   return (
     <BoardPopover anchor={anchor} onClose={onCancel} title="New">

@@ -26,6 +26,9 @@ import type {
   Question,
   Candidate,
 } from "@/lib/command/resolve";
+import type { Highlight } from "../lib/highlight";
+
+export type { Highlight };
 
 /**
  * P1-7a — "Tell the board": the typed command bar (brief
@@ -70,6 +73,28 @@ import type {
  * One capability folded into the existing control, not a parallel widget
  * (CLAUDE.md §4).
  *
+ * S47-a (docs/agent-briefs/s47-a-outline-and-yes-brief.md, R-395) adds three
+ * optional props, none of which changes anything for a caller that omits
+ * them. `onHighlight` is called with a `Highlight` (`../lib/highlight.ts`)
+ * whenever a `remove_which`/`move_which`/`block_exists` question is the
+ * current status (the ids to outline and which colour), and with `null`
+ * whenever that status is replaced, cleared or this component unmounts --
+ * done in one `useEffect` keyed on `status` (see below) rather than at every
+ * `setStatus` call site, so the many existing ones stay untouched. When such
+ * a question has exactly one candidate, its message gains a yes/no suffix
+ * and `submitText` recognises the confirmation words below it BEFORE
+ * parsing: a confirm word runs that one candidate's `onClick` (several
+ * candidates: a bare confirm asks "Which one?" instead, buttons unchanged);
+ * a cancel word clears the question, the outline and the input. `onOpen`ed
+ * pop-ups are the OTHER half (R-384's "Enter creates when clean" widened to
+ * a spoken yes): when NO such question stands, a confirm/cancel word is
+ * offered first to `onConfirmWord`/`onCancelWord` (only ever true when a
+ * create pop-up a SENTENCE opened is showing); either returning `false`
+ * means "not for me" and the word falls through to the ordinary parse path
+ * (the rules refuse it with the usual shape hint, same as any other
+ * unparseable sentence) -- so both props are safe to omit or to return
+ * false unconditionally.
+ *
  * The bar holds no rule of its own: parsing is `parseCommand`/`formatCommand`
  * (`src/lib/command/parse.ts`), resolving is `resolveCommand`/`describeQuestion`
  * (`src/lib/command/resolve.ts`) against the `ctx` the caller (`BoardPage`)
@@ -86,10 +111,71 @@ import type {
 
 type Status =
   | { kind: "shape"; message: string }
-  | { kind: "question"; message: string; candidates: CandidateButton[] }
+  | {
+      kind: "question";
+      message: string;
+      candidates: CandidateButton[];
+      /** S47: set only for remove_which/move_which/block_exists -- the ids
+       *  to outline on the board (`onHighlight`) while this status stands. */
+      blockHighlight?: Highlight;
+    }
   | { kind: "readout"; message: string }
   /** S44-b: shown while `reader(text, signal)` is pending. */
   | { kind: "reading"; message: string };
+
+/** S47: appended to a block question's message when it has exactly one
+ *  candidate (brief §2 item 3) -- the ONLY place this string is written. */
+const YES_SUFFIX = " — say or type yes to do it, no to leave it.";
+
+/** S47: recognised by `submitText` before parsing (case-insensitive,
+ *  trimmed, trailing punctuation ignored -- see `normalizeWord`). These five
+ *  confirm ANY block question, or a pop-up, regardless of kind. "remove it"
+ *  and "move it" are NOT here -- review fix: they used to be, which meant
+ *  saying "remove it" to a standing MOVE question ran the move (the word
+ *  was never checked against what was actually being asked). They are
+ *  matched against the standing question's own kind instead, in
+ *  `confirmsQuestion` below. */
+const UNIVERSAL_CONFIRM_WORDS = new Set(["yes", "yes please", "confirm", "do it", "ok"]);
+const CANCEL_WORDS = new Set(["no", "cancel", "leave it", "stop"]);
+
+/**
+ * S47 review fix: true when `word` confirms a block question of `kind` --
+ * one of the five universal words always does; "remove it" only confirms a
+ * `remove_which` question (`kind === "remove"`); "move it" only confirms a
+ * `move_which` OR a `block_exists` re-time question (`kind === "move"` or
+ * `"retime"` -- a re-time is not a removal, so "move it" reaches it too).
+ * Used against the OTHER kind, "remove it"/"move it" are ordinary text, same
+ * as any word this function returns false for.
+ */
+function confirmsQuestion(word: string, kind: Highlight["kind"]): boolean {
+  if (UNIVERSAL_CONFIRM_WORDS.has(word)) return true;
+  if (word === "remove it") return kind === "remove";
+  if (word === "move it") return kind === "move" || kind === "retime";
+  return false;
+}
+
+/**
+ * True for any word `confirmsQuestion` or a cancel could ever act on, for
+ * SOME kind -- used by `handleChange` below to tell "the person is typing a
+ * word that might confirm or cancel the standing question" apart from "the
+ * person is editing the sentence itself" without knowing yet which kind is
+ * standing (that check is `confirmsQuestion`'s, run again at Enter).
+ */
+function isConfirmOrCancelWord(word: string): boolean {
+  return (
+    UNIVERSAL_CONFIRM_WORDS.has(word) ||
+    CANCEL_WORDS.has(word) ||
+    word === "remove it" ||
+    word === "move it"
+  );
+}
+
+function normalizeWord(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?,;:]+$/, "");
+}
 
 interface CandidateButton {
   key: string;
@@ -131,7 +217,39 @@ export interface CommandBarProps {
    *  (the default) renders no button -- byte for byte the pre-S46-a
    *  behaviour. */
   recognizer?: Recognizer | null;
+  /** S47 / R-395: told what is in question -- the ids to outline and which
+   *  colour -- whenever a remove/move/retime question stands, and `null`
+   *  whenever it is answered, cleared or this component unmounts. */
+  onHighlight?: (highlight: Highlight | null) => void;
+  /**
+   * S47 / R-385/R-384: called when a confirm word (`yes`, `confirm`, ...)
+   * arrives and no block question stands. Three outcomes, review fix
+   * (a bare boolean could not say WHY nothing happened):
+   *   - `"created"`: a create pop-up a sentence opened was showing, read
+   *     clean (R-384, unweakened), and has now been submitted through that
+   *     same path -- the bar clears the input.
+   *   - `"needs-decision"`: that pop-up was showing but was NOT clean (it
+   *     would show something to decide) -- nothing is sent; the bar says so
+   *     verbatim and leaves the input as it was.
+   *   - `"none"`: no such pop-up is showing (or `autoCreate` was never set)
+   *     -- the bar treats the word as ordinary text, same as any other
+   *     unparseable sentence (the rules' shape hint).
+   * Omit to leave every confirm word here as ordinary text.
+   */
+  onConfirmWord?: () => ConfirmWordResult;
+  /** S47: the cancel-word twin of `onConfirmWord` -- true when a create
+   *  pop-up a sentence opened was showing and this closed it; false
+   *  otherwise (then the bar treats the word as ordinary text, refused with
+   *  the usual shape hint like any other unparseable sentence). */
+  onCancelWord?: () => boolean;
 }
+
+/** S47 review fix: see `onConfirmWord`'s own doc above for what each value
+ *  means. `PopoverConfirmHandle.submitIfClean()` (`CreatePopover.tsx`)
+ *  returns the same three strings -- structurally, not by a shared import,
+ *  since the bar imports nothing from the popover (brief §2: "no second
+ *  door"). */
+export type ConfirmWordResult = "created" | "needs-decision" | "none";
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
 
@@ -174,6 +292,9 @@ export function CommandBar({
   onMove,
   reader = null,
   recognizer = null,
+  onHighlight,
+  onConfirmWord,
+  onCancelWord,
 }: CommandBarProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
@@ -219,6 +340,27 @@ export function CommandBar({
       recognitionSeqRef.current++;
     };
   }, []);
+
+  // S47: kept in a ref, not the effect's own dependency array, below -- a
+  // caller that passes a fresh inline function every render (BoardPage does)
+  // must not re-fire the effect on every unrelated render, only when
+  // `status` itself actually changes.
+  const onHighlightRef = useRef(onHighlight);
+  onHighlightRef.current = onHighlight;
+
+  // S47 / R-395: reports the outline `status` implies -- a block question's
+  // `blockHighlight` when that is the current status, `null` otherwise --
+  // and, via the cleanup function every effect gets, `null` again the moment
+  // `status` changes away from it OR this component unmounts (brief §2 item
+  // 1: "call it with null whenever that status is replaced, cleared ... or
+  // the bar unmounts"). One `useEffect` here instead of touching every
+  // `setStatus` call site above and below.
+  useEffect(() => {
+    onHighlightRef.current?.(
+      status?.kind === "question" && status.blockHighlight ? status.blockHighlight : null,
+    );
+    return () => onHighlightRef.current?.(null);
+  }, [status]);
 
   function renderReadout(readout: string): string {
     return readout.replace(ISO_DAY, (iso) =>
@@ -395,6 +537,25 @@ export function CommandBar({
     runCommand({ ...command, existing } as Command);
   }
 
+  /**
+   * S47: the one place a `Status` gains a `blockHighlight` -- called only
+   * for `remove_which`/`move_which`/`block_exists` (brief §2 items 1 and 3).
+   * With exactly one candidate the message also gets `YES_SUFFIX`; with
+   * several, the outline still covers every one of `assignmentIds` but the
+   * message is left as `describeQuestion` wrote it (a bare yes would be
+   * ambiguous -- `submitText` below asks "Which one?" instead).
+   */
+  function withBlockHighlight(
+    status: Status,
+    kind: Highlight["kind"],
+    assignmentIds: string[],
+  ): Status {
+    if (status.kind !== "question") return status;
+    const withSuffix =
+      status.candidates.length === 1 ? { ...status, message: status.message + YES_SUFFIX } : status;
+    return { ...withSuffix, blockHighlight: { kind, assignmentIds } };
+  }
+
   function questionToStatus(question: Question, command: Command): Status {
     // CU4 (S41-b brief §5): a question's message can carry an ISO day too
     // (`remove_which`/`no_block`'s whole-day `when`) -- the same
@@ -439,21 +600,30 @@ export function CommandBar({
         label: "Separate block",
         onClick: () => pickExisting(assignCommand, { kind: "separate" }),
       };
+      const ids = question.blocks.map((b) => b.id);
       if (question.same) {
-        return { kind: "question", message, candidates: [separate] };
+        return withBlockHighlight(
+          { kind: "question", message, candidates: [separate] },
+          "retime",
+          ids,
+        );
       }
-      return {
-        kind: "question",
-        message,
-        candidates: [
-          ...question.blocks.map((b) => ({
-            key: b.id,
-            label: `Change ${b.label}`,
-            onClick: () => pickExisting(assignCommand, { kind: "retime", assignmentId: b.id }),
-          })),
-          separate,
-        ],
-      };
+      return withBlockHighlight(
+        {
+          kind: "question",
+          message,
+          candidates: [
+            ...question.blocks.map((b) => ({
+              key: b.id,
+              label: `Change ${b.label}`,
+              onClick: () => pickExisting(assignCommand, { kind: "retime", assignmentId: b.id }),
+            })),
+            separate,
+          ],
+        },
+        "retime",
+        ids,
+      );
     }
     if (question.kind === "block_gone") {
       const assignCommand = command as AssignCommand;
@@ -508,45 +678,58 @@ export function CommandBar({
     if (question.kind === "remove_which") {
       // Only ever asked from the unassign path (S41-b).
       const unassignCommand = command as UnassignCommand;
+      const ids = question.blocks.map((b) => b.id);
       if (question.blocks.length === 1) {
         const only = question.blocks[0];
-        return {
+        return withBlockHighlight(
+          {
+            kind: "question",
+            message,
+            candidates: [
+              {
+                key: only.id,
+                label: "Remove it",
+                onClick: () =>
+                  pickExisting(unassignCommand, { kind: "remove", assignmentId: only.id }),
+              },
+            ],
+          },
+          "remove",
+          ids,
+        );
+      }
+      return withBlockHighlight(
+        {
           kind: "question",
           message,
-          candidates: [
-            {
-              key: only.id,
-              label: "Remove it",
-              onClick: () =>
-                pickExisting(unassignCommand, { kind: "remove", assignmentId: only.id }),
-            },
-          ],
-        };
-      }
-      return {
-        kind: "question",
-        message,
-        candidates: question.blocks.map((b) => ({
-          key: b.id,
-          label: `Remove ${b.label}`,
-          onClick: () => pickExisting(unassignCommand, { kind: "remove", assignmentId: b.id }),
-        })),
-      };
+          candidates: question.blocks.map((b) => ({
+            key: b.id,
+            label: `Remove ${b.label}`,
+            onClick: () => pickExisting(unassignCommand, { kind: "remove", assignmentId: b.id }),
+          })),
+        },
+        "remove",
+        ids,
+      );
     }
     if (question.kind === "move_which") {
       // Only ever asked from the move path (S41-c). Unlike remove_which,
       // this is never asked for exactly one block (a move takes it without
       // asking), so there is no one-block branch here.
       const moveCommand = command as MoveCommand;
-      return {
-        kind: "question",
-        message,
-        candidates: question.blocks.map((b) => ({
-          key: b.id,
-          label: `Move ${b.label}`,
-          onClick: () => pickExisting(moveCommand, { kind: "move", assignmentId: b.id }),
-        })),
-      };
+      return withBlockHighlight(
+        {
+          kind: "question",
+          message,
+          candidates: question.blocks.map((b) => ({
+            key: b.id,
+            label: `Move ${b.label}`,
+            onClick: () => pickExisting(moveCommand, { kind: "move", assignmentId: b.id }),
+          })),
+        },
+        "move",
+        question.blocks.map((b) => b.id),
+      );
     }
     if (question.kind === "no_block" || question.kind === "block_gone_remove") {
       return { kind: "question", message, candidates: [] };
@@ -570,8 +753,33 @@ export function CommandBar({
       readingAbortRef.current.abort();
       readingAbortRef.current = null;
       readingSeqRef.current++;
-      setStatus((prev) => (prev?.kind === "reading" ? null : prev));
     }
+    // S47 review must-fix: a TYPED edit also clears a standing block
+    // question (remove_which/move_which/block_exists) -- its buttons are
+    // bound to the OLD command, so leaving them up under unrelated text
+    // would keep a stale "Remove it" clickable. This goes through the
+    // ordinary `status` state, so the highlight effect clears the outline
+    // the same way Escape does.
+    //
+    // EXCEPT when the new text is itself a confirm/cancel candidate
+    // (`isConfirmOrCancelWord` -- the same words `submitText` reads at
+    // Enter): typing "yes" is a normal way to answer a standing question
+    // (CB-yes-2), so that keystroke must not erase the very question it is
+    // about to answer. Which KIND it actually confirms is re-checked at
+    // Enter (`confirmsQuestion`) -- this only decides whether to keep the
+    // question standing long enough to ask.
+    //
+    // This handler is the DOM input's own `onChange` -- `onInterim` (S46-a)
+    // calls `setText` directly and never reaches here, so a speech result
+    // that is still interim (the person may be about to say "yes") leaves a
+    // standing question alone regardless, on purpose.
+    setStatus((prev) => {
+      if (prev?.kind === "reading") return null;
+      if (prev?.kind === "question" && prev.blockHighlight) {
+        return isConfirmOrCancelWord(normalizeWord(e.target.value)) ? prev : null;
+      }
+      return prev;
+    });
   }
 
   /**
@@ -580,6 +788,77 @@ export function CommandBar({
    * unchanged from the pre-S46-a Enter path.
    */
   function submitText(value: string): void {
+    // S47 / R-395 (brief §2 item 3): a confirm/cancel word is read BEFORE
+    // parsing -- ahead of even the model reader below, since "yes" is never
+    // a sentence to send there. Two contexts, checked in order:
+    //   1. A block question stands (`status.blockHighlight` -- remove_which/
+    //      move_which/block_exists): the word acts on IT (its one candidate,
+    //      or "Which one?" with several; a cancel clears it) and nothing
+    //      else runs -- PROVIDED it actually confirms THIS question's kind
+    //      (`confirmsQuestion`, review fix: "remove it" no longer confirms a
+    //      move, nor "move it" a removal). A kind-mismatched word is neither
+    //      a confirm nor a cancel here -- it falls all the way through to
+    //      the ordinary path below, same as any other word that means
+    //      nothing to this question.
+    //   2. No question stands at all: a candidate word is offered to
+    //      `onConfirmWord`/`onCancelWord` (R-384's pop-up, S47 item 4) --
+    //      "none" (or `onCancelWord`'s false) falls through to the ordinary
+    //      path below, same as any other word that means nothing here.
+    // A word that fits neither -- e.g. a question of some OTHER kind
+    // (`ambiguous`, `run_exists`, ...) stands -- also falls through.
+    const normalized = normalizeWord(value);
+    const isCancel = CANCEL_WORDS.has(normalized);
+    // "remove it"/"move it" are only ever confirm CANDIDATES -- whether they
+    // actually confirm depends on the standing question's kind, decided
+    // below by `confirmsQuestion`; the five universal words always are.
+    const isConfirmCandidate =
+      UNIVERSAL_CONFIRM_WORDS.has(normalized) ||
+      normalized === "remove it" ||
+      normalized === "move it";
+    if (isConfirmCandidate || isCancel) {
+      if (status?.kind === "question" && status.blockHighlight) {
+        if (isConfirmCandidate && confirmsQuestion(normalized, status.blockHighlight.kind)) {
+          if (status.candidates.length === 1) {
+            status.candidates[0].onClick();
+          } else {
+            // Several candidates: a bare confirm is ambiguous (brief §2
+            // item 3) -- ask which one, buttons unchanged, nothing written.
+            setStatus({
+              ...status,
+              message: `Which one? ${status.candidates.map((c) => c.label).join(", ")}`,
+            });
+          }
+          return;
+        }
+        if (isCancel) {
+          setStatus(null);
+          setText("");
+          return;
+        }
+        // A confirm candidate that does not match THIS question's kind --
+        // ordinary text, falls through below (never treated as a cancel).
+      } else if (status?.kind !== "question") {
+        if (isConfirmCandidate && onConfirmWord) {
+          const result = onConfirmWord();
+          if (result === "created") {
+            setText("");
+            return;
+          }
+          if (result === "needs-decision") {
+            setStatus({ kind: "shape", message: "The pop-up needs a decision first." });
+            return;
+          }
+          // "none" -- falls through to the ordinary path below.
+        } else if (isCancel && onCancelWord) {
+          if (onCancelWord()) {
+            setStatus(null);
+            setText("");
+            return;
+          }
+        }
+      }
+      // Neither context claimed it -- ordinary text, falls through below.
+    }
     // Review finding 2: empty/whitespace-only text takes exactly the
     // null-reader path -- no network round trip (and no 20s wait) for a
     // sentence that can only ever fail to parse, and no misleading "not a
@@ -635,7 +914,14 @@ export function CommandBar({
       readingAbortRef.current = null;
       readingSeqRef.current++;
     }
-    setStatus(null);
+    // S47 / R-395: a standing block question (remove/move/retime) survives a
+    // fresh mic press -- the browser's own recogniser ends a session after
+    // one final result (`recognizer.ts`'s `continuous = false`), so saying
+    // the confirming "yes" out loud takes a SECOND press; that press must
+    // not erase the very question the word is about to answer. Anything
+    // else (a readout, a shape hint, an ordinary question) still clears, as
+    // before S47.
+    setStatus((prev) => (prev?.kind === "question" && prev.blockHighlight ? prev : null));
     const mySeq = ++recognitionSeqRef.current;
     function isCurrent(): boolean {
       return recognitionSeqRef.current === mySeq;

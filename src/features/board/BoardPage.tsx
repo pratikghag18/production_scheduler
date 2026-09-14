@@ -43,7 +43,8 @@ import { BoardGrid } from "./components/BoardGrid";
 import { OperatorPanel } from "./components/OperatorPanel";
 import { BoardEmptyState } from "./components/BoardEmptyState";
 import { Toasts } from "./components/Toasts";
-import { CreatePopover } from "./components/CreatePopover";
+import { CreatePopover, type PopoverConfirmHandle } from "./components/CreatePopover";
+import { HighlightProvider, type Highlight } from "./lib/highlight";
 import { RunPopover } from "./components/RunPopover";
 import { AssignmentPopover } from "./components/AssignmentPopover";
 import { SplitCoveragePopover } from "./components/SplitCoveragePopover";
@@ -435,6 +436,16 @@ export default function BoardPage() {
   // list — the same shape as `requiredSkills={index?.skillsForNode.get(...)}`
   // below (D64/D65). The popover takes a list, never a rule.
   const popover = dragApi.popover;
+  // S47 / R-395: what the bar told us is in question, drawn on the board via
+  // `HighlightProvider` below -- read by `DirectBlock`/`AssignmentChip`
+  // through `useHighlightKind`, never threaded through `BoardGrid`/`TrackRow`
+  // as a prop (`../lib/highlight.ts`'s own file comment says why).
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
+  // S47 / R-395 item 4: the currently-open create pop-up's imperative handle
+  // (null when none is mounted) -- `CommandBar`'s `onConfirmWord` reaches
+  // through it for a spoken yes that arrives after mount, once R-384's own
+  // auto-press has already had its one chance.
+  const createPopoverRef = useRef<PopoverConfirmHandle | null>(null);
   const createNodeId = popover?.kind === "create" ? popover.nodeId : null;
   const offeredProducts = useMemo(() => {
     if (!boardQuery.data || createNodeId === null) return [];
@@ -845,6 +856,21 @@ export default function BoardPage() {
                   });
                 }
               }}
+              // S47 / R-395: told what is in question -- drawn on the board
+              // through `HighlightProvider` below.
+              onHighlight={setHighlight}
+              // S47 / R-395 item 4: a spoken/typed yes with no question
+              // standing reaches the currently-open create pop-up ONLY when
+              // a sentence opened it (`autoCreate`) -- `submitIfClean` itself
+              // reads R-384's `clean` and refuses a second fire.
+              onConfirmWord={() => createPopoverRef.current?.submitIfClean() ?? "none"}
+              onCancelWord={() => {
+                if (popover?.kind === "create" && popover.autoCreate) {
+                  dragApi.closePopover();
+                  return true;
+                }
+                return false;
+              }}
             />
           )}
           {boardQuery.data.nodes.length === 0 ? (
@@ -890,20 +916,26 @@ export default function BoardPage() {
                   }}
                 />
               )}
-              <BoardGrid
-                index={index}
-                levelById={levelById}
-                collapsedNodeIds={collapsedNodeIds}
-                onToggleCollapsed={toggleCollapsed}
-                zoomIndex={zoomIndex}
-                productById={index.productById}
-                operatorById={index.operatorById}
-                scrollToNowNonce={scrollToNowNonce}
-                dragApi={dragApi}
-                setDropRowResolver={dragApi.setDropRowResolver}
-                onFitScaleChange={handleFitScaleChange}
-                dateFormat={dateFormat}
-              />
+              {/* S47 / R-395: the only subtree with an assignment block in
+                  it -- `DirectBlock`/`AssignmentChip` read `highlight`
+                  through this, never as a prop threaded through
+                  `BoardGrid`/`TrackRow`. */}
+              <HighlightProvider value={highlight}>
+                <BoardGrid
+                  index={index}
+                  levelById={levelById}
+                  collapsedNodeIds={collapsedNodeIds}
+                  onToggleCollapsed={toggleCollapsed}
+                  zoomIndex={zoomIndex}
+                  productById={index.productById}
+                  operatorById={index.operatorById}
+                  scrollToNowNonce={scrollToNowNonce}
+                  dragApi={dragApi}
+                  setDropRowResolver={dragApi.setDropRowResolver}
+                  onFitScaleChange={handleFitScaleChange}
+                  dateFormat={dateFormat}
+                />
+              </HighlightProvider>
             </div>
           )}
         </>
@@ -931,6 +963,7 @@ export default function BoardPage() {
           // update this component's props in place and the mount-only
           // R-384 auto-press effect would never re-arm for it.
           key={popover.seq}
+          ref={createPopoverRef}
           nodeId={popover.nodeId}
           anchor={popover.anchor}
           initialRange={popover.range}

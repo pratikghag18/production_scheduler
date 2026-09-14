@@ -55,6 +55,24 @@
   outline-offset: 1px;
 }
 
+/* S47 / R-395: what the command bar's remove/move/retime question draws
+   while it stands -- an OUTLINE (never `border`), pulled inward with a
+   negative offset so it reads as INSET and never nudges this block's own
+   layout (brief §2 item 2). Reuses the two existing tokens the brief names
+   rather than inventing a colour: `--crit`, the same red every other
+   conflict/blocked signal on the board already uses (tokens.css), for a
+   removal; `--ring`, the board's own outline token, for a move or a re-time
+   (R-385's "change it" answer -- not a removal, so never red). */
+.outlineRemove {
+  outline: 2px solid var(--crit);
+  outline-offset: -2px;
+}
+
+.outlineMove {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 /* Ported from the mockup's .dblk.dragging — kept as the compound
    `.dblk.dragging` (§10.1's trap: see RunBand.module.css's `.band.dragging`
    for the full reasoning). `.dblk` and `.dragging` land on the same

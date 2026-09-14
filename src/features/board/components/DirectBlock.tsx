@@ -5,6 +5,7 @@ import { formatClock, formatFull, addMinutes } from "../lib/time";
 import type { DayAxis } from "../lib/time";
 import { targetDisplay } from "../lib/standardTarget";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
+import { useHighlightKind } from "../lib/highlight";
 import styles from "./DirectBlock.module.css";
 
 function initials(name: string): string {
@@ -68,6 +69,11 @@ export function DirectBlock({
   onKeyUp: (e: React.KeyboardEvent) => void;
 }) {
   const dragging = activeDrag !== null;
+  // S47 / R-395: the command bar's remove/move/retime question, when this
+  // block is one of its candidates -- `null` the rest of the time (read
+  // through context, not a prop threaded down from `BoardPage` through
+  // `BoardGrid`/`TrackRow`, neither of which otherwise cares about it).
+  const highlightKind = useHighlightKind(assignment.id);
   const range =
     dragging && activeDrag.candidate
       ? activeDrag.candidate
@@ -103,7 +109,7 @@ export function DirectBlock({
 
   return (
     <div
-      className={`${styles.dblk} ${assignment.eligibilityOverride ? styles.override : ""} ${dragging ? styles.dragging : ""}`}
+      className={`${styles.dblk} ${assignment.eligibilityOverride ? styles.override : ""} ${dragging ? styles.dragging : ""} ${highlightKind === "remove" ? styles.outlineRemove : ""} ${highlightKind === "move" || highlightKind === "retime" ? styles.outlineMove : ""}`}
       style={{
         left,
         width,

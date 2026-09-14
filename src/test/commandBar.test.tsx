@@ -29,7 +29,7 @@ import type {
   ContextRun,
   ContextAssignment,
 } from "@/lib/command/resolve";
-import { CommandBar } from "@/features/board/components/CommandBar";
+import { CommandBar, type ConfirmWordResult } from "@/features/board/components/CommandBar";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 
@@ -169,11 +169,21 @@ const BLK2: ContextAssignment = {
  *  argument only) is unaffected; the CB-model describe block below is the
  *  only caller that passes a second argument. S46-a widens this with a
  *  third, also defaulted, argument the same way -- every earlier call site
- *  (one or two arguments) is unaffected. */
+ *  (one or two arguments) is unaffected. S47 widens it again with a fourth,
+ *  optional, options object -- `onHighlight` is always a fresh `vi.fn()`
+ *  (a plain callback prop here has no case that needs a caller-supplied
+ *  one; every test reads it off the returned spy instead) and
+ *  `onConfirmWord`/`onCancelWord` default to `undefined` (CommandBar's own
+ *  default), so every pre-S47 call site (up to three positional arguments)
+ *  is unaffected either way. */
 function renderBar(
   over: Partial<ResolveContext> = {},
   reader: Reader | null = null,
   recognizer: Recognizer | null = null,
+  s47: {
+    onConfirmWord?: () => ConfirmWordResult;
+    onCancelWord?: () => boolean;
+  } = {},
 ) {
   const onOpen = vi.fn();
   const onRetime = vi.fn();
@@ -181,6 +191,7 @@ function renderBar(
   const onRetimeRun = vi.fn();
   const onUnassign = vi.fn();
   const onMove = vi.fn();
+  const onHighlight = vi.fn();
   render(
     <CommandBar
       ctx={buildCtx(over)}
@@ -194,10 +205,13 @@ function renderBar(
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
       onMove={onMove}
+      onHighlight={onHighlight}
+      onConfirmWord={s47.onConfirmWord}
+      onCancelWord={s47.onCancelWord}
     />,
   );
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
-  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, input };
+  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, onHighlight, input };
 }
 
 /** S46-a: a fake recogniser (brief §2.4) -- records the `RecognizerEvents`
@@ -455,8 +469,11 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
+    // S47 / R-395: one candidate ("Separate block") -- the message now
+    // gains the yes/no suffix (CB-yes-1's rule applies to block_exists too).
     expect(statusText()).toBe(
-      "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?",
+      "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?" +
+        " — say or type yes to do it, no to leave it.",
     );
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Change /i })).toBeNull();
@@ -558,7 +575,12 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe("Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?");
+    // S47 / R-395: one candidate ("Remove it") -- the message now gains the
+    // yes/no suffix (CB-yes-1).
+    expect(statusText()).toBe(
+      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?" +
+        " — say or type yes to do it, no to leave it.",
+    );
     expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
     expect(screen.queryAllByRole("button")).toHaveLength(1);
     expect(onOpen).not.toHaveBeenCalled();
@@ -692,6 +714,272 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onRetimeRun).not.toHaveBeenCalled();
     expect(onUnassign).not.toHaveBeenCalled();
     expect(onMove).not.toHaveBeenCalled();
+  });
+});
+
+// -----------------------------------------------------------------------
+// S47 / R-395: the outline and the spoken yes (brief
+// docs/agent-briefs/s47-a-outline-and-yes-brief.md). `onHighlight` is the
+// bar telling the board what a remove/move/retime question is about; a
+// confirm/cancel word is `submitText`'s own shortcut around that same
+// question BEFORE parsing, and, with none standing, around
+// `onConfirmWord`/`onCancelWord` (R-384's pop-up).
+// -----------------------------------------------------------------------
+
+describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
+  it("CB-yes-1: a remove sentence with one matching block highlights it and the message gains the yes suffix", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1] });
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+    expect(statusText()).toBe(
+      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00? — say or type yes to do it, no to leave it.",
+    );
+  });
+
+  it("CB-yes-2: typing yes + Enter calls onUnassign with that block and clears the highlight", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-3: no clears the status, the outline and the input; onUnassign is never called", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(statusText()).toBe("");
+    expect(input.value).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-4: two matching blocks highlight both with no suffix; a bare yes asks which one and writes nothing", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: UNASSIGN_WHOLE_DAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "remove",
+      assignmentIds: ["blk1", "blk2"],
+    });
+    expect(statusText()).not.toMatch(/say or type yes/);
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Which one? Remove Housing A 10:00–14:00, Remove Housing A 14:00–16:00",
+    );
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CB-yes-5: a spoken final result 'yes' confirms exactly like typing", () => {
+    // The sentence is typed; "yes" is spoken as its OWN session (the browser
+    // recogniser ends a session after one final result -- `recognizer.ts`'s
+    // `continuous = false` -- so a second word always takes a second press).
+    // The press itself must not erase the standing question -- see
+    // `startListening`'s S47 comment.
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input, onUnassign } = renderBar({ assignments: [BLK1] }, null, recognizer);
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fire.final("yes");
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it("CB-yes-6: Escape clears the highlight", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(statusText()).toBe("");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-7: a new sentence replaces the highlight with the new one", () => {
+    const { input, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "move",
+      assignmentIds: ["blk1", "blk2"],
+    });
+  });
+
+  it("CB-yes-8: yes with no question defers to onConfirmWord -- 'none' falls to the rules, 'created' clears the input", () => {
+    const onConfirmWordNone = vi.fn((): ConfirmWordResult => "none");
+    const { input } = renderBar({}, null, null, { onConfirmWord: onConfirmWordNone });
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onConfirmWordNone).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe(SHAPE);
+    expect(input.value).toBe("yes");
+
+    cleanup();
+    const onConfirmWordCreated = vi.fn((): ConfirmWordResult => "created");
+    const second = renderBar({}, null, null, { onConfirmWord: onConfirmWordCreated });
+
+    fireEvent.change(second.input, { target: { value: "yes" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+
+    expect(onConfirmWordCreated).toHaveBeenCalledTimes(1);
+    expect(second.input.value).toBe("");
+  });
+
+  it("CB-yes-9: a move sentence highlights both candidates as kind move; picking one (after a bare yes asks which) reaches onMove", () => {
+    const { input, onMove, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "move",
+      assignmentIds: ["blk1", "blk2"],
+    });
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onMove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" }));
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk2");
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it("CB-yes-10: a typed edit while a block question stands clears the question, the outline and the stale button", () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: `${UNASSIGN_SENTENCE}x` } });
+
+    expect(statusText()).toBe("");
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+    expect(onHighlight).toHaveBeenLastCalledWith(null);
+
+    // The stale button is really gone, not just hidden -- confirm words
+    // now go to the ordinary path (the sentence-plus-"x" makes "yes" alone
+    // moot here, so this instead proves nothing is bound to click any more:
+    // there is no button left to click).
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CB-yes-11: an interim speech result leaves a standing block question (and its highlight) alone; a final 'yes' then confirms", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] }, null, recognizer);
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    onHighlight.mockClear();
+
+    // A fresh mic press preserves the standing question (see
+    // `startListening`'s S47 comment) -- an interim result must not undo
+    // that just because the input's text now reads "ye".
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fire.interim("ye");
+
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    expect(statusText().endsWith(" — say or type yes to do it, no to leave it.")).toBe(true);
+    expect(onHighlight).not.toHaveBeenCalled();
+
+    fire.final("yes");
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it("CB-yes-12: 'remove it' does not confirm a standing MOVE question (shape hint, no onMove); 'move it' does", () => {
+    // move_which is never asked for exactly one block (CM3's own comment:
+    // "a move takes it without asking" -- resolve.ts's `resolveMoveCommand`
+    // only ever calls `askMoveWhich` when more than one block matches), so
+    // the smallest standing "move" question has two candidates. That is
+    // enough to prove the kind gate at the point it actually acts: a
+    // mismatched word is refused OUTRIGHT (never even entering the
+    // "Which one?" flow), while a matching one is accepted as a confirm and
+    // reaches `onMove`, same as any other confirm word would.
+    const { input, onMove, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "move",
+      assignmentIds: ["blk1", "blk2"],
+    });
+
+    fireEvent.change(input, { target: { value: "remove it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(statusText()).toBe(SHAPE);
+
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "move it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Which one? Move Housing A 10:00–14:00, Move Housing A 14:00–16:00");
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 10:00–14:00" }));
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it("CB-yes-13: onConfirmWord's three results -- 'created' clears the input, 'needs-decision' shows the message and keeps the input, 'none' goes to the rules", () => {
+    const created = vi.fn((): ConfirmWordResult => "created");
+    const first = renderBar({}, null, null, { onConfirmWord: created });
+    fireEvent.change(first.input, { target: { value: "yes" } });
+    fireEvent.keyDown(first.input, { key: "Enter" });
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(first.input.value).toBe("");
+
+    cleanup();
+    const needsDecision = vi.fn((): ConfirmWordResult => "needs-decision");
+    const second = renderBar({}, null, null, { onConfirmWord: needsDecision });
+    fireEvent.change(second.input, { target: { value: "yes" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    expect(needsDecision).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe("The pop-up needs a decision first.");
+    expect(second.input.value).toBe("yes");
+
+    cleanup();
+    const none = vi.fn((): ConfirmWordResult => "none");
+    const third = renderBar({}, null, null, { onConfirmWord: none });
+    fireEvent.change(third.input, { target: { value: "yes" } });
+    fireEvent.keyDown(third.input, { key: "Enter" });
+    expect(none).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe(SHAPE);
+    expect(third.input.value).toBe("yes");
   });
 });
 
