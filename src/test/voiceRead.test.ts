@@ -190,7 +190,9 @@ describe("VR6: the request body matches the contract exactly", () => {
     expect(body.messages[0]).toEqual({ role: "system", content: expectedSystemPrompt });
     expect(body.messages[1]).toEqual({ role: "user", content: SENTENCE });
     expect(body.temperature).toBe(0);
-    expect(body.max_tokens).toBe(256);
+    // S50 (docs/agent-briefs/s50-b-data-brief.md §2 item 4): 256 -> 640, big
+    // enough for a several of three complete forms.
+    expect(body.max_tokens).toBe(640);
     expect(body.cache_prompt).toBe(true);
     expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
     expect(body.response_format).toEqual({
@@ -202,6 +204,24 @@ describe("VR6: the request body matches the contract exactly", () => {
       fs.readFileSync("scripts/voice/serve/form.schema.json", "utf8"),
     ) as unknown;
     expect(body.response_format.json_schema.schema).toEqual(fileSchema);
+  });
+
+  // Reviewer fix: `scripts/voice/serve/probe.mjs` cannot import
+  // `readSentence.ts`'s `MAX_TOKENS` directly (that module is Vite/vitest-
+  // only -- a top-level `?raw` import of `system_prompt.txt` fails under
+  // plain Node), so it keeps its own named constant instead. This is the
+  // one check that the two never drift apart, the same way the assertion
+  // above pins the system prompt's bytes rather than trusting two copies to
+  // agree by construction.
+  it("VR6: probe.mjs's own MAX_TOKENS agrees with readSentence.ts's", () => {
+    const readSentenceSrc = fs.readFileSync("src/lib/voice/readSentence.ts", "utf8");
+    const probeSrc = fs.readFileSync("scripts/voice/serve/probe.mjs", "utf8");
+    const readSentenceMatch = readSentenceSrc.match(/const MAX_TOKENS = (\d+);/);
+    const probeMatch = probeSrc.match(/const MAX_TOKENS = (\d+);/);
+    expect(readSentenceMatch, "readSentence.ts: no `const MAX_TOKENS = <n>;`").toBeTruthy();
+    expect(probeMatch, "probe.mjs: no `const MAX_TOKENS = <n>;`").toBeTruthy();
+    expect(Number(probeMatch![1])).toBe(Number(readSentenceMatch![1]));
+    expect(Number(probeMatch![1])).toBe(640);
   });
 });
 
@@ -218,6 +238,11 @@ describe("VR7: a null baseUrl is no-service", () => {
 // S45-a VR8: the schema in `form.schema.json` must agree with the four
 // `Command` shapes field for field -- no schema-validation library, just a
 // small hand-written walk (brief §2.4).
+//
+// S50 (docs/agent-briefs/s50-b-data-brief.md §2 item 4): the four branches
+// now live in `$defs` and the top-level `oneOf` merely `$ref`s them (plus a
+// fifth, `several`, branch) -- `resolveRef` below is the one place that
+// indirection is undone, shared by VR8's own `branchFor` and VR11.
 describe("VR8: the schema matches the four canonical forms field for field", () => {
   type JsonSchemaNode = {
     $ref?: string;
@@ -228,10 +253,18 @@ describe("VR8: the schema matches the four canonical forms field for field", () 
 
   const root = formSchema as { $defs: Record<string, JsonSchemaNode>; oneOf: JsonSchemaNode[] };
 
+  function resolveRef(node: JsonSchemaNode): JsonSchemaNode {
+    if (typeof node.$ref !== "string") return node;
+    const key = node.$ref.replace("#/$defs/", "");
+    const resolved = root.$defs[key];
+    if (!resolved) throw new Error(`resolveRef: no $defs entry for "${node.$ref}"`);
+    return resolved;
+  }
+
   function branchFor(intent: string): JsonSchemaNode {
-    const branch = root.oneOf.find(
-      (b) => (b.properties?.intent as { const?: string } | undefined)?.const === intent,
-    );
+    const branch = root.oneOf
+      .map(resolveRef)
+      .find((b) => (b.properties?.intent as { const?: string } | undefined)?.const === intent);
     if (!branch) throw new Error(`no schema branch for intent "${intent}"`);
     return branch;
   }
@@ -331,5 +364,157 @@ describe("VR9: an empty place decodes for unassign/move, never for assign/book",
     neitherForm.toPlace = null;
     neitherForm.span = null;
     expect(decodeCommand(neitherForm)).toBeNull();
+  });
+});
+
+// S50 (docs/agent-briefs/s50-b-data-brief.md §2 item 5): the decoder reads a
+// `several` into complete commands, or refuses the whole thing.
+describe("VR10: a several decodes to complete commands, or refuses", () => {
+  const validInnerA = {
+    intent: "assign",
+    operator: "A2",
+    product: "Housing A",
+    place: ["Cell 1"],
+    day: null,
+    start: { hour: 10, minute: 0 },
+    end: { hour: 14, minute: 0 },
+    attach: null,
+    existing: null,
+  };
+  const validInnerB = {
+    intent: "assign",
+    operator: "A3",
+    product: "Housing A",
+    place: ["Cell 2"],
+    day: null,
+    start: { hour: 10, minute: 0 },
+    end: { hour: 14, minute: 0 },
+    attach: null,
+    existing: null,
+  };
+  const validInnerC = {
+    intent: "assign",
+    operator: "A4",
+    product: "Housing A",
+    place: ["Cell 3"],
+    day: null,
+    start: { hour: 10, minute: 0 },
+    end: { hour: 14, minute: 0 },
+    attach: null,
+    existing: null,
+  };
+
+  it("VR10: a several of two decodes to two complete commands", () => {
+    const decoded = decodeCommand({ intent: "several", commands: [validInnerA, validInnerB] });
+    expect(decoded).toEqual({ intent: "several", commands: [validInnerA, validInnerB] });
+  });
+
+  it("VR10: a several of three (the schema's own maxItems) decodes to three complete commands", () => {
+    const decoded = decodeCommand({
+      intent: "several",
+      commands: [validInnerA, validInnerB, validInnerC],
+    });
+    expect(decoded).toEqual({
+      intent: "several",
+      commands: [validInnerA, validInnerB, validInnerC],
+    });
+  });
+
+  it("VR10: one inner command malformed refuses the whole form", () => {
+    const badInner: Record<string, unknown> = { ...validInnerB };
+    delete badInner.product;
+    expect(decodeCommand({ intent: "several", commands: [validInnerA, badInner] })).toBeNull();
+  });
+
+  it("VR10: fewer than two inner commands refuses (never a one-element several)", () => {
+    expect(decodeCommand({ intent: "several", commands: [validInnerA] })).toBeNull();
+  });
+
+  // Reviewer fix: more than three inner commands refuses too -- the schema's
+  // own `maxItems: 3` on the several branch (form.schema.json), mirrored
+  // here so the decoder never accepts a shape the served model's grammar
+  // could not have emitted in the first place.
+  it("VR10: more than three inner commands refuses (matches the schema's maxItems: 3)", () => {
+    const validInnerD = { ...validInnerC, operator: "A5", place: ["Cell 4"] };
+    expect(
+      decodeCommand({
+        intent: "several",
+        commands: [validInnerA, validInnerB, validInnerC, validInnerD],
+      }),
+    ).toBeNull();
+  });
+
+  it("VR10: a nested several inside commands refuses", () => {
+    const nested = { intent: "several", commands: [validInnerA, validInnerB] };
+    expect(decodeCommand({ intent: "several", commands: [validInnerA, nested] })).toBeNull();
+  });
+});
+
+// S50 (docs/agent-briefs/s50-b-data-brief.md §2 item 4): the schema's fifth
+// branch, and `place`'s widened `minItems` for unassign/move.
+describe("VR11: the schema's fifth branch is a several of the four $defs", () => {
+  type JsonSchemaNode = {
+    $ref?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+    oneOf?: JsonSchemaNode[];
+  };
+  const root = formSchema as { $defs: Record<string, JsonSchemaNode>; oneOf: JsonSchemaNode[] };
+
+  function resolveRef(node: JsonSchemaNode): JsonSchemaNode {
+    if (typeof node.$ref !== "string") return node;
+    const key = node.$ref.replace("#/$defs/", "");
+    const resolved = root.$defs[key];
+    if (!resolved) throw new Error(`resolveRef: no $defs entry for "${node.$ref}"`);
+    return resolved;
+  }
+
+  function severalBranch(): JsonSchemaNode {
+    const branch = root.oneOf
+      .map(resolveRef)
+      .find((b) => (b.properties?.intent as { const?: string } | undefined)?.const === "several");
+    if (!branch) throw new Error('no schema branch for intent "several"');
+    return branch;
+  }
+
+  it("VR11: the several branch requires exactly commands and intent", () => {
+    const branch = severalBranch();
+    expect([...(branch.required ?? [])].sort()).toEqual(["commands", "intent"]);
+    expect(Object.keys(branch.properties ?? {})).toEqual(["commands", "intent"]);
+  });
+
+  it("VR11: commands is an array of 2-3 items, each one of the four $defs branches", () => {
+    const branch = severalBranch();
+    const commandsSchema = branch.properties?.commands as {
+      type: string;
+      minItems: number;
+      maxItems: number;
+      items: { oneOf: { $ref: string }[] };
+    };
+    expect(commandsSchema.type).toBe("array");
+    expect(commandsSchema.minItems).toBe(2);
+    expect(commandsSchema.maxItems).toBe(3);
+    const refs = commandsSchema.items.oneOf.map((r) => r.$ref).sort();
+    expect(refs).toEqual(
+      ["#/$defs/assign", "#/$defs/book", "#/$defs/move", "#/$defs/unassign"].sort(),
+    );
+  });
+
+  it("VR11: place has minItems 0 for unassign and move, still 1 for assign and book", () => {
+    const place = (name: string) =>
+      (root.$defs[name].properties?.place as { minItems: number }).minItems;
+    expect(place("unassign")).toBe(0);
+    expect(place("move")).toBe(0);
+    expect(place("assign")).toBe(1);
+    expect(place("book")).toBe(1);
+  });
+
+  it("VR11: VR8 still passes -- every branch (the four $defs and the several branch) resolves and matches its own intent", () => {
+    for (const intent of ["assign", "book", "unassign", "move", "several"]) {
+      const branch = root.oneOf
+        .map(resolveRef)
+        .find((b) => (b.properties?.intent as { const?: string } | undefined)?.const === intent);
+      expect(branch, intent).toBeTruthy();
+    }
   });
 });

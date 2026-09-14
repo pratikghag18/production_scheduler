@@ -9,7 +9,9 @@ import { perturbAll, perturbedRowForm } from "./perturb.mjs";
 import { equalForms } from "./form.mjs";
 import { parseCommand } from "../../../src/lib/command/parse.ts";
 
-export const INTENTS = ["assign", "book", "unassign", "move"];
+// S50 (R-398): "several" joins the four -- one sentence naming more than one
+// person or place, one `{intent:"several", commands:[...]}` form.
+export const INTENTS = ["assign", "book", "unassign", "move", "several"];
 
 export function templatesFor(intent) {
   return TEMPLATES.filter((t) => t.intent === intent);

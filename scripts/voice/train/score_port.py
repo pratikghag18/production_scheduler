@@ -104,7 +104,17 @@ def score(
     never "extra", so an incomplete prediction is still wrong. `extraKeys`
     counts, as a diagnostic only, every row whose prediction carried a key
     the expected form did not, and how many times each such key name
-    occurred."""
+    occurred.
+
+    S50 (mirrors `lib/score.mjs`'s own S50 addition -- keep the two in
+    lock-step): a "several" row's own top-level keys are just "commands" and
+    "intent"; when the prediction is ALSO a "several" with the SAME number
+    of inner commands, each inner command's fields are tallied into the SAME
+    `by_field` buckets a plain assign/book/unassign/move row would use, so
+    "place"/"span"/... keep their diagnostic meaning for a several row too.
+    A different inner count is already wrong for the row and tallies nothing
+    inner -- never a guess at which of a differently-sized pair might
+    correspond to which."""
     clean = _empty_bucket()
     perturbed = _empty_bucket()
     by_intent: Dict[str, Dict[str, Dict[str, int]]] = {}
@@ -152,6 +162,35 @@ def score(
                 row["form"][field]
             ):
                 field_bucket["correct"] += 1
+
+        # S50: a several's own inner commands' fields, tallied into the same
+        # `by_field` buckets (see the doc comment above `score` for why). A
+        # different inner count (or no several prediction at all) tallies
+        # NOTHING here -- the whole loop is skipped, never run with a None
+        # `predicted_inner` on every iteration (that would still count `n`
+        # for fields no other row in the set carries at all).
+        if row["intent"] == "several" and isinstance(row["form"].get("commands"), list):
+            expected_commands = row["form"]["commands"]
+            predicted_commands_raw = (
+                normalized_predicted.get("commands") if same_intent else None
+            )
+            predicted_commands = (
+                predicted_commands_raw
+                if isinstance(predicted_commands_raw, list)
+                and len(predicted_commands_raw) == len(expected_commands)
+                else None
+            )
+            if predicted_commands is not None:
+                for i, expected_inner in enumerate(expected_commands):
+                    predicted_inner = _normalize_to_known_keys(predicted_commands[i], expected_inner)
+                    same_inner_intent = predicted_inner.get("intent") == expected_inner.get("intent")
+                    for field in expected_inner.keys():
+                        field_bucket = by_field.setdefault(field, _empty_bucket())
+                        field_bucket["n"] += 1
+                        if same_inner_intent and canonical(predicted_inner.get(field)) == canonical(
+                            expected_inner[field]
+                        ):
+                            field_bucket["correct"] += 1
 
     return {
         "clean": clean,

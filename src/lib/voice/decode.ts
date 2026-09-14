@@ -12,6 +12,15 @@
  * F-140's lesson: an invented key, at the top level or inside `day`/`start`/
  * `end`/`span`, is ignored rather than refused — this only ever READS the
  * fields it knows, so an extra key never reaches the returned object.
+ *
+ * S50 (docs/agent-briefs/s50-b-data-brief.md §2 item 5): a `several` decodes
+ * each inner object through the SAME four single-command decoders below —
+ * one failure anywhere makes the whole form garbled (never a partial
+ * several), fewer than two inner commands is refused (never a one-element
+ * several, matching `parse.ts`'s own rule), and a nested `several` inside
+ * `commands` is refused (an inner command is always a `SingleCommand`). The
+ * model does not emit this shape yet (S50-b's training set does); the
+ * decoder accepts it now so the pipeline is ready the day it does.
  */
 import type {
   AssignCommand,
@@ -20,6 +29,8 @@ import type {
   Command,
   DayWord,
   MoveCommand,
+  SeveralCommand,
+  SingleCommand,
   UnassignCommand,
 } from "../command/parse.ts";
 
@@ -185,15 +196,46 @@ function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
   };
 }
 
-/** Accepts an object whose `intent` is one of the four and every field of
- *  that intent's interface is present with the right shape; otherwise
- *  `null`. Never throws. */
+/** Accepts an object whose `intent` is one of the four single shapes and
+ *  every field of that intent's interface is present with the right shape;
+ *  otherwise `null`. Never throws. Shared by `decodeCommand` (the top level)
+ *  and `decodeSeveral` (each inner command) so the two never disagree about
+ *  what a valid single command looks like. */
+function decodeSingle(obj: Record<string, unknown>): SingleCommand | null {
+  const intent = obj.intent;
+  if (intent === "assign") return decodeAssign(obj);
+  if (intent === "book") return decodeBook(obj);
+  if (intent === "unassign") return decodeUnassign(obj);
+  if (intent === "move") return decodeMove(obj);
+  return null;
+}
+
+/** S50: `commands` must be an array of two or three inner objects (matching
+ *  `form.schema.json`'s own `minItems`/`maxItems` on the several branch --
+ *  the generator and the notebook's `MAX_LEN` token cap both hold a several
+ *  to at most three), each a valid `SingleCommand` of its own (never itself
+ *  a `several` -- checked before `decodeSingle`, which would otherwise
+ *  simply return `null` for an unrecognised `intent` and mask the real
+ *  reason). One bad inner command fails the whole form -- a several is
+ *  never partially read. */
+function decodeSeveral(obj: Record<string, unknown>): SeveralCommand | null {
+  if (!Array.isArray(obj.commands)) return null;
+  if (obj.commands.length < 2 || obj.commands.length > 3) return null;
+  const commands: SingleCommand[] = [];
+  for (const item of obj.commands) {
+    if (!isRecord(item) || item.intent === "several") return null;
+    const decoded = decodeSingle(item);
+    if (decoded === null) return null;
+    commands.push(decoded);
+  }
+  return { intent: "several", commands };
+}
+
+/** Accepts an object whose `intent` is one of the four single shapes, or
+ *  `"several"` (S50: an array of two or more of them); otherwise `null`.
+ *  Never throws. */
 export function decodeCommand(value: unknown): Command | null {
   if (!isRecord(value)) return null;
-  const intent = value.intent;
-  if (intent === "assign") return decodeAssign(value);
-  if (intent === "book") return decodeBook(value);
-  if (intent === "unassign") return decodeUnassign(value);
-  if (intent === "move") return decodeMove(value);
-  return null;
+  if (value.intent === "several") return decodeSeveral(value);
+  return decodeSingle(value);
 }

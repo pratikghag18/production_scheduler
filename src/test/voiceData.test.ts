@@ -16,7 +16,7 @@ import {
   UNASSIGN_VERBS,
   MOVE_VERBS,
 } from "@/lib/command/parse";
-import type { Command } from "@/lib/command/parse";
+import type { Command, SingleCommand } from "@/lib/command/parse";
 import { mulberry32 } from "../../scripts/voice/lib/rng.mjs";
 import { TEMPLATES } from "../../scripts/voice/lib/templates.mjs";
 import { CATALOG, PERTURBATION_IDS, perturbedRowForm } from "../../scripts/voice/lib/perturb.mjs";
@@ -111,8 +111,12 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     }
   });
 
-  it("V4: data/voice/heldout.jsonl is valid, 400 rows, 100/intent, half clean/intent, clean rows parse today", () => {
-    expect(HELDOUT.length).toBe(400);
+  it("V4: data/voice/heldout.jsonl is valid, 500 rows, 100/intent, half clean/intent, clean rows parse today", () => {
+    // S50 (R-398/R-399): "several" joins the four -- the held-out set is
+    // regenerated (a NEW reference set; the old one could not contain
+    // sentences its grammar could not yet parse, design §19.97/D126), still
+    // 100 rows per intent, now across five intents instead of four.
+    expect(HELDOUT.length).toBe(500);
 
     const counts: Record<string, { total: number; clean: number }> = {};
     for (const row of HELDOUT) {
@@ -120,7 +124,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       bucket.total++;
       if (row.clean) bucket.clean++;
     }
-    expect(Object.keys(counts).sort()).toEqual(["assign", "book", "move", "unassign"]);
+    expect(Object.keys(counts).sort()).toEqual(["assign", "book", "move", "several", "unassign"]);
     for (const [intent, bucket] of Object.entries(counts)) {
       expect(bucket.total, intent).toBe(100);
       expect(bucket.clean, intent).toBe(50);
@@ -239,19 +243,27 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
   });
 
   it("V6: the rule parser's own baseline on held-out is 1.0 clean, well below 0.5 perturbed", () => {
+    // S50: re-pinned on the regenerated 500-row set (read from
+    // `node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl
+    // --rule-parser --bar 0.95`, after the reviewer's M7/U8 template fixes):
+    // clean 250/250 (1.0), perturbed 8/250 (0.032) -- close to the pre-S50
+    // ~4% by construction (the same perturbation catalogue, one more
+    // intent's worth of templates).
     const predict = (row: VoiceRow) => {
       const result = parseCommand(row.sentence);
       return result.ok ? result.command : null;
     };
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
+    expect(result.clean).toEqual({ n: 250, correct: 250 });
+    expect(result.perturbed).toEqual({ n: 250, correct: 8 });
     // Pinned with a tolerance around the number this generator actually
-    // produces (~4%) -- a perturbation catalogue that stopped perturbing
+    // produces (~3.2%) -- a perturbation catalogue that stopped perturbing
     // (every function became a no-op) would push this toward 1.0, and that
     // is exactly the drift this pin exists to catch.
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.04, 1);
+    expect(rate(result.perturbed)).toBeCloseTo(0.032, 2);
   });
 
   it("V7: a generated training set (n=200, seed 1) shares no sentence with held-out and is ~50% clean", () => {
@@ -355,8 +367,75 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     };
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
+    expect(result.clean).toEqual({ n: 250, correct: 250 });
+    expect(result.perturbed).toEqual({ n: 250, correct: 8 });
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.04, 1);
+    expect(rate(result.perturbed)).toBeCloseTo(0.032, 2);
+  });
+
+  describe("V14 (S50, R-398): the scorer tallies a several's inner fields", () => {
+    const innerA: SingleCommand = {
+      intent: "assign",
+      operator: "A2",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      attach: null,
+      existing: null,
+    };
+    const innerB: SingleCommand = {
+      intent: "assign",
+      operator: "A3",
+      product: "Housing A",
+      place: ["Cell 2"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: { hour: 14, minute: 0 },
+      attach: null,
+      existing: null,
+    };
+    const severalForm: Command = { intent: "several", commands: [innerA, innerB] };
+    const rows: VoiceRow[] = [
+      { id: "s1", intent: "several", sentence: "n/a", form: severalForm, clean: true, source: "x" },
+    ];
+
+    it("V14a: an exact match scores the row correct", () => {
+      const result = score(rows, () => severalForm);
+      expect(rate(result.clean)).toBe(1);
+    });
+
+    it("V14b: one inner field wrong is wrong for the row, tallied under that field", () => {
+      const predicted: Command = {
+        intent: "several",
+        commands: [innerA, { ...innerB, place: ["Cell 9"] } as SingleCommand],
+      };
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(0);
+      // Two inner commands each carry `place` -- innerA's is right, the
+      // mutated innerB's is wrong.
+      expect(result.byField.place).toEqual({ n: 2, correct: 1 });
+      // Every other inner field the two commands carry is still right.
+      expect(result.byField.operator).toEqual({ n: 2, correct: 2 });
+      expect(result.byField.product).toEqual({ n: 2, correct: 2 });
+    });
+
+    it("V14c: a different inner count is wrong for the row and tallies nothing inner", () => {
+      const predicted: Command = { intent: "several", commands: [innerA] };
+      const result = score(rows, () => predicted);
+      expect(rate(result.clean)).toBe(0);
+      // No inner tally ran at all -- "place"/"operator"/"product" (fields
+      // that ONLY a several's inner commands could contribute here, since
+      // no plain assign/book/unassign/move row is in this row set) never
+      // appear in byField.
+      expect(result.byField.place).toBeUndefined();
+      expect(result.byField.operator).toBeUndefined();
+      expect(result.byField.product).toBeUndefined();
+      // The row's own top-level keys (commands, intent) are still tallied.
+      expect(result.byField.intent).toEqual({ n: 1, correct: 1 });
+      expect(result.byField.commands.n).toBe(1);
+    });
   });
 });

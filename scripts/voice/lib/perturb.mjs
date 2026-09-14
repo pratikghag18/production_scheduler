@@ -143,10 +143,19 @@ function swapAdjacent(word, rng) {
 }
 
 /** Picks one word token whose lowercase form is/is-not a grammar keyword,
- *  eligible by a minimum length, or null when none exists. */
+ *  eligible by a minimum length, or null when none exists.
+ *
+ * S50: the literal word "and" is never a candidate, in either category --
+ * it joins a several's list (parse.ts's `detectAndList`), and a dropped,
+ * doubled or swapped letter turns it into a different token that no longer
+ * matches `\band\b`, silently collapsing a several's list into a single
+ * (wrong) item instead of merely garbling a name or keyword the way every
+ * other spelling perturbation is meant to (brief §2 item "Perturbations"). */
 function pickWord(sentence, rng, { keyword, minLen }) {
   const candidates = wordTokens(sentence).filter((t) => {
-    const isKeyword = KEYWORDS.has(t.word.toLowerCase());
+    const lower = t.word.toLowerCase();
+    if (lower === "and") return false;
+    const isKeyword = KEYWORDS.has(lower);
     return isKeyword === keyword && t.word.length >= minLen;
   });
   if (candidates.length === 0) return null;
@@ -247,8 +256,18 @@ function speechAmPmSpacedLetters(sentence) {
   return sentence.slice(0, m.index) + spaced + sentence.slice(m.index + m[0].length);
 }
 
-/** Drops one comma -- a recognizer rarely transcribes punctuation. */
+/** Drops one comma -- a recognizer rarely transcribes punctuation.
+ *
+ * S50: never on a sentence that carries a several's list -- a comma there
+ * (S4-three-people-one-cell's "A1, A2 and A3") is one of the list's own
+ * separators (`detectAndList`'s comma-before-final-"and" rule), and
+ * dropping it silently merges two names into one ("A1 A2 and A3" reads as
+ * TWO items, "A1 A2" and "A3", never erroring) -- a several sentence is
+ * detected the same cheap way the grammar itself never uses "and" outside a
+ * list, so any sentence containing the word is left to every OTHER
+ * perturbation instead. */
 function speechMissingComma(sentence) {
+  if (/\band\b/i.test(sentence)) return sentence;
   const idx = sentence.indexOf(",");
   if (idx === -1) return sentence;
   return sentence.slice(0, idx) + sentence.slice(idx + 1);

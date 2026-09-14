@@ -19,6 +19,16 @@ const SYSTEM_PROMPT_PATH = fileURLToPath(new URL("../train/system_prompt.txt", i
 const FORM_SCHEMA_PATH = fileURLToPath(new URL("./form.schema.json", import.meta.url));
 const DEFAULT_URL = "http://127.0.0.1:8089";
 
+// S50 (reviewer fix): must match `src/lib/voice/readSentence.ts`'s own
+// `MAX_TOKENS` -- both send the same request shape to the same served
+// model, and a several of three must fit through either door. Not imported
+// from that file: `readSentence.ts` is a Vite/vitest module (a top-level
+// `?raw` import of `system_prompt.txt`, `import.meta.env`), and importing
+// it from this plain Node script fails outside that bundler ("Unknown file
+// extension \".txt\""). `src/test/voiceRead.test.ts`'s VR6 asserts the two
+// numbers agree, the same way it already pins the system prompt's bytes.
+const MAX_TOKENS = 640;
+
 function parseArgs(argv) {
   const out = {
     url: DEFAULT_URL,
@@ -94,7 +104,7 @@ async function callService(url, systemPrompt, sentence, schema) {
       { role: "user", content: sentence },
     ],
     temperature: 0,
-    max_tokens: 256,
+    max_tokens: MAX_TOKENS,
     cache_prompt: true,
     chat_template_kwargs: { enable_thinking: false },
   };

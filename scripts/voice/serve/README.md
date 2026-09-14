@@ -61,7 +61,7 @@ Confirm it is gone with `docker ps`.
 ## Checking accuracy against the held-out set
 
 This takes a while -- measured on this machine, about six seconds a row (0.17 rows/s), so
-400 rows is roughly 40 minutes. Run a small batch first to see the rate before committing
+500 rows is roughly 50 minutes. Run a small batch first to see the rate before committing
 to the full set:
 
 ```
@@ -69,14 +69,16 @@ npm run voice:probe -- --heldout data/voice/heldout.jsonl --out data/voice/runs/
 node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions data/voice/runs/served-q4/predictions.jsonl --bar 0.95
 ```
 
-Drop `--limit` to run all 400. The probe skips ids already in `--out`, so an interrupted run
-picks up where it left off instead of starting over -- rerun the same command to continue it.
+Drop `--limit` to run all 500 (S50: the held-out set now covers five intents --
+assign/book/unassign/move/several -- 100 rows each). The probe skips ids already in `--out`,
+so an interrupted run picks up where it left off instead of starting over -- rerun the same
+command to continue it.
 
 ## The grammar (S45-a)
 
 By default the probe and the app send `form.schema.json` under `response_format`, which
-llama.cpp turns into a grammar that forbids any answer but the four command shapes in the
-model's own alphabetical key order -- no wrong field name, no missing or extra key, no
-out-of-range hour or weekday. Pass `--no-grammar` to `npm run voice:probe` to send the plain
-request instead, the way S44 measured it, so the grammar's accuracy and time cost can be
-compared against a run without it.
+llama.cpp turns into a grammar that forbids any answer but the five command shapes (S50 adds
+`several` to the original four) in the model's own alphabetical key order -- no wrong field
+name, no missing or extra key, no out-of-range hour or weekday. Pass `--no-grammar` to
+`npm run voice:probe` to send the plain request instead, the way S44 measured it, so the
+grammar's accuracy and time cost can be compared against a run without it.

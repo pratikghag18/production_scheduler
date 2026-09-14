@@ -1,5 +1,46 @@
 {
   "$defs": {
+    "assign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attach": { "type": "null" },
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "end": { "$ref": "#/$defs/clock_time" },
+        "existing": { "type": "null" },
+        "intent": { "const": "assign" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "start": { "$ref": "#/$defs/clock_time" }
+      },
+      "required": [
+        "attach",
+        "day",
+        "end",
+        "existing",
+        "intent",
+        "operator",
+        "place",
+        "product",
+        "start"
+      ]
+    },
+    "book": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "end": { "$ref": "#/$defs/clock_time" },
+        "existing": { "type": "null" },
+        "headcount": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+        "intent": { "const": "book" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "start": { "$ref": "#/$defs/clock_time" }
+      },
+      "required": ["day", "end", "existing", "headcount", "intent", "place", "product", "start"]
+    },
     "clock_time": {
       "type": "object",
       "additionalProperties": false,
@@ -43,72 +84,7 @@
         }
       ]
     },
-    "span": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "end": { "$ref": "#/$defs/clock_time" },
-        "start": { "$ref": "#/$defs/clock_time" }
-      },
-      "required": ["end", "start"]
-    }
-  },
-  "oneOf": [
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "attach": { "type": "null" },
-        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
-        "end": { "$ref": "#/$defs/clock_time" },
-        "existing": { "type": "null" },
-        "intent": { "const": "assign" },
-        "operator": { "type": "string" },
-        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "product": { "type": "string" },
-        "start": { "$ref": "#/$defs/clock_time" }
-      },
-      "required": [
-        "attach",
-        "day",
-        "end",
-        "existing",
-        "intent",
-        "operator",
-        "place",
-        "product",
-        "start"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
-        "end": { "$ref": "#/$defs/clock_time" },
-        "existing": { "type": "null" },
-        "headcount": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
-        "intent": { "const": "book" },
-        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "product": { "type": "string" },
-        "start": { "$ref": "#/$defs/clock_time" }
-      },
-      "required": ["day", "end", "existing", "headcount", "intent", "place", "product", "start"]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
-        "existing": { "type": "null" },
-        "intent": { "const": "unassign" },
-        "operator": { "type": "string" },
-        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
-      },
-      "required": ["day", "existing", "intent", "operator", "place", "span"]
-    },
-    {
+    "move": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -116,7 +92,7 @@
         "existing": { "type": "null" },
         "intent": { "const": "move" },
         "operator": { "type": "string" },
-        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
         "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
         "toPlace": {
           "oneOf": [
@@ -126,6 +102,55 @@
         }
       },
       "required": ["day", "existing", "intent", "operator", "place", "span", "toPlace"]
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "end": { "$ref": "#/$defs/clock_time" },
+        "start": { "$ref": "#/$defs/clock_time" }
+      },
+      "required": ["end", "start"]
+    },
+    "unassign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "existing": { "type": "null" },
+        "intent": { "const": "unassign" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+      },
+      "required": ["day", "existing", "intent", "operator", "place", "span"]
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/assign" },
+    { "$ref": "#/$defs/book" },
+    { "$ref": "#/$defs/unassign" },
+    { "$ref": "#/$defs/move" },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/assign" },
+              { "$ref": "#/$defs/book" },
+              { "$ref": "#/$defs/unassign" },
+              { "$ref": "#/$defs/move" }
+            ]
+          }
+        },
+        "intent": { "const": "several" }
+      },
+      "required": ["commands", "intent"]
     }
   ]
 }

@@ -30,6 +30,24 @@ export type Reader = (text: string, signal: AbortSignal) => Promise<Reading>;
  *  ~450-token system prompt. */
 const DEFAULT_TIMEOUT_MS = 20000;
 
+/**
+ * S50 (docs/agent-briefs/s50-b-data-brief.md §2 item 4): 256 -> 640. The
+ * CURRENT served model never emits a `several` (it was never trained on
+ * one), so this cannot be measured on the real model yet -- it is sized
+ * from what IS measured: brief §1 records a single form at ~100-130 tokens
+ * with the real tokenizer, and a several holds at most three inner forms
+ * (the notebook's own `MAX_LEN = 1024` training-example cap is why the
+ * generator keeps lists to two or three, brief §1). Three forms at the
+ * upper end (3 x 130 = 390) plus the wrapping `{"intent":"several",
+ * "commands":[...]}` and JSON punctuation between them (a few tokens each)
+ * comes to well under 640; 640 keeps the same generous margin over that
+ * estimate `DEFAULT_TIMEOUT_MS` keeps over the prompt's own measured size,
+ * rather than cutting the ceiling as close as the raw arithmetic would
+ * allow. Re-measure against the real retrained model once it serves a
+ * several (S50's own next step, on Colab).
+ */
+const MAX_TOKENS = 640;
+
 /** `VITE_VOICE_URL`, trimmed, or `null` when unset/empty — "no service". */
 export function voiceServiceUrl(): string | null {
   const raw = import.meta.env.VITE_VOICE_URL;
@@ -130,7 +148,7 @@ export function makeReader(opts?: {
             { role: "user", content: text },
           ],
           temperature: 0,
-          max_tokens: 256,
+          max_tokens: MAX_TOKENS,
           cache_prompt: true,
           chat_template_kwargs: { enable_thinking: false },
           response_format: { type: "json_schema", json_schema: { schema: formSchema } },

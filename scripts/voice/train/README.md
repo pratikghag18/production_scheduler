@@ -31,8 +31,9 @@ Nothing in the app changes from running this. No model is served until its score
    the left, drag the file in, or use its upload button) — the scoring cell imports it from
    `/content/score_port.py` and fails with a plain message if it is missing. Then:
    Runtime → Change runtime type → T4 GPU, then Runtime → Run all. Measured on the second run,
-   a T4 with fp16 and batch 16 x 2: training took over an hour and the 400-row Predict cell about
-   another hour (one row at a time, six to nine seconds each), so plan on two and a half hours
+   a T4 with fp16 and batch 16 x 2: training took over an hour and the (then 400-row, now 500-row
+   -- S50 added a fifth intent, `several`) Predict cell about another hour (one row at a time, six
+   to nine seconds each), so plan on two and a half hours
    end to end on a T4. The "30 to 60 minutes" this file said before was an estimate, not a
    measurement. A paid L4 runs the same notebook unchanged (it picks bf16 by itself) in roughly
    a third of the time; switch runtimes between cells, never mid-training, because a checkpoint
@@ -56,11 +57,12 @@ Nothing in the app changes from running this. No model is served until its score
 
    The Predict cell prints its first row's timing alone — `first row: 1.3s for 42 tokens` — so
    an emulated-precision slow path (see above) is visible within seconds instead of a blank cell
-   for the whole 400-row pass, then one line every 25 rows: `225/400 rows, 310s, 0.73 rows/s, 2
+   for the whole 500-row pass (S50: 100 rows each across five intents, `several` included), then
+   one line every 25 rows: `225/500 rows, 310s, 0.73 rows/s, 2
 failed to parse`. It writes `predictions.jsonl` one row at a time as each is decided, not all
    at once at the end, so a session killed mid-prediction (Colab's free tier has a two-hour
    deadline) can just be re-run: it skips the ids already in the file and prints how many, and
-   continues from there instead of starting the 400 rows over.
+   continues from there instead of starting the 500 rows over.
 
 4. **When it finishes**, download `predictions.jsonl` and `model-q4_k_m.gguf` from the run
    folder in Drive (`scheduler-voice/run-qwen3-1.7b/`, a fixed name — the exact path is printed
@@ -76,7 +78,7 @@ failed to parse`. It writes `predictions.jsonl` one row at a time as each is dec
    Paste the table to the developer session; it goes on S43's card.
 
 6. **What "good" looks like:** clean at or above 95%; perturbed far above the rule parser's
-   baseline (`ruleParserBaseline.perturbed` in the manifest — currently 3.5%; the plan expects
+   baseline (`ruleParserBaseline.perturbed` in the manifest — currently 3.2%; the plan expects
    90% or better on sentences shaped like the training ones). A field the model invents that
    the training data never had (`"type":"assign"`, say) does not fail a row by itself — the
    scorer ignores any key the expected form does not have and reports it on the "extra keys
@@ -129,6 +131,7 @@ without failing on the llama.cpp clone; it checks for `convert_hf_to_gguf.py` in
 Two real runs scored `product` at 2.5% before the cause was found: `MAX_LEN = 512` was shorter
 than a full training conversation, so `SFTConfig(max_length=MAX_LEN)` silently cut every row off
 before the answer — the system prompt alone runs 450 tokens, and the answer comes last. `MAX_LEN`
-is now 1024, and the cell after the chat-template round trip tokenises every training
+is now 1280 (raised from 1024 in S50, when the widened prompt and a several of three measured
+about 940 tokens), and the cell after the chat-template round trip tokenises every training
 conversation the same way the trainer will, prints the median and longest length seen, and
 asserts the longest is under `MAX_LEN` before training is allowed to start (F-142).

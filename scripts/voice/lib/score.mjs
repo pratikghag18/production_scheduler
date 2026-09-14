@@ -65,6 +65,19 @@ function collectExtraKeys(predicted, expected, into) {
  * prediction carried a key the expected form did not, at any level; `keys`
  * counts each such key name across every occurrence (first-seen order). It
  * is a diagnostic only -- it never changes `correct`.
+ *
+ * S50 (R-398): a `several` row's OWN top-level keys are just `commands` and
+ * `intent` -- `place`/`span`/`operator`/... never show up in `byField` for
+ * it unless we look INSIDE `commands`. When the prediction is ALSO a
+ * `several` with the SAME number of inner commands as the row's own, each
+ * inner command's fields are tallied into the SAME `byField` buckets a
+ * plain assign/book/unassign/move row would use (merged by field name, not
+ * kept separate per intent) -- that is what keeps `place` and `span`
+ * meaningful for a several row too, exactly the way brief §2 item 6 asks.
+ * A different inner count is already wrong for the ROW (the whole-form
+ * `canonical` compare never matches when the array lengths differ) and
+ * tallies NOTHING inner here either -- never a guess at which of a
+ * differently-sized pair of lists might correspond to which.
  */
 export function score(rows, predict) {
   const clean = emptyBucket();
@@ -108,6 +121,39 @@ export function score(rows, predict) {
       fieldBucket.n++;
       if (sameIntent && canonical(normalizedPredicted[field]) === canonical(row.form[field])) {
         fieldBucket.correct++;
+      }
+    }
+
+    // S50: a several's own inner commands' fields, tallied into the same
+    // `byField` buckets (see the doc comment above `score` for why). A
+    // different inner count (or no several prediction at all) tallies
+    // NOTHING here -- the whole loop is skipped, never run with a null
+    // `predictedInner` on every iteration (that would still count `n` for
+    // fields no other row in the set carries at all).
+    if (row.intent === "several" && Array.isArray(row.form.commands)) {
+      const expectedCommands = row.form.commands;
+      const predictedCommands =
+        sameIntent &&
+        Array.isArray(normalizedPredicted.commands) &&
+        normalizedPredicted.commands.length === expectedCommands.length
+          ? normalizedPredicted.commands
+          : null;
+      if (predictedCommands != null) {
+        for (let i = 0; i < expectedCommands.length; i++) {
+          const expectedInner = expectedCommands[i];
+          const predictedInner = normalizeToKnownKeys(predictedCommands[i], expectedInner);
+          const sameInnerIntent = predictedInner.intent === expectedInner.intent;
+          for (const field of Object.keys(expectedInner)) {
+            const fieldBucket = (byField[field] ??= emptyBucket());
+            fieldBucket.n++;
+            if (
+              sameInnerIntent &&
+              canonical(predictedInner[field]) === canonical(expectedInner[field])
+            ) {
+              fieldBucket.correct++;
+            }
+          }
+        }
       }
     }
   }

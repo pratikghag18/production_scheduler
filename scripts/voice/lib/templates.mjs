@@ -58,6 +58,50 @@ function qw(word) {
 const TRICKY_OPERATORS = ["Lin On", "Jo To", "Ann At Bay", "Cy In Field"];
 const TRICKY_CELLS = ["Cell in 2", "Bay on 3", "Dock at 5", "Line, North"];
 
+/** S50: `n` DISTINCT items from `pool`, in draw order -- a several's list
+ *  slots must never repeat an item ("no A2 and A2"). */
+function pickDistinct(rng, pool, n) {
+  const remaining = pool.slice();
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const idx = randInt(rng, 0, remaining.length - 1);
+    out.push(remaining[idx]);
+    remaining.splice(idx, 1);
+  }
+  return out;
+}
+
+/** S50 (brief §2 item 1, M8): a day word with NO "on " prefix -- for the
+ *  MOVE grammar's place-less branch specifically, where (unlike unassign)
+ *  the day is read off the OPERATOR segment only AFTER `splitMoveOperatorPlaces`
+ *  has already looked for an on/at/from separator in the whole remaining
+ *  text; an "on today"-style day would be misread as a (fake) place clause
+ *  before the day ever gets a chance to be recognised. Every kind
+ *  `randomDay` can produce, just never prefixed. */
+function randomBareDay(rng) {
+  const kind = pick(rng, ["today", "tomorrow", "weekday", "iso"]);
+  if (kind === "today") return { text: "today", day: { kind: "today" } };
+  if (kind === "tomorrow") return { text: "tomorrow", day: { kind: "tomorrow" } };
+  if (kind === "weekday") {
+    const idx = randInt(rng, 0, 6);
+    const word = chance(rng, 0.5) ? WEEKDAY_FULL[idx] : WEEKDAY_ABBR[idx];
+    return { text: word, day: { kind: "weekday", day: idx } };
+  }
+  const iso = pick(rng, ISO_DATES);
+  return { text: iso, day: { kind: "date", iso } };
+}
+
+/** S50: joins already-quoted (`qw`) items as an operator/place LIST would be
+ *  said -- two items as "a and b", three as "a, b and c" (an operator list
+ *  only; a place list is always exactly two items here, so the comma form
+ *  never applies to one, per the parser's own rule that a FIRST PLACE
+ *  segment lists on " and " alone). */
+function joinAnd(items) {
+  if (items.length < 2) throw new Error("joinAnd: needs at least two items");
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 function randomDay(rng) {
   const kind = pick(rng, ["today", "tomorrow", "weekday", "iso"]);
   if (kind === "today") {
@@ -88,8 +132,16 @@ function randomHeadcount(rng) {
  *  accepts: plain 24h, am/pm, noon/midnight, and -- when the end hour allows
  *  it -- the bare small number that only the afternoon rule turns into an
  *  afternoon hour ("from 10 to 2"). Retries (extremely rarely) on the one
- *  combination that cannot produce end-after-start. */
-function randomSpan(rng) {
+ *  combination that cannot produce end-after-start.
+ *
+ * `forcedSep`, when given, is used instead of a random pick from
+ * `TIME_SEPARATORS` (S50 fix: M7-no-place-hours's own outer clause word is
+ * itself "to" or "from" -- picking the PAIR's separator independently of
+ * that produces a sentence that stacks two different prepositions, "move X
+ * to 2:15pm until 16:30", which nothing in the grammar rejects (the parsed
+ * MEANING is identical either way, so the oracle never flags it) but which
+ * no one would actually say). */
+function randomSpan(rng, forcedSep) {
   const startHour = randInt(rng, 6, 18);
   let duration = pick(rng, [2, 3, 4, 6, 8]);
   if (startHour + duration > 22) duration = Math.max(1, 22 - startHour);
@@ -116,9 +168,9 @@ function randomSpan(rng) {
     endSpec = { kind: "24h", hour: endHour, minute: endMinute };
   }
 
-  const sep = pick(rng, TIME_SEPARATORS);
+  const sep = forcedSep ?? pick(rng, TIME_SEPARATORS);
   const pair = buildTimePair(startSpec, endSpec, sep);
-  if (!pair) return randomSpan(rng);
+  if (!pair) return randomSpan(rng, forcedSep);
   return pair;
 }
 
@@ -696,6 +748,69 @@ const unassignTemplates = [
         existing: null,
       }),
   },
+  // -------------------------------------------------------------------------
+  // S50 (R-398, brief §2 item 1): a removal need not name a place at all --
+  // `place: []`, "wherever the person is" (S49).
+  // -------------------------------------------------------------------------
+  {
+    id: "U8-no-place-day",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      // Reviewer fix: `randomBareDay` (as M8 uses), never `randomDay` -- the
+      // "on " prefix `randomDay` sometimes adds is harmless for the UNASSIGN
+      // grammar's own day extraction (it strips the whole "on <day>" tail
+      // before place-splitting ever runs, see `extractDayWord`/`DAY_TAIL_RE`)
+      // but "unassign Layla Rossi on today" still reads oddly next to every
+      // other bare-day sentence this template produces ("remove X today").
+      day: randomBareDay(rng),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} ${s.day.text}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [],
+        day: s.day.day,
+        span: null,
+        existing: null,
+      }),
+  },
+  {
+    id: "U9-no-place-hours",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      span: randomSpan(rng),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} from ${s.span.text}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [],
+        day: null,
+        span: { start: s.span.start, end: s.span.end },
+        existing: null,
+      }),
+  },
+  {
+    id: "U10-no-place-bare",
+    intent: "unassign",
+    genSlots: (rng) => ({
+      verb: pick(rng, UNASSIGN_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)}`,
+    form: (s) =>
+      baseCommand("unassign", {
+        operator: s.op,
+        place: [],
+        day: null,
+        span: null,
+        existing: null,
+      }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -831,6 +946,293 @@ const moveTemplates = [
         existing: null,
       }),
   },
+  // -------------------------------------------------------------------------
+  // S50 (R-398, brief §2 item 2): a move need not name a place at all --
+  // `place: []`, "wherever the person is" (S49).
+  // -------------------------------------------------------------------------
+  {
+    id: "M7-no-place-hours",
+    intent: "move",
+    genSlots: (rng) => {
+      // brief §2 item 1 (M7): the hours clause reads as either "to <time> to
+      // <time>" (parseMoveRest's own extractToTimeClause, tried once
+      // `extractOptionalTimeClause` finds no "from" at all) or "from <time>
+      // to <time>" (extractOptionalTimeClause itself) -- both parse to the
+      // same place-less move, so both are exercised here.
+      const clause = pick(rng, ["to", "from"]);
+      // Reviewer fix: when the OUTER clause word is "to", the pair's own
+      // separator is forced to "to" as well -- a "from" clause may keep any
+      // separator (TIME_SEPARATORS), since "from 2pm until 4pm" reads fine,
+      // but "to 2:15pm until 16:30" stacks two different prepositions no one
+      // would say (`randomSpan`'s own doc comment).
+      const span = randomSpan(rng, clause === "to" ? "to" : undefined);
+      return { verb: pick(rng, MOVE_VERBS), op: pick(rng, PEOPLE_ALL), clause, span };
+    },
+    sentence: (s) => `${s.verb} ${qw(s.op)} ${s.clause} ${s.span.text}`,
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: s.span.start, end: s.span.end },
+        existing: null,
+      }),
+  },
+  {
+    id: "M8-no-place-day-hours",
+    intent: "move",
+    genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      // `randomBareDay`, never `randomDay`: an "on <day>" prefix would be
+      // misread as a (fake) place clause by `splitMoveOperatorPlaces`, which
+      // runs BEFORE day extraction on this branch (see that function's own
+      // comment) -- unlike unassign, where the day is stripped off the
+      // whole remaining text first.
+      day: randomBareDay(rng),
+      span: randomSpan(rng),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} ${s.day.text} from ${s.span.text}`,
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: [],
+        toPlace: null,
+        day: s.day.day,
+        span: { start: s.span.start, end: s.span.end },
+        existing: null,
+      }),
+  },
+  {
+    id: "M9-no-place-cell",
+    intent: "move",
+    genSlots: (rng) => ({
+      verb: pick(rng, MOVE_VERBS),
+      op: pick(rng, PEOPLE_ALL),
+      cell2: pick(rng, CELLS_ALL),
+    }),
+    sentence: (s) => `${s.verb} ${qw(s.op)} to ${qw(s.cell2)}`,
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: [],
+        toPlace: [s.cell2],
+        day: null,
+        span: null,
+        existing: null,
+      }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Several (S1-S6) -- S50 (R-398, brief §2 item 3): the OPERATOR segment
+// (assign, unassign, move) or the FIRST PLACE segment (assign, book) names
+// more than one thing, joined by " and " (an operator list also accepts a
+// ", "-joined run before the final " and "). Every `form` here is
+// `{intent:"several", commands:[...]}`, one complete `SingleCommand` per
+// item, in the sentence's order -- exactly what `combineLists` in parse.ts
+// builds (brief's own worked example, L10). `pickDistinct` guarantees no
+// list ever repeats a name or a cell.
+// ---------------------------------------------------------------------------
+
+const severalTemplates = [
+  {
+    id: "S1-two-people-one-cell",
+    intent: "several",
+    genSlots: (rng) => {
+      const [op1, op2] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op1,
+        op2,
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        span: randomSpan(rng),
+      };
+    },
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${joinAnd([qw(s.op1), qw(s.op2)])} to ${qw(s.part)} on ${qw(s.cell)} from ${s.span.text}`,
+    form: (s) => ({
+      intent: "several",
+      commands: [s.op1, s.op2].map((op) =>
+        baseCommand("assign", {
+          operator: op,
+          product: s.part,
+          place: [s.cell],
+          day: null,
+          start: s.span.start,
+          end: s.span.end,
+          attach: null,
+          existing: null,
+        }),
+      ),
+    }),
+  },
+  {
+    id: "S2-one-person-two-cells",
+    intent: "several",
+    genSlots: (rng) => {
+      const [cell1, cell2] = pickDistinct(rng, CELLS_ALL, 2);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op: pick(rng, PEOPLE_ALL),
+        part: pick(rng, PARTS_ALL),
+        cell1,
+        cell2,
+        span: randomSpan(rng),
+      };
+    },
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${qw(s.op)} to ${qw(s.part)} on ${joinAnd([qw(s.cell1), qw(s.cell2)])} from ${s.span.text}`,
+    form: (s) => ({
+      intent: "several",
+      commands: [s.cell1, s.cell2].map((cell) =>
+        baseCommand("assign", {
+          operator: s.op,
+          product: s.part,
+          place: [cell],
+          day: null,
+          start: s.span.start,
+          end: s.span.end,
+          attach: null,
+          existing: null,
+        }),
+      ),
+    }),
+  },
+  {
+    id: "S3-pairs",
+    intent: "several",
+    // The maintainer's own sentence shape (docs/design-plan.md §19.97):
+    // "assign A2 and A3 to Housing A on Cell 1 and Cell 2 in Line 1 today
+    // from 3 to 5" -- two people, two cells, a line qualifier (applies to
+    // every pair), a day, hours.
+    genSlots: (rng) => {
+      const [op1, op2] = pickDistinct(rng, PEOPLE_ALL, 2);
+      const [cell1, cell2] = pickDistinct(rng, CELLS_ALL, 2);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op1,
+        op2,
+        part: pick(rng, PARTS_ALL),
+        cell1,
+        cell2,
+        line: pick(rng, LINES_ALL),
+        day: randomDay(rng),
+        span: randomSpan(rng),
+      };
+    },
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${joinAnd([qw(s.op1), qw(s.op2)])} to ${qw(s.part)} on ${joinAnd([qw(s.cell1), qw(s.cell2)])} in ${qw(s.line)} ${s.day.text} from ${s.span.text}`,
+    form: (s) => ({
+      intent: "several",
+      commands: [
+        [s.op1, s.cell1],
+        [s.op2, s.cell2],
+      ].map(([op, cell]) =>
+        baseCommand("assign", {
+          operator: op,
+          product: s.part,
+          place: [cell, s.line],
+          day: s.day.day,
+          start: s.span.start,
+          end: s.span.end,
+          attach: null,
+          existing: null,
+        }),
+      ),
+    }),
+  },
+  {
+    id: "S4-three-people-one-cell",
+    intent: "several",
+    genSlots: (rng) => {
+      const [op1, op2, op3] = pickDistinct(rng, PEOPLE_ALL, 3);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op1,
+        op2,
+        op3,
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        span: randomSpan(rng),
+      };
+    },
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${joinAnd([qw(s.op1), qw(s.op2), qw(s.op3)])} to ${qw(s.part)} on ${qw(s.cell)} from ${s.span.text}`,
+    form: (s) => ({
+      intent: "several",
+      commands: [s.op1, s.op2, s.op3].map((op) =>
+        baseCommand("assign", {
+          operator: op,
+          product: s.part,
+          place: [s.cell],
+          day: null,
+          start: s.span.start,
+          end: s.span.end,
+          attach: null,
+          existing: null,
+        }),
+      ),
+    }),
+  },
+  {
+    id: "S5-remove-two",
+    intent: "several",
+    genSlots: (rng) => {
+      const [op1, op2] = pickDistinct(rng, PEOPLE_ALL, 2);
+      return {
+        verb: pick(rng, UNASSIGN_VERBS),
+        op1,
+        op2,
+        cell: pick(rng, CELLS_ALL),
+      };
+    },
+    sentence: (s) => `${s.verb} ${joinAnd([qw(s.op1), qw(s.op2)])} from ${qw(s.cell)}`,
+    form: (s) => ({
+      intent: "several",
+      commands: [s.op1, s.op2].map((op) =>
+        baseCommand("unassign", {
+          operator: op,
+          place: [s.cell],
+          day: null,
+          span: null,
+          existing: null,
+        }),
+      ),
+    }),
+  },
+  {
+    id: "S6-book-two-cells",
+    intent: "several",
+    genSlots: (rng) => {
+      const [cell1, cell2] = pickDistinct(rng, CELLS_ALL, 2);
+      return {
+        verb: pick(rng, BOOK_VERBS),
+        part: pick(rng, PARTS_ALL),
+        cell1,
+        cell2,
+        span: randomSpan(rng),
+      };
+    },
+    sentence: (s) =>
+      `${capitalize(s.verb)} ${qw(s.part)} on ${joinAnd([qw(s.cell1), qw(s.cell2)])} from ${s.span.text}`,
+    form: (s) => ({
+      intent: "several",
+      commands: [s.cell1, s.cell2].map((cell) =>
+        baseCommand("book", {
+          product: s.part,
+          place: [cell],
+          headcount: null,
+          day: null,
+          start: s.span.start,
+          end: s.span.end,
+          existing: null,
+        }),
+      ),
+    }),
+  },
 ];
 
 export const TEMPLATES = [
@@ -838,6 +1240,7 @@ export const TEMPLATES = [
   ...bookTemplates,
   ...unassignTemplates,
   ...moveTemplates,
+  ...severalTemplates,
 ];
 
 export function templateById(id) {
