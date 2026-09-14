@@ -378,6 +378,30 @@ export async function setOrgTimezone(timezone: string): Promise<void> {
 }
 
 /**
+ * The command bar mode (migration 0081, R-403, D129): `off` (no launcher at
+ * all), `typed` (the launcher and the bar, no microphone) or `voice`
+ * (everything -- the default, and the board's behaviour before this setting
+ * existed). Mirrors `node_settings_value_check`'s `command_bar` branch.
+ */
+export const COMMAND_BAR_MODES = ["off", "typed", "voice"] as const;
+export type CommandBarMode = (typeof COMMAND_BAR_MODES)[number];
+
+/**
+ * `set_org_command_bar(p_value)` (migration 0081, R-403). Sets the org-wide
+ * fallback command bar mode. Raises: `not_permitted` (not a system admin),
+ * `invalid_argument` (anything but off/typed/voice, carrying
+ * `field: "command_bar"`).
+ *
+ * ⚠️ The returned settings are DISCARDED, exactly as `setOrgTimezone` above:
+ * the caller invalidates and refetches, and the loudness of a refusal comes
+ * from the server RAISE, not from anything this wrapper could inspect.
+ */
+export async function setOrgCommandBar(mode: CommandBarMode): Promise<void> {
+  const { error } = await supabase.rpc("set_org_command_bar", { p_value: mode });
+  if (error) throw toSchedulerError(error);
+}
+
+/**
  * What the org does when somebody is scheduled onto work they are not
  * certified for. Mirrors migration 0001's
  * `check (settings->>'eligibility_policy' in ('warn','block'))` — the same
@@ -466,13 +490,14 @@ export async function setOrgEligibilityPolicy(policy: EligibilityPolicy): Promis
  * without a matching migration is a control the server refuses. 0052's header
  * carries the full list of what a third key costs on the server side.
  */
-export type NodeSettingKey = "eligibility_policy" | "date_format" | "timezone";
+export type NodeSettingKey = "eligibility_policy" | "date_format" | "timezone" | "command_bar";
 
 /** Every key, so a caller can loop rather than restate the union. */
 export const NODE_SETTING_KEYS: readonly NodeSettingKey[] = [
   "eligibility_policy",
   "date_format",
   "timezone",
+  "command_bar",
 ];
 
 /** One plant's own answer for one setting, as the Settings screen has to show it. */

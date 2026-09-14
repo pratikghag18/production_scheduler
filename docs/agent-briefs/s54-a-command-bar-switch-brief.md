@@ -68,7 +68,7 @@ until `db:types`, extract never retype, the definer resolver, the role walk).
 2. **Apply it** to the running stack (the command above), then `npm run db:types`; confirm
    `set_org_command_bar` appears in `database.types.ts` and `board_window`'s return type is
    unchanged (it is `jsonb`). Then `tsc` is conclusive.
-3. **SQL cases**, new `supabase/tests/74_command_bar_setting_test.sql` (check the highest
+3. **SQL cases**, new `supabase/tests/98_command_bar_setting_test.sql` (the next free number when built; 74 to 97 were taken) (check the highest
    existing number first with Glob and take the next), C0–C9: C0 the roles fixture as 63/73
    do; C1 the value check accepts the three and refuses `on`, `''` and a JSON-null-style empty
    (23514), and NOT NULL refuses a null (23502); C2 `set_node_setting(plant, 'command_bar',

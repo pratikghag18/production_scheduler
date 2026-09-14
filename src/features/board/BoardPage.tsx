@@ -29,6 +29,7 @@ import {
   MIN_DURATION_MINUTES,
 } from "./lib/interaction";
 import { commandAssignments } from "./lib/commandAssignments";
+import { launcherFor } from "./lib/commandBarGate";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
 import {
   addMinutes,
@@ -256,6 +257,19 @@ export default function BoardPage() {
    * agree.
    */
   const zone = boardQuery.data?.timezone ?? DEFAULT_TIMEZONE;
+
+  /**
+   * R-403 / migration 0081 (D129): the command bar mode, read off the payload
+   * exactly as `dateFormat`/`zone` are -- resolved for this board's own root
+   * on the server. Falls back to the key's own default ('voice', the board's
+   * behaviour before this setting existed) only while the window is still
+   * loading; once it lands, `parseCommandBarMode` (shapes.ts) has already
+   * failed an unrecognised STORED value to 'off'. `launcherFor` turns this
+   * and `canPlace` into the one decision `CommandLauncher`'s render below
+   * needs (`src/features/board/lib/commandBarGate.ts`, pinned without
+   * rendering this component by `commandBarGate.test.ts`).
+   */
+  const commandBarLaunch = launcherFor(boardQuery.data?.commandBar ?? "voice", canPlace);
 
   // P1-4c D45/T17: `density` is part of this dependency array, so a density
   // change produces a brand-new `index` (new `rows` array identity) exactly
@@ -803,14 +817,21 @@ export default function BoardPage() {
               rendering at the top of the board; it is still gated on the
               same `canPlace && commandCtx !== null` a viewer never clears,
               and can render anywhere in the page tree since the launcher is
-              fixed-positioned regardless of where this sits. */}
-          {canPlace && commandCtx !== null && (
+              fixed-positioned regardless of where this sits.
+
+              R-403 / D129 (S54): a THIRD gate now sits beside those two --
+              `commandBarLaunch.show`, the plant's own command_bar setting
+              (off/typed/voice) resolved for this board's root and folded
+              through `launcherFor` with `canPlace` already. `off` hides the
+              launcher for EVERYONE on that board, admin included -- the
+              requirement's own words, "a viewer's view, for everyone". */}
+          {canPlace && commandCtx !== null && commandBarLaunch.show && (
             <CommandLauncher
               ctx={commandCtx}
               dateFormat={dateFormat}
               zone={index.zone}
               reader={COMMAND_BAR_READER}
-              recognizer={BOARD_RECOGNIZER}
+              recognizer={commandBarLaunch.voice ? BOARD_RECOGNIZER : null}
               onOpen={(resolved, anchor) => {
                 // R-385: a `retime` target is never a create; `onRetime`
                 // below is the caller for that branch of the union.

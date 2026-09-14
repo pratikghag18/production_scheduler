@@ -41,6 +41,7 @@ const h = vi.hoisted(() => ({
   setOrgFormat: vi.fn(),
   setOrgPolicy: vi.fn(),
   setOrgTz: vi.fn(),
+  setOrgCommandBar: vi.fn(),
   setPlant: vi.fn(),
   usePlantFilterSpy: vi.fn(),
   state: {
@@ -81,6 +82,7 @@ const h = vi.hoisted(() => ({
     companyFormat: "d_mon_yyyy" as string,
     companyPolicy: "warn" as string,
     companyTimezone: "UTC" as string,
+    companyCommandBar: "voice" as string,
     /**
      * ⛔ `null` IS "INHERITING" AND IS NOT THE SAME AS THE COMPANY'S VALUE.
      * A plant deliberately set to `warn` while the company is on `warn` keeps
@@ -90,6 +92,7 @@ const h = vi.hoisted(() => ({
       dateFormat: null as string | null,
       policy: null as string | null,
       timezone: null as string | null,
+      commandBar: null as string | null,
       isLoading: false,
       error: null as unknown,
     },
@@ -99,6 +102,8 @@ const h = vi.hoisted(() => ({
     orgPolicyError: null as unknown,
     orgTzPending: false,
     orgTzError: null as unknown,
+    orgCommandBarPending: false,
+    orgCommandBarError: null as unknown,
     /** Which SETTING a per-plant write is in flight for, if any. */
     plantPendingKey: null as string | null,
     plantErrorKey: null as string | null,
@@ -122,6 +127,8 @@ vi.mock("@/lib/api", () => ({
   setOrgDateFormat: vi.fn(),
   setOrgEligibilityPolicy: vi.fn(),
   setOrgTimezone: vi.fn(),
+  setOrgCommandBar: vi.fn(),
+  COMMAND_BAR_MODES: ["off", "typed", "voice"],
   fetchPlantSettings: vi.fn(),
   setPlantSetting: vi.fn(),
   clearPlantSetting: vi.fn(),
@@ -175,13 +182,22 @@ vi.mock("@/features/admin/hooks/useOrgSettings", async (importOriginal) => {
     useCompanyDateFormat: () => h.state.companyFormat,
     useCompanyEligibilityPolicy: () => h.state.companyPolicy,
     useCompanyTimezone: () => h.state.companyTimezone,
+    useCompanyCommandBar: () => h.state.companyCommandBar,
     usePlantOverrides: (_enabled: boolean, nodeId: string | null) =>
       nodeId === null
-        ? { dateFormat: null, policy: null, timezone: null, isLoading: false, error: null }
+        ? {
+            dateFormat: null,
+            policy: null,
+            timezone: null,
+            commandBar: null,
+            isLoading: false,
+            error: null,
+          }
         : {
             dateFormat: h.state.own.dateFormat,
             policy: h.state.own.policy,
             timezone: h.state.own.timezone,
+            commandBar: h.state.own.commandBar,
             isLoading: h.state.own.isLoading,
             error: h.state.own.error,
           },
@@ -202,6 +218,12 @@ vi.mock("@/features/admin/hooks/useOrgSettings", async (importOriginal) => {
       isPending: h.state.orgTzPending,
       isError: h.state.orgTzError !== null,
       error: h.state.orgTzError,
+    }),
+    useSetCommandBar: () => ({
+      mutate: h.setOrgCommandBar,
+      isPending: h.state.orgCommandBarPending,
+      isError: h.state.orgCommandBarError !== null,
+      error: h.state.orgCommandBarError,
     }),
     useSetPlantSetting: () => ({
       mutate: h.setPlant,
@@ -239,6 +261,11 @@ function timezonePicker(): HTMLSelectElement {
   return screen.getByRole("combobox", { name: "Time zone" }) as HTMLSelectElement;
 }
 
+/** The command bar control, by the words a reader sees (R-403). */
+function commandBarPicker(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "The command bar" }) as HTMLSelectElement;
+}
+
 /** Today the way the panel builds it: LOCAL, not the UTC day. */
 function todayIso(): string {
   const now = new Date();
@@ -259,6 +286,7 @@ function choosePlant(id: string): void {
 beforeEach(() => {
   h.setOrgFormat.mockClear();
   h.setOrgPolicy.mockClear();
+  h.setOrgCommandBar.mockClear();
   h.setPlant.mockClear();
   h.usePlantFilterSpy.mockClear();
   h.state.profile.role = "admin";
@@ -284,11 +312,21 @@ beforeEach(() => {
   h.state.rights = { role: "admin", adminPaths: [], writablePaths: [], known: true };
   h.state.companyFormat = "d_mon_yyyy";
   h.state.companyPolicy = "warn";
-  h.state.own = { dateFormat: null, policy: null, timezone: null, isLoading: false, error: null };
+  h.state.companyCommandBar = "voice";
+  h.state.own = {
+    dateFormat: null,
+    policy: null,
+    timezone: null,
+    commandBar: null,
+    isLoading: false,
+    error: null,
+  };
   h.state.orgFormatPending = false;
   h.state.orgFormatError = null;
   h.state.orgPolicyPending = false;
   h.state.orgPolicyError = null;
+  h.state.orgCommandBarPending = false;
+  h.state.orgCommandBarError = null;
   h.state.plantPendingKey = null;
   h.state.plantErrorKey = null;
   h.state.plantError = null;
@@ -571,6 +609,117 @@ describe("R-014: choosing what happens when someone is not certified for the job
   });
 });
 
+/**
+ * R-403 / D129 — THE COMMAND BAR SWITCH. "Is there a way we can enable and
+ * disable the chatbot from the settings?" A fourth setting beside the
+ * eligibility rule, the date format and the time zone: off/typed/voice,
+ * default voice. SP-cb-1..4 from the brief.
+ */
+describe("R-403: the command bar switch", () => {
+  it("SP-cb-1: shows the company's current value and the three options, with no inherit option at company scope", () => {
+    render(<SettingsPanel />);
+    const select = commandBarPicker();
+    expect(select.value).toBe("voice");
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((o) => o.getAttribute("value")),
+    ).toEqual(["off", "typed", "voice"]);
+  });
+
+  it("labels each option by what it does, never by the bare stored word alone", () => {
+    render(<SettingsPanel />);
+    const texts = within(commandBarPicker())
+      .getAllByRole("option")
+      .map((o) => (o.textContent ?? "").trim());
+    expect(texts).toEqual([
+      "Off — no button",
+      "Typed only — the button and the bar, no microphone",
+      "Typed and voice — everything",
+    ]);
+  });
+
+  it("SP-cb-2: choosing typed on a plant calls set_node_setting with command_bar/typed", () => {
+    choosePlant("a");
+    render(<SettingsPanel />);
+    fireEvent.change(commandBarPicker(), { target: { value: "typed" } });
+    expect(h.setPlant).toHaveBeenCalledWith({ nodeId: "a", key: "command_bar", choice: "typed" });
+  });
+
+  it("SP-cb-3: choosing inherit on a plant calls clear_node_setting, via the shared inherit verb", () => {
+    choosePlant("a");
+    h.state.own.commandBar = "off";
+    render(<SettingsPanel />);
+    fireEvent.change(commandBarPicker(), { target: { value: INHERIT } });
+    expect(h.setPlant).toHaveBeenCalledWith({ nodeId: "a", key: "command_bar", choice: INHERIT });
+  });
+
+  it("SP-cb-4: the consequence line names what is in force, in full, for each of the three choices", () => {
+    const voice = render(<SettingsPanel />);
+    expect(
+      screen.getByText(/The launcher button opens the bar with both typing and the microphone/i),
+    ).toBeTruthy();
+    voice.unmount();
+
+    h.state.companyCommandBar = "off";
+    const off = render(<SettingsPanel />);
+    expect(
+      screen.getByText(/The launcher button does not appear on the board at all/i),
+    ).toBeTruthy();
+    off.unmount();
+
+    h.state.companyCommandBar = "typed";
+    const typed = render(<SettingsPanel />);
+    expect(screen.getByText(/There is no microphone, so nothing.*is ever sent/i)).toBeTruthy();
+    typed.unmount();
+  });
+
+  it("saves through the company writer on the company scope", () => {
+    render(<SettingsPanel />);
+    fireEvent.change(commandBarPicker(), { target: { value: "off" } });
+    expect(h.setOrgCommandBar).toHaveBeenCalledWith("off");
+  });
+
+  it("disables the picker while the company write is in flight", () => {
+    h.state.orgCommandBarPending = true;
+    render(<SettingsPanel />);
+    expect(commandBarPicker().disabled).toBe(true);
+    expect(screen.getByText("Saving…")).toBeTruthy();
+  });
+
+  it("shows a refused company write rather than leaving the new choice looking saved", () => {
+    h.state.orgCommandBarError = "only a system admin may change site settings";
+    render(<SettingsPanel />);
+    expect(screen.getByText("only a system admin may change site settings")).toBeTruthy();
+  });
+
+  it("a site admin gets the company picker disabled, told why, and cannot post through it", () => {
+    h.state.profile.role = "supervisor";
+    render(<SettingsPanel />);
+    const select = commandBarPicker();
+    expect(select.disabled).toBe(true);
+    expect(screen.getByText("Only a system admin can change the command bar.")).toBeTruthy();
+    fireEvent.change(select, { target: { value: "off" } });
+    expect(h.setOrgCommandBar).not.toHaveBeenCalled();
+  });
+
+  it("R-403: an untouched plant inherits the command bar the same way its siblings do", () => {
+    choosePlant("a");
+    h.state.companyCommandBar = "typed";
+    render(<SettingsPanel />);
+    expect(commandBarPicker().value).toBe(INHERIT);
+    expect(screen.getByText(/Inheriting from the company — currently typed only/)).toBeTruthy();
+  });
+
+  it("R-403: a plant set to off keeps it though the company is on voice", () => {
+    choosePlant("a");
+    h.state.own.commandBar = "off";
+    render(<SettingsPanel />);
+    expect(commandBarPicker().value).toBe("off");
+    expect(screen.getByText(/Set for this plant — off/)).toBeTruthy();
+  });
+});
+
 /* ===========================================================================
  * R-331 — A SETTING IS ANSWERED FOR A PLACE, AND "INHERITING" IS A STATE.
  *
@@ -605,8 +754,9 @@ describe("R-331: a plant's own answers, kept apart from the company's", () => {
     expect(
       screen.getByText(/Inheriting from the company — currently Allowed with a reason/),
     ).toBeTruthy();
-    // R-355: three settings inherit now — date format, time zone, eligibility.
-    expect(screen.getAllByText(/this plant follows/i)).toHaveLength(3);
+    // R-403: the contract changed again, the same way R-355 changed it from 2
+    // to 3 — a fourth setting (the command bar) now inherits the same way.
+    expect(screen.getAllByText(/this plant follows/i)).toHaveLength(4);
   });
 
   it("an inheriting plant tracks the company's answer rather than a stored one", () => {
@@ -624,14 +774,17 @@ describe("R-331: a plant's own answers, kept apart from the company's", () => {
     h.state.own.dateFormat = "iso";
     h.state.own.policy = "block";
     h.state.own.timezone = "America/Chicago";
+    h.state.own.commandBar = "off";
     render(<SettingsPanel />);
     expect(picker().value).toBe("iso");
     expect(policyPicker().value).toBe("block");
     expect(timezonePicker().value).toBe("America/Chicago");
+    expect(commandBarPicker().value).toBe("off");
     expect(screen.getByText(/Set for this plant — ISO \(Year-Month-Day\)/)).toBeTruthy();
     expect(screen.getByText(/Set for this plant — Refused/)).toBeTruthy();
-    // R-355: all three settings now say "does not follow the company" when set.
-    expect(screen.getAllByText(/does not follow the company/i)).toHaveLength(3);
+    // R-403: the contract changed again (see the inheriting case above) — all
+    // four settings now say "does not follow the company" when set.
+    expect(screen.getAllByText(/does not follow the company/i)).toHaveLength(4);
   });
 
   it("R-355: the time zone is a per-plant setting with the same three states", () => {
@@ -660,9 +813,10 @@ describe("R-331: a plant's own answers, kept apart from the company's", () => {
   it("does not show a plant set to the company's current value as inheriting", () => {
     h.state.own.dateFormat = "d_mon_yyyy";
     h.state.own.policy = "warn";
-    // All three set (timezone to the company's own value), so nothing on the
-    // tab is inheriting — the whole point of this case.
+    // All four set (timezone and command bar to the company's own values), so
+    // nothing on the tab is inheriting — the whole point of this case.
     h.state.own.timezone = "UTC";
+    h.state.own.commandBar = "voice";
     render(<SettingsPanel />);
     expect(picker().value).toBe("d_mon_yyyy");
     expect(policyPicker().value).toBe("warn");
@@ -826,9 +980,10 @@ describe("R-332: every setting's control is the same column", () => {
       h.state.plantFilter.choice = choice;
       const { container, unmount } = render(<SettingsPanel />);
       const rows = container.querySelectorAll(`.${rowStyles.row}`);
-      // R-355: three settings now -- date format, time zone, eligibility.
-      expect(rows).toHaveLength(3);
-      expect(container.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(3);
+      // R-403: the contract changed again -- four settings now: date format,
+      // time zone, eligibility, command bar.
+      expect(rows).toHaveLength(4);
+      expect(container.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(4);
       for (const row of Array.from(rows)) {
         expect(row.querySelectorAll(`.${rowStyles.text}`)).toHaveLength(1);
         expect(row.querySelectorAll(`.${rowStyles.control}`)).toHaveLength(1);

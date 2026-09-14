@@ -224,9 +224,24 @@ describe("R-331/R-333: writing one place's answer, and taking it back off", () =
    * ⚠️ THE KEY LIST MIRRORS `node_settings_key_check`, and a member here
    * without a matching migration is a control the server refuses with
    * `invalid_argument`. Migration 0052's header carries what a third costs;
-   * `timezone` is that third key (migration 0063, R-353).
+   * `timezone` is that third key (migration 0063, R-353), `command_bar` the
+   * fourth (migration 0081, R-403).
    */
   it("offers exactly the keys the server validates", () => {
-    expect([...NODE_SETTING_KEYS]).toEqual(["eligibility_policy", "date_format", "timezone"]);
+    expect([...NODE_SETTING_KEYS]).toEqual([
+      "eligibility_policy",
+      "date_format",
+      "timezone",
+      "command_bar",
+    ]);
+  });
+
+  it("sets and clears the command bar mode through the same two functions", async () => {
+    await setPlantSetting("n2", "command_bar", "typed");
+    await clearPlantSetting("n2", "command_bar");
+    expect(sb.rpcCalls).toEqual([
+      ["set_node_setting", { p_node_id: "n2", p_key: "command_bar", p_value: "typed" }],
+      ["clear_node_setting", { p_node_id: "n2", p_key: "command_bar" }],
+    ]);
   });
 });

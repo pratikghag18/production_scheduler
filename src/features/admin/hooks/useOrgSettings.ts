@@ -38,12 +38,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   clearPlantSetting,
+  COMMAND_BAR_MODES,
   fetchOrgSettings,
   fetchPlantSettings,
+  setOrgCommandBar,
   setOrgDateFormat,
   setOrgEligibilityPolicy,
   setOrgTimezone,
   setPlantSetting,
+  type CommandBarMode,
   type EligibilityPolicy,
   type Json,
   type NodeSettingKey,
@@ -153,6 +156,51 @@ export function useSetTimezone() {
   const queryClient = useQueryClient();
   return useMutation<void, SchedulerError, string>({
     mutationFn: (tz) => setOrgTimezone(tz),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: orgSettingsKeys.all });
+    },
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   THE COMMAND BAR (R-403, D129, migration 0081) — the same shape as the time
+   zone above: a per-plant display/feature choice the client reads (here,
+   whether BoardPage renders the launcher at all, and whether it is handed a
+   recogniser) with a company fallback. The default must not move for a
+   company that has never touched the switch, so it is 'voice' throughout —
+   the board's behaviour before this setting existed.
+   --------------------------------------------------------------------------- */
+
+/** Absent or unrecognised setting resolves to this — the key's own default
+ *  (0081's COALESCE at the board_window call site). */
+export const DEFAULT_COMMAND_BAR_MODE: CommandBarMode = "voice";
+
+/** Pure, never throws; the peer of `coerceDateFormat`/`coerceTimezone`. */
+export function coerceCommandBar(value: unknown): CommandBarMode {
+  return typeof value === "string" && (COMMAND_BAR_MODES as readonly string[]).includes(value)
+    ? (value as CommandBarMode)
+    : DEFAULT_COMMAND_BAR_MODE;
+}
+
+/** The COMPANY-wide command bar mode, resolved defensively. Returns the
+ *  default while the read is in flight or absent, and for any unrecognised
+ *  stored value — read for the plant row's "use the company setting" label,
+ *  exactly as `useCompanyTimezone` is. */
+export function useCompanyCommandBar(enabled: boolean): CommandBarMode {
+  const { data } = useOrgSettings(enabled);
+  if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+    return coerceCommandBar((data as Record<string, Json | undefined>).command_bar);
+  }
+  return DEFAULT_COMMAND_BAR_MODE;
+}
+
+/** Set the COMPANY-wide fallback mode. Refused server-side unless a system
+ *  admin; invalidate-and-refetch, no optimistic update — the twin of
+ *  `useSetTimezone`. */
+export function useSetCommandBar() {
+  const queryClient = useQueryClient();
+  return useMutation<void, SchedulerError, CommandBarMode>({
+    mutationFn: (mode) => setOrgCommandBar(mode),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: orgSettingsKeys.all });
     },
@@ -330,11 +378,20 @@ export function asTimezone(value: unknown): string | null {
   return isUsableTimezone(value) ? value : null;
 }
 
+/** A stored command bar token, or `null` for absent or unrecognised — the
+ *  null-returning twin of `coerceCommandBar`. */
+export function asCommandBar(value: unknown): CommandBarMode | null {
+  return typeof value === "string" && (COMMAND_BAR_MODES as readonly string[]).includes(value)
+    ? (value as CommandBarMode)
+    : null;
+}
+
 /** What one plant has said for itself. `null` on a field means "inheriting". */
 export interface PlantOverrides {
   dateFormat: DateFormat | null;
   policy: EligibilityPolicy | null;
   timezone: string | null;
+  commandBar: CommandBarMode | null;
   isLoading: boolean;
   error: SchedulerError | null;
 }
@@ -352,12 +409,15 @@ export function usePlantOverrides(enabled: boolean, nodeId: string | null): Plan
   const format = usePlantOverridesFor(on, "date_format");
   const policy = usePlantOverridesFor(on, "eligibility_policy");
   const timezone = usePlantOverridesFor(on, "timezone");
+  const commandBar = usePlantOverridesFor(on, "command_bar");
   return {
     dateFormat: nodeId === null ? null : asDateFormat(ownOverride(format.data, nodeId)),
     policy: nodeId === null ? null : asEligibilityPolicy(ownOverride(policy.data, nodeId)),
     timezone: nodeId === null ? null : asTimezone(ownOverride(timezone.data, nodeId)),
-    isLoading: on && (format.isLoading || policy.isLoading || timezone.isLoading),
-    error: format.error ?? policy.error ?? timezone.error ?? null,
+    commandBar: nodeId === null ? null : asCommandBar(ownOverride(commandBar.data, nodeId)),
+    isLoading:
+      on && (format.isLoading || policy.isLoading || timezone.isLoading || commandBar.isLoading),
+    error: format.error ?? policy.error ?? timezone.error ?? commandBar.error ?? null,
   };
 }
 

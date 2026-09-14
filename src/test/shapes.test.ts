@@ -221,6 +221,37 @@ describe("parseBoardWindow", () => {
   });
 
   /**
+   * R-403 / migration 0081 (D129): the command bar mode, carried as a
+   * top-level token beside date_format/timezone. LENIENT IN BOTH
+   * DIRECTIONS, unlike either of those: a MISSING key (an older payload,
+   * predating this migration) reads as 'voice' — that board had the full
+   * bar before the setting existed — but a PRESENT, unrecognised token reads
+   * as 'off', the requirement's own fail-safe rule ("An unrecognised value
+   * read from the server hides the button"). Neither case nulls the parse;
+   * `date_format` is the one field on this payload strict enough to do that.
+   */
+  it("carries the board's command bar mode: missing reads as voice, unrecognised fails safe to off", () => {
+    // The fixture omits `command_bar` -> an older payload reads as 'voice'.
+    expect(parseBoardWindow(boardWindowJson)?.commandBar).toBe("voice");
+    expect(parseBoardWindow({ ...boardWindowJson, command_bar: "off" } as Json)?.commandBar).toBe(
+      "off",
+    );
+    expect(parseBoardWindow({ ...boardWindowJson, command_bar: "typed" } as Json)?.commandBar).toBe(
+      "typed",
+    );
+    expect(parseBoardWindow({ ...boardWindowJson, command_bar: "voice" } as Json)?.commandBar).toBe(
+      "voice",
+    );
+    // A forward-versioned or malformed token fails SAFE -- hidden, not the
+    // permissive default -- and the parse still succeeds.
+    const unknown = parseBoardWindow({ ...boardWindowJson, command_bar: "on" } as Json);
+    expect(unknown).not.toBeNull();
+    expect(unknown?.commandBar).toBe("off");
+    const wrongType = parseBoardWindow({ ...boardWindowJson, command_bar: 1 } as Json);
+    expect(wrongType?.commandBar).toBe("off");
+  });
+
+  /**
    * D86. `template_id` on a level is not decoration: with two shapes in one
    * org it is the only thing that says which vocabulary a level belongs to,
    * and `canDropOn` refuses a cross-template parent on the strength of it.

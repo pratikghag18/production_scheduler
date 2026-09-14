@@ -19,6 +19,7 @@
 import type { Json } from "@/lib/database.types";
 import { DATE_FORMATS, type DateFormat } from "@/lib/format/dates";
 import { coerceTimezone } from "@/lib/format/timezones";
+import { COMMAND_BAR_MODES, type CommandBarMode } from "./access";
 
 type JsonRecord = { [key: string]: Json | undefined };
 
@@ -806,6 +807,30 @@ function parseTimezone(v: Json | undefined): string {
   return coerceTimezone(v);
 }
 
+/**
+ * R-403 / migration 0081 (D129): the command bar mode RESOLVED for the
+ * board's own root on the server, the twin of `parseDateFormat` /
+ * `parseTimezone` above.
+ *
+ * ⚠️ LENIENT LIKE `date_format` USED TO BE, BUT NOT STRICT -- and the reason
+ * is the requirement's own words: "An unrecognised value read from the
+ * server hides the button (fails safe)." A malformed or forward-versioned
+ * token must not blank the whole board the way a bad `date_format` does; it
+ * must fail SAFE by hiding the launcher, so the default here is `"off"`, not
+ * the key's own resolved default (`"voice"`, which `board_window` already
+ * COALESCEs to when nothing is set). A MISSING key (an older window payload,
+ * predating this migration) is different: that board had the launcher, in
+ * full, and command_bar did not exist to turn it off, so a missing key reads
+ * as `"voice"` -- the behaviour that board already had -- and only a
+ * PRESENT-but-unrecognised string reads as `"off"`.
+ */
+function parseCommandBarMode(v: Json | undefined): CommandBarMode {
+  if (v === undefined) return "voice";
+  return isStr(v) && (COMMAND_BAR_MODES as readonly string[]).includes(v)
+    ? (v as CommandBarMode)
+    : "off";
+}
+
 // ---------------------------------------------------------------------------
 // Top-level RPC results.
 // ---------------------------------------------------------------------------
@@ -850,6 +875,15 @@ export interface BoardWindow {
    *  'UTC' via `coerceTimezone`, because a zone `Intl` cannot format would blank
    *  the board — a display fallback, not a shape mismatch. */
   timezone: string;
+  /** R-403 / migration 0081 (D129): the command bar mode resolved for the
+   *  board's own root, the twin of `dateFormat`/`timezone`. `off` hides the
+   *  launcher entirely; `typed` shows it without the microphone; `voice`
+   *  shows everything (the default). A MISSING key (an older payload) reads
+   *  as `voice` — that board had the full bar before this setting existed.
+   *  A PRESENT but unrecognised token reads as `off` — the requirement's own
+   *  fail-safe rule, and the one field on this interface that is lenient in
+   *  BOTH directions rather than strict like `dateFormat`. */
+  commandBar: CommandBarMode;
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -871,6 +905,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     can_place,
     date_format,
     timezone,
+    command_bar,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -908,6 +943,10 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   // `parseTimezone` — the zone is an open vocabulary and a bad token is a
   // display fallback, not the shape mismatch a null `date_format` is.
   const parsedTimezone = parseTimezone(timezone);
+  // R-403 / 0081: lenient in both directions -- see `parseCommandBarMode`.
+  // Missing (an older payload) reads as 'voice'; present-but-unrecognised
+  // reads as 'off', the requirement's own fail-safe rule.
+  const parsedCommandBar = parseCommandBarMode(command_bar);
 
   if (
     parsedOrg === null ||
@@ -944,6 +983,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     canPlace: can_place,
     dateFormat: parsedDateFormat,
     timezone: parsedTimezone,
+    commandBar: parsedCommandBar,
   };
 }
 

@@ -89,6 +89,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   describeSchedulerError,
   fetchHierarchyTree,
+  type CommandBarMode,
   type EligibilityPolicy,
   type SchedulerError,
 } from "@/lib/api";
@@ -100,10 +101,12 @@ import {
   canAdministerPlant,
   INHERIT_CHOICE,
   settingsScope,
+  useCompanyCommandBar,
   useCompanyDateFormat,
   useCompanyEligibilityPolicy,
   useCompanyTimezone,
   usePlantOverrides,
+  useSetCommandBar,
   useSetDateFormat,
   useSetEligibilityPolicy,
   useSetPlantSetting,
@@ -197,6 +200,51 @@ const POLICY_SHORT: Record<EligibilityPolicy, string> = {
   block: "Refused",
 };
 
+/* ---------------------------------------------------------------------------
+   THE COMMAND BAR (R-403, D129, migration 0081). "Telling the board what to
+   do by typing or by voice" — the maintainer, session 164: a plant getting
+   used to the board wants to limit the feature, or turn it off entirely,
+   during that period. Three positions, same sentence-per-option shape as
+   POLICY_CHOICES above.
+   --------------------------------------------------------------------------- */
+interface CommandBarChoice {
+  value: CommandBarMode;
+  label: string;
+  consequence: string;
+}
+
+const COMMAND_BAR_CHOICES: readonly CommandBarChoice[] = [
+  {
+    value: "off",
+    label: "Off — no button",
+    consequence:
+      "The launcher button does not appear on the board at all, for anyone. Nobody has a way to " +
+      "tell the board what to do by typing or by speaking.",
+  },
+  {
+    value: "typed",
+    label: "Typed only — the button and the bar, no microphone",
+    consequence:
+      "The launcher button opens the bar for typing a sentence. There is no microphone, so nothing " +
+      "is ever sent to a speech recognition service.",
+  },
+  {
+    value: "voice",
+    label: "Typed and voice — everything",
+    consequence:
+      "The launcher button opens the bar with both typing and the microphone, exactly as the board " +
+      "has always worked.",
+  },
+];
+
+/** The same three answers, short enough to sit inside "Inheriting from the
+ *  company — currently ...", the same purpose `POLICY_SHORT` serves. */
+const COMMAND_BAR_SHORT: Record<CommandBarMode, string> = {
+  off: "off",
+  typed: "typed only",
+  voice: "typed and voice",
+};
+
 /** Today as `YYYY-MM-DD` in LOCAL time — the same reasoning as OperatorsPanel's
  *  `todayIso`: `toISOString().slice(0,10)` is the UTC day and is a day out west
  *  of Greenwich. This is date construction, not display formatting, so it is not
@@ -276,6 +324,7 @@ export function SettingsPanel() {
   const companyFormat = useCompanyDateFormat(canQuery);
   const companyPolicy = useCompanyEligibilityPolicy(canQuery);
   const companyTimezone = useCompanyTimezone(canQuery);
+  const companyCommandBar = useCompanyCommandBar(canQuery);
   // The offered zones — the browser's full IANA list where the runtime has it,
   // else the curated ~60 (see `timezones.ts`). Cheap enough to build per render
   // on a panel this rarely mounted.
@@ -287,13 +336,17 @@ export function SettingsPanel() {
   const format = own.dateFormat ?? companyFormat;
   const policy = own.policy ?? companyPolicy;
   const timezone = own.timezone ?? companyTimezone;
+  const commandBar = own.commandBar ?? companyCommandBar;
   const currentPolicy = POLICY_CHOICES.find((c) => c.value === policy) ?? POLICY_CHOICES[0];
+  const currentCommandBar =
+    COMMAND_BAR_CHOICES.find((c) => c.value === commandBar) ?? COMMAND_BAR_CHOICES[2];
 
   /* -- the writers, and which row each in-flight write belongs to -------- */
 
   const setOrgFormat = useSetDateFormat();
   const setOrgPolicy = useSetEligibilityPolicy();
   const setOrgTz = useSetTimezone();
+  const setOrgCommandBarMutation = useSetCommandBar();
   // ⚠️ ONE MUTATION SERVES BOTH PLANT ROWS (a hook per row is not allowed), so
   // the in-flight and failed states have to be attributed to the SETTING they
   // belong to. React Query hands `variables` back; without this, the date
@@ -305,12 +358,22 @@ export function SettingsPanel() {
   const formatBusy = onPlant ? plantBusyKey === "date_format" : setOrgFormat.isPending;
   const policyBusy = onPlant ? plantBusyKey === "eligibility_policy" : setOrgPolicy.isPending;
   const timezoneBusy = onPlant ? plantBusyKey === "timezone" : setOrgTz.isPending;
+  const commandBarBusy = onPlant
+    ? plantBusyKey === "command_bar"
+    : setOrgCommandBarMutation.isPending;
   const timezoneError: SchedulerError | null = onPlant
     ? plantFailedKey === "timezone"
       ? setPlant.error
       : null
     : setOrgTz.isError
       ? setOrgTz.error
+      : null;
+  const commandBarError: SchedulerError | null = onPlant
+    ? plantFailedKey === "command_bar"
+      ? setPlant.error
+      : null
+    : setOrgCommandBarMutation.isError
+      ? setOrgCommandBarMutation.error
       : null;
   const formatError: SchedulerError | null = onPlant
     ? plantFailedKey === "date_format"
@@ -338,7 +401,10 @@ export function SettingsPanel() {
   // ⛔ `INHERIT_CHOICE` NEVER REACHES THE SERVER. `useSetPlantSetting`
   // dispatches it to `clear_node_setting`, the separate verb — there is no "set
   // to nothing" here because there is none on the server.
-  function write(key: "date_format" | "eligibility_policy" | "timezone", value: string): void {
+  function write(
+    key: "date_format" | "eligibility_policy" | "timezone" | "command_bar",
+    value: string,
+  ): void {
     if (!mayEdit) return;
     if (scope.kind === "plant") {
       setPlant.mutate({ nodeId: scope.nodeId, key, choice: value });
@@ -346,6 +412,8 @@ export function SettingsPanel() {
       setOrgFormat.mutate(value as DateFormat);
     } else if (key === "timezone") {
       setOrgTz.mutate(value);
+    } else if (key === "command_bar") {
+      setOrgCommandBarMutation.mutate(value as CommandBarMode);
     } else {
       setOrgPolicy.mutate(value as EligibilityPolicy);
     }
@@ -567,6 +635,61 @@ export function SettingsPanel() {
             {policyBusy && <p className={styles.status}>Saving…</p>}
             {policyError !== null && (
               <p className={styles.error}>{describeSchedulerError(policyError)}</p>
+            )}
+          </div>
+        </div>
+
+        {/* R-403/D129: THE COMMAND BAR. A client feature gate, not a display
+            convention and not a server-enforced rule -- board_window carries
+            the resolved mode and BoardPage's gate (commandBarGate.ts) decides
+            what to render from it. Same ONE-`<select>`, TWO-OPTION-LISTS rule
+            as every other row on this screen. */}
+        <div className={rowStyles.row}>
+          <div className={rowStyles.text}>
+            <label className={rowStyles.name} htmlFor="settings-command-bar">
+              The command bar
+            </label>
+            <p className={rowStyles.hint}>
+              Telling the board what to do by typing or by voice. The button in the lower right of
+              the board. Switch it off while a plant gets used to the board, or allow typing only.
+            </p>
+          </div>
+
+          <div className={rowStyles.control}>
+            {showControl && (
+              <select
+                id="settings-command-bar"
+                className={`${fieldStyles.select} ${rowStyles.controlField}`}
+                value={onPlant ? (own.commandBar ?? INHERIT_CHOICE) : companyCommandBar}
+                disabled={!mayEdit || commandBarBusy}
+                onChange={(e) => write("command_bar", e.target.value)}
+              >
+                {onPlant && (
+                  <option value={INHERIT_CHOICE}>
+                    Use the company setting (currently {COMMAND_BAR_SHORT[companyCommandBar]})
+                  </option>
+                )}
+                {COMMAND_BAR_CHOICES.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className={styles.consequence}>
+              {onPlant
+                ? own.commandBar === null
+                  ? inheritingNote(COMMAND_BAR_SHORT[commandBar])
+                  : setHereNote(COMMAND_BAR_SHORT[commandBar], COMMAND_BAR_SHORT[companyCommandBar])
+                : currentCommandBar.consequence}
+            </p>
+            {onPlant && <p className={styles.consequence}>{currentCommandBar.consequence}</p>}
+            {!onPlant && !mayEdit && (
+              <p className={styles.status}>Only a system admin can change the command bar.</p>
+            )}
+            {commandBarBusy && <p className={styles.status}>Saving…</p>}
+            {commandBarError !== null && (
+              <p className={styles.error}>{describeSchedulerError(commandBarError)}</p>
             )}
           </div>
         </div>

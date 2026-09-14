@@ -1632,6 +1632,7 @@ export type Database = {
         Args: { p_key: string; p_node_id: string; p_value: string }
         Returns: Json
       }
+      set_org_command_bar: { Args: { p_value: string }; Returns: Json }
       set_org_date_format: { Args: { p_format: string }; Returns: Json }
       set_org_eligibility_policy: { Args: { p_policy: string }; Returns: Json }
       set_org_timezone: { Args: { p_tz: string }; Returns: Json }
