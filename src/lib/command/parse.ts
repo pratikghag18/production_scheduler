@@ -21,6 +21,19 @@
  * stage). The time-clause and day-word steps are shared by both intents
  * through private helpers (`parseTimeAndDay`) so the assign grammar's own
  * P1–P24 keep their meaning unchanged.
+ *
+ * S50 (docs/agent-briefs/s50-a-grammar-brief.md, R-398, design §19.97/D126)
+ * widens the grammar twice more, both times WITHOUT a new intent word:
+ * (1) a removal or a move need no longer name a place at all -- an empty
+ * `place: []` reads as "wherever the person is" (S49 already resolves it
+ * that way); an assign or a booking still need one, and a move still needs
+ * a new cell or new hours (`no_move`). (2) the OPERATOR segment (assign,
+ * unassign, move) or the FIRST PLACE segment (assign, book) may list more
+ * than one name or cell, joined by " and " (an operator list also accepts
+ * ", " before a final " and "), and the sentence becomes a fifth `Command`
+ * member, `several` -- one complete `SingleCommand` per item, in the
+ * sentence's order, every other field copied onto each. A quoted "and" is
+ * one name (the sentinel makes it atomic, same as every other keyword).
  */
 
 /** A clock time on the board's own clock, 24h. The plant's zone is the
@@ -133,7 +146,32 @@ export interface MoveCommand {
   existing: { kind: "move"; assignmentId: string } | null;
 }
 
-export type Command = AssignCommand | BookCommand | UnassignCommand | MoveCommand;
+/** The four intents that name a single block/job/removal/move -- what
+ *  `Command` was, in full, before S50. `SeveralCommand.commands` is typed on
+ *  this narrower union: a several's inner forms are never themselves several. */
+export type SingleCommand = AssignCommand | BookCommand | UnassignCommand | MoveCommand;
+
+/**
+ * S50 (brief §2 item 3, R-398): "assign A2 and A3 to Housing A on Cell 1 and
+ * Cell 2 in Line 1 today from 3 to 5" -- the OPERATOR segment or the FIRST
+ * PLACE segment (or both, paired in order) named more than one thing.
+ * `commands` are complete forms, `attach`/`existing` included, in the
+ * sentence's order; every other field of the sentence (product, qualifiers
+ * after the first place, day, hours/span, toPlace, headcount) is copied onto
+ * every one of them. `formatCommand` prints a several as its commands' own
+ * `formatCommand`s joined by `"; "` -- a `;` is not grammar, so parsing that
+ * string back need not reproduce this same several (the round trip is
+ * per-inner-command instead). Never emitted by `decode.ts` yet (S50's data
+ * brief is the next lane); `resolveCommand`'s only answer to one today is
+ * the `several_unsupported` question -- resolving and confirming each inner
+ * command is its own later stage.
+ */
+export interface SeveralCommand {
+  intent: "several";
+  commands: SingleCommand[];
+}
+
+export type Command = AssignCommand | BookCommand | UnassignCommand | MoveCommand | SeveralCommand;
 
 export type ParseFailure =
   | { kind: "empty" }
@@ -149,7 +187,13 @@ export type ParseFailure =
   /** S41-a: a `for` clause whose number is not a whole number 1–99. */
   | { kind: "bad_headcount"; text: string }
   /** S41-c: neither a new cell nor new hours were said -- nothing to move. */
-  | { kind: "no_move" };
+  | { kind: "no_move" }
+  /** S50: an operator or first-place LIST segment is malformed -- a leading
+   *  or trailing "and", or an empty item between two separators. */
+  | { kind: "bad_list"; text: string }
+  /** S50: the operator segment and the first place segment both listed more
+   *  than one item, and the two counts disagree -- never a guess (R-379). */
+  | { kind: "list_mismatch"; people: number; places: number };
 
 export type ParseResult = { ok: true; command: Command } | { ok: false; failure: ParseFailure };
 
@@ -544,6 +588,68 @@ function splitProductPlaces(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * S50 (brief §2 item 3): does `text` (the OPERATOR segment, or the FIRST
+ * PLACE segment) list more than one item? Operates on the quote-sentineled
+ * text, same as every other split in this file, so a quoted "Ann and Bob"
+ * (one opaque token, no literal "and" left in the string) is never read as
+ * a list. `allowCommas` additionally accepts a ", "-joined run before the
+ * final " and " (an operator list only -- "A1, A2 and A3" -- a PLACE list
+ * splits on " and " alone, since a comma there is already a qualifier
+ * separator, `splitProductPlaces`'s own job, brief §2 item 3's own note).
+ *
+ * - `{ kind: "none" }` — no standalone "and" at all: not a list, the
+ *   caller's existing single-item path runs exactly as before S50.
+ * - `{ kind: "bad" }` — a leading or trailing "and" (on the WHOLE text, or
+ *   -- reviewer fix -- on any ONE item after splitting, e.g. a doubled
+ *   "Sam and and Bob" splits on the first " and " into "Sam" and "and Bob",
+ *   which still starts with "and"), or an empty item between two
+ *   separators: the caller turns this into `bad_list`.
+ * - `{ kind: "list"; items }` — two or more items, in order.
+ */
+function detectAndList(
+  text: string,
+  allowCommas: boolean,
+): { kind: "none" } | { kind: "bad" } | { kind: "list"; items: string[] } {
+  const trimmed = text.trim();
+  if (!/\band\b/i.test(trimmed)) return { kind: "none" };
+  if (/^and\b/i.test(trimmed) || /\band$/i.test(trimmed)) return { kind: "bad" };
+  const delimiter = allowCommas ? /\s*,\s*|\s+and\s+/gi : /\s+and\s+/gi;
+  const items = trimmed.split(delimiter).map((s) => s.trim());
+  if (items.length < 2) return { kind: "bad" };
+  if (items.some((s) => s === "" || /^and\b/i.test(s) || /\band$/i.test(s))) return { kind: "bad" };
+  return { kind: "list", items };
+}
+
+/**
+ * S50 (brief §2 item 3): combines an optional OPERATOR list with an
+ * optional FIRST-PLACE list into N pairs -- n people x 1 place broadcasts
+ * the place onto every one; 1 person x m places broadcasts the person; n =
+ * m pairs them in order; n != m with both > 1 is `list_mismatch`, never a
+ * guess (R-379). `operatorItems`/`placeItems` are each either the single
+ * original segment (length 1, "not a list" per `detectAndList`) or its
+ * `items` (length >= 2).
+ */
+function combineLists<T>(
+  operatorItems: string[],
+  placeItems: string[],
+  build: (operator: string, place: string) => T,
+): { ok: true; items: T[] } | { ok: false; failure: ParseFailure } {
+  const n = operatorItems.length;
+  const m = placeItems.length;
+  if (n > 1 && m > 1 && n !== m) {
+    return { ok: false, failure: { kind: "list_mismatch", people: n, places: m } };
+  }
+  const count = Math.max(n, m);
+  const items: T[] = [];
+  for (let i = 0; i < count; i++) {
+    items.push(
+      build(n > 1 ? operatorItems[i] : operatorItems[0], m > 1 ? placeItems[i] : placeItems[0]),
+    );
+  }
+  return { ok: true, items };
+}
+
 function parseAssignRest(
   rest: string,
   day: DayWord | null,
@@ -572,6 +678,35 @@ function parseAssignRest(
   const pieces = splitProductPlaces(productPlaces);
   if (pieces.length === 0) return { ok: false, failure: { kind: "no_product" } };
   if (pieces.length === 1) return { ok: false, failure: { kind: "no_place" } };
+
+  // S50 (brief §2 item 3): the OPERATOR segment and the FIRST PLACE segment
+  // (pieces[1] -- pieces[0] is the product, pieces[2:] are qualifiers that
+  // apply to every inner command unchanged) may each list more than one
+  // item.
+  const operatorList = detectAndList(operatorPart, true);
+  if (operatorList.kind === "bad")
+    return { ok: false, failure: { kind: "bad_list", text: operatorPart } };
+  const placeList = detectAndList(pieces[1], false);
+  if (placeList.kind === "bad")
+    return { ok: false, failure: { kind: "bad_list", text: pieces[1] } };
+
+  if (operatorList.kind === "list" || placeList.kind === "list") {
+    const operatorItems = operatorList.kind === "list" ? operatorList.items : [operatorPart];
+    const placeItems = placeList.kind === "list" ? placeList.items : [pieces[1]];
+    const combined = combineLists(operatorItems, placeItems, (op, pl) => ({
+      intent: "assign" as const,
+      operator: restoreQuotes(op, quotes),
+      product: restoreQuotes(pieces[0], quotes),
+      place: [pl, ...pieces.slice(2)].map((p) => restoreQuotes(p, quotes)),
+      day,
+      start,
+      end,
+      attach: null,
+      existing: null,
+    }));
+    if (!combined.ok) return combined;
+    return { ok: true, command: { intent: "several", commands: combined.items } };
+  }
 
   const operator = restoreQuotes(operatorPart, quotes);
   const product = restoreQuotes(pieces[0], quotes);
@@ -629,6 +764,26 @@ function parseBookRest(
   const pieces = splitProductPlaces(middle);
   if (pieces.length === 0) return { ok: false, failure: { kind: "no_product" } };
   if (pieces.length === 1) return { ok: false, failure: { kind: "no_place" } };
+
+  // S50 (brief §2 item 3): book has no operator field, so only the FIRST
+  // PLACE segment (pieces[1]) can list more than one item.
+  const placeList = detectAndList(pieces[1], false);
+  if (placeList.kind === "bad")
+    return { ok: false, failure: { kind: "bad_list", text: pieces[1] } };
+
+  if (placeList.kind === "list") {
+    const commands = placeList.items.map((pl) => ({
+      intent: "book" as const,
+      product: restoreQuotes(pieces[0], quotes),
+      place: [pl, ...pieces.slice(2)].map((p) => restoreQuotes(p, quotes)),
+      headcount: hc.headcount,
+      day,
+      start,
+      end,
+      existing: null,
+    }));
+    return { ok: true, command: { intent: "several", commands } };
+  }
 
   const product = restoreQuotes(pieces[0], quotes);
   const place = pieces.slice(1).map((p) => restoreQuotes(p, quotes));
@@ -728,6 +883,15 @@ function splitOperatorPlaces(text: string): { operator: string; placesText: stri
 /**
  * S41-b: "unassign <op> from <cell> [in <line>] [on <day>] [from <time> to
  * <time>]" (brief §3). `rest` is the text after the verb has been stripped.
+ *
+ * S50 (brief §2 item 1, R-398): `from` is both the place preposition AND
+ * the time clause's own word -- `extractOptionalTimeClause` above already
+ * took the LAST `from` for the hours, so when the operator segment left
+ * behind is the WHOLE rest (no `from`/`off`/`on`/`at` left to split it on),
+ * `placesText` is `""` and that is the new empty place ("wherever the
+ * person is", S49), never `no_place` -- UNLESS the operator segment is
+ * itself empty ("remove" alone, or "remove from Cell 1" with no operator at
+ * all), which is still `empty`, checked first, unchanged.
  */
 function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
   const tc = extractOptionalTimeClause(rest);
@@ -746,10 +910,26 @@ function parseUnassignRest(rest: string, quotes: string[]): ParseResult {
 
   const { operator: operatorPart, placesText } = splitOperatorPlaces(dayResult.rest);
   if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
-  if (placesText === "") return { ok: false, failure: { kind: "no_place" } };
 
-  const pieces = splitProductPlaces(placesText);
-  if (pieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+  const pieces = placesText === "" ? [] : splitProductPlaces(placesText);
+  if (pieces.length === 0 && placesText !== "") return { ok: false, failure: { kind: "no_place" } };
+
+  // S50 (brief §2 item 3): the OPERATOR segment may list more than one name.
+  const operatorList = detectAndList(operatorPart, true);
+  if (operatorList.kind === "bad")
+    return { ok: false, failure: { kind: "bad_list", text: operatorPart } };
+
+  if (operatorList.kind === "list") {
+    const commands = operatorList.items.map((op) => ({
+      intent: "unassign" as const,
+      operator: restoreQuotes(op, quotes),
+      place: pieces.map((p) => restoreQuotes(p, quotes)),
+      day: merged.day,
+      span: tc.span,
+      existing: null,
+    }));
+    return { ok: true, command: { intent: "several", commands } };
+  }
 
   const operator = restoreQuotes(operatorPart, quotes);
   const place = pieces.map((p) => restoreQuotes(p, quotes));
@@ -842,6 +1022,20 @@ function splitMoveOperatorPlaces(text: string): { operator: string; placesText: 
   };
 }
 
+/** S50/R-398: splits `text` on the FIRST " to " (word-bounded,
+ *  case-insensitive) into a before/after pair -- shared by `parseMoveRest`'s
+ *  two branches (a named current place, or none) so a destination clause
+ *  reads identically wherever the split happens. `after` is `null` when
+ *  there is no " to " in `text` at all. */
+function splitOnFirstTo(text: string): { before: string; after: string | null } {
+  const toMatch = text.match(/\s+to\s+/i);
+  if (!toMatch || toMatch.index === undefined) return { before: text, after: null };
+  return {
+    before: text.slice(0, toMatch.index).trim(),
+    after: text.slice(toMatch.index + toMatch[0].length).trim(),
+  };
+}
+
 /**
  * S41-c: "move <op> (on|at|from) <place> [to <place>] [on <day>] [<hours>]"
  * (brief §3). `rest` is the text after the verb has been stripped.
@@ -857,6 +1051,22 @@ function splitMoveOperatorPlaces(text: string): { operator: string; placesText: 
  * end of the CURRENT segment, falling back to the end of the NEW segment
  * (the order the grammar's own brackets list it in) when the current one
  * carries none.
+ *
+ * S50 (brief §2 item 2, R-398): when `splitMoveOperatorPlaces` finds NO
+ * `on`/`at`/`from` at all, the sentence named no CURRENT place ("move A3 to
+ * 8 pm to 11 pm", "move A3 to Cell 2", "move A3 tomorrow") -- `place` is
+ * `[]` (S49: wherever the person is), never `no_place`. The OPERATOR
+ * SEGMENT ITSELF may still carry a DESTINATION clause the time-clause
+ * helpers above did not already consume (a new CELL, never a bare pair of
+ * times -- `extractToTimeClause` always takes those first, greedily, from
+ * the end): split it on the FIRST " to " -- the exact same word, and the
+ * exact same `splitOnFirstTo` call, the placed branch below splits its OWN
+ * place text on -- into the operator and that destination; with no " to "
+ * at all, the whole segment is the operator and there is no destination.
+ * The day word may sit on either side of that split, tried in the same
+ * current-then-new order as the placed branch (`extractDayWord` on the
+ * "before" half first, since that is where the operator itself lives, then
+ * the "after" half) -- never on both (F-133's own rule, `mergeDay` below).
  */
 function parseMoveRest(rest: string, quotes: string[]): ParseResult {
   const fromClause = extractOptionalTimeClause(rest);
@@ -876,32 +1086,61 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
 
   const { operator: operatorPart, placesText } = splitMoveOperatorPlaces(afterTime);
   if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
-  if (placesText === "") return { ok: false, failure: { kind: "no_place" } };
 
-  // The FIRST " to " splits the current place(s) from the new place(s) --
-  // never the last, since a qualifier never uses "to" (on/at/in/comma only).
-  const toMatch = placesText.match(/\s+to\s+/i);
-  let placeText = placesText;
-  let toPlaceText: string | null = null;
-  if (toMatch && toMatch.index !== undefined) {
-    placeText = placesText.slice(0, toMatch.index).trim();
-    toPlaceText = placesText.slice(toMatch.index + toMatch[0].length).trim();
-  }
-
+  let operator: string;
   let day: DayWord | null = null;
   let dayWord: string | null = null;
-  const dayInCurrent = extractDayWord(placeText);
-  if (!dayInCurrent.ok) return dayInCurrent;
-  if (dayInCurrent.day !== null) {
-    day = dayInCurrent.day;
-    dayWord = dayInCurrent.word;
-    placeText = dayInCurrent.rest;
-  } else if (toPlaceText !== null) {
-    const dayInNew = extractDayWord(toPlaceText);
-    if (!dayInNew.ok) return dayInNew;
-    day = dayInNew.day;
-    dayWord = dayInNew.word;
-    toPlaceText = dayInNew.rest;
+  let placePieces: string[];
+  let toPlaceText: string | null;
+
+  if (placesText === "") {
+    // S50 place-less branch (see the function comment above).
+    const split = splitOnFirstTo(operatorPart);
+    const dayBefore = extractDayWord(split.before);
+    if (!dayBefore.ok) return dayBefore;
+    if (dayBefore.day !== null) {
+      day = dayBefore.day;
+      dayWord = dayBefore.word;
+      operator = dayBefore.rest;
+      toPlaceText = split.after;
+    } else if (split.after !== null) {
+      const dayAfter = extractDayWord(split.after);
+      if (!dayAfter.ok) return dayAfter;
+      day = dayAfter.day;
+      dayWord = dayAfter.word;
+      operator = split.before;
+      toPlaceText = dayAfter.rest;
+    } else {
+      operator = split.before;
+      toPlaceText = null;
+    }
+    if (operator === "") return { ok: false, failure: { kind: "empty" } };
+    placePieces = [];
+  } else {
+    operator = operatorPart;
+    // The FIRST " to " splits the current place(s) from the new place(s) --
+    // never the last, since a qualifier never uses "to" (on/at/in/comma only).
+    const split = splitOnFirstTo(placesText);
+    let placeText = split.before;
+    toPlaceText = split.after;
+
+    const dayInCurrent = extractDayWord(placeText);
+    if (!dayInCurrent.ok) return dayInCurrent;
+    if (dayInCurrent.day !== null) {
+      day = dayInCurrent.day;
+      dayWord = dayInCurrent.word;
+      placeText = dayInCurrent.rest;
+    } else if (toPlaceText !== null) {
+      const dayInNew = extractDayWord(toPlaceText);
+      if (!dayInNew.ok) return dayInNew;
+      day = dayInNew.day;
+      dayWord = dayInNew.word;
+      toPlaceText = dayInNew.rest;
+    }
+
+    const pieces = splitProductPlaces(placeText);
+    if (pieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+    placePieces = pieces;
   }
 
   // F-133: merge with the trailing day either time-clause helper may have
@@ -910,8 +1149,13 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
   if (!merged.ok) return merged;
   day = merged.day;
 
-  const pieces = splitProductPlaces(placeText);
-  if (pieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+  // Nit fix (S50 review): a doubled "to" ("move Sam to to Cell 2", or the
+  // placed "move Sam on Cell 1 to to Cell 2") leaves a stray leading "to" on
+  // the destination text -- splitting on the FIRST " to " cannot itself see
+  // a second one right behind it. Stripped here, once, for both branches.
+  if (toPlaceText !== null) {
+    toPlaceText = toPlaceText.replace(/^to\s+/i, "");
+  }
 
   const toPieces = toPlaceText !== null ? splitProductPlaces(toPlaceText) : [];
   const toPlace =
@@ -924,14 +1168,33 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
     return { ok: false, failure: { kind: "no_move" } };
   }
 
-  const operator = restoreQuotes(operatorPart, quotes);
-  const place = pieces.map((p) => restoreQuotes(p, quotes));
+  // S50 (brief §2 item 3): the OPERATOR segment may list more than one name.
+  const operatorList = detectAndList(operator, true);
+  if (operatorList.kind === "bad")
+    return { ok: false, failure: { kind: "bad_list", text: operator } };
+
+  if (operatorList.kind === "list") {
+    const place = placePieces.map((p) => restoreQuotes(p, quotes));
+    const commands = operatorList.items.map((op) => ({
+      intent: "move" as const,
+      operator: restoreQuotes(op, quotes),
+      place,
+      toPlace,
+      day,
+      span,
+      existing: null,
+    }));
+    return { ok: true, command: { intent: "several", commands } };
+  }
+
+  const finalOperator = restoreQuotes(operator, quotes);
+  const place = placePieces.map((p) => restoreQuotes(p, quotes));
 
   return {
     ok: true,
     command: {
       intent: "move",
-      operator,
+      operator: finalOperator,
       place,
       toPlace,
       day,
@@ -1050,14 +1313,23 @@ function formatBookCommand(command: BookCommand): string {
 
 /**
  * S41-b: the canonical sentence for an `UnassignCommand` — `unassign <person>
- * from <cell> [in <line>] [on <day>] [from HH:MM to HH:MM]`. Does NOT print
+ * [from <cell> [in <line>]] [on <day>] [from HH:MM to HH:MM]`. Does NOT print
  * `existing`; the time clause is printed only when `span` is not null.
+ *
+ * S50 (reviewer blocker): `place` may be `[]` (a place-less removal) --
+ * `command.place[0]` is then `undefined`, and `quoteIfNeeded` throws reading
+ * `.includes` off it. The whole "from <cell> [in <line>]" clause is printed
+ * ONLY when `place.length > 0`; a place-less removal reads back through
+ * `parseUnassignRest`'s own empty-place branch (S50 §2 item 1) into the same
+ * `place: []`, so the round trip still holds.
  */
 function formatUnassignCommand(command: UnassignCommand): string {
   const parts: string[] = ["unassign", quoteIfNeeded(command.operator)];
-  parts.push("from", quoteIfNeeded(command.place[0]));
-  for (let i = 1; i < command.place.length; i++) {
-    parts.push("in", quoteIfNeeded(command.place[i]));
+  if (command.place.length > 0) {
+    parts.push("from", quoteIfNeeded(command.place[0]));
+    for (let i = 1; i < command.place.length; i++) {
+      parts.push("in", quoteIfNeeded(command.place[i]));
+    }
   }
   if (command.day) {
     parts.push("on", dayToCanonicalText(command.day));
@@ -1074,16 +1346,31 @@ function formatUnassignCommand(command: UnassignCommand): string {
 }
 
 /**
- * S41-c: the canonical sentence for a `MoveCommand` — `move <person> on
- * <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from HH:MM to
+ * S41-c: the canonical sentence for a `MoveCommand` — `move <person> [on
+ * <cell> [in <line>]] [to <cell> [in <line>]] [on <day>] [from HH:MM to
  * HH:MM]` (always `from` for the hours when printing, whichever word the
  * sentence used). Does NOT print `existing`.
+ *
+ * S50 (reviewer blocker): `place` may be `[]` (a place-less move) --
+ * `command.place[0]` is then `undefined`, and `quoteIfNeeded` throws reading
+ * `.includes` off it. The whole "on <cell> [in <line>]" clause is printed
+ * ONLY when `place.length > 0`. The rest of the sentence still reads back as
+ * the SAME place-less move through the new split rule in `parseMoveRest`:
+ * with no place clause, `splitMoveOperatorPlaces` finds no on/at/from at
+ * all, so the place-less branch runs -- "move <person> to <cell>" splits on
+ * the first " to " into operator/destination (toPlace), and "move <person>
+ * from HH:MM to HH:MM" has no " to " left in the operator segment at all
+ * (the hours are consumed first, by `extractOptionalTimeClause`'s own
+ * "from"), so the whole remainder is the operator and there is no
+ * destination -- both read back to the same command that was formatted.
  */
 function formatMoveCommand(command: MoveCommand): string {
   const parts: string[] = ["move", quoteIfNeeded(command.operator)];
-  parts.push("on", quoteIfNeeded(command.place[0]));
-  for (let i = 1; i < command.place.length; i++) {
-    parts.push("in", quoteIfNeeded(command.place[i]));
+  if (command.place.length > 0) {
+    parts.push("on", quoteIfNeeded(command.place[0]));
+    for (let i = 1; i < command.place.length; i++) {
+      parts.push("in", quoteIfNeeded(command.place[i]));
+    }
   }
   if (command.toPlace) {
     parts.push("to", quoteIfNeeded(command.toPlace[0]));
@@ -1110,8 +1397,14 @@ function formatMoveCommand(command: MoveCommand): string {
  * whichever shape the command's `intent` names. The bar rebuilds the input
  * from this after a candidate button is pressed. Never prints `attach` or
  * `existing`.
+ *
+ * S50: a `several`'s sentence is its inner commands' own sentences joined by
+ * `"; "` -- a `;` is not grammar (brief §2 item 3), so `parseCommand` of
+ * THIS string need not reproduce the same several; only each inner
+ * command's own sentence round-trips on its own.
  */
 export function formatCommand(command: Command): string {
+  if (command.intent === "several") return command.commands.map((c) => formatCommand(c)).join("; ");
   if (command.intent === "book") return formatBookCommand(command);
   if (command.intent === "unassign") return formatUnassignCommand(command);
   if (command.intent === "move") return formatMoveCommand(command);

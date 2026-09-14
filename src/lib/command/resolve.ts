@@ -319,7 +319,12 @@ export type Question =
       blocks: Candidate[];
       elsewhere?: true;
       destination?: string;
-    };
+    }
+  /** S50 (brief §2 item 4, R-398): the sentence parsed as a `several` --
+   *  more than one operator or place segment in one sentence. Resolving and
+   *  confirming each inner command is its own later stage; for now the bar
+   *  only says so. `count` is `command.commands.length`. */
+  | { kind: "several_unsupported"; count: number };
 
 export type Resolution =
   | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove }
@@ -1275,6 +1280,11 @@ export function resolveCommand(
 ): { ok: true; resolved: ResolvedMove } | { ok: false; question: Question };
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution;
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution {
+  // S50 (brief §2 item 4, R-398): a several is read but not yet run -- the
+  // bar's one-yes-for-the-lot confirmation is the next stage after this one.
+  if (command.intent === "several") {
+    return { ok: false, question: { kind: "several_unsupported", count: command.commands.length } };
+  }
   if (command.intent === "book") return resolveBookCommand(command, ctx);
   if (command.intent === "unassign") return resolveUnassignCommand(command, ctx);
   if (command.intent === "move") return resolveMoveCommand(command, ctx);
@@ -1392,5 +1402,7 @@ export function describeQuestion(q: Question): string {
       }
       return `${q.person} has ${q.blocks.length} blocks on ${q.cell} ${q.when}. Move which?`;
     }
+    case "several_unsupported":
+      return "Several commands in one sentence are read but not yet run; say them one at a time for now.";
   }
 }

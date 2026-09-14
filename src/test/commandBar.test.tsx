@@ -927,15 +927,17 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     expect(resolved.assignmentId).toBe("blk1");
   });
 
-  it("CB-yes-12: 'remove it' does not confirm a standing MOVE question (shape hint, no onMove); 'move it' does", () => {
+  it('CB-yes-12: "remove it" does not confirm a standing MOVE question -- answered in place, the question stands; "move it" does', () => {
     // move_which is never asked for exactly one block (CM3's own comment:
     // "a move takes it without asking" -- resolve.ts's `resolveMoveCommand`
     // only ever calls `askMoveWhich` when more than one block matches), so
     // the smallest standing "move" question has two candidates. That is
     // enough to prove the kind gate at the point it actually acts: a
-    // mismatched word is refused OUTRIGHT (never even entering the
-    // "Which one?" flow), while a matching one is accepted as a confirm and
-    // reaches `onMove`, same as any other confirm word would.
+    // mismatched word is answered IN PLACE (S50 fix, CB-yes-12: it is never
+    // a sentence, so it must never reach the rules parser -- the question,
+    // its outline and its buttons all stand, only the message changes),
+    // while a matching one is accepted as a confirm and reaches `onMove`,
+    // same as any other confirm word would.
     const { input, onMove, onHighlight } = renderBar({ assignments: [BLK1, BLK2] });
     fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -948,7 +950,15 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onMove).not.toHaveBeenCalled();
-    expect(statusText()).toBe(SHAPE);
+    expect(statusText()).toBe('That question is about a move; say "move it", yes, or no.');
+    // The outline is still standing -- the last highlight call is still the
+    // move's, not cleared to null -- and the buttons are still there.
+    expect(onHighlight).toHaveBeenLastCalledWith({
+      kind: "move",
+      assignmentIds: ["blk1", "blk2"],
+    });
+    expect(screen.getByRole("button", { name: "Move Housing A 10:00–14:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" })).toBeTruthy();
 
     fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -961,6 +971,37 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     expect(onMove).toHaveBeenCalledTimes(1);
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it('CB-yes-12b: the symmetric case -- "move it" does not confirm a standing REMOVAL question, answered in place', () => {
+    const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+
+    fireEvent.change(input, { target: { value: "move it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(statusText()).toBe('That question is about a removal; say "remove it", yes, or no.');
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+  });
+
+  it('CB-yes-12c: "remove it" does not confirm a standing RETIME (block_exists) question, answered with the move message', () => {
+    const { input, onRetime, onHighlight } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "retime", assignmentIds: ["blk1"] });
+
+    fireEvent.change(input, { target: { value: "remove it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onRetime).not.toHaveBeenCalled();
+    expect(statusText()).toBe('That question is about a move; say "move it", yes, or no.');
+    expect(onHighlight).toHaveBeenLastCalledWith({ kind: "retime", assignmentIds: ["blk1"] });
+    expect(screen.getByRole("button", { name: "Change 10:00–14:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
   });
 
   it("CB-yes-13: onConfirmWord's three results -- 'created' clears the input, 'needs-decision' shows the message and keeps the input, 'none' goes to the rules", () => {

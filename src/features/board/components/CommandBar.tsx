@@ -503,8 +503,11 @@ export function CommandBar({
     // ambiguous-operator question re-resolves through its own `operator`
     // field below rather than this cast). "product" only ever comes from
     // AssignCommand or BookCommand (S41-b: unassign names no part at all).
-    // Both casts mirror those invariants rather than re-deriving them from
-    // `command.intent`.
+    // "place" comes from any of the four -- never from a SeveralCommand
+    // (S50: a several never reaches an ambiguous/place question; its only
+    // answer is `several_unsupported`, with no candidates at all) -- so the
+    // cast here mirrors that invariant the same way the other two branches
+    // already do, rather than widening `SingleCommand` to prove it.
     const next: Command =
       field === "operator"
         ? command.intent === "unassign"
@@ -512,7 +515,10 @@ export function CommandBar({
           : { ...(command as AssignCommand), operator: candidate.word }
         : field === "product"
           ? { ...(command as AssignCommand | BookCommand), product: candidate.word }
-          : { ...command, place: [candidate.word] };
+          : {
+              ...(command as AssignCommand | BookCommand | UnassignCommand | MoveCommand),
+              place: [candidate.word],
+            };
     const rendered = formatCommand(next);
     setText(rendered);
     const parsed = parseCommand(rendered);
@@ -815,10 +821,16 @@ export function CommandBar({
     //      or "Which one?" with several; a cancel clears it) and nothing
     //      else runs -- PROVIDED it actually confirms THIS question's kind
     //      (`confirmsQuestion`, review fix: "remove it" no longer confirms a
-    //      move, nor "move it" a removal). A kind-mismatched word is neither
-    //      a confirm nor a cancel here -- it falls all the way through to
-    //      the ordinary path below, same as any other word that means
-    //      nothing to this question.
+    //      move, nor "move it" a removal). A kind-mismatched confirm
+    //      CANDIDATE (S50 fix, CB-yes-12: "remove it"/"move it" against the
+    //      other kind) is answered IN PLACE -- the question, its buttons and
+    //      the outline stand, only the message changes to say which word
+    //      this question wants -- and NEVER falls through to be parsed as a
+    //      sentence: it is never a sentence, and the old fallthrough only
+    //      "worked" as a no-op because the pre-S50 grammar happened to
+    //      refuse "remove it"/"move it" outright (no_place); S50 widened the
+    //      grammar enough that "remove it" became a valid place-less removal
+    //      of an operator literally named "it", which must never run.
     //   2. No question stands at all: a candidate word is offered to
     //      `onConfirmWord`/`onCancelWord` (R-384's pop-up, S47 item 4) --
     //      "none" (or `onCancelWord`'s false) falls through to the ordinary
@@ -854,8 +866,19 @@ export function CommandBar({
           setText("");
           return;
         }
-        // A confirm candidate that does not match THIS question's kind --
-        // ordinary text, falls through below (never treated as a cancel).
+        // S50 fix (CB-yes-12): a confirm CANDIDATE that does NOT match THIS
+        // question's kind is answered in place -- the question, its buttons
+        // and the outline stand (the status object keeps the same
+        // `candidates`/`blockHighlight`; only `message` changes), and it
+        // never falls through to be parsed as a sentence (it is never a
+        // sentence -- see the comment block above).
+        const kind = status.blockHighlight.kind;
+        const message =
+          kind === "remove"
+            ? 'That question is about a removal; say "remove it", yes, or no.'
+            : 'That question is about a move; say "move it", yes, or no.';
+        setStatus({ ...status, message });
+        return;
       } else if (status?.kind !== "question") {
         if (isConfirmCandidate && onConfirmWord) {
           const result = onConfirmWord();

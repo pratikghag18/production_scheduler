@@ -757,10 +757,17 @@ describe("commandParse: S41-b unassign worked examples", () => {
     });
   });
 
-  it("U6: unassign Sam from 10 to 2 -- no_place (the only 'from' is consumed by the time clause)", () => {
+  it("U6: unassign Sam from 10 to 2 -- S50/R-398: the only 'from' is consumed by the time clause, leaving an empty place, not no_place", () => {
     expect(parseCommand("unassign Sam from 10 to 2")).toEqual({
-      ok: false,
-      failure: { kind: "no_place" },
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: null,
+        span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+        existing: null,
+      },
     });
   });
 
@@ -865,10 +872,18 @@ describe("commandParse: S41-c move worked examples", () => {
     expect(parseCommand("move Sam on Cell 1")).toEqual({ ok: false, failure: { kind: "no_move" } });
   });
 
-  it("MV5: move Sam to Cell 2 -- no_place (no on/at/from before a place at all)", () => {
+  it("MV5: move Sam to Cell 2 -- S50/R-398: no on/at/from before a place at all, so the destination is read out of the operator segment, empty place, not no_place", () => {
     expect(parseCommand("move Sam to Cell 2")).toEqual({
-      ok: false,
-      failure: { kind: "no_place" },
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Sam",
+        place: [],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+      },
     });
   });
 
@@ -1099,5 +1114,401 @@ describe("commandParse: dotted a.m./p.m. from the recogniser", () => {
         existing: null,
       }),
     );
+  });
+});
+
+/**
+ * S50 (docs/agent-briefs/s50-a-grammar-brief.md §2, R-398, design §19.97/
+ * D126) — a removal or a move need not name a place, and the operator
+ * segment or the first place segment may list more than one item. L1–L16,
+ * run verbatim, the same one-`it()`-per-case shape as every describe block
+ * above.
+ */
+describe("commandParse: S50 no place, and several in one sentence", () => {
+  it("L1: remove Operator A3 -- empty place, span null, no day", () => {
+    expect(parseCommand("remove Operator A3")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Operator A3",
+        place: [],
+        day: null,
+        span: null,
+        existing: null,
+      },
+    });
+  });
+
+  it("L2: remove Operator A3 today -- empty place, with a day", () => {
+    expect(parseCommand("remove Operator A3 today")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Operator A3",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+      },
+    });
+  });
+
+  it("L3: unassign Operator A3 from 3 to 5 -- empty place, hours only (the 'from' the time clause consumed leaves nothing for a place)", () => {
+    expect(parseCommand("unassign Operator A3 from 3 to 5")).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Operator A3",
+        place: [],
+        day: null,
+        span: { start: { hour: 3, minute: 0 }, end: { hour: 5, minute: 0 } },
+        existing: null,
+      },
+    });
+  });
+
+  it('L4: unassign "Ann At Bay" from 3 to 5 -- a quoted name with hours, empty place', () => {
+    // The brief's own illustrative parenthetical for this sentence reads
+    // "span 15:00-17:00" -- checked against the real, already-pinned (P9/
+    // P35/P36) afternoon rule, which only ever shifts the END, never the
+    // START, and only when the end is not already after the start (it is
+    // here: 5 > 3) -- so the actual, mechanically consistent span is
+    // 03:00-05:00, exactly what "clear A3 tomorrow from 8 to 11" (S50's own
+    // next example, 8 to 11, no shift) computes by the same rule. Pinned to
+    // the real behaviour, not the brief's prose (CLAUDE.md §4: never guess;
+    // reported in the final summary for the maintainer to confirm).
+    expect(parseCommand('unassign "Ann At Bay" from 3 to 5')).toEqual({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Ann At Bay",
+        place: [],
+        day: null,
+        span: { start: { hour: 3, minute: 0 }, end: { hour: 5, minute: 0 } },
+        existing: null,
+      },
+    });
+  });
+
+  it("L5: remove alone -- still empty (no operator at all)", () => {
+    expect(parseCommand("remove")).toEqual({ ok: false, failure: { kind: "empty" } });
+  });
+
+  it("L5b: remove from Cell 1 -- still empty (no operator, place-less rule does not touch this)", () => {
+    expect(parseCommand("remove from Cell 1")).toEqual({ ok: false, failure: { kind: "empty" } });
+  });
+
+  it("L6: move Operator A3 to 8 pm to 11 pm -- empty place, toPlace null, span from the hours", () => {
+    expect(parseCommand("move Operator A3 to 8 pm to 11 pm")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Operator A3",
+        place: [],
+        toPlace: null,
+        day: null,
+        span: { start: { hour: 20, minute: 0 }, end: { hour: 23, minute: 0 } },
+        existing: null,
+      },
+    });
+  });
+
+  it("L7: move A3 tomorrow to Cell 2 -- a day BEFORE the destination, empty place, toPlace given", () => {
+    expect(parseCommand("move A3 tomorrow to Cell 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "A3",
+        place: [],
+        toPlace: ["Cell 2"],
+        day: { kind: "tomorrow" },
+        span: null,
+        existing: null,
+      },
+    });
+  });
+
+  it("L8: move A3 to Cell 2 -- empty place, toPlace given, no hours", () => {
+    expect(parseCommand("move A3 to Cell 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "A3",
+        place: [],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+      },
+    });
+  });
+
+  it("L9: move A3 -- still no_move (neither a new cell nor new hours, place-less or not)", () => {
+    expect(parseCommand("move A3")).toEqual({ ok: false, failure: { kind: "no_move" } });
+  });
+
+  it("L9b: move A3 on Cell 1 -- still no_move (a place was said, but nothing to move it to)", () => {
+    expect(parseCommand("move A3 on Cell 1")).toEqual({ ok: false, failure: { kind: "no_move" } });
+  });
+
+  it("L10: the maintainer's own sentence -- two people, two cells, pairs in order, every field copied", () => {
+    expect(
+      parseCommand(
+        "assign Operator A2 and Operator A3 to Housing A on Cell 1 and Cell 2 in Line 1 today from 3 to 5",
+      ),
+    ).toEqual({
+      ok: true,
+      command: {
+        intent: "several",
+        commands: [
+          {
+            intent: "assign",
+            operator: "Operator A2",
+            product: "Housing A",
+            place: ["Cell 1", "Line 1"],
+            day: { kind: "today" },
+            start: { hour: 3, minute: 0 },
+            end: { hour: 5, minute: 0 },
+            attach: null,
+            existing: null,
+          },
+          {
+            intent: "assign",
+            operator: "Operator A3",
+            product: "Housing A",
+            place: ["Cell 2", "Line 1"],
+            day: { kind: "today" },
+            start: { hour: 3, minute: 0 },
+            end: { hour: 5, minute: 0 },
+            attach: null,
+            existing: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("L11: two people, one cell -- both land on the same place", () => {
+    expect(parseCommand("assign A2 and A3 to Housing A on Cell 1 from 10 to 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "several",
+        commands: [
+          {
+            intent: "assign",
+            operator: "A2",
+            product: "Housing A",
+            place: ["Cell 1"],
+            day: null,
+            start: { hour: 10, minute: 0 },
+            end: { hour: 14, minute: 0 },
+            attach: null,
+            existing: null,
+          },
+          {
+            intent: "assign",
+            operator: "A3",
+            product: "Housing A",
+            place: ["Cell 1"],
+            day: null,
+            start: { hour: 10, minute: 0 },
+            end: { hour: 14, minute: 0 },
+            attach: null,
+            existing: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("L12: one person, two cells -- that person lands on each", () => {
+    expect(parseCommand("assign A2 to Housing A on Cell 1 and Cell 2 from 10 to 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "several",
+        commands: [
+          {
+            intent: "assign",
+            operator: "A2",
+            product: "Housing A",
+            place: ["Cell 1"],
+            day: null,
+            start: { hour: 10, minute: 0 },
+            end: { hour: 14, minute: 0 },
+            attach: null,
+            existing: null,
+          },
+          {
+            intent: "assign",
+            operator: "A2",
+            product: "Housing A",
+            place: ["Cell 2"],
+            day: null,
+            start: { hour: 10, minute: 0 },
+            end: { hour: 14, minute: 0 },
+            attach: null,
+            existing: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("L13: three people, two cells -- list_mismatch, never a guess", () => {
+    expect(
+      parseCommand("assign A1, A2 and A3 to Housing A on Cell 1 and Cell 2 from 10 to 2"),
+    ).toEqual({
+      ok: false,
+      failure: { kind: "list_mismatch", people: 3, places: 2 },
+    });
+  });
+
+  it('L14: a quoted "Ann and Bob" is one name (single command); A1, A2 and A3 is three', () => {
+    expect(parseCommand('assign "Ann and Bob" to Housing A on Cell 1 from 10 to 2')).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Ann and Bob",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+      }),
+    );
+
+    const three = parseCommand("assign A1, A2 and A3 to Housing A on Cell 1 from 10 to 2");
+    expect(three.ok).toBe(true);
+    if (three.ok) {
+      expect(three.command.intent).toBe("several");
+      if (three.command.intent === "several") {
+        expect(
+          three.command.commands.map((c) => (c.intent === "assign" ? c.operator : null)),
+        ).toEqual(["A1", "A2", "A3"]);
+      }
+    }
+  });
+
+  it("L15: remove A2 and A3 from Cell 1 -- several unassign, same place on both", () => {
+    expect(parseCommand("remove A2 and A3 from Cell 1")).toEqual({
+      ok: true,
+      command: {
+        intent: "several",
+        commands: [
+          {
+            intent: "unassign",
+            operator: "A2",
+            place: ["Cell 1"],
+            day: null,
+            span: null,
+            existing: null,
+          },
+          {
+            intent: "unassign",
+            operator: "A3",
+            place: ["Cell 1"],
+            day: null,
+            span: null,
+            existing: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("L16: formatCommand of L10 joins the inner sentences with '; ', and each round-trips on its own", () => {
+    const l10 = parseCommand(
+      "assign Operator A2 and Operator A3 to Housing A on Cell 1 and Cell 2 in Line 1 today from 3 to 5",
+    );
+    if (!l10.ok || l10.command.intent !== "several") throw new Error("L10 must parse as several");
+    const rendered = formatCommand(l10.command);
+    const innerSentences = l10.command.commands.map((c) => formatCommand(c));
+    expect(rendered).toBe(innerSentences.join("; "));
+    for (let i = 0; i < l10.command.commands.length; i++) {
+      const inner = l10.command.commands[i];
+      expect(parseCommand(innerSentences[i])).toEqual({ ok: true, command: inner });
+    }
+    // A ';' is not grammar -- parsing the JOINED sentence back need not
+    // reproduce the same several (brief §2 item 3); it is not asserted here.
+  });
+
+  it("L17: formatCommand round-trips all four place-less shapes (reviewer blocker -- place[0] was read unconditionally and threw)", () => {
+    const sentences = [
+      "remove Operator A3",
+      "unassign Operator A3 from 10:00 to 14:00",
+      "move Operator A3 to 8 pm to 11 pm",
+      "move A3 to Cell 2",
+    ];
+    for (const sentence of sentences) {
+      const parsed = parseCommand(sentence);
+      if (!parsed.ok) throw new Error(`${sentence} must parse`);
+      // The crash was `formatCommand` throwing on `command.place[0]` when
+      // `place` is `[]` -- calling it at all is the regression test; the
+      // round trip on top confirms the fix reads back to the SAME command
+      // (never asserting the exact printed string, since e.g.
+      // `formatMoveCommand` always prints the hours clause with "from",
+      // never "to", whichever word the sentence used -- read from the
+      // runner, not reasoned to).
+      const rendered = formatCommand(parsed.command);
+      expect(parseCommand(rendered)).toEqual(parsed);
+    }
+  });
+
+  it("L18: a several of place-less removals ('remove A2 and A3 today') round-trips per inner command and joins with '; '", () => {
+    const parsed = parseCommand("remove A2 and A3 today");
+    if (!parsed.ok || parsed.command.intent !== "several") {
+      throw new Error("must parse as several");
+    }
+    expect(parsed.command.commands).toEqual([
+      {
+        intent: "unassign",
+        operator: "A2",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+      },
+      {
+        intent: "unassign",
+        operator: "A3",
+        place: [],
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+      },
+    ]);
+    const rendered = formatCommand(parsed.command);
+    const innerSentences = parsed.command.commands.map((c) => formatCommand(c));
+    expect(rendered).toBe(innerSentences.join("; "));
+    for (let i = 0; i < parsed.command.commands.length; i++) {
+      expect(parseCommand(innerSentences[i])).toEqual({
+        ok: true,
+        command: parsed.command.commands[i],
+      });
+    }
+  });
+
+  it("L19: a doubled 'and' ('Sam and and Bob') is bad_list, never a two-item list with a mangled second name (should-fix)", () => {
+    expect(parseCommand("assign Sam and and Bob to Housing A on Cell 1 from 3 to 5")).toEqual({
+      ok: false,
+      failure: { kind: "bad_list", text: "Sam and and Bob" },
+    });
+  });
+
+  it("L20 (nit): 'move Sam to to Cell 2' -- a doubled preposition strips to the same destination as a single one", () => {
+    expect(parseCommand("move Sam to to Cell 2")).toEqual(parseCommand("move Sam to Cell 2"));
+    expect(parseCommand("move Sam to to Cell 2")).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Sam",
+        place: [],
+        toPlace: ["Cell 2"],
+        day: null,
+        span: null,
+        existing: null,
+      },
+    });
   });
 });

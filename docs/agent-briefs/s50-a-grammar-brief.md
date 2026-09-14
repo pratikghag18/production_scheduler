@@ -35,7 +35,8 @@ Stage S50, requirement R-398 (read it in `docs/plan.yaml`; its claim is the cont
    word and the optional time clause are taken) is `place: []`, not `no_place`. Examples
    that must parse: `remove Operator A3` → `{intent:"unassign", operator:"Operator A3",
    place:[], day:null, span:null, existing:null}`; `remove Operator A3 today`; `unassign
-   "Ann At Bay" from 3 to 5` (span 15:00–17:00, place []); `clear A3 tomorrow from 8 to 11`.
+   "Ann At Bay" from 3 to 5` (span 03:00–05:00 — the afternoon rule shifts only an end that is not
+   after its start; place []); `clear A3 tomorrow from 8 to 11`.
    Careful: `from` is both the place preposition and the time clause's word —
    `extractOptionalTimeClause` takes the LAST `from`; after it, if the operator segment is
    the whole rest, `placesText` is "" and that is the empty place. `remove` alone is still

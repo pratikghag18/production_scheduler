@@ -1817,3 +1817,28 @@ describe("commandResolve: S49 the block is elsewhere", () => {
     }
   });
 });
+
+/**
+ * S50 (docs/agent-briefs/s50-a-grammar-brief.md §2 item 4, R-398): a
+ * `several` resolves to the `several_unsupported` question -- read, but not
+ * yet run (the bar's one-yes-for-the-lot confirmation is its own later
+ * stage).
+ */
+describe("commandResolve: S50 a several is read but not yet run", () => {
+  it("RS1: a several resolves to several_unsupported with the count and the message verbatim", () => {
+    const several = {
+      intent: "several" as const,
+      commands: [cmd(), cmd({ operator: "Operator 2" })],
+    };
+    const res = resolveCommand(several, baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "several_unsupported", count: 2 },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "Several commands in one sentence are read but not yet run; say them one at a time for now.",
+      );
+    }
+  });
+});
