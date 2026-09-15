@@ -143,6 +143,77 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     expect(source).toContain('"sentence": row["sentence"]');
   });
 
+  it("VT8 (F-147): the notebook's Train cell stamps the adapter and checkpoints with the data they were trained on, and refuses a mismatch or a missing stamp", () => {
+    const notebook = JSON.parse(readFileSync("scripts/voice/train/train_qwen3.ipynb", "utf8")) as {
+      cells: Array<{ cell_type: string; source: string[] }>;
+    };
+    const trainCell = notebook.cells.find(
+      (cell) => cell.cell_type === "code" && cell.source.join("").includes("Train (S43-a brief"),
+    );
+    expect(trainCell, "Train cell not found in the notebook").toBeTruthy();
+    const source = trainCell!.source.join("");
+    expect(source).toContain("F-147");
+
+    // The stamp is computed from the manifest's own identifying fields
+    // (read from prepare.mjs's buildManifest, not retyped: gitSha,
+    // trainRows, heldoutRows, seeds) plus a STREAMED sha256 of
+    // train.chat.jsonl -- pin the mechanism, not just the word "sha256".
+    expect(source).toContain('manifest["gitSha"]');
+    expect(source).toContain('manifest["trainRows"]');
+    expect(source).toContain('manifest["heldoutRows"]');
+    expect(source).toContain('manifest["seeds"]');
+    expect(source).toContain("import hashlib");
+    expect(source).toContain("hashlib.sha256()");
+    // Streamed, not `f.read()` in one shot.
+    expect(source).toContain("f.read(1 << 20)");
+
+    // The stamp file itself, written for both the adapter and the
+    // checkpoints dir.
+    expect(source).toContain('"trained-on.json"');
+    expect(source).toContain("_write_stamp(ADAPTER_DIR");
+    expect(source).toContain("_write_stamp(CHECKPOINTS_DIR");
+
+    // Read-and-compare before the skip: the adapter's own trained-on.json
+    // is read and compared before training is ever skipped in its favour
+    // -- the comparison must appear ahead of the resume/skip action (VT4's
+    // guard style: an ordering assertion, not just presence).
+    expect(source.indexOf("_read_stamp(ADAPTER_DIR)")).toBeLessThan(
+      source.indexOf("model = PeftModel.from_pretrained(base_model, ADAPTER_DIR)"),
+    );
+    // Same for the checkpoint stamp: read and compared before a resume is
+    // ever handed to the trainer.
+    expect(source.indexOf("_read_stamp(CHECKPOINTS_DIR)")).toBeLessThan(
+      source.indexOf("trainer.train(resume_from_checkpoint=resume_from)"),
+    );
+
+    // SystemExit -- both on a missing stamp (adapter and checkpoints) and
+    // on a mismatch (adapter and checkpoints): four distinct refusals.
+    expect(source).toContain('raise SystemExit(f"F-147: {ADAPTER_DIR} has no trained-on.json")');
+    expect(source).toContain(
+      'raise SystemExit(f"F-147: {CHECKPOINTS_DIR} has no trained-on.json")',
+    );
+    const systemExitCount = (source.match(/raise SystemExit/g) ?? []).length;
+    expect(systemExitCount).toBeGreaterThanOrEqual(4);
+
+    // No flag overrides a mismatch -- ALLOW_UNSTAMPED_ADAPTER only ever
+    // bypasses a MISSING stamp, never a mismatched one; the mismatch
+    // refusals say so in their own message.
+    const mismatchMessageCount = (source.match(/No flag overrides a mismatch\./g) ?? []).length;
+    expect(mismatchMessageCount).toBe(2);
+
+    // Field-by-field printing on a mismatch, not just "they differ".
+    expect(source).toContain("_mismatched_fields(saved_stamp, current_stamp)");
+    expect(source).toContain("current data: {current_stamp[key]!r}");
+
+    // The Settings cell carries the override flag, defaulted off.
+    const settingsCell = notebook.cells.find(
+      (cell) => cell.cell_type === "code" && cell.source.join("").includes("# Settings -- every"),
+    );
+    expect(settingsCell, "Settings cell not found in the notebook").toBeTruthy();
+    const settingsSource = settingsCell!.source.join("");
+    expect(settingsSource).toContain("ALLOW_UNSTAMPED_ADAPTER = False");
+  });
+
   it("VT6 (S56, re-pinned S58): score_port.py prints the same table as score.mjs, on a file covering every intent including split/headcount", () => {
     // S56 brief §3: "score.mjs's by-field tally must cover the new intents'
     // fields (with, other, from, to, until) and the port score_port.py must

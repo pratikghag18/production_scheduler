@@ -51,13 +51,27 @@ Nothing in the app changes from running this. No model is served until its score
    training cell (the stop button), then run a new cell containing
    `trainer.save_model(ADAPTER_DIR); tokenizer.save_pretrained(ADAPTER_DIR)`, then use
    Runtime → "Run after" from the Predict cell to continue without retraining. A `Run all` on
-   any later day finds that saved adapter, prints that training is being skipped, and goes
-   straight to prediction and scoring — delete the adapter folder on Drive (under
-   `scheduler-voice/run-qwen3-1.7b/adapter`) to force a genuinely fresh run. Before a retrain,
-   also delete the `checkpoints` folder under the same run folder — the resume logic in the
-   training cell finds the newest `checkpoint-<step>` there and picks up mid-run from it
-   regardless of what changed in the Settings cell, so a checkpoint saved under an old `MAX_LEN`
-   (F-142, say) would otherwise resume as if nothing had changed.
+   any later day finds that saved adapter and, if it matches the CURRENT data, prints that
+   training is being skipped and goes straight to prediction and scoring.
+
+   The notebook now refuses an adapter or a checkpoint trained on OTHER data on its own
+   (F-147): beside `adapter_config.json` and beside the newest `checkpoint-<step>`, the Train
+   cell writes its own `trained-on.json` (the manifest's `gitSha`, `trainRows`, `heldoutRows`,
+   `seeds`, and a streamed sha256 of `train.chat.jsonl`) the moment training starts or finishes.
+   Before skipping training or resuming a checkpoint, that stamp is read back and compared
+   field by field against the CURRENT run's own data; a mismatch prints both sides and stops
+   the cell (`raise SystemExit`) — no setting overrides a mismatch. A folder with no stamp at
+   all (an adapter or a checkpoint saved before this change) is refused the same way, unless,
+   for the adapter only, `ALLOW_UNSTAMPED_ADAPTER = True` is set in the Settings cell to
+   knowingly reuse it as is. This closes the same hole F-145 closed for `predictions.jsonl` one
+   folder over — the fifth run found the fourth run's adapter this way and nearly scored the
+   fifth run's held-out set against the wrong model.
+
+   The only reason to delete the adapter folder (`scheduler-voice/run-qwen3-1.7b/adapter`) or
+   the `checkpoints` folder under the same run folder now is to retrain on the SAME data —
+   the notebook already refuses to reuse either one across different data by itself. (Before
+   F-147, a checkpoint saved under an old `MAX_LEN`, F-142 say, would resume as if nothing had
+   changed; that is exactly the case the stamp now catches.)
 
    The Predict cell prints its first row's timing alone — `first row: 1.3s for 42 tokens` — so
    an emulated-precision slow path (see above) is visible within seconds instead of a blank cell
