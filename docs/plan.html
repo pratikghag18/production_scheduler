@@ -113,17 +113,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 169 · 2026-09-14 · Group 2 rides the same run; Whisper beside the model; the fifth run's data done in two passes (S57, S58, R-411 to R-416)</h2>
-  <div class="lead"><p>The maintainer asked how things were going, whether group 2 would save a Colab run (yes, only if it went in before the same run) and chose it: &quot;group 2 too&quot;. The developer session wrote D132 (a move gains an adjust; a split is a shorten plus an assign the board writes; &quot;the job&quot; is a reserved shift name; a headcount intent writes through the job panel's own field edit; two repeat day words expand into one command per day), R-412 to R-416 and S58, ran four lanes, three reviewers and a fix lane, and in parallel built S57 (D131: a second recogniser with the S46 shape, Whisper in a container beside the model, chosen by configuration, the browser's as the fallback), whose published arm64 image turned out to crash on this CPU and is built locally instead. The data lane ran twice (S55's shapes, then S58's), the second pass also closing two flags from the first (the manifest's stale seed, the perturber rewriting an ISO date) and teaching the data to say midnight. Committed in order after one green suite and role walk. Next: the maintainer's fifth Colab run on the 1000-row held-out set; while it trains, 6b packaging is the next model-free piece.</p></div>
+  <h2>Session 170 · 2026-09-14 · The fifth run skipped training on the fourth run's adapter: a saved model now names its data (F-147)</h2>
+  <div class="lead"><p>The maintainer pasted Colab's &quot;training skipped: a trained adapter already exists&quot; from the fifth run and asked whether it looked wrong. It did: the fourth run's adapter sat under the same fixed folder name, and the Train cell's only rule was that an adapter exists --- F-145's hole one folder over. Told the maintainer to interrupt, delete the adapter folder on Drive and Run all; recorded F-147; one lane stamped the adapter and the checkpoints with the manifest and the training file's hash and made the notebook refuse a missing or different stamp; a reviewer read the cell line by line and simulated the compare in Python. The fifth run is the maintainer's to restart.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">3658</span><span class="l">app tests in 147 files — session 169, 2026-09-14</span></div>
+  <div class="stat ok"><span class="n">3659</span><span class="l">app tests in 147 files — session 170, 2026-09-14</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">856</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">80</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
   <div class="stat "><span class="n">310 / 359</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>36b684d</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>2344246</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2295,7 +2295,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>146 things that weren't in the plan</h2>
+  <h2>147 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3585,6 +3585,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <div class="aside"><span class="k">Fix</span><p>Session 168 (85e645d). The grammar writes an end spelled midnight, 12 am or 24:00, or a length that lands exactly on it, as 23:59 (DAY_END, the same value &quot;after 2 pm&quot; already used) on every intent, a start of midnight stays 00:00, formatCommand prints such an end as &quot;midnight&quot; and the round trip holds; the resolver reads 23:59 as the day's 1440 offset for every intent, the minimum-duration check unchanged. A length that runs PAST midnight is still refused. Pinned in commandParse.test.ts (the F-146 describe) and commandResolve.test.ts (four F-146 cases).</p></div>
   <p class="fine">R-378 · R-404</p>
+</div>
+<div class="find fix" id="F-147">
+  <span class="tag">A saved model that cannot say what it was trained on · fixed · you found it · <a href="#S56">S56</a></span>
+  <h3>The fifth run skipped training because the fourth run's adapter sat on Drive under the same name</h3>
+  <p>Reported 14 Sept (session 170), pasted from Colab: &quot;training skipped: a trained adapter already exists at .../run-qwen3-1.7b/adapter --- delete that folder on Drive to retrain from scratch&quot;, then a PEFT warning about a second adapter on the model. The Train cell's resume rule is &quot;an adapter exists, so use it&quot;, and the folder's name never changes between runs, so the fourth run's adapter was picked up and the fifth run's held-out set was about to be predicted with the old model. F-145 closed exactly this hole for the predictions file one folder over; the adapter (and the checkpoints under it) had no record of the data they came from.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 170 (2344246). Immediate, told to the maintainer: stop the run, delete the adapter folder (and any new predictions.jsonl) on Drive, Run all. For good: the notebook writes trained-on.json beside the adapter (the manifest's gitSha, row counts, seeds, and the training file's hash) and beside the checkpoints when training starts; an adapter or a checkpoint with no stamp, or a stamp that differs from the current manifest and file, is refused with both sides printed and an F-147 message, never skipped over (brief docs/agent-briefs/f-147-adapter-must-name-its-data-brief.md). VT8 asserts on the code; the reviewer walked the cells in order and ran the compare logic in Python. The fixed notebook is for the next run unless the maintainer's rerun had not started yet.</p></div>
+  <p class="fine">R-392 · R-410 · F-145</p>
 </div>
 </section>
 
@@ -6115,6 +6123,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 170</b> · 2026-09-14 · The fifth run skipped training on the fourth run's adapter: a saved model now names its data (F-147) <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer pasted Colab's &quot;training skipped: a trained adapter already exists&quot; from the fifth run and asked whether it looked wrong. It did: the fourth run's adapter sat under the same fixed folder name, and the Train cell's only rule was that an adapter exists --- F-145's hole one folder over. Told the maintainer to interrupt, delete the adapter folder on Drive and Run all; recorded F-147; one lane stamped the adapter and the checkpoints with the manifest and the training file's hash and made the notebook refuse a missing or different stamp; a reviewer read the cell line by line and simulated the compare in Python. The fifth run is the maintainer's to restart.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>npm run test, 14 Sept, after the F-147 commit: 3659 tests in 147 files, all passing (one new case, VT8); tsc and eslint clean; no board file changed, so the role walk was not re-run. One test failed on the first full run and passed on the immediate rerun with nothing changed; its name was not captured, so it is not chased here --- if it shows again it gets a finding.</p></div>
+    <p class="fine">3659 app tests in 147 files · 856 database checks · 80 migrations · tsc 0 · eslint 0 · commits 2344246</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 169</b> · 2026-09-14 · Group 2 rides the same run; Whisper beside the model; the fifth run's data done in two passes (S57, S58, R-411 to R-416) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer asked how things were going, whether group 2 would save a Colab run (yes, only if it went in before the same run) and chose it: &quot;group 2 too&quot;. The developer session wrote D132 (a move gains an adjust; a split is a shorten plus an assign the board writes; &quot;the job&quot; is a reserved shift name; a headcount intent writes through the job panel's own field edit; two repeat day words expand into one command per day), R-412 to R-416 and S58, ran four lanes, three reviewers and a fix lane, and in parallel built S57 (D131: a second recogniser with the S46 shape, Whisper in a container beside the model, chosen by configuration, the browser's as the fallback), whose published arm64 image turned out to crash on this CPU and is built locally instead. The data lane ran twice (S55's shapes, then S58's), the second pass also closing two flags from the first (the manifest's stale seed, the perturber rewriting an ISO date) and teaching the data to say midnight. Committed in order after one green suite and role walk. Next: the maintainer's fifth Colab run on the 1000-row held-out set; while it trains, 6b packaging is the next model-free piece.</p>
