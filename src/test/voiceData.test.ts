@@ -846,17 +846,24 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     expect(sawDecimal, "never drew a decimal duration in 300 tries").toBe(true);
   });
 
-  it("V26 (S56 review): the system prompt says swap's place may be [] too, matching replace's own annotation", () => {
-    // Bug: replace's own line already said "place (or [])"; swap's did not,
-    // even though two of swap's own three templates (W1-swap-and,
-    // W3-exchange) never name a place at all -- a model reading the prompt
-    // literally could conclude swap always needs one. Found reading the
-    // prompt against `form.schema.json` (both allow `minItems: 0` for
-    // swap's `place`, D130 item 2).
-    const prompt = readFileSync("scripts/voice/train/system_prompt.txt", "utf8");
-    const swapLine = prompt.split("\n").find((l) => l.startsWith("swap:"));
-    expect(swapLine, "no swap: line in the prompt").toBeTruthy();
-    expect(swapLine).toContain("place (or [])");
+  it("V26 (S56 review): the system prompt names swap and replace as intents, and says a several never holds them", () => {
+    // Re-pinned for R-417 (15 Sept): the short prompt dropped the
+    // field-by-field paragraphs, so swap's old "place (or [])" annotation
+    // -- the original bug this case caught (D130 item 2: swap's place may
+    // be [] too, same as replace's) -- has nowhere to live in prose
+    // anymore; `form.schema.json`'s own `minItems: 0` on swap's `place`
+    // still enforces the shape either way (the served model is forced
+    // through the schema, brief §1). What the short prompt still owes
+    // swap and replace is being named as intents at all, and being named
+    // in the several exclusion, so this case now pins those two things.
+    const prompt = readFileSync("scripts/voice/train/system_prompt.txt", "utf8").toLowerCase();
+    expect(prompt).toContain("swap");
+    expect(prompt).toContain("replace");
+    const holdsIdx = prompt.indexOf("a several never holds");
+    expect(holdsIdx, "no 'a several never holds' clause in the prompt").toBeGreaterThanOrEqual(0);
+    const holdsClause = prompt.slice(holdsIdx, prompt.indexOf(".", holdsIdx) + 1);
+    expect(holdsClause).toContain("swap");
+    expect(holdsClause).toContain("replace");
   });
 
   // -------------------------------------------------------------------------
@@ -1081,20 +1088,26 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
   });
 
   it("V34 (S58): the system prompt mentions every new S58 word (a guard against prompt drift)", () => {
+    // Re-pinned for R-417 (15 Sept): the short prompt keeps vocabulary the
+    // model must recognise in a sentence -- "adjust" dropped (it names a
+    // field shape the schema fence forces, brief §1, not a word a sentence
+    // says) and "make it n people" dropped (the rule that no sentence says
+    // that, not a word the prompt need repeat). "this_week" was never a
+    // word either -- it is the JSON day-kind's own value; the prompt says
+    // the words a sentence actually uses, "this week"/"next week"/"last
+    // week", so that is what this case checks for now.
     const prompt = readFileSync("scripts/voice/train/system_prompt.txt", "utf8").toLowerCase();
     for (const word of [
       "split",
       "headcount",
-      "adjust",
       "the job",
       "every weekday",
       "every day",
       "weekdays",
+      "this week",
     ]) {
       expect(prompt, word).toContain(word);
     }
-    expect(prompt).toContain("make it n people");
-    expect(prompt).toContain("this_week");
   });
 
   it("V35 (S56-b brief §4's own flag): the perturber's speech-digit-as-word never mangles a digit inside an ISO date", () => {

@@ -8,13 +8,14 @@ Nothing in the app changes from running this. No model is served until its score
 
 ## What the pieces are
 
-| file                                    | what                                                                                                                                                                          |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/voice/train/prepare.mjs`       | turns `data/voice/train.jsonl` and the committed `data/voice/heldout.jsonl` into the four files Colab needs (the three data files plus a stamped COPY of the notebook, F-148) |
-| `scripts/voice/train/system_prompt.txt` | the one system prompt — read by `prepare.mjs` and, through `manifest.json`, by the notebook; never retyped in either place                                                    |
-| `scripts/voice/train/train_qwen3.ipynb` | the Colab notebook that fine-tunes Qwen3 1.7B and scores it                                                                                                                   |
-| `scripts/voice/train/score_port.py`     | a Python port of `scripts/voice/score.mjs`'s arithmetic — the notebook's own table, and a standalone check you can run here                                                   |
-| `scripts/voice/train/check_notebook.py` | pulls every code cell out of the notebook and checks it compiles — no GPU or Colab needed                                                                                     |
+| file                                        | what                                                                                                                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `scripts/voice/train/prepare.mjs`           | turns `data/voice/train.jsonl` and the committed `data/voice/heldout.jsonl` into the four files Colab needs (the three data files plus a stamped COPY of the notebook, F-148)  |
+| `scripts/voice/train/system_prompt.txt`     | the short system prompt (R-417) — read by `prepare.mjs` and, through `manifest.json`, by the notebook; the one that trains and serves the model; never retyped in either place |
+| `scripts/voice/train/system_prompt.long.md` | the long form of the prompt, kept as the human-readable description of every field (R-417). Not read by any code since 15 Sept — documentation only                            |
+| `scripts/voice/train/train_qwen3.ipynb`     | the Colab notebook that fine-tunes Qwen3 1.7B and scores it                                                                                                                    |
+| `scripts/voice/train/score_port.py`         | a Python port of `scripts/voice/score.mjs`'s arithmetic — the notebook's own table, and a standalone check you can run here                                                    |
+| `scripts/voice/train/check_notebook.py`     | pulls every code cell out of the notebook and checks it compiles — no GPU or Colab needed                                                                                      |
 
 ## Steps
 
@@ -188,11 +189,16 @@ without failing on the llama.cpp clone; it checks for `convert_hf_to_gguf.py` in
 
 Two real runs scored `product` at 2.5% before the cause was found: `MAX_LEN = 512` was shorter
 than a full training conversation, so `SFTConfig(max_length=MAX_LEN)` silently cut every row off
-before the answer — the system prompt alone runs 450 tokens, and the answer comes last. `MAX_LEN`
-is now 1792 (raised from 1280 to 1536 at S56's first pass and to 1792 at its second, when replace/swap/copy and the widened grammar's own longer
-sentences pushed the longest chat row to about 1449 tokens, measured with the served model's own
-`/tokenize` endpoint — 1280 was itself raised from 1024 in S50, when the widened prompt and a
-several of three measured about 940 tokens), and the cell after the chat-template round trip
-tokenises every training conversation the same way the trainer will, prints the median and
-longest length seen, and asserts the longest is under `MAX_LEN` before training is allowed to
-start (F-142).
+before the answer — the system prompt alone ran 450 tokens then, and the answer comes last.
+`MAX_LEN` went 1280 (raised from 1024 in S50, when the widened prompt and a several of three
+measured about 940 tokens) to 1536 at S56's first pass and to 1792 at its second, when
+replace/swap/copy and the widened grammar's own longer sentences pushed the longest chat row to
+about 1449 tokens — and back down to 512 at S56-c (R-417), when the fifth run's ~1,500-token
+system prompt moved to documentation (`system_prompt.long.md`) and training and serving switched
+to the ~178-token short prompt in `system_prompt.txt`, re-measured the same way against the
+regenerated `train.chat.jsonl` at 436 tokens for the longest row. `512` here is a coincidence, not
+a reversion to the F-142 bug: it comes from the same "next 128 above the measured maximum" rule
+as every other value in this history, and the cell after the chat-template round trip tokenises
+every training conversation the same way the trainer will, prints the median and longest length
+seen, and asserts the longest is under `MAX_LEN` before training is allowed to start (F-142) — so
+an undersized `MAX_LEN` still cannot pass silently.
