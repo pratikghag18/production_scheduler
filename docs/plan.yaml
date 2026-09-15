@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-14'
-  tip: '85e645d'
+  tip: '36b684d'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2628,13 +2628,18 @@ stages:
     **Waits on S55.** One lane after S55's grammar and decoder land. While the maintainer's Colab run
     **14 Sept, later (session 168): the maintainer chose group 2 too (S58), so this run teaches S55 and
     S58 together; the data lane's first pass over S55 is done and reviewed, its second pass follows S58.**
+    **Data done 14 Sept (session 169): first pass df9758e, second pass 36b684d.** 92 templates, ten intents, the
+    held-out set at 1000 rows on seed 20260915 (baseline 1.0 clean, 0.086 perturbed), 7000 training rows, the
+    prompt at 1499 tokens, MAX_LEN 1792 for a longest example of 1757, the manifest naming the seed. What
+    remains is the maintainer's Colab run (delete predictions.jsonl on Drive first, F-145; upload the new
+    held-out, training and notebook files; Run all) and its score here.
     trains, the queue's next model-free piece (Whisper, Stage 6's second half) proceeds — the
     maintainer's "in parallel" answered.
 - id: S57
   track: core
   num: 57
   title: The microphone's second half — Whisper beside the model, chosen by configuration, the browser's recogniser as the fallback
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 168 conversation (the maintainer, 14 Sept: "also can something else be done in parallel?")'
@@ -2655,11 +2660,18 @@ stages:
     Colab run proceed. One lane: the recogniser module and its pure encoder, the serve script's second
     container and the fetch script, the proxy, the BoardPage choice, the tests. The lane verifies the
     container image runs on this machine (linux/arm64) before building on it and reports if it cannot.
+    **DONE 14 Sept (session 169, 031cabb).** The published arm64 image crashes on this CPU (an instruction its
+    build assumes), so voice:whisper:build builds the image locally from whisper.cpp's own Dockerfile in about
+    two minutes and voice:whisper:fetch downloads base.en once; whisper.cpp's own sample clip came back
+    transcribed through the container and the dev server's proxy answered healthy. The reviewer fixed three
+    things: a browser refusing a 16 kHz context (now the default rate plus a resample), a trailing slash in
+    the URL, and the serve script giving up on both services when only the model file was missing. Left for
+    the maintainer: one line in .env.local (VITE_WHISPER_URL=/whisper) and a sentence said through the bar.
 - id: S58
   track: core
   num: 58
   title: The form grows a little — group 2 of the catalogue (adjust an edge, split, the job's hours, a job's headcount, every weekday), before the same run
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 168 conversation (the maintainer, 14 Sept: "group 2 too")'
@@ -2686,6 +2698,16 @@ stages:
     **Briefed 14 Sept (session 168).** Same shape as S55: lane A the grammar, then B the resolver and C
     the decoder in parallel, then D the bar; a reviewer breaks each. S56's data lane runs once more over
     S55 and S58 together, then the maintainer's one Colab run.
+    **DONE 14 Sept (session 169, a9cca46).** Four lanes, three reviewers and one fix lane. The reviewers found
+    and fixed fourteen things, the largest a split that could never complete (its second half tripped the
+    own-block question against the block it was cut from; now a separate_from answer that skips only that
+    block, so a genuine second block is still asked about), a day-end split's second half ending at 00:00, a
+    frozen Reading when the model put a headcount inside a several, a stale-board headcount write that
+    would have blanked a job's notes, and six grammar edges (a place after the distance, the edge tail's
+    place, adjusts losing their place on round trip, midnight as an end, "the job" with a shift clause, a
+    place-less headcount). Recorded, not changed: "extend everyone" reads everyone as a person; "start Sam an
+    hour later" is not a sentence (start is a booking verb), say "move Sam's start"; the count in a headcount
+    sentence is always last; a headcount write reports a failure through the toast, as every single write does.
 - id: M1
   track: matrix
   num: 1
@@ -11362,7 +11384,7 @@ requirements:
     An expansion above 100 commands is a question naming the count and asking for a smaller span (one cell, one day), never a silent cut. Below it the lot is R-400's: numbered questions per step, the readout of every command, one yes, a failure stops it and says how many were done. The rule parser reads every sentence of R-404 to R-409 (tests pin each); the decoder reads the three new intents, the four day words and the until field, and refuses anything else as before; the training templates cover every shape, the held-out set carries them, and one Colab run (the fifth) is scored on it at the 0.95 bar before the model file behind the board is replaced. Nothing in the bar executes a step any differently than a several of the same commands typed by hand would.
   verified_by:
   - kind: manual
-    steps: "the ceiling and the lot's shape are pinned (commandBar.test.tsx CB-x-4, CB-x-7, CB-x-12, CB-x-15; commandResolve.test.ts CP6 lot_too_big at 101, 100 allowed); the fifth run's score on the new held-out set, at the 0.95 bar, is S56's and is not yet in hand"
+    steps: "the ceiling and the lot's shape are pinned (commandBar.test.tsx CB-x-4, CB-x-7, CB-x-12, CB-x-15; commandResolve.test.ts CP6 lot_too_big at 101, 100 allowed); the data is done in two passes (df9758e, 36b684d: 92 templates, ten intents, 1000 held-out rows, 7000 training rows, the prompt at 1499 tokens, MAX_LEN 1792); the fifth run's score on that held-out set, at the 0.95 bar, is the maintainer's Colab run and is not yet in hand"
   status: uncovered
   note: >-
     STATED 14 Sept (session 168): "one retrain"; design §19.101 (D130 items 5 and the closing paragraph).
@@ -11383,12 +11405,23 @@ requirements:
     stops both; the model file is fetched once by npm run voice:whisper:fetch into a gitignored folder.
     Nothing in CommandBar.tsx knows which engine is behind the button; the S54 setting is untouched.
   verified_by:
+  - kind: vitest
+    file: src/test/localRecognizer.test.ts
+    cases: "LREC-1 to LREC-14 (the happy path from frames to a posted WAV to a final text; silence ends the clip at 1500 ms and not at 1499; the twelve-second cap; stop mid-clip and during getUserMedia; not-allowed; no speech; the service down; a late response after stop; tracks released on every path; a browser refusing 16 kHz falls back to the default rate and resamples; a NaN frame), WF-1 to WF-6 (the fallback wrapper: one session, onEnd once, the error stands without a browser recogniser, not-allowed and no-speech never fall back, the browser leg cannot loop), WSU-1 to WSU-5 (the URL: unset, whitespace, a trailing slash)"
+  - kind: vitest
+    file: src/test/wav.test.ts
+    cases: "WAV-1 to WAV-5d (the RIFF header's bytes and sizes for 0, 1 and odd counts, clipping, little-endian, rms of silence and of a full-scale square, NaN)"
+  - kind: vitest
+    file: src/test/commandBarGate.test.ts
+    cases: "G1 to G4 unchanged: typed-only still passes no recogniser"
   - kind: manual
-    steps: "pinned by S57's tests when the lane lands; the maintainer says a sentence through the local recogniser on this machine"
-  status: uncovered
+    steps: "on this machine, 14 Sept (session 169): the published arm64 image crashes on this CPU; the locally built image served whisper.cpp's own sample clip back as its sentence through 127.0.0.1:8090/inference, and the dev server's /whisper/health answered 200; the maintainer's own sentence through the bar is still to be said (add VITE_WHISPER_URL=/whisper to .env.local)"
+  status: covered
   note: >-
     STATED 14 Sept (session 168) by taking the queue's next model-free entry while the fifth run's data
-    was built, the maintainer's "in parallel"; design §19.102 (D131).
+    was built, the maintainer's "in parallel"; design §19.102 (D131). COVERED 14 Sept (session 169, 031cabb):
+    the tests above and the clip through the container; the maintainer's own voice through the bar is the
+    last check, needing one line in .env.local.
 - id: R-412
   title: A block is re-timed by one edge — extended or shortened by a distance, ended or started at a time
   source:
@@ -11398,11 +11431,19 @@ requirements:
   claim: >-
     "Extend Sam's block by an hour", "shorten Sam by 30 minutes", "end Sam early at 3", "finish Sam an hour earlier", "move Sam's start to 9" and "shift Sam's end an hour later" are a move with an adjust naming the edge and a distance or a time, and no span, shift or destination; the block is found the way a place-less move finds it (wherever the person is, the which-block question when several); the resolver computes the new hours from the block's own and the minimum-duration and order checks still run; a result that would leave the day is refused. "Start" stays a booking verb, so the start edge is said through a move verb and the possessive tail ("Sam's start").
   verified_by:
-  - kind: manual
-    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "AJ1 to AJ24 (extend/lengthen/shorten by a distance with a place before or after; end/finish at a time, early, earlier and later; the possessive edge tail with to, by, later and earlier; a destination refused; midnight as an end; round trips keep the place)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "AJ1 to AJ11 (the new range from the block's own; a run block stays a retime; inverted; too short; off the day; which block when several; existing honoured), the SWEEP describe"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-y-3 (the single move path with the new hours), CB-y-11 (move_which with two blocks, the pick, the readout), CB-y-15 (a decoded adjust reaches the single path)"
+  status: covered
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+    COVERED 14 Sept (session 169, a9cca46); the model's own reading is the fifth run's (S56).
 - id: R-413
   title: A block is split at a time — the first part keeps the block, the second is a new block of the same person, part, cell and job
   source:
@@ -11412,11 +11453,19 @@ requirements:
   claim: >-
     "Split Sam's block at noon" and "split Sam on Cell 1 at 12 today" are a split (person, place, day, at); the board writes a move in time to the first part and an assign for the second with the same part, cell and attachment, and the lot does both with one yes; an at outside the block, or a part shorter than the minimum, is a question; a person with no block that day gets the no-block answer.
   verified_by:
-  - kind: manual
-    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "SP1 to SP6 (split at noon, at a time, with a place and a day; no time refused; the separate_from answer left alone by formatCommand)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "SP1 to SP10 (a direct block: shorten then assign with the separate_from answer; a run block keeps the attachment; at outside; a part too short; no block; a day-end block's second half ends at the day's end; a second overlapping block still asks block_exists naming only that block)"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-y-1 (a lot of two with both outlines), CB-y-9 (the second half asks about another overlapping block and the answer substitutes into the lot), CB-y-10 (move_which cannot fire for the shorten), CB-y-14 (a decoded split reaches the lot)"
+  status: covered
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+    COVERED 14 Sept (session 169, a9cca46); the model's own reading is the fifth run's (S56).
 - id: R-414
   title: Adding a person to a job by its name gives the block the job's own hours and attaches it
   source:
@@ -11426,11 +11475,19 @@ requirements:
   claim: >-
     "Add Sam to the Housing A job on Cell 1" and "put Sam on the Housing A run on Cell 1 tomorrow" are an assign whose shift is the reserved name "the job" and whose hours are null; the resolver finds that part's run on that cell that day, takes its hours and attaches the block to it; no run is a question naming the part and cell; two runs is a question naming their hours; a run whose hours are said as well is shift_and_hours.
   verified_by:
-  - kind: manual
-    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "JB1 to JB9 (add/put to the <part> job or run; a quoted part; hours or a shift alongside is shift_and_hours; no cell is no_place; an ordinary assign untouched; round trip)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "JB1 to JB6 (one run: its hours and the run target; none is no_job; two is which_job naming their hours; the own-block question still runs; a booking or a removal with the name is refused)"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-y-6 (the assign resolved with the run target and hours), CB-y-7 (which_job), CB-y-18 (already in the job: block_exists and the retime answer)"
+  status: covered
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+    COVERED 14 Sept (session 169, a9cca46); the model's own reading is the fifth run's (S56).
 - id: R-415
   title: A job's headcount is set by a sentence naming the job
   source:
@@ -11440,11 +11497,22 @@ requirements:
   claim: >-
     "Make the Housing A job on Cell 1 4 people" and "set the Housing A job on Cell 1 to 4 people" resolve to that run and write its planned headcount through the same field edit the job's own panel uses, with a readout naming the job and the new number; "make it 4 people" is refused by the grammar with a sentence asking for the job's name (the bar keeps no memory of "it"); never part of a lot; a number outside 1 to 99 is refused as a headcount is today.
   verified_by:
-  - kind: manual
-    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "HC1 to HC10 (make/set the <part> job on <cell> [day] [hours|shift] N people; make it is which_job; 0 and 100 refused; a place-less headcount is no_place; set on a person stays an assign; round trip)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "HC1 to HC4 (one run, none, two, a shift narrowing a run that spans both shifts), expandCommand hands a headcount back unchanged"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-y-4 (onSetHeadcount with the run id and 4, the readout), CB-y-5 (make it 4 people), CB-y-8 and CB-y-16 (the model path; a headcount inside a several is refused with a sentence, never a frozen Reading), CB-y-12, CB-y-13"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "setHeadcountFromCommand reuses the job panel's field edit, keeps the notes, refuses a run not on the board, reports a failed write; a headcount step in a lot is refused"
+  status: covered
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+    COVERED 14 Sept (session 169, a9cca46); the model's own reading is the fifth run's (S56).
 - id: R-416
   title: Every weekday this week, or every day next week, on an assign or a booking is one sentence and one command per day
   source:
@@ -11454,11 +11522,22 @@ requirements:
   claim: >-
     "Assign Sam to Housing A on Cell 1 every weekday this week 8 to 4" and "book Housing A on Cell 2 every day next week 6 to 2" carry a day word of kind weekdays or every_day with this week or next week; the board writes one command per day in order and the lot does them with one yes; a day off the board names its date; the two kinds are allowed only on an assign or a booking, by the grammar, the decoder and the served model's schema alike.
   verified_by:
-  - kind: manual
-    steps: "pinned by S58's tests when the lanes land; the model's own reading by S56's fifth run"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "RW1 to RW7 (every weekday / every day, this or next week, this week by default, with a shift; on a removal is bad_day; with another day word is two_days; round trip)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RW1 to RW5 (five assigns in order with the date on each; a booking every day of next week; a day off the board names its iso; the other kinds unchanged; attach, existing and the shift copied onto every day)"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-y-2 (a lot of five), CB-y-19 and CB-y-20 (five listed in full, seven as five and two more)"
+  - kind: vitest
+    file: src/test/voiceRead.test.ts
+    cases: "VR23 (the two kinds decode on an assign and a booking and are refused everywhere else by the schema and the decoder alike)"
+  status: covered
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
+    COVERED 14 Sept (session 169, a9cca46); the model's own reading is the fifth run's (S56).
 findings:
 - id: F-146
   title: A block that ends at midnight could not be said at all
@@ -15384,6 +15463,38 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 169
+  date: 2026-09-14
+  title: "Group 2 rides the same run; Whisper beside the model; the fifth run's data done in two passes (S57, S58, R-411 to R-416)"
+  shipped: [S57, S58]
+  commits: ['031cabb', 'a9cca46', '36b684d']
+  numbers:
+    app_tests: 3658
+    app_test_files: 147
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 14 Sept, before the three commits on the same tree: 3658 tests in 147 files, all passing
+    (3451 after S55); tsc clean; eslint clean after data/ joined its ignore list (the whisper.cpp clone under
+    data/voice/whisper/src is not this repo's to lint); the role walk re-run, 5 passed; no migration or RPC
+    changed. The two new files are localRecognizer.test.ts and wav.test.ts.
+  summary: >-
+    The maintainer asked how things were going, whether group 2 would save a Colab run (yes, only if it
+    went in before the same run) and chose it: "group 2 too". The developer session wrote D132 (a move
+    gains an adjust; a split is a shorten plus an assign the board writes; "the job" is a reserved shift
+    name; a headcount intent writes through the job panel's own field edit; two repeat day words expand
+    into one command per day), R-412 to R-416 and S58, ran four lanes, three reviewers and a fix lane,
+    and in parallel built S57 (D131: a second recogniser with the S46 shape, Whisper in a container
+    beside the model, chosen by configuration, the browser's as the fallback), whose published arm64 image
+    turned out to crash on this CPU and is built locally instead. The data lane ran twice (S55's shapes,
+    then S58's), the second pass also closing two flags from the first (the manifest's stale seed, the
+    perturber rewriting an ISO date) and teaching the data to say midnight. Committed in order after one
+    green suite and role walk. Next: the maintainer's fifth Colab run on the 1000-row held-out set; while
+    it trains, 6b packaging is the next model-free piece.
 - id: 168
   date: 2026-09-14
   title: "The catalogue's groups 1 and 3 unparked: spans by their edges, other word orders, the board writing the lot (S55, R-404 to R-410, F-146)"
@@ -22698,21 +22809,10 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  stage: S58
-  text: "Group 2 of the catalogue before the same run --- adjust an edge, split, the job's hours, a job's headcount, every weekday (S58, R-412 to R-416, in progress)"
-  why: >-
-    The maintainer's word on 14 Sept (session 168): "group 2 too", so the fifth run is the only run.
-- kind: task
   stage: S56
   text: "The fifth run --- templates and held-out for S55's and S58's shapes, one Colab run, scored at the 0.95 bar (S56, R-410)"
   why: >-
     One retrain for both groups, the maintainer's word. While it trains on Colab the next entry proceeds.
-- kind: task
-  stage: S57
-  text: "Voice plan Stage 6, second half --- local Whisper through the model service so audio stays in the building (S57, R-411, in progress)"
-  why: >-
-    The browser's recogniser (S46) sends audio to the browser maker's service; the plan's second version
-    runs Whisper beside the model on the same box. Wanted before a site that will not accept the first.
 - kind: task
   text: "Voice plan Stage 8 --- the question catalog: twenty to thirty questions schedulers ask, one tested lookup each"
   why: >-
