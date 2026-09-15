@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-15'
-  tip: '1e46c57'
+  tip: 'fb6e12f'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2613,8 +2613,11 @@ stages:
   - 'session 168 conversation (the maintainer, 14 Sept: "one retrain")'
   - §19.101 (D130)
   - docs/agent-briefs/s56-a-data-brief.md
+  - docs/agent-briefs/s56-b-data-brief.md
+  - docs/agent-briefs/s56-c-short-prompt-brief.md
   delivers:
   - R-410
+  - R-417
   what: >-
     **Data follows the grammar (D126).** Templates for every S55 shape (durations, boundaries, the
     open edges, the word orders, take-off/pull, the time-of-day words, everyone and clear, cover and
@@ -2633,6 +2636,9 @@ stages:
     prompt at 1499 tokens, MAX_LEN 1792 for a longest example of 1757, the manifest naming the seed. What
     remains is the maintainer's Colab run (delete predictions.jsonl on Drive first, F-145; upload the new
     held-out, training and notebook files; Run all) and its score here.
+    **15 Sept (sessions 171 and 172):** the first fifth run was spent on the old data (F-148); the folder is
+    now uploaded from data/voice/colab with the fingerprinted notebook copy, and R-417 shrank the prompt to
+    197 tokens and MAX_LEN to 512 so the rerun costs roughly a third of the wasted one.
     trains, the queue's next model-free piece (Whisper, Stage 6's second half) proceeds — the
     maintainer's "in parallel" answered.
 - id: S57
@@ -11538,6 +11544,36 @@ requirements:
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
     COVERED 14 Sept (session 169, a9cca46); the model's own reading is the fifth run's (S56).
+- id: R-417
+  title: The model is trained and served with one short prompt; the long one is documentation; batches sorted by length; three epochs kept
+  source:
+  - 'session 172 conversation (the maintainer, 15 Sept: "The training was slower for the last round even with L4, is there any way to speed it up?" then "I don''t want to sacrifice quality", then "go")'
+  - docs/agent-briefs/s56-c-short-prompt-brief.md
+  stated_by: maintainer
+  claim: >-
+    The system prompt every training example carries and the served bar sends is one short paragraph
+    (about 120 to 180 tokens) naming the task, the ten intents, that every field is present with attach
+    and existing null, that a shift name stands in for hours, the reserved word everyone and the day
+    words; the field-by-field text is kept as a human-readable document no code reads. Training sorts
+    batches by length and uses a larger per-step batch on the L4 at the same effective batch of 32;
+    three epochs stay. The same 1000-row held-out set and the 0.95 bar judge the result, and the fourth
+    run's 99.6 clean and 97.2 perturbed is the number a short-prompt run must not fall below before its
+    model goes behind the board. The served model's schema fence is unchanged, so the prompt's length
+    cannot produce a malformed form.
+  verified_by:
+  - kind: manual
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V23 (the short prompt names every intent and the vocabulary), V26 and V34 re-pinned to it (R-417)"
+  - kind: manual
+    steps: "the prompt measured at 197 tokens through the service, the longest of the 7000 prepared examples at 455, MAX_LEN 512 (session 172, fb6e12f); the fifth run's score on the 1000-row set against the fourth run's 99.6 / 97.2 is still to come"
+  status: uncovered
+  note: >-
+    STATED 15 Sept (session 172). The reasoning the maintainer accepted: roughly 85 percent of the fifth
+    run's tokens were the same prompt re-read 21,000 times; the examples teach the shapes; the fourth run
+    scored 99.6 with a prompt half the size; a guess on an unseen phrasing is shown before it acts and
+    fails at the resolver with a question. Cutting epochs was offered and declined as the one lever
+    that trades quality for time. BUILT 15 Sept (session 172, fb6e12f); covered when the fifth run's score is in.
 findings:
 - id: F-148
   title: The fifth run predicted against the old held-out file still on Drive, and only the scorer here noticed
@@ -15525,6 +15561,33 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 172
+  date: 2026-09-15
+  title: "One short prompt for training and serving, so the fifth run costs a third (R-417)"
+  shipped: []
+  commits: ['fb6e12f']
+  numbers:
+    app_tests: 3663
+    app_test_files: 147
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 15 Sept, after the R-417 commit: 3663 tests in 147 files, all passing; tsc and
+    eslint clean; no board file changed, so the role walk was not re-run.
+  summary: >-
+    The maintainer asked why the run was slower on an L4 and whether anything could run in parallel.
+    Answer: about 85 percent of the tokens were the same 1,500-token prompt re-read 21,000 times; a
+    Colab GPU cannot be split, so the win is fewer tokens. Explained with the clerk-and-manual picture,
+    the risks placed (covered shapes: none; unseen phrasings: the guess is shown and fails at the
+    resolver; the schema fence is unchanged), epochs left alone as the one lever that trades quality;
+    the maintainer said go. One lane wrote the 197-token prompt (an existing test caught the missing
+    "the job"), moved the long text to a document, sorted batches by length, set 16 x 2, measured every
+    prepared example (455 tokens, MAX_LEN 512), re-pinned two wording tests, and rebuilt the Colab folder.
+    The maintainer uploads the four files again and runs; the score decides whether it ships.
 - id: 171
   date: 2026-09-15
   title: "The fifth run was spent on the old data: the notebook now carries its data's fingerprints (F-148)"
