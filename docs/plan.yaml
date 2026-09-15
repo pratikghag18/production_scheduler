@@ -11562,11 +11562,8 @@ requirements:
     cannot produce a malformed form.
   verified_by:
   - kind: manual
-  - kind: vitest
-    file: src/test/voiceData.test.ts
-    cases: "V23 (the short prompt names every intent and the vocabulary), V26 and V34 re-pinned to it (R-417)"
   - kind: manual
-    steps: "the prompt measured at 197 tokens through the service, the longest of the 7000 prepared examples at 455, MAX_LEN 512 (session 172, fb6e12f); the fifth run's score on the 1000-row set against the fourth run's 99.6 / 97.2 is still to come"
+    steps: "voiceData.test.ts V23, V26 and V34 pin the short prompt's vocabulary (named here as manual until the score is in, the validator's rule); the prompt measured at 197 tokens through the service, the longest of the 7000 prepared examples at 455, MAX_LEN 512 (session 172, fb6e12f); the fifth run's score on the 1000-row set against the fourth run's 99.6 / 97.2 is still to come"
   status: uncovered
   note: >-
     STATED 15 Sept (session 172). The reasoning the maintainer accepted: roughly 85 percent of the fifth
