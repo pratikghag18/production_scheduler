@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-14'
-  tip: '2344246'
+  updated: '2026-09-15'
+  tip: '1e46c57'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -11539,6 +11539,41 @@ requirements:
     STATED 14 Sept (session 168), the catalogue's group 2 (S53), chosen to ride the fifth run; design §19.103 (D132).
     COVERED 14 Sept (session 169, a9cca46); the model's own reading is the fifth run's (S56).
 findings:
+- id: F-148
+  title: The fifth run predicted against the old held-out file still on Drive, and only the scorer here noticed
+  tag: The data files were trusted by name
+  status: fixed
+  found_by: maintainer
+  stage: S56
+  refs:
+  - R-392
+  - R-410
+  - F-145
+  - F-147
+  story: >-
+    Reported 15 Sept (session 171): the run completed, and npm run voice:score refused the predictions
+    file with F-145's own message --- row ho-00000 answered "Staff Chidi Hoang to work on Plate Assembly
+    on Cell 3", the fourth run's first sentence, where the committed file says Tariq Petrov on Weld Bay 2.
+    The new heldout.jsonl had not replaced the old one on Drive, and the notebook reads whatever sits
+    under that name; the manifest it loads says 1000 held-out rows, and nothing compared the file to it.
+    F-145 stamped the predictions and F-147 stamped the adapter; the two data files were still taken on
+    trust. The adapter's trained-on.json settled it: gitSha 29bd4d0, 4000 rows, the old seed --- ALL three
+    files on Drive were the fourth run's. How they stayed there is not known: the developer session first
+    blamed Drive's "(1)" duplicate on a same-named upload, and the maintainer found no such copies, so the
+    upload most likely landed elsewhere or never completed, with no sign either way. The whole run was
+    spent on the old data. The lesson stands whatever the cause: nothing checked the files against what
+    the repo had prepared.
+  fix: >-
+    Session 171 (1e46c57). Immediate: delete every old file and folder on Drive first, then upload the three
+    data files and the notebook from data/voice/colab, and Run all --- a full retrain. For good: voice:prepare bakes the data
+    files' fingerprints into the notebook copy it writes beside them, so the notebook you upload refuses a
+    stale file on Drive in its first cell, whatever sits there; the manifest also carries the sha256
+    and row count of both data files, the notebook hashes the files on Drive against it in the cell that
+    loads them and refuses a difference or an old manifest with an F-148 message before training or
+    predicting, and the adapter's stamp takes the hashes from the manifest (brief
+    docs/agent-briefs/f-148-drive-files-must-match-manifest-brief.md). VT9 to VT11 pin it; the reviewer
+    recomputed every hash, ran the check in Python against a match, a change, a missing file and the
+    placeholder, and found the missing-file path printing a traceback, fixed.
 - id: F-147
   title: The fifth run skipped training because the fourth run's adapter sat on Drive under the same name
   tag: A saved model that cannot say what it was trained on
@@ -15490,6 +15525,33 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 171
+  date: 2026-09-15
+  title: "The fifth run was spent on the old data: the notebook now carries its data's fingerprints (F-148)"
+  shipped: []
+  commits: ['1e46c57']
+  numbers:
+    app_tests: 3663
+    app_test_files: 147
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 15 Sept, after the F-148 commit: 3663 tests in 147 files, all passing; tsc and
+    eslint clean; no board file changed, so the role walk was not re-run.
+  summary: >-
+    The maintainer's fifth run completed and the scorer here refused its predictions with F-145's message:
+    the held-out file on Drive was the fourth run's. The adapter's F-147 stamp showed the training file and
+    the manifest were old too; the run was spent on the old data. The developer session first blamed a
+    Drive duplicate, which the maintainer disproved, so the cause is recorded as unknown. The fix does not
+    depend on it: voice:prepare writes a fingerprinted copy of the notebook beside the data, and that copy
+    refuses any stale file in its first cell. The maintainer asked how to be sure the files are right:
+    the sizes, line counts, first row and manifest fields to compare, on this machine and on Drive, and
+    the notebook's own "matches" lines. Next: the maintainer empties the Drive folders, uploads the four
+    files from data/voice/colab, and runs the fifth run again.
 - id: 170
   date: 2026-09-14
   title: "The fifth run skipped training on the fourth run's adapter: a saved model now names its data (F-147)"

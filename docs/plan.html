@@ -113,17 +113,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 170 · 2026-09-14 · The fifth run skipped training on the fourth run's adapter: a saved model now names its data (F-147)</h2>
-  <div class="lead"><p>The maintainer pasted Colab's &quot;training skipped: a trained adapter already exists&quot; from the fifth run and asked whether it looked wrong. It did: the fourth run's adapter sat under the same fixed folder name, and the Train cell's only rule was that an adapter exists --- F-145's hole one folder over. Told the maintainer to interrupt, delete the adapter folder on Drive and Run all; recorded F-147; one lane stamped the adapter and the checkpoints with the manifest and the training file's hash and made the notebook refuse a missing or different stamp; a reviewer read the cell line by line and simulated the compare in Python. The fifth run is the maintainer's to restart.</p></div>
+  <h2>Session 171 · 2026-09-15 · The fifth run was spent on the old data: the notebook now carries its data's fingerprints (F-148)</h2>
+  <div class="lead"><p>The maintainer's fifth run completed and the scorer here refused its predictions with F-145's message: the held-out file on Drive was the fourth run's. The adapter's F-147 stamp showed the training file and the manifest were old too; the run was spent on the old data. The developer session first blamed a Drive duplicate, which the maintainer disproved, so the cause is recorded as unknown. The fix does not depend on it: voice:prepare writes a fingerprinted copy of the notebook beside the data, and that copy refuses any stale file in its first cell. The maintainer asked how to be sure the files are right: the sizes, line counts, first row and manifest fields to compare, on this machine and on Drive, and the notebook's own &quot;matches&quot; lines. Next: the maintainer empties the Drive folders, uploads the four files from data/voice/colab, and runs the fifth run again.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">3659</span><span class="l">app tests in 147 files — session 170, 2026-09-14</span></div>
+  <div class="stat ok"><span class="n">3663</span><span class="l">app tests in 147 files — session 171, 2026-09-15</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">856</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">80</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
   <div class="stat "><span class="n">310 / 359</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>2344246</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>1e46c57</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2295,7 +2295,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>147 things that weren't in the plan</h2>
+  <h2>148 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3593,6 +3593,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <div class="aside"><span class="k">Fix</span><p>Session 170 (2344246). Immediate, told to the maintainer: stop the run, delete the adapter folder (and any new predictions.jsonl) on Drive, Run all. For good: the notebook writes trained-on.json beside the adapter (the manifest's gitSha, row counts, seeds, and the training file's hash) and beside the checkpoints when training starts; an adapter or a checkpoint with no stamp, or a stamp that differs from the current manifest and file, is refused with both sides printed and an F-147 message, never skipped over (brief docs/agent-briefs/f-147-adapter-must-name-its-data-brief.md). VT8 asserts on the code; the reviewer walked the cells in order and ran the compare logic in Python. The fixed notebook is for the next run unless the maintainer's rerun had not started yet.</p></div>
   <p class="fine">R-392 · R-410 · F-145</p>
+</div>
+<div class="find fix" id="F-148">
+  <span class="tag">The data files were trusted by name · fixed · you found it · <a href="#S56">S56</a></span>
+  <h3>The fifth run predicted against the old held-out file still on Drive, and only the scorer here noticed</h3>
+  <p>Reported 15 Sept (session 171): the run completed, and npm run voice:score refused the predictions file with F-145's own message --- row ho-00000 answered &quot;Staff Chidi Hoang to work on Plate Assembly on Cell 3&quot;, the fourth run's first sentence, where the committed file says Tariq Petrov on Weld Bay 2. The new heldout.jsonl had not replaced the old one on Drive, and the notebook reads whatever sits under that name; the manifest it loads says 1000 held-out rows, and nothing compared the file to it. F-145 stamped the predictions and F-147 stamped the adapter; the two data files were still taken on trust. The adapter's trained-on.json settled it: gitSha 29bd4d0, 4000 rows, the old seed --- ALL three files on Drive were the fourth run's. How they stayed there is not known: the developer session first blamed Drive's &quot;(1)&quot; duplicate on a same-named upload, and the maintainer found no such copies, so the upload most likely landed elsewhere or never completed, with no sign either way. The whole run was spent on the old data. The lesson stands whatever the cause: nothing checked the files against what the repo had prepared.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 171 (1e46c57). Immediate: delete every old file and folder on Drive first, then upload the three data files and the notebook from data/voice/colab, and Run all --- a full retrain. For good: voice:prepare bakes the data files' fingerprints into the notebook copy it writes beside them, so the notebook you upload refuses a stale file on Drive in its first cell, whatever sits there; the manifest also carries the sha256 and row count of both data files, the notebook hashes the files on Drive against it in the cell that loads them and refuses a difference or an old manifest with an F-148 message before training or predicting, and the adapter's stamp takes the hashes from the manifest (brief docs/agent-briefs/f-148-drive-files-must-match-manifest-brief.md). VT9 to VT11 pin it; the reviewer recomputed every hash, ran the check in Python against a match, a change, a missing file and the placeholder, and found the missing-file path printing a traceback, fixed.</p></div>
+  <p class="fine">R-392 · R-410 · F-145 · F-147</p>
 </div>
 </section>
 
@@ -6123,6 +6131,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 171</b> · 2026-09-15 · The fifth run was spent on the old data: the notebook now carries its data's fingerprints (F-148) <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer's fifth run completed and the scorer here refused its predictions with F-145's message: the held-out file on Drive was the fourth run's. The adapter's F-147 stamp showed the training file and the manifest were old too; the run was spent on the old data. The developer session first blamed a Drive duplicate, which the maintainer disproved, so the cause is recorded as unknown. The fix does not depend on it: voice:prepare writes a fingerprinted copy of the notebook beside the data, and that copy refuses any stale file in its first cell. The maintainer asked how to be sure the files are right: the sizes, line counts, first row and manifest fields to compare, on this machine and on Drive, and the notebook's own &quot;matches&quot; lines. Next: the maintainer empties the Drive folders, uploads the four files from data/voice/colab, and runs the fifth run again.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>npm run test, 15 Sept, after the F-148 commit: 3663 tests in 147 files, all passing; tsc and eslint clean; no board file changed, so the role walk was not re-run.</p></div>
+    <p class="fine">3663 app tests in 147 files · 856 database checks · 80 migrations · tsc 0 · eslint 0 · commits 1e46c57</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 170</b> · 2026-09-14 · The fifth run skipped training on the fourth run's adapter: a saved model now names its data (F-147) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer pasted Colab's &quot;training skipped: a trained adapter already exists&quot; from the fifth run and asked whether it looked wrong. It did: the fourth run's adapter sat under the same fixed folder name, and the Train cell's only rule was that an adapter exists --- F-145's hole one folder over. Told the maintainer to interrupt, delete the adapter folder on Drive and Run all; recorded F-147; one lane stamped the adapter and the checkpoints with the manifest and the training file's hash and made the notebook refuse a missing or different stamp; a reviewer read the cell line by line and simulated the compare in Python. The fifth run is the maintainer's to restart.</p>
@@ -7404,5 +7420,5 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 </details>
 </section>
 
-<footer>Generated from <code>docs/plan.yaml</code> (updated 2026-09-14) by <code>scripts/render-plan.mjs</code>. Edit the YAML, never this page.</footer>
+<footer>Generated from <code>docs/plan.yaml</code> (updated 2026-09-15) by <code>scripts/render-plan.mjs</code>. Edit the YAML, never this page.</footer>
 </div></body></html>
