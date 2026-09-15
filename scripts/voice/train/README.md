@@ -8,29 +8,47 @@ Nothing in the app changes from running this. No model is served until its score
 
 ## What the pieces are
 
-| file                                    | what                                                                                                                        |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/voice/train/prepare.mjs`       | turns `data/voice/train.jsonl` and the committed `data/voice/heldout.jsonl` into the three files Colab needs                |
-| `scripts/voice/train/system_prompt.txt` | the one system prompt — read by `prepare.mjs` and, through `manifest.json`, by the notebook; never retyped in either place  |
-| `scripts/voice/train/train_qwen3.ipynb` | the Colab notebook that fine-tunes Qwen3 1.7B and scores it                                                                 |
-| `scripts/voice/train/score_port.py`     | a Python port of `scripts/voice/score.mjs`'s arithmetic — the notebook's own table, and a standalone check you can run here |
-| `scripts/voice/train/check_notebook.py` | pulls every code cell out of the notebook and checks it compiles — no GPU or Colab needed                                   |
+| file                                    | what                                                                                                                                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/voice/train/prepare.mjs`       | turns `data/voice/train.jsonl` and the committed `data/voice/heldout.jsonl` into the four files Colab needs (the three data files plus a stamped COPY of the notebook, F-148) |
+| `scripts/voice/train/system_prompt.txt` | the one system prompt — read by `prepare.mjs` and, through `manifest.json`, by the notebook; never retyped in either place                                                    |
+| `scripts/voice/train/train_qwen3.ipynb` | the Colab notebook that fine-tunes Qwen3 1.7B and scores it                                                                                                                   |
+| `scripts/voice/train/score_port.py`     | a Python port of `scripts/voice/score.mjs`'s arithmetic — the notebook's own table, and a standalone check you can run here                                                   |
+| `scripts/voice/train/check_notebook.py` | pulls every code cell out of the notebook and checks it compiles — no GPU or Colab needed                                                                                     |
 
 ## Steps
 
 1. **On this machine:** `npm run voice:generate` (writes `data/voice/train.jsonl`, gitignored,
-   7000 rows) then `npm run voice:prepare`. The folder `data/voice/colab/` now holds three files:
-   `train.chat.jsonl`, `heldout.jsonl`, `manifest.json`. The command prints the manifest — check
-   `trainRows` and `heldoutRows` look right, and note `ruleParserBaseline`: that is the number
-   the trained model has to beat.
+   7000 rows) then `npm run voice:prepare`. The folder `data/voice/colab/` now holds four files:
+   `train.chat.jsonl`, `heldout.jsonl`, `manifest.json`, and a COPY of the notebook,
+   `train_qwen3.ipynb`, with this run's own fingerprints baked into its Settings cell (F-148 —
+   see step 2). The command prints the manifest — check `trainRows` and `heldoutRows` look
+   right, and note `ruleParserBaseline`: that is the number the trained model has to beat.
 
-2. **Google Drive:** make a folder `scheduler-voice/data` and upload those three files there.
+2. **Google Drive:** make a folder `scheduler-voice/data` (first time only). **Delete every file
+   already in that folder before uploading**, then upload the three data files from
+   `data/voice/colab/` there (`train.chat.jsonl`, `heldout.jsonl`, `manifest.json` — the notebook
+   copy goes to Colab itself, step 3 below, not to this Drive folder), and check each file's size
+   and date in the Drive folder afterward. Do this every run: the fifth Colab run found all three
+   data files stale on Drive, including `manifest.json` itself — an old same-named file had been
+   left in place instead of the one that run actually prepared. How is not known (a same-named web
+   upload is one way that can happen, but the maintainer found no evidence it was); delete-then-
+   upload-then-check is the reliable habit regardless of cause. The notebook's own data-load cell
+   is the real check — it refuses to proceed on a stale file (F-148), naming which one and both
+   hashes and row counts, rather than silently training or scoring against the wrong data.
 
-3. **Colab:** open `train_qwen3.ipynb` (File → Upload notebook). Also upload
+3. **Colab:** open `data/voice/colab/train_qwen3.ipynb` — the COPY `npm run voice:prepare` just
+   wrote, with this run's fingerprints baked in — NOT `scripts/voice/train/train_qwen3.ipynb`, the
+   source file in the repo, which carries only a placeholder and refuses to run at all (F-148:
+   "this notebook has not been prepared"). (File → Upload notebook.) Also upload
    `scripts/voice/train/score_port.py` into the notebook's own file browser (the folder icon on
    the left, drag the file in, or use its upload button) — the scoring cell imports it from
    `/content/score_port.py` and fails with a plain message if it is missing. Then:
-   Runtime → Change runtime type → T4 GPU, then Runtime → Run all. Measured on the second run,
+   Runtime → Change runtime type → T4 GPU, then Runtime → Run all. The first code cell to run
+   after mounting Drive checks the three data files there against this notebook's own baked-in
+   fingerprints and prints one line per file confirming it matches, or refuses (F-148) naming
+   whichever file is stale, before touching training or prediction at all. Measured on the second
+   run,
    a T4 with fp16 and batch 16 x 2: training took over an hour and the (then 400-row, then 500-row
    -- S50 added a fifth intent, `several`, then 800-row -- S56 added replace/swap/copy, an eighth
    intent, now 1000-row -- S58 added split/headcount, a tenth) Predict cell about another hour
@@ -57,7 +75,9 @@ Nothing in the app changes from running this. No model is served until its score
    The notebook now refuses an adapter or a checkpoint trained on OTHER data on its own
    (F-147): beside `adapter_config.json` and beside the newest `checkpoint-<step>`, the Train
    cell writes its own `trained-on.json` (the manifest's `gitSha`, `trainRows`, `heldoutRows`,
-   `seeds`, and a streamed sha256 of `train.chat.jsonl`) the moment training starts or finishes.
+   `seeds`, and — F-148 — `train.chat.jsonl`'s and `heldout.jsonl`'s sha256, taken from
+   `manifest.json`'s own `files` block rather than re-hashed, since the data-load cell has
+   already checked that block against Drive) the moment training starts or finishes.
    Before skipping training or resuming a checkpoint, that stamp is read back and compared
    field by field against the CURRENT run's own data; a mismatch prints both sides and stops
    the cell (`raise SystemExit`) — no setting overrides a mismatch. A folder with no stamp at
@@ -123,7 +143,9 @@ Nothing in the app changes from running this. No model is served until its score
 
 ## What you can check without Colab, on this machine
 
-- `npm run voice:prepare` runs end to end and prints a manifest.
+- `npm run voice:prepare` runs end to end, prints a manifest, and writes a stamped notebook
+  copy to `data/voice/colab/train_qwen3.ipynb` (F-148) — upload that, not
+  `scripts/voice/train/train_qwen3.ipynb`.
 - `npx vitest run src/test/voiceTrain.test.ts src/test/voiceData.test.ts` — the pure pieces
   (the chat-row format, the predictions-file round trip through `score.mjs`, the manifest's
   sample) and the training-set generator underneath it.
@@ -167,7 +189,7 @@ without failing on the llama.cpp clone; it checks for `convert_hf_to_gguf.py` in
 Two real runs scored `product` at 2.5% before the cause was found: `MAX_LEN = 512` was shorter
 than a full training conversation, so `SFTConfig(max_length=MAX_LEN)` silently cut every row off
 before the answer — the system prompt alone runs 450 tokens, and the answer comes last. `MAX_LEN`
-is now 1536 (raised from 1280 at S56, when replace/swap/copy and the widened grammar's own longer
+is now 1792 (raised from 1280 to 1536 at S56's first pass and to 1792 at its second, when replace/swap/copy and the widened grammar's own longer
 sentences pushed the longest chat row to about 1449 tokens, measured with the served model's own
 `/tokenize` endpoint — 1280 was itself raised from 1024 in S50, when the widened prompt and a
 several of three measured about 940 tokens), and the cell after the chat-template round trip

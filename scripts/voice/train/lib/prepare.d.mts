@@ -25,6 +25,13 @@ export interface RuleParserBaseline {
 
 export function ruleParserBaseline(heldoutRows: VoiceRow[]): RuleParserBaseline;
 
+export function sha256Hex(text: string): string;
+
+export interface ManifestFileEntry {
+  sha256: string;
+  rows: number;
+}
+
 export interface PrepareManifest {
   gitSha: string;
   generatedAt: string;
@@ -34,6 +41,10 @@ export interface PrepareManifest {
   systemPrompt: string;
   ruleParserBaseline: RuleParserBaseline;
   sample: { id: string; sentence: string; canonicalForm: string };
+  files: {
+    "train.chat.jsonl": ManifestFileEntry;
+    "heldout.jsonl": ManifestFileEntry;
+  };
 }
 
 export function buildManifest(args: {
@@ -44,4 +55,18 @@ export function buildManifest(args: {
   trainSeed: number;
   heldoutSeed: number;
   generatedAt: string;
+  trainChatText: string;
+  heldoutText: string;
 }): PrepareManifest;
+
+export function buildExpectedFilesLines(args: {
+  gitSha: string;
+  manifest: PrepareManifest;
+  manifestText: string;
+}): string[];
+
+export function replaceCellSourceInRawText(
+  rawText: string,
+  cellIndex: number,
+  newLines: string[],
+): string;

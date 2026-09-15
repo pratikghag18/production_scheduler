@@ -13,9 +13,23 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseJsonl, buildChatRows, assertDisjoint, buildManifest } from "./lib/prepare.mjs";
+import {
+  parseJsonl,
+  buildChatRows,
+  assertDisjoint,
+  buildManifest,
+  buildExpectedFilesLines,
+  replaceCellSourceInRawText,
+} from "./lib/prepare.mjs";
 
 const SYSTEM_PROMPT_PATH = fileURLToPath(new URL("./system_prompt.txt", import.meta.url));
+const SOURCE_NOTEBOOK_PATH = fileURLToPath(new URL("./train_qwen3.ipynb", import.meta.url));
+
+// The exact line the notebook checked into the repo carries in its
+// Settings cell (F-148 design note) -- this run's fingerprints replace it
+// in the COPY written to `data/voice/colab/`; the source notebook itself
+// is never touched by this script.
+const EXPECTED_FILES_PLACEHOLDER_LINE = "EXPECTED_FILES = None\n";
 
 // The fixed seeds `package.json`'s own scripts use to generate these files
 // (`voice:generate` for training; S42-a's held-out generation, run once, for
@@ -72,27 +86,66 @@ function main() {
   mkdirSync(outDir, { recursive: true });
 
   const chatRows = buildChatRows(systemPrompt, trainRows);
-  writeFileSync(
-    resolve(outDir, "train.chat.jsonl"),
-    chatRows.map((r) => JSON.stringify(r)).join("\n") + "\n",
-    "utf8",
-  );
+  const trainChatText = chatRows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  writeFileSync(resolve(outDir, "train.chat.jsonl"), trainChatText, "utf8");
   writeFileSync(resolve(outDir, "heldout.jsonl"), heldoutText, "utf8");
 
+  const sha = gitSha();
   const manifest = buildManifest({
     trainRows,
     heldoutRows,
     systemPrompt,
-    gitSha: gitSha(),
+    gitSha: sha,
     trainSeed: TRAIN_SEED,
     heldoutSeed: HELDOUT_SEED,
     generatedAt: new Date().toISOString(),
+    trainChatText,
+    heldoutText,
   });
-  writeFileSync(resolve(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  const manifestText = JSON.stringify(manifest, null, 2) + "\n";
+  writeFileSync(resolve(outDir, "manifest.json"), manifestText, "utf8");
+
+  // F-148 design note: an old same-named file can be left on Drive instead
+  // of the one this run actually prepared (how is not always known), so
+  // even `manifest.json` on Drive can be a stale copy sitting under the
+  // expected name. A COPY of the notebook, with this run's own fingerprints
+  // baked into its Settings cell, is what actually gets uploaded to Colab
+  // -- the notebook's own data-load cell checks Drive's files against
+  // THIS, not against whatever manifest.json happens to be sitting on
+  // Drive.
+  const sourceNotebookText = readFileSync(SOURCE_NOTEBOOK_PATH, "utf8");
+  const notebookCells = JSON.parse(sourceNotebookText).cells;
+  const settingsCellIndex = notebookCells.findIndex(
+    (cell) => cell.cell_type === "code" && cell.source.join("").includes("# Settings -- every"),
+  );
+  if (settingsCellIndex === -1) {
+    throw new Error("prepare.mjs: Settings cell not found in train_qwen3.ipynb");
+  }
+  const settingsSource = notebookCells[settingsCellIndex].source;
+  const placeholderIdx = settingsSource.indexOf(EXPECTED_FILES_PLACEHOLDER_LINE);
+  if (placeholderIdx === -1) {
+    throw new Error(
+      "prepare.mjs: EXPECTED_FILES placeholder not found in train_qwen3.ipynb's Settings " +
+        "cell -- has the placeholder line changed?",
+    );
+  }
+  const expectedFilesLines = buildExpectedFilesLines({ gitSha: sha, manifest, manifestText });
+  const newSettingsSource = [
+    ...settingsSource.slice(0, placeholderIdx),
+    ...expectedFilesLines,
+    ...settingsSource.slice(placeholderIdx + 1),
+  ];
+  const notebookCopyText = replaceCellSourceInRawText(
+    sourceNotebookText,
+    settingsCellIndex,
+    newSettingsSource,
+  );
+  writeFileSync(resolve(outDir, "train_qwen3.ipynb"), notebookCopyText, "utf8");
 
   console.log(
     `wrote ${chatRows.length} chat rows and ${heldoutRows.length} held-out rows to ${outDir}`,
   );
+  console.log(`wrote a stamped notebook copy to ${resolve(outDir, "train_qwen3.ipynb")}`);
   console.log(JSON.stringify(manifest, null, 2));
 }
 
