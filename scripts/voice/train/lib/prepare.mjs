@@ -183,12 +183,15 @@ export function replaceCellSourceInRawText(rawText, cellIndex, newLines) {
     searchStart = startIdx + 1;
   }
   const arrayStart = startIdx + marker.length;
-  const closeMarker = "\r\n   ]";
+  // The working copy may carry either line ending (git normalises on commit; a
+  // script that re-serialises the notebook writes LF): match the file's own.
+  const nl = rawText.includes("\r\n") ? "\r\n" : "\n";
+  const closeMarker = nl + "   ]";
   const closeIdx = rawText.indexOf(closeMarker, arrayStart);
   if (closeIdx === -1) {
     throw new Error("replaceCellSourceInRawText: closing bracket not found");
   }
-  const body = newLines.map((line) => "    " + JSON.stringify(line)).join(",\r\n");
-  const replacement = marker + "\r\n" + body + closeMarker;
+  const body = newLines.map((line) => "    " + JSON.stringify(line)).join("," + nl);
+  const replacement = marker + nl + body + closeMarker;
   return rawText.slice(0, startIdx) + replacement + rawText.slice(closeIdx + closeMarker.length);
 }
