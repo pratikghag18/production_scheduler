@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-15'
-  tip: 'fb6e12f'
+  tip: 'a07fdeb'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2518,7 +2518,7 @@ stages:
     **Groups 1 and 3 unparked 14 Sept (session 168)** together, one retrain: S55 (the sentences and the
     board's lot) and S56 (the data and the fifth run), R-404 to R-410. **Group 2 unparked the same day**
     as S58 (R-412 to R-416) to ride the same run. Still parked: "undo that" (its own parked entry); the
-    questions are Stage 8.
+    questions are Stage 8. **Groups 1, 2 and 3 are taught and served as of 15 Sept (session 173).**
 - id: S54
   track: core
   num: 54
@@ -2607,7 +2607,7 @@ stages:
   track: core
   num: 56
   title: The fifth run — the data widens for S55 and the model is taught once
-  status: open
+  status: done
   owner: maintainer
   refs:
   - 'session 168 conversation (the maintainer, 14 Sept: "one retrain")'
@@ -2639,6 +2639,11 @@ stages:
     **15 Sept (sessions 171 and 172):** the first fifth run was spent on the old data (F-148); the folder is
     now uploaded from data/voice/colab with the fingerprinted notebook copy, and R-417 shrank the prompt to
     197 tokens and MAX_LEN to 512 so the rerun costs roughly a third of the wasted one.
+    **DONE 15 Sept (session 173, a07fdeb): the fifth run, on the 1000-row set ---** clean 499/500 (99.8%), perturbed 487/500 (97.4%); by intent every one at 96% or above on perturbed sentences, unassign, move and split at 100%; intent right on all 1214 forms; every field at 98.8% or above; extra keys 0; every sentence checked. The model file
+    behind the board is the fifth run's Q4_K_M (the fourth kept beside it), the container restarted, and
+    twelve sentences read right through it: a length, clear, cover, swap, same as yesterday, on leave till
+    Friday, extend by an hour, split at noon, add to the job, a headcount, every weekday, and the maintainer's
+    own shift-by-name sentence from Stage 7.
     trains, the queue's next model-free piece (Whisper, Stage 6's second half) proceeds — the
     maintainer's "in parallel" answered.
 - id: S57
@@ -11389,11 +11394,25 @@ requirements:
   claim: >-
     An expansion above 100 commands is a question naming the count and asking for a smaller span (one cell, one day), never a silent cut. Below it the lot is R-400's: numbered questions per step, the readout of every command, one yes, a failure stops it and says how many were done. The rule parser reads every sentence of R-404 to R-409 (tests pin each); the decoder reads the three new intents, the four day words and the until field, and refuses anything else as before; the training templates cover every shape, the held-out set carries them, and one Colab run (the fifth) is scored on it at the 0.95 bar before the model file behind the board is replaced. Nothing in the bar executes a step any differently than a several of the same commands typed by hand would.
   verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-x-4 (101 commands refused with the count), CB-x-7 and CB-x-15 (the lot lists five and the rest as a count), CB-x-12 (Escape, a cancel word and typing drop an expanded lot)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "CP6 (lot_too_big at 101, 100 allowed)"
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V4 (the held-out set: 1000 rows, ten intents, half clean), V6 and V13 (the rule parser's baseline on it), V2 over the 92 templates"
+  - kind: vitest
+    file: src/test/voiceTrain.test.ts
+    cases: "VT7 (the manifest's seed), VT9 to VT11 (the notebook refuses stale data files), VT8 (a stamped adapter)"
   - kind: manual
     steps: "the ceiling and the lot's shape are pinned (commandBar.test.tsx CB-x-4, CB-x-7, CB-x-12, CB-x-15; commandResolve.test.ts CP6 lot_too_big at 101, 100 allowed); the data is done in two passes (df9758e, 36b684d: 92 templates, ten intents, 1000 held-out rows, 7000 training rows, the prompt at 1499 tokens, MAX_LEN 1792); the fifth run's score on that held-out set, at the 0.95 bar, is the maintainer's Colab run and is not yet in hand"
-  status: uncovered
+  status: covered
   note: >-
     STATED 14 Sept (session 168): "one retrain"; design §19.101 (D130 items 5 and the closing paragraph).
+    COVERED 15 Sept (session 173): the fifth run on the 1000-row set, clean 499/500 (99.8%), perturbed 487/500 (97.4%); by intent every one at 96% or above on perturbed sentences, unassign, move and split at 100%; intent right on all 1214 forms; every field at 98.8% or above; extra keys 0; every sentence checked. PASS at the 0.95 bar; the
+    served model read twelve sentences across every shape right.
 - id: R-411
   title: A local recogniser (Whisper) hears the microphone when one is configured, so audio stays in the building, and the browser's is the fallback
   source:
@@ -11561,9 +11580,12 @@ requirements:
     model goes behind the board. The served model's schema fence is unchanged, so the prompt's length
     cannot produce a malformed form.
   verified_by:
+  - kind: vitest
+    file: src/test/voiceData.test.ts
+    cases: "V23 (the short prompt names every intent and the vocabulary), V26 and V34 (re-pinned to it)"
   - kind: manual
     steps: "voiceData.test.ts V23, V26 and V34 pin the short prompt's vocabulary (named here as manual until the score is in, the validator's rule); the prompt measured at 197 tokens through the service, the longest of the 7000 prepared examples at 455, MAX_LEN 512 (session 172, fb6e12f); the fifth run's score on the 1000-row set against the fourth run's 99.6 / 97.2 is still to come"
-  status: uncovered
+  status: covered
   note: >-
     STATED 15 Sept (session 172). The reasoning the maintainer accepted: roughly 85 percent of the fifth
     run's tokens were the same prompt re-read 21,000 times; the examples teach the shapes; the fourth run
@@ -11572,7 +11594,9 @@ requirements:
     that trades quality for time. BUILT 15 Sept (session 172, fb6e12f); covered when the fifth run's score is in.
     Two stumbles on the rerun's first cells, both fixed the same evening: the F-142 median-length floor of 300
     tokens tripped on the 293-token median the short prompt gives (lowered to 150, 9b907a5), and the
-    notebook splice in prepare wanted Windows line endings (d5dfd94).
+    notebook splice in prepare wanted Windows line endings (d5dfd94). A third at the trainer: the Colab
+    trainer refuses group_by_length (4d47b1b), so that lever is gone. COVERED 15 Sept (session 173): the
+    short-prompt run scored clean 499/500 (99.8%), perturbed 487/500 (97.4%); by intent every one at 96% or above on perturbed sentences, unassign, move and split at 100%; intent right on all 1214 forms; every field at 98.8% or above; extra keys 0; every sentence checked --- above the fourth run's 99.6 / 97.2 on both counts.
 findings:
 - id: F-148
   title: The fifth run predicted against the old held-out file still on Drive, and only the scorer here noticed
@@ -15560,6 +15584,32 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 173
+  date: 2026-09-15
+  title: "The fifth run passes at 99.8 / 97.4 with the short prompt and is served; the catalogue's three command groups are taught (S56, R-410, R-417)"
+  shipped: [S56]
+  commits: ['9b907a5', 'd5dfd94', '4d47b1b', 'a07fdeb']
+  numbers:
+    app_tests: 3663
+    app_test_files: 147
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    No app code changed since session 172's run; the notebook, the prepare script and a comment changed.
+    The model file under data/voice/model is the fifth run's Q4_K_M (gitignored); the fourth is kept beside it.
+  summary: >-
+    The rerun stumbled three times in its first cells (an F-142 length floor written for the long prompt,
+    the prepare splice wanting Windows line endings, the Colab trainer refusing group_by_length), each fixed
+    and re-prepared the same morning; the maintainer asked whether a small test had been run first (it had
+    not --- the checks were the ones possible without a GPU; a smoke switch goes to the queue). The run
+    completed and scored clean 499/500 (99.8%), perturbed 487/500 (97.4%); by intent every one at 96% or above on perturbed sentences, unassign, move and split at 100%; intent right on all 1214 forms; every field at 98.8% or above; extra keys 0; every sentence checked, above the fourth run on both counts with a prompt a seventh of the
+    size. The model went behind the board and twelve sentences across every shape read right. S56 closes;
+    the catalogue's groups 1, 2 and 3 are taught and served; Whisper is in (S57, needing the maintainer's
+    .env.local line). Next: 6b packaging, or Stage 8's questions, at the maintainer's word.
 - id: 172
   date: 2026-09-15
   title: "One short prompt for training and serving, so the fifth run costs a third (R-417)"
@@ -22987,10 +23037,11 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  stage: S56
-  text: "The fifth run --- templates and held-out for S55's and S58's shapes, one Colab run, scored at the 0.95 bar (S56, R-410)"
+  text: "A smoke run for the notebook --- a Settings switch that trains on 50 rows for one epoch and predicts 20, so the whole path from install to GGUF is proved in minutes before a real run"
   why: >-
-    One retrain for both groups, the maintainer's word. While it trains on Colab the next entry proceeds.
+    The maintainer's question on 15 Sept (session 173): "I thought we were going to do a small test first".
+    Three of the morning's stops (the length floor, the splice's line ending, the trainer refusing an
+    argument) would have shown in ten minutes on a tiny run instead of at the cost of a GPU session.
 - kind: task
   text: "Voice plan Stage 8 --- the question catalog: twenty to thirty questions schedulers ask, one tested lookup each"
   why: >-
