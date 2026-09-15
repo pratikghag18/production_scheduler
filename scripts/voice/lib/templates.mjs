@@ -10,7 +10,7 @@
 // `parseCommand(sentence(slots))` equals `form(slots)` is a real check, not a
 // tautology (brief §2).
 import { pick, randInt, chance } from "./rng.mjs";
-import { buildTimePair, TIME_SEPARATORS } from "./time.mjs";
+import { buildTimePair, TIME_SEPARATORS, resolveLoneTime } from "./time.mjs";
 import {
   PEOPLE_ALL,
   PEOPLE_DEMO,
@@ -35,9 +35,6 @@ import {
   BOOK_VERBS,
   UNASSIGN_VERBS,
   MOVE_VERBS,
-  REPLACE_VERBS,
-  SWAP_VERBS,
-  COPY_VERBS,
   ABSENCE_WORDS,
   TIME_OF_DAY_WORDS,
   EVERYONE,
@@ -45,6 +42,13 @@ import {
   END_OF_SHIFT,
   END_OF_DAY,
   DAY_END,
+  // S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-412/413/414/415/416,
+  // design §19.103/D132): the group-2 shapes' own exports -- the S56-b
+  // brief's same rule as S56-a's own comment above, never retyped here.
+  ADJUST_VERBS,
+  HEADCOUNT_VERBS,
+  REPEAT_WORDS,
+  JOB_HOURS,
 } from "../../../src/lib/command/parse.ts";
 
 // R-407 (S55): the raw words that canonicalize to `EVERYONE` on a removal or
@@ -65,6 +69,14 @@ const EVERYONE_ALIASES = ["everyone", "everybody", "all"];
 // step asks for (`for word of ["this X"]`), the same way U8-U10's "clear"
 // exclusion (S55) was found while doing an unrelated migration.
 const TIME_OF_DAY_WORDS_THIS = TIME_OF_DAY_WORDS.filter((w) => w !== "night");
+
+/** S58 (R-412, brief §2 M13/M14): `ADJUST_VERBS`'s own two shapes, split
+ *  by which clause each half reads -- extend/lengthen/shorten always a
+ *  distance ("by <duration>"), end/finish a time or a distance (M14's own
+ *  three kinds). Derived from the export (R-391: never retype a word the
+ *  grammar owns), not two new hard-coded lists. */
+const ADJUST_DISTANCE_VERBS = ADJUST_VERBS.filter((v) => v !== "end" && v !== "finish");
+const ADJUST_AT_VERBS = ADJUST_VERBS.filter((v) => v === "end" || v === "finish");
 
 function capitalize(word) {
   return word.charAt(0).toUpperCase() + word.slice(1);
@@ -191,6 +203,43 @@ function randomHeadcount(rng) {
   return { text: `for ${n} ${word}`, headcount: n };
 }
 
+/** S58 (R-412, brief §2 M13/M14): a duration shape restricted to the three
+ *  spellings those two ids' own bullets name -- "N minutes" / "an hour" /
+ *  "N hours" -- a NARROWER set than A14-duration's own six DU-numbered
+ *  shapes (this is an adjust's DISTANCE, never an assign's whole span; the
+ *  wider set stays A14's own job). Always a positive value -- the sign
+ *  (extend/shorten, earlier/later) is decided by the caller. */
+function randomAdjustDuration(rng) {
+  const kind = pick(rng, ["minutes", "anHour", "hours"]);
+  if (kind === "anHour") return { text: "an hour", minutes: 60 };
+  if (kind === "hours") {
+    const n = randInt(rng, 1, 6);
+    return { text: `${n} hours`, minutes: n * 60 };
+  }
+  const n = pick(rng, [15, 30, 45, 90]);
+  return { text: `${n} minutes`, minutes: n };
+}
+
+/** S58 (R-412/R-413, brief §2 M14/M15/X1): one time SPEC for a lone edge
+ *  (never a `from`/`to` pair -- `randomSpan`/`randomBareSpan` own that), fed
+ *  to `resolveLoneTime` (`time.mjs`) by every caller. `allowMidnight` draws
+ *  an occasional "midnight" (F-146) -- callers pass it only for an END
+ *  edge, never a START (the S58 brief's own "a START of midnight stays
+ *  {0,0}" rule -- there is nothing DAY_END-shaped about a START, so a
+ *  caller that never asks for it never has to filter one back out). */
+function randomLoneTimeSpec(rng, allowMidnight) {
+  if (allowMidnight && chance(rng, 0.12)) return { kind: "midnight" };
+  if (chance(rng, 0.15)) return { kind: "noon" };
+  return chance(rng, 0.5)
+    ? {
+        kind: "ampm",
+        hour: randInt(rng, 1, 22),
+        minute: pick(rng, [0, 15, 30, 45]),
+        spaced: chance(rng, 0.5),
+      }
+    : { kind: "24h", hour: randInt(rng, 1, 22), minute: pick(rng, [0, 15, 30, 45]) };
+}
+
 /** A random `from <t1> <sep> <t2>` pair, in one of the styles the grammar
  *  accepts: plain 24h, am/pm, noon/midnight, and -- when the end hour allows
  *  it -- the bare small number that only the afternoon rule turns into an
@@ -222,13 +271,23 @@ function randomSpan(rng, forcedSep) {
   }
 
   let endSpec;
-  const endStyle = pick(rng, ["24h", "ampm", "ambiguous"]);
-  if (endStyle === "ambiguous" && endHour > 12 && endHour <= 23) {
-    endSpec = { kind: "24h", hour: endHour - 12, minute: endMinute }; // relies on the afternoon rule
-  } else if (endStyle === "ampm") {
-    endSpec = { kind: "ampm", hour: endHour, minute: endMinute, spaced: chance(rng, 0.5) };
+  // F-146 (S56-b brief §4, the first pass's own flag): draw an END of
+  // "midnight" sometimes, on top of the ordinary 24h/ampm/ambiguous styles
+  // below -- `buildTimePair` now knows to write DAY_END for it (this file's
+  // own change, above), so every template that calls `randomSpan` (book's
+  // own included) gets a little of that coverage for free, not just
+  // A23-to-midnight's own dedicated rows.
+  if (chance(rng, 0.08)) {
+    endSpec = { kind: "midnight" };
   } else {
-    endSpec = { kind: "24h", hour: endHour, minute: endMinute };
+    const endStyle = pick(rng, ["24h", "ampm", "ambiguous"]);
+    if (endStyle === "ambiguous" && endHour > 12 && endHour <= 23) {
+      endSpec = { kind: "24h", hour: endHour - 12, minute: endMinute }; // relies on the afternoon rule
+    } else if (endStyle === "ampm") {
+      endSpec = { kind: "ampm", hour: endHour, minute: endMinute, spaced: chance(rng, 0.5) };
+    } else {
+      endSpec = { kind: "24h", hour: endHour, minute: endMinute };
+    }
   }
 
   const sep = forcedSep ?? pick(rng, TIME_SEPARATORS);
@@ -277,8 +336,14 @@ function randomBareSpan(rng, forcedSep) {
 // still hours-only (`shift: null`); the shift-grammar's own training rows
 // are the data lane's job (docs/agent-briefs/s52-a-shift-grammar-brief.md
 // §2 item 5).
+// S58 (R-412, design §19.103/D132 item 1): every `MoveCommand` now carries
+// `adjust: Adjust | null` -- defaulted here to `null` so every move
+// template (M1-M12 unchanged, the new M13-M15 override it) gets the field
+// without retyping it at each call site; every other intent is untouched.
 function baseCommand(intent, extra) {
-  return { intent, shift: null, ...extra };
+  const defaults =
+    intent === "move" ? { intent, shift: null, adjust: null } : { intent, shift: null };
+  return { ...defaults, ...extra };
 }
 
 // ---------------------------------------------------------------------------
@@ -961,6 +1026,155 @@ const assignTemplates = [
         shift: s.shift,
       }),
   },
+  // -------------------------------------------------------------------------
+  // S58 (design §19.103/D132): group 2's assign-side shapes -- the job's
+  // hours (R-414), an assign repeated every weekday (R-416), and F-146's own
+  // "to midnight" case (the first pass's own flag, S56-b brief §4).
+  // -------------------------------------------------------------------------
+  {
+    // JB1-JB3: "add/put X to|on the <part> job|run on <cell> [day]" -- the
+    // block takes the job's OWN hours, never a clock; start/end stay null.
+    // JB3's own case (a quoted part containing a keyword) is exercised for
+    // free by drawing `part` from the whole PARTS_ALL pool -- several of
+    // `PARTS_REALISTIC`'s own entries need `qw`'s quoting (`pools.mjs`'s own
+    // comment: "on"/"at"/"in"/"," on purpose).
+    id: "A21-add-to-job",
+    intent: "assign",
+    genSlots: (rng) => {
+      const withDay = chance(rng, 0.5);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        prep: pick(rng, ["to", "on"]),
+        noun: pick(rng, ["job", "run"]),
+        op: pick(rng, PEOPLE_ALL),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        withDay,
+        day: withDay ? randomDay(rng) : null,
+      };
+    },
+    sentence: (s) => {
+      const dayText = s.withDay ? ` ${s.day.text}` : "";
+      return `${s.verb} ${qw(s.op)} ${s.prep} the ${qw(s.part)} ${s.noun} on ${qw(s.cell)}${dayText}`;
+    },
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: s.withDay ? s.day.day : null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: JOB_HOURS,
+      }),
+  },
+  {
+    // RW1/RW3/RW4: "every weekday"/"weekdays"/"every day", with or without
+    // "this week"/"next week" (defaults to this week), narrowed by hours (a
+    // BARE trailing pair, RW1's own shape -- no "from") or a shift (RW3).
+    // The repeat-day clause is stripped from the WHOLE sentence before any
+    // verb dispatch runs (parse.ts's own `extractRepeatDayClause`), so its
+    // position relative to the hours/shift clause is not load-bearing to
+    // the parser -- kept here right after the place, matching every RW
+    // case in the brief verbatim.
+    id: "A22-every-weekday",
+    intent: "assign",
+    genSlots: (rng) => {
+      const repeatWord = pick(rng, REPEAT_WORDS);
+      const kind = repeatWord === "every day" ? "every_day" : "weekdays";
+      const withWeek = chance(rng, 0.7);
+      const week = withWeek ? pick(rng, ["this_week", "next_week"]) : "this_week";
+      const weekText = withWeek ? (week === "this_week" ? " this week" : " next week") : "";
+      const withShift = chance(rng, 0.3);
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        prep: pick(rng, ["to", "on"]),
+        op: pick(rng, PEOPLE_ALL),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        repeatWord,
+        kind,
+        week,
+        weekText,
+        withShift,
+        span: withShift ? null : randomBareSpan(rng),
+        shiftName: withShift ? pick(rng, SHIFTS_ALL) : null,
+        shiftPrep: withShift ? pick(rng, ["for", "during"]) : null,
+      };
+    },
+    sentence: (s) => {
+      const tail = s.withShift ? `${s.shiftPrep} shift ${qwShift(s.shiftName)}` : s.span.text;
+      return `${s.verb} ${qw(s.op)} ${s.prep} ${qw(s.part)} on ${qw(s.cell)} ${s.repeatWord}${s.weekText} ${tail}`;
+    },
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: { kind: s.kind, week: s.week },
+        start: s.withShift ? null : s.span.start,
+        end: s.withShift ? null : s.span.end,
+        attach: null,
+        existing: null,
+        shift: s.withShift ? s.shiftName : null,
+      }),
+  },
+  {
+    // F-146 (the first pass's own flag, S56-b brief §4): an evening start
+    // to midnight, said explicitly ("from 8 pm to midnight") or through a
+    // duration that lands exactly on minute 1440 ("from 20 for 4 hours") --
+    // both must write DAY_END, never the literal {0,0} midnight resolves to
+    // everywhere else. `randomSpan`'s own occasional midnight draw (above,
+    // time.mjs) gives every OTHER span-bearing template -- book included --
+    // the same coverage without a dedicated id for each; this id's own job
+    // is just an evening start, where the shape is unmistakable.
+    id: "A23-to-midnight",
+    intent: "assign",
+    genSlots: (rng) => {
+      const op = pick(rng, PEOPLE_ALL);
+      const part = pick(rng, PARTS_ALL);
+      const cell = pick(rng, CELLS_ALL);
+      const verb = pick(rng, ASSIGN_VERBS);
+      const startHour = randInt(rng, 18, 22); // an evening start
+      const useDuration = chance(rng, 0.5);
+      if (useDuration) {
+        const minutes = (24 - startHour) * 60;
+        return {
+          verb,
+          op,
+          part,
+          cell,
+          useDuration,
+          startHour,
+          durationText: `${minutes / 60} hours`,
+          start: { hour: startHour, minute: 0 },
+          end: { hour: 23, minute: 59 },
+        };
+      }
+      const startSpec = chance(rng, 0.5)
+        ? { kind: "ampm", hour: startHour, minute: 0, spaced: chance(rng, 0.5) }
+        : { kind: "24h", hour: startHour, minute: 0 };
+      const span = buildTimePair(startSpec, { kind: "midnight" }, "to");
+      return { verb, op, part, cell, useDuration, span };
+    },
+    sentence: (s) =>
+      s.useDuration
+        ? `${s.verb} ${qw(s.op)} on ${qw(s.part)} on ${qw(s.cell)} from ${s.startHour} for ${s.durationText}`
+        : `${s.verb} ${qw(s.op)} on ${qw(s.part)} on ${qw(s.cell)} from ${s.span.text}`,
+    form: (s) =>
+      baseCommand("assign", {
+        operator: s.op,
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        start: s.useDuration ? s.start : s.span.start,
+        end: s.useDuration ? s.end : s.span.end,
+        attach: null,
+        existing: null,
+      }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1221,6 +1435,48 @@ const bookTemplates = [
         end: null,
         existing: null,
         shift: ALL_DAY,
+      }),
+  },
+  {
+    // RW2 (R-416): "every day"/"weekdays" narrowing a booking, "this
+    // week"/"next week" (defaults to this week), a bare trailing pair (RW2's
+    // own shape -- no "from"), sometimes with a headcount clause the same
+    // way B6 already exercises one alongside plain hours.
+    id: "B11-every-day",
+    intent: "book",
+    genSlots: (rng) => {
+      const repeatWord = pick(rng, REPEAT_WORDS);
+      const kind = repeatWord === "every day" ? "every_day" : "weekdays";
+      const withWeek = chance(rng, 0.7);
+      const week = withWeek ? pick(rng, ["this_week", "next_week"]) : "this_week";
+      const weekText = withWeek ? (week === "this_week" ? " this week" : " next week") : "";
+      const withHeadcount = chance(rng, 0.5);
+      return {
+        verb: pick(rng, BOOK_VERBS),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        repeatWord,
+        kind,
+        week,
+        weekText,
+        withHeadcount,
+        hc: withHeadcount ? randomHeadcount(rng) : null,
+        span: randomBareSpan(rng),
+      };
+    },
+    sentence: (s) => {
+      const hcText = s.withHeadcount ? ` ${s.hc.text}` : "";
+      return `${s.verb} ${qw(s.part)} on ${qw(s.cell)}${hcText} ${s.repeatWord}${s.weekText} ${s.span.text}`;
+    },
+    form: (s) =>
+      baseCommand("book", {
+        product: s.part,
+        place: [s.cell],
+        headcount: s.withHeadcount ? s.hc.headcount : null,
+        day: { kind: s.kind, week: s.week },
+        start: s.span.start,
+        end: s.span.end,
+        existing: null,
       }),
   },
 ];
@@ -2029,6 +2285,191 @@ const moveTemplates = [
         existing: null,
       }),
   },
+  // -------------------------------------------------------------------------
+  // S58 (design §19.103/D132 item 1, R-412): a re-time by ONE edge --
+  // `adjust` set, `span`/`shift`/`toPlace` all null (`baseCommand`'s own
+  // `adjust: null` default, above, overridden by every template here).
+  // M13/M14 are the dedicated-verb door (`ADJUST_VERBS`); M15 is the
+  // possessive-edge-tail door (`MOVE_VERBS`' own "'s start|end|finish"
+  // tail). The reviewer's own later rule (S58 review): a place clause may
+  // come BEFORE or AFTER the distance/time clause (AJ3 vs AJ20) -- both
+  // orderings are drawn here, not just one.
+  // -------------------------------------------------------------------------
+  {
+    // AJ1-AJ4: extend/lengthen (add) or shorten (subtract) "by <duration>".
+    id: "M13-extend-by",
+    intent: "move",
+    genSlots: (rng) => {
+      const verb = pick(rng, ADJUST_DISTANCE_VERBS);
+      const op = pick(rng, PEOPLE_ALL);
+      const withBlock = chance(rng, 0.4); // AJ1's own "'s block" is optional (AJ2 has none)
+      const dur = randomAdjustDuration(rng);
+      const withPlace = chance(rng, 0.6);
+      const cell = withPlace ? pick(rng, CELLS_ALL) : null;
+      const placeBefore = withPlace ? chance(rng, 0.5) : false;
+      const withDay = chance(rng, 0.5);
+      const day = withDay ? randomDay(rng) : null;
+      return { verb, op, withBlock, dur, withPlace, cell, placeBefore, withDay, day };
+    },
+    sentence: (s) => {
+      const opText = s.withBlock ? `${qw(s.op)}'s block` : qw(s.op);
+      const byClause = `by ${s.dur.text}`;
+      const mid = !s.withPlace
+        ? byClause
+        : s.placeBefore
+          ? `on ${qw(s.cell)} ${byClause}`
+          : `${byClause} on ${qw(s.cell)}`;
+      const dayText = s.withDay ? ` ${s.day.text}` : "";
+      return `${s.verb} ${opText} ${mid}${dayText}`;
+    },
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: s.withPlace ? [s.cell] : [],
+        toPlace: null,
+        day: s.withDay ? s.day.day : null,
+        span: null,
+        existing: null,
+        adjust: { edge: "end", by: s.verb === "shorten" ? -s.dur.minutes : s.dur.minutes },
+      }),
+  },
+  {
+    // AJ7-AJ10: end/finish "(early) at <time>" or "<duration> earlier|later".
+    id: "M14-end-at",
+    intent: "move",
+    genSlots: (rng) => {
+      const verb = pick(rng, ADJUST_AT_VERBS);
+      const op = pick(rng, PEOPLE_ALL);
+      const withBlock = chance(rng, 0.4);
+      const withPlace = chance(rng, 0.6);
+      const cell = withPlace ? pick(rng, CELLS_ALL) : null;
+      const placeBefore = withPlace ? chance(rng, 0.5) : false;
+      const withDay = chance(rng, 0.5);
+      const day = withDay ? randomDay(rng) : null;
+      const kind = pick(rng, ["at", "earlyAt", "elapsed"]);
+
+      let clauseText;
+      let adjust;
+      if (kind === "elapsed") {
+        const dur = randomAdjustDuration(rng);
+        const word = pick(rng, ["earlier", "later"]);
+        clauseText = `${dur.text} ${word}`;
+        adjust = { edge: "end", by: word === "earlier" ? -dur.minutes : dur.minutes };
+      } else {
+        // F-146 (AJ22): an END spelled "midnight" writes DAY_END here too.
+        const spec = randomLoneTimeSpec(rng, /* allowMidnight */ true);
+        const resolved = resolveLoneTime(spec, { allowDayEnd: true });
+        clauseText = `${kind === "earlyAt" ? "early at" : "at"} ${resolved.text}`;
+        adjust = { edge: "end", at: { hour: resolved.hour, minute: resolved.minute } };
+      }
+      return {
+        verb,
+        op,
+        withBlock,
+        withPlace,
+        cell,
+        placeBefore,
+        withDay,
+        day,
+        clauseText,
+        adjust,
+      };
+    },
+    sentence: (s) => {
+      const opText = s.withBlock ? `${qw(s.op)}'s block` : qw(s.op);
+      const mid = !s.withPlace
+        ? s.clauseText
+        : s.placeBefore
+          ? `on ${qw(s.cell)} ${s.clauseText}`
+          : `${s.clauseText} on ${qw(s.cell)}`;
+      const dayText = s.withDay ? ` ${s.day.text}` : "";
+      return `${s.verb} ${opText} ${mid}${dayText}`;
+    },
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: s.withPlace ? [s.cell] : [],
+        toPlace: null,
+        day: s.withDay ? s.day.day : null,
+        span: null,
+        existing: null,
+        adjust: s.adjust,
+      }),
+  },
+  {
+    // AJ12-AJ15: the possessive-edge-tail door -- "move/shift/change X's
+    // start|end|finish to T / by D / D earlier|later". Place, when said, is
+    // ALWAYS after the clause on this door (AJ21's own reviewer fix; there
+    // is no "before" reading here the way M13/M14's dedicated-verb door
+    // has, since the operator segment ends right at "'s <edge>").
+    id: "M15-edge-tail",
+    intent: "move",
+    genSlots: (rng) => {
+      const edgeWord = pick(rng, ["start", "end", "finish"]);
+      const edge = edgeWord === "start" ? "start" : "end";
+      // S52-c's own half-and-half apostrophe coverage (M10-change-timing),
+      // exercised here too -- the apostrophe-less spelling only parses right
+      // after a DIGIT (`POSSESSIVE_EDGE_TAIL_RE`), so that half draws its
+      // operator from `PEOPLE_DEMO` instead of the full pool.
+      const noApostrophe = chance(rng, 0.3);
+      const op = noApostrophe ? pick(rng, PEOPLE_DEMO) : pick(rng, PEOPLE_ALL);
+      const verb = pick(rng, ["move", "shift", "change"]);
+      const withPlace = chance(rng, 0.5);
+      const cell = withPlace ? pick(rng, CELLS_ALL) : null;
+      const withDay = chance(rng, 0.5);
+      const day = withDay ? randomDay(rng) : null;
+      const kind = pick(rng, ["to", "by", "elapsed"]);
+
+      let clauseText;
+      let adjust;
+      if (kind === "to") {
+        // F-146: only an END edge ever draws "midnight" here -- a START
+        // stays the literal {0,0} the S58 brief's own rule keeps.
+        const spec = randomLoneTimeSpec(rng, /* allowMidnight */ edge === "end");
+        const resolved = resolveLoneTime(spec, { allowDayEnd: edge === "end" });
+        clauseText = `to ${resolved.text}`;
+        adjust = { edge, at: { hour: resolved.hour, minute: resolved.minute } };
+      } else if (kind === "by") {
+        const dur = randomAdjustDuration(rng);
+        clauseText = `by ${dur.text}`;
+        adjust = { edge, by: dur.minutes };
+      } else {
+        const dur = randomAdjustDuration(rng);
+        const word = pick(rng, ["earlier", "later"]);
+        clauseText = `${dur.text} ${word}`;
+        adjust = { edge, by: word === "earlier" ? -dur.minutes : dur.minutes };
+      }
+      return {
+        edgeWord,
+        edge,
+        noApostrophe,
+        op,
+        verb,
+        withPlace,
+        cell,
+        withDay,
+        day,
+        clauseText,
+        adjust,
+      };
+    },
+    sentence: (s) => {
+      const possessive = s.noApostrophe ? `${qw(s.op)}s` : `${qw(s.op)}'s`;
+      const placeText = s.withPlace ? ` on ${qw(s.cell)}` : "";
+      const dayText = s.withDay ? ` ${s.day.text}` : "";
+      return `${s.verb} ${possessive} ${s.edgeWord} ${s.clauseText}${placeText}${dayText}`;
+    },
+    form: (s) =>
+      baseCommand("move", {
+        operator: s.op,
+        place: s.withPlace ? [s.cell] : [],
+        toPlace: null,
+        day: s.withDay ? s.day.day : null,
+        span: null,
+        existing: null,
+        adjust: s.adjust,
+      }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2607,6 +3048,142 @@ const copyTemplates = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Split (X1) -- S58 (design §19.103/D132 item 2, R-413): "split Sam's block
+// at noon" -- a shorten plus an assign, written by the board (`resolve.ts`'s
+// own `expandCommand`); the grammar's own four fields are all this template
+// ever needs. Never appears inside a `several` (the same D130/D132 rule
+// `replace`/`swap`/`copy` already follow).
+// ---------------------------------------------------------------------------
+
+const splitTemplates = [
+  {
+    // SP1-SP3: "split X['s block] [on <cell>] at <time> [<day>]" -- the "at"
+    // clause is found ANYWHERE (SP2: the place can follow it), so both
+    // orders are exercised (`withBlock` mirrors AJ1/AJ2's own optional "'s
+    // block").
+    id: "X1-split-at",
+    intent: "split",
+    genSlots: (rng) => {
+      const op = pick(rng, PEOPLE_ALL);
+      const withBlock = chance(rng, 0.5);
+      const withPlace = chance(rng, 0.5);
+      const cell = withPlace ? pick(rng, CELLS_ALL) : null;
+      const withDay = chance(rng, 0.5);
+      const day = withDay ? randomDay(rng) : null;
+      const spec = randomLoneTimeSpec(rng, /* allowMidnight */ false);
+      const resolved = resolveLoneTime(spec);
+      return { op, withBlock, withPlace, cell, withDay, day, resolved };
+    },
+    sentence: (s) => {
+      const opText = s.withBlock ? `${qw(s.op)}'s block` : qw(s.op);
+      const placeText = s.withPlace ? ` on ${qw(s.cell)}` : "";
+      const dayText = s.withDay ? ` ${s.day.text}` : "";
+      return `split ${opText}${placeText} at ${s.resolved.text}${dayText}`;
+    },
+    form: (s) => ({
+      intent: "split",
+      operator: s.op,
+      place: s.withPlace ? [s.cell] : [],
+      day: s.withDay ? s.day.day : null,
+      at: { hour: s.resolved.hour, minute: s.resolved.minute },
+    }),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Headcount (H1-H3) -- S58 (design §19.103/D132 item 4, R-415): "make"/"set"
+// a job's planned headcount -- one existing write, never a create, never
+// part of a lot (never inside a `several`, same rule as the board-answered
+// group). `HEADCOUNT_VERBS[0]`/`[1]` are "make"/"set" -- read off the export
+// rather than retyped (R-391), each id naming its own verb on purpose the
+// same way `templates.mjs`'s header comment already allows.
+// ---------------------------------------------------------------------------
+
+const headcountTemplates = [
+  {
+    // HC1: "make the <part> job on <cell> N people" -- no "to".
+    id: "H1-make-job-people",
+    intent: "headcount",
+    genSlots: (rng) => ({
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      n: randInt(rng, 1, 99),
+    }),
+    sentence: (s) => `${HEADCOUNT_VERBS[0]} the ${qw(s.part)} job on ${qw(s.cell)} ${s.n} people`,
+    form: (s) =>
+      baseCommand("headcount", {
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        span: null,
+        shift: null,
+        headcount: s.n,
+      }),
+  },
+  {
+    // HC2: "set the <part> job on <cell> to N people" -- "set" keeps its
+    // own "to" the way HC2 says it.
+    id: "H2-set-job-to",
+    intent: "headcount",
+    genSlots: (rng) => ({
+      part: pick(rng, PARTS_ALL),
+      cell: pick(rng, CELLS_ALL),
+      n: randInt(rng, 1, 99),
+    }),
+    sentence: (s) =>
+      `${HEADCOUNT_VERBS[1]} the ${qw(s.part)} job on ${qw(s.cell)} to ${s.n} people`,
+    form: (s) =>
+      baseCommand("headcount", {
+        product: s.part,
+        place: [s.cell],
+        day: null,
+        span: null,
+        shift: null,
+        headcount: s.n,
+      }),
+  },
+  {
+    // HC3/HC4: a span (WITH "from", HC3's own shape) or a shift narrowing
+    // which run, an optional day before either -- always right before the
+    // trailing count, which is always the sentence's very last words (the
+    // reviewer's own later rule: a day AFTER the count is not a sentence).
+    id: "H3-with-hours-or-shift",
+    intent: "headcount",
+    genSlots: (rng) => {
+      const withShift = chance(rng, 0.5);
+      const withDay = chance(rng, 0.5);
+      return {
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        n: randInt(rng, 1, 99),
+        withDay,
+        day: withDay ? randomDay(rng) : null,
+        withShift,
+        span: withShift ? null : randomSpan(rng),
+        shiftName: withShift ? pick(rng, SHIFTS_ALL) : null,
+        shiftPrep: withShift ? pick(rng, ["for", "during"]) : null,
+      };
+    },
+    sentence: (s) => {
+      const dayText = s.withDay ? ` ${s.day.text}` : "";
+      const narrowText = s.withShift
+        ? ` ${s.shiftPrep} shift ${qwShift(s.shiftName)}`
+        : ` from ${s.span.text}`;
+      return `${HEADCOUNT_VERBS[0]} the ${qw(s.part)} job on ${qw(s.cell)}${dayText}${narrowText} ${s.n} people`;
+    },
+    form: (s) =>
+      baseCommand("headcount", {
+        product: s.part,
+        place: [s.cell],
+        day: s.withDay ? s.day.day : null,
+        span: s.withShift ? null : { start: s.span.start, end: s.span.end },
+        shift: s.withShift ? s.shiftName : null,
+        headcount: s.n,
+      }),
+  },
+];
+
 export const TEMPLATES = [
   ...assignTemplates,
   ...bookTemplates,
@@ -2616,6 +3193,8 @@ export const TEMPLATES = [
   ...replaceTemplates,
   ...swapTemplates,
   ...copyTemplates,
+  ...splitTemplates,
+  ...headcountTemplates,
 ];
 
 export function templateById(id) {

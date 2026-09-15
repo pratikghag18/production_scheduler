@@ -15,6 +15,7 @@ import {
   BOOK_VERBS,
   UNASSIGN_VERBS,
   MOVE_VERBS,
+  JOB_HOURS,
 } from "@/lib/command/parse";
 import type { Command, SingleCommand } from "@/lib/command/parse";
 import { mulberry32 } from "../../scripts/voice/lib/rng.mjs";
@@ -34,6 +35,7 @@ import {
 } from "../../scripts/voice/lib/score.mjs";
 import { generateTrainingRows } from "../../scripts/voice/lib/rows.mjs";
 import type { VoiceRow } from "../../scripts/voice/lib/rows.mjs";
+import { buildTimePair, resolveLoneTime } from "../../scripts/voice/lib/time.mjs";
 
 const HELDOUT: VoiceRow[] = readFileSync("data/voice/heldout.jsonl", "utf8")
   .trim()
@@ -121,14 +123,16 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     }
   });
 
-  it("V4: data/voice/heldout.jsonl is valid, 800 rows, 100/intent, half clean/intent, clean rows parse today", () => {
-    // S56 (D130/S55-a brief, R-406/R-408): re-pinned again -- three
-    // board-answered intents (replace/swap/copy) join the five, and the
-    // whole set is regenerated on a new seed (20260915) the same way S50's
+  it("V4: data/voice/heldout.jsonl is valid, 1000 rows, 100/intent, half clean/intent, clean rows parse today", () => {
+    // S58 (D132/S58-a brief, R-412 to R-416, S56-b data brief §1): re-pinned
+    // again -- two more intents (split/headcount) join the eight, and the
+    // whole set is regenerated on the SAME seed (20260915, the README's own
+    // rule: a template/grammar widening, not a deliberate drift, keeps the
+    // seed and just re-runs the generation) the same way S56's own
     // regeneration was: the old file could not contain sentences its
     // grammar could not yet parse (design §19.97/D126). Still 100 rows per
-    // intent, now across eight intents instead of five.
-    expect(HELDOUT.length).toBe(800);
+    // intent, now across ten intents instead of eight.
+    expect(HELDOUT.length).toBe(1000);
 
     const counts: Record<string, { total: number; clean: number }> = {};
     for (const row of HELDOUT) {
@@ -140,9 +144,11 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       "assign",
       "book",
       "copy",
+      "headcount",
       "move",
       "replace",
       "several",
+      "split",
       "swap",
       "unassign",
     ]);
@@ -218,6 +224,10 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
         shift: null,
         existing: null,
+        // S58 (R-412, D132 item 1): every `MoveCommand` now carries `adjust`
+        // -- `null` here is this row's own pre-S58 shape, an ordinary move
+        // in time, not an edge adjust.
+        adjust: null,
       };
       const moveRows: VoiceRow[] = [
         { id: "m1", intent: "move", sentence: "n/a", form: moveForm, clean: true, source: "x" },
@@ -227,6 +237,10 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       const predicted = {
         existing: null,
         shift: null,
+        // S58 (R-412, D132 item 1): the reference form's own `adjust: null`
+        // (added above) must be matched here too, or this "structurally
+        // equivalent, keys reordered" fixture stops being equivalent.
+        adjust: null,
         span: {
           end: { minute: 0, hour: 14 },
           start: { minute: 0, hour: 10, meridiem: "am" },
@@ -253,6 +267,10 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
         span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
         shift: null,
         existing: null,
+        // S58 (R-412, D132 item 1): every `MoveCommand` now carries `adjust`
+        // -- `null` here is this row's own pre-S58 shape, an ordinary move
+        // in time, not an edge adjust.
+        adjust: null,
       };
       const moveRows: VoiceRow[] = [
         { id: "m1", intent: "move", sentence: "n/a", form: moveForm, clean: true, source: "x" },
@@ -269,33 +287,31 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
   });
 
   it("V6: the rule parser's own baseline on held-out is 1.0 clean, well below 0.5 perturbed", () => {
-    // S56 review: re-pinned again -- the reviewer fix that dropped the
-    // never-said "this night" phrase (A20-time-of-day/U13-pull-time-of-day)
-    // and added the two missing DU4/DU6 duration spellings ("1.5 hours",
-    // "half an hour") to A14-duration changed which sentences the
-    // generator draws, so the held-out set was regenerated again on the
-    // SAME seed 20260915 (`data/voice/README.md`'s own rule for a
-    // deliberate regeneration). Read from `node scripts/voice/score.mjs
+    // S58 (S56-b data brief §1/§5): re-pinned again -- split/headcount join
+    // the ten intents and the held-out set was regenerated on the SAME seed
+    // 20260915 (`data/voice/README.md`'s own rule: a grammar widening, not a
+    // deliberate drift, keeps the seed). Read from `node scripts/voice/score.mjs
     // --heldout data/voice/heldout.jsonl --rule-parser --bar 0.95`: clean
-    // 400/400 (1.0), perturbed 19/400 (0.0475) -- down from the prior
-    // 25/400 (0.0625) because fewer of the templates now drawn happen to
-    // land on a perturbable word at all, not because anything stopped
-    // perturbing (V6 below still checks that directly).
+    // 500/500 (1.0), perturbed 43/500 (0.086) -- up from the prior 19/400
+    // (0.0475) mostly because two of the two NEW intents' own templates
+    // (split/headcount) happen to land on a perturbable keyword/name more
+    // often than the eight-intent average did, not because anything
+    // stopped perturbing (V6 below still checks that directly).
     const predict = (row: VoiceRow) => {
       const result = parseCommand(row.sentence);
       return result.ok ? result.command : null;
     };
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
-    expect(result.clean).toEqual({ n: 400, correct: 400 });
-    expect(result.perturbed).toEqual({ n: 400, correct: 19 });
+    expect(result.clean).toEqual({ n: 500, correct: 500 });
+    expect(result.perturbed).toEqual({ n: 500, correct: 43 });
     // Pinned with a tolerance around the number this generator actually
-    // produces (~4.75%) -- a perturbation catalogue that stopped perturbing
+    // produces (~8.6%) -- a perturbation catalogue that stopped perturbing
     // (every function became a no-op) would push this toward 1.0, and that
     // is exactly the drift this pin exists to catch.
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.0475, 2);
+    expect(rate(result.perturbed)).toBeCloseTo(0.086, 2);
   });
 
   it("V7: a generated training set (n=200, seed 1) shares no sentence with held-out and is ~50% clean", () => {
@@ -441,18 +457,18 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
   });
 
   it("V13: the rule parser's held-out baseline is unchanged by the extra-key normalisation (re-pins V6)", () => {
-    // S56 review: re-pinned alongside V6, same regeneration, same reason.
+    // S58: re-pinned alongside V6, same regeneration, same reason.
     const predict = (row: VoiceRow) => {
       const result = parseCommand(row.sentence);
       return result.ok ? result.command : null;
     };
     const result = score(HELDOUT, predict);
     expect(rate(result.clean)).toBe(1);
-    expect(result.clean).toEqual({ n: 400, correct: 400 });
-    expect(result.perturbed).toEqual({ n: 400, correct: 19 });
+    expect(result.clean).toEqual({ n: 500, correct: 500 });
+    expect(result.perturbed).toEqual({ n: 500, correct: 43 });
     expect(rate(result.perturbed)).toBeGreaterThan(0);
     expect(rate(result.perturbed)).toBeLessThan(0.5);
-    expect(rate(result.perturbed)).toBeCloseTo(0.0475, 2);
+    expect(rate(result.perturbed)).toBeCloseTo(0.086, 2);
   });
 
   it("V15 (S52-c, R-402): a shift template's form has start/end null and a name -- the oracle holds", () => {
@@ -478,7 +494,10 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
       const commands = form.intent === "several" ? form.commands : [form];
       for (const c of commands) {
         expect(
-          (c as Exclude<typeof c, { intent: "copy" }>).shift,
+          // S58: `SplitCommand` carries neither `shift` nor `span` at all
+          // (R-413's own four fields, `at` instead) -- narrowed out here
+          // alongside `copy`, which never had either either.
+          (c as Exclude<typeof c, { intent: "copy" } | { intent: "split" }>).shift,
           `${id}: "${sentence}"`,
         ).not.toBeNull();
         if (c.intent === "assign" || c.intent === "book") {
@@ -486,7 +505,7 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
           expect(c.end, `${id}: "${sentence}"`).toBeNull();
         } else {
           expect(
-            (c as Exclude<typeof c, { intent: "copy" }>).span,
+            (c as Exclude<typeof c, { intent: "copy" } | { intent: "split" }>).span,
             `${id}: "${sentence}"`,
           ).toBeNull();
         }
@@ -838,5 +857,257 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     const swapLine = prompt.split("\n").find((l) => l.startsWith("swap:"));
     expect(swapLine, "no swap: line in the prompt").toBeTruthy();
     expect(swapLine).toContain("place (or [])");
+  });
+
+  // -------------------------------------------------------------------------
+  // S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-412 to R-416, design
+  // §19.103/D132; S56-b data brief §6): group 2's own template families.
+  // -------------------------------------------------------------------------
+
+  it("V27 (S58, R-412): every M13-M15 draw sets adjust and clears span/shift/toPlace -- the invariant D132 item 1 states", () => {
+    const ids = ["M13-extend-by", "M14-end-at", "M15-edge-tail"];
+    for (const id of ids) {
+      const t = templateById(id);
+      for (let i = 1; i <= 200; i++) {
+        const rng = mulberry32(seedFrom(id, `V27-${i}`));
+        const slots = t.genSlots(rng);
+        const sentence = t.sentence(slots);
+        const form = t.form(slots) as Command;
+        const result = parseCommand(sentence);
+        expect(result.ok, `${id}: "${sentence}" did not parse`).toBe(true);
+        if (!result.ok) continue;
+        expect(equalForms(result.command, form), `${id}: "${sentence}"`).toBe(true);
+        expect(form.intent, id).toBe("move");
+        if (form.intent !== "move") continue;
+        expect(form.adjust, `${id}: "${sentence}"`).not.toBeNull();
+        expect(form.span, `${id}: "${sentence}"`).toBeNull();
+        expect(form.shift, `${id}: "${sentence}"`).toBeNull();
+        expect(form.toPlace, `${id}: "${sentence}"`).toBeNull();
+        if (form.adjust) {
+          const hasBy = "by" in form.adjust;
+          const hasAt = "at" in form.adjust;
+          expect(hasBy !== hasAt, `${id}: "${sentence}" adjust has both or neither of by/at`).toBe(
+            true,
+          );
+        }
+      }
+    }
+  });
+
+  it("V28 (S58, R-413): every X1-split-at draw is a SplitCommand -- no shift/span key, operator/place/day/at all present", () => {
+    const t = templateById("X1-split-at");
+    for (let i = 1; i <= 200; i++) {
+      const rng = mulberry32(seedFrom("X1-split-at", `V28-${i}`));
+      const slots = t.genSlots(rng);
+      const sentence = t.sentence(slots);
+      const form = t.form(slots) as Command;
+      const result = parseCommand(sentence);
+      expect(result.ok, `"${sentence}" did not parse`).toBe(true);
+      if (!result.ok) continue;
+      expect(equalForms(result.command, form), sentence).toBe(true);
+      expect(form.intent).toBe("split");
+      expect(Object.keys(form).sort()).toEqual(["at", "day", "intent", "operator", "place"]);
+      if (form.intent === "split") {
+        expect(form.at.hour).toBeGreaterThanOrEqual(0);
+        expect(form.at.hour).toBeLessThanOrEqual(23);
+      }
+    }
+  });
+
+  it("V29 (S58, R-415): every H1-H3 draw's headcount is 1-99", () => {
+    const ids = ["H1-make-job-people", "H2-set-job-to", "H3-with-hours-or-shift"];
+    for (const id of ids) {
+      const t = templateById(id);
+      for (let i = 1; i <= 200; i++) {
+        const rng = mulberry32(seedFrom(id, `V29-${i}`));
+        const slots = t.genSlots(rng);
+        const sentence = t.sentence(slots);
+        const form = t.form(slots) as Command;
+        const result = parseCommand(sentence);
+        expect(result.ok, `${id}: "${sentence}" did not parse`).toBe(true);
+        if (!result.ok) continue;
+        expect(equalForms(result.command, form), `${id}: "${sentence}"`).toBe(true);
+        expect(form.intent, id).toBe("headcount");
+        if (form.intent !== "headcount") continue;
+        expect(form.headcount).toBeGreaterThanOrEqual(1);
+        expect(form.headcount).toBeLessThanOrEqual(99);
+      }
+    }
+    // D132 item 4 ("never part of a lot"): headcount sits outside
+    // `severalTemplates` altogether -- there is no H-series id anywhere in
+    // that array for a several to have drawn from in the first place.
+    for (const t of TEMPLATES) {
+      if (t.id.startsWith("H") && t.intent === "headcount") continue;
+      expect(t.intent, t.id).not.toBe("headcount");
+    }
+  });
+
+  it("V30 (S58, R-414): every A21-add-to-job draw carries shift JOB_HOURS and start/end null", () => {
+    const t = templateById("A21-add-to-job");
+    for (let i = 1; i <= 200; i++) {
+      const rng = mulberry32(seedFrom("A21-add-to-job", `V30-${i}`));
+      const slots = t.genSlots(rng);
+      const sentence = t.sentence(slots);
+      const form = t.form(slots) as Command;
+      const result = parseCommand(sentence);
+      expect(result.ok, `"${sentence}" did not parse`).toBe(true);
+      if (!result.ok) continue;
+      expect(equalForms(result.command, form), sentence).toBe(true);
+      expect(form.intent).toBe("assign");
+      if (form.intent === "assign") {
+        expect(form.shift).toBe(JOB_HOURS);
+        expect(form.start).toBeNull();
+        expect(form.end).toBeNull();
+      }
+    }
+  });
+
+  it("V31 (S58, R-416): every A22/B11 draw's day is a repeat kind, on the one shape (assign/book) that may carry it", () => {
+    const ids: Array<[string, "assign" | "book"]> = [
+      ["A22-every-weekday", "assign"],
+      ["B11-every-day", "book"],
+    ];
+    for (const [id, intent] of ids) {
+      const t = templateById(id);
+      for (let i = 1; i <= 200; i++) {
+        const rng = mulberry32(seedFrom(id, `V31-${i}`));
+        const slots = t.genSlots(rng);
+        const sentence = t.sentence(slots);
+        const form = t.form(slots) as Command;
+        const result = parseCommand(sentence);
+        expect(result.ok, `${id}: "${sentence}" did not parse`).toBe(true);
+        if (!result.ok) continue;
+        expect(equalForms(result.command, form), `${id}: "${sentence}"`).toBe(true);
+        expect(form.intent, id).toBe(intent);
+        const day = (form as { day: { kind: string; week: string } }).day;
+        expect(["weekdays", "every_day"]).toContain(day.kind);
+        expect(["this_week", "next_week"]).toContain(day.week);
+      }
+    }
+  });
+
+  it("V32 (F-146): time.mjs's buildTimePair/resolveLoneTime write DAY_END for an END of midnight, never a START", () => {
+    const endMidnight = buildTimePair(
+      { kind: "24h", hour: 20, minute: 0 },
+      { kind: "midnight" },
+      "to",
+    );
+    expect(endMidnight).not.toBeNull();
+    expect(endMidnight!.start).toEqual({ hour: 20, minute: 0 });
+    expect(endMidnight!.end).toEqual({ hour: 23, minute: 59 });
+    expect(endMidnight!.text).toBe("20 to midnight");
+
+    // The S58 brief's own rule: "a START of midnight stays {0,0}".
+    const startMidnight = buildTimePair(
+      { kind: "midnight" },
+      { kind: "24h", hour: 9, minute: 0 },
+      "to",
+    );
+    expect(startMidnight).not.toBeNull();
+    expect(startMidnight!.start).toEqual({ hour: 0, minute: 0 });
+    expect(startMidnight!.end).toEqual({ hour: 9, minute: 0 });
+
+    expect(resolveLoneTime({ kind: "midnight" }, { allowDayEnd: true })).toMatchObject({
+      hour: 23,
+      minute: 59,
+    });
+    // The same spec with no `allowDayEnd` (a START's own door) stays literal.
+    expect(resolveLoneTime({ kind: "midnight" })).toMatchObject({ hour: 0, minute: 0 });
+
+    // The lone-edge workday rule (AJ7/SP3): an hour 1-6 with no explicit
+    // meridiem reads as pm; 7 and up are unchanged.
+    expect(resolveLoneTime({ kind: "24h", hour: 3, minute: 0 })).toMatchObject({
+      hour: 15,
+      minute: 0,
+    });
+    expect(resolveLoneTime({ kind: "24h", hour: 9, minute: 0 })).toMatchObject({
+      hour: 9,
+      minute: 0,
+    });
+  });
+
+  describe("V33 (S58): the scorer on the two new intents' own fields", () => {
+    const splitForm: Command = {
+      intent: "split",
+      operator: "Sam Patel",
+      place: ["Cell 1"],
+      day: null,
+      at: { hour: 12, minute: 0 },
+    };
+    const headcountForm: Command = {
+      intent: "headcount",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      span: null,
+      shift: null,
+      headcount: 4,
+    };
+
+    it("V33a: an exact split prediction scores correct; a wrong `at` field is wrong and tallied, `place` still right", () => {
+      const rows: VoiceRow[] = [
+        { id: "sp1", intent: "split", sentence: "n/a", form: splitForm, clean: true, source: "x" },
+      ];
+      const exact = score(rows, () => splitForm);
+      expect(rate(exact.clean)).toBe(1);
+
+      const wrongAt: Command = { ...splitForm, at: { hour: 13, minute: 0 } };
+      const wrong = score(rows, () => wrongAt);
+      expect(rate(wrong.clean)).toBe(0);
+      expect(wrong.byField.at).toEqual({ n: 1, correct: 0 });
+      expect(wrong.byField.place).toEqual({ n: 1, correct: 1 });
+    });
+
+    it("V33b: an exact headcount prediction scores correct; a wrong `headcount` field is wrong and tallied, `product` still right", () => {
+      const rows: VoiceRow[] = [
+        {
+          id: "hc1",
+          intent: "headcount",
+          sentence: "n/a",
+          form: headcountForm,
+          clean: true,
+          source: "x",
+        },
+      ];
+      const exact = score(rows, () => headcountForm);
+      expect(rate(exact.clean)).toBe(1);
+
+      const wrongCount: Command = { ...headcountForm, headcount: 5 };
+      const wrong = score(rows, () => wrongCount);
+      expect(rate(wrong.clean)).toBe(0);
+      expect(wrong.byField.headcount).toEqual({ n: 1, correct: 0 });
+      expect(wrong.byField.product).toEqual({ n: 1, correct: 1 });
+    });
+  });
+
+  it("V34 (S58): the system prompt mentions every new S58 word (a guard against prompt drift)", () => {
+    const prompt = readFileSync("scripts/voice/train/system_prompt.txt", "utf8").toLowerCase();
+    for (const word of [
+      "split",
+      "headcount",
+      "adjust",
+      "the job",
+      "every weekday",
+      "every day",
+      "weekdays",
+    ]) {
+      expect(prompt, word).toContain(word);
+    }
+    expect(prompt).toContain("make it n people");
+    expect(prompt).toContain("this_week");
+  });
+
+  it("V35 (S56-b brief §4's own flag): the perturber's speech-digit-as-word never mangles a digit inside an ISO date", () => {
+    const sentence = "assign Sam to Housing A on Cell 1 on 2026-09-04";
+    let sawAChange = false;
+    for (let i = 1; i <= 300; i++) {
+      const rng = mulberry32(seedFrom("speech-digit-as-word-V35", `${i}`));
+      const result = CATALOG["speech-digit-as-word"](sentence, rng);
+      expect(result, `draw ${i}`).toContain("2026-09-04");
+      if (result !== sentence) sawAChange = true;
+    }
+    // The guard must not have disabled the perturbation altogether -- "Cell
+    // 1"'s own bare "1" is still fair game.
+    expect(sawAChange, "never perturbed the non-ISO bare number in 300 tries").toBe(true);
   });
 });

@@ -19,7 +19,7 @@ Nothing in the app changes from running this. No model is served until its score
 ## Steps
 
 1. **On this machine:** `npm run voice:generate` (writes `data/voice/train.jsonl`, gitignored,
-   4000 rows) then `npm run voice:prepare`. The folder `data/voice/colab/` now holds three files:
+   7000 rows) then `npm run voice:prepare`. The folder `data/voice/colab/` now holds three files:
    `train.chat.jsonl`, `heldout.jsonl`, `manifest.json`. The command prints the manifest — check
    `trainRows` and `heldoutRows` look right, and note `ruleParserBaseline`: that is the number
    the trained model has to beat.
@@ -32,11 +32,12 @@ Nothing in the app changes from running this. No model is served until its score
    `/content/score_port.py` and fails with a plain message if it is missing. Then:
    Runtime → Change runtime type → T4 GPU, then Runtime → Run all. Measured on the second run,
    a T4 with fp16 and batch 16 x 2: training took over an hour and the (then 400-row, then 500-row
-   -- S50 added a fifth intent, `several`, now 800-row -- S56 added replace/swap/copy, an eighth
-   intent) Predict cell about another hour (one row at a time, six to nine seconds each), so plan
-   on at least two and a half hours end to end on a T4 -- the Predict cell's own share of that
-   grows roughly with the held-out row count (500 to 800 is +60%), so treat "two and a half hours"
-   as the pre-S56 floor, not a fresh measurement, until the maintainer's next real run confirms it.
+   -- S50 added a fifth intent, `several`, then 800-row -- S56 added replace/swap/copy, an eighth
+   intent, now 1000-row -- S58 added split/headcount, a tenth) Predict cell about another hour
+   (one row at a time, six to nine seconds each), so plan on at least two and a half hours end to
+   end on a T4 -- the Predict cell's own share of that grows roughly with the held-out row count
+   (500 to 1000 is +100%), so treat "two and a half hours" as the pre-S56 floor, not a fresh
+   measurement, until the maintainer's next real run confirms it.
    The "30 to 60 minutes" this file said before was an estimate, not a
    measurement. A paid L4 runs the same notebook unchanged (it picks bf16 by itself) in roughly
    a third of the time; switch runtimes between cells, never mid-training, because a checkpoint
@@ -60,12 +61,12 @@ Nothing in the app changes from running this. No model is served until its score
 
    The Predict cell prints its first row's timing alone — `first row: 1.3s for 42 tokens` — so
    an emulated-precision slow path (see above) is visible within seconds instead of a blank cell
-   for the whole 800-row pass (S56: 100 rows each across eight intents, `replace`/`swap`/`copy`
-   included), then one line every 25 rows: `225/800 rows, 310s, 0.73 rows/s, 2
-failed to parse`. It writes `predictions.jsonl` one row at a time as each is decided, not all
+   for the whole 1000-row pass (S58: 100 rows each across ten intents, `split`/`headcount` now
+   included alongside `replace`/`swap`/`copy`), then one line every 25 rows: `225/1000 rows, 310s,
+0.73 rows/s, 2 failed to parse`. It writes `predictions.jsonl` one row at a time as each is decided, not all
    at once at the end, so a session killed mid-prediction (Colab's free tier has a two-hour
    deadline) can just be re-run: it skips the ids already in the file and prints how many, and
-   continues from there instead of starting the 800 rows over. That resume is by id, and only
+   continues from there instead of starting the 1000 rows over. That resume is by id, and only
    safe against the SAME `heldout.jsonl` it started against (F-145: the fourth Colab run's
    `predictions.jsonl` was resumed against a `heldout.jsonl` that had been silently regenerated
    under it, so 400 predictions answered sentences that were no longer in the committed file).
@@ -94,11 +95,12 @@ failed to parse`. It writes `predictions.jsonl` one row at a time as each is dec
    summary: `sentences not checked: N rows (predictions from before F-145)`.
 
 6. **What "good" looks like:** clean at or above 95%; perturbed far above the rule parser's
-   baseline (`ruleParserBaseline.perturbed` in the manifest — currently 4.75% (S56 review: down
-   from 6.25% once a reviewer fix stopped two templates drawing the never-said "this night" and
-   filled in A14-duration's missing "half an hour"/decimal spellings, which changed which
-   sentences land on a perturbable word at all; up from S52-c's own 5.2% before replace/swap/copy
-   joined and gave the same perturbation catalogue more surface); the plan expects
+   baseline (`ruleParserBaseline.perturbed` in the manifest — currently 8.6% (S58: up from 4.75%
+   once split/headcount joined and gave the same perturbation catalogue more surface to land on;
+   S56 review: that 4.75% was itself down from 6.25% once a reviewer fix stopped two templates
+   drawing the never-said "this night" and filled in A14-duration's missing "half an
+   hour"/decimal spellings, which changed which sentences land on a perturbable word at all; up
+   from S52-c's own 5.2% before replace/swap/copy joined); the plan expects
    90% or better on sentences shaped like the training ones). A field the model invents that
    the training data never had (`"type":"assign"`, say) does not fail a row by itself — the
    scorer ignores any key the expected form does not have and reports it on the "extra keys

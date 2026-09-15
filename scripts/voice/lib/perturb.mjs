@@ -233,12 +233,40 @@ function speechToAsTwoOrToo(sentence, rng) {
   return replaceAt(sentence, idx, idx + 2, word);
 }
 
+/** S56-b review flag: an ISO date's zero-padded month/day ("2026-09-04")
+ *  matches `\b\d{1,2}\b` just like an ordinary bare number -- turning the
+ *  "09" into the WORD "nine" leaves "2026-nine-04", which is not a date
+ *  `parseCommand`'s own `ISO_DATE_RE` (or this file's own `ISO_DATES` pool)
+ *  can read back, silently breaking the row's own clean form (the exact
+ *  bug the brief's own example names: "2026-one-28"). Every digit run
+ *  inside a `YYYY-MM-DD` span is therefore off limits to this perturbation,
+ *  found and fixed here rather than by narrowing `NUMBER_WORDS` or the
+ *  digit regex itself, since an ordinary bare number right next to a dash
+ *  ("Cell-9", say) is still fair game. */
+const ISO_DATE_SPAN_RE = /\b\d{4}-\d{2}-\d{2}\b/g;
+
+function isoDateSpans(sentence) {
+  const spans = [];
+  let m;
+  ISO_DATE_SPAN_RE.lastIndex = 0;
+  while ((m = ISO_DATE_SPAN_RE.exec(sentence)) !== null) {
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+function insideAny(spans, start, end) {
+  return spans.some(([s, e]) => start >= s && end <= e);
+}
+
 /** Any bare number 0-20 spoken as a word -- brief's own example is "10" -> "ten". */
 function speechDigitAsWord(sentence, rng) {
+  const isoSpans = isoDateSpans(sentence);
   const re = /\b\d{1,2}\b/g;
   const hits = [];
   let m;
   while ((m = re.exec(sentence)) !== null) {
+    if (insideAny(isoSpans, m.index, m.index + m[0].length)) continue;
     const n = Number(m[0]);
     if (n < NUMBER_WORDS.length) hits.push({ start: m.index, end: m.index + m[0].length, n });
   }

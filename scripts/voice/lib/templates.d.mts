@@ -4,7 +4,17 @@ import type { Rng } from "./rng.d.mts";
 
 export interface VoiceTemplate {
   id: string;
-  intent: "assign" | "book" | "unassign" | "move" | "several" | "replace" | "swap" | "copy";
+  intent:
+    | "assign"
+    | "book"
+    | "unassign"
+    | "move"
+    | "several"
+    | "replace"
+    | "swap"
+    | "copy"
+    | "split"
+    | "headcount";
   /** The slot set is opaque outside the template that made it -- `sentence`
    *  and `form` below are the only things allowed to read it. */
   genSlots(rng: Rng): unknown;

@@ -16,7 +16,23 @@ import { parseCommand } from "../../../src/lib/command/parse.ts";
 // five -- "replace" (cover/replace), "swap" (swap/exchange), "copy" (same
 // as / copy / repeat). None of the three ever appears inside a `several`
 // (D130 item 2), so they sit alongside it rather than inside its own list.
-export const INTENTS = ["assign", "book", "unassign", "move", "several", "replace", "swap", "copy"];
+//
+// S58 (D132/S58-a brief, R-413/R-415, S56-b data brief §1): two more join --
+// "split" (a shorten plus an assign, board-answered like the three above)
+// and "headcount" (a job's planned headcount, an existing write, never part
+// of a lot -- D132 item 4's own "never part of a several" rule).
+export const INTENTS = [
+  "assign",
+  "book",
+  "unassign",
+  "move",
+  "several",
+  "replace",
+  "swap",
+  "copy",
+  "split",
+  "headcount",
+];
 
 export function templatesFor(intent) {
   return TEMPLATES.filter((t) => t.intent === intent);

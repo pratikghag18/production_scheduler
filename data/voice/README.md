@@ -5,10 +5,10 @@ S42-a (`docs/agent-briefs/s42-a-training-set-brief.md`), Stage 3 of
 
 ## `heldout.jsonl` — committed, generated ONCE, never regenerated
 
-800 rows: 100 per intent (assign, book, unassign, move, several — "several"
-joined the other four at S50 — and replace, swap, copy — the three
-board-answered intents that joined at S56), half clean and half perturbed
-within each intent. Generated with a fixed seed so it is reproducible, but
+1000 rows: 100 per intent (assign, book, unassign, move, several — "several"
+joined the other four at S50 — replace, swap, copy — the three
+board-answered intents that joined at S56 — and split, headcount — the two
+that joined at S58), half clean and half perturbed within each intent. Generated with a fixed seed so it is reproducible, but
 the file itself — not the command that made it — is the source of truth
 from here on:
 
@@ -55,6 +55,15 @@ below moved. Rule-parser baseline on this file: clean 400/400 (1.0),
 perturbed 19/400 (0.0475) — see `data/voice/colab/manifest.json`'s
 `ruleParserBaseline` for the number a trained model has to beat.
 
+**Regenerated again, same seed (S58, D132, S56-b data brief):** two more intents,
+`split` and `headcount`, joined the ten (R-413/R-415), and every existing move
+template family gained an `adjust` field (R-412) — a re-time by one edge — plus
+F-146's own "to midnight" writes DAY_END fix (found reviewing the first pass,
+`scripts/voice/lib/time.mjs`'s own `buildTimePair`). Rule-parser baseline on this
+file: clean 500/500 (1.0), perturbed 43/500 (0.086) — see
+`data/voice/colab/manifest.json`'s `ruleParserBaseline` for the number a trained
+model has to beat.
+
 ## `train.jsonl` — gitignored, generated on demand
 
 Not committed. Generate it with:
@@ -63,8 +72,8 @@ Not committed. Generate it with:
 npm run voice:generate
 ```
 
-(6000 rows, seed 1 — raised from 4000 at S56 so each of the now eight
-intents keeps roughly the rows it had before replace/swap/copy joined).
+(7000 rows, seed 1 — raised from 6000 at S58 so each of the now ten
+intents keeps roughly the rows it had before split/headcount joined).
 Every sentence in it is checked, at generation time,
 against `heldout.jsonl` and dropped/retried on collision, so the two files
 never share a sentence — training on a sentence the held-out set will later
@@ -74,7 +83,8 @@ test you on defeats the point of a held-out set.
 
 ```
 { "id": string,
-  "intent": "assign" | "book" | "unassign" | "move" | "several" | "replace" | "swap" | "copy",
+  "intent": "assign" | "book" | "unassign" | "move" | "several" | "replace" | "swap" | "copy" |
+    "split" | "headcount",
   "sentence": string, "form": Command, "clean": boolean,
   "source": "<template id>" | "<template id>+<perturbation id>+..." }
 ```

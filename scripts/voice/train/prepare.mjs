@@ -23,7 +23,16 @@ const SYSTEM_PROMPT_PATH = fileURLToPath(new URL("./system_prompt.txt", import.m
 // generated row carries no seed), so the manifest can name them (brief §3:
 // "manifest.json (row counts, seeds, the git sha, ...)").
 const TRAIN_SEED = 1;
-const HELDOUT_SEED = 20260911;
+// S56-b review flag: this used to read 20260911, a stale value from before
+// S56's first regeneration -- `data/voice/heldout.jsonl` has not carried
+// that seed's own rows since (`data/voice/README.md`'s own held-out
+// generation command is the source of truth: `--seed 20260915`). The
+// generator stamps no seed into the file itself (checked: `generate.mjs`
+// writes only `{ id, intent, sentence, form, clean, source }`), so this
+// constant is kept in sync with the README's own documented command by
+// hand, the same way `TRAIN_SEED` above already is -- `src/test/voiceData.test.ts`'s
+// own pin on `manifest.json`'s `heldoutSeed` is what catches the next drift.
+const HELDOUT_SEED = 20260915;
 
 function parseArgs(argv) {
   const out = { train: null, heldout: null, out: null };

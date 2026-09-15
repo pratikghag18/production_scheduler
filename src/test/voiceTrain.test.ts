@@ -143,7 +143,7 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     expect(source).toContain('"sentence": row["sentence"]');
   });
 
-  it("VT6 (S56): score_port.py prints the same table as score.mjs, on a file covering every intent including the three new ones", () => {
+  it("VT6 (S56, re-pinned S58): score_port.py prints the same table as score.mjs, on a file covering every intent including split/headcount", () => {
     // S56 brief §3: "score.mjs's by-field tally must cover the new intents'
     // fields (with, other, from, to, until) and the port score_port.py must
     // print the same table on the same file" -- both are already generic
@@ -151,6 +151,10 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     // hard-coded field list), so this is the parity CHECK that generic
     // claim, extended (per the brief) with a row per new intent rather than
     // VT2's own three assign/book/unassign rows.
+    //
+    // S58 (S56-b data brief §5): re-pinned again -- split/headcount join the
+    // ten intents; split's own `at` field is the only genuinely NEW field
+    // name the two add (`headcount`'s own field already exists on `book`).
     const oneRowPerIntent: VoiceRow[] = [];
     const seenIntents = new Set<string>();
     for (const row of HELDOUT) {
@@ -159,7 +163,18 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
       oneRowPerIntent.push(row);
     }
     expect(seenIntents).toEqual(
-      new Set(["assign", "book", "unassign", "move", "several", "replace", "swap", "copy"]),
+      new Set([
+        "assign",
+        "book",
+        "unassign",
+        "move",
+        "several",
+        "replace",
+        "swap",
+        "copy",
+        "split",
+        "headcount",
+      ]),
     );
 
     const ruleParserPredict = (row: VoiceRow) => {
@@ -206,11 +221,12 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     );
 
     // Every "By field" line (including the new intents' own with/other/
-    // from/to/until) must appear, byte for byte, in both printouts.
+    // from/to/until, and split's own `at`) must appear, byte for byte, in
+    // both printouts.
     const fieldLines = jsStdout
       .split("\n")
-      .filter((l) => /^\s{2}(with|other|from|to|until)\s+\d+\/\d+/.test(l));
-    expect(fieldLines.length).toBe(5);
+      .filter((l) => /^\s{2}(with|other|from|to|until|at)\s+\d+\/\d+/.test(l));
+    expect(fieldLines.length).toBe(6);
     for (const line of fieldLines) {
       expect(pyStdout, `line missing from score_port.py's table: ${line}`).toContain(line.trim());
     }
@@ -224,6 +240,42 @@ describe("S43-a: prepare.mjs's pure pieces", () => {
     const jsPerturbed = jsStdout.match(/perturbed:\s+(\d+)\/(\d+)/);
     const pyPerturbed = pyStdout.match(/perturbed:\s+(\d+)\/(\d+)/);
     expect(pyPerturbed![0]).toBe(jsPerturbed![0]);
+  });
+
+  it("VT7 (S56-b brief §4's own flag): prepare.mjs's own CLI writes manifest.json with heldoutSeed 20260915, the seed data/voice/README.md documents", () => {
+    // The first pass left `HELDOUT_SEED` hard-coded at the stale 20260911
+    // (a value from before S56's own first regeneration) -- this runs the
+    // ACTUAL CLI (not just `buildManifest`, VT3's own job) so a future
+    // edit that drifts the constant from the README's documented command
+    // again fails here, not just by eyeball.
+    const dir = mkdtempSync(join(tmpdir(), "voice-vt7-"));
+    const trainPath = join(dir, "train.jsonl");
+    const heldoutPath = join(dir, "heldout.jsonl");
+    const outDir = join(dir, "colab");
+    const threeRows = HELDOUT.slice(0, 3);
+    const forbidden = new Set(HELDOUT.map((r) => r.sentence));
+    const trainRows = generateTrainingRows(1, 3, forbidden);
+    writeFileSync(trainPath, trainRows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+    writeFileSync(heldoutPath, threeRows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+
+    execFileSync(
+      process.execPath,
+      [
+        "scripts/voice/train/prepare.mjs",
+        "--train",
+        trainPath,
+        "--heldout",
+        heldoutPath,
+        "--out",
+        outDir,
+      ],
+      { encoding: "utf8" },
+    );
+
+    const manifest = JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8")) as {
+      seeds: { train: number; heldout: number };
+    };
+    expect(manifest.seeds.heldout).toBe(20260915);
   });
 
   it("VT5 (F-145): the notebook's Score cell (cell 8) reads predictions.jsonl through score_predictions/load_jsonl, not the unprotected predictions_predict path", () => {
