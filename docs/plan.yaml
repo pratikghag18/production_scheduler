@@ -11570,6 +11570,9 @@ requirements:
     scored 99.6 with a prompt half the size; a guess on an unseen phrasing is shown before it acts and
     fails at the resolver with a question. Cutting epochs was offered and declined as the one lever
     that trades quality for time. BUILT 15 Sept (session 172, fb6e12f); covered when the fifth run's score is in.
+    Two stumbles on the rerun's first cells, both fixed the same evening: the F-142 median-length floor of 300
+    tokens tripped on the 293-token median the short prompt gives (lowered to 150, 9b907a5), and the
+    notebook splice in prepare wanted Windows line endings (d5dfd94).
 findings:
 - id: F-148
   title: The fifth run predicted against the old held-out file still on Drive, and only the scorer here noticed
